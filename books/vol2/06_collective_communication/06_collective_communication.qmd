@@ -52,6 +52,488 @@ Computation scales by adding processors; communication scales by moving data bet
 
 :::
 
+## Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
+
+Sending a gradient tensor to a peer does not specify which workers must contribute or where the final result belongs. Collective operations supply that group-level contract, using a vocabulary standardized by MPI and inherited by modern ML communication libraries [@mpiforum2015mpi31]. @Fig-collective-primitives-overview diagrams the input-to-output dataflow contracts for four central primitives in this group-communication vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Reading left to right across four ranks (rows 0 through 3), each panel routes per-rank input buffers through an amber transformation operator to produce green output buffers. AllReduce applies global summation ($\Sigma$) to replicate identical sums across all ranks; AllGather concatenates disparate shards onto every rank; ReduceScatter sums vectors across ranks before partitioning the result so each rank retains one reduced shard ($\Sigma_i$); and AllToAll performs a distributed matrix transpose, routing each rank's $j$-th chunk to the $j$-th rank. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), serve as foundational building blocks defined in @sec-collective-communication-six-core-primitives-8a66 and compose into these collective patterns.
+
+::: {.column-margin .margin-pointer}
+↪ The bandwidth and latency cost terms of AllReduce, AllGather, ReduceScatter, AllToAll, and Broadcast, under ring, tree, and pairwise-exchange algorithms, are developed in @sec-appdx-comm-foundations-collective-complexity.
+:::
+
+::: {#dfn-collective-communication-collective-operation .callout-definition title="Collective operation"}
+
+***Collective operation***\index{Collective Operation!definition} is a distributed communication pattern in which every rank in a process group invokes a matching operation to aggregate, broadcast, or redistribute data. The operation's contract specifies the output at each rank; it does not require simultaneous entry and does not, by itself, impose a general-purpose barrier before or after the call [@mpiforum2015mpi31].
+
+1.  **Significance**: The collective algorithm determines how communication demand is distributed as the group grows. Ring AllReduce has the bandwidth-optimal byte-transfer term $2(N-1)/N \times M / \beta$ per rank (nearly constant in $N$), while direct gather-and-broadcast through one root must move $(N-1)M$ bytes into and out of that root, costing at least $(N-1)M/\beta$ even when receiving and sending overlap. The root's bandwidth budget is roughly $N/2$ times the ring's byte-transfer term, or about 500$\times$ for $N=1024$. This comparison excludes startup, arithmetic, and contention; it illustrates how endpoint concentration can enlarge the communication term $\CommunicationTime$ of the Fleet Law (@eq-fleet-law), rather than predicting an end-to-end speedup.
+2.  **Distinction**: Unlike point-to-point communication, a collective defines one operation over a process group. Ranks may enter at different times, and some algorithms allow one rank to complete before another has entered; correctness depends on matching the operation sequence and argument contract across ranks, not on barrier semantics.
+3.  **Common pitfall**: Treating a non-blocking collective as complete when its initiation call returns. The returned request or stream event represents work in flight. A dependent consumer must wait for completion, and a late rank can extend that dependency even though the collective is not a barrier.
+
+:::
+
+::: {#fig-collective-primitives-overview fig-env="figure" fig-pos="htb" fig-cap="**Four central collective primitives**: Standardized patterns for group communication in distributed systems. In each panel the four rows are ranks 0 to 3, read left to right from each rank's input, through the collective, to what each rank holds afterward. (1) AllReduce: all aggregate and all receive the result. (2) AllGather: all send to all and concatenate. (3) ReduceScatter: all aggregate and results are distributed in shards. (4) AllToAll: every process sends unique data to every other process. The two foundational primitives Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0) compose the patterns shown here and are defined in the surrounding prose." fig-alt="Four panels, each with four input boxes on the left joined through an amber collective box to four green output boxes on the right. AllReduce: inputs 1, 2, 3, 4 become 10 on every rank. AllGather: inputs a, b, c, d become a b c d on every rank. ReduceScatter: rows a0 b0 c0 d0 through a3 b3 c3 d3 become sum a, sum b, sum c, sum d, one per rank. AllToAll: the same rows become a0 a1 a2 a3, b0 b1 b2 b3, c0 c1 c2 c3, d0 d1 d2 d3."}
+![](images/svg/collective-primitives-overview.svg)
+
+<!--
+```{.tikz}
+\begin{tikzpicture}[
+    font=\small\sffamily,
+    >=Stealth,
+    panel/.style={
+      draw=CanvasBorder,
+      fill=CanvasBg,
+      rounded corners=5pt,
+      line width=0.6pt,
+      inner sep=8pt
+    },
+    in node/.style={
+      draw=BlueLine,
+      fill=white,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    out node green/.style={
+      draw=GreenLine,
+      fill=GreenFill!60,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    out node violet/.style={
+      draw=VioletLine,
+      fill=VioletFill!70,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    op orange/.style={
+      draw=OrangeLine,
+      fill=OrangeFill,
+      text=OrangeLine!90!black,
+      line width=0.9pt,
+      rounded corners=3.5pt,
+      font=\footnotesize\bfseries\sffamily,
+      inner sep=4pt,
+      text centered
+    },
+    op violet/.style={
+      draw=VioletLine,
+      fill=VioletFill,
+      text=VioletLine,
+      line width=0.9pt,
+      rounded corners=3.5pt,
+      font=\footnotesize\bfseries\sffamily,
+      inner sep=4pt,
+      text centered
+    },
+    wire in/.style={
+      draw=BlueLine!80!black,
+      line width=0.7pt
+    },
+    wire green/.style={
+      ->,
+      draw=GreenLine,
+      line width=0.8pt
+    },
+    wire violet/.style={
+      ->,
+      draw=VioletLine,
+      line width=0.8pt
+    }
+  ]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfsetlayers{background,main}
+
+  % ========================================================
+  % 1. TOP-LEFT: ALLREDUCE
+  % ========================================================
+  \begin{scope}[shift={(0, 5.0)}, local bounding box=boxAllReduce]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllReduce} \footnotesize(Sum Reduction)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=BlueLine] at (7.1, 4.35) {All Hold Total Sum};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Aggregates arrays; every device receives the identical sum.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=1.55cm] (ar_in0) at (0.95, 3.35) {G0: [ 1 ]};
+    \node[in node, minimum width=1.55cm] (ar_in1) at (0.95, 2.70) {G1: [ 2 ]};
+    \node[in node, minimum width=1.55cm] (ar_in2) at (0.95, 2.05) {G2: [ 3 ]};
+    \node[in node, minimum width=1.55cm] (ar_in3) at (0.95, 1.40) {G3: [ 4 ]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ar_op) at (3.55, 2.375) {AllReduce $\Sigma$};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=1.65cm] (ar_out0) at (6.15, 3.35) {G0: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out1) at (6.15, 2.70) {G1: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out2) at (6.15, 2.05) {G2: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out3) at (6.15, 1.40) {G3: [ \textbf{10} ]};
+
+    % Wires In -> Op
+    \draw[wire in] (ar_in0.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, 0.15)$);
+    \draw[wire in] (ar_in1.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, 0.05)$);
+    \draw[wire in] (ar_in2.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, -0.05)$);
+    \draw[wire in] (ar_in3.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ar_op.west)-(0.15,0)$) -- (ar_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ar_out_fork) at ($(ar_op.east)+(0.25,0)$);
+    \draw[wire green, -] (ar_op.east) -- (ar_out_fork);
+    \draw[wire green] (ar_out_fork) |- (ar_out0.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out1.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out2.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=TextDark] at (3.55, 0.95) {\textbf{Core Usage:} Data Parallel gradient sync (DDP)};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllReduce)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 2. TOP-RIGHT: ALLGATHER
+  % ========================================================
+  \begin{scope}[shift={(7.8, 5.0)}, local bounding box=boxAllGather]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllGather} \footnotesize(Concatenation)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=GreenLine] at (7.1, 4.35) {All Hold Full Tensor};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Collects each device's partial shard into the full tensor.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=1.55cm] (ag_in0) at (0.95, 3.35) {G0: [ $a$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in1) at (0.95, 2.70) {G1: [ $b$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in2) at (0.95, 2.05) {G2: [ $c$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in3) at (0.95, 1.40) {G3: [ $d$ ]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ag_op) at (3.55, 2.375) {AllGather $\boxplus$};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=2.1cm] (ag_out0) at (6.05, 3.35) {G0: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out1) at (6.05, 2.70) {G1: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out2) at (6.05, 2.05) {G2: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out3) at (6.05, 1.40) {G3: [ $a, b, c, d$ ]};
+
+    % Wires In -> Op
+    \draw[wire in] (ag_in0.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, 0.15)$);
+    \draw[wire in] (ag_in1.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, 0.05)$);
+    \draw[wire in] (ag_in2.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, -0.05)$);
+    \draw[wire in] (ag_in3.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ag_op.west)-(0.15,0)$) -- (ag_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ag_out_fork) at ($(ag_op.east)+(0.25,0)$);
+    \draw[wire green, -] (ag_op.east) -- (ag_out_fork);
+    \draw[wire green] (ag_out_fork) |- (ag_out0.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out1.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out2.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=GreenLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO-3 parameter un-sharding};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllGather)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 3. BOTTOM-LEFT: REDUCESCATTER
+  % ========================================================
+  \begin{scope}[shift={(0, 0)}, local bounding box=boxReduceScatter]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small ReduceScatter} \footnotesize(Reduce-Scatter)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=OrangeLine] at (7.1, 4.35) {One Shard Each};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Reduces across devices, then scatters disjoint slices.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=2.1cm] (rs_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
+    \node[in node, minimum width=2.1cm] (rs_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
+    \node[in node, minimum width=2.1cm] (rs_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
+    \node[in node, minimum width=2.1cm] (rs_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (rs_op) at (3.90, 2.375) {ReduceScatter};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=1.65cm] (rs_out0) at (6.15, 3.35) {G0: [ $\sum a$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out1) at (6.15, 2.70) {G1: [ $\sum b$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out2) at (6.15, 2.05) {G2: [ $\sum c$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out3) at (6.15, 1.40) {G3: [ $\sum d$ ]};
+
+    % Wires In -> Op
+    \draw[wire in] (rs_in0.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, 0.15)$);
+    \draw[wire in] (rs_in1.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, 0.05)$);
+    \draw[wire in] (rs_in2.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, -0.05)$);
+    \draw[wire in] (rs_in3.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(rs_op.west)-(0.15,0)$) -- (rs_op.west);
+
+    % Wires Op -> Out
+    \coordinate (rs_out_fork) at ($(rs_op.east)+(0.25,0)$);
+    \draw[wire green, -] (rs_op.east) -- (rs_out_fork);
+    \draw[wire green] (rs_out_fork) |- (rs_out0.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out1.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out2.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=OrangeLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO sharded reduction};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxReduceScatter)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 4. BOTTOM-RIGHT: ALLTOALL
+  % ========================================================
+  \begin{scope}[shift={(7.8, 0)}, local bounding box=boxAllToAll]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllToAll} \footnotesize(Matrix Transpose)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=VioletLine] at (7.1, 4.35) {Pairwise Shuffle};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Each rank sends distinct shard $i$ to peer rank $i$ (transposition).};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=2.1cm] (ata_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
+    \node[in node, minimum width=2.1cm] (ata_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
+    \node[in node, minimum width=2.1cm] (ata_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
+    \node[in node, minimum width=2.1cm] (ata_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
+
+    % Central Operator
+    \node[op violet, minimum width=1.8cm, minimum height=0.75cm] (ata_op) at (3.60, 2.375) {AllToAll $\rightleftarrows$};
+
+    % Outputs (Violet)
+    \node[out node violet, minimum width=2.1cm] (ata_out0) at (6.05, 3.35) {G0: [$a_0,a_1,a_2,a_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out1) at (6.05, 2.70) {G1: [$b_0,b_1,b_2,b_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out2) at (6.05, 2.05) {G2: [$c_0,c_1,c_2,c_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out3) at (6.05, 1.40) {G3: [$d_0,d_1,d_2,d_3$]};
+
+    % Wires In -> Op
+    \draw[wire in] (ata_in0.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, 0.15)$);
+    \draw[wire in] (ata_in1.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, 0.05)$);
+    \draw[wire in] (ata_in2.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, -0.05)$);
+    \draw[wire in] (ata_in3.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ata_op.west)-(0.15,0)$) -- (ata_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ata_out_fork) at ($(ata_op.east)+(0.25,0)$);
+    \draw[wire violet, -] (ata_op.east) -- (ata_out_fork);
+    \draw[wire violet] (ata_out_fork) |- (ata_out0.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out1.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out2.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=VioletLine] at (3.55, 0.95) {\textbf{Core Usage:} MoE token dispatch \& combine routing};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllToAll)] {};
+  \end{pgfonlayer}
+
+\end{tikzpicture}
+```
+-->
+
+:::
+
+The primitive choice is the first scaling decision because it fixes which ranks must coordinate and which result each must obtain. The algorithm and placement then determine the traffic and its limiting resource. Different model architectures require different operations, and choosing a broader operation than the workload needs can create unnecessary bottlenecks.
+
+### The six core primitives {#sec-collective-communication-six-core-primitives-8a66}
+
+The six primitives in @tbl-collective-primitives form a decision ladder: use the narrowest operation that preserves the model's mathematics, because every broader pattern adds data movement, coordination, or contention. Read the output contract and use case first. The cost column previews particular implementations, using $N$ for the participating rank count and $M$ for the full tensor or per-rank AllToAll payload; the ring and tree derivations follow in the algorithm section.
+
+| **Primitive**                          | **What it does**                                                                                                        | **Primary use case**                                                                                | **Communication cost**                                                                                                                                                                          |
+|:---------------------------------------|:------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Broadcast**\index{Broadcast}         | One sender transmits data to all receivers.                                                                             | Distribute initial model weights from rank 0 at startup, across all parallelism strategies.         | $\mathcal{O}(\log N)$ latency (tree); $\mathcal{O}(M)$ bandwidth.                                                                                                                               |
+| **Reduce**\index{Reduce}               | Aggregate data from all workers (sum, min, max) to a single root.                                                       | Aggregate validation metrics such as loss and accuracy to a logging process.                        | $\mathcal{O}(\log N)$ latency (tree); $\mathcal{O}(M)$ bandwidth.                                                                                                                               |
+| **AllReduce**\index{AllReduce}         | Aggregate from all workers, then distribute the result to all ($y_i = \sum_{j=0}^{N-1} x_j$ for all $i$).               | Data parallelism: synchronize gradients so every GPU computes the same update.                      | Ring is bandwidth-optimal at $2\frac{N-1}{N}\frac{M}{\beta}$ but $\mathcal{O}(N)$ latency; the simple full-message Tree model gives $\mathcal{O}(\log N)$ latency with more byte-transfer work. |
+| **AllGather**\index{AllGather}         | Each worker's data goes to all; the result concatenates every input ($x_i \rightarrow [x_0, \dots, x_{N-1}]$).          | Sharded data parallelism (FSDP/ZeRO): collect sharded parameters before a forward or backward pass. | Ring $\frac{N-1}{N}\frac{M}{\beta}$; resident data grows from an $M/N$ shard to the full $M$.                                                                                                   |
+| **ReduceScatter**\index{ReduceScatter} | Reduce across workers, but scatter so each keeps a distinct chunk (worker $i$ receives the $i$-th block of $\sum x_j$). | Sharded data parallelism: reduce gradients while keeping them sharded to save memory.               | Ring $\frac{N-1}{N}\frac{M}{\beta}$; the same ring byte-transfer term as AllGather, with reduction.                                                                                             |
+| **AllToAll**\index{AllToAll}           | The most general pattern: worker $i$ sends a distinct chunk to each worker $j$, a distributed matrix transpose.         | MoE routing tokens to experts; DLRM exchanging embedding lookups across workers.                    | Per-worker payload $\frac{N-1}{N}M$; the limiter can arise from startup, injection/reception, bisection, oversubscription, routing, granularity, or skew.                                       |
+
+: **The Six Collective Primitives**: What each primitive computes, its primary use, and its communication cost, ordered from the narrowest pattern (Broadcast) to the most general (AllToAll). {#tbl-collective-primitives tbl-colwidths="[14,30,27,29]"}
+
+Ring achieves AllReduce's bandwidth-optimal cost while the simple full-message Tree model\index{Broadcast!tree topology} trades bandwidth for logarithmic latency [@patarasuk2009; @thakur2005].
+
+AllReduce decomposes into ReduceScatter\index{ReduceScatter!decomposition} followed by AllGather\index{AllGather!decomposition}. The decomposition is operational as well as mathematical, since Ring AllReduce's Scatter-Reduce phase is a ReduceScatter and its AllGather phase is an AllGather. ReduceScatter performs arithmetic, so it does not invert AllGather despite reversing the direction of shard expansion. Full ZeRO-style sharding\index{ZeRO!parameter sharding} and PyTorch FSDP[^fn-fsdp-memory-sharding] use related partitioning strategies: AllGather parameter shards before a module needs them and ReduceScatter gradients after backward so each rank retains only its shard for the optimizer step [@rajbhandari2020]. Sharding parameters, gradients, and optimizer state across workers reduces persistent model-state memory roughly by $N \times$, while temporary full-parameter buffers and prefetching determine peak memory.
+
+The same AllGather/ReduceScatter pair also appears in sequence parallelism: an AllGather reconstructs the activation view needed for a local operation, and a later ReduceScatter redistributes the result along the sequence dimension. That example will matter later because it shows that a primitive's semantics stay fixed even when the tensor dimension being sharded changes.
+
+This ladder matters because the primitive determines the communication dependency before any algorithmic optimization begins. AllReduce delivers a common reduced value to participating ranks, AllGather and ReduceScatter support transitions between full and sharded representations, and AllToAll routes destination-specific data. These are data-movement contracts; they do not by themselves establish optimizer consistency or recovery after failure.
+
+Collective correctness has an interface dimension as well as a mathematical one. Every rank in a process group must issue collectives in a compatible order; mismatched operation sequences can deadlock or pair unrelated buffers. Operations also impose shape and count contracts. AllReduce requires compatible element counts and datatypes, whereas variable-size exchanges require explicit per-destination counts and displacements. These invariants belong at the boundary between the parallel decomposition and the communication runtime: the model decides which tensor slice each rank owns, and the collective contract proves that those slices can be recombined.
+
+Reduction order introduces a second, numerical contract. Floating-point addition is not associative, so ring, tree, and switch-assisted reductions may accumulate the same values in different orders and produce different low-order bits [@goldberg1991]. A correct AllReduce therefore guarantees the specified reduction over all contributions, not bitwise identity across algorithms, rank counts, or hardware. Reproducibility-sensitive workloads must fix the algorithm and process-group configuration or use a reproducible accumulation\index{Numerical reproducibility!reduction order} scheme; ordinary training should treat small order-dependent differences as numerical behavior while still checking for larger rank disagreement.
+
+[^fn-fsdp-memory-sharding]: **FSDP (Fully Sharded Data Parallel)**\index{FSDP!memory trade-off}: PyTorch's fully sharded implementation follows the ZeRO-3 idea of sharding parameters, gradients, and optimizer states across $N$ accelerators [@rajbhandari2020]. The trade-off is communication frequency: full sharding adds layer-level AllGather and ReduceScatter operations instead of relying only on data parallelism's step-level AllReduce, making it more sensitive to the $\alpha$ overhead.
+
+[^fn-dlrm-embedding-alltoall]: [offset=6mm] **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction uses sharded embedding tables and exchanges the resulting sparse lookups across workers. The resulting AllToAll may be startup-bound when each destination receives a fine-grained message, injection- or reception-bound as aggregate payload grows, or fabric-bound under oversubscription, unfavorable routing, or shard-access skew. DLRM therefore supplies a destination-specific traffic pattern, not a universal latency regime.
+
+The contrast between AllToAll and AllReduce highlights a fundamental difference in how collective operations scale with cluster size.
+
+:::: {#psp-collective-communication-alltoall-vs-allreduce-why-scale-differs .callout-perspective title="AllToAll vs. AllReduce: Why scale differs"}
+
+Ring AllReduce can pipeline a uniform payload through neighbor exchanges. AllToAll presents a different scaling problem because every rank has destination-specific traffic, but the logical peer count alone does not determine its cost.
+
+An AllToAll over $N$ ranks creates $N(N-1)$ logical source-destination transfers, yet each rank's aggregate payload can remain fixed under weak scaling. Its lower bound is governed by the largest of four terms: source injection time\index{All-to-All!injection bound}, destination reception time\index{All-to-All!reception bound}, traffic crossing the fabric bisection\index{Bisection bandwidth!All-to-All communication}, and per-message startup or scheduling overhead. Oversubscription and routing determine how much physical capacity those flows share. Message granularity determines how often they pay $\alpha$. Routing skew determines whether one destination or link becomes the critical path. A full-bisection network carrying balanced, coarse-grained traffic can therefore scale well despite the quadratic logical connection count, whereas an oversubscribed fabric or skewed expert assignment can stall at much smaller $N$.
+
+::: {.column-margin}
+```{=latex}
+\vspace*{-14mm}
+```
+![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="All-to-All quadratic logical source-destination pairs compared with the linear number of ranks; physical cost depends on how those flows share the fabric."}
+
+*Logical peer pairs grow quadratically; physical cost depends on the fabric.*
+:::
+
+Expert parallelism and large-scale recommendation systems\index{Recommendation System} can reach a communication wall earlier than standard data parallelism when their traffic exhausts injection, reception, or bisection capacity, or when routing and destination skew create hotspots. The primitive determines the traffic matrix\index{Traffic matrix!collective communication}; the physical fabric and routing distribution determine the scaling ceiling.
+
+::::
+
+To make the AllToAll pattern concrete, consider a mixture-of-experts model with 64 experts distributed across 8 GPUs (8 experts per GPU). During each forward pass, a gating network assigns each input token to one or more experts. The tokens assigned to experts on remote GPUs must be physically moved to those GPUs before computation can proceed, and the results must be moved back afterward.
+
+```{python}
+#| echo: false
+#| label: moe-alltoall-calc
+from mlsysim.core.units import BYTES_FP16, GB, KB, MB, microsecond, second
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time
+from mlsysim import Systems
+
+class MoeAllToAll:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    total_tokens = 4096
+    n_gpus = 8
+    hidden_dim = 2048
+    bytes_per_elem = BYTES_FP16
+    n_experts = 64
+    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
+    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    alpha = Systems.SwitchFabric.AlphaNdr
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    tokens_per_gpu = total_tokens // n_gpus
+    experts_per_gpu = n_experts // n_gpus
+    bytes_per_token = hidden_dim * bytes_per_elem
+    kb_per_token = bytes_per_token.to(KB)
+    tokens_per_expert = total_tokens // n_experts
+    tokens_per_transfer = tokens_per_gpu // n_gpus
+    remote_gpus = n_gpus - 1
+    data_per_transfer = tokens_per_transfer * bytes_per_token
+    total_sent = remote_gpus * data_per_transfer
+    # Bandwidth term rounded to whole microseconds: the worked trace presents it
+    # as the clean "≈ 5 μs" approximation the callout math line displays, so the
+    # downstream per-transfer and serialized totals stay on visible
+    # arithmetic (1.5 + 5 = 6.5; 7 × 6.5 = 45.5).
+    bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
+    per_transfer = alpha + bw_time
+    serialized = remote_gpus * per_transfer
+    # Concurrent peer streams share the GPU's aggregate NIC injection bandwidth.
+    # Full duplex permits simultaneous send and receive, but does not multiply the
+    # outgoing 50 GB/s port by the number of remote peers.
+    parallel = alpha + total_sent / beta
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(tokens_per_gpu == 512, f"tokens/GPU = {tokens_per_gpu}")
+    check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
+    check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
+    check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
+    check(abs(per_transfer.to(microsecond).magnitude - 6.5) < 1e-9, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
+    check(abs(parallel.to(microsecond).magnitude - 38.20016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
+    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
+    tokens_per_gpu_str = fmt_count(tokens_per_gpu, label="token", commas=False)
+    tokens_per_transfer_str = fmt_count(tokens_per_transfer, label="token", commas=False)
+    kb_per_token_str = fmt_memory(kb_per_token, unit=KB, precision=3, commas=False)
+    tokens_per_expert_str = fmt_count(tokens_per_expert, label="token", commas=False)
+    data_per_transfer_kb_str = fmt_memory(data_per_transfer, unit=KB, precision=3, commas=False)
+    total_sent_mb_str = fmt_memory(total_sent, unit=MB, precision=2, commas=False)
+    bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
+    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=1, commas=False)
+    serialized_us_str = fmt_time(serialized, unit=microsecond, precision=1, commas=False)
+    parallel_us_str = fmt_time(parallel, unit=microsecond, precision=1, commas=False)
+    total_tokens_str = fmt_count(total_tokens, label="token", commas=False)
+    n_gpus_str = fmt(n_gpus, precision=0, commas=False)
+    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
+    n_experts_str = fmt(n_experts, precision=0, commas=False)
+    experts_per_gpu_str = fmt(experts_per_gpu, precision=0, commas=False)
+    remote_gpus_str = fmt(remote_gpus, precision=0, commas=False)
+```
+
+::: {#nbk-collective-communication-alltoall-moe-token-routing .callout-notebook title="AllToAll for MoE token routing"}
+
+**Problem**: A MoE model processes a batch of `{python} MoeAllToAll.total_tokens_str` across `{python} MoeAllToAll.n_gpus_str` GPUs (`{python} MoeAllToAll.tokens_per_gpu_str` per GPU). Each token is a `{python} MoeAllToAll.hidden_dim_str`-dimensional hidden state in BF16 (`{python} MoeAllToAll.kb_per_token_str` per token). The gating network assigns each token to exactly 1 of `{python} MoeAllToAll.n_experts_str` experts (`{python} MoeAllToAll.experts_per_gpu_str` experts per GPU). Assuming uniform routing (each expert receives `{python} MoeAllToAll.tokens_per_expert_str`), how much data does each GPU send and receive?
+
+**Math**:
+
+Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` that need to reach `{python} MoeAllToAll.n_experts_str` different experts across `{python} MoeAllToAll.n_gpus_str` GPUs. With uniform routing, each GPU sends `{python} MoeAllToAll.tokens_per_transfer_str` to each of the other `{python} MoeAllToAll.remote_gpus_str` GPUs (keeping `{python} MoeAllToAll.tokens_per_transfer_str` local).
+
+*   Data per GPU-to-GPU transfer: `{python} MoeAllToAll.tokens_per_transfer_str` $\times$ `{python} MoeAllToAll.kb_per_token_str`/token = `{python} MoeAllToAll.data_per_transfer_kb_str`
+*   Total data sent per GPU: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
+*   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
+
+**Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_us_str`, $\beta =$ `{python} MoeAllToAll.beta_gb_per_s_str`):
+
+Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
+
+If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\alpha + \text{total bytes sent}/\beta =$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
+
+**Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\Bandwidth_{\text{bisect}}$ and $V_{\text{cut}}$ bytes must cross its minimum cut, the exchange also obeys $T\geq V_{\text{cut}}/\Bandwidth_{\text{bisect}}$. Oversubscription reduces $\Bandwidth_{\text{bisect}}$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
+
+:::
+
+#### Dynamic routing and expert imbalance in MoE AllToAll {#sec-collective-communication-moe-dynamic-routing}
+
+The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing, in which every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent. The exchange keeps its two-phase shape, but its buffer sizes, its slowest receiver, and its load on the fabric all become functions of the routing distribution.
+
+Each MoE layer performs two exchanges. In an MoE transformer layer with $E$ experts distributed across $N$ ranks ($E/N$ experts per rank), each rank holds a local batch of $B_{\text{tok}}$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token, inducing two collective communication phases separated by expert computation. During token dispatch\index{All-to-All!dispatch phase}, each rank partitions its $B_{\text{tok}}$ local token activation vectors ($\mathbf{x} \in \mathbb{R}^d$) according to the destination ranks hosting the selected experts, executing an AllToAll collective (or variable-size `AllToAllv`\index{All-to-All!variable-size AllToAllv}) to route tokens across the fabric according to the routing matrix\index{All-to-All!routing matrix}. After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), the token combine\index{All-to-All!combine phase} phase executes a second AllToAll collective to route output vectors back to their originating ranks. Each rank then computes the weighted combination of expert outputs:
+$$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
+
+Because routing is data-dependent, so are the required buffer sizes, even when the input tensor shape is fixed. One simplified model treats assignments of different tokens independently: the count for expert $e$ is then $B_e \sim \text{Binomial}(N B_{\text{tok}}, p_e)$, where $p_e$ is the fixed probability that a token selects expert $e$. Correlated tokens or changing router probabilities require a different count model. To avoid reallocating buffers for every routing decision, a capacity-limited implementation can reserve space using an expert capacity factor\index{Capacity factor!expert routing} $C \ge 1.0$ [@lepikhin2021gshard; @fedus2022switch]:
+$$\text{Capacity}_e = \left\lceil \frac{N \times B_{\text{tok}} \times k}{E} \times C \right\rceil$$
+
+The capacity factor exposes a trade-off between reserved space and retained expert assignments. At uniform expected capacity ($C = 1.0$), some experts can still overflow while others have unused slots. A dropping implementation bypasses excess assignments through the residual connection\index{Token dropping!capacity factor}, changing the computation and potentially harming training quality. Increasing headroom ($C > 1.0$, for example $1.25$–$1.5$) can reduce overflow. If the implementation transmits every reserved slot, its padded payload grows by approximately $C\times$ relative to the uniform capacity-one budget; kernels that skip unused slots need not perform the corresponding dummy computation. A dropless implementation retains every assignment and can use variable-size `AllToAllv` to avoid sending unused slots. It still needs enough memory for the realized counts and remains exposed to routing skew.
+
+Skew turns the most heavily loaded rank into a straggler. Because token routing is determined by input semantics, some experts inevitably receive disproportionate token volumes. An expert receiving $\gamma \times$ the average load ($\gamma > 1$) increases its host GPU's traffic. The host's total receive volume depends on the combined load of all experts assigned to it, which is the rank-level quantity in the bound that follows.
+
+Routing skew can create stragglers\index{Straggler!expert skew} in both communication and expert computation. An inbound reception bottleneck bounds dispatch completion by the most heavily loaded receiver. Other ranks may finish their transfers earlier, but work that needs the delayed expert outputs must wait. The receive budget gives a lower bound before expert computation and the return exchange are counted:
+$$T_{\text{dispatch}} \ge \frac{B_{\text{max}} \times d \times \ElementStorageSize}{\Bandwidth_{\text{rx}}}$$
+where $B_{\text{max}} = \max_r \sum_{e \in \text{rank } r} B_e$ is the largest token batch size any rank $r$ receives. Bisection capacity provides a separate limit. Ring AllReduce exchanges data with logical ring neighbors, whereas AllToAll permits a complete bipartite exchange\index{All-to-All!bipartite exchange}. Under uniform destination assignment, a fraction $(N-1)/N \approx 1$ of tokens leaves its source rank; the fraction crossing nodes or a particular fabric cut depends on placement. In the simplified symmetric fabric model with oversubscription ratio $R:1$, usable bisection bandwidth $\Bandwidth_{\text{bisect}} = (N \cdot \Bandwidth_{\text{inject}}) / (2R)$ bounds the time needed to carry traffic across that cut:
+$$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\Bandwidth_{\text{bisect}}}$$
+
+Scale compounds both problems. To amortize small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]. Intra-node NVLink first coalesces tokens destined for experts on the same remote server node. Participating nodes then exchange aggregated payloads over InfiniBand or RoCE, and receiving GPUs use NVLink to distribute tokens to the GPUs hosting the targeted experts. At the logical level, this replaces $N(N-1)$ directed rank pairs with $\AcceleratorsPerNodeNodes(\AcceleratorsPerNodeNodes-1)$ directed node pairs; actual transport connections depend on the implementation. Coalescing can improve link utilization and reduce startup overhead, but the token bytes still have to cross the required fabric cuts, and skew can still overload a destination.
+
+#### AllToAll schedule selection {#sec-collective-communication-alltoall-schedule-selection}
+
+\index{AllToAll!schedule selection}\index{Collective communication!AllToAll schedules}
+
+AllToAll specifies the destination-specific exchange, not the schedule that carries it. The runtime should choose that schedule from the traffic matrix and physical hierarchy rather than treating every exchange as one flat pattern. @Tbl-alltoall-schedule-selection compares the three common regimes; hierarchical designs such as Tutel's two-dimensional exchange demonstrate why the best schedule can change with message size, scale, and topology [@hwang2023tutel].
+
+| **Schedule**                                                              | **When it fits**                                                                                                              | **Cost exposed**                                                                                                                                                  |
+|:--------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Direct pairwise exchange**\index{All-to-All!pairwise exchange schedule} | Balanced, coarse per-peer chunks on a small or full-bisection process group                                                   | Each rank injects directly to its peers; fine granularity repeats startup and scheduling cost, while oversubscription can bind the bisection                      |
+| **Hierarchical/coalesced exchange**                                       | Many small remote chunks across multi-GPU nodes or rails; pack by remote node, exchange aggregates, then redistribute locally | Coalescing amortizes inter-node startups and respects fast local links, but adds packing, local copies, synchronization, and temporary buffers                    |
+| **Variable-size exchange**                                                | Token or embedding counts differ by destination and padding to the maximum count would waste substantial bandwidth            | Explicit counts and displacements avoid padding, but count exchange and irregular transfers add control overhead; the hottest receiver still sets completion time |
+
+: **AllToAll schedule selection**: The right schedule minimizes the active bound rather than the logical peer count. Direct exchange preserves simplicity, hierarchy coalesces traffic before scarce links, and variable-size exchange removes padding without removing skew. {#tbl-alltoall-schedule-selection tbl-colwidths="[22,37,41]"}
+
+The selection test follows the lower bound developed above. If per-peer chunks are coarse and source injection or fabric bisection already dominates, coalescing cannot remove the byte term and may only add copies. If $N\alpha$ dominates because each remote destination receives a small chunk, hierarchy can replace many inter-node startups with fewer aggregate transfers. If counts are skewed, a variable-size interface prevents padding from inflating $V_{\text{cut}}$, but the schedule must still provision for the maximum receive volume and expert compute load. Consequently, a runtime should benchmark candidate schedules with the observed count distribution, rank placement, and topology; a balanced fixed-size microbenchmark cannot select a production AllToAll schedule.
+
+With the six contracts defined, every row of the travel manifest in @tbl-parallelism-communication-mapping names a primitive whose output and traffic pattern are precise. The sharded data-parallel row repays closer study, because sharding changes how often those primitives run rather than which ones run.
+
+
 ## From Parallelism to Communication Patterns {#sec-communication-collective-operations-collective-operations-communication-fundamentals-44eb}
 
 When 10,000 GPUs cooperate on one training update, the splits created by data, tensor, pipeline, and expert parallelism determine which results must cross device boundaries. Workers execute collective operations within participating groups and point-to-point transfers between pipeline stages. Within the multi-tier fleet stack diagrammed in @fig-fleet-stack, these exchanges occupy the Distributed Execution row of the Distribution band, where logical parallelism becomes physical traffic.
@@ -1136,487 +1618,6 @@ When messages are large and pipelined across the network, the LogGP model\index{
 
 The transfer model prices a message, but a training dependency usually requires a coordinated set of messages. Before counting algorithmic rounds or bytes, we need to specify which result each participating worker must receive.
 
-## Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
-
-Sending a gradient tensor to a peer does not specify which workers must contribute or where the final result belongs. Collective operations supply that group-level contract, using a vocabulary standardized by MPI and inherited by modern ML communication libraries [@mpiforum2015mpi31]. @Fig-collective-primitives-overview diagrams the input-to-output dataflow contracts for four central primitives in this group-communication vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Reading left to right across four ranks (rows 0 through 3), each panel routes per-rank input buffers through an amber transformation operator to produce green output buffers. AllReduce applies global summation ($\Sigma$) to replicate identical sums across all ranks; AllGather concatenates disparate shards onto every rank; ReduceScatter sums vectors across ranks before partitioning the result so each rank retains one reduced shard ($\Sigma_i$); and AllToAll performs a distributed matrix transpose, routing each rank's $j$-th chunk to the $j$-th rank. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), serve as foundational building blocks defined in @sec-collective-communication-six-core-primitives-8a66 and compose into these collective patterns.
-
-::: {.column-margin .margin-pointer}
-↪ The bandwidth and latency cost terms of AllReduce, AllGather, ReduceScatter, AllToAll, and Broadcast, under ring, tree, and pairwise-exchange algorithms, are developed in @sec-appdx-comm-foundations-collective-complexity.
-:::
-
-::: {#dfn-collective-communication-collective-operation .callout-definition title="Collective operation"}
-
-***Collective operation***\index{Collective Operation!definition} is a distributed communication pattern in which every rank in a process group invokes a matching operation to aggregate, broadcast, or redistribute data. The operation's contract specifies the output at each rank; it does not require simultaneous entry and does not, by itself, impose a general-purpose barrier before or after the call [@mpiforum2015mpi31].
-
-1.  **Significance**: The collective algorithm determines how communication demand is distributed as the group grows. Ring AllReduce has the bandwidth-optimal byte-transfer term $2(N-1)/N \times M / \beta$ per rank (nearly constant in $N$), while direct gather-and-broadcast through one root must move $(N-1)M$ bytes into and out of that root, costing at least $(N-1)M/\beta$ even when receiving and sending overlap. The root's bandwidth budget is roughly $N/2$ times the ring's byte-transfer term, or about 500$\times$ for $N=1024$. This comparison excludes startup, arithmetic, and contention; it illustrates how endpoint concentration can enlarge the communication term $\CommunicationTime$ of the Fleet Law (@eq-fleet-law), rather than predicting an end-to-end speedup.
-2.  **Distinction**: Unlike point-to-point communication, a collective defines one operation over a process group. Ranks may enter at different times, and some algorithms allow one rank to complete before another has entered; correctness depends on matching the operation sequence and argument contract across ranks, not on barrier semantics.
-3.  **Common pitfall**: Treating a non-blocking collective as complete when its initiation call returns. The returned request or stream event represents work in flight. A dependent consumer must wait for completion, and a late rank can extend that dependency even though the collective is not a barrier.
-
-:::
-
-::: {#fig-collective-primitives-overview fig-env="figure" fig-pos="htb" fig-cap="**Four central collective primitives**: Standardized patterns for group communication in distributed systems. In each panel the four rows are ranks 0 to 3, read left to right from each rank's input, through the collective, to what each rank holds afterward. (1) AllReduce: all aggregate and all receive the result. (2) AllGather: all send to all and concatenate. (3) ReduceScatter: all aggregate and results are distributed in shards. (4) AllToAll: every process sends unique data to every other process. The two foundational primitives Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0) compose the patterns shown here and are defined in the surrounding prose." fig-alt="Four panels, each with four input boxes on the left joined through an amber collective box to four green output boxes on the right. AllReduce: inputs 1, 2, 3, 4 become 10 on every rank. AllGather: inputs a, b, c, d become a b c d on every rank. ReduceScatter: rows a0 b0 c0 d0 through a3 b3 c3 d3 become sum a, sum b, sum c, sum d, one per rank. AllToAll: the same rows become a0 a1 a2 a3, b0 b1 b2 b3, c0 c1 c2 c3, d0 d1 d2 d3."}
-![](images/svg/collective-primitives-overview.svg)
-
-<!--
-```{.tikz}
-\begin{tikzpicture}[
-    font=\small\sffamily,
-    >=Stealth,
-    panel/.style={
-      draw=CanvasBorder,
-      fill=CanvasBg,
-      rounded corners=5pt,
-      line width=0.6pt,
-      inner sep=8pt
-    },
-    in node/.style={
-      draw=BlueLine,
-      fill=white,
-      text=TextDark,
-      line width=0.75pt,
-      rounded corners=2.5pt,
-      font=\scriptsize\sffamily,
-      minimum height=0.48cm,
-      text centered
-    },
-    out node green/.style={
-      draw=GreenLine,
-      fill=GreenFill!60,
-      text=TextDark,
-      line width=0.75pt,
-      rounded corners=2.5pt,
-      font=\scriptsize\sffamily,
-      minimum height=0.48cm,
-      text centered
-    },
-    out node violet/.style={
-      draw=VioletLine,
-      fill=VioletFill!70,
-      text=TextDark,
-      line width=0.75pt,
-      rounded corners=2.5pt,
-      font=\scriptsize\sffamily,
-      minimum height=0.48cm,
-      text centered
-    },
-    op orange/.style={
-      draw=OrangeLine,
-      fill=OrangeFill,
-      text=OrangeLine!90!black,
-      line width=0.9pt,
-      rounded corners=3.5pt,
-      font=\footnotesize\bfseries\sffamily,
-      inner sep=4pt,
-      text centered
-    },
-    op violet/.style={
-      draw=VioletLine,
-      fill=VioletFill,
-      text=VioletLine,
-      line width=0.9pt,
-      rounded corners=3.5pt,
-      font=\footnotesize\bfseries\sffamily,
-      inner sep=4pt,
-      text centered
-    },
-    wire in/.style={
-      draw=BlueLine!80!black,
-      line width=0.7pt
-    },
-    wire green/.style={
-      ->,
-      draw=GreenLine,
-      line width=0.8pt
-    },
-    wire violet/.style={
-      ->,
-      draw=VioletLine,
-      line width=0.8pt
-    }
-  ]
-
-  % Define Layer Order
-  \pgfdeclarelayer{background}
-  \pgfsetlayers{background,main}
-
-  % ========================================================
-  % 1. TOP-LEFT: ALLREDUCE
-  % ========================================================
-  \begin{scope}[shift={(0, 5.0)}, local bounding box=boxAllReduce]
-    % Header
-    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllReduce} \footnotesize(Sum Reduction)};
-    \node[anchor=east, font=\bfseries\scriptsize, text=BlueLine] at (7.1, 4.35) {All Hold Total Sum};
-    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Aggregates arrays; every device receives the identical sum.};
-
-    % Inputs (Blue)
-    \node[in node, minimum width=1.55cm] (ar_in0) at (0.95, 3.35) {G0: [ 1 ]};
-    \node[in node, minimum width=1.55cm] (ar_in1) at (0.95, 2.70) {G1: [ 2 ]};
-    \node[in node, minimum width=1.55cm] (ar_in2) at (0.95, 2.05) {G2: [ 3 ]};
-    \node[in node, minimum width=1.55cm] (ar_in3) at (0.95, 1.40) {G3: [ 4 ]};
-
-    % Central Operator
-    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ar_op) at (3.55, 2.375) {AllReduce $\Sigma$};
-
-    % Outputs (Green)
-    \node[out node green, minimum width=1.65cm] (ar_out0) at (6.15, 3.35) {G0: [ \textbf{10} ]};
-    \node[out node green, minimum width=1.65cm] (ar_out1) at (6.15, 2.70) {G1: [ \textbf{10} ]};
-    \node[out node green, minimum width=1.65cm] (ar_out2) at (6.15, 2.05) {G2: [ \textbf{10} ]};
-    \node[out node green, minimum width=1.65cm] (ar_out3) at (6.15, 1.40) {G3: [ \textbf{10} ]};
-
-    % Wires In -> Op
-    \draw[wire in] (ar_in0.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, 0.15)$);
-    \draw[wire in] (ar_in1.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, 0.05)$);
-    \draw[wire in] (ar_in2.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, -0.05)$);
-    \draw[wire in] (ar_in3.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, -0.15)$);
-    \draw[->, wire in] ($(ar_op.west)-(0.15,0)$) -- (ar_op.west);
-
-    % Wires Op -> Out
-    \coordinate (ar_out_fork) at ($(ar_op.east)+(0.25,0)$);
-    \draw[wire green, -] (ar_op.east) -- (ar_out_fork);
-    \draw[wire green] (ar_out_fork) |- (ar_out0.west);
-    \draw[wire green] (ar_out_fork) |- (ar_out1.west);
-    \draw[wire green] (ar_out_fork) |- (ar_out2.west);
-    \draw[wire green] (ar_out_fork) |- (ar_out3.west);
-
-    % Footer Note
-    \node[anchor=north, font=\scriptsize, text=TextDark] at (3.55, 0.95) {\textbf{Core Usage:} Data Parallel gradient sync (DDP)};
-  \end{scope}
-
-  \begin{pgfonlayer}{background}
-    \node[panel, fit=(boxAllReduce)] {};
-  \end{pgfonlayer}
-
-  % ========================================================
-  % 2. TOP-RIGHT: ALLGATHER
-  % ========================================================
-  \begin{scope}[shift={(7.8, 5.0)}, local bounding box=boxAllGather]
-    % Header
-    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllGather} \footnotesize(Concatenation)};
-    \node[anchor=east, font=\bfseries\scriptsize, text=GreenLine] at (7.1, 4.35) {All Hold Full Tensor};
-    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Collects each device's partial shard into the full tensor.};
-
-    % Inputs (Blue)
-    \node[in node, minimum width=1.55cm] (ag_in0) at (0.95, 3.35) {G0: [ $a$ ]};
-    \node[in node, minimum width=1.55cm] (ag_in1) at (0.95, 2.70) {G1: [ $b$ ]};
-    \node[in node, minimum width=1.55cm] (ag_in2) at (0.95, 2.05) {G2: [ $c$ ]};
-    \node[in node, minimum width=1.55cm] (ag_in3) at (0.95, 1.40) {G3: [ $d$ ]};
-
-    % Central Operator
-    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ag_op) at (3.55, 2.375) {AllGather $\boxplus$};
-
-    % Outputs (Green)
-    \node[out node green, minimum width=2.1cm] (ag_out0) at (6.05, 3.35) {G0: [ $a, b, c, d$ ]};
-    \node[out node green, minimum width=2.1cm] (ag_out1) at (6.05, 2.70) {G1: [ $a, b, c, d$ ]};
-    \node[out node green, minimum width=2.1cm] (ag_out2) at (6.05, 2.05) {G2: [ $a, b, c, d$ ]};
-    \node[out node green, minimum width=2.1cm] (ag_out3) at (6.05, 1.40) {G3: [ $a, b, c, d$ ]};
-
-    % Wires In -> Op
-    \draw[wire in] (ag_in0.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, 0.15)$);
-    \draw[wire in] (ag_in1.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, 0.05)$);
-    \draw[wire in] (ag_in2.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, -0.05)$);
-    \draw[wire in] (ag_in3.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, -0.15)$);
-    \draw[->, wire in] ($(ag_op.west)-(0.15,0)$) -- (ag_op.west);
-
-    % Wires Op -> Out
-    \coordinate (ag_out_fork) at ($(ag_op.east)+(0.25,0)$);
-    \draw[wire green, -] (ag_op.east) -- (ag_out_fork);
-    \draw[wire green] (ag_out_fork) |- (ag_out0.west);
-    \draw[wire green] (ag_out_fork) |- (ag_out1.west);
-    \draw[wire green] (ag_out_fork) |- (ag_out2.west);
-    \draw[wire green] (ag_out_fork) |- (ag_out3.west);
-
-    % Footer Note
-    \node[anchor=north, font=\scriptsize, text=GreenLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO-3 parameter un-sharding};
-  \end{scope}
-
-  \begin{pgfonlayer}{background}
-    \node[panel, fit=(boxAllGather)] {};
-  \end{pgfonlayer}
-
-  % ========================================================
-  % 3. BOTTOM-LEFT: REDUCESCATTER
-  % ========================================================
-  \begin{scope}[shift={(0, 0)}, local bounding box=boxReduceScatter]
-    % Header
-    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small ReduceScatter} \footnotesize(Reduce-Scatter)};
-    \node[anchor=east, font=\bfseries\scriptsize, text=OrangeLine] at (7.1, 4.35) {One Shard Each};
-    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Reduces across devices, then scatters disjoint slices.};
-
-    % Inputs (Blue)
-    \node[in node, minimum width=2.1cm] (rs_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
-    \node[in node, minimum width=2.1cm] (rs_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
-    \node[in node, minimum width=2.1cm] (rs_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
-    \node[in node, minimum width=2.1cm] (rs_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
-
-    % Central Operator
-    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (rs_op) at (3.90, 2.375) {ReduceScatter};
-
-    % Outputs (Green)
-    \node[out node green, minimum width=1.65cm] (rs_out0) at (6.15, 3.35) {G0: [ $\sum a$ ]};
-    \node[out node green, minimum width=1.65cm] (rs_out1) at (6.15, 2.70) {G1: [ $\sum b$ ]};
-    \node[out node green, minimum width=1.65cm] (rs_out2) at (6.15, 2.05) {G2: [ $\sum c$ ]};
-    \node[out node green, minimum width=1.65cm] (rs_out3) at (6.15, 1.40) {G3: [ $\sum d$ ]};
-
-    % Wires In -> Op
-    \draw[wire in] (rs_in0.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, 0.15)$);
-    \draw[wire in] (rs_in1.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, 0.05)$);
-    \draw[wire in] (rs_in2.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, -0.05)$);
-    \draw[wire in] (rs_in3.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, -0.15)$);
-    \draw[->, wire in] ($(rs_op.west)-(0.15,0)$) -- (rs_op.west);
-
-    % Wires Op -> Out
-    \coordinate (rs_out_fork) at ($(rs_op.east)+(0.25,0)$);
-    \draw[wire green, -] (rs_op.east) -- (rs_out_fork);
-    \draw[wire green] (rs_out_fork) |- (rs_out0.west);
-    \draw[wire green] (rs_out_fork) |- (rs_out1.west);
-    \draw[wire green] (rs_out_fork) |- (rs_out2.west);
-    \draw[wire green] (rs_out_fork) |- (rs_out3.west);
-
-    % Footer Note
-    \node[anchor=north, font=\scriptsize, text=OrangeLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO sharded reduction};
-  \end{scope}
-
-  \begin{pgfonlayer}{background}
-    \node[panel, fit=(boxReduceScatter)] {};
-  \end{pgfonlayer}
-
-  % ========================================================
-  % 4. BOTTOM-RIGHT: ALLTOALL
-  % ========================================================
-  \begin{scope}[shift={(7.8, 0)}, local bounding box=boxAllToAll]
-    % Header
-    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllToAll} \footnotesize(Matrix Transpose)};
-    \node[anchor=east, font=\bfseries\scriptsize, text=VioletLine] at (7.1, 4.35) {Pairwise Shuffle};
-    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Each rank sends distinct shard $i$ to peer rank $i$ (transposition).};
-
-    % Inputs (Blue)
-    \node[in node, minimum width=2.1cm] (ata_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
-    \node[in node, minimum width=2.1cm] (ata_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
-    \node[in node, minimum width=2.1cm] (ata_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
-    \node[in node, minimum width=2.1cm] (ata_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
-
-    % Central Operator
-    \node[op violet, minimum width=1.8cm, minimum height=0.75cm] (ata_op) at (3.60, 2.375) {AllToAll $\rightleftarrows$};
-
-    % Outputs (Violet)
-    \node[out node violet, minimum width=2.1cm] (ata_out0) at (6.05, 3.35) {G0: [$a_0,a_1,a_2,a_3$]};
-    \node[out node violet, minimum width=2.1cm] (ata_out1) at (6.05, 2.70) {G1: [$b_0,b_1,b_2,b_3$]};
-    \node[out node violet, minimum width=2.1cm] (ata_out2) at (6.05, 2.05) {G2: [$c_0,c_1,c_2,c_3$]};
-    \node[out node violet, minimum width=2.1cm] (ata_out3) at (6.05, 1.40) {G3: [$d_0,d_1,d_2,d_3$]};
-
-    % Wires In -> Op
-    \draw[wire in] (ata_in0.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, 0.15)$);
-    \draw[wire in] (ata_in1.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, 0.05)$);
-    \draw[wire in] (ata_in2.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, -0.05)$);
-    \draw[wire in] (ata_in3.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, -0.15)$);
-    \draw[->, wire in] ($(ata_op.west)-(0.15,0)$) -- (ata_op.west);
-
-    % Wires Op -> Out
-    \coordinate (ata_out_fork) at ($(ata_op.east)+(0.25,0)$);
-    \draw[wire violet, -] (ata_op.east) -- (ata_out_fork);
-    \draw[wire violet] (ata_out_fork) |- (ata_out0.west);
-    \draw[wire violet] (ata_out_fork) |- (ata_out1.west);
-    \draw[wire violet] (ata_out_fork) |- (ata_out2.west);
-    \draw[wire violet] (ata_out_fork) |- (ata_out3.west);
-
-    % Footer Note
-    \node[anchor=north, font=\scriptsize, text=VioletLine] at (3.55, 0.95) {\textbf{Core Usage:} MoE token dispatch \& combine routing};
-  \end{scope}
-
-  \begin{pgfonlayer}{background}
-    \node[panel, fit=(boxAllToAll)] {};
-  \end{pgfonlayer}
-
-\end{tikzpicture}
-```
--->
-
-:::
-
-The primitive choice is the first scaling decision because it fixes which ranks must coordinate and which result each must obtain. The algorithm and placement then determine the traffic and its limiting resource. Different model architectures require different operations, and choosing a broader operation than the workload needs can create unnecessary bottlenecks.
-
-### The six core primitives {#sec-collective-communication-six-core-primitives-8a66}
-
-The six primitives in @tbl-collective-primitives form a decision ladder: use the narrowest operation that preserves the model's mathematics, because every broader pattern adds data movement, coordination, or contention. Read the output contract and use case first. The cost column previews particular implementations, using $N$ for the participating rank count and $M$ for the full tensor or per-rank AllToAll payload; the ring and tree derivations follow in the algorithm section.
-
-| **Primitive**                          | **What it does**                                                                                                        | **Primary use case**                                                                                | **Communication cost**                                                                                                                                                                          |
-|:---------------------------------------|:------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Broadcast**\index{Broadcast}         | One sender transmits data to all receivers.                                                                             | Distribute initial model weights from rank 0 at startup, across all parallelism strategies.         | $\mathcal{O}(\log N)$ latency (tree); $\mathcal{O}(M)$ bandwidth.                                                                                                                               |
-| **Reduce**\index{Reduce}               | Aggregate data from all workers (sum, min, max) to a single root.                                                       | Aggregate validation metrics such as loss and accuracy to a logging process.                        | $\mathcal{O}(\log N)$ latency (tree); $\mathcal{O}(M)$ bandwidth.                                                                                                                               |
-| **AllReduce**\index{AllReduce}         | Aggregate from all workers, then distribute the result to all ($y_i = \sum_{j=0}^{N-1} x_j$ for all $i$).               | Data parallelism: synchronize gradients so every GPU computes the same update.                      | Ring is bandwidth-optimal at $2\frac{N-1}{N}\frac{M}{\beta}$ but $\mathcal{O}(N)$ latency; the simple full-message Tree model gives $\mathcal{O}(\log N)$ latency with more byte-transfer work. |
-| **AllGather**\index{AllGather}         | Each worker's data goes to all; the result concatenates every input ($x_i \rightarrow [x_0, \dots, x_{N-1}]$).          | Sharded data parallelism (FSDP/ZeRO): collect sharded parameters before a forward or backward pass. | Ring $\frac{N-1}{N}\frac{M}{\beta}$; resident data grows from an $M/N$ shard to the full $M$.                                                                                                   |
-| **ReduceScatter**\index{ReduceScatter} | Reduce across workers, but scatter so each keeps a distinct chunk (worker $i$ receives the $i$-th block of $\sum x_j$). | Sharded data parallelism: reduce gradients while keeping them sharded to save memory.               | Ring $\frac{N-1}{N}\frac{M}{\beta}$; the same ring byte-transfer term as AllGather, with reduction.                                                                                             |
-| **AllToAll**\index{AllToAll}           | The most general pattern: worker $i$ sends a distinct chunk to each worker $j$, a distributed matrix transpose.         | MoE routing tokens to experts; DLRM exchanging embedding lookups across workers.                    | Per-worker payload $\frac{N-1}{N}M$; the limiter can arise from startup, injection/reception, bisection, oversubscription, routing, granularity, or skew.                                       |
-
-: **The Six Collective Primitives**: What each primitive computes, its primary use, and its communication cost, ordered from the narrowest pattern (Broadcast) to the most general (AllToAll). {#tbl-collective-primitives tbl-colwidths="[14,30,27,29]"}
-
-Ring achieves AllReduce's bandwidth-optimal cost while the simple full-message Tree model\index{Broadcast!tree topology} trades bandwidth for logarithmic latency [@patarasuk2009; @thakur2005].
-
-AllReduce decomposes into ReduceScatter\index{ReduceScatter!decomposition} followed by AllGather\index{AllGather!decomposition}. The decomposition is operational as well as mathematical, since Ring AllReduce's Scatter-Reduce phase is a ReduceScatter and its AllGather phase is an AllGather. ReduceScatter performs arithmetic, so it does not invert AllGather despite reversing the direction of shard expansion. Full ZeRO-style sharding\index{ZeRO!parameter sharding} and PyTorch FSDP[^fn-fsdp-memory-sharding] use related partitioning strategies: AllGather parameter shards before a module needs them and ReduceScatter gradients after backward so each rank retains only its shard for the optimizer step [@rajbhandari2020]. Sharding parameters, gradients, and optimizer state across workers reduces persistent model-state memory roughly by $N \times$, while temporary full-parameter buffers and prefetching determine peak memory.
-
-The same AllGather/ReduceScatter pair also appears in sequence parallelism: an AllGather reconstructs the activation view needed for a local operation, and a later ReduceScatter redistributes the result along the sequence dimension. That example will matter later because it shows that a primitive's semantics stay fixed even when the tensor dimension being sharded changes.
-
-This ladder matters because the primitive determines the communication dependency before any algorithmic optimization begins. AllReduce delivers a common reduced value to participating ranks, AllGather and ReduceScatter support transitions between full and sharded representations, and AllToAll routes destination-specific data. These are data-movement contracts; they do not by themselves establish optimizer consistency or recovery after failure.
-
-Collective correctness has an interface dimension as well as a mathematical one. Every rank in a process group must issue collectives in a compatible order; mismatched operation sequences can deadlock or pair unrelated buffers. Operations also impose shape and count contracts. AllReduce requires compatible element counts and datatypes, whereas variable-size exchanges require explicit per-destination counts and displacements. These invariants belong at the boundary between the parallel decomposition and the communication runtime: the model decides which tensor slice each rank owns, and the collective contract proves that those slices can be recombined.
-
-Reduction order introduces a second, numerical contract. Floating-point addition is not associative, so ring, tree, and switch-assisted reductions may accumulate the same values in different orders and produce different low-order bits [@goldberg1991]. A correct AllReduce therefore guarantees the specified reduction over all contributions, not bitwise identity across algorithms, rank counts, or hardware. Reproducibility-sensitive workloads must fix the algorithm and process-group configuration or use a reproducible accumulation\index{Numerical reproducibility!reduction order} scheme; ordinary training should treat small order-dependent differences as numerical behavior while still checking for larger rank disagreement.
-
-[^fn-fsdp-memory-sharding]: **FSDP (Fully Sharded Data Parallel)**\index{FSDP!memory trade-off}: PyTorch's fully sharded implementation follows the ZeRO-3 idea of sharding parameters, gradients, and optimizer states across $N$ accelerators [@rajbhandari2020]. The trade-off is communication frequency: full sharding adds layer-level AllGather and ReduceScatter operations instead of relying only on data parallelism's step-level AllReduce, making it more sensitive to the $\alpha$ overhead.
-
-[^fn-dlrm-embedding-alltoall]: [offset=6mm] **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction uses sharded embedding tables and exchanges the resulting sparse lookups across workers. The resulting AllToAll may be startup-bound when each destination receives a fine-grained message, injection- or reception-bound as aggregate payload grows, or fabric-bound under oversubscription, unfavorable routing, or shard-access skew. DLRM therefore supplies a destination-specific traffic pattern, not a universal latency regime.
-
-The contrast between AllToAll and AllReduce highlights a fundamental difference in how collective operations scale with cluster size.
-
-:::: {#psp-collective-communication-alltoall-vs-allreduce-why-scale-differs .callout-perspective title="AllToAll vs. AllReduce: Why scale differs"}
-
-Ring AllReduce can pipeline a uniform payload through neighbor exchanges. AllToAll presents a different scaling problem because every rank has destination-specific traffic, but the logical peer count alone does not determine its cost.
-
-An AllToAll over $N$ ranks creates $N(N-1)$ logical source-destination transfers, yet each rank's aggregate payload can remain fixed under weak scaling. Its lower bound is governed by the largest of four terms: source injection time\index{All-to-All!injection bound}, destination reception time\index{All-to-All!reception bound}, traffic crossing the fabric bisection\index{Bisection bandwidth!All-to-All communication}, and per-message startup or scheduling overhead. Oversubscription and routing determine how much physical capacity those flows share. Message granularity determines how often they pay $\alpha$. Routing skew determines whether one destination or link becomes the critical path. A full-bisection network carrying balanced, coarse-grained traffic can therefore scale well despite the quadratic logical connection count, whereas an oversubscribed fabric or skewed expert assignment can stall at much smaller $N$.
-
-::: {.column-margin}
-```{=latex}
-\vspace*{-14mm}
-```
-![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="All-to-All quadratic logical source-destination pairs compared with the linear number of ranks; physical cost depends on how those flows share the fabric."}
-
-*Logical peer pairs grow quadratically; physical cost depends on the fabric.*
-:::
-
-Expert parallelism and large-scale recommendation systems\index{Recommendation System} can reach a communication wall earlier than standard data parallelism when their traffic exhausts injection, reception, or bisection capacity, or when routing and destination skew create hotspots. The primitive determines the traffic matrix\index{Traffic matrix!collective communication}; the physical fabric and routing distribution determine the scaling ceiling.
-
-::::
-
-To make the AllToAll pattern concrete, consider a mixture-of-experts model with 64 experts distributed across 8 GPUs (8 experts per GPU). During each forward pass, a gating network assigns each input token to one or more experts. The tokens assigned to experts on remote GPUs must be physically moved to those GPUs before computation can proceed, and the results must be moved back afterward.
-
-```{python}
-#| echo: false
-#| label: moe-alltoall-calc
-from mlsysim.core.units import BYTES_FP16, GB, KB, MB, microsecond, second
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time
-from mlsysim import Systems
-
-class MoeAllToAll:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    total_tokens = 4096
-    n_gpus = 8
-    hidden_dim = 2048
-    bytes_per_elem = BYTES_FP16
-    n_experts = 64
-    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
-    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    alpha = Systems.SwitchFabric.AlphaNdr
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    tokens_per_gpu = total_tokens // n_gpus
-    experts_per_gpu = n_experts // n_gpus
-    bytes_per_token = hidden_dim * bytes_per_elem
-    kb_per_token = bytes_per_token.to(KB)
-    tokens_per_expert = total_tokens // n_experts
-    tokens_per_transfer = tokens_per_gpu // n_gpus
-    remote_gpus = n_gpus - 1
-    data_per_transfer = tokens_per_transfer * bytes_per_token
-    total_sent = remote_gpus * data_per_transfer
-    # Bandwidth term rounded to whole microseconds: the worked trace presents it
-    # as the clean "≈ 5 μs" approximation the callout math line displays, so the
-    # downstream per-transfer and serialized totals stay on visible
-    # arithmetic (1.5 + 5 = 6.5; 7 × 6.5 = 45.5).
-    bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
-    per_transfer = alpha + bw_time
-    serialized = remote_gpus * per_transfer
-    # Concurrent peer streams share the GPU's aggregate NIC injection bandwidth.
-    # Full duplex permits simultaneous send and receive, but does not multiply the
-    # outgoing 50 GB/s port by the number of remote peers.
-    parallel = alpha + total_sent / beta
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(tokens_per_gpu == 512, f"tokens/GPU = {tokens_per_gpu}")
-    check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
-    check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
-    check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
-    check(abs(per_transfer.to(microsecond).magnitude - 6.5) < 1e-9, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
-    check(abs(parallel.to(microsecond).magnitude - 38.20016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
-    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
-    tokens_per_gpu_str = fmt_count(tokens_per_gpu, label="token", commas=False)
-    tokens_per_transfer_str = fmt_count(tokens_per_transfer, label="token", commas=False)
-    kb_per_token_str = fmt_memory(kb_per_token, unit=KB, precision=3, commas=False)
-    tokens_per_expert_str = fmt_count(tokens_per_expert, label="token", commas=False)
-    data_per_transfer_kb_str = fmt_memory(data_per_transfer, unit=KB, precision=3, commas=False)
-    total_sent_mb_str = fmt_memory(total_sent, unit=MB, precision=2, commas=False)
-    bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
-    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=1, commas=False)
-    serialized_us_str = fmt_time(serialized, unit=microsecond, precision=1, commas=False)
-    parallel_us_str = fmt_time(parallel, unit=microsecond, precision=1, commas=False)
-    total_tokens_str = fmt_count(total_tokens, label="token", commas=False)
-    n_gpus_str = fmt(n_gpus, precision=0, commas=False)
-    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
-    n_experts_str = fmt(n_experts, precision=0, commas=False)
-    experts_per_gpu_str = fmt(experts_per_gpu, precision=0, commas=False)
-    remote_gpus_str = fmt(remote_gpus, precision=0, commas=False)
-```
-
-::: {#nbk-collective-communication-alltoall-moe-token-routing .callout-notebook title="AllToAll for MoE token routing"}
-
-**Problem**: A MoE model processes a batch of `{python} MoeAllToAll.total_tokens_str` across `{python} MoeAllToAll.n_gpus_str` GPUs (`{python} MoeAllToAll.tokens_per_gpu_str` per GPU). Each token is a `{python} MoeAllToAll.hidden_dim_str`-dimensional hidden state in BF16 (`{python} MoeAllToAll.kb_per_token_str` per token). The gating network assigns each token to exactly 1 of `{python} MoeAllToAll.n_experts_str` experts (`{python} MoeAllToAll.experts_per_gpu_str` experts per GPU). Assuming uniform routing (each expert receives `{python} MoeAllToAll.tokens_per_expert_str`), how much data does each GPU send and receive?
-
-**Math**:
-
-Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` that need to reach `{python} MoeAllToAll.n_experts_str` different experts across `{python} MoeAllToAll.n_gpus_str` GPUs. With uniform routing, each GPU sends `{python} MoeAllToAll.tokens_per_transfer_str` to each of the other `{python} MoeAllToAll.remote_gpus_str` GPUs (keeping `{python} MoeAllToAll.tokens_per_transfer_str` local).
-
-*   Data per GPU-to-GPU transfer: `{python} MoeAllToAll.tokens_per_transfer_str` $\times$ `{python} MoeAllToAll.kb_per_token_str`/token = `{python} MoeAllToAll.data_per_transfer_kb_str`
-*   Total data sent per GPU: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
-*   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
-
-**Latency Analysis** (InfiniBand NDR, $\alpha =$ `{python} MoeAllToAll.alpha_us_str`, $\beta =$ `{python} MoeAllToAll.beta_gb_per_s_str`):
-
-Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
-
-If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\alpha + \text{total bytes sent}/\beta =$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
-
-**Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\Bandwidth_{\text{bisect}}$ and $V_{\text{cut}}$ bytes must cross its minimum cut, the exchange also obeys $T\geq V_{\text{cut}}/\Bandwidth_{\text{bisect}}$. Oversubscription reduces $\Bandwidth_{\text{bisect}}$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
-
-:::
-
-#### Dynamic routing and expert imbalance in MoE AllToAll {#sec-collective-communication-moe-dynamic-routing}
-
-The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing, in which every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent. The exchange keeps its two-phase shape, but its buffer sizes, its slowest receiver, and its load on the fabric all become functions of the routing distribution.
-
-Each MoE layer performs two exchanges. In an MoE transformer layer with $E$ experts distributed across $N$ ranks ($E/N$ experts per rank), each rank holds a local batch of $B_{\text{tok}}$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token, inducing two collective communication phases separated by expert computation. During token dispatch\index{All-to-All!dispatch phase}, each rank partitions its $B_{\text{tok}}$ local token activation vectors ($\mathbf{x} \in \mathbb{R}^d$) according to the destination ranks hosting the selected experts, executing an AllToAll collective (or variable-size `AllToAllv`\index{All-to-All!variable-size AllToAllv}) to route tokens across the fabric according to the routing matrix\index{All-to-All!routing matrix}. After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), the token combine\index{All-to-All!combine phase} phase executes a second AllToAll collective to route output vectors back to their originating ranks. Each rank then computes the weighted combination of expert outputs:
-$$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
-
-Because routing is data-dependent, so are the required buffer sizes, even when the input tensor shape is fixed. One simplified model treats assignments of different tokens independently: the count for expert $e$ is then $B_e \sim \text{Binomial}(N B_{\text{tok}}, p_e)$, where $p_e$ is the fixed probability that a token selects expert $e$. Correlated tokens or changing router probabilities require a different count model. To avoid reallocating buffers for every routing decision, a capacity-limited implementation can reserve space using an expert capacity factor\index{Capacity factor!expert routing} $C \ge 1.0$ [@lepikhin2021gshard; @fedus2022switch]:
-$$\text{Capacity}_e = \left\lceil \frac{N \times B_{\text{tok}} \times k}{E} \times C \right\rceil$$
-
-The capacity factor exposes a trade-off between reserved space and retained expert assignments. At uniform expected capacity ($C = 1.0$), some experts can still overflow while others have unused slots. A dropping implementation bypasses excess assignments through the residual connection\index{Token dropping!capacity factor}, changing the computation and potentially harming training quality. Increasing headroom ($C > 1.0$, for example $1.25$–$1.5$) can reduce overflow. If the implementation transmits every reserved slot, its padded payload grows by approximately $C\times$ relative to the uniform capacity-one budget; kernels that skip unused slots need not perform the corresponding dummy computation. A dropless implementation retains every assignment and can use variable-size `AllToAllv` to avoid sending unused slots. It still needs enough memory for the realized counts and remains exposed to routing skew.
-
-Skew turns the most heavily loaded rank into a straggler. Because token routing is determined by input semantics, some experts inevitably receive disproportionate token volumes. An expert receiving $\gamma \times$ the average load ($\gamma > 1$) increases its host GPU's traffic. The host's total receive volume depends on the combined load of all experts assigned to it, which is the rank-level quantity in the bound that follows.
-
-Routing skew can create stragglers\index{Straggler!expert skew} in both communication and expert computation. An inbound reception bottleneck bounds dispatch completion by the most heavily loaded receiver. Other ranks may finish their transfers earlier, but work that needs the delayed expert outputs must wait. The receive budget gives a lower bound before expert computation and the return exchange are counted:
-$$T_{\text{dispatch}} \ge \frac{B_{\text{max}} \times d \times \ElementStorageSize}{\Bandwidth_{\text{rx}}}$$
-where $B_{\text{max}} = \max_r \sum_{e \in \text{rank } r} B_e$ is the largest token batch size any rank $r$ receives. Bisection capacity provides a separate limit. Ring AllReduce exchanges data with logical ring neighbors, whereas AllToAll permits a complete bipartite exchange\index{All-to-All!bipartite exchange}. Under uniform destination assignment, a fraction $(N-1)/N \approx 1$ of tokens leaves its source rank; the fraction crossing nodes or a particular fabric cut depends on placement. In the simplified symmetric fabric model with oversubscription ratio $R:1$, usable bisection bandwidth $\Bandwidth_{\text{bisect}} = (N \cdot \Bandwidth_{\text{inject}}) / (2R)$ bounds the time needed to carry traffic across that cut:
-$$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\Bandwidth_{\text{bisect}}}$$
-
-Scale compounds both problems. To amortize small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]. Intra-node NVLink first coalesces tokens destined for experts on the same remote server node. Participating nodes then exchange aggregated payloads over InfiniBand or RoCE, and receiving GPUs use NVLink to distribute tokens to the GPUs hosting the targeted experts. At the logical level, this replaces $N(N-1)$ directed rank pairs with $\AcceleratorsPerNodeNodes(\AcceleratorsPerNodeNodes-1)$ directed node pairs; actual transport connections depend on the implementation. Coalescing can improve link utilization and reduce startup overhead, but the token bytes still have to cross the required fabric cuts, and skew can still overload a destination.
-
-#### AllToAll schedule selection {#sec-collective-communication-alltoall-schedule-selection}
-
-\index{AllToAll!schedule selection}\index{Collective communication!AllToAll schedules}
-
-AllToAll specifies the destination-specific exchange, not the schedule that carries it. The runtime should choose that schedule from the traffic matrix and physical hierarchy rather than treating every exchange as one flat pattern. @Tbl-alltoall-schedule-selection compares the three common regimes; hierarchical designs such as Tutel's two-dimensional exchange demonstrate why the best schedule can change with message size, scale, and topology [@hwang2023tutel].
-
-| **Schedule**                                                              | **When it fits**                                                                                                              | **Cost exposed**                                                                                                                                                  |
-|:--------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Direct pairwise exchange**\index{All-to-All!pairwise exchange schedule} | Balanced, coarse per-peer chunks on a small or full-bisection process group                                                   | Each rank injects directly to its peers; fine granularity repeats startup and scheduling cost, while oversubscription can bind the bisection                      |
-| **Hierarchical/coalesced exchange**                                       | Many small remote chunks across multi-GPU nodes or rails; pack by remote node, exchange aggregates, then redistribute locally | Coalescing amortizes inter-node startups and respects fast local links, but adds packing, local copies, synchronization, and temporary buffers                    |
-| **Variable-size exchange**                                                | Token or embedding counts differ by destination and padding to the maximum count would waste substantial bandwidth            | Explicit counts and displacements avoid padding, but count exchange and irregular transfers add control overhead; the hottest receiver still sets completion time |
-
-: **AllToAll schedule selection**: The right schedule minimizes the active bound rather than the logical peer count. Direct exchange preserves simplicity, hierarchy coalesces traffic before scarce links, and variable-size exchange removes padding without removing skew. {#tbl-alltoall-schedule-selection tbl-colwidths="[22,37,41]"}
-
-The selection test follows the lower bound developed above. If per-peer chunks are coarse and source injection or fabric bisection already dominates, coalescing cannot remove the byte term and may only add copies. If $N\alpha$ dominates because each remote destination receives a small chunk, hierarchy can replace many inter-node startups with fewer aggregate transfers. If counts are skewed, a variable-size interface prevents padding from inflating $V_{\text{cut}}$, but the schedule must still provision for the maximum receive volume and expert compute load. Consequently, a runtime should benchmark candidate schedules with the observed count distribution, rank placement, and topology; a balanced fixed-size microbenchmark cannot select a production AllToAll schedule.
-
-With the six contracts defined, every row of the travel manifest in @tbl-parallelism-communication-mapping names a primitive whose output and traffic pattern are precise. The sharded data-parallel row repays closer study, because sharding changes how often those primitives run rather than which ones run.
-
 ## AllReduce Algorithms and Topologies {#sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545}
 
 A correct AllReduce must give all 1,000 GPUs the reduced sum of all 1,000 one-gigabyte gradients, subject to the floating-point reduction contract, and the algorithm that delivers it sets the cluster's scaling ceiling. The naive answer (every GPU sends to one central server, whose network card instantly saturates) fails first, which makes it the right place to start.
@@ -2347,6 +2348,15 @@ Verify your understanding of Ring vs. Tree AllReduce trade-offs:
 :::
 
 [^fn-moe-sparse-routing]: **Mixture-of-Experts (MoE)**\index{MoE!communication}: Because each token activates only a few experts, MoE replaces a uniform dense reduction with destination-specific AllToAll traffic. Fine-grained dispatch can expose startup cost, larger batches can bind injection or reception bandwidth, and oversubscription, routing, or expert skew can make bisection capacity or a hotspot the critical path.
+
+## AllToAll and Advanced Collective Topologies {#sec-communication-alltoall}
+AllReduce dominates dense training workloads like standard data parallelism, but sparse workloads, Mixture of Experts (MoE), and complex model parallelism strategies increasingly rely on AllToAll communication.
+
+### The AllToAll routing challenge {#sec-communication-alltoall-routing}
+Unlike AllReduce, which computes a single reduction over compatible elements, AllToAll requires destination-specific routing where each worker sends distinct data to different peers. These workloads bind differently on the network fabric. Their performance is less dependent on simple ring or tree topologies and more dependent on injection bandwidth, bisection bandwidth, oversubscription, message granularity, routing algorithms, and traffic skew. The $\alpha$-$\beta$ model applies, but the traffic multiplier must account for the specific exchange matrix of the workload.
+
+### Mixture-of-Experts network demands {#sec-communication-alltoall-moe}
+Because each token in an MoE model activates only a few experts, the uniform dense reduction of AllReduce is replaced with destination-specific AllToAll traffic. Fine-grained expert dispatch can expose high $\alpha$ (startup cost), larger batches can bind injection or reception bandwidth, and oversubscription or expert skew can make the fabric's bisection capacity or a single hotspot the critical path.
 
 ## Hierarchical Communication {#sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214}
 

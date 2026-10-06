@@ -999,6 +999,193 @@ When per-model savings and platform cost remain fixed, @eq-platform-roi scales t
 
 :::
 
+## Platform Engineering {#sec-ml-operations-scale-platform-engineering-17be}
+
+Organizations where every data science team independently provisions GPU clusters, configures model registries, and wires up alerting dashboards duplicate infrastructure work. **Platform engineering**\index{Platform Engineering!definition} addresses this by treating the ML infrastructure itself as a product, providing supported paths that reduce repeated implementation and maintenance. Product teams still own model behavior and workload-specific decisions; the platform makes shared operational responsibilities explicit.
+
+Platform engineering for machine learning creates shared infrastructure that absorbs recurring operational complexity while exposing the controls model teams need. Effective platforms balance self-service capabilities that accelerate development against governance requirements that enforce common release and reliability policies.
+
+### Abstraction levels {#sec-ml-operations-scale-abstraction-levels-6e15}
+
+The abstraction-level decision\index{Platform engineering!abstraction level} is how much operational judgment the platform should centralize on behalf of model teams. Too little abstraction leaves every team paying the same infrastructure tax; too much hides the controls that unusual workloads need. The four levels in @tbl-ops-scale-platform-abstraction-levels sit on that flexibility-vs.-convenience curve, distinguished by which concerns the platform owns and which it leaves to the model team.
+
+| **Level** | **Platform owns**                                                                                                  | **Model team still owns**                                                       | **Best fit and risk**                                                                                                      |
+|:----------|:-------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------|
+| Level 1   | GPU capacity, storage volumes, network connectivity, and basic orchestration such as Kubernetes namespaces         | Training code, serving stack, monitoring, and deployment path                   | Fits unusual workloads with strong infrastructure teams; becomes costly when many teams repeat the same operational work   |
+| Level 2   | Standardized containers, ML-aware Kubernetes integration, persistent volumes, and basic service-mesh support       | Experiment structure, training jobs, serving releases, and monitoring workflows | Reduces packaging duplication; operational correctness still depends heavily on each team                                  |
+| Level 3   | ML-specific control loops such as topology-aware scheduling, hyperparameter tuning, distributed training, serving  | Modeling judgment and workload-specific trade-offs                              | Absorbs failure modes that recur across teams; systems such as Kubeflow and Ray often sit near this level                  |
+| Level 4   | Full lifecycle product: IDEs, feature stores, experiment tracking, registries, CI/CD, monitoring, cost, governance | Higher-level product and modeling intent, with less direct low-level control    | Maximizes speed and consistency; the platform team accepts responsibility for policy, reliability, and economic visibility |
+
+: **Platform abstraction levels**: Platform engineering centralizes different parts of the ML lifecycle at each abstraction level. The right level depends on whether an organization values workload-specific control or shared operational invariants more. {#tbl-ops-scale-platform-abstraction-levels tbl-colwidths="[12,28,27,33]"}
+
+Managed services such as Vertex AI and SageMaker, and lifecycle tooling such as TensorFlow Extended (TFX)[^fn-tfx-production-pipeline] at Google [@baylor2017] and MLflow [@zaharia2018accelerating], support different parts of this spectrum. A product name does not establish the organization's abstraction level. The decisive boundary is which lifecycle responsibilities the assembled platform actually owns, which controls model teams retain, and who supplies policy, reliability, and economic visibility for the gaps.
+
+[^fn-tfx-production-pipeline]: **TensorFlow Extended (TFX)**\index{TFX!data validation}: Google's production ML pipeline framework includes TensorFlow Data Validation (TFDV), which checks data against schema expectations and configured drift and skew comparisons. Connecting those checks to a release policy allows a pipeline to stop before spending training resources on detected data defects. The checks cover declared expectations; a passing result does not establish that every value is correct or that a distribution change is harmless.
+
+### Platform lifecycle and adoption {#sec-ops-scale-platform-lifecycle-adoption}
+
+An internal ML platform is a versioned product, not a one-time infrastructure project. Its interfaces, supported workflows, reliability targets, and ownership boundaries must evolve without forcing every model team into synchronized migration. Each platform release therefore needs compatibility guarantees, a migration path, telemetry that distinguishes old and new paths, and a retirement date for deprecated behavior. The platform team also needs its own service-level objectives because a registry, feature service, or deployment controller outage can block every product team at once.
+
+Adoption measures whether the platform removes work rather than merely centralizing it. Useful indicators include the share of production models on supported paths, time from validated artifact to bounded production traffic, exception rate, migration completion, support load, and repeated toil outside the paved road. A high signup count with persistent custom pipelines signals nominal adoption but weak product fit. Conversely, mandatory migration can raise the adoption percentage while increasing lead time and operational risk. The platform roadmap should therefore combine fleet outcomes with user evidence: incident reduction and cost attribution matter alongside time-to-first-deployment and the fraction of teams that can complete routine changes without platform intervention.
+
+Lifecycle decisions must preserve an escape hatch for workloads whose constraints do not fit the shared path. Exceptions should be explicit, time-bounded contracts with named owners and integration obligations, not permanent forks. When exception volume grows around the same missing capability, the pattern becomes product evidence for the next platform version. When a capability no longer earns its maintenance and migration cost, the platform should deprecate it through measured dual-running, compatibility testing, and a final removal gate. This product discipline keeps the shared control plane from becoming the next source of technical debt.
+
+### Self-service model deployment {#sec-ml-operations-scale-selfservice-model-deployment-4753}
+
+Self-service deployment works only when the platform can let model teams move quickly while keeping risky choices inside governed boundaries. The design question is therefore which deployment decisions should remain team-owned and which invariants the platform must enforce before a model receives production traffic.
+
+#### Deployment API design {#sec-ml-operations-scale-deployment-api-design-e962}
+
+A well-designed deployment API abstracts operational complexity by making the model team's intent declarative. The platform lesson is not the shape of a particular YAML file; it is which invariants the platform must capture before it turns a model version into fleet traffic. The invariants in @tbl-self-service-deployment-invariants are the platform contract behind that declarative interface. Prometheus[^fn-prometheus-fleet-metrics] is one common operational sink for the telemetry side of that contract.
+
+| **Declared intent**        | **Platform invariant**                                                                                                |
+|:---------------------------|:----------------------------------------------------------------------------------------------------------------------|
+| Model artifact and version | The serving system loads exactly the validated model from the registry.                                               |
+| Resource envelope          | GPU, memory, and replica requests stay inside quota and scheduling constraints.                                       |
+| Traffic policy             | Canary, shadow, and rollback controls bound blast radius before full promotion.                                       |
+| Quality gates              | Error, latency, drift, and task-quality thresholds block unsafe promotion.                                            |
+| Telemetry sink             | Operational metrics flow into operational monitoring, while model-quality signals flow into drift and slice monitors. |
+| Approval boundary          | Sensitive data access, budget overruns, and high-risk release windows require review.                                 |
+
+: **Self-service deployment invariants**: A deployment API should encode the controls that keep local team autonomy from creating fleet-wide risk. The concrete syntax can vary, but the invariants must survive across platforms. {#tbl-self-service-deployment-invariants tbl-colwidths="[28,72]"}
+
+[^fn-prometheus-fleet-metrics]: **Prometheus**\index{Prometheus!monitoring}: An open-source monitoring system that scrapes and stores labeled time series. A fleet can export operational metrics and computed drift scores through the same metrics interface while retaining detailed prediction records elsewhere for analysis. The distinction is between compact alerting signals and the evidence needed to investigate them; it does not require every platform to adopt the same two-tier implementation.
+
+TensorFlow Serving provides model-serving lifecycle capabilities for loading, versioning, canarying, and rolling back models [@olston2017tensorflow]. A self-service platform adds the policy layer around those capabilities: model teams specify intent, and the platform translates it into scheduling, traffic routing, telemetry, and approval controls.
+
+### Resource management {#sec-ml-operations-scale-resource-management-5550}
+
+Efficient resource utilization is essential for platform economics, but training and serving place different demands on shared capacity. Training jobs can trade completion time for utilization within their deadlines; serving needs headroom to protect tail latency as requests arrive. A scheduler can manage both, provided its policy represents those distinct constraints rather than maximizing utilization alone.
+
+#### Training resource management {#sec-ml-operations-scale-training-resource-management-a972}
+
+Training resource policy must expose which jobs may wait or be preempted,[^fn-preemption-spot-instance] which deadlines are binding, and who accepts the recovery cost. Scheduler mechanisms enforce those choices. The platform records checkpoint readiness, budget, priority, and accountable owner with each job so a utilization improvement does not silently transfer deadline or lost-work risk to a model team.
+
+::: {.column-margin .margin-pointer}
+↩ Scheduler mechanisms for queueing, priority preemption, and elastic resizing of training jobs are established in @sec-fleet-orchestration.
+:::
+
+[^fn-preemption-spot-instance]: **Job Preemption**\index{Job Preemption!checkpoint trade-off}: The ability to terminate lower-priority workloads to free resources for urgent work. Preemptible capacity is also how cloud providers sell deep discounts, which @sec-ml-operations-scale-cloud-options prices. Without a usable checkpoint, a preempted 72-hour run may need to restart from scratch, potentially erasing the discount. Checkpoint frequency trades I/O overhead against wasted-compute risk; the right policy depends on job duration, interruption frequency, and recovery cost.
+
+#### Serving resource management {#sec-ml-operations-scale-serving-resource-management-35b7}
+
+Serving workloads bind on latency rather than batch flexibility. Demand fluctuates with time of day, events, and seasonality, but a live request cannot be preempted without user impact. The serving control loop therefore starts from the latency SLO and asks how much capacity must be online before requests arrive.
+
+Serving autoscalers translate request load and queue pressure into capacity decisions. Operations owns their policy envelope: the latency SLO, warm rollback capacity, tenant limits, budget, and authority to override normal scaling during an incident. Those commitments must remain visible in the release record so a cheaper allocation cannot silently remove the headroom on which validation relied.
+
+::: {.column-margin .margin-pointer}
+↩ Autoscaling controllers that convert queue growth and token arrival rates into replica counts are established in @sec-inference-scale-autoscaling-capacity-control.
+:::
+
+#### Platform utilization metrics {#sec-ml-operations-scale-platform-utilization-metrics-ed31}
+
+Once training and serving controls are separated, the shared platform still needs an aggregate measure of whether capacity is being converted into useful work. @Eq-platform-utilization defines platform efficiency as the capacity-weighted average utilization across all resources:
+
+$$U_{\text{platform}} = \frac{\sum_{i} U_i \times \text{Cap}_i}{\sum_{i} \text{Cap}_i}$$ {#eq-platform-utilization}
+
+where $U_i$ is the utilization of resource $i$ and $\text{Cap}_i$ is its capacity in a common unit over the same interval. Heterogeneous accelerators require a declared workload normalization; CPU cores, device counts, and bytes cannot be added directly. Weighting by capacity keeps the metric honest about where stranded work lives: an idle single GPU and an idle eight-GPU node are not equally wasteful, so a small underused resource should not drag the platform average down as hard as a large idle pool.
+
+However, raw utilization is incomplete. Effective utilization must also consider utilization quality to determine whether GPUs are doing productive work or waiting on data, utilization fairness to assess whether utilization is distributed appropriately across teams, and utilization cost to evaluate efficiency in terms of cost per unit of ML output.
+
+#### GPU cluster efficiency {#sec-ml-operations-scale-worked-example-gpu-cluster-efficiency-87b0}
+
+```{python}
+#| echo: false
+#| label: gpu-cluster-efficiency
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: GPU cluster efficiency worked example and its checkpoint.
+# │ Goal: Daily spend, useful-work value, and recovered-capacity value.
+from mlsysim import Infrastructure
+from mlsysim.core.units import DAYS_PER_YEAR, USD, hour
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent, fmt_usd
+
+class GpuClusterEfficiency:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 100  # scenario assumption
+    util_before = 0.65  # scenario assumption: measured compute utilization
+    util_after = 0.80  # scenario assumption: after data-loading repair
+    rate = Infrastructure.Pricing.Fleet.InternalChargebackPerHour.rate.to(USD / hour).magnitude
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    daily_spend = n_gpus * 24 * rate
+    useful_before = daily_spend * util_before
+    useful_after = daily_spend * util_after
+    annual_recovered = (useful_after - useful_before) * DAYS_PER_YEAR
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(useful_before < useful_after < daily_spend, "Useful-work value must stay below the fixed bill")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    rate_str = fmt_usd(rate, precision=2, commas=False)
+    rate_per_hour_str = fmt_usd(rate, precision=2, commas=False, per="GPU-hour")
+    daily_spend_str = fmt_usd(daily_spend, precision=0, per="day")
+    useful_before_str = fmt_usd(useful_before, precision=0, per="day")
+    annual_recovered_str = fmt_usd(annual_recovered, precision=0)
+    util_before_pct_str = fmt_percent(util_before, precision=0, commas=False, style="prose")
+    spend_eq_math = fmt_math(rf"{n_gpus} \times 24 \times {rate_str} = {fmt_usd(daily_spend, precision=0)}/\text{{day}}")
+    before_eq_math = fmt_math(rf"{n_gpus} \times 24 \times {util_before} \times {rate_str} = {fmt_usd(useful_before, precision=0)}/\text{{day}}")
+    after_eq_math = fmt_math(rf"{n_gpus} \times 24 \times {util_after:.2f} \times {rate_str} = {fmt_usd(useful_after, precision=0)}/\text{{day}}")
+```
+
+A platform operates a 100-GPU training cluster with average GPU utilization of 65 percent, memory utilization of 80 percent, four-hour average queue waits, and an internal chargeback rate of `{python} GpuClusterEfficiency.rate_per_hour_str`. Memory occupancy and compute utilization alone do not identify the bottleneck: profiling must separate input stalls, communication, kernel inefficiency, and scheduling gaps. Queue waits may also reflect burst arrivals or placement constraints rather than insufficient aggregate capacity. Suppose profiling identifies input stalls and confirms that recovering them increases useful throughput at the same quality target. Daily cluster spend is fixed by provisioned capacity at `{python} GpuClusterEfficiency.spend_eq_math`, while the capacity-equivalent value associated with the assumed useful-work fraction is `{python} GpuClusterEfficiency.before_eq_math`. If data-loading optimization raises compute utilization to 80 percent, useful work rises to `{python} GpuClusterEfficiency.after_eq_math` before adding any capacity. The recovered capacity has an annualized value of `{python} GpuClusterEfficiency.annual_recovered_str` at the stated rate, but the fixed cluster bill remains unchanged. Cash savings require reducing provisioned capacity or avoiding a future purchase; serving queued work creates value through additional output instead. After the validated bottleneck repair, scheduling and capacity planning address the remaining queue pressure.
+
+::: {#chk-ops-scale-gpu-cluster-efficiency .callout-checkpoint title="The annual cost of GPU cluster underutilization"}
+
+Use daily cluster spend (`{python} GpuClusterEfficiency.daily_spend_str`) and capacity-equivalent useful-work value (`{python} GpuClusterEfficiency.useful_before_str` at `{python} GpuClusterEfficiency.util_before_pct_str` utilization) to extend the analysis to annual scale and compare against the platform ROI argument.
+
+- [ ] **Underutilization cost**: calculate the annual cost of underutilization for the 100-GPU cluster at 65 percent utilization, the cost after optimization to 80 percent, and the annual value of recovered capacity. State when that value would become cash savings.
+- [ ] **Queue dynamics**: using Little's Law $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$, calculate the arrival rate for a 4-hour average wait with 100 jobs in queue and explain what additional job-size, service-time, and arrival-pattern measurements are needed to choose expansion or utilization optimization.
+- [ ] **Savings vs. platform**: compare the annual recovered-capacity value from cluster optimization to the \$2M/year platform investment scenario and determine the fleet size where cluster-efficiency optimization alone justifies the platform investment, holding all other per-model savings constant.
+
+:::
+
+### Advanced fleet metrics and ML productivity goodput {#sec-ml-operations-scale-advanced-fleet-metrics-ml-productivity-goodput-mpg-fabf}
+
+While utilization metrics capture resource busyness, they often fail to reflect true engineering value. A GPU spinning at 100 percent utilization on a hyperparameter tuning job that eventually fails due to a configuration error is "efficient" in terms of hardware but "wasteful" in terms of productivity. ML productivity goodput (MPG)\index{ML Productivity Goodput!fleet operations} turns that distinction into a fleet metric [@wongpanich2025fleet].
+
+::: {.column-margin .margin-pointer}
+↩ The Fleet Law and the ML productivity goodput metric introduced beside it are established in @sec-vol2-introduction-fleet-law.
+:::
+
+The Fleet Law accounts for time within one distributed step; MPG complements it by locating lost productivity across a whole portfolio of jobs. Its three multiplicative factors share a common workload and time boundary, and they cut across C³ rather than mapping onto one axis:
+
+$$\text{MPG} = \MlProductivityGoodputFactorsScheduling \times \MlProductivityGoodputFactorsRuntime \times \MlProductivityGoodputFactorsProgram$$
+
+In this decomposition, scheduling goodput\index{Efficiency!scheduling} ($\MlProductivityGoodputFactorsScheduling$) measures the fraction of fleet capacity-time for which a job has all resources needed for synchronous progress. Partial allocations do not count as fully available work capacity. Runtime goodput\index{Efficiency!runtime} ($\MlProductivityGoodputFactorsRuntime$) measures productive, checkpoint-preserved progress relative to that allocated time, excluding initialization, input delays, and work lost after the last checkpoint. Program goodput\index{Efficiency!program} ($\MlProductivityGoodputFactorsProgram$) compares an ideal execution-time baseline with actual program execution time, exposing code, compiler, and communication inefficiencies. These boundaries prevent a single delay from being charged indiscriminately to several factors. Their product measures efficiency rather than an absolute throughput rate; the decomposition helps locate which layer limits useful fleet output.
+
+### Multi-tenancy and isolation {#sec-ml-operations-scale-multitenancy-isolation-c3ff}
+
+Enterprise platforms earn their sharing dividend only if multiple teams can share infrastructure without sharing failures. Multi-tenancy is therefore an isolation problem before it is an efficiency problem: the platform must bound performance interference, data exposure, and cost spillover at the same time.
+
+#### Isolation requirements {#sec-ml-operations-scale-isolation-requirements-19a2}
+
+Tenants need isolation at every boundary where one team's workload, data, or cost can affect another. Performance isolation uses resource quotas, fair-share scheduling, and network quality-of-service rules to bound interference from training spikes or serving bursts. Security isolation enforces access controls, network segmentation, and encryption across tenant data paths. Cost isolation combines granular metering with declared allocation rules for shared services and reserved capacity; not every shared cost can be assigned directly to an individual request. Together, these boundaries establish the conditions under which product teams can share infrastructure without negotiating every allocation manually.
+
+#### Namespace architecture {#sec-ml-operations-scale-namespace-architecture-190c}
+
+A typical multi-tenant architecture uses hierarchical namespaces:
+
+```text
+Platform
+|-- Team A
+|   |-- Development
+|   |-- Staging
+|   `-- Production
+|-- Team B
+|   |-- Development
+|   |-- Staging
+|   `-- Production
+`-- Shared
+    |-- Feature Store
+    |-- Model Registry
+    `-- Monitoring
+```
+
+Each team receives dedicated namespaces with resource quotas, while shared services operate in common namespaces with appropriate access controls. Without controls, one team's demanding workload can degrade performance for others, a failure mode known as the noisy neighbor problem.[^fn-noisy-neighbor-ml] Prevention requires controls at request, rate, priority, and budget boundaries.
+
+[^fn-noisy-neighbor-ml]: **Noisy Neighbor Problem**\index{Noisy Neighbor Problem!definition}\index{Noisy Neighbor!GPU multi-tenancy}: A multi-tenancy failure mode where one tenant's workload degrades performance for co-located tenants. ML workloads are particularly prone to this because training jobs allocate GPU memory greedily; a single job requesting all available HBM on a shared node can starve co-located inference services, causing latency spikes that violate SLOs. Sharing therefore requires an explicit fit, eviction, offload, time-sharing, or partitioning policy, and even physical partitioning leaves shared-fabric contention in place.
+
+To prevent any single tenant from overwhelming shared platform services, four complementary controls govern the request path. Request limits place hard caps on the compute and memory an individual invocation may consume, while rate limiting bounds aggregate query velocity across tenant boundaries. Under heavy cluster contention, priority classes ensure that mission-critical production traffic receives scheduling preference over ad-hoc or batch queries. Finally, burst budgets permit brief, temporary resource overages to accommodate legitimate spikes while preserving long-term fairness across the fleet. Together, these controls make fairness enforceable directly in the data plane rather than relying on after-the-fact operational negotiation.
+
+Isolation makes sharing safe, but a technically sound shared service still needs an owner for its budget, compatibility promises, and retirement decisions. Organizational design determines whether those responsibilities support model teams or leave every cross-team change waiting in a central queue.
+
 ## Fleet Economics and Utilization {#sec-ops-scale-fleet-economics}
 
 A provisioned GPU incurs capacity costs whether it serves predictions, waits between training bursts, or remains reserved for rollback. Those idle periods have different meanings: a scheduling bottleneck strands capacity, while a justified reserve buys recovery capability. The operational machinery developed so far decides how models change safely; it does not decide whether the capacity underneath them is worth what it costs. Fleet economics therefore distinguishes productive use, deliberate headroom, and avoidable waste before treating higher utilization as an improvement.
@@ -4946,193 +5133,6 @@ A dashboard is the human attention surface of the monitoring hierarchy. It shoul
 : **Dashboard views by operational question**: Dashboard hierarchy should route attention from business impact to root cause. Each view reveals the amount of detail needed for the decision at that level, preventing executive views from becoming debugging consoles and investigation views from becoming portfolio summaries. {#tbl-ops-scale-dashboard-views}
 
 The same views carry cost as one more monitored dimension: the portfolio and model views surface spend beside quality and latency, and @sec-ml-operations-scale-cost-monitoring-anomaly-detection-1976 develops the anomaly detection that watches that ledger. Hierarchical monitoring, release pipelines, registries, and feature contracts are expensive to build, and building them separately for every product team would recreate the duplication that motivated them. Organizations therefore package these capabilities as a unified internal product, a discipline known as platform engineering.
-
-## Platform Engineering {#sec-ml-operations-scale-platform-engineering-17be}
-
-Organizations where every data science team independently provisions GPU clusters, configures model registries, and wires up alerting dashboards duplicate infrastructure work. **Platform engineering**\index{Platform Engineering!definition} addresses this by treating the ML infrastructure itself as a product, providing supported paths that reduce repeated implementation and maintenance. Product teams still own model behavior and workload-specific decisions; the platform makes shared operational responsibilities explicit.
-
-Platform engineering for machine learning creates shared infrastructure that absorbs recurring operational complexity while exposing the controls model teams need. Effective platforms balance self-service capabilities that accelerate development against governance requirements that enforce common release and reliability policies.
-
-### Abstraction levels {#sec-ml-operations-scale-abstraction-levels-6e15}
-
-The abstraction-level decision\index{Platform engineering!abstraction level} is how much operational judgment the platform should centralize on behalf of model teams. Too little abstraction leaves every team paying the same infrastructure tax; too much hides the controls that unusual workloads need. The four levels in @tbl-ops-scale-platform-abstraction-levels sit on that flexibility-vs.-convenience curve, distinguished by which concerns the platform owns and which it leaves to the model team.
-
-| **Level** | **Platform owns**                                                                                                  | **Model team still owns**                                                       | **Best fit and risk**                                                                                                      |
-|:----------|:-------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------|
-| Level 1   | GPU capacity, storage volumes, network connectivity, and basic orchestration such as Kubernetes namespaces         | Training code, serving stack, monitoring, and deployment path                   | Fits unusual workloads with strong infrastructure teams; becomes costly when many teams repeat the same operational work   |
-| Level 2   | Standardized containers, ML-aware Kubernetes integration, persistent volumes, and basic service-mesh support       | Experiment structure, training jobs, serving releases, and monitoring workflows | Reduces packaging duplication; operational correctness still depends heavily on each team                                  |
-| Level 3   | ML-specific control loops such as topology-aware scheduling, hyperparameter tuning, distributed training, serving  | Modeling judgment and workload-specific trade-offs                              | Absorbs failure modes that recur across teams; systems such as Kubeflow and Ray often sit near this level                  |
-| Level 4   | Full lifecycle product: IDEs, feature stores, experiment tracking, registries, CI/CD, monitoring, cost, governance | Higher-level product and modeling intent, with less direct low-level control    | Maximizes speed and consistency; the platform team accepts responsibility for policy, reliability, and economic visibility |
-
-: **Platform abstraction levels**: Platform engineering centralizes different parts of the ML lifecycle at each abstraction level. The right level depends on whether an organization values workload-specific control or shared operational invariants more. {#tbl-ops-scale-platform-abstraction-levels tbl-colwidths="[12,28,27,33]"}
-
-Managed services such as Vertex AI and SageMaker, and lifecycle tooling such as TensorFlow Extended (TFX)[^fn-tfx-production-pipeline] at Google [@baylor2017] and MLflow [@zaharia2018accelerating], support different parts of this spectrum. A product name does not establish the organization's abstraction level. The decisive boundary is which lifecycle responsibilities the assembled platform actually owns, which controls model teams retain, and who supplies policy, reliability, and economic visibility for the gaps.
-
-[^fn-tfx-production-pipeline]: **TensorFlow Extended (TFX)**\index{TFX!data validation}: Google's production ML pipeline framework includes TensorFlow Data Validation (TFDV), which checks data against schema expectations and configured drift and skew comparisons. Connecting those checks to a release policy allows a pipeline to stop before spending training resources on detected data defects. The checks cover declared expectations; a passing result does not establish that every value is correct or that a distribution change is harmless.
-
-### Platform lifecycle and adoption {#sec-ops-scale-platform-lifecycle-adoption}
-
-An internal ML platform is a versioned product, not a one-time infrastructure project. Its interfaces, supported workflows, reliability targets, and ownership boundaries must evolve without forcing every model team into synchronized migration. Each platform release therefore needs compatibility guarantees, a migration path, telemetry that distinguishes old and new paths, and a retirement date for deprecated behavior. The platform team also needs its own service-level objectives because a registry, feature service, or deployment controller outage can block every product team at once.
-
-Adoption measures whether the platform removes work rather than merely centralizing it. Useful indicators include the share of production models on supported paths, time from validated artifact to bounded production traffic, exception rate, migration completion, support load, and repeated toil outside the paved road. A high signup count with persistent custom pipelines signals nominal adoption but weak product fit. Conversely, mandatory migration can raise the adoption percentage while increasing lead time and operational risk. The platform roadmap should therefore combine fleet outcomes with user evidence: incident reduction and cost attribution matter alongside time-to-first-deployment and the fraction of teams that can complete routine changes without platform intervention.
-
-Lifecycle decisions must preserve an escape hatch for workloads whose constraints do not fit the shared path. Exceptions should be explicit, time-bounded contracts with named owners and integration obligations, not permanent forks. When exception volume grows around the same missing capability, the pattern becomes product evidence for the next platform version. When a capability no longer earns its maintenance and migration cost, the platform should deprecate it through measured dual-running, compatibility testing, and a final removal gate. This product discipline keeps the shared control plane from becoming the next source of technical debt.
-
-### Self-service model deployment {#sec-ml-operations-scale-selfservice-model-deployment-4753}
-
-Self-service deployment works only when the platform can let model teams move quickly while keeping risky choices inside governed boundaries. The design question is therefore which deployment decisions should remain team-owned and which invariants the platform must enforce before a model receives production traffic.
-
-#### Deployment API design {#sec-ml-operations-scale-deployment-api-design-e962}
-
-A well-designed deployment API abstracts operational complexity by making the model team's intent declarative. The platform lesson is not the shape of a particular YAML file; it is which invariants the platform must capture before it turns a model version into fleet traffic. The invariants in @tbl-self-service-deployment-invariants are the platform contract behind that declarative interface. Prometheus[^fn-prometheus-fleet-metrics] is one common operational sink for the telemetry side of that contract.
-
-| **Declared intent**        | **Platform invariant**                                                                                                |
-|:---------------------------|:----------------------------------------------------------------------------------------------------------------------|
-| Model artifact and version | The serving system loads exactly the validated model from the registry.                                               |
-| Resource envelope          | GPU, memory, and replica requests stay inside quota and scheduling constraints.                                       |
-| Traffic policy             | Canary, shadow, and rollback controls bound blast radius before full promotion.                                       |
-| Quality gates              | Error, latency, drift, and task-quality thresholds block unsafe promotion.                                            |
-| Telemetry sink             | Operational metrics flow into operational monitoring, while model-quality signals flow into drift and slice monitors. |
-| Approval boundary          | Sensitive data access, budget overruns, and high-risk release windows require review.                                 |
-
-: **Self-service deployment invariants**: A deployment API should encode the controls that keep local team autonomy from creating fleet-wide risk. The concrete syntax can vary, but the invariants must survive across platforms. {#tbl-self-service-deployment-invariants tbl-colwidths="[28,72]"}
-
-[^fn-prometheus-fleet-metrics]: **Prometheus**\index{Prometheus!monitoring}: An open-source monitoring system that scrapes and stores labeled time series. A fleet can export operational metrics and computed drift scores through the same metrics interface while retaining detailed prediction records elsewhere for analysis. The distinction is between compact alerting signals and the evidence needed to investigate them; it does not require every platform to adopt the same two-tier implementation.
-
-TensorFlow Serving provides model-serving lifecycle capabilities for loading, versioning, canarying, and rolling back models [@olston2017tensorflow]. A self-service platform adds the policy layer around those capabilities: model teams specify intent, and the platform translates it into scheduling, traffic routing, telemetry, and approval controls.
-
-### Resource management {#sec-ml-operations-scale-resource-management-5550}
-
-Efficient resource utilization is essential for platform economics, but training and serving place different demands on shared capacity. Training jobs can trade completion time for utilization within their deadlines; serving needs headroom to protect tail latency as requests arrive. A scheduler can manage both, provided its policy represents those distinct constraints rather than maximizing utilization alone.
-
-#### Training resource management {#sec-ml-operations-scale-training-resource-management-a972}
-
-Training resource policy must expose which jobs may wait or be preempted,[^fn-preemption-spot-instance] which deadlines are binding, and who accepts the recovery cost. Scheduler mechanisms enforce those choices. The platform records checkpoint readiness, budget, priority, and accountable owner with each job so a utilization improvement does not silently transfer deadline or lost-work risk to a model team.
-
-::: {.column-margin .margin-pointer}
-↩ Scheduler mechanisms for queueing, priority preemption, and elastic resizing of training jobs are established in @sec-fleet-orchestration.
-:::
-
-[^fn-preemption-spot-instance]: **Job Preemption**\index{Job Preemption!checkpoint trade-off}: The ability to terminate lower-priority workloads to free resources for urgent work. Preemptible capacity is also how cloud providers sell deep discounts, which @sec-ml-operations-scale-cloud-options prices. Without a usable checkpoint, a preempted 72-hour run may need to restart from scratch, potentially erasing the discount. Checkpoint frequency trades I/O overhead against wasted-compute risk; the right policy depends on job duration, interruption frequency, and recovery cost.
-
-#### Serving resource management {#sec-ml-operations-scale-serving-resource-management-35b7}
-
-Serving workloads bind on latency rather than batch flexibility. Demand fluctuates with time of day, events, and seasonality, but a live request cannot be preempted without user impact. The serving control loop therefore starts from the latency SLO and asks how much capacity must be online before requests arrive.
-
-Serving autoscalers translate request load and queue pressure into capacity decisions. Operations owns their policy envelope: the latency SLO, warm rollback capacity, tenant limits, budget, and authority to override normal scaling during an incident. Those commitments must remain visible in the release record so a cheaper allocation cannot silently remove the headroom on which validation relied.
-
-::: {.column-margin .margin-pointer}
-↩ Autoscaling controllers that convert queue growth and token arrival rates into replica counts are established in @sec-inference-scale-autoscaling-capacity-control.
-:::
-
-#### Platform utilization metrics {#sec-ml-operations-scale-platform-utilization-metrics-ed31}
-
-Once training and serving controls are separated, the shared platform still needs an aggregate measure of whether capacity is being converted into useful work. @Eq-platform-utilization defines platform efficiency as the capacity-weighted average utilization across all resources:
-
-$$U_{\text{platform}} = \frac{\sum_{i} U_i \times \text{Cap}_i}{\sum_{i} \text{Cap}_i}$$ {#eq-platform-utilization}
-
-where $U_i$ is the utilization of resource $i$ and $\text{Cap}_i$ is its capacity in a common unit over the same interval. Heterogeneous accelerators require a declared workload normalization; CPU cores, device counts, and bytes cannot be added directly. Weighting by capacity keeps the metric honest about where stranded work lives: an idle single GPU and an idle eight-GPU node are not equally wasteful, so a small underused resource should not drag the platform average down as hard as a large idle pool.
-
-However, raw utilization is incomplete. Effective utilization must also consider utilization quality to determine whether GPUs are doing productive work or waiting on data, utilization fairness to assess whether utilization is distributed appropriately across teams, and utilization cost to evaluate efficiency in terms of cost per unit of ML output.
-
-#### GPU cluster efficiency {#sec-ml-operations-scale-worked-example-gpu-cluster-efficiency-87b0}
-
-```{python}
-#| echo: false
-#| label: gpu-cluster-efficiency
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: GPU cluster efficiency worked example and its checkpoint.
-# │ Goal: Daily spend, useful-work value, and recovered-capacity value.
-from mlsysim import Infrastructure
-from mlsysim.core.units import DAYS_PER_YEAR, USD, hour
-from mlsysim.fmt import check, fmt, fmt_math, fmt_percent, fmt_usd
-
-class GpuClusterEfficiency:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus = 100  # scenario assumption
-    util_before = 0.65  # scenario assumption: measured compute utilization
-    util_after = 0.80  # scenario assumption: after data-loading repair
-    rate = Infrastructure.Pricing.Fleet.InternalChargebackPerHour.rate.to(USD / hour).magnitude
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    daily_spend = n_gpus * 24 * rate
-    useful_before = daily_spend * util_before
-    useful_after = daily_spend * util_after
-    annual_recovered = (useful_after - useful_before) * DAYS_PER_YEAR
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(useful_before < useful_after < daily_spend, "Useful-work value must stay below the fixed bill")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    rate_str = fmt_usd(rate, precision=2, commas=False)
-    rate_per_hour_str = fmt_usd(rate, precision=2, commas=False, per="GPU-hour")
-    daily_spend_str = fmt_usd(daily_spend, precision=0, per="day")
-    useful_before_str = fmt_usd(useful_before, precision=0, per="day")
-    annual_recovered_str = fmt_usd(annual_recovered, precision=0)
-    util_before_pct_str = fmt_percent(util_before, precision=0, commas=False, style="prose")
-    spend_eq_math = fmt_math(rf"{n_gpus} \times 24 \times {rate_str} = {fmt_usd(daily_spend, precision=0)}/\text{{day}}")
-    before_eq_math = fmt_math(rf"{n_gpus} \times 24 \times {util_before} \times {rate_str} = {fmt_usd(useful_before, precision=0)}/\text{{day}}")
-    after_eq_math = fmt_math(rf"{n_gpus} \times 24 \times {util_after:.2f} \times {rate_str} = {fmt_usd(useful_after, precision=0)}/\text{{day}}")
-```
-
-A platform operates a 100-GPU training cluster with average GPU utilization of 65 percent, memory utilization of 80 percent, four-hour average queue waits, and an internal chargeback rate of `{python} GpuClusterEfficiency.rate_per_hour_str`. Memory occupancy and compute utilization alone do not identify the bottleneck: profiling must separate input stalls, communication, kernel inefficiency, and scheduling gaps. Queue waits may also reflect burst arrivals or placement constraints rather than insufficient aggregate capacity. Suppose profiling identifies input stalls and confirms that recovering them increases useful throughput at the same quality target. Daily cluster spend is fixed by provisioned capacity at `{python} GpuClusterEfficiency.spend_eq_math`, while the capacity-equivalent value associated with the assumed useful-work fraction is `{python} GpuClusterEfficiency.before_eq_math`. If data-loading optimization raises compute utilization to 80 percent, useful work rises to `{python} GpuClusterEfficiency.after_eq_math` before adding any capacity. The recovered capacity has an annualized value of `{python} GpuClusterEfficiency.annual_recovered_str` at the stated rate, but the fixed cluster bill remains unchanged. Cash savings require reducing provisioned capacity or avoiding a future purchase; serving queued work creates value through additional output instead. After the validated bottleneck repair, scheduling and capacity planning address the remaining queue pressure.
-
-::: {#chk-ops-scale-gpu-cluster-efficiency .callout-checkpoint title="The annual cost of GPU cluster underutilization"}
-
-Use daily cluster spend (`{python} GpuClusterEfficiency.daily_spend_str`) and capacity-equivalent useful-work value (`{python} GpuClusterEfficiency.useful_before_str` at `{python} GpuClusterEfficiency.util_before_pct_str` utilization) to extend the analysis to annual scale and compare against the platform ROI argument.
-
-- [ ] **Underutilization cost**: calculate the annual cost of underutilization for the 100-GPU cluster at 65 percent utilization, the cost after optimization to 80 percent, and the annual value of recovered capacity. State when that value would become cash savings.
-- [ ] **Queue dynamics**: using Little's Law $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$, calculate the arrival rate for a 4-hour average wait with 100 jobs in queue and explain what additional job-size, service-time, and arrival-pattern measurements are needed to choose expansion or utilization optimization.
-- [ ] **Savings vs. platform**: compare the annual recovered-capacity value from cluster optimization to the \$2M/year platform investment scenario and determine the fleet size where cluster-efficiency optimization alone justifies the platform investment, holding all other per-model savings constant.
-
-:::
-
-### Advanced fleet metrics and ML productivity goodput {#sec-ml-operations-scale-advanced-fleet-metrics-ml-productivity-goodput-mpg-fabf}
-
-While utilization metrics capture resource busyness, they often fail to reflect true engineering value. A GPU spinning at 100 percent utilization on a hyperparameter tuning job that eventually fails due to a configuration error is "efficient" in terms of hardware but "wasteful" in terms of productivity. ML productivity goodput (MPG)\index{ML Productivity Goodput!fleet operations} turns that distinction into a fleet metric [@wongpanich2025fleet].
-
-::: {.column-margin .margin-pointer}
-↩ The Fleet Law and the ML productivity goodput metric introduced beside it are established in @sec-vol2-introduction-fleet-law.
-:::
-
-The Fleet Law accounts for time within one distributed step; MPG complements it by locating lost productivity across a whole portfolio of jobs. Its three multiplicative factors share a common workload and time boundary, and they cut across C³ rather than mapping onto one axis:
-
-$$\text{MPG} = \MlProductivityGoodputFactorsScheduling \times \MlProductivityGoodputFactorsRuntime \times \MlProductivityGoodputFactorsProgram$$
-
-In this decomposition, scheduling goodput\index{Efficiency!scheduling} ($\MlProductivityGoodputFactorsScheduling$) measures the fraction of fleet capacity-time for which a job has all resources needed for synchronous progress. Partial allocations do not count as fully available work capacity. Runtime goodput\index{Efficiency!runtime} ($\MlProductivityGoodputFactorsRuntime$) measures productive, checkpoint-preserved progress relative to that allocated time, excluding initialization, input delays, and work lost after the last checkpoint. Program goodput\index{Efficiency!program} ($\MlProductivityGoodputFactorsProgram$) compares an ideal execution-time baseline with actual program execution time, exposing code, compiler, and communication inefficiencies. These boundaries prevent a single delay from being charged indiscriminately to several factors. Their product measures efficiency rather than an absolute throughput rate; the decomposition helps locate which layer limits useful fleet output.
-
-### Multi-tenancy and isolation {#sec-ml-operations-scale-multitenancy-isolation-c3ff}
-
-Enterprise platforms earn their sharing dividend only if multiple teams can share infrastructure without sharing failures. Multi-tenancy is therefore an isolation problem before it is an efficiency problem: the platform must bound performance interference, data exposure, and cost spillover at the same time.
-
-#### Isolation requirements {#sec-ml-operations-scale-isolation-requirements-19a2}
-
-Tenants need isolation at every boundary where one team's workload, data, or cost can affect another. Performance isolation uses resource quotas, fair-share scheduling, and network quality-of-service rules to bound interference from training spikes or serving bursts. Security isolation enforces access controls, network segmentation, and encryption across tenant data paths. Cost isolation combines granular metering with declared allocation rules for shared services and reserved capacity; not every shared cost can be assigned directly to an individual request. Together, these boundaries establish the conditions under which product teams can share infrastructure without negotiating every allocation manually.
-
-#### Namespace architecture {#sec-ml-operations-scale-namespace-architecture-190c}
-
-A typical multi-tenant architecture uses hierarchical namespaces:
-
-```text
-Platform
-|-- Team A
-|   |-- Development
-|   |-- Staging
-|   `-- Production
-|-- Team B
-|   |-- Development
-|   |-- Staging
-|   `-- Production
-`-- Shared
-    |-- Feature Store
-    |-- Model Registry
-    `-- Monitoring
-```
-
-Each team receives dedicated namespaces with resource quotas, while shared services operate in common namespaces with appropriate access controls. Without controls, one team's demanding workload can degrade performance for others, a failure mode known as the noisy neighbor problem.[^fn-noisy-neighbor-ml] Prevention requires controls at request, rate, priority, and budget boundaries.
-
-[^fn-noisy-neighbor-ml]: **Noisy Neighbor Problem**\index{Noisy Neighbor Problem!definition}\index{Noisy Neighbor!GPU multi-tenancy}: A multi-tenancy failure mode where one tenant's workload degrades performance for co-located tenants. ML workloads are particularly prone to this because training jobs allocate GPU memory greedily; a single job requesting all available HBM on a shared node can starve co-located inference services, causing latency spikes that violate SLOs. Sharing therefore requires an explicit fit, eviction, offload, time-sharing, or partitioning policy, and even physical partitioning leaves shared-fabric contention in place.
-
-To prevent any single tenant from overwhelming shared platform services, four complementary controls govern the request path. Request limits place hard caps on the compute and memory an individual invocation may consume, while rate limiting bounds aggregate query velocity across tenant boundaries. Under heavy cluster contention, priority classes ensure that mission-critical production traffic receives scheduling preference over ad-hoc or batch queries. Finally, burst budgets permit brief, temporary resource overages to accommodate legitimate spikes while preserving long-term fairness across the fleet. Together, these controls make fairness enforceable directly in the data plane rather than relying on after-the-fact operational negotiation.
-
-Isolation makes sharing safe, but a technically sound shared service still needs an owner for its budget, compatibility promises, and retirement decisions. Organizational design determines whether those responsibilities support model teams or leave every cross-team change waiting in a central queue.
 
 ## Organizational Operation and Learning {#sec-ml-operations-scale-organizational-patterns-e2e8}
 

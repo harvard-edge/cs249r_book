@@ -2410,6 +2410,465 @@ Packing accelerators close together shortens communication paths but concentrate
 
 Power-envelope implications recur throughout the infrastructure hierarchy. At the node level, configured limits constrain how many accelerators can share a chassis (@sec-compute-node). At the rack level, aggregate sustained load and heat flux help determine whether engineered air or liquid cooling can meet the design point (@sec-compute-rack). At the pod level, coincident demand and transient behavior shape megawatt-scale power delivery (@sec-compute-pod). Every level above the die must therefore manage both sustained heat and electrical variation. Accelerator selection must compare useful workload throughput within that facility envelope, rather than treating power as a cost added after the compute decision.
 
+## Accelerator Selection for Fleet Workloads {#sec-compute-accelerator-selection}
+
+An accelerator's compute throughput, memory bandwidth, memory capacity, and power consumption are meaningful only in relation to a specific workload. The same H100 that delivers near-peak utilization during large-batch training may achieve less than 5 percent utilization during single-request inference, because the binding constraint shifts from arithmetic to memory bandwidth. Selecting the right accelerator\index{Accelerator!selection} therefore requires mapping each workload archetype to its position on the Roofline plot and identifying which physical resource dominates its performance.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+from mlsysim.fmt import fmt_count
+
+class InfraFrontierTdpRecap:
+    diffusion = Models.GenerativeVision.StableDiffusion_v1_5
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    diffusion_steps_count_str = fmt_count(diffusion.denoising_steps, label="denoising step", commas=False)
+```
+
+For the `{python} InfraFrontierTdpRecap.frontier_params_b_str` running example, large local matrix operations can place substantial training work above the Roofline ridge point. Arithmetic throughput then matters alongside the capacity needed for sharded state and the interconnect needed by the partition. H100, B200, and TPU v5p configurations are candidates to evaluate under the same workload and quality target. The selected software stack must express the required operations efficiently enough for the hardware advantage to appear in sustained execution.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_bandwidth
+
+# ┌── LEGO ───────────────────────────────────────────────
+class RooflineTdpRecap:
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    h100_bw_tb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
+```
+Serving the same language model changes the answer. During autoregressive decode, every generated token streams weights through memory, so the key metric becomes memory bandwidth per dollar rather than peak TFLOP/s. At batch size 1, the H100's `{python} RooflineTdpRecap.h100_bw_tb_per_s_str` bandwidth determines throughput while much of the arithmetic silicon waits. Batching raises arithmetic intensity by reusing the same weight movement across more requests, which is why serving systems work so hard to batch without violating tail-latency service-level objectives (SLOs). The workload did not change names, but the binding term of the single-machine iron law moved from arithmetic to data movement, and the accelerator choice changes with it.
+
+Recommendation models\index{Recommendation model!embedding capacity} split the decision across sparse lookup and dense computation. Large embedding tables create a capacity requirement, while lookup locality and concurrency determine access latency and bandwidth demand. The dense neural network layers\index{Dense layer!compute intensity} have a different reuse pattern. A hybrid CPU-GPU design can place tables in host DRAM and dense computation on accelerators, but its transfer and lookup costs must be compared with accelerator-resident sharding or caching. One headline TFLOP/s number cannot describe the complete request path.
+
+Vision and diffusion workloads move back toward arithmetic throughput because convolutions, attention blocks, and denoising networks reuse data heavily. Diffusion inference makes this especially clear: the Stable Diffusion v1.5 profile in MLSysIM uses `{python} InfraFrontierTdpRecap.diffusion_steps_count_str`, so the service pays for a sequence of full model evaluations rather than one decode step per token. For these workloads, TFLOP/s per dollar often dominates bandwidth per dollar once model state fits in memory.
+
+```{python}
+#| echo: false
+from mlsysim import Models
+from mlsysim.fmt import check, fmt_count, fmt_params
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: §Total cost of ownership and workload matching, MoE example.
+# │ Goal: Restore the concrete MoE scale anchor from the model registry.
+class MoETdpRecap:
+    m_moe = Models.Language.Mixtral_8x7B
+
+    # ┌── 1. LOAD (Source of truth) ───────────────────────────────────────────
+    total_params = m_moe.parameters
+    active_params = m_moe.active_parameters
+    experts = m_moe.experts
+    active_experts = m_moe.active_experts_per_token
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────────
+    check(active_params < total_params, "MoE active parameters must be fewer than total parameters.")
+    check(0 < active_experts <= experts, "MoE active experts must be within the expert count.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    total_params_b_str = fmt_params(total_params, scale="B", precision=1, commas=False)
+    active_params_b_str = fmt_params(active_params, scale="B", precision=1, commas=False)
+    experts_count_str = fmt_count(experts, label="expert", commas=False)
+    active_experts_count_str = fmt_count(active_experts, label="expert", commas=False)
+```
+
+Mixture of experts (MoE)\index{Mixture-of-Experts|see{MoE}}\index{MoE!infrastructure challenge} adds a routing constraint: the sparsely gated layer activates only part of a much larger parameter set for each token [@shazeer2017outrageously]. Mixtral-8x7B [@jiang2024mixtral], for example, has `{python} MoETdpRecap.total_params_b_str` total parameters but only `{python} MoETdpRecap.active_params_b_str` active parameters per token because the router chooses `{python} MoETdpRecap.active_experts_count_str` from `{python} MoETdpRecap.experts_count_str`. That compute saving introduces a many-to-many token exchange pattern, the AllToAll collective, and load-balance risk because tokens must be routed to different expert placements. High-bisection fabrics and load-balancing mechanisms such as auxiliary losses, which penalize overloaded experts, or capacity factors, which cap how many tokens each expert accepts, determine whether the theoretical saving appears in the training trace [@fedus2022switch; @lepikhin2021gshard].
+
+::: {.column-margin .margin-pointer}
+↪ MoE AllToAll routing and expert load imbalance are developed in @sec-collective-communication-moe-dynamic-routing.
+:::
+
+Multi-modal models combine phases with different arithmetic intensity and batching behavior, such as vision encoding and text decode. Their relative cost and placement determine whether flexible scheduling, additional memory, or communication capacity changes the critical path. Modality count alone does not select an accelerator architecture; the planner must follow the data exchanged between the actual phases.
+
+::: {#psp-compute-infrastructure-matching-hardware-workload .callout-perspective title="Matching hardware to workload"}
+
+Workload diversity can justify a heterogeneous fleet, with each pool provisioned for its binding resource. The gain comes from matching hardware to the work assigned to it, while keeping each tightly synchronized training group balanced. The fleet-wide decision must account for that matching benefit together with the cost of supporting multiple platforms.
+
+:::
+
+### Precision and throughput trade-offs {#sec-compute-infrastructure-precision-throughput-tradeoffs-49a5}
+
+The relationship between numerical precision and hardware throughput is one of the most important considerations for infrastructure planning, because it directly affects how much useful work each accelerator can perform per second. Lower precision representations use fewer bits per number, which has two compounding benefits: more numbers fit in the same HBM capacity (reducing memory pressure), and the arithmetic units can process more operations per cycle (increasing throughput).
+
+Numerical precision formats for ML have evolved rapidly. @Tbl-precision-throughput summarizes representative precision formats on H100-class accelerators and their common use cases.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_flop_rate, fmt_ops_rate
+
+# ┌── LEGO ───────────────────────────────────────────────
+class TensorCorePrecisionRecap:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
+    h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs / second, precision=0, commas=True)
+    h100_int8_tc_tops_str = fmt_ops_rate(Hardware.Cloud.H100.compute.precision_flops['int8'], unit=TOPS, precision=0, commas=True)
+    h100_fp32_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp32'], unit=TFLOPs / second, precision=0, commas=False)
+    h100_tf32_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['tf32'], unit=TFLOPs / second, precision=0, commas=False)
+```
+
+| **Format**                                    | **Bits** | **Exponent** | **Mantissa** |                       **H100 dense peak**                        |         **Typical use**          |
+|:----------------------------------------------|:--------:|:------------:|:------------:|:----------------------------------------------------------------:|:--------------------------------:|
+| **FP32**\index{FP32!master weights}           |    32    |      8       |      23      |  ~`{python} TensorCorePrecisionRecap.h100_fp32_tflop_per_s_str`  | Master weights, loss computation |
+| **TF32**\index{TF32!Tensor Core acceleration} |    19    |      8       |      10      |  `{python} TensorCorePrecisionRecap.h100_tf32_tflop_per_s_str`   |    Training (NVIDIA default)     |
+| **BF16**\index{BF16!dynamic range}            |    16    |      8       |      7       | `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` |      Training, fine-tuning       |
+| **FP16**\index{FP16!loss scaling}             |    16    |      5       |      10      | `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` |    Training with loss scaling    |
+| **FP8 (E4M3)**\index{FP8!E4M3 format}         |    8     |      4       |      3       | `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str`  |      Forward pass, weights       |
+| **FP8 (E5M2)**\index{FP8!E5M2 format}         |    8     |      5       |      2       | `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str`  |     Backward pass, gradients     |
+| **INT8**\index{INT8!quantization}             |    8     |     N/A      |     N/A      |    `{python} TensorCorePrecisionRecap.h100_int8_tc_tops_str`     |    Post-training quantization    |
+
+: **Precision formats and hardware throughput on H100**: The table uses dense peak throughput where Tensor Core support exists; structured sparsity can roughly double several of these advertised peaks. The choice of precision affects both the training dynamics (convergence, numerical stability) and the infrastructure requirements (memory capacity, bandwidth utilization). TF32 preserves the FP32 exponent width but reduces mantissa precision so Tensor Cores can accelerate common FP32 training workloads. {#tbl-precision-throughput}
+
+```{python}
+#| echo: false
+from mlsysim import Infrastructure, Systems
+from mlsysim.fmt import check, fmt_int, fmt_usd
+
+# ┌── LEGO ───────────────────────────────────────────────
+class Fp8CostEquivalence:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators  # 10K reference cluster
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node  # DGX H100 node
+    node_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate  # $350k CapEx ref
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    nodes = cluster_gpus // gpus_per_node
+    total_usd = nodes * node_price
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(nodes == 1250, f"Expected 1250 nodes, got {nodes}")
+    check(round(total_usd.magnitude / 1e6) == 438, f"Expected ~$438M total USD, got {total_usd}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    cluster_gpus_str = fmt_int(cluster_gpus)
+    gpus_per_node_str = fmt_int(gpus_per_node)
+    node_price_str = fmt_usd(node_price.magnitude, precision=0)
+    total_musd_str = fmt_usd(round(total_usd.magnitude / 1e6), precision=0)
+```
+
+The infrastructure implications are substantial. A fleet designed for BF16 training, a common baseline for large models, has a peak of `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` per GPU on an H100. The same fleet has an FP8 peak of `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str` per GPU, doubling the arithmetic ceiling for supported operations without additional hardware. For a `{python} Fp8CostEquivalence.cluster_gpus_str`-GPU cluster priced at roughly `{python} Fp8CostEquivalence.node_price_str` per `{python} Fp8CostEquivalence.gpus_per_node_str`-GPU node, the increase in advertised arithmetic capacity is equivalent to adding another `{python} Fp8CostEquivalence.cluster_gpus_str` GPUs, or roughly `{python} Fp8CostEquivalence.total_musd_str` million in node hardware. This is a peak-capacity comparison; it is not a prediction of training speedup or a saving that can be booked before workload validation.
+
+FP8 also changes numerical behavior. E4M3's 3 mantissa bits limit precision, while its exponent range limits which magnitudes it represents. Scaling places a tensor within that range but does not restore the precision lost to rounding. Values outside the representable range can saturate or become nonfinite, and sufficiently small values can round to zero. The selected recipe therefore needs workload-specific quality validation even when Transformer Engine supplies the scaling machinery. Infrastructure sizing must use the sustained rate of a validated precision policy.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierStragglerRecap3:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    model = Models.Language.GPT3
+    gpu_hbm = Hardware.Cloud.H100.memory.capacity
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    weights_fp16 = model.size_in_bytes(BYTES_FP16)
+    weights_int8 = model.size_in_bytes(BYTES_INT8)
+    weights_int4 = model.size_in_bytes(BYTES_INT4)
+    gpus_fp16 = math.ceil((weights_fp16 / gpu_hbm).to_base_units().magnitude)
+    gpus_int8 = math.ceil((weights_int8 / gpu_hbm).to_base_units().magnitude)
+    gpus_int4 = math.ceil((weights_int4 / gpu_hbm).to_base_units().magnitude)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check((gpus_fp16, gpus_int8, gpus_int4) == (5, 3, 2), "Prose walks 5 -> 3 -> 2 GPUs for FP16/INT8/INT4 weights")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
+    weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
+    weights_int8_gb_str = fmt_memory(weights_int8, unit=GB, precision=0, commas=False)
+    weights_int4_gb_str = fmt_memory(weights_int4, unit=GB, precision=1, commas=False)
+    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GiB, precision=0, commas=False)
+```
+
+For inference, quantization\index{Quantization!serving economics} changes both weight storage and the possible hardware topology. Our `{python} InfraFrontierStragglerRecap3.frontier_params_b_str` model at FP16 requires `{python} InfraFrontierStragglerRecap3.weights_fp16_gb_str`, necessitating a minimum of five `{python} InfraFrontierStragglerRecap3.gpu_hbm_gb_str` H100 GPUs for the parameters alone. At INT8, the weight payload drops to `{python} InfraFrontierStragglerRecap3.weights_int8_gb_str`, fitting on three GPUs. At INT4, it shrinks to `{python} InfraFrontierStragglerRecap3.weights_int4_gb_str`, fitting on two GPUs. These are weight-only capacity bounds; quantization metadata, attention state, and workspace also need memory. Reading 4-bit rather than 16-bit weights quarters the raw payload, but it does not change physical bandwidth or guarantee a fourfold token-latency reduction. Kernel support, conversion work, other traffic, and any change in device count determine the realized gain, subject to validation of model quality.
+
+For training, many workloads use mixed-precision training\index{Mixed-precision training!numerical stability}, a strategy that decouples storage precision from arithmetic precision. A "master copy" of weights remains in FP32 for numerical stability, while the computationally intensive forward and backward passes are cast to BF16\index{BF16!mixed-precision training} or FP16\index{FP16!mixed-precision training} to exploit the full throughput of Tensor Cores. Accumulating gradients in FP32 reduces rounding and underflow risk before the optimizer updates the master weights. The memory examples below assume retained FP16 gradients; implementations that retain a full FP32 accumulation buffer must add that buffer to their peak budget. The H100's Transformer Engine extends this paradigm through configured FP8 recipes, autocast integration, and scaling metadata, potentially doubling peak throughput for supported operations that remain numerically stable at the lower precision. The training-time improvement depends on model coverage and the remaining bottlenecks.
+
+### Energy cost of data movement {#sec-compute-infrastructure-energy-cost-data-movement-3cd1}
+
+The Roofline Model and token latency analysis demonstrate that data movement limits performance. Data movement also dominates energy consumption\index{Data movement!energy cost}, with direct implications for fleet economics. A useful normalization is an FP16 operand: reading one 16-bit value from HBM at roughly 4 pJ/bit costs about 64 picojoules (pJ), while one FP16 multiply-accumulate operation costs roughly 1 pJ. The raw operand fetch can therefore cost about 64$\times$ the arithmetic operation, before tiling and reuse amortize that movement across many MACs.
+
+::: {.column-margin}
+```{=latex}
+\vspace*{-33mm}
+```
+![](images/svg/vol2_compute_infrastructure_margin_001.svg){width="100%" fig-alt="Three orange horizontal bars on a log scale: DRAM read 320 pJ, HBM read 64 pJ, and MAC 1 pJ."}
+
+*Data movement dwarfs arithmetic in energy cost.*
+:::
+
+This operand-level ratio explains why accelerator architects devote so much silicon area to data reuse. A Tensor Core's tile-based execution model loads a small matrix into local registers and reuses each element hundreds of times (once per element in the opposing matrix), amortizing the HBM access cost across hundreds of 1 pJ compute operations. Without this reuse, the energy budget would be dominated by memory access, and most of the chip's power would be spent heating wires rather than switching transistors.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_power
+
+# ┌── LEGO ───────────────────────────────────────────────
+class H100TdpEnergyRecap:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
+```
+
+At fleet scale, movement energy must be evaluated over the execution schedule. A 10,000-GPU cluster operating within a `{python} H100TdpEnergyRecap.tdp_w_str` per-GPU envelope also powers control, interconnect, and other circuitry; the operand-level ratio does not determine the share of that envelope spent on memory. Kernel fusion and FlashAttention reduce particular transfers, while activation checkpointing trades saved activation storage for recomputation. The useful comparison is total energy to complete equivalent work at the required quality, including any change in execution time.
+
+The energy perspective provides a physical foundation for understanding why different parallelism strategies have different efficiencies. Tensor parallelism requires data movement over NVLink (approximately 5 pJ per bit at the link level, plus the energy of the NVSwitch chips). Data parallelism requires data movement over InfiniBand (approximately 15--20 pJ per bit, including the energy of the host channel adapter (HCA) and switch). Pipeline parallelism moves less data but requires more complex scheduling. Each parallelism strategy represents a different point in the trade-off between communication energy and computation efficiency.
+
+::: {#nbk-compute-infrastructure-energy-cost-data-movement .callout-notebook title="The energy cost of data movement"}
+
+At modern process nodes, moving data costs far more energy than computing on it. The energy hierarchy of a single operation at the 4 nm node makes the gap concrete.
+
+Performing one FP16 multiply-accumulate (MAC\index{MAC!energy cost}) operation, the atomic unit of deep learning, consumes approximately 1 picojoule (pJ). This is the baseline cost of useful work. Reading a single FP16 operand (16 bits) from HBM consumes roughly 4 pJ per bit, totaling 64 pJ. Reading that same operand from off-package DRAM costs approximately 20 pJ per bit, or 320 pJ. The asymmetry is staggering: reading a value from HBM costs 64$\times$ more energy than computing on it. Retrieving it from standard DRAM costs 320$\times$ more.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_memory
+
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierTdpServingRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    model = Models.Language.GPT3
+    hbm_pj_per_bit = 4  # scenario assumption: HBM read energy (pJ/bit), as in the notebook text
+    mac_pj = 1  # scenario assumption: FP16 MAC energy (pJ), as in the notebook text
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    weights = model.size_in_bytes(BYTES_FP16)
+    macs_per_token = model.inference_flops.to(flop).magnitude / 2  # 1 MAC = 2 FLOPs
+    move_j = weights.to(byte).magnitude * 8 * hbm_pj_per_bit * 1e-12
+    compute_j = macs_per_token * mac_pj * 1e-12
+    energy_ratio = move_j / compute_j
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(energy_ratio - 64) < 0.5, "Prose claims weight movement costs 64x the arithmetic energy")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
+    weight_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
+    macs_b_str = fmt(macs_per_token / 1e9, precision=0, commas=False)
+    flops_b_str = fmt(model.inference_flops.to(flop).magnitude / 1e9, precision=0, commas=False)
+    move_energy_eq_math = fmt_display_math(
+        f"\\text{{Data Movement Energy}} = {weights.to(GB).magnitude:.0f} \\text{{ GB}} \\times 8 \\text{{ bits/byte}} "
+        f"\\times {hbm_pj_per_bit} \\text{{ pJ/bit}} \\approx \\mathbf{{{move_j:.1f} \\text{{ Joules}}}}"
+    )
+    compute_energy_eq_math = fmt_display_math(
+        f"\\text{{Computation Energy}} = {macs_per_token / 1e9:.0f} \\times 10^9 \\text{{ MACs}} "
+        f"\\times {mac_pj} \\text{{ pJ/MAC}} \\approx \\mathbf{{{compute_j:.3f} \\text{{ Joules}}}}"
+    )
+```
+
+The macro impact appears when serving our `{python} InfraFrontierTdpServingRecap.frontier_params_b_str` model. Generating a single token requires loading the entire `{python} InfraFrontierTdpServingRecap.weight_gb_str` weight tensor from HBM:
+
+`{python} InfraFrontierTdpServingRecap.move_energy_eq_math`
+
+The computational cost for the associated $\approx$ `{python} InfraFrontierTdpServingRecap.macs_b_str` billion MACs (about `{python} InfraFrontierTdpServingRecap.flops_b_str` billion FLOPs) is trivial by comparison:
+
+`{python} InfraFrontierTdpServingRecap.compute_energy_eq_math`
+
+Moving the weights to the compute units consumes 64$\times$ more energy than the math itself in this simplified decode model. This energy penalty is why HBM is engineered for physical proximity to the GPU die; shorter traces mean less capacitance and lower energy per bit. It also explains why techniques that reduce data movement, such as quantization (moving fewer bits) and kernel fusion (preventing round-trips to memory), are the primary levers for improving both system performance and power efficiency.
+
+:::
+
+### Benchmarking accelerator performance {#sec-compute-infrastructure-benchmarking-accelerator-performance-6920}
+
+A procurement team comparing accelerators needs a published number that predicts the performance the organization will actually achieve. Peak TFLOP/s, memory bandwidth, and TDP describe *potential*, not *achieved* performance, so the decision turns on whose measured results to trust and under what rules they were produced. The industry-standard reference is MLPerf, maintained by MLCommons: MLPerf Training reports the time to train reference models to a target accuracy, and MLPerf Inference reports serving throughput and latency under realistic batching and streaming conditions. Both capture complete system performance, including software stack efficiency, communication overhead, and memory management, not just the raw silicon.
+
+Closed-division MLPerf results constrain the workload and quality target to support comparisons across implementations. They still permit specified optimizations and benchmark-dependent tuning; the rules do not require identical hyperparameters or ordinary untuned framework configurations in every case. Open-division submissions allow broader changes and require closer inspection of what differs. Neither division predicts a deployment automatically. Compare the submission's workload, software, precision, hardware count, and quality target with the intended system before using its result for procurement.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierTdpBenchRecap:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+```
+
+For our `{python} InfraFrontierTdpBenchRecap.frontier_params_b_str` model, training, fine-tuning, and serving need separate measurements. Batch shape, trainable state, sequence length, and partitioning can change both capacity demand and the critical path. Fine-tuning does not occupy a fixed point between training and decode merely because it updates an existing model. Evaluate the intended phases on candidate hardware with the actual model and data pipeline, using published MLPerf results as comparative evidence rather than deployment forecasts.
+
+::: {#psp-compute-infrastructure-beyond-peak-specifications .callout-perspective title="Beyond peak specifications"}
+
+When evaluating accelerator options, the following metrics provide a more complete picture than peak TFLOP/s alone:
+
+- **MFU**: The ratio of achieved FLOP/s during real training to peak hardware FLOP/s. An MFU of 50 percent means the model's useful computation averages half the chosen peak rate over the measurement interval; it does not distinguish partially occupied execution from completely idle time.
+- **Time-to-train**: The wall-clock time to train a reference model to a target metric. This captures all system-level effects that a steady-state MFU measurement can omit, including I/O stalls, checkpointing overhead, and job restart delays outside its measurement window. Whole-run MFU includes those elapsed-time losses but still does not establish the model quality reached.
+- **Cost per token**\index{Cost per token!metric}: For language model training, the total cost (hardware amortization plus electricity) divided by the number of tokens processed. This metric normalizes across different hardware generations, cluster sizes, and pricing models.
+- **Tokens per dollar**\index{Inference!throughput per dollar}: The inverse of cost per token. Divide tokens per second by dollars per second, converting an hourly rental price to the same time unit before comparing systems.
+
+No single metric tells the whole story. A system with high MFU but high cost per GPU-hour may be less economical than a system with lower MFU but cheaper hardware. The right metric depends on whether the organization is optimizing for time (training must finish by a deadline), cost (minimize total expenditure), or throughput (maximize tokens processed per unit time).
+
+:::
+
+### Inference-specific infrastructure considerations {#sec-compute-infrastructure-inferencespecific-infrastructure-considerations-10c9}
+
+Serving trained models\index{Inference!infrastructure} changes the planning objective. A large training run emphasizes sustained *throughput* and time to a target quality across its allocated workers. Its repeated steps make communication demand easier to characterize than an unpredictable arrival stream, although failures, I/O, and changes in execution shape still affect the schedule. Serving must translate the same hardware resources into responses under per-request latency targets.
+
+Serving infrastructure must meet *latency* targets at an acceptable *cost per query* under a variable request load. Independent requests can be assigned to separate replicas, but a replica that shards a model across devices still communicates within each request. Prompt processing, successive decode steps, and complete responses also have different latency budgets. Capacity planning must therefore specify the request mix, model placement, and service targets before concluding that serving needs less network capacity than training.
+
+The differing requirements drive distinct hardware and architecture choices, summarized in @tbl-training-serving-infrastructure.
+
+| **Dimension**                                                        | **Training infrastructure**                                                                      | **Serving infrastructure**                                                                                                           |
+|:---------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------|
+| **GPU utilization**\index{GPU utilization!training vs. serving}      | Local reuse, precision, partitioning, and communication determine sustained MFU.                 | Batching can increase weight reuse; its benefit depends on memory capacity, request shape, and latency targets.                      |
+| **Model placement**\index{Model replication!serving replicas}        | Tensor and pipeline parallelism distribute a single model across many GPUs.                      | Replicas of the model, or large shards of it, handle independent requests, so memory demand scales with concurrent serving capacity. |
+| **Network traffic**\index{Network requirements!training vs. serving} | The partition determines gradient, activation, and parameter exchanges between workers.          | Independent replicas can serve separate requests, but sharded replicas still require inter-device exchanges within each request.     |
+| **Cost metric**\index{Serving!cost metric}                           | Cost per completed run at a target quality includes the measured schedule and recovery overhead. | Cost per request or per 1,000 tokens depends on request shape, latency targets, utilization, and provisioned capacity.               |
+
+: **Training vs. serving infrastructure**: Training and serving optimize different hardware behaviors, so capacity planning must compare utilization, model placement, network traffic, and cost in the mode the fleet will actually run. {#tbl-training-serving-infrastructure tbl-colwidths="[20,40,40]"}
+
+The table shows why serving cannot be planned as training with smaller batches: the optimization target changes from synchronized throughput to latency-bounded, continuously billed requests.
+
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_power
+
+# ┌── LEGO ───────────────────────────────────────────────
+class A100ServingTdpRecap:
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
+```
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt_power
+
+# ┌── LEGO ───────────────────────────────────────────────
+class H100TdpServingRecap:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
+```
+
+The implication is that effective serving infrastructure often uses different hardware, different software, and different facility designs than the training infrastructure. Some organizations use previous-generation GPUs (A100s) for serving because the memory bandwidth per dollar can be competitive with newer GPUs, and the lower TDP (`{python} A100ServingTdpRecap.tdp_w_str` vs. `{python} H100TdpServingRecap.tdp_w_str`) allows higher rack density and lower cooling costs.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierStragglerRecap4:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+```
+
+The inference workload itself bifurcates into two distinct phases with opposing bottlenecks. The prefill\index{Prefill!inference phase} phase processes prompt tokens in parallel, increasing weight reuse and potentially approaching the compute ceiling when the prompt and batch shapes supply enough work. The decode\index{Decode!inference phase} phase generates tokens sequentially for each request and is deeply memory-bandwidth-bound at small batch sizes. To maximize hardware utilization, high-performance serving systems employ continuous batching\index{Continuous batching!iteration-level scheduling}, which schedules requests at the iteration level rather than the request level. Completed requests leave the active batch and waiting requests can enter at iteration boundaries. Scheduling prefill alongside decode also requires controlling how much prompt work delays the next decode iteration.
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERVING REPLICA NAPKIN ESTIMATE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: inference-infrastructure paragraph in
+# │          @sec-compute-infrastructure-inferencespecific-infrastructure-considerations-10c9.
+# │
+# │ Goal: Size a decode fleet for the 175B running example from the
+# │       weight-streaming floor, and compare it with the reference cluster.
+# │ Show: ~13 ms decode step per TP-8 replica; ~100 replicas; ~800 GPUs.
+# │ How: step = FP16 weights / (8 x HBM BW); replica rate = batch / step;
+# │      replicas = ceil(output token demand / replica rate). KV-cache
+# │      traffic is ignored, so the replica count is a lower bound.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_rate, fmt_time
+
+class ServingReplicaEstimate:
+    """Lower-bound decode replica count for serving the 175B running example."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    weights = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
+    gpus_per_replica = Systems.Nodes.DGX_H100.accelerators_per_node  # one TP-8 replica per DGX H100 node
+    hbm_bw = Hardware.Cloud.H100.memory.bandwidth
+    ref_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
+    request_rate = 1000  # scenario assumption: requests per second at peak
+    output_tokens = 250  # scenario assumption: generated tokens per request
+    decode_batch = 32  # scenario assumption: concurrent requests per replica
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    step_time = (weights / (gpus_per_replica * hbm_bw)).to(millisecond)
+    replica_tokens_per_s = decode_batch / step_time.to(second).magnitude
+    token_demand = request_rate * output_tokens
+    replicas = math.ceil(token_demand / replica_tokens_per_s)
+    serving_gpus = replicas * gpus_per_replica
+    ref_fraction = serving_gpus / ref_gpus
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(10 < step_time.magnitude < 20, "A TP-8 decode step should take about 13 ms")
+    check(50 < replicas < 200, "The napkin estimate should need on the order of 100 replicas")
+    check(0.5 < ref_fraction < 1.0, "Prose compares the serving fleet with most of the reference cluster")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    request_rate_str = fmt_rate(request_rate, "requests/s", commas=True)
+    output_tokens_str = fmt(output_tokens, precision=0, commas=False)
+    decode_batch_str = fmt(decode_batch, precision=0, commas=False)
+    step_time_ms_str = fmt_time(step_time, millisecond, precision=1, commas=False)
+    replica_tokens_str = fmt_rate(round(replica_tokens_per_s, -1), "tokens/s", commas=True)
+    token_demand_str = fmt_rate(token_demand, "tokens/s", commas=True)
+    replicas_str = fmt(replicas, precision=0, commas=False)
+    serving_gpus_str = fmt(serving_gpus, precision=0, commas=False)
+    ref_gpus_str = fmt(ref_gpus, precision=0, commas=True)
+```
+
+A napkin estimate shows how quickly serving capacity reaches training scale. One tensor-parallel replica of the running model on an eight-GPU node streams its FP16 weights once per decode step, which takes at least `{python} ServingReplicaEstimate.step_time_ms_str` at H100 HBM bandwidth. Batching `{python} ServingReplicaEstimate.decode_batch_str` concurrent requests yields about `{python} ServingReplicaEstimate.replica_tokens_str` per replica. A service handling `{python} ServingReplicaEstimate.request_rate_str` at `{python} ServingReplicaEstimate.output_tokens_str` output tokens each must generate `{python} ServingReplicaEstimate.token_demand_str`, which requires at least `{python} ServingReplicaEstimate.replicas_str` replicas, or `{python} ServingReplicaEstimate.serving_gpus_str` GPUs, most of the `{python} ServingReplicaEstimate.ref_gpus_str`-GPU training reference cluster. The estimate is a lower bound because it ignores key-value cache traffic, prefill work, and headroom for bursts and failures; @sec-inference-scale-batching-strategies-scale-6733 replaces it with batching models that account for key-value cache capacity, variable request lengths, and latency targets.
+
+Reliability objectives differ as well. A training job can absorb an occasional failure because checkpointing recovers the lost progress, whereas a stalled serving replica delays every request routed to it until traffic fails over.
+
+### The accelerator decision matrix {#sec-compute-infrastructure-accelerator-decision-matrix-8bba}
+
+A practical decision framework starts with the workload's likely limiting resources and tests them against its execution shape. @Tbl-accelerator-decision supplies candidate configurations under representative assumptions, not fixed assignments of model families to bottlenecks or vendors. The selection rule is to diagnose the binding constraint, then compare sustained useful work within the capacity, quality, latency, and facility budgets.
+
+::: {.column-margin .margin-pointer}
+↩ The three canonical fleet workload archetypes are established in @sec-vol2-introduction-archetypes.
+:::
+
+| **Workload**                      |    **Binding constraint**    |      **Key metric**     |               **Recommended class**               |
+|:----------------------------------|:----------------------------:|:-----------------------:|:-------------------------------------------------:|
+| **LLM training ($>100\text{B}$)** |  Compute (high batch size)   | Peak TFLOP/s, NVLink BW |                 H100/B200, TPU v5p                |
+| **LLM inference (batch=1)**       |       Memory bandwidth       |     GB/s per dollar     |             A100, H100 (bandwidth/\$)             |
+| **LLM inference (batched)**       |     Compute + bandwidth      |     TFLOP/s and GB/s    |                     H100, B200                    |
+| **Vision model training**         | Compute (large spatial dims) |       Peak TFLOP/s      |        H100/B200 configurations to evaluate       |
+| **Recommendation (embeddings)**   |       Memory capacity        |      GB per dollar      |               CPU DRAM + GPU hybrid               |
+| **Fine-tuning ($<13\text{B}$)**   |       Memory capacity        |       HBM capacity      |           A100-class capacity candidate           |
+| **Research/prototyping**          |         Flexibility          |    Software ecosystem   | GPU or accelerator with required operator support |
+
+: **The accelerator decision matrix**: The optimal accelerator depends not on peak specifications but on which physical resource (compute, bandwidth, or capacity) is the binding constraint for the target workload. The roofline model provides the diagnostic: compute the arithmetic intensity, locate the workload relative to the ridge point, and select hardware that maximizes the binding resource per dollar. {#tbl-accelerator-decision}
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierTdpDecisionRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    h100_hour = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate  # current-generation cloud GPU-hour
+    a100_hour = Infrastructure.Pricing.Fleet.GpuHourRef.rate  # reference fleet GPU-hour
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(a100_hour < h100_hour, "The previous-generation GPU-hour should be the cheaper option")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    h100_hour_usd_str = fmt_usd(h100_hour.to(USD / hour).magnitude, precision=0, commas=False)
+    a100_hour_usd_str = fmt_usd(a100_hour.to(USD / hour).magnitude, precision=0, commas=False)
+```
+
+For our `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` running example, @tbl-accelerator-decision separates the training purchase from the serving purchase. We apply the workload constraint first, then compare software support, deployment lifetime, and measured sustained throughput. A cheaper accelerator-hour is useful only if it supplies the required throughput within the capacity, latency, and facility budgets.
+
+::: {#chk-compute-infrastructure-accelerator-selection .callout-checkpoint title="Accelerator selection"}
+
+An engineering team needs to deploy a 70B-parameter model for both training and inference. Training will use batch size 2048 across 256 GPUs for 3 months. Inference will serve 10,000 requests per second at batch size 1 for 2 years.
+
+- [ ] **Training intensity**: use the Roofline Model to determine the arithmetic intensity of each workload on an H100.
+- [ ] **Hardware split**: decide whether training and inference should use the same hardware or different hardware.
+- [ ] **Two-year cost**: calculate the 2-year inference cost difference between H100s (`{python} InfraFrontierTdpDecisionRecap.h100_hour_usd_str`/GPU-hour) and A100s (`{python} InfraFrontierTdpDecisionRecap.a100_hour_usd_str`/GPU-hour), accounting for throughput at the workload's arithmetic intensity.
+
+:::
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class InfraFrontierTdpTransitionRecap:
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
+    weights_fp16_gb_str = fmt_memory(Models.Language.GPT3.size_in_bytes(BYTES_FP16), unit=GB, precision=0, commas=False)
+    h100_hbm_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
+```
+
+The accelerator's physics establish a concrete problem: our `{python} InfraFrontierTdpTransitionRecap.frontier_params_b_str` model requires `{python} InfraFrontierTdpTransitionRecap.weights_fp16_gb_str` of memory for its weights alone in FP16, and Adam-style training state raises the requirement to multiple terabytes once optimizer moments, gradients, and activations are included. A single H100 provides `{python} InfraFrontierTdpTransitionRecap.h100_hbm_gb_str` of HBM. No single accelerator can hold this model (principle \ref{pri-memory-capacity-gap}). The system must expand to the next physical level: the node.
+
+
 ## The Node {#sec-compute-node}
 
 The running model needs more memory than one accelerator provides. A node supplies several accelerators in one chassis, but each retains its own memory; dividing the work creates communication that the local fabric must sustain. Tensor parallelism divides an operation across accelerators, pipeline parallelism assigns successive model stages to different groups, and data parallelism assigns different training examples to model replicas whose updates must be combined. These strategies impose different traffic patterns. The node design determines whether that traffic crosses a slow ring\index{Network topology!ring}, a dense mesh\index{Network topology!full mesh}, or a switch-backed crossbar\index{NVSwitch!crossbar topology}. @Fig-node-topology-comparison diagrams these three intra-node wiring options for an eight-GPU chassis, contrasting the link scaling and network diameter of a two-link ring (up to four hops) and a 28-link full mesh against a single-hop NVSwitch crossbar.
@@ -2998,7 +3457,7 @@ Gaudi takes a different route by integrating RDMA-capable Ethernet into the acce
 
 These alternatives are not a ranking of vendors. They are different placements of scarce resources: switching bandwidth in the node, regular topology in the pod, HBM capacity in the package, or network attachment on the accelerator. For the `{python} AlternativeNodeArchitectureRecap.frontier_params_b_str` model used throughout this chapter, the tensor-parallel portion of training makes local accelerator communication unusually important, so the DGX-style answer is natural. In other regimes, especially memory-heavy recommenders, topology-regular training, or cost-sensitive serving fleets, a different boundary can become the one that matters most. Software ecosystem maturity, supply availability, and total cost of ownership then decide whether the theoretical architectural fit becomes a deployable system.
 
-#### Node health and reliability {#sec-compute-infrastructure-node-health-reliability-56a6}
+### Node health and reliability {#sec-compute-infrastructure-node-health-reliability-56a6}
 
 The node is the fundamental failure domain in the fleet hierarchy. For an eight-way tensor-parallel group within a node, a single GPU failure typically makes the group unusable for the training job because its collectives require all eight participants. A single missing GPU breaks the collective communication, stalling all other GPUs in the node. The node's effective mean time between failures (MTBF) depends on the combined failure exposure of every component whose loss stops the job, as well as shared power and cooling failures.
 
@@ -3700,7 +4159,7 @@ The rail-optimized design spends additional switches, ports, and cabling to alig
 ↪ How rail-optimized topologies align cabling with collective traffic is developed in @sec-network-fabrics-rail-optimized.
 :::
 
-#### Facility reliability and environmental controls {#sec-compute-infrastructure-physical-security-environmental-controls-7132}
+### Facility reliability and environmental controls {#sec-compute-infrastructure-physical-security-environmental-controls-7132}
 
 Rack design also defines physical failure domains. Data centers housing ML infrastructure implement multiple layers of physical security and environmental monitoring, not only for regulatory compliance but also because a single rack of DGX H100 nodes (`{python} RackPowerRackRecap.rack_hardware_musd_str` million in hardware alone) concentrates enough value, heat, and liquid-cooling risk to justify controls that would be excessive for traditional server equipment.
 
@@ -4110,464 +4569,6 @@ The physical design supplies constraints, not an operating policy. Later chapter
 :::
 
 These physical constraints define warehouse-scale computer design. New technologies do not remove the walls; they move them. The technologies in @sec-compute-emerging matter because they change where the memory, communication, or power constraint binds.
-
-## Accelerator Selection for Fleet Workloads {#sec-compute-accelerator-selection}
-
-An accelerator's compute throughput, memory bandwidth, memory capacity, and power consumption are meaningful only in relation to a specific workload. The same H100 that delivers near-peak utilization during large-batch training may achieve less than 5 percent utilization during single-request inference, because the binding constraint shifts from arithmetic to memory bandwidth. Selecting the right accelerator\index{Accelerator!selection} therefore requires mapping each workload archetype to its position on the Roofline plot and identifying which physical resource dominates its performance.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-from mlsysim.fmt import fmt_count
-
-class InfraFrontierTdpRecap:
-    diffusion = Models.GenerativeVision.StableDiffusion_v1_5
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-    diffusion_steps_count_str = fmt_count(diffusion.denoising_steps, label="denoising step", commas=False)
-```
-
-For the `{python} InfraFrontierTdpRecap.frontier_params_b_str` running example, large local matrix operations can place substantial training work above the Roofline ridge point. Arithmetic throughput then matters alongside the capacity needed for sharded state and the interconnect needed by the partition. H100, B200, and TPU v5p configurations are candidates to evaluate under the same workload and quality target. The selected software stack must express the required operations efficiently enough for the hardware advantage to appear in sustained execution.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_bandwidth
-
-# ┌── LEGO ───────────────────────────────────────────────
-class RooflineTdpRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_bw_tb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
-```
-Serving the same language model changes the answer. During autoregressive decode, every generated token streams weights through memory, so the key metric becomes memory bandwidth per dollar rather than peak TFLOP/s. At batch size 1, the H100's `{python} RooflineTdpRecap.h100_bw_tb_per_s_str` bandwidth determines throughput while much of the arithmetic silicon waits. Batching raises arithmetic intensity by reusing the same weight movement across more requests, which is why serving systems work so hard to batch without violating tail-latency service-level objectives (SLOs). The workload did not change names, but the binding term of the single-machine iron law moved from arithmetic to data movement, and the accelerator choice changes with it.
-
-Recommendation models\index{Recommendation model!embedding capacity} split the decision across sparse lookup and dense computation. Large embedding tables create a capacity requirement, while lookup locality and concurrency determine access latency and bandwidth demand. The dense neural network layers\index{Dense layer!compute intensity} have a different reuse pattern. A hybrid CPU-GPU design can place tables in host DRAM and dense computation on accelerators, but its transfer and lookup costs must be compared with accelerator-resident sharding or caching. One headline TFLOP/s number cannot describe the complete request path.
-
-Vision and diffusion workloads move back toward arithmetic throughput because convolutions, attention blocks, and denoising networks reuse data heavily. Diffusion inference makes this especially clear: the Stable Diffusion v1.5 profile in MLSysIM uses `{python} InfraFrontierTdpRecap.diffusion_steps_count_str`, so the service pays for a sequence of full model evaluations rather than one decode step per token. For these workloads, TFLOP/s per dollar often dominates bandwidth per dollar once model state fits in memory.
-
-```{python}
-#| echo: false
-from mlsysim import Models
-from mlsysim.fmt import check, fmt_count, fmt_params
-
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: §Total cost of ownership and workload matching, MoE example.
-# │ Goal: Restore the concrete MoE scale anchor from the model registry.
-class MoETdpRecap:
-    m_moe = Models.Language.Mixtral_8x7B
-
-    # ┌── 1. LOAD (Source of truth) ───────────────────────────────────────────
-    total_params = m_moe.parameters
-    active_params = m_moe.active_parameters
-    experts = m_moe.experts
-    active_experts = m_moe.active_experts_per_token
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────────
-    check(active_params < total_params, "MoE active parameters must be fewer than total parameters.")
-    check(0 < active_experts <= experts, "MoE active experts must be within the expert count.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    total_params_b_str = fmt_params(total_params, scale="B", precision=1, commas=False)
-    active_params_b_str = fmt_params(active_params, scale="B", precision=1, commas=False)
-    experts_count_str = fmt_count(experts, label="expert", commas=False)
-    active_experts_count_str = fmt_count(active_experts, label="expert", commas=False)
-```
-
-Mixture of experts (MoE)\index{Mixture-of-Experts|see{MoE}}\index{MoE!infrastructure challenge} adds a routing constraint: the sparsely gated layer activates only part of a much larger parameter set for each token [@shazeer2017outrageously]. Mixtral-8x7B [@jiang2024mixtral], for example, has `{python} MoETdpRecap.total_params_b_str` total parameters but only `{python} MoETdpRecap.active_params_b_str` active parameters per token because the router chooses `{python} MoETdpRecap.active_experts_count_str` from `{python} MoETdpRecap.experts_count_str`. That compute saving introduces a many-to-many token exchange pattern, the AllToAll collective, and load-balance risk because tokens must be routed to different expert placements. High-bisection fabrics and load-balancing mechanisms such as auxiliary losses, which penalize overloaded experts, or capacity factors, which cap how many tokens each expert accepts, determine whether the theoretical saving appears in the training trace [@fedus2022switch; @lepikhin2021gshard].
-
-::: {.column-margin .margin-pointer}
-↪ MoE AllToAll routing and expert load imbalance are developed in @sec-collective-communication-moe-dynamic-routing.
-:::
-
-Multi-modal models combine phases with different arithmetic intensity and batching behavior, such as vision encoding and text decode. Their relative cost and placement determine whether flexible scheduling, additional memory, or communication capacity changes the critical path. Modality count alone does not select an accelerator architecture; the planner must follow the data exchanged between the actual phases.
-
-::: {#psp-compute-infrastructure-matching-hardware-workload .callout-perspective title="Matching hardware to workload"}
-
-Workload diversity can justify a heterogeneous fleet, with each pool provisioned for its binding resource. The gain comes from matching hardware to the work assigned to it, while keeping each tightly synchronized training group balanced. The fleet-wide decision must account for that matching benefit together with the cost of supporting multiple platforms.
-
-:::
-
-### Precision and throughput trade-offs {#sec-compute-infrastructure-precision-throughput-tradeoffs-49a5}
-
-The relationship between numerical precision and hardware throughput is one of the most important considerations for infrastructure planning, because it directly affects how much useful work each accelerator can perform per second. Lower precision representations use fewer bits per number, which has two compounding benefits: more numbers fit in the same HBM capacity (reducing memory pressure), and the arithmetic units can process more operations per cycle (increasing throughput).
-
-Numerical precision formats for ML have evolved rapidly. @Tbl-precision-throughput summarizes representative precision formats on H100-class accelerators and their common use cases.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_flop_rate, fmt_ops_rate
-
-# ┌── LEGO ───────────────────────────────────────────────
-class TensorCorePrecisionRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
-    h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs / second, precision=0, commas=True)
-    h100_int8_tc_tops_str = fmt_ops_rate(Hardware.Cloud.H100.compute.precision_flops['int8'], unit=TOPS, precision=0, commas=True)
-    h100_fp32_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp32'], unit=TFLOPs / second, precision=0, commas=False)
-    h100_tf32_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['tf32'], unit=TFLOPs / second, precision=0, commas=False)
-```
-
-| **Format**                                    | **Bits** | **Exponent** | **Mantissa** |                       **H100 dense peak**                        |         **Typical use**          |
-|:----------------------------------------------|:--------:|:------------:|:------------:|:----------------------------------------------------------------:|:--------------------------------:|
-| **FP32**\index{FP32!master weights}           |    32    |      8       |      23      |  ~`{python} TensorCorePrecisionRecap.h100_fp32_tflop_per_s_str`  | Master weights, loss computation |
-| **TF32**\index{TF32!Tensor Core acceleration} |    19    |      8       |      10      |  `{python} TensorCorePrecisionRecap.h100_tf32_tflop_per_s_str`   |    Training (NVIDIA default)     |
-| **BF16**\index{BF16!dynamic range}            |    16    |      8       |      7       | `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` |      Training, fine-tuning       |
-| **FP16**\index{FP16!loss scaling}             |    16    |      5       |      10      | `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` |    Training with loss scaling    |
-| **FP8 (E4M3)**\index{FP8!E4M3 format}         |    8     |      4       |      3       | `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str`  |      Forward pass, weights       |
-| **FP8 (E5M2)**\index{FP8!E5M2 format}         |    8     |      5       |      2       | `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str`  |     Backward pass, gradients     |
-| **INT8**\index{INT8!quantization}             |    8     |     N/A      |     N/A      |    `{python} TensorCorePrecisionRecap.h100_int8_tc_tops_str`     |    Post-training quantization    |
-
-: **Precision formats and hardware throughput on H100**: The table uses dense peak throughput where Tensor Core support exists; structured sparsity can roughly double several of these advertised peaks. The choice of precision affects both the training dynamics (convergence, numerical stability) and the infrastructure requirements (memory capacity, bandwidth utilization). TF32 preserves the FP32 exponent width but reduces mantissa precision so Tensor Cores can accelerate common FP32 training workloads. {#tbl-precision-throughput}
-
-```{python}
-#| echo: false
-from mlsysim import Infrastructure, Systems
-from mlsysim.fmt import check, fmt_int, fmt_usd
-
-# ┌── LEGO ───────────────────────────────────────────────
-class Fp8CostEquivalence:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators  # 10K reference cluster
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node  # DGX H100 node
-    node_price = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate  # $350k CapEx ref
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    nodes = cluster_gpus // gpus_per_node
-    total_usd = nodes * node_price
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(nodes == 1250, f"Expected 1250 nodes, got {nodes}")
-    check(round(total_usd.magnitude / 1e6) == 438, f"Expected ~$438M total USD, got {total_usd}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    cluster_gpus_str = fmt_int(cluster_gpus)
-    gpus_per_node_str = fmt_int(gpus_per_node)
-    node_price_str = fmt_usd(node_price.magnitude, precision=0)
-    total_musd_str = fmt_usd(round(total_usd.magnitude / 1e6), precision=0)
-```
-
-The infrastructure implications are substantial. A fleet designed for BF16 training, a common baseline for large models, has a peak of `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` per GPU on an H100. The same fleet has an FP8 peak of `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str` per GPU, doubling the arithmetic ceiling for supported operations without additional hardware. For a `{python} Fp8CostEquivalence.cluster_gpus_str`-GPU cluster priced at roughly `{python} Fp8CostEquivalence.node_price_str` per `{python} Fp8CostEquivalence.gpus_per_node_str`-GPU node, the increase in advertised arithmetic capacity is equivalent to adding another `{python} Fp8CostEquivalence.cluster_gpus_str` GPUs, or roughly `{python} Fp8CostEquivalence.total_musd_str` million in node hardware. This is a peak-capacity comparison; it is not a prediction of training speedup or a saving that can be booked before workload validation.
-
-FP8 also changes numerical behavior. E4M3's 3 mantissa bits limit precision, while its exponent range limits which magnitudes it represents. Scaling places a tensor within that range but does not restore the precision lost to rounding. Values outside the representable range can saturate or become nonfinite, and sufficiently small values can round to zero. The selected recipe therefore needs workload-specific quality validation even when Transformer Engine supplies the scaling machinery. Infrastructure sizing must use the sustained rate of a validated precision policy.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierStragglerRecap3:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    model = Models.Language.GPT3
-    gpu_hbm = Hardware.Cloud.H100.memory.capacity
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights_fp16 = model.size_in_bytes(BYTES_FP16)
-    weights_int8 = model.size_in_bytes(BYTES_INT8)
-    weights_int4 = model.size_in_bytes(BYTES_INT4)
-    gpus_fp16 = math.ceil((weights_fp16 / gpu_hbm).to_base_units().magnitude)
-    gpus_int8 = math.ceil((weights_int8 / gpu_hbm).to_base_units().magnitude)
-    gpus_int4 = math.ceil((weights_int4 / gpu_hbm).to_base_units().magnitude)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check((gpus_fp16, gpus_int8, gpus_int4) == (5, 3, 2), "Prose walks 5 -> 3 -> 2 GPUs for FP16/INT8/INT4 weights")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
-    weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
-    weights_int8_gb_str = fmt_memory(weights_int8, unit=GB, precision=0, commas=False)
-    weights_int4_gb_str = fmt_memory(weights_int4, unit=GB, precision=1, commas=False)
-    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GiB, precision=0, commas=False)
-```
-
-For inference, quantization\index{Quantization!serving economics} changes both weight storage and the possible hardware topology. Our `{python} InfraFrontierStragglerRecap3.frontier_params_b_str` model at FP16 requires `{python} InfraFrontierStragglerRecap3.weights_fp16_gb_str`, necessitating a minimum of five `{python} InfraFrontierStragglerRecap3.gpu_hbm_gb_str` H100 GPUs for the parameters alone. At INT8, the weight payload drops to `{python} InfraFrontierStragglerRecap3.weights_int8_gb_str`, fitting on three GPUs. At INT4, it shrinks to `{python} InfraFrontierStragglerRecap3.weights_int4_gb_str`, fitting on two GPUs. These are weight-only capacity bounds; quantization metadata, attention state, and workspace also need memory. Reading 4-bit rather than 16-bit weights quarters the raw payload, but it does not change physical bandwidth or guarantee a fourfold token-latency reduction. Kernel support, conversion work, other traffic, and any change in device count determine the realized gain, subject to validation of model quality.
-
-For training, many workloads use mixed-precision training\index{Mixed-precision training!numerical stability}, a strategy that decouples storage precision from arithmetic precision. A "master copy" of weights remains in FP32 for numerical stability, while the computationally intensive forward and backward passes are cast to BF16\index{BF16!mixed-precision training} or FP16\index{FP16!mixed-precision training} to exploit the full throughput of Tensor Cores. Accumulating gradients in FP32 reduces rounding and underflow risk before the optimizer updates the master weights. The memory examples below assume retained FP16 gradients; implementations that retain a full FP32 accumulation buffer must add that buffer to their peak budget. The H100's Transformer Engine extends this paradigm through configured FP8 recipes, autocast integration, and scaling metadata, potentially doubling peak throughput for supported operations that remain numerically stable at the lower precision. The training-time improvement depends on model coverage and the remaining bottlenecks.
-
-### Energy cost of data movement {#sec-compute-infrastructure-energy-cost-data-movement-3cd1}
-
-The Roofline Model and token latency analysis demonstrate that data movement limits performance. Data movement also dominates energy consumption\index{Data movement!energy cost}, with direct implications for fleet economics. A useful normalization is an FP16 operand: reading one 16-bit value from HBM at roughly 4 pJ/bit costs about 64 picojoules (pJ), while one FP16 multiply-accumulate operation costs roughly 1 pJ. The raw operand fetch can therefore cost about 64$\times$ the arithmetic operation, before tiling and reuse amortize that movement across many MACs.
-
-::: {.column-margin}
-```{=latex}
-\vspace*{-33mm}
-```
-![](images/svg/vol2_compute_infrastructure_margin_001.svg){width="100%" fig-alt="Three orange horizontal bars on a log scale: DRAM read 320 pJ, HBM read 64 pJ, and MAC 1 pJ."}
-
-*Data movement dwarfs arithmetic in energy cost.*
-:::
-
-This operand-level ratio explains why accelerator architects devote so much silicon area to data reuse. A Tensor Core's tile-based execution model loads a small matrix into local registers and reuses each element hundreds of times (once per element in the opposing matrix), amortizing the HBM access cost across hundreds of 1 pJ compute operations. Without this reuse, the energy budget would be dominated by memory access, and most of the chip's power would be spent heating wires rather than switching transistors.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_power
-
-# ┌── LEGO ───────────────────────────────────────────────
-class H100TdpEnergyRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
-```
-
-At fleet scale, movement energy must be evaluated over the execution schedule. A 10,000-GPU cluster operating within a `{python} H100TdpEnergyRecap.tdp_w_str` per-GPU envelope also powers control, interconnect, and other circuitry; the operand-level ratio does not determine the share of that envelope spent on memory. Kernel fusion and FlashAttention reduce particular transfers, while activation checkpointing trades saved activation storage for recomputation. The useful comparison is total energy to complete equivalent work at the required quality, including any change in execution time.
-
-The energy perspective provides a physical foundation for understanding why different parallelism strategies have different efficiencies. Tensor parallelism requires data movement over NVLink (approximately 5 pJ per bit at the link level, plus the energy of the NVSwitch chips). Data parallelism requires data movement over InfiniBand (approximately 15--20 pJ per bit, including the energy of the host channel adapter (HCA) and switch). Pipeline parallelism moves less data but requires more complex scheduling. Each parallelism strategy represents a different point in the trade-off between communication energy and computation efficiency.
-
-::: {#nbk-compute-infrastructure-energy-cost-data-movement .callout-notebook title="The energy cost of data movement"}
-
-At modern process nodes, moving data costs far more energy than computing on it. The energy hierarchy of a single operation at the 4 nm node makes the gap concrete.
-
-Performing one FP16 multiply-accumulate (MAC\index{MAC!energy cost}) operation, the atomic unit of deep learning, consumes approximately 1 picojoule (pJ). This is the baseline cost of useful work. Reading a single FP16 operand (16 bits) from HBM consumes roughly 4 pJ per bit, totaling 64 pJ. Reading that same operand from off-package DRAM costs approximately 20 pJ per bit, or 320 pJ. The asymmetry is staggering: reading a value from HBM costs 64$\times$ more energy than computing on it. Retrieving it from standard DRAM costs 320$\times$ more.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_memory
-
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierTdpServingRecap:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    model = Models.Language.GPT3
-    hbm_pj_per_bit = 4  # scenario assumption: HBM read energy (pJ/bit), as in the notebook text
-    mac_pj = 1  # scenario assumption: FP16 MAC energy (pJ), as in the notebook text
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    weights = model.size_in_bytes(BYTES_FP16)
-    macs_per_token = model.inference_flops.to(flop).magnitude / 2  # 1 MAC = 2 FLOPs
-    move_j = weights.to(byte).magnitude * 8 * hbm_pj_per_bit * 1e-12
-    compute_j = macs_per_token * mac_pj * 1e-12
-    energy_ratio = move_j / compute_j
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(energy_ratio - 64) < 0.5, "Prose claims weight movement costs 64x the arithmetic energy")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
-    weight_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
-    macs_b_str = fmt(macs_per_token / 1e9, precision=0, commas=False)
-    flops_b_str = fmt(model.inference_flops.to(flop).magnitude / 1e9, precision=0, commas=False)
-    move_energy_eq_math = fmt_display_math(
-        f"\\text{{Data Movement Energy}} = {weights.to(GB).magnitude:.0f} \\text{{ GB}} \\times 8 \\text{{ bits/byte}} "
-        f"\\times {hbm_pj_per_bit} \\text{{ pJ/bit}} \\approx \\mathbf{{{move_j:.1f} \\text{{ Joules}}}}"
-    )
-    compute_energy_eq_math = fmt_display_math(
-        f"\\text{{Computation Energy}} = {macs_per_token / 1e9:.0f} \\times 10^9 \\text{{ MACs}} "
-        f"\\times {mac_pj} \\text{{ pJ/MAC}} \\approx \\mathbf{{{compute_j:.3f} \\text{{ Joules}}}}"
-    )
-```
-
-The macro impact appears when serving our `{python} InfraFrontierTdpServingRecap.frontier_params_b_str` model. Generating a single token requires loading the entire `{python} InfraFrontierTdpServingRecap.weight_gb_str` weight tensor from HBM:
-
-`{python} InfraFrontierTdpServingRecap.move_energy_eq_math`
-
-The computational cost for the associated $\approx$ `{python} InfraFrontierTdpServingRecap.macs_b_str` billion MACs (about `{python} InfraFrontierTdpServingRecap.flops_b_str` billion FLOPs) is trivial by comparison:
-
-`{python} InfraFrontierTdpServingRecap.compute_energy_eq_math`
-
-Moving the weights to the compute units consumes 64$\times$ more energy than the math itself in this simplified decode model. This energy penalty is why HBM is engineered for physical proximity to the GPU die; shorter traces mean less capacitance and lower energy per bit. It also explains why techniques that reduce data movement, such as quantization (moving fewer bits) and kernel fusion (preventing round-trips to memory), are the primary levers for improving both system performance and power efficiency.
-
-:::
-
-### Benchmarking accelerator performance {#sec-compute-infrastructure-benchmarking-accelerator-performance-6920}
-
-A procurement team comparing accelerators needs a published number that predicts the performance the organization will actually achieve. Peak TFLOP/s, memory bandwidth, and TDP describe *potential*, not *achieved* performance, so the decision turns on whose measured results to trust and under what rules they were produced. The industry-standard reference is MLPerf, maintained by MLCommons: MLPerf Training reports the time to train reference models to a target accuracy, and MLPerf Inference reports serving throughput and latency under realistic batching and streaming conditions. Both capture complete system performance, including software stack efficiency, communication overhead, and memory management, not just the raw silicon.
-
-Closed-division MLPerf results constrain the workload and quality target to support comparisons across implementations. They still permit specified optimizations and benchmark-dependent tuning; the rules do not require identical hyperparameters or ordinary untuned framework configurations in every case. Open-division submissions allow broader changes and require closer inspection of what differs. Neither division predicts a deployment automatically. Compare the submission's workload, software, precision, hardware count, and quality target with the intended system before using its result for procurement.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierTdpBenchRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-For our `{python} InfraFrontierTdpBenchRecap.frontier_params_b_str` model, training, fine-tuning, and serving need separate measurements. Batch shape, trainable state, sequence length, and partitioning can change both capacity demand and the critical path. Fine-tuning does not occupy a fixed point between training and decode merely because it updates an existing model. Evaluate the intended phases on candidate hardware with the actual model and data pipeline, using published MLPerf results as comparative evidence rather than deployment forecasts.
-
-::: {#psp-compute-infrastructure-beyond-peak-specifications .callout-perspective title="Beyond peak specifications"}
-
-When evaluating accelerator options, the following metrics provide a more complete picture than peak TFLOP/s alone:
-
-- **MFU**: The ratio of achieved FLOP/s during real training to peak hardware FLOP/s. An MFU of 50 percent means the model's useful computation averages half the chosen peak rate over the measurement interval; it does not distinguish partially occupied execution from completely idle time.
-- **Time-to-train**: The wall-clock time to train a reference model to a target metric. This captures all system-level effects that a steady-state MFU measurement can omit, including I/O stalls, checkpointing overhead, and job restart delays outside its measurement window. Whole-run MFU includes those elapsed-time losses but still does not establish the model quality reached.
-- **Cost per token**\index{Cost per token!metric}: For language model training, the total cost (hardware amortization plus electricity) divided by the number of tokens processed. This metric normalizes across different hardware generations, cluster sizes, and pricing models.
-- **Tokens per dollar**\index{Inference!throughput per dollar}: The inverse of cost per token. Divide tokens per second by dollars per second, converting an hourly rental price to the same time unit before comparing systems.
-
-No single metric tells the whole story. A system with high MFU but high cost per GPU-hour may be less economical than a system with lower MFU but cheaper hardware. The right metric depends on whether the organization is optimizing for time (training must finish by a deadline), cost (minimize total expenditure), or throughput (maximize tokens processed per unit time).
-
-:::
-
-### Inference-specific infrastructure considerations {#sec-compute-infrastructure-inferencespecific-infrastructure-considerations-10c9}
-
-Serving trained models\index{Inference!infrastructure} changes the planning objective. A large training run emphasizes sustained *throughput* and time to a target quality across its allocated workers. Its repeated steps make communication demand easier to characterize than an unpredictable arrival stream, although failures, I/O, and changes in execution shape still affect the schedule. Serving must translate the same hardware resources into responses under per-request latency targets.
-
-Serving infrastructure must meet *latency* targets at an acceptable *cost per query* under a variable request load. Independent requests can be assigned to separate replicas, but a replica that shards a model across devices still communicates within each request. Prompt processing, successive decode steps, and complete responses also have different latency budgets. Capacity planning must therefore specify the request mix, model placement, and service targets before concluding that serving needs less network capacity than training.
-
-The differing requirements drive distinct hardware and architecture choices, summarized in @tbl-training-serving-infrastructure.
-
-| **Dimension**                                                        | **Training infrastructure**                                                                      | **Serving infrastructure**                                                                                                           |
-|:---------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------|
-| **GPU utilization**\index{GPU utilization!training vs. serving}      | Local reuse, precision, partitioning, and communication determine sustained MFU.                 | Batching can increase weight reuse; its benefit depends on memory capacity, request shape, and latency targets.                      |
-| **Model placement**\index{Model replication!serving replicas}        | Tensor and pipeline parallelism distribute a single model across many GPUs.                      | Replicas of the model, or large shards of it, handle independent requests, so memory demand scales with concurrent serving capacity. |
-| **Network traffic**\index{Network requirements!training vs. serving} | The partition determines gradient, activation, and parameter exchanges between workers.          | Independent replicas can serve separate requests, but sharded replicas still require inter-device exchanges within each request.     |
-| **Cost metric**\index{Serving!cost metric}                           | Cost per completed run at a target quality includes the measured schedule and recovery overhead. | Cost per request or per 1,000 tokens depends on request shape, latency targets, utilization, and provisioned capacity.               |
-
-: **Training vs. serving infrastructure**: Training and serving optimize different hardware behaviors, so capacity planning must compare utilization, model placement, network traffic, and cost in the mode the fleet will actually run. {#tbl-training-serving-infrastructure tbl-colwidths="[20,40,40]"}
-
-The table shows why serving cannot be planned as training with smaller batches: the optimization target changes from synchronized throughput to latency-bounded, continuously billed requests.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_power
-
-# ┌── LEGO ───────────────────────────────────────────────
-class A100ServingTdpRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
-```
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_power
-
-# ┌── LEGO ───────────────────────────────────────────────
-class H100TdpServingRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
-```
-
-The implication is that effective serving infrastructure often uses different hardware, different software, and different facility designs than the training infrastructure. Some organizations use previous-generation GPUs (A100s) for serving because the memory bandwidth per dollar can be competitive with newer GPUs, and the lower TDP (`{python} A100ServingTdpRecap.tdp_w_str` vs. `{python} H100TdpServingRecap.tdp_w_str`) allows higher rack density and lower cooling costs.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierStragglerRecap4:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
-
-The inference workload itself bifurcates into two distinct phases with opposing bottlenecks. The prefill\index{Prefill!inference phase} phase processes prompt tokens in parallel, increasing weight reuse and potentially approaching the compute ceiling when the prompt and batch shapes supply enough work. The decode\index{Decode!inference phase} phase generates tokens sequentially for each request and is deeply memory-bandwidth-bound at small batch sizes. To maximize hardware utilization, high-performance serving systems employ continuous batching\index{Continuous batching!iteration-level scheduling}, which schedules requests at the iteration level rather than the request level. Completed requests leave the active batch and waiting requests can enter at iteration boundaries. Scheduling prefill alongside decode also requires controlling how much prompt work delays the next decode iteration.
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SERVING REPLICA NAPKIN ESTIMATE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: inference-infrastructure paragraph in
-# │          @sec-compute-infrastructure-inferencespecific-infrastructure-considerations-10c9.
-# │
-# │ Goal: Size a decode fleet for the 175B running example from the
-# │       weight-streaming floor, and compare it with the reference cluster.
-# │ Show: ~13 ms decode step per TP-8 replica; ~100 replicas; ~800 GPUs.
-# │ How: step = FP16 weights / (8 x HBM BW); replica rate = batch / step;
-# │      replicas = ceil(output token demand / replica rate). KV-cache
-# │      traffic is ignored, so the replica count is a lower bound.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_rate, fmt_time
-
-class ServingReplicaEstimate:
-    """Lower-bound decode replica count for serving the 175B running example."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    weights = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
-    gpus_per_replica = Systems.Nodes.DGX_H100.accelerators_per_node  # one TP-8 replica per DGX H100 node
-    hbm_bw = Hardware.Cloud.H100.memory.bandwidth
-    ref_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
-    request_rate = 1000  # scenario assumption: requests per second at peak
-    output_tokens = 250  # scenario assumption: generated tokens per request
-    decode_batch = 32  # scenario assumption: concurrent requests per replica
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    step_time = (weights / (gpus_per_replica * hbm_bw)).to(millisecond)
-    replica_tokens_per_s = decode_batch / step_time.to(second).magnitude
-    token_demand = request_rate * output_tokens
-    replicas = math.ceil(token_demand / replica_tokens_per_s)
-    serving_gpus = replicas * gpus_per_replica
-    ref_fraction = serving_gpus / ref_gpus
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(10 < step_time.magnitude < 20, "A TP-8 decode step should take about 13 ms")
-    check(50 < replicas < 200, "The napkin estimate should need on the order of 100 replicas")
-    check(0.5 < ref_fraction < 1.0, "Prose compares the serving fleet with most of the reference cluster")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    request_rate_str = fmt_rate(request_rate, "requests/s", commas=True)
-    output_tokens_str = fmt(output_tokens, precision=0, commas=False)
-    decode_batch_str = fmt(decode_batch, precision=0, commas=False)
-    step_time_ms_str = fmt_time(step_time, millisecond, precision=1, commas=False)
-    replica_tokens_str = fmt_rate(round(replica_tokens_per_s, -1), "tokens/s", commas=True)
-    token_demand_str = fmt_rate(token_demand, "tokens/s", commas=True)
-    replicas_str = fmt(replicas, precision=0, commas=False)
-    serving_gpus_str = fmt(serving_gpus, precision=0, commas=False)
-    ref_gpus_str = fmt(ref_gpus, precision=0, commas=True)
-```
-
-A napkin estimate shows how quickly serving capacity reaches training scale. One tensor-parallel replica of the running model on an eight-GPU node streams its FP16 weights once per decode step, which takes at least `{python} ServingReplicaEstimate.step_time_ms_str` at H100 HBM bandwidth. Batching `{python} ServingReplicaEstimate.decode_batch_str` concurrent requests yields about `{python} ServingReplicaEstimate.replica_tokens_str` per replica. A service handling `{python} ServingReplicaEstimate.request_rate_str` at `{python} ServingReplicaEstimate.output_tokens_str` output tokens each must generate `{python} ServingReplicaEstimate.token_demand_str`, which requires at least `{python} ServingReplicaEstimate.replicas_str` replicas, or `{python} ServingReplicaEstimate.serving_gpus_str` GPUs, most of the `{python} ServingReplicaEstimate.ref_gpus_str`-GPU training reference cluster. The estimate is a lower bound because it ignores key-value cache traffic, prefill work, and headroom for bursts and failures; @sec-inference-scale-batching-strategies-scale-6733 replaces it with batching models that account for key-value cache capacity, variable request lengths, and latency targets.
-
-Reliability objectives differ as well. A training job can absorb an occasional failure because checkpointing recovers the lost progress, whereas a stalled serving replica delays every request routed to it until traffic fails over.
-
-### The accelerator decision matrix {#sec-compute-infrastructure-accelerator-decision-matrix-8bba}
-
-A practical decision framework starts with the workload's likely limiting resources and tests them against its execution shape. @Tbl-accelerator-decision supplies candidate configurations under representative assumptions, not fixed assignments of model families to bottlenecks or vendors. The selection rule is to diagnose the binding constraint, then compare sustained useful work within the capacity, quality, latency, and facility budgets.
-
-::: {.column-margin .margin-pointer}
-↩ The three canonical fleet workload archetypes are established in @sec-vol2-introduction-archetypes.
-:::
-
-| **Workload**                      |    **Binding constraint**    |      **Key metric**     |               **Recommended class**               |
-|:----------------------------------|:----------------------------:|:-----------------------:|:-------------------------------------------------:|
-| **LLM training ($>100\text{B}$)** |  Compute (high batch size)   | Peak TFLOP/s, NVLink BW |                 H100/B200, TPU v5p                |
-| **LLM inference (batch=1)**       |       Memory bandwidth       |     GB/s per dollar     |             A100, H100 (bandwidth/\$)             |
-| **LLM inference (batched)**       |     Compute + bandwidth      |     TFLOP/s and GB/s    |                     H100, B200                    |
-| **Vision model training**         | Compute (large spatial dims) |       Peak TFLOP/s      |        H100/B200 configurations to evaluate       |
-| **Recommendation (embeddings)**   |       Memory capacity        |      GB per dollar      |               CPU DRAM + GPU hybrid               |
-| **Fine-tuning ($<13\text{B}$)**   |       Memory capacity        |       HBM capacity      |           A100-class capacity candidate           |
-| **Research/prototyping**          |         Flexibility          |    Software ecosystem   | GPU or accelerator with required operator support |
-
-: **The accelerator decision matrix**: The optimal accelerator depends not on peak specifications but on which physical resource (compute, bandwidth, or capacity) is the binding constraint for the target workload. The roofline model provides the diagnostic: compute the arithmetic intensity, locate the workload relative to the ridge point, and select hardware that maximizes the binding resource per dollar. {#tbl-accelerator-decision}
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierTdpDecisionRecap:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    h100_hour = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate  # current-generation cloud GPU-hour
-    a100_hour = Infrastructure.Pricing.Fleet.GpuHourRef.rate  # reference fleet GPU-hour
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(a100_hour < h100_hour, "The previous-generation GPU-hour should be the cheaper option")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-    h100_hour_usd_str = fmt_usd(h100_hour.to(USD / hour).magnitude, precision=0, commas=False)
-    a100_hour_usd_str = fmt_usd(a100_hour.to(USD / hour).magnitude, precision=0, commas=False)
-```
-
-For our `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` running example, @tbl-accelerator-decision separates the training purchase from the serving purchase. We apply the workload constraint first, then compare software support, deployment lifetime, and measured sustained throughput. A cheaper accelerator-hour is useful only if it supplies the required throughput within the capacity, latency, and facility budgets.
-
-::: {#chk-compute-infrastructure-accelerator-selection .callout-checkpoint title="Accelerator selection"}
-
-An engineering team needs to deploy a 70B-parameter model for both training and inference. Training will use batch size 2048 across 256 GPUs for 3 months. Inference will serve 10,000 requests per second at batch size 1 for 2 years.
-
-- [ ] **Training intensity**: use the Roofline Model to determine the arithmetic intensity of each workload on an H100.
-- [ ] **Hardware split**: decide whether training and inference should use the same hardware or different hardware.
-- [ ] **Two-year cost**: calculate the 2-year inference cost difference between H100s (`{python} InfraFrontierTdpDecisionRecap.h100_hour_usd_str`/GPU-hour) and A100s (`{python} InfraFrontierTdpDecisionRecap.a100_hour_usd_str`/GPU-hour), accounting for throughput at the workload's arithmetic intensity.
-
-:::
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierTdpTransitionRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-    weights_fp16_gb_str = fmt_memory(Models.Language.GPT3.size_in_bytes(BYTES_FP16), unit=GB, precision=0, commas=False)
-    h100_hbm_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
-```
-
-The accelerator's physics establish a concrete problem: our `{python} InfraFrontierTdpTransitionRecap.frontier_params_b_str` model requires `{python} InfraFrontierTdpTransitionRecap.weights_fp16_gb_str` of memory for its weights alone in FP16, and Adam-style training state raises the requirement to multiple terabytes once optimizer moments, gradients, and activations are included. A single H100 provides `{python} InfraFrontierTdpTransitionRecap.h100_hbm_gb_str` of HBM. No single accelerator can hold this model (principle \ref{pri-memory-capacity-gap}). The system must expand to the next physical level: the node.
 
 ## Infrastructure Technologies That Move the Walls {#sec-compute-emerging}
 

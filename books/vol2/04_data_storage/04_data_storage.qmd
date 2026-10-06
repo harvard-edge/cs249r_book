@@ -2664,7 +2664,7 @@ class GDSLatency:
     n_gpus_str = fmt_count(Systems.Nodes.DGX_H100.accelerators_per_node, commas=False, label="GPU")
     per_gpu_images_per_s_str = fmt_rate(images_per_s_per_gpu, 'images/s', precision=0, commas=True)
 ```
-## GPUDirect Storage and the CPU Data-Copy Bypass {#sec-storage-gds}
+### GPUDirect Storage and the CPU Data-Copy Bypass {#sec-storage-gds}
 
 The storage hierarchy can provide enough aggregate bandwidth and still leave GPUs waiting when the CPU copies data for thousands of small transfers. In the traditional path, every shard read bounces through host DRAM before reaching GPU HBM; GPUDirect Storage (GDS) removes that host-memory bounce copy for local or RDMA-attached NVMe\index{NVMe-oF!RDMA-attached storage}, which pays off when the copy itself limits throughput. The CPU still submits and coordinates I/O through the software stack. Understanding the traditional path first makes the GDS optimization clear.
 
@@ -3761,17 +3761,8 @@ The staging decision determines where the job pays for data movement: before tra
 
 Tiering is a placement policy, so the next question is where the tier boundaries can move. Emerging devices shift the boundary between DRAM, NVMe, and archival storage, while inference workloads reuse the same hierarchy for a different objective: reducing cold-start latency and managing serving-time working sets rather than maximizing epoch throughput.
 
-### Storage technologies that move tiers {#sec-storage-emerging}
-
-While the six-tier hierarchy represents a common production baseline, memory and storage technologies can fill the bandwidth gaps between existing tiers, reshaping effective storage architecture for large-scale ML. The widest unfilled gap in the hierarchy sits between host DRAM and local NVMe. Compute Express Link (CXL)\index{Compute Express Link!memory expansion}, an open standard interconnect that allows CPUs, accelerators, and memory devices to share memory with cache-coherent semantics, targets exactly this gap. CXL-attached memory provides bandwidth between that of local DRAM and NVMe (roughly 30--60 GB/s) at latencies that are also intermediate (200--500 ns). For ML workloads, CXL memory could serve as a "Tier 1.5" between host DRAM and local NVMe, creating a massive capacity pool for embedding tables and prefetch buffers without the latency penalty of NVMe. For the running example, CXL-attached memory could expand the effective host memory tier from 512 GB to over 4 TB per node, large enough to hold the compressed source corpus or a large local shard cache, though still short of the full `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized training copy on one node.
-
-A different bottleneck appears when CPU-side decoding, not storage bandwidth, throttles the pipeline. The computational storage drive\index{Computational storage!SSD offload} closes that gap by embedding processing elements (field-programmable gate arrays (FPGAs) or simple CPU cores) directly on the SSD controller, enabling decompression, filtering, or format conversion to happen at the storage device rather than consuming host CPU cycles. For ML pipelines where CPU-side decoding is the bottleneck, computational storage could eliminate the CPU from the data path entirely, complementing GDS by offloading work that direct DMA cannot address.
-
-Checkpoint writes also impose a pause while a consistent snapshot reaches the first storage tier. Reducing that pause, denoted $\CheckpointWriteTime$, makes frequent saves less costly without yet deciding how often the fleet should checkpoint. Persistent memory\index{Persistent memory!checkpoint acceleration}, despite market shifts such as the discontinuation of Intel Optane, remains the architectural idea that attacks that term directly. Byte-addressable non-volatile memory could lower the destination-device latency, but the checkpoint pause still includes snapshot creation, byte transfer, and coordination. A lower device-access latency reduces $\CheckpointWriteTime$ only to the extent that this device lies on the pause's critical path.
-
-These technologies are not yet broadly deployed at the scale of the largest ML clusters, but they illustrate the direction of the storage hierarchy's evolution. The fundamental principle remains unchanged: faster, more expensive storage closer to the accelerator, with slower, cheaper storage at the periphery. What changes is the *granularity* of the tiers and the *size of the gaps* between them.
-
-## Storage for inference workloads {#sec-storage-inference}
+## Data Operations Beyond Core Training
+### Storage for inference workloads {#sec-storage-inference}
 
 The storage requirements for inference differ fundamentally from full-corpus training. Training streams datasets and writes checkpoints in bursts. In the weight-resident serving baseline, inference reads model weights at startup and then serves requests from HBM. The primary storage challenge shifts from sustained dataset throughput to model-loading latency, although retrieval indexes and KV-cache offload add serving-time I/O when those mechanisms are enabled.
 
@@ -3826,7 +3817,7 @@ To reduce cold-start time, the model is sharded and loaded in parallel. If the `
 
 During autoregressive generation, the server keeps a per-request record of the attention keys and values produced by earlier tokens so it can generate the next token without recomputing the entire prefix. This record, called the key-value cache (KV cache)\index{KV Cache!offload working set}, grows with sequence length and can consume significant HBM. For long sequences (128K tokens or more), KV cache offloading to host DRAM or NVMe extends the effective context window at the cost of increased latency per generated token, because cache blocks must be moved back into HBM before attention can use them. The storage lesson is that inference has its own working set, not just a model-loading problem. When serving must also retrieve external context to ground that generation, the storage pipeline faces an entirely different access pattern: low-latency random queries into high-dimensional vector indexes.
 
-## Retrieval Infrastructure and Vector Indexes {#sec-data-storage-retrieval-infrastructure}
+### Retrieval Infrastructure and Vector Indexes {#sec-data-storage-retrieval-infrastructure}
 
 An inference request that needs supporting documents cannot wait for a sequential scan of the training corpus. A retrieval system first converts documents into vectors that represent semantic meaning, then finds nearby vectors and returns their source documents as context. The same storage analysis still applies, but the unit of demand becomes a query and its index accesses, and the deadline becomes the serving latency budget. With a graph-based approximate nearest-neighbor (ANN) index, the storage system traverses a high-dimensional vector graph instead of streaming sequential blobs via formats such as TFRecord or Parquet. This is one index family, not a universal vector-database layout: exact flat search, inverted-file (IVF) partitioning, and product-quantized (PQ) variants impose different bandwidth, capacity, and recall trade-offs.
 
@@ -3875,7 +3866,7 @@ For graph-based ANN, this architectural pattern shifts the primary storage bottl
 
 Graph-based retrieval therefore spends storage budget on index levels that keep random traversal inside the serving latency service-level objective. A disk-backed graph is economical only if the extra SSD accesses do not erase the quality gain from searching a larger corpus. Flat, IVF, and PQ designs move that budget toward scan bandwidth, partition probes, or decompression and approximation error. The same hierarchy now supports bulk model loading, request-scoped KV state, and retrieval, each with a distinct service-rate contract.
 
-## The Synthetic Fuel Line {#sec-storage-synthetic-fuel}
+### The Synthetic Fuel Line {#sec-storage-synthetic-fuel}
 
 The versioned-artifact contract applies to generated training samples as well as collected ones. When a fleet generates candidate samples, filters them, and verifies the survivors, each stage adds storage traffic and records that must remain linked to the accepted payload. As high-quality human-generated text becomes harder to expand, the fleet encounters the **data wall**\index{Data Wall!definition}: the point where additional training samples must increasingly come from synthesis, simulation, curation, or expensive human collection [@villalobos2022will]. This shift from simple collection to managed data generation sends more than payload bytes through the hierarchy. A "synthetic fuel line" must also store the **provenance chain**\index{Provenance Chain!definition} of every sample: which model generated it, which filters accepted or rejected it, which judge or verifier models scored it, and which downstream run consumed it. That lineage makes repeated reuse of generated material traceable. It supports investigation of **model collapse**\index{Model Collapse!definition}, where recursive training on generated data can degrade the learned distribution [@shumailov2024]; retaining provenance alone does not prevent the degradation. The storage design must separately budget retained artifacts and the repeated scans used to assess them.
 
@@ -3945,6 +3936,17 @@ class SyntheticStorage:
 :::
 
 The synthetic fuel line closes the chapter's storage arc by making lineage part of the payload. Large-scale training, checkpointing, retrieval, and synthetic-data generation stress different tiers. Their common design requirement is to account for service rate and correctness alongside capacity. A store can have room for every artifact yet fail to deliver it on time, restore a complete generation, or identify the data that shaped a model.
+
+## Emerging Storage Technologies {#sec-storage-emerging}
+
+While the six-tier hierarchy represents a common production baseline, memory and storage technologies can fill the bandwidth gaps between existing tiers, reshaping effective storage architecture for large-scale ML. The widest unfilled gap in the hierarchy sits between host DRAM and local NVMe. Compute Express Link (CXL)\index{Compute Express Link!memory expansion}, an open standard interconnect that allows CPUs, accelerators, and memory devices to share memory with cache-coherent semantics, targets exactly this gap. CXL-attached memory provides bandwidth between that of local DRAM and NVMe (roughly 30--60 GB/s) at latencies that are also intermediate (200--500 ns). For ML workloads, CXL memory could serve as a "Tier 1.5" between host DRAM and local NVMe, creating a massive capacity pool for embedding tables and prefetch buffers without the latency penalty of NVMe. For the running example, CXL-attached memory could expand the effective host memory tier from 512 GB to over 4 TB per node, large enough to hold the compressed source corpus or a large local shard cache, though still short of the full `{python} StorageEconomicsCorpus.tokenized_text_tb_str` serialized training copy on one node.
+
+A different bottleneck appears when CPU-side decoding, not storage bandwidth, throttles the pipeline. The computational storage drive\index{Computational storage!SSD offload} closes that gap by embedding processing elements (field-programmable gate arrays (FPGAs) or simple CPU cores) directly on the SSD controller, enabling decompression, filtering, or format conversion to happen at the storage device rather than consuming host CPU cycles. For ML pipelines where CPU-side decoding is the bottleneck, computational storage could eliminate the CPU from the data path entirely, complementing GDS by offloading work that direct DMA cannot address.
+
+Checkpoint writes also impose a pause while a consistent snapshot reaches the first storage tier. Reducing that pause, denoted $\CheckpointWriteTime$, makes frequent saves less costly without yet deciding how often the fleet should checkpoint. Persistent memory\index{Persistent memory!checkpoint acceleration}, despite market shifts such as the discontinuation of Intel Optane, remains the architectural idea that attacks that term directly. Byte-addressable non-volatile memory could lower the destination-device latency, but the checkpoint pause still includes snapshot creation, byte transfer, and coordination. A lower device-access latency reduces $\CheckpointWriteTime$ only to the extent that this device lies on the pause's critical path.
+
+These technologies are not yet broadly deployed at the scale of the largest ML clusters, but they illustrate the direction of the storage hierarchy's evolution. The fundamental principle remains unchanged: faster, more expensive storage closer to the accelerator, with slower, cheaper storage at the periphery. What changes is the *granularity* of the tiers and the *size of the gaps* between them.
+
 
 ## Fallacies and Pitfalls {#sec-storage-fallacies}
 
