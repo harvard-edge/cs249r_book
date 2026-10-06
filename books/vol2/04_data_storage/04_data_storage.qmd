@@ -2566,80 +2566,6 @@ class NodeStagingContext:
 ```
 For the `{python} NodeStagingContext.tokenized_text_tb_str` serialized dataset distributed across `{python} NodeStagingContext.n_training_nodes_str` nodes, each node is responsible for approximately `{python} NodeStagingContext.node_tokenized_gb_str` of data. If a node fails, its replacement must stage that shard subset from the PFS. At an uncontended PFS read speed of `{python} NodeStagingContext.uncontended_pfs_bw_str`, this staging takes about `{python} NodeStagingContext.node_stage_uncontended_s_str`; under recovery contention, an effective `{python} NodeStagingContext.contended_pfs_bw_str` per-node rate stretches the same copy to about `{python} NodeStagingContext.node_stage_contended_s_str`. If the orchestrator can instead schedule the replacement workload on an idle node that already has the data cached from a previous run, staging time is zero and training resumes as soon as the replacement joins. The saving is modest per event but recurs. At a per-GPU mean time between failures of `{python} NodeStagingContext.gpu_mtbf_hours_str` hours, the `{python} NodeStagingContext.n_training_nodes_str`-node cluster sees about `{python} NodeStagingContext.node_failures_per_day_str` node failure per day, and each contended restage idles the whole synchronous job for the copy time above. Larger fleets fail proportionally more often, although each node's share of the corpus shrinks as the node count grows.
 
-### Data versioning and pipeline orchestration at scale {#sec-storage-data-versioning-orchestration}
-
-Knowing where data lives is only half the story; at scale the storage infrastructure must also record which version of the data each run uses and how it flows through the pipeline. Versioning turns the storage hierarchy into a reproducibility system: the fleet must know not only which bytes it read, but which preprocessing code, shuffle seed, schema, and integrity checks produced those bytes before the run began.
-
-::: {#lhs-data-storage-archetype-b-dlrm-at-scale-feature-store-latency .callout-lighthouse title="Archetype B (DLRM at Scale): Feature store latency"}
-
-While Archetype A (GPT-4/Llama-3) deals with static, versioned datasets of trillions of tokens, Archetype B (DLRM at Scale) deals with dynamic, high-velocity feature streams. For a recommendation system, the "ground truth" changes every second as users click and interact. This forces a move from simple file-based storage to a feature store\index{Feature store!point-in-time correctness} architecture that must solve the point-in-time correctness problem: ensuring that the features retrieved for training exactly match what the model would have seen at the moment of inference, without "leaking" future information.
-
-:::
-
-That same reproducibility requirement becomes harder when the inputs are live features rather than immutable text shards. Feature store architectures address point-in-time correctness[^fn-point-in-time] by maintaining an immutable feature ledger or a "time-travel" query engine, significantly increasing storage complexity.
-
-[^fn-point-in-time]: **Point-in-Time Correctness**\index{Point-in-time correctness!feature stores}: In recommendation systems, features (for example, user click history) must be retrieved exactly as they existed at the moment of the historical interaction. Retrieving current features for a past event, a form of temporal leakage, inflates training accuracy but causes the model to fail in production. At petabyte scale, the ledger that prevents it must retain every feature version a training query might request.
-
-```{python}
-#| echo: false
-#| label: hash-validation-cost
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ HASH VALIDATION COST (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: SHA-256 validation footnote in §Data versioning.
-# │ Goal: Make the 100 TB integrity-check core-hour estimate reproducible.
-# │ How: Dataset MB / effective per-core throughput / seconds per hour.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory
-
-class HashValidationCost:
-    """Pipeline-level SHA-256 validation cost assumption."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    dataset = 100 * TB  # scenario validation dataset size assumption
-    throughput_per_core = 500 * (MB / second)  # scenario per-core SHA-256 rate (modern server core)
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    validation_time = dataset / throughput_per_core
-    core_hours = validation_time.to(hour).magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(50 < core_hours < 60, "100 TB at 500 MB/s/core should be about 56 core-hours")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    dataset_tb_str = fmt_memory(dataset, unit=TB, precision=0, commas=False)
-    throughput_mb_per_s_str = fmt_bandwidth(throughput_per_core, unit=MB / second, precision=0, commas=False)
-    cpu_core_hours_str = fmt_count(core_hours, precision=1, label="CPU-core hour", allow_fractional=True)
-```
-
-At fleet scale, even an immutable collection of files produces a distributed stream of consumed samples whose versions and order must be recorded. Foundation-model runs can last weeks or months; in the `{python} StorageFuelLineContext.training_window_attr_str` running example, the dataset version and sampling policy must remain identifiable throughout the run. Samples and shuffle order can change across epochs, but the pipeline must record enough state to reconstruct the sequence consumed. Otherwise, an engineer cannot distinguish between a model regression and a silent change in the input distribution. Dataset versioning\index{Dataset versioning!cryptographic snapshotting} provides the necessary "Git for data" capability by snapshotting the cryptographic hashes[^fn-hash-computation-overhead] of every data shard, the exact preprocessing code used for tokenization, and the random seeds governing the global shuffle. This level of rigor is essential for audit trails and for debugging the subtle "loss spikes" that characterize large-scale training, where engineers must be able to replay the exact batch that caused a divergence to determine if the cause was a corrupted data sample or a numerical instability in the optimizer.
-
-[^fn-hash-computation-overhead]: **Hash Cost (SHA-256)**\index{Cryptographic hash!validation cost}: Verifying the integrity of a `{python} HashValidationCost.dataset_tb_str` dataset using SHA-256 consumes approximately `{python} HashValidationCost.cpu_core_hours_str` at a per-core hashing rate of `{python} HashValidationCost.throughput_mb_per_s_str`. The work parallelizes across shards, but it still competes with decoding for host cores and must read every byte, so the validation step is best pipelined with ingestion rather than run as a separate pass before the fleet starts.
-
-At petabyte scale, the data pipeline has to make every transformation reproducible. Raw documents are cleaned, tokenized, packed into training examples, and sharded across storage tiers. Each stage writes an immutable artifact, and each artifact records the input version, code version, schema, and statistical checks it satisfied. Once those dependencies are explicit, the pipeline forms a directed acyclic graph: later artifacts depend on earlier artifacts, and no stage is allowed to rewrite its own history. When a training job starts, the cluster manager verifies that each worker's local NVMe shards match the data snapshot declared for the run. Treating the data pipeline as a graph of versioned artifacts rather than a simple file transfer makes silent data drift detectable and attributable to a specific stage, code version, or input snapshot.
-
-#### Execution semantics for distributed transformations {#sec-storage-distributed-transformation-semantics}
-
-Versioned artifacts identify *what* a pipeline produced; execution semantics determine whether failures can change that result. The storage system's part in that contract is the commit boundary, the point at which a stage's output becomes durable and visible downstream, because a restarted stage decides what to replay by comparing its input position with the last committed output. Two service-rate effects govern how much uncommitted work accumulates before that boundary. Partition skew\index{Partition skew!data pipelines} lets one key that owns disproportionate work hold a stage open while the rest of the fleet idles, and backpressure\index{Backpressure!data pipelines} propagates a slow downstream stage's limit upstream by slowing admission or bounding in-flight data, a control response to overload rather than another name for slow processing.
-
-Failures create a separate correctness question. At-most-once processing\index{Processing semantics!at-most-once} can lose an output because it does not replay uncertain work; at-least-once processing\index{Processing semantics!at-least-once} can duplicate an effect because it does. An effectively exactly-once outcome\index{Processing semantics!exactly-once} requires replayable inputs and idempotent writes\index{Idempotent writes!data pipelines} or transactional output keyed by a stable event or transaction identifier [@akidau2015]. Transport delivery alone cannot provide this application-level guarantee.
-
-::: {#exmp-storage-acknowledgment-gap .callout-example title="The acknowledgment gap"}
-
-**Failure trace**: A worker commits event `e42`, then fails before its acknowledgment. Skipping the uncertain event risks loss; replaying a non-idempotent effect duplicates it. Writing by stable key `(feature_version, e42)` prevents the duplicate.
-
-**Systems lesson**: Exactly-once belongs at the output commit boundary, whose record must bind the input position, transformation version, stable identifier, and commit state.
-
-:::
-
-Streaming adds a time boundary to the contract. Event time\index{Event time!data pipelines} records when an event occurred; processing time\index{Processing time!data pipelines} records when a worker handled it. A watermark\index{Watermark!stream processing} estimates that event time has advanced far enough to close a window; a late-data policy determines whether later arrivals update, retract, quarantine, or drop its result [@akidau2015]. Thus, watermarks trade freshness against completeness rather than prove that no older event remains.
-
-These mechanisms bound an optimization's blast radius. Buffering absorbs finite bursts or temporary slowdowns but increases recovery state and freshness lag; sustained overload still requires backpressure or more service capacity. Aggressive watermarks reduce delay but exclude more late data, while retries help only when writes are safe to repeat. A reproducible training snapshot must therefore record source and code versions alongside partitioning, replay policy, stable identifiers, watermark state, and late-data decisions. Platform operations uses this contract to keep feature backfills and point-in-time joins from mixing histories.
-
-::: {.column-margin .margin-pointer}
-↪ Feature backfills that replay history under this snapshot contract are operationalized in @sec-ml-operations-scale-backfill-procedures-eb66.
-:::
-
 Balancing ingestion throughput and pipeline stages establishes the baseline delivery rate, but software orchestration alone cannot remove the latency of intermediate memory copies. Bypassing the host DRAM bounce buffer requires a direct data path between storage and accelerator.
 
 ```{python}
@@ -2693,7 +2619,6 @@ class GDSLatency:
     n_gpus_str = fmt_count(Systems.Nodes.DGX_H100.accelerators_per_node, commas=False, label="GPU")
     per_gpu_images_per_s_str = fmt_rate(images_per_s_per_gpu, 'images/s', precision=0, commas=True)
 ```
-
 ## GPUDirect Storage and the CPU Data-Copy Bypass {#sec-storage-gds}
 
 The storage hierarchy can provide enough aggregate bandwidth and still leave GPUs waiting when the CPU copies data for thousands of small transfers. In the traditional path, every shard read bounces through host DRAM before reaching GPU HBM; GPUDirect Storage (GDS) removes that host-memory bounce copy for local or RDMA-attached NVMe\index{NVMe-oF!RDMA-attached storage}, which pays off when the copy itself limits throughput. The CPU still submits and coordinates I/O through the software stack. Understanding the traditional path first makes the GDS optimization clear.
@@ -3054,7 +2979,400 @@ The total number of data copies in this lifecycle is instructive. Each training 
 
 Every copy that leaves the node also needs a network, and the choice of network decides whom a storage burst can disturb. Many training nodes carry a small number of storage-facing network adapters on a separate front-end network, in addition to one compute-fabric adapter per accelerator. Routing staging reads and checkpoint copies over that front-end network isolates them from gradient collectives, but it caps each node's storage bandwidth at a few front-end ports. Routing storage over the compute fabric offers far more bandwidth, and remote GDS reads use exactly that RDMA path, but then a checkpoint burst shares switch buffers and spine links with the job's collectives and must be separated by traffic classes. For the running example, each node's fair share of a `{python} StoragePyramidContext.pfs_bw_tb_per_s_str` file system shared by `{python} StoragePyramidContext.pfs_nodes_str` nodes is roughly `{python} StoragePyramidContext.pfs_per_node_bw_gb_per_s_str`, and copying its roughly `{python} NvmeTierContext.ckpt_node_share_gb_str` checkpoint shard within the `{python} StorageFuelLineContext.checkpoint_interval_attr_str` interval needs far less, so a front-end network can carry it; image workloads that stream hundreds of GB/s across the cluster push designs toward the compute fabric.
 
-The volume of data moved during a `{python} StorageFuelLineContext.training_window_attr_str` training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every `{python} StorageFuelLineContext.checkpoint_interval_str` across `{python} StorageFuelLineContext.run_nodes_str` nodes for `{python} StorageFuelLineContext.training_window_days_str`, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs. The physical data path dictates where bytes move; the remaining question is what each movement costs.
+The volume of data moved during a `{python} StorageFuelLineContext.training_window_attr_str` training run reveals a counterintuitive reality. A single staging copy of the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` serialized dataset from object storage to local NVMe accounts for a modest transfer. The checkpointing process, however, generates a vastly larger data stream. With a roughly `{python} CompleteDataPathCheckpoint.ckpt_total_gb_str` checkpoint created every `{python} StorageFuelLineContext.checkpoint_interval_str` across `{python} StorageFuelLineContext.run_nodes_str` nodes for `{python} StorageFuelLineContext.training_window_days_str`, the system produces approximately `{python} CompleteDataPathCheckpoint.checkpoint_count_str` checkpoints, totaling roughly `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the `{python} CompleteDataPathCheckpoint.tokenized_text_tb_str` training dataset might be read a handful of times (once per epoch), the `{python} CompleteDataPathCheckpoint.ckpt_fleet_total_pb_str` of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) can have a larger impact on overall storage design than training data pipeline optimization for large-model runs. The physical data path dictates where bytes move.
+
+## Checkpoint Storage {#sec-storage-checkpointing}
+
+After a thousand GPUs have been training for six hours, a power supply failure turns checkpoint storage\index{Checkpointing!storage architecture} into the difference between resuming quickly and repeating hours of work. The decisive storage questions are how quickly the most recent checkpoint was saved, where it resides, and whether it can be read back. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. The storage architecture must therefore minimize $\CheckpointWriteTime$, the time the training pipeline pauses to save a checkpoint, while stating when that checkpoint becomes durable and visible for restore. The save interval is an input to this storage analysis; selecting it from failure rates and recovery costs is a separate reliability decision derived in @sec-fault-tolerance-young-daly.
+
+A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with mixed-precision Adam\index{Adam optimizer!checkpoint state size} generates a resumable checkpoint of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The byte contract comprises `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.master_weights_fp32_gb_str` of FP32 master weights, and `{python} CheckpointModelIntro.adam_moments_gb_str` for the two FP32 Adam moments. Learning-rate-scheduler state, random-number-generator state, and the data-loader cursor add little capacity but remain required for deterministic continuation. Gradients are omitted because the restored job recomputes them. Each participating worker process, called a rank, saves its assigned shard simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads. The examples below compare redundant copies with one logical checkpoint partitioned across workers. ZeRO-3 names a training scheme that partitions model and optimizer state; only its resulting shard sizes are needed here, not the training algorithm that produces them.
+
+::: {.column-margin}
+![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Two-bar log-scale ladder: a long gray bar for a naive replicated checkpoint write at 167.3 minutes above a short bar for a ZeRO-3 sharded write at 9.8 seconds, with a double arrow labeled 1,024 times between them."}
+
+*Replicated checkpoint writes take about 1,000 times longer than sharded ones.*
+:::
+
+```{python}
+#| echo: false
+#| label: checkpoint-storm-definition-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT STORM DEFINITION CALCULATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Quantitative significance bullet in the Checkpoint Storm definition.
+# │ Goal: Make the 70B naive-vs-sharded checkpoint arithmetic explicit.
+# │ How: Compute FP16 weights, FP32 master weights, Adam moments, and
+# │      fabric write time at 100 GB/s.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_params, fmt_time
+
+class CheckpointStormDefinition:
+    """Checkpoint-storm arithmetic for the definition callout."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    params = Models.Language.Llama2_70B.parameters
+    params_b = params.to(Bparam).magnitude
+    replicas = Systems.Clusters.Training_1K.total_accelerators
+    bytes_fp16 = BYTES_FP16
+    bytes_fp32 = BYTES_FP32
+    fabric_bw = Systems.Fabrics.InfiniBand_XDR.bandwidth
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    weights = memory_from_params(params, bytes_fp16 / param)
+    master_weights = memory_from_params(params, bytes_fp32 / param)
+    adam_moments = memory_from_params(params, 2 * bytes_fp32 / param)
+    resumable_state = weights + master_weights + adam_moments
+    per_replica_state = resumable_state
+    zero3_total = per_replica_state
+    zero3_write = zero3_total / fabric_bw
+    naive_total = per_replica_state * replicas
+    naive_write = naive_total / fabric_bw
+    naive_write_min = naive_write.to(minute)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(zero3_total.to(GB).magnitude - 980) < 1e-6, "70B resumable checkpoint should be 980 GB")
+    check(naive_write.to(second).magnitude > 10_000, "Naive full-state write at 100 GB/s should exceed 10,000 s for Training_1K replicas")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
+    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
+    master_weights_gb_str = fmt_memory(master_weights, unit=GB, precision=0, commas=False)
+    adam_moments_gb_str = fmt_memory(adam_moments, unit=GB, precision=0, commas=False)
+    zero3_total_tb_str = fmt_memory(zero3_total, unit=TB, precision=2, commas=False)
+    zero3_write_s_str = fmt_time(zero3_write, second, precision=1, commas=False, style='word')
+    naive_total_tb_str = fmt_memory(naive_total, unit=TB, precision=1, commas=False)
+    naive_write_s_str = fmt_time(naive_write, second, precision=1, commas=True, style='word')
+    naive_write_min_str = fmt_time(naive_write_min, minute, precision=1, commas=False, style='word')
+    replicas_str = fmt_count(replicas, commas=True, label="replica")
+```
+
+::: {#dfn-data-storage-checkpoint-storm .callout-definition title="Checkpoint storm"}
+
+***Checkpoint storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
+
+1.  **Significance**: The storm magnitude scales as $\CheckpointWriteTime = \DataparallelDegreeDp \times \text{per-replica state} / \Bandwidth_{\text{ingest}}$, where $\DataparallelDegreeDp$ is the number of replicas writing at once and $\Bandwidth_{\text{ingest}}$ is the aggregate rate at which the target storage tier absorbs writes. Under the chapter's checkpoint contract, a `{python} CheckpointStormDefinition.params_b_str`-parameter model, smaller than the 175B running example, stores `{python} CheckpointStormDefinition.weights_gb_str` of FP16 weights, `{python} CheckpointStormDefinition.master_weights_gb_str` of FP32 master weights, and `{python} CheckpointStormDefinition.adam_moments_gb_str` of Adam moments. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str` (one per GPU of the book's reference cluster, rather than the chapter's `{python} StorageFuelLineContext.run_nodes_str`-node fleet), naively writing that complete state from every replica generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous traffic. At 100 GB/s of aggregate storage ingest bandwidth, the write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall. A coordinated checkpoint protocol writes one logical copy. Replicated data parallelism can select one writer; ZeRO-3 instead distributes that copy across state-owning ranks. In the sharded example the total is roughly `{python} CheckpointStormDefinition.zero3_total_tb_str`, bringing $\CheckpointWriteTime$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. Gradients do not appear in either total because recovery recomputes them.
+2.  **Distinction**: Unlike general I/O contention (which is stochastic and unpredictable), a checkpoint storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
+3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
+
+:::
+
+The severity of a checkpoint storm depends on two factors: the per-node shard size, determined by the model size and the sharding strategy, and the throughput of the first write tier, typically local NVMe. A concrete 175B example shows why the local-write phase, rather than the durable copy to the parallel file system, governs the exposed training pause.
+
+```{python}
+#| echo: false
+#| label: checkpoint-storm-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT STORM STAGING CALCULATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-data-storage-checkpoint-storm.
+# │ Goal: Compute local NVMe pause, PFS async copy time, and exposed overhead.
+# │ How: ZeRO-3 shard = total checkpoint / nodes; local write uses 4 NVMe drives;
+# │      PFS copy uses aggregate PFS bandwidth shared across all nodes.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, Systems
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time
+
+class CheckpointStormCalc:
+    """Tiered checkpoint staging timings for the 175B example."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    fleet = Systems.Clusters.Production_2K
+    storage_path = Systems.Storage.Production2KCheckpointPath
+    nodes = fleet.count
+    local_drive_count = storage_path.local_stage.devices_per_node
+    local_drive_bw = storage_path.local_stage.device.bandwidth
+    pfs_aggregate_bw = storage_path.durable_store.bandwidth
+    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval.to(second)
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    total_checkpoint = Models.Language.GPT3.parameters * CHECKPOINT_RESUME_BYTES_PER_PARAM
+    per_node_shard = total_checkpoint / nodes
+    local_bw = local_drive_count * local_drive_bw
+    local_write = per_node_shard / local_bw
+    pfs_copy = total_checkpoint / pfs_aggregate_bw
+    per_node_pfs_bw = pfs_aggregate_bw / nodes
+    per_node_pfs_copy = per_node_shard / per_node_pfs_bw
+    overhead_pct = (local_write / checkpoint_interval).to("").magnitude * 100
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(0.30 < local_write.to(second).magnitude < 0.40, "Local checkpoint pause should be about 0.34 s")
+    check(2.4 < pfs_copy.to(second).magnitude < 2.5, "PFS async copy should be about 2.45 s")
+    check(abs((pfs_copy - per_node_pfs_copy).to(second).magnitude) < 1e-9, "Aggregate and per-node PFS views must match")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    ckpt_total_gb_str = fmt_memory(total_checkpoint, unit=GB, precision=0, commas=True)
+    per_node_shard_gb_str = fmt_memory(per_node_shard, unit=GB, precision=1, commas=False)
+    local_bw_gb_per_s_str = fmt_bandwidth(local_bw, unit=GB / second, precision=0, commas=False)
+    local_write_s_str = fmt_time(local_write, second, precision=2, commas=False, style='word')
+    total_pfs_tb_str = fmt_memory(total_checkpoint, unit=TB, precision=1, commas=False)
+    pfs_copy_s_str = fmt_time(pfs_copy, second, precision=1, commas=False, style='word')
+    per_node_pfs_bw_gb_per_s_str = fmt_bandwidth(per_node_pfs_bw, unit=GB / second, precision=1, commas=False)
+    overhead_pct_str = fmt_percent(overhead_pct / 100, precision=2, commas=False, style='prose')
+    local_drive_count_str = fmt(local_drive_count, precision=0, commas=False)
+    local_drive_bw_gb_per_s_str = fmt_bandwidth(local_drive_bw, unit=GB / second, precision=0, commas=False)
+    nodes_str = fmt(nodes, precision=0, commas=True)
+    pfs_aggregate_bw_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
+    checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
+    checkpoint_interval_s_str = fmt_time(checkpoint_interval, second, precision=0, commas=False, style='word')
+    pfs_aggregate_bw_gb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=GB / second, precision=0, commas=False)
+```
+
+::: {#nbk-data-storage-checkpoint-storm .callout-notebook title="Tiered checkpoint staging"}
+
+**Problem**: Assume sustained bandwidth, no snapshot-copy, serialization, or coordination overhead, and no interference from background copies. The resulting times are bandwidth lower bounds. A `{python} CheckpointStormCalc.nodes_str`-node cluster saves a 175B-parameter checkpoint every `{python} CheckpointStormCalc.checkpoint_interval_min_str`. Each checkpoint totals `{python} CheckpointModelIntro.ckpt_total_gb_str`. With ZeRO-3, each node saves roughly `{python} CheckpointStormCalc.per_node_shard_gb_str`.
+
+1. **Per-node write to local NVMe** (`{python} CheckpointStormCalc.local_drive_count_str` drives at `{python} CheckpointStormCalc.local_drive_bw_gb_per_s_str` each = `{python} CheckpointStormCalc.local_bw_gb_per_s_str`): `{python} CheckpointStormCalc.per_node_shard_gb_str` $\div$ `{python} CheckpointStormCalc.local_bw_gb_per_s_str` $\approx$ `{python} CheckpointStormCalc.local_write_s_str`.
+2. **Async copy to PFS**\index{Checkpointing!async PFS copy}: `{python} CheckpointStormCalc.nodes_str` $\times$ `{python} CheckpointStormCalc.per_node_shard_gb_str` $\approx$ `{python} CheckpointStormCalc.total_pfs_tb_str` total. If the PFS provides `{python} CheckpointStormCalc.pfs_aggregate_bw_tb_per_s_str` aggregate, the storm completes in roughly `{python} CheckpointStormCalc.pfs_copy_s_str`.
+3. **Per-node PFS bandwidth**\index{Bandwidth!per-node PFS}: If all `{python} CheckpointStormCalc.nodes_str` write simultaneously, each gets `{python} CheckpointStormCalc.pfs_aggregate_bw_gb_per_s_str` $\div$ `{python} CheckpointStormCalc.nodes_str` = `{python} CheckpointStormCalc.per_node_pfs_bw_gb_per_s_str`.
+4. **Training pause**\index{Checkpointing!training pause}: At least `{python} CheckpointStormCalc.local_write_s_str` for the local NVMe write under this model. The PFS copy overlaps with the next training iteration.
+5. **Overhead lower bound**\index{Checkpointing!overhead}: `{python} CheckpointStormCalc.local_write_s_str` pause every `{python} CheckpointStormCalc.checkpoint_interval_s_str` $\approx$ `{python} CheckpointStormCalc.overhead_pct_str` training time lost to checkpointing.
+
+**Systems insight**: Under these `{python} CheckpointStormCalc.pfs_aggregate_bw_tb_per_s_str` aggregate-PFS assumptions, tiered staging reduces checkpoint overhead from about a `{python} CheckpointStormCalc.pfs_copy_s_str` PFS-direct write to a sub-second local write. The training pause can end at the local snapshot boundary before durable publication, but actual pause includes snapshot creation, serialization, and coordination in addition to this byte-transfer lower bound.
+
+:::
+
+The tiered staging\index{Tiered staging!two-phase checkpoint} strategy minimizes $\CheckpointWriteTime$ by writing in two phases. In the first phase, each node writes its checkpoint shard to local NVMe at full bandwidth. With `{python} CheckpointStormCalc.local_drive_count_str` NVMe drives providing `{python} CheckpointStormCalc.local_bw_gb_per_s_str` aggregate, a per-node shard of roughly `{python} CheckpointStormCalc.per_node_shard_gb_str` (a `{python} CheckpointStormCalc.nodes_str`-node ZeRO-3 split of the `{python} CheckpointModelIntro.ckpt_total_gb_str` total checkpoint) completes in roughly `{python} CheckpointStormCalc.local_write_s_str`. In this staging model, the training pipeline can resume after every required local shard has completed and the snapshot is no longer being modified. The local-write calculation excludes snapshot-copy, serialization, and coordination overhead, so it is a bandwidth lower bound on the pause.
+
+In the second phase, a background process asynchronously copies the local checkpoint to the parallel file system for durability. The copy can overlap training, but it still competes for memory, network, and storage service and must drain before repeated saves create an unbounded backlog. If a node fails before its copy completes, the new generation may lose a required shard. Replication to peer nodes' NVMe drives can protect against a single-node loss, provided replicas occupy independent failure domains. Waiting for that replication extends the pause beyond the local-only calculation. A design that resumes earlier must retain the previous committed generation until the new one reaches its declared durability boundary.
+
+Durability alone does not make a distributed checkpoint visible safely. Each rank first writes its shard under an immutable generation identifier, computes a checksum over the completed bytes, and acknowledges the shard only after the target tier has persisted it. A coordinator then writes a manifest\index{Checkpointing!manifest publication} containing the training step, checkpoint schema, expected shard set, sizes, and checksums. The manifest or commit marker is published last using the target backend's atomic publication primitive: an atomic create or rename on a file system, or an immutable manifest plus conditional creation or a versioned pointer under the object store's consistency guarantees. PyTorch Distributed Checkpoint\index{Distributed Checkpoint!manifest publication} exposes the ordering directly: storage writers write rank data before the coordinator's `finish()` operation writes metadata and marks the checkpoint successful, while the storage backend supplies the publication semantics [@pytorchDistributedCheckpointDocs]. Restore logic lists only committed generations, verifies every shard against the manifest, and rejects temporary, partial, or mixed-step state. This ordering separates *writing bytes* from *publishing a restorable checkpoint*: a crash can leave garbage to collect, but it cannot make an incomplete generation appear valid.
+
+The exposed pause and the durability boundary therefore fall at different moments. @Fig-storage-checkpoint-staging aligns these decoupled milestones across four concurrent execution lanes: training pauses only during the local NVMe shard write ($t_0$ to $t_1$), resuming on live state while the parallel file system absorbs the asynchronous copy ($t_1$ to $t_2$) and the coordinator validates checksums before publishing the manifest last ($t_3$).
+
+::: {#fig-storage-checkpoint-staging fig-env="figure" fig-pos="htb" fig-cap="**Two-phase checkpoint staging**: Read the lanes left to right. Training pauses only for the local NVMe write ($t_0$ to $t_1$); the copy to the parallel file system overlaps later training steps, and the coordinator publishes the manifest last ($t_3$). Between $t_1$ and $t_3$ the new generation exists only as staged shards, so the previous committed generation remains the restore point." fig-alt="Timeline with four horizontal lanes labeled training, local NVMe, parallel FS, and coordinator above a time axis marked t0 through t3. A short red paused block in the training lane lines up with a local write block; long blocks show training continuing, an asynchronous copy to the parallel file system, checksum verification, and manifest publication. Brackets below the axis mark the span from t1 to t3 as staged and the span after t3 as restorable."}
+![](images/svg/checkpoint-staging.svg)
+:::
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Checkpoint retention paragraph below — fleet totals over 30-day run
+from mlsysim import Models
+from mlsysim.fmt import fmt, fmt_memory
+
+class CheckpointFleetRetention:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    bytes_per_param_ckpt = CHECKPOINT_RESUME_BYTES_PER_PARAM
+    training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
+    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
+    ckpt_total = Models.Language.GPT3.parameters * bytes_per_param_ckpt
+    checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
+    ckpt_fleet_total = ckpt_total * checkpoint_count_val
+    retention_recent = 3 * ckpt_total
+    retained_every_100_count_val = checkpoint_count_val // 100
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    checkpoint_count_str = fmt(checkpoint_count_val, precision=0)
+    ckpt_fleet_total_pb_str = fmt_memory(ckpt_fleet_total, unit=PB, precision=1, commas=True)
+    retention_recent_tb_str = fmt_memory(retention_recent, unit=TB, precision=2, commas=False)
+    retained_every_100_count_str = fmt(retained_every_100_count_val, precision=0)
+```
+
+The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every `{python} StorageFuelLineContext.checkpoint_interval_str` over a `{python} StorageFuelLineContext.training_window_attr_str` training run generates roughly `{python} CheckpointFleetRetention.checkpoint_count_str` checkpoints, each `{python} CheckpointModelIntro.ckpt_total_gb_str`, for a total of approximately `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` of checkpoint data. Retaining all of them is neither necessary nor economical. The retention policy\index{Checkpointing!retention policy} this run adopts keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint and the final checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` to roughly `{python} CheckpointFleetRetention.retention_recent_tb_str` (three live full checkpoints) while preserving `{python} CheckpointFleetRetention.retained_every_100_count_str` periodic historical snapshots in object storage, plus the final checkpoint when it does not coincide with that schedule, for posttraining analysis.
+
+Incremental checkpointing\index{Incremental checkpointing!delta state} offers a further optimization for reducing $\CheckpointWriteTime$. Rather than saving the entire training state every time, an incremental checkpoint records changed state relative to a declared base or preceding generation. The delta must include changed optimizer and continuation state as well as parameters. For models where a large fraction of parameters are frozen (such as fine-tuning scenarios where only the last few layers are updated), incremental checkpoints can be orders of magnitude smaller than full checkpoints. Restoring a generation requires its base and every intervening delta, so smaller saves add recovery work and dependencies. Periodic full checkpoints bound that chain. The retention policy must preserve each dependency until no retained generation requires it.
+
+Checkpoint storage interacts directly with the system's failure model. From the storage perspective, the design goal is to minimize $\CheckpointWriteTime$ (the time the training pipeline pauses) while defining which failures each saved generation survives. Failures can occur during background replication, so a locally staged generation and a durably committed generation must remain distinct. Reducing $\CheckpointWriteTime$ through tiered staging makes more frequent checkpoints affordable. Minimizing $\CheckpointWriteTime$, however, only matters if the checkpoint can actually be read back; the costlier failure is a checkpoint that was written but never verified as restorable.
+
+::: {#ws-data-storage-gitlab-database-incident .callout-war-story title="The backup that had not been restored (2017)"}
+
+**Context**: On January 31, 2017, a GitLab.com site reliability engineer working a database replication incident accidentally wiped the primary PostgreSQL data directory [@gitlab2017postmortem].
+
+**Mechanism**: All five layered backup paths failed simultaneously: S3 dumps were silently empty due to a version mismatch, Azure disk snapshots were disabled, replication was broken, LVM snapshots were six hours stale, and WAL archiving was unimplemented.
+
+**Impact**: Six hours of production database writes, user comments, and repository metadata were permanently lost, requiring an 18-hour emergency restoration from a staging snapshot.
+
+**Fix**: GitLab instituted automated daily backup restoration testing, unified PostgreSQL versioning across environments, and implemented automated WAL archiving to S3.
+
+**Systems lesson**: Storage reliability is a restore property, not a backup property. A checkpoint, replica, or dump only counts if the team regularly proves that it can be located, validated, and restored under incident conditions. ML systems encounter this exact vulnerability: a model checkpoint written to object storage or a feature store snapshot is useless if silent version mismatches or missing restore tests\index{Checkpointing!restore validation} prevent resuming a multi-day training run after node preemption.
+
+:::
+
+That incident turns checkpoint storage from a capacity question into a restore-design question.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @chk-data-storage-checkpoint-storage-design
+# │ Goal: Prompt parameters for the checkpoint storage design exercise.
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_time
+
+class CheckpointStorageDesignPrompt:
+    nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
+    local_nvme_bw = Systems.Storage.LocalNvmeGen4_7T68x4.aggregate_bandwidth
+    pfs_aggregate_bw = Systems.Storage.PfsOneTbPerSecond.bandwidth
+    step_time = ReferenceStats.StorageTrainingCorpus.StepTime
+    pause = 1 * second  # scenario assumption: checkpoint pause budget
+    pause_steps = (pause / step_time).to("").magnitude
+    check(abs(pause_steps - 5) < 1e-9, "Prose says a 1-second pause costs five iterations")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    nodes_str = fmt_count(nodes, commas=True, label="node")
+    checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
+    local_nvme_bw_gb_per_s_str = fmt_bandwidth(local_nvme_bw, unit=GB / second, precision=0, commas=False)
+    pfs_aggregate_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
+    step_time_ms_str = fmt_time(step_time, ms, precision=0, commas=False)
+```
+
+::: {#chk-data-storage-checkpoint-storage-design .callout-checkpoint title="Checkpoint storage design"}
+
+A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a 175B-parameter model checkpoint every `{python} CheckpointStorageDesignPrompt.checkpoint_interval_min_str`. Each checkpoint is `{python} CheckpointModelIntro.ckpt_total_gb_str` total, distributed across all nodes.
+
+- [ ] **Per-node state**: calculate the per-node checkpoint size.
+- [ ] **Local write**: calculate $\CheckpointWriteTime$ for the local write when each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`.
+- [ ] **Async copy**: calculate the per-node write bandwidth and async-copy time when the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously.
+- [ ] **Tiered staging**: explain why tiered staging (local NVMe first, then async PFS copy) is faster than writing directly to PFS.
+
+:::
+
+### Distributed checkpoint coordination {#sec-storage-distributed-checkpoint}
+
+In a sharded training setup with `{python} CheckpointStorageDesignPrompt.nodes_str`, no single node necessarily holds the complete training state. One node may hold a shard of the optimizer state, while other model-partitioning strategies split the weights themselves across devices. A complete checkpoint therefore requires every node to save its shard, and the checkpoint is publishable only after all expected shards have been durably written and verified against one manifest. This creates a coordination problem: the system must confirm that all `{python} CheckpointStorageDesignPrompt.nodes_str` have finished writing before it exposes the generation for restore.
+
+The simplest approach coordinates a snapshot at one completed training step: all nodes pause, write their shards to local NVMe, then run a cluster-wide acknowledgement operation to confirm completion. Only when every node has acknowledged its write does training resume. Capturing the same step prevents mixing shards from step $i$ with shards from step $i+1$; a barrier after writing cannot repair a snapshot captured inconsistently. The slowest node determines when the completion barrier releases.
+
+Asynchronous checkpointing reduces the training pause by writing in the background. Nodes first coordinate the training step to capture. Each node copies its accelerator-resident shard to a dedicated pinned host-memory buffer, then resumes training and writes the buffer to NVMe in a background thread. The snapshot buffer must remain immutable until the background write finishes; separate live-state buffers allow training to advance without changing the captured generation. If a node fails during the asynchronous write, its local shard may be incomplete. The job must wait for the required writes or peer replication before declaring this generation durable, even if training has already resumed.
+
+The choice between synchronous and asynchronous checkpointing depends on the pause budget and save frequency. A 1-second pause at `{python} CheckpointStorageDesignPrompt.step_time_ms_str` per iteration costs five iterations; whether that overhead is acceptable depends on how much useful training occurs between saves. Asynchronous checkpointing reduces exposed write time when snapshot buffers and background bandwidth are available, but its buffer capacity, contention, and durability delay also enter the decision.
+
+Beyond the choice of synchronous or asynchronous methods, checkpoint format optimization\index{Checkpointing!format optimization} reduces the per-node I/O volume. In the simplest data-parallel setup, every node holds an identical copy of the model weights, so a naive checkpoint would redundantly save the same data from every node. Sharded checkpoint protocols avoid that redundancy by saving shards instead of full replicas. DeepSpeed's zero-redundancy checkpointing\index{Checkpointing!zero-redundancy} uses its ZeRO optimizer-state partitioning: each of the $\AcceleratorsPerNodeNodes$ nodes saves only its $1/\AcceleratorsPerNodeNodes$ shard of the optimizer state, and the system saves one consolidated copy of the weights. PyTorch's Distributed Checkpoint\index{Distributed Checkpoint!rank-sharded data} protocol follows the same storage principle by writing each rank's sharded data to a distinct file.
+
+For the 175B model using ZeRO-3 across `{python} CheckpointStormCalc.nodes_str` nodes, the result is concrete: each node writes only its roughly `{python} CheckpointStormCalc.per_node_shard_gb_str` shard of the total `{python} CheckpointModelIntro.ckpt_total_gb_str` state, reducing the local write from minutes to around a second on one NVMe drive, or well below a second on a local stripe. The tiered-staging derivation earlier in this section already threaded these per-node shard sizes and write times through the running example, and the same arithmetic governs distributed coordination: the local NVMe write bounds one component of the exposed pause, while the durable copy to the parallel file system can overlap subsequent training. Snapshot copying, coordination, and any replication required before resumption also contribute to the actual pause.
+
+With the checkpoint accounting now derived in full, the running example's storage demands can be consolidated against the same hierarchy, so the training dataset, checkpoints, and archive lineage are visible side by side.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: @psp-data-storage-175b-models-storage-footprint
+from mlsysim import Models
+from mlsysim.fmt import fmt, fmt_count, fmt_memory, fmt_ratio
+
+class StorageFootprintTable:
+    gpt3_params = Models.Language.GPT3.parameters
+    training_tokens = ReferenceStats.StorageTrainingCorpus.TrainingTokens
+    compressed_text = ReferenceStats.StorageTrainingCorpus.CompressedSource
+    token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
+    training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
+    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
+    training_nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
+    tokenized_text = training_tokens * token_id_bytes
+    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
+    checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
+    ckpt_fleet_total = ckpt_total * checkpoint_count_val
+    archive_checkpoint_count = checkpoint_count_val // 100 + int(checkpoint_count_val % 100 != 0)
+    archive_lineage = archive_checkpoint_count * ckpt_total + compressed_text + tokenized_text
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
+    tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
+    ckpt_fleet_total_pb_str = fmt_memory(ckpt_fleet_total, unit=PB, precision=1, commas=True)
+    archive_lineage_tb_str = fmt_memory(archive_lineage, unit=TB, precision=1, commas=False, approx=True)
+    epochs_str = fmt_count(1, commas=False, label="epoch")
+    ckpt_io_dominance_factor_str = fmt_ratio(
+        int((ckpt_fleet_total / tokenized_text).to("").magnitude),
+        precision=0,
+        commas=True,
+    )
+    training_nodes_str = fmt_count(training_nodes, commas=False, label="node")
+```
+
+::: {#psp-data-storage-175b-models-storage-footprint .callout-perspective title="The 175B model's storage footprint"}
+
+@Tbl-data-storage-175b-footprint assembles the complete storage picture for the running example, a `{python} StorageFuelLineContext.training_window_attr_str` training run of a 175B-parameter model on `{python} StorageFootprintTable.training_nodes_str`.
+
+| **Category**                                                                                                                                          |                         **Volume**                         | **Primary Tier**                                           |
+|:------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------:|:-----------------------------------------------------------|
+| Training dataset (compressed source)                                                                                                                  |  `{python} StorageFootprintTable.compressed_text_tb_str`   | Object Storage                                             |
+| Training dataset (tokenized, per epoch)                                                                                                               |   `{python} StorageFootprintTable.tokenized_text_tb_str`   | Object Storage $\to$ NVMe cache $\to$ Host DRAM            |
+| Model weights (FP16)                                                                                                                                  |    `{python} CheckpointModelIntro.weights_fp16_gb_str`     | GPU HBM (distributed)                                      |
+| Master weights (FP32)                                                                                                                                 | `{python} CheckpointModelIntro.master_weights_fp32_gb_str` | GPU HBM (ZeRO-partitioned)                                 |
+| Adam moments (two FP32 states)                                                                                                                        |    `{python} CheckpointModelIntro.adam_moments_gb_str`     | GPU HBM (ZeRO-partitioned)                                 |
+| Single resumable checkpoint                                                                                                                           |     `{python} CheckpointModelIntro.ckpt_total_gb_str`      | NVMe $\to$ PFS $\to$ Object Storage                        |
+| All checkpoints (`{python} StorageFuelLineContext.training_window_days_str`, `{python} StorageFuelLineContext.checkpoint_interval_attr_str` interval) |  `{python} StorageFootprintTable.ckpt_fleet_total_pb_str`  | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
+| Archive (retained checkpoints + dataset)                                                                                                              |  `{python} StorageFootprintTable.archive_lineage_tb_str`   | Glacier                                                    |
+
+: **175B-Parameter Training Storage Footprint**: Volume and primary storage tier for each data category in a `{python} StorageFuelLineContext.training_window_attr_str`, `{python} StorageFuelLineContext.run_nodes_str`-node training run. Note that the Archive category routes to Glacier to exploit the long-term cold storage economics discussed earlier. {#tbl-data-storage-175b-footprint}
+
+The total data moved through the hierarchy\index{Storage!total data movement} is approximately `{python} StorageFootprintTable.ckpt_fleet_total_pb_str` of checkpoint data plus `{python} StorageFootprintTable.tokenized_text_tb_str` per `{python} StorageFootprintTable.epochs_str` of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over `{python} StorageFootprintTable.ckpt_io_dominance_factor_str`.
+
+:::
+
+Checkpoints preserve model state against hardware failure, while feature stores and model registries manage the versioned artifacts that feed training and serving. At fleet scale, their storage consequence is a shared contract: immutable content identifiers and manifests let many experiments reuse unchanged artifacts without copying entire datasets or model packages.
+
+## Data versioning and pipeline orchestration at scale {#sec-storage-data-versioning-orchestration}
+
+Knowing where data lives is only half the story; at scale the storage infrastructure must also record which version of the data each run uses and how it flows through the pipeline. Versioning turns the storage hierarchy into a reproducibility system: the fleet must know not only which bytes it read, but which preprocessing code, shuffle seed, schema, and integrity checks produced those bytes before the run began.
+
+::: {#lhs-data-storage-archetype-b-dlrm-at-scale-feature-store-latency .callout-lighthouse title="Archetype B (DLRM at Scale): Feature store latency"}
+
+While Archetype A (GPT-4/Llama-3) deals with static, versioned datasets of trillions of tokens, Archetype B (DLRM at Scale) deals with dynamic, high-velocity feature streams. For a recommendation system, the "ground truth" changes every second as users click and interact. This forces a move from simple file-based storage to a feature store\index{Feature store!point-in-time correctness} architecture that must solve the point-in-time correctness problem: ensuring that the features retrieved for training exactly match what the model would have seen at the moment of inference, without "leaking" future information.
+
+:::
+
+That same reproducibility requirement becomes harder when the inputs are live features rather than immutable text shards. Feature store architectures address point-in-time correctness[^fn-point-in-time] by maintaining an immutable feature ledger or a "time-travel" query engine, significantly increasing storage complexity.
+
+[^fn-point-in-time]: **Point-in-Time Correctness**\index{Point-in-time correctness!feature stores}: In recommendation systems, features (for example, user click history) must be retrieved exactly as they existed at the moment of the historical interaction. Retrieving current features for a past event, a form of temporal leakage, inflates training accuracy but causes the model to fail in production. At petabyte scale, the ledger that prevents it must retain every feature version a training query might request.
+
+```{python}
+#| echo: false
+#| label: hash-validation-cost
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HASH VALIDATION COST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: SHA-256 validation footnote in §Data versioning.
+# │ Goal: Make the 100 TB integrity-check core-hour estimate reproducible.
+# │ How: Dataset MB / effective per-core throughput / seconds per hour.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_bandwidth, fmt_count, fmt_memory
+
+class HashValidationCost:
+    """Pipeline-level SHA-256 validation cost assumption."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    dataset = 100 * TB  # scenario validation dataset size assumption
+    throughput_per_core = 500 * (MB / second)  # scenario per-core SHA-256 rate (modern server core)
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    validation_time = dataset / throughput_per_core
+    core_hours = validation_time.to(hour).magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(50 < core_hours < 60, "100 TB at 500 MB/s/core should be about 56 core-hours")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    dataset_tb_str = fmt_memory(dataset, unit=TB, precision=0, commas=False)
+    throughput_mb_per_s_str = fmt_bandwidth(throughput_per_core, unit=MB / second, precision=0, commas=False)
+    cpu_core_hours_str = fmt_count(core_hours, precision=1, label="CPU-core hour", allow_fractional=True)
+```
+
+At fleet scale, even an immutable collection of files produces a distributed stream of consumed samples whose versions and order must be recorded. Foundation-model runs can last weeks or months; in the `{python} StorageFuelLineContext.training_window_attr_str` running example, the dataset version and sampling policy must remain identifiable throughout the run. Samples and shuffle order can change across epochs, but the pipeline must record enough state to reconstruct the sequence consumed. Otherwise, an engineer cannot distinguish between a model regression and a silent change in the input distribution. Dataset versioning\index{Dataset versioning!cryptographic snapshotting} provides the necessary "Git for data" capability by snapshotting the cryptographic hashes[^fn-hash-computation-overhead] of every data shard, the exact preprocessing code used for tokenization, and the random seeds governing the global shuffle. This level of rigor is essential for audit trails and for debugging the subtle "loss spikes" that characterize large-scale training, where engineers must be able to replay the exact batch that caused a divergence to determine if the cause was a corrupted data sample or a numerical instability in the optimizer.
+
+[^fn-hash-computation-overhead]: **Hash Cost (SHA-256)**\index{Cryptographic hash!validation cost}: Verifying the integrity of a `{python} HashValidationCost.dataset_tb_str` dataset using SHA-256 consumes approximately `{python} HashValidationCost.cpu_core_hours_str` at a per-core hashing rate of `{python} HashValidationCost.throughput_mb_per_s_str`. The work parallelizes across shards, but it still competes with decoding for host cores and must read every byte, so the validation step is best pipelined with ingestion rather than run as a separate pass before the fleet starts.
+
+At petabyte scale, the data pipeline has to make every transformation reproducible. Raw documents are cleaned, tokenized, packed into training examples, and sharded across storage tiers. Each stage writes an immutable artifact, and each artifact records the input version, code version, schema, and statistical checks it satisfied. Once those dependencies are explicit, the pipeline forms a directed acyclic graph: later artifacts depend on earlier artifacts, and no stage is allowed to rewrite its own history. When a training job starts, the cluster manager verifies that each worker's local NVMe shards match the data snapshot declared for the run. Treating the data pipeline as a graph of versioned artifacts rather than a simple file transfer makes silent data drift detectable and attributable to a specific stage, code version, or input snapshot.
+
+#### Execution semantics for distributed transformations {#sec-storage-distributed-transformation-semantics}
+
+Versioned artifacts identify *what* a pipeline produced; execution semantics determine whether failures can change that result. The storage system's part in that contract is the commit boundary, the point at which a stage's output becomes durable and visible downstream, because a restarted stage decides what to replay by comparing its input position with the last committed output. Two service-rate effects govern how much uncommitted work accumulates before that boundary. Partition skew\index{Partition skew!data pipelines} lets one key that owns disproportionate work hold a stage open while the rest of the fleet idles, and backpressure\index{Backpressure!data pipelines} propagates a slow downstream stage's limit upstream by slowing admission or bounding in-flight data, a control response to overload rather than another name for slow processing.
+
+Failures create a separate correctness question. At-most-once processing\index{Processing semantics!at-most-once} can lose an output because it does not replay uncertain work; at-least-once processing\index{Processing semantics!at-least-once} can duplicate an effect because it does. An effectively exactly-once outcome\index{Processing semantics!exactly-once} requires replayable inputs and idempotent writes\index{Idempotent writes!data pipelines} or transactional output keyed by a stable event or transaction identifier [@akidau2015]. Transport delivery alone cannot provide this application-level guarantee.
+
+::: {#exmp-storage-acknowledgment-gap .callout-example title="The acknowledgment gap"}
+
+**Failure trace**: A worker commits event `e42`, then fails before its acknowledgment. Skipping the uncertain event risks loss; replaying a non-idempotent effect duplicates it. Writing by stable key `(feature_version, e42)` prevents the duplicate.
+
+**Systems lesson**: Exactly-once belongs at the output commit boundary, whose record must bind the input position, transformation version, stable identifier, and commit state.
+
+:::
+
+Streaming adds a time boundary to the contract. Event time\index{Event time!data pipelines} records when an event occurred; processing time\index{Processing time!data pipelines} records when a worker handled it. A watermark\index{Watermark!stream processing} estimates that event time has advanced far enough to close a window; a late-data policy determines whether later arrivals update, retract, quarantine, or drop its result [@akidau2015]. Thus, watermarks trade freshness against completeness rather than prove that no older event remains.
+
+These mechanisms bound an optimization's blast radius. Buffering absorbs finite bursts or temporary slowdowns but increases recovery state and freshness lag; sustained overload still requires backpressure or more service capacity. Aggressive watermarks reduce delay but exclude more late data, while retries help only when writes are safe to repeat. A reproducible training snapshot must therefore record source and code versions alongside partitioning, replay policy, stable identifiers, watermark state, and late-data decisions. Platform operations uses this contract to keep feature backfills and point-in-time joins from mixing histories.
+
+::: {.column-margin .margin-pointer}
+↪ Feature backfills that replay history under this snapshot contract are operationalized in @sec-ml-operations-scale-backfill-procedures-eb66.
+:::
 
 ## Storage Economics {#sec-storage-economics}
 
@@ -3428,7 +3746,7 @@ Checkpoint writes also impose a pause while a consistent snapshot reaches the fi
 
 These technologies are not yet broadly deployed at the scale of the largest ML clusters, but they illustrate the direction of the storage hierarchy's evolution. The fundamental principle remains unchanged: faster, more expensive storage closer to the accelerator, with slower, cheaper storage at the periphery. What changes is the *granularity* of the tiers and the *size of the gaps* between them.
 
-### Storage for inference workloads {#sec-storage-inference}
+## Storage for inference workloads {#sec-storage-inference}
 
 The storage requirements for inference differ fundamentally from full-corpus training. Training streams datasets and writes checkpoints in bursts. In the weight-resident serving baseline, inference reads model weights at startup and then serves requests from HBM. The primary storage challenge shifts from sustained dataset throughput to model-loading latency, although retrieval indexes and KV-cache offload add serving-time I/O when those mechanisms are enabled.
 
@@ -3532,350 +3850,7 @@ For graph-based ANN, this architectural pattern shifts the primary storage bottl
 
 Graph-based retrieval therefore spends storage budget on index levels that keep random traversal inside the serving latency service-level objective. A disk-backed graph is economical only if the extra SSD accesses do not erase the quality gain from searching a larger corpus. Flat, IVF, and PQ designs move that budget toward scan bandwidth, partition probes, or decompression and approximation error. The same hierarchy now supports bulk model loading, request-scoped KV state, and retrieval, each with a distinct service-rate contract.
 
-While serving demands low-latency retrieval and bounded KV-cache expansion, training imposes an opposite challenge: absorbing multi-terabyte bursts of checkpoint state to protect days of computation against hardware failure.
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Checkpoint section intro — model scale and checkpoint size
-from mlsysim import Models, ReferenceStats
-from mlsysim.core.units import BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GB
-from mlsysim.fmt import check, fmt_memory, fmt_params
-
-class CheckpointModelIntro:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt3_params = Models.Language.GPT3.parameters
-    weights_fp16 = gpt3_params * BYTES_FP16
-    master_weights_fp32 = gpt3_params * BYTES_FP32
-    adam_moments = gpt3_params * BYTES_ADAM_STATE
-    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
-    check(weights_fp16 + master_weights_fp32 + adam_moments == ckpt_total, "Checkpoint component bytes must sum to total.")
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpt3_params_b_str = fmt_params(gpt3_params, scale="B", precision=0, commas=False)
-    ckpt_total_gb_str = fmt_memory(ckpt_total, unit=GB, precision=0, commas=True)
-    weights_fp16_gb_str = fmt_memory(weights_fp16, unit=GB, precision=0, commas=False)
-    master_weights_fp32_gb_str = fmt_memory(master_weights_fp32, unit=GB, precision=0, commas=False)
-    adam_moments_gb_str = fmt_memory(adam_moments, unit=GB, precision=0, commas=True)
-```
-
-## Checkpoint Storage {#sec-storage-checkpointing}
-
-After a thousand GPUs have been training for six hours, a power supply failure turns checkpoint storage\index{Checkpointing!storage architecture} into the difference between resuming quickly and repeating hours of work. The decisive storage questions are how quickly the most recent checkpoint was saved, where it resides, and whether it can be read back. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. The storage architecture must therefore minimize $\CheckpointWriteTime$, the time the training pipeline pauses to save a checkpoint, while stating when that checkpoint becomes durable and visible for restore. The save interval is an input to this storage analysis; selecting it from failure rates and recovery costs is a separate reliability decision derived in @sec-fault-tolerance-young-daly.
-
-A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with mixed-precision Adam\index{Adam optimizer!checkpoint state size} generates a resumable checkpoint of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The byte contract comprises `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.master_weights_fp32_gb_str` of FP32 master weights, and `{python} CheckpointModelIntro.adam_moments_gb_str` for the two FP32 Adam moments. Learning-rate-scheduler state, random-number-generator state, and the data-loader cursor add little capacity but remain required for deterministic continuation. Gradients are omitted because the restored job recomputes them. Each participating worker process, called a rank, saves its assigned shard simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads. The examples below compare redundant copies with one logical checkpoint partitioned across workers. ZeRO-3 names a training scheme that partitions model and optimizer state; only its resulting shard sizes are needed here, not the training algorithm that produces them.
-
-::: {.column-margin}
-![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Two-bar log-scale ladder: a long gray bar for a naive replicated checkpoint write at 167.3 minutes above a short bar for a ZeRO-3 sharded write at 9.8 seconds, with a double arrow labeled 1,024 times between them."}
-
-*Replicated checkpoint writes take about 1,000 times longer than sharded ones.*
-:::
-
-```{python}
-#| echo: false
-#| label: checkpoint-storm-definition-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT STORM DEFINITION CALCULATION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Quantitative significance bullet in the Checkpoint Storm definition.
-# │ Goal: Make the 70B naive-vs-sharded checkpoint arithmetic explicit.
-# │ How: Compute FP16 weights, FP32 master weights, Adam moments, and
-# │      fabric write time at 100 GB/s.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_params, fmt_time
-
-class CheckpointStormDefinition:
-    """Checkpoint-storm arithmetic for the definition callout."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    params = Models.Language.Llama2_70B.parameters
-    params_b = params.to(Bparam).magnitude
-    replicas = Systems.Clusters.Training_1K.total_accelerators
-    bytes_fp16 = BYTES_FP16
-    bytes_fp32 = BYTES_FP32
-    fabric_bw = Systems.Fabrics.InfiniBand_XDR.bandwidth
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    weights = memory_from_params(params, bytes_fp16 / param)
-    master_weights = memory_from_params(params, bytes_fp32 / param)
-    adam_moments = memory_from_params(params, 2 * bytes_fp32 / param)
-    resumable_state = weights + master_weights + adam_moments
-    per_replica_state = resumable_state
-    zero3_total = per_replica_state
-    zero3_write = zero3_total / fabric_bw
-    naive_total = per_replica_state * replicas
-    naive_write = naive_total / fabric_bw
-    naive_write_min = naive_write.to(minute)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(abs(zero3_total.to(GB).magnitude - 980) < 1e-6, "70B resumable checkpoint should be 980 GB")
-    check(naive_write.to(second).magnitude > 10_000, "Naive full-state write at 100 GB/s should exceed 10,000 s for Training_1K replicas")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    params_b_str = fmt_params(params, scale="B", precision=0, commas=False)
-    weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
-    master_weights_gb_str = fmt_memory(master_weights, unit=GB, precision=0, commas=False)
-    adam_moments_gb_str = fmt_memory(adam_moments, unit=GB, precision=0, commas=False)
-    zero3_total_tb_str = fmt_memory(zero3_total, unit=TB, precision=2, commas=False)
-    zero3_write_s_str = fmt_time(zero3_write, second, precision=1, commas=False, style='word')
-    naive_total_tb_str = fmt_memory(naive_total, unit=TB, precision=1, commas=False)
-    naive_write_s_str = fmt_time(naive_write, second, precision=1, commas=True, style='word')
-    naive_write_min_str = fmt_time(naive_write_min, minute, precision=1, commas=False, style='word')
-    replicas_str = fmt_count(replicas, commas=True, label="replica")
-```
-
-::: {#dfn-data-storage-checkpoint-storm .callout-definition title="Checkpoint storm"}
-
-***Checkpoint storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in an ML training fleet save model state simultaneously.
-
-1.  **Significance**: The storm magnitude scales as $\CheckpointWriteTime = \DataparallelDegreeDp \times \text{per-replica state} / \Bandwidth_{\text{ingest}}$, where $\DataparallelDegreeDp$ is the number of replicas writing at once and $\Bandwidth_{\text{ingest}}$ is the aggregate rate at which the target storage tier absorbs writes. Under the chapter's checkpoint contract, a `{python} CheckpointStormDefinition.params_b_str`-parameter model, smaller than the 175B running example, stores `{python} CheckpointStormDefinition.weights_gb_str` of FP16 weights, `{python} CheckpointStormDefinition.master_weights_gb_str` of FP32 master weights, and `{python} CheckpointStormDefinition.adam_moments_gb_str` of Adam moments. With vanilla data parallelism across `{python} CheckpointStormDefinition.replicas_str` (one per GPU of the book's reference cluster, rather than the chapter's `{python} StorageFuelLineContext.run_nodes_str`-node fleet), naively writing that complete state from every replica generates `{python} CheckpointStormDefinition.naive_total_tb_str` of simultaneous traffic. At 100 GB/s of aggregate storage ingest bandwidth, the write takes roughly `{python} CheckpointStormDefinition.naive_write_s_str`, or over `{python} CheckpointStormDefinition.naive_write_min_str` of training stall. A coordinated checkpoint protocol writes one logical copy. Replicated data parallelism can select one writer; ZeRO-3 instead distributes that copy across state-owning ranks. In the sharded example the total is roughly `{python} CheckpointStormDefinition.zero3_total_tb_str`, bringing $\CheckpointWriteTime$ down to roughly `{python} CheckpointStormDefinition.zero3_write_s_str`. Gradients do not appear in either total because recovery recomputes them.
-2.  **Distinction**: Unlike general I/O contention (which is stochastic and unpredictable), a checkpoint storm is synchronous and periodic: every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
-3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes `{python} CheckpointStormDefinition.naive_write_s_str`, checkpointing every 100 steps means spending most of the run on checkpoint I/O rather than useful training.
-
-:::
-
-The severity of a checkpoint storm depends on two factors: the per-node shard size, determined by the model size and the sharding strategy, and the throughput of the first write tier, typically local NVMe. A concrete 175B example shows why the local-write phase, rather than the durable copy to the parallel file system, governs the exposed training pause.
-
-```{python}
-#| echo: false
-#| label: checkpoint-storm-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT STORM STAGING CALCULATION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @nbk-data-storage-checkpoint-storm.
-# │ Goal: Compute local NVMe pause, PFS async copy time, and exposed overhead.
-# │ How: ZeRO-3 shard = total checkpoint / nodes; local write uses 4 NVMe drives;
-# │      PFS copy uses aggregate PFS bandwidth shared across all nodes.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Systems
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time
-
-class CheckpointStormCalc:
-    """Tiered checkpoint staging timings for the 175B example."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    fleet = Systems.Clusters.Production_2K
-    storage_path = Systems.Storage.Production2KCheckpointPath
-    nodes = fleet.count
-    local_drive_count = storage_path.local_stage.devices_per_node
-    local_drive_bw = storage_path.local_stage.device.bandwidth
-    pfs_aggregate_bw = storage_path.durable_store.bandwidth
-    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval.to(second)
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    total_checkpoint = Models.Language.GPT3.parameters * CHECKPOINT_RESUME_BYTES_PER_PARAM
-    per_node_shard = total_checkpoint / nodes
-    local_bw = local_drive_count * local_drive_bw
-    local_write = per_node_shard / local_bw
-    pfs_copy = total_checkpoint / pfs_aggregate_bw
-    per_node_pfs_bw = pfs_aggregate_bw / nodes
-    per_node_pfs_copy = per_node_shard / per_node_pfs_bw
-    overhead_pct = (local_write / checkpoint_interval).to("").magnitude * 100
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(0.30 < local_write.to(second).magnitude < 0.40, "Local checkpoint pause should be about 0.34 s")
-    check(2.4 < pfs_copy.to(second).magnitude < 2.5, "PFS async copy should be about 2.45 s")
-    check(abs((pfs_copy - per_node_pfs_copy).to(second).magnitude) < 1e-9, "Aggregate and per-node PFS views must match")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    ckpt_total_gb_str = fmt_memory(total_checkpoint, unit=GB, precision=0, commas=True)
-    per_node_shard_gb_str = fmt_memory(per_node_shard, unit=GB, precision=1, commas=False)
-    local_bw_gb_per_s_str = fmt_bandwidth(local_bw, unit=GB / second, precision=0, commas=False)
-    local_write_s_str = fmt_time(local_write, second, precision=2, commas=False, style='word')
-    total_pfs_tb_str = fmt_memory(total_checkpoint, unit=TB, precision=1, commas=False)
-    pfs_copy_s_str = fmt_time(pfs_copy, second, precision=1, commas=False, style='word')
-    per_node_pfs_bw_gb_per_s_str = fmt_bandwidth(per_node_pfs_bw, unit=GB / second, precision=1, commas=False)
-    overhead_pct_str = fmt_percent(overhead_pct / 100, precision=2, commas=False, style='prose')
-    local_drive_count_str = fmt(local_drive_count, precision=0, commas=False)
-    local_drive_bw_gb_per_s_str = fmt_bandwidth(local_drive_bw, unit=GB / second, precision=0, commas=False)
-    nodes_str = fmt(nodes, precision=0, commas=True)
-    pfs_aggregate_bw_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
-    checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
-    checkpoint_interval_s_str = fmt_time(checkpoint_interval, second, precision=0, commas=False, style='word')
-    pfs_aggregate_bw_gb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=GB / second, precision=0, commas=False)
-```
-
-::: {#nbk-data-storage-checkpoint-storm .callout-notebook title="Tiered checkpoint staging"}
-
-**Problem**: Assume sustained bandwidth, no snapshot-copy, serialization, or coordination overhead, and no interference from background copies. The resulting times are bandwidth lower bounds. A `{python} CheckpointStormCalc.nodes_str`-node cluster saves a 175B-parameter checkpoint every `{python} CheckpointStormCalc.checkpoint_interval_min_str`. Each checkpoint totals `{python} CheckpointModelIntro.ckpt_total_gb_str`. With ZeRO-3, each node saves roughly `{python} CheckpointStormCalc.per_node_shard_gb_str`.
-
-1. **Per-node write to local NVMe** (`{python} CheckpointStormCalc.local_drive_count_str` drives at `{python} CheckpointStormCalc.local_drive_bw_gb_per_s_str` each = `{python} CheckpointStormCalc.local_bw_gb_per_s_str`): `{python} CheckpointStormCalc.per_node_shard_gb_str` $\div$ `{python} CheckpointStormCalc.local_bw_gb_per_s_str` $\approx$ `{python} CheckpointStormCalc.local_write_s_str`.
-2. **Async copy to PFS**\index{Checkpointing!async PFS copy}: `{python} CheckpointStormCalc.nodes_str` $\times$ `{python} CheckpointStormCalc.per_node_shard_gb_str` $\approx$ `{python} CheckpointStormCalc.total_pfs_tb_str` total. If the PFS provides `{python} CheckpointStormCalc.pfs_aggregate_bw_tb_per_s_str` aggregate, the storm completes in roughly `{python} CheckpointStormCalc.pfs_copy_s_str`.
-3. **Per-node PFS bandwidth**\index{Bandwidth!per-node PFS}: If all `{python} CheckpointStormCalc.nodes_str` write simultaneously, each gets `{python} CheckpointStormCalc.pfs_aggregate_bw_gb_per_s_str` $\div$ `{python} CheckpointStormCalc.nodes_str` = `{python} CheckpointStormCalc.per_node_pfs_bw_gb_per_s_str`.
-4. **Training pause**\index{Checkpointing!training pause}: At least `{python} CheckpointStormCalc.local_write_s_str` for the local NVMe write under this model. The PFS copy overlaps with the next training iteration.
-5. **Overhead lower bound**\index{Checkpointing!overhead}: `{python} CheckpointStormCalc.local_write_s_str` pause every `{python} CheckpointStormCalc.checkpoint_interval_s_str` $\approx$ `{python} CheckpointStormCalc.overhead_pct_str` training time lost to checkpointing.
-
-**Systems insight**: Under these `{python} CheckpointStormCalc.pfs_aggregate_bw_tb_per_s_str` aggregate-PFS assumptions, tiered staging reduces checkpoint overhead from about a `{python} CheckpointStormCalc.pfs_copy_s_str` PFS-direct write to a sub-second local write. The training pause can end at the local snapshot boundary before durable publication, but actual pause includes snapshot creation, serialization, and coordination in addition to this byte-transfer lower bound.
-
-:::
-
-The tiered staging\index{Tiered staging!two-phase checkpoint} strategy minimizes $\CheckpointWriteTime$ by writing in two phases. In the first phase, each node writes its checkpoint shard to local NVMe at full bandwidth. With `{python} CheckpointStormCalc.local_drive_count_str` NVMe drives providing `{python} CheckpointStormCalc.local_bw_gb_per_s_str` aggregate, a per-node shard of roughly `{python} CheckpointStormCalc.per_node_shard_gb_str` (a `{python} CheckpointStormCalc.nodes_str`-node ZeRO-3 split of the `{python} CheckpointModelIntro.ckpt_total_gb_str` total checkpoint) completes in roughly `{python} CheckpointStormCalc.local_write_s_str`. In this staging model, the training pipeline can resume after every required local shard has completed and the snapshot is no longer being modified. The local-write calculation excludes snapshot-copy, serialization, and coordination overhead, so it is a bandwidth lower bound on the pause.
-
-In the second phase, a background process asynchronously copies the local checkpoint to the parallel file system for durability. The copy can overlap training, but it still competes for memory, network, and storage service and must drain before repeated saves create an unbounded backlog. If a node fails before its copy completes, the new generation may lose a required shard. Replication to peer nodes' NVMe drives can protect against a single-node loss, provided replicas occupy independent failure domains. Waiting for that replication extends the pause beyond the local-only calculation. A design that resumes earlier must retain the previous committed generation until the new one reaches its declared durability boundary.
-
-Durability alone does not make a distributed checkpoint visible safely. Each rank first writes its shard under an immutable generation identifier, computes a checksum over the completed bytes, and acknowledges the shard only after the target tier has persisted it. A coordinator then writes a manifest\index{Checkpointing!manifest publication} containing the training step, checkpoint schema, expected shard set, sizes, and checksums. The manifest or commit marker is published last using the target backend's atomic publication primitive: an atomic create or rename on a file system, or an immutable manifest plus conditional creation or a versioned pointer under the object store's consistency guarantees. PyTorch Distributed Checkpoint\index{Distributed Checkpoint!manifest publication} exposes the ordering directly: storage writers write rank data before the coordinator's `finish()` operation writes metadata and marks the checkpoint successful, while the storage backend supplies the publication semantics [@pytorchDistributedCheckpointDocs]. Restore logic lists only committed generations, verifies every shard against the manifest, and rejects temporary, partial, or mixed-step state. This ordering separates *writing bytes* from *publishing a restorable checkpoint*: a crash can leave garbage to collect, but it cannot make an incomplete generation appear valid.
-
-The exposed pause and the durability boundary therefore fall at different moments. @Fig-storage-checkpoint-staging aligns these decoupled milestones across four concurrent execution lanes: training pauses only during the local NVMe shard write ($t_0$ to $t_1$), resuming on live state while the parallel file system absorbs the asynchronous copy ($t_1$ to $t_2$) and the coordinator validates checksums before publishing the manifest last ($t_3$).
-
-::: {#fig-storage-checkpoint-staging fig-env="figure" fig-pos="htb" fig-cap="**Two-phase checkpoint staging**: Read the lanes left to right. Training pauses only for the local NVMe write ($t_0$ to $t_1$); the copy to the parallel file system overlaps later training steps, and the coordinator publishes the manifest last ($t_3$). Between $t_1$ and $t_3$ the new generation exists only as staged shards, so the previous committed generation remains the restore point." fig-alt="Timeline with four horizontal lanes labeled training, local NVMe, parallel FS, and coordinator above a time axis marked t0 through t3. A short red paused block in the training lane lines up with a local write block; long blocks show training continuing, an asynchronous copy to the parallel file system, checksum verification, and manifest publication. Brackets below the axis mark the span from t1 to t3 as staged and the span after t3 as restorable."}
-![](images/svg/checkpoint-staging.svg)
-:::
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Checkpoint retention paragraph below — fleet totals over 30-day run
-from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_memory
-
-class CheckpointFleetRetention:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bytes_per_param_ckpt = CHECKPOINT_RESUME_BYTES_PER_PARAM
-    training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
-    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
-    ckpt_total = Models.Language.GPT3.parameters * bytes_per_param_ckpt
-    checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
-    ckpt_fleet_total = ckpt_total * checkpoint_count_val
-    retention_recent = 3 * ckpt_total
-    retained_every_100_count_val = checkpoint_count_val // 100
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    checkpoint_count_str = fmt(checkpoint_count_val, precision=0)
-    ckpt_fleet_total_pb_str = fmt_memory(ckpt_fleet_total, unit=PB, precision=1, commas=True)
-    retention_recent_tb_str = fmt_memory(retention_recent, unit=TB, precision=2, commas=False)
-    retained_every_100_count_str = fmt(retained_every_100_count_val, precision=0)
-```
-
-The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every `{python} StorageFuelLineContext.checkpoint_interval_str` over a `{python} StorageFuelLineContext.training_window_attr_str` training run generates roughly `{python} CheckpointFleetRetention.checkpoint_count_str` checkpoints, each `{python} CheckpointModelIntro.ckpt_total_gb_str`, for a total of approximately `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` of checkpoint data. Retaining all of them is neither necessary nor economical. The retention policy\index{Checkpointing!retention policy} this run adopts keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint and the final checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} CheckpointFleetRetention.ckpt_fleet_total_pb_str` to roughly `{python} CheckpointFleetRetention.retention_recent_tb_str` (three live full checkpoints) while preserving `{python} CheckpointFleetRetention.retained_every_100_count_str` periodic historical snapshots in object storage, plus the final checkpoint when it does not coincide with that schedule, for posttraining analysis.
-
-Incremental checkpointing\index{Incremental checkpointing!delta state} offers a further optimization for reducing $\CheckpointWriteTime$. Rather than saving the entire training state every time, an incremental checkpoint records changed state relative to a declared base or preceding generation. The delta must include changed optimizer and continuation state as well as parameters. For models where a large fraction of parameters are frozen (such as fine-tuning scenarios where only the last few layers are updated), incremental checkpoints can be orders of magnitude smaller than full checkpoints. Restoring a generation requires its base and every intervening delta, so smaller saves add recovery work and dependencies. Periodic full checkpoints bound that chain. The retention policy must preserve each dependency until no retained generation requires it.
-
-Checkpoint storage interacts directly with the system's failure model. From the storage perspective, the design goal is to minimize $\CheckpointWriteTime$ (the time the training pipeline pauses) while defining which failures each saved generation survives. Failures can occur during background replication, so a locally staged generation and a durably committed generation must remain distinct. Reducing $\CheckpointWriteTime$ through tiered staging makes more frequent checkpoints affordable. Minimizing $\CheckpointWriteTime$, however, only matters if the checkpoint can actually be read back; the costlier failure is a checkpoint that was written but never verified as restorable.
-
-::: {#ws-data-storage-gitlab-database-incident .callout-war-story title="The backup that had not been restored (2017)"}
-
-**Context**: On January 31, 2017, a GitLab.com site reliability engineer working a database replication incident accidentally wiped the primary PostgreSQL data directory [@gitlab2017postmortem].
-
-**Mechanism**: All five layered backup paths failed simultaneously: S3 dumps were silently empty due to a version mismatch, Azure disk snapshots were disabled, replication was broken, LVM snapshots were six hours stale, and WAL archiving was unimplemented.
-
-**Impact**: Six hours of production database writes, user comments, and repository metadata were permanently lost, requiring an 18-hour emergency restoration from a staging snapshot.
-
-**Fix**: GitLab instituted automated daily backup restoration testing, unified PostgreSQL versioning across environments, and implemented automated WAL archiving to S3.
-
-**Systems lesson**: Storage reliability is a restore property, not a backup property. A checkpoint, replica, or dump only counts if the team regularly proves that it can be located, validated, and restored under incident conditions. ML systems encounter this exact vulnerability: a model checkpoint written to object storage or a feature store snapshot is useless if silent version mismatches or missing restore tests\index{Checkpointing!restore validation} prevent resuming a multi-day training run after node preemption.
-
-:::
-
-That incident turns checkpoint storage from a capacity question into a restore-design question.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @chk-data-storage-checkpoint-storage-design
-# │ Goal: Prompt parameters for the checkpoint storage design exercise.
-from mlsysim.fmt import fmt, fmt_bandwidth, fmt_time
-
-class CheckpointStorageDesignPrompt:
-    nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
-    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
-    local_nvme_bw = Systems.Storage.LocalNvmeGen4_7T68x4.aggregate_bandwidth
-    pfs_aggregate_bw = Systems.Storage.PfsOneTbPerSecond.bandwidth
-    step_time = ReferenceStats.StorageTrainingCorpus.StepTime
-    pause = 1 * second  # scenario assumption: checkpoint pause budget
-    pause_steps = (pause / step_time).to("").magnitude
-    check(abs(pause_steps - 5) < 1e-9, "Prose says a 1-second pause costs five iterations")
-
-    # ┌── 4. OUTPUT ───────────────────────────────────────
-    nodes_str = fmt_count(nodes, commas=True, label="node")
-    checkpoint_interval_min_str = fmt_time(checkpoint_interval, minute, precision=0, commas=False, style='word')
-    local_nvme_bw_gb_per_s_str = fmt_bandwidth(local_nvme_bw, unit=GB / second, precision=0, commas=False)
-    pfs_aggregate_tb_per_s_str = fmt_bandwidth(pfs_aggregate_bw, unit=TB / second, precision=0, commas=False)
-    step_time_ms_str = fmt_time(step_time, ms, precision=0, commas=False)
-```
-
-::: {#chk-data-storage-checkpoint-storage-design .callout-checkpoint title="Checkpoint storage design"}
-
-A training cluster of `{python} CheckpointStorageDesignPrompt.nodes_str` saves a 175B-parameter model checkpoint every `{python} CheckpointStorageDesignPrompt.checkpoint_interval_min_str`. Each checkpoint is `{python} CheckpointModelIntro.ckpt_total_gb_str` total, distributed across all nodes.
-
-- [ ] **Per-node state**: calculate the per-node checkpoint size.
-- [ ] **Local write**: calculate $\CheckpointWriteTime$ for the local write when each node writes to local NVMe at `{python} CheckpointStorageDesignPrompt.local_nvme_bw_gb_per_s_str`.
-- [ ] **Async copy**: calculate the per-node write bandwidth and async-copy time when the parallel file system provides `{python} CheckpointStorageDesignPrompt.pfs_aggregate_tb_per_s_str` aggregate and all `{python} CheckpointStorageDesignPrompt.nodes_str` write simultaneously.
-- [ ] **Tiered staging**: explain why tiered staging (local NVMe first, then async PFS copy) is faster than writing directly to PFS.
-
-:::
-
-### Distributed checkpoint coordination {#sec-storage-distributed-checkpoint}
-
-In a sharded training setup with `{python} CheckpointStorageDesignPrompt.nodes_str`, no single node necessarily holds the complete training state. One node may hold a shard of the optimizer state, while other model-partitioning strategies split the weights themselves across devices. A complete checkpoint therefore requires every node to save its shard, and the checkpoint is publishable only after all expected shards have been durably written and verified against one manifest. This creates a coordination problem: the system must confirm that all `{python} CheckpointStorageDesignPrompt.nodes_str` have finished writing before it exposes the generation for restore.
-
-The simplest approach coordinates a snapshot at one completed training step: all nodes pause, write their shards to local NVMe, then run a cluster-wide acknowledgement operation to confirm completion. Only when every node has acknowledged its write does training resume. Capturing the same step prevents mixing shards from step $i$ with shards from step $i+1$; a barrier after writing cannot repair a snapshot captured inconsistently. The slowest node determines when the completion barrier releases.
-
-Asynchronous checkpointing reduces the training pause by writing in the background. Nodes first coordinate the training step to capture. Each node copies its accelerator-resident shard to a dedicated pinned host-memory buffer, then resumes training and writes the buffer to NVMe in a background thread. The snapshot buffer must remain immutable until the background write finishes; separate live-state buffers allow training to advance without changing the captured generation. If a node fails during the asynchronous write, its local shard may be incomplete. The job must wait for the required writes or peer replication before declaring this generation durable, even if training has already resumed.
-
-The choice between synchronous and asynchronous checkpointing depends on the pause budget and save frequency. A 1-second pause at `{python} CheckpointStorageDesignPrompt.step_time_ms_str` per iteration costs five iterations; whether that overhead is acceptable depends on how much useful training occurs between saves. Asynchronous checkpointing reduces exposed write time when snapshot buffers and background bandwidth are available, but its buffer capacity, contention, and durability delay also enter the decision.
-
-Beyond the choice of synchronous or asynchronous methods, checkpoint format optimization\index{Checkpointing!format optimization} reduces the per-node I/O volume. In the simplest data-parallel setup, every node holds an identical copy of the model weights, so a naive checkpoint would redundantly save the same data from every node. Sharded checkpoint protocols avoid that redundancy by saving shards instead of full replicas. DeepSpeed's zero-redundancy checkpointing\index{Checkpointing!zero-redundancy} uses its ZeRO optimizer-state partitioning: each of the $\AcceleratorsPerNodeNodes$ nodes saves only its $1/\AcceleratorsPerNodeNodes$ shard of the optimizer state, and the system saves one consolidated copy of the weights. PyTorch's Distributed Checkpoint\index{Distributed Checkpoint!rank-sharded data} protocol follows the same storage principle by writing each rank's sharded data to a distinct file.
-
-For the 175B model using ZeRO-3 across `{python} CheckpointStormCalc.nodes_str` nodes, the result is concrete: each node writes only its roughly `{python} CheckpointStormCalc.per_node_shard_gb_str` shard of the total `{python} CheckpointModelIntro.ckpt_total_gb_str` state, reducing the local write from minutes to around a second on one NVMe drive, or well below a second on a local stripe. The tiered-staging derivation earlier in this section already threaded these per-node shard sizes and write times through the running example, and the same arithmetic governs distributed coordination: the local NVMe write bounds one component of the exposed pause, while the durable copy to the parallel file system can overlap subsequent training. Snapshot copying, coordination, and any replication required before resumption also contribute to the actual pause.
-
-With the checkpoint accounting now derived in full, the running example's storage demands can be consolidated against the same hierarchy, so the training dataset, checkpoints, and archive lineage are visible side by side.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @psp-data-storage-175b-models-storage-footprint
-from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_count, fmt_memory, fmt_ratio
-
-class StorageFootprintTable:
-    gpt3_params = Models.Language.GPT3.parameters
-    training_tokens = ReferenceStats.StorageTrainingCorpus.TrainingTokens
-    compressed_text = ReferenceStats.StorageTrainingCorpus.CompressedSource
-    token_id_bytes = ReferenceStats.StorageTrainingCorpus.TokenIdBytes
-    training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
-    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
-    training_nodes = Systems.Clusters.Production_2K.count  # the chapter's 256-node running cluster
-    tokenized_text = training_tokens * token_id_bytes
-    ckpt_total = gpt3_params * CHECKPOINT_RESUME_BYTES_PER_PARAM
-    checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
-    ckpt_fleet_total = ckpt_total * checkpoint_count_val
-    archive_checkpoint_count = checkpoint_count_val // 100 + int(checkpoint_count_val % 100 != 0)
-    archive_lineage = archive_checkpoint_count * ckpt_total + compressed_text + tokenized_text
-
-    # ┌── 4. OUTPUT ───────────────────────────────────────
-    compressed_text_tb_str = fmt_memory(compressed_text, unit=TB, precision=0, commas=False)
-    tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
-    ckpt_fleet_total_pb_str = fmt_memory(ckpt_fleet_total, unit=PB, precision=1, commas=True)
-    archive_lineage_tb_str = fmt_memory(archive_lineage, unit=TB, precision=1, commas=False, approx=True)
-    epochs_str = fmt_count(1, commas=False, label="epoch")
-    ckpt_io_dominance_factor_str = fmt_ratio(
-        int((ckpt_fleet_total / tokenized_text).to("").magnitude),
-        precision=0,
-        commas=True,
-    )
-    training_nodes_str = fmt_count(training_nodes, commas=False, label="node")
-```
-
-::: {#psp-data-storage-175b-models-storage-footprint .callout-perspective title="The 175B model's storage footprint"}
-
-@Tbl-data-storage-175b-footprint assembles the complete storage picture for the running example, a `{python} StorageFuelLineContext.training_window_attr_str` training run of a 175B-parameter model on `{python} StorageFootprintTable.training_nodes_str`.
-
-| **Category**                                                                                                                                          |                         **Volume**                         | **Primary Tier**                                           |
-|:------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------:|:-----------------------------------------------------------|
-| Training dataset (compressed source)                                                                                                                  |  `{python} StorageFootprintTable.compressed_text_tb_str`   | Object Storage                                             |
-| Training dataset (tokenized, per epoch)                                                                                                               |   `{python} StorageFootprintTable.tokenized_text_tb_str`   | Object Storage $\to$ NVMe cache $\to$ Host DRAM            |
-| Model weights (FP16)                                                                                                                                  |    `{python} CheckpointModelIntro.weights_fp16_gb_str`     | GPU HBM (distributed)                                      |
-| Master weights (FP32)                                                                                                                                 | `{python} CheckpointModelIntro.master_weights_fp32_gb_str` | GPU HBM (ZeRO-partitioned)                                 |
-| Adam moments (two FP32 states)                                                                                                                        |    `{python} CheckpointModelIntro.adam_moments_gb_str`     | GPU HBM (ZeRO-partitioned)                                 |
-| Single resumable checkpoint                                                                                                                           |     `{python} CheckpointModelIntro.ckpt_total_gb_str`      | NVMe $\to$ PFS $\to$ Object Storage                        |
-| All checkpoints (`{python} StorageFuelLineContext.training_window_days_str`, `{python} StorageFuelLineContext.checkpoint_interval_attr_str` interval) |  `{python} StorageFootprintTable.ckpt_fleet_total_pb_str`  | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
-| Archive (retained checkpoints + dataset)                                                                                                              |  `{python} StorageFootprintTable.archive_lineage_tb_str`   | Glacier                                                    |
-
-: **175B-Parameter Training Storage Footprint**: Volume and primary storage tier for each data category in a `{python} StorageFuelLineContext.training_window_attr_str`, `{python} StorageFuelLineContext.run_nodes_str`-node training run. Note that the Archive category routes to Glacier to exploit the long-term cold storage economics discussed earlier. {#tbl-data-storage-175b-footprint}
-
-The total data moved through the hierarchy\index{Storage!total data movement} is approximately `{python} StorageFootprintTable.ckpt_fleet_total_pb_str` of checkpoint data plus `{python} StorageFootprintTable.tokenized_text_tb_str` per `{python} StorageFootprintTable.epochs_str` of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over `{python} StorageFootprintTable.ckpt_io_dominance_factor_str`.
-
-:::
-
-Checkpoints preserve model state against hardware failure, while feature stores and model registries manage the versioned artifacts that feed training and serving. At fleet scale, their storage consequence is a shared contract: immutable content identifiers and manifests let many experiments reuse unchanged artifacts without copying entire datasets or model packages.
 
 ## The Synthetic Fuel Line {#sec-storage-synthetic-fuel}
 
