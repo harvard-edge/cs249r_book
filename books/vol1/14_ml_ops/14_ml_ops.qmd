@@ -1570,6 +1570,26 @@ These controls prepare an artifact for release, but deployment must still establ
 
 A model that passes every offline gate has still not made a single production decision. Between the validated checkpoint and the first user-facing prediction lie packaging, conversion to a serving runtime, staged exposure to live traffic, and a path back if the new version misbehaves, and at each step the artifact users see can drift from the artifact that was evaluated. Deployment transforms a static checkpoint into a versioned, reproducible execution artifact; serving allocates accelerator memory, stages input batches, and schedules compute kernels to satisfy latency SLOs under dynamic request loads. Operations owns the seams between the two: proving that what ships is what was validated, limiting how much traffic a bad version can reach, and keeping rollback fast enough to use.
 
+### Validating the serving artifact {#sec-ml-operations-model-format-optimization-c9d6}
+
+The artifact that reaches the serving fleet is rarely the checkpoint that passed evaluation. Before deployment, the model is usually compiled from eager framework code into a static graph for a specific runtime and often lowered in precision. Each conversion buys speed with portability, and each can change what the model computes, so the operational obligation is to prove that the converted artifact still behaves like the model that was validated.
+
+::: {.column-margin .margin-pointer}
+↩ Inference runtimes and the precision choices they support for serving are established in @sec-model-serving-inference-runtime-selection-5eef.
+:::
+
+That proof must target the failure modes that conversion introduces silently\index{Model Optimization!conversion validation}. Consider a team that deploys an INT8-quantized model after verifying only throughput improvement: classification accuracy drops on rare but high-value edge cases, and the degradation goes undetected for weeks because aggregate metrics remain within SLO bounds. The first validation layer is numerical equivalence, comparing optimized outputs against the original model on a representative test set with application-specific divergence thresholds. That check is necessary but insufficient, because a static calibration slice is not live traffic: rare inputs, out-of-distribution examples, and subgroup-specific cases can expose quantization artifacts that aggregate test metrics hide, so the comparison must be disaggregated by the same cohorts that production monitoring tracks (@sec-ml-operations-production-monitoring-5e1b).
+
+The second layer is operational validation. Memory footprint must be measured at peak runtime utilization, including dynamic allocations during inference, since some optimizations trade increased runtime memory for computational speed. Warm-up behavior varies by runtime: Accelerated Linear Algebra (XLA)\index{XLA!warm-up compilation} may JIT-compile kernels during initial execution, whereas TensorRT\index{TensorRT!model optimization} selects tactics and builds an engine before deployment; loading that engine can still add startup latency. Runtime version compatibility then closes the loop. Deployment configurations need explicit version pinning\index{Version pinning!inference runtime}, because even a minor runtime upgrade can change kernel selection, and with it both latency and numerical results, in an artifact whose weights never changed. An unpinned runtime is an untracked input to @eq-model-reproducibility.
+
+::: {#chk-ml-ops-release-evidence .callout-checkpoint title="Evidence for a release"}
+
+- [ ] **Promotion evidence**: A shadow model has acceptable latency and similar output distributions, but outcome labels have not arrived. What has been established, and what quality evidence is still missing?
+- [ ] **Recovery state**: A canary changes an embedding dimension. Which artifacts and cached state must a tested rollback restore together?
+- [ ] **Converted artifact**: Explain why passing aggregate accuracy before quantization does not replace numerical, slice-level, and runtime checks after conversion.
+
+:::
+
 ### Model deployment {#sec-ml-operations-model-deployment-b9b9}
 
 Consider a fraud detection model that achieves 99.2 percent precision in the development environment. An engineer exports the weights, copies them to a production server, and discovers the model predicts every transaction as legitimate: the production server runs a different version of the feature extraction library, producing inputs the model has never seen. This scenario illustrates why deployment is a systems engineering problem rather than a simple file transfer. Packaging, testing, and tracking ML models\index{Model deployment!packaging and serving} for reliable production deployment requires treating the model weights, runtime dependencies, and preprocessing configuration as a single deployable unit. Containerizing the model artifact and serving runtime[^fn-containerization-ml-deploy] packages user-space dependencies, runtime libraries, and environment variables into an immutable image, enforcing environment parity between development and cluster nodes.
@@ -1750,26 +1770,6 @@ To maintain lineage and auditability, teams track model artifacts, including scr
 [^fn-mlflow-model-registry]: **MLflow**\index{MLflow!experiment tracking}: An open-source MLOps framework that couples artifact storage (S3/GCS) with metadata DBs (PostgreSQL) to record hyperparameter runs, model binary hashes, and deployment stage transitions. The systems trade-off is centralizing lineage tracking vs. incurring database connection bottlenecks during massive parallel hyperparameter sweeps.
 
 [^fn-ray-distributed-ml]: **Ray**\index{Ray!distributed ML}: A distributed computing framework from UC Berkeley [@moritz2018ray] that provides a unified task and actor interface, backed by a distributed scheduler and fault-tolerant store. The broader MLOps lesson is that fragmented infrastructure creates translation points where preprocessing logic, normalization constants, tokenizer versions, or artifact formats can diverge silently. Shared execution abstractions can reduce that fragmentation, but training-serving skew still requires explicit consistency checks across data, features, and serving code.
-
-### Validating the serving artifact {#sec-ml-operations-model-format-optimization-c9d6}
-
-The artifact that reaches the serving fleet is rarely the checkpoint that passed evaluation. Before deployment, the model is usually compiled from eager framework code into a static graph for a specific runtime and often lowered in precision. Each conversion buys speed with portability, and each can change what the model computes, so the operational obligation is to prove that the converted artifact still behaves like the model that was validated.
-
-::: {.column-margin .margin-pointer}
-↩ Inference runtimes and the precision choices they support for serving are established in @sec-model-serving-inference-runtime-selection-5eef.
-:::
-
-That proof must target the failure modes that conversion introduces silently\index{Model Optimization!conversion validation}. Consider a team that deploys an INT8-quantized model after verifying only throughput improvement: classification accuracy drops on rare but high-value edge cases, and the degradation goes undetected for weeks because aggregate metrics remain within SLO bounds. The first validation layer is numerical equivalence, comparing optimized outputs against the original model on a representative test set with application-specific divergence thresholds. That check is necessary but insufficient, because a static calibration slice is not live traffic: rare inputs, out-of-distribution examples, and subgroup-specific cases can expose quantization artifacts that aggregate test metrics hide, so the comparison must be disaggregated by the same cohorts that production monitoring tracks (@sec-ml-operations-production-monitoring-5e1b).
-
-The second layer is operational validation. Memory footprint must be measured at peak runtime utilization, including dynamic allocations during inference, since some optimizations trade increased runtime memory for computational speed. Warm-up behavior varies by runtime: Accelerated Linear Algebra (XLA)\index{XLA!warm-up compilation} may JIT-compile kernels during initial execution, whereas TensorRT\index{TensorRT!model optimization} selects tactics and builds an engine before deployment; loading that engine can still add startup latency. Runtime version compatibility then closes the loop. Deployment configurations need explicit version pinning\index{Version pinning!inference runtime}, because even a minor runtime upgrade can change kernel selection, and with it both latency and numerical results, in an artifact whose weights never changed. An unpinned runtime is an untracked input to @eq-model-reproducibility.
-
-::: {#chk-ml-ops-release-evidence .callout-checkpoint title="Evidence for a release"}
-
-- [ ] **Promotion evidence**: A shadow model has acceptable latency and similar output distributions, but outcome labels have not arrived. What has been established, and what quality evidence is still missing?
-- [ ] **Recovery state**: A canary changes an embedding dimension. Which artifacts and cached state must a tested rollback restore together?
-- [ ] **Converted artifact**: Explain why passing aggregate accuracy before quantization does not replace numerical, slice-level, and runtime checks after conversion.
-
-:::
 
 ### Inference serving {#sec-ml-operations-inference-serving-3f9a}
 
@@ -3167,6 +3167,10 @@ Similarly, bulkhead patterns\index{Bulkhead pattern!resource isolation}[^fn-bulk
 
 Consensus algorithms establish agreement among nodes; they cannot determine whether a model prediction is correct when ground truth is delayed or unavailable. Replicating a model across multiple nodes or voting across ensemble members provides redundancy against crash faults, but it cannot resolve silent semantic errors when all replicas share the same inductive biases or training distribution blind spots. These reliability patterns nevertheless help distinguish robust MLOps implementations from fragile ones when their guarantees are applied within scope.
 
+## Case Studies {#sec-ml-operations-case-studies-641d}
+
+
+
 ### Contextualizing MLOps {#sec-ml-operations-contextualizing-mlops-194a}
 
 Standard operational patterns must adapt to physical and organizational constraints. Every ML system operates within a specific context that shapes implementation: physical constraints (edge compute, power budgets), regulatory requirements (healthcare, finance), or organizational scale (team size, skill distribution). A standard CI/CD pipeline may be infeasible without direct host access; monitoring may require indirect signals or on-device anomaly detection; data collection may be limited by privacy regulations. These adaptations are expressions of maturity under constraint, not departures from foundational principles.
@@ -3272,7 +3276,6 @@ The economic trade-offs become concrete in two architectural studies in @sec-ml-
 
 :::
 
-## Case Studies {#sec-ml-operations-case-studies-641d}
 
 Operational constraints in machine learning systems are governed by the physical envelope of the serving hardware and the failure consequences of the application. A battery-powered wearable operates under milliwatt power budgets, constrained on-device SRAM, and narrow telemetry bandwidth over Bluetooth Low Energy. In contrast, regulated AI-enabled medical devices require evidence and change controls appropriate to their intended use. FDA guidance for predetermined change control plans describes planned modifications, validation methods, and impact assessment [@fda2025pccp]. These disparate environments dictate how engineering teams manage data pipelines, model artifacts, and hardware execution across the lifecycle. Edge architectures spend their engineering budgets bridging the hardware asymmetry between high-throughput cloud training clusters and microcontrollers, whereas clinical systems spend that budget on provenance tracking, cohort monitoring, and human-in-the-loop validation gates.
 
