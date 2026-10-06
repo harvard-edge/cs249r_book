@@ -1056,353 +1056,6 @@ The next sections develop these complementary levers in turn: prune static waste
 
 Quantifying these compound trade-offs requires determining whether nominal sample reduction translates into true end-to-end efficiency without silently compromising generalization. Answering that question requires a disciplined measurement framework: quantitative metrics that balance arithmetic savings, data movement overhead, and empirical task quality across the complete pipeline.
 
-## Measurement Framework {#sec-data-selection-measurement-framework-733b}
-
-Deploying a model trained on an aggressively filtered dataset can yield unexpected regressions in production: an autonomous vehicle perception model might maintain high aggregate precision while failing on rare pedestrian crossings pruned as low-density noise. The cross-layer stack makes a disciplined measurement framework\index{Measurement framework!data selection metrics} essential. Every data selection technique claims to improve efficiency, but only rigorous measurement separates genuine training savings from shifted computational debt or degradation on safety-critical tail distributions. The core metrics in @sec-data-selection-core-metrics-32e9 tie sample reduction to task accuracy, arithmetic throughput, and deployment slice coverage so that a smaller dataset is judged by what it preserves under production stress, rather than by the raw volume it discards alone.
-
-### Core metrics {#sec-data-selection-core-metrics-32e9}
-
-The core metrics connect sample reduction to model quality instead of reporting accuracy alone, and they are the measurable proxies for the information-compute ratio (@sec-data-selection-informationcompute-ratio-8c0b). Because ICR's numerator cannot be observed directly, performance-per-data and the learning curve stand in for learning gained per sample, which becomes learning per FLOP once per-sample cost is fixed. The compression ratio measures how much of the denominator a selection removes at fixed quality. They measure accuracy gain per sample (performance-per-data), cumulative learning efficiency across dataset scales (area under the learning curve), and dataset reduction at a target accuracy (data compression ratio).
-
-#### Performance-per-data {.unnumbered}
-
-The most direct metric, **performance-per-data (PPD)**\index{Performance-per-data!metric definition}, measures accuracy gain per sample:
-$$
-\text{PPD}(n) = \frac{\text{Accuracy}(n) - \text{Accuracy}(0)}{n}
-$$
-where $n$ is the number of training samples. A higher PPD indicates greater average improvement per sample over the stated interval. Its shape must be measured because diminishing returns and their onset are workload-dependent.
-
-#### Area under the learning curve {.unnumbered}
-
-Rather than comparing at a single point, the **area under the learning curve**\index{Area under the learning curve!definition} (AULC) integrates performance across all dataset sizes:
-$$
-\text{AULC} = \int_0^D \text{Accuracy}(n) \, dn
-$$
-where $n$ is the dataset size and $D$ is the total dataset size.
-
-For the same metric and integration range, a higher AULC means stronger integrated performance across dataset sizes, though one strategy need not outperform the other at every size. Comparisons must use the same upper limit $D$ or normalize the integral.
-
-#### Data compression ratio {.unnumbered}
-
-For coreset methods, the **data compression ratio**\index{Data compression ratio!definition} (DCR) measures how much data reduction is achieved at a target accuracy:
-$$
-\text{DCR} = \frac{D_{\text{full}}}{D_{\text{coreset}}} \text{ at } \text{Accuracy}_{\text{target}}
-$$
-
-A DCR of 5$\times$ means the coreset achieves target accuracy with 20 percent of the data.
-
-### The compute-optimal frontier {#sec-data-selection-computeoptimal-frontier-24ba}
-
-While the core metrics in @sec-data-selection-core-metrics-32e9 measure individual techniques, a higher-level diagnostic is also needed to test whether the overall training strategy is data-limited or compute-limited. Neural scaling-law experiments [@kaplan2020scaling; @hoffmann2022chinchilla] fit power-law relationships over particular model families, datasets, and compute ranges. Controlled sweeps can use those fitted relationships to compare model and data allocations, but no single ratio diagnoses every training run.
-
-The Chinchilla study\index{Chinchilla!compute-optimal training}[^fn-chinchilla-scaling-law] [@hoffmann2022chinchilla] fit a compute-optimal balance between model size and training data within its experimental regime. Allocations on either side of that fitted balance used the study's compute budget less effectively.
-
-[^fn-chinchilla-scaling-law]: **Chinchilla**\index{Chinchilla!compute-optimal scaling}: Chinchilla is a 70-billion-parameter language model trained on 1.4 trillion tokens. In the experiments reported by @hoffmann2022chinchilla, it outperformed the larger GPT-3 on most evaluated tasks under a similar training-compute budget. The fitted compute-optimal allocation scaled parameters and tokens at roughly equal rates within the study's experimental regime; it is not a universal prescription for every architecture, dataset, or training recipe.
-
-The optimal balance defines a **compute-optimal frontier**\index{Compute-optimal frontier!Chinchilla scaling laws}: the best achievable performance at each compute budget when data and model size are properly balanced. @Fig-compute-optimal-frontier plots this diagnostic curve over normalized training compute, isolating the optimal operating envelope on the green frontier from the compute-starved and data-starved allocations charted in the suboptimal region below.
-
-::: {#fig-compute-optimal-frontier fig-env="figure" fig-pos="H" fig-cap="**Illustrative Compute-Optimal Frontier**: The green curve is a conceptual frontier over normalized compute, not a fitted result from Chinchilla. Points below it illustrate allocations that a controlled model-size and token-count sweep might identify as data- or compute-limited." fig-alt="Semi-log plot with normalized training compute from 10^0 to 10^3 on the logarithmic x-axis and model performance from 50 to 100 on the y-axis. A green compute-optimal frontier bounds a gray-shaded suboptimal region. Orange Data-starved and red Compute-starved points below the curve have dashed arrows labeled Better data selection and More training, respectively; a violet Optimal point lies on the curve."}
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMPUTE-OPTIMAL FRONTIER (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-compute-optimal-frontier—Measuring Data Selection section
-# │
-# │ Goal: Plot compute-optimal frontier curve; show data-starved vs compute-
-# │       starved operating points and arrows toward frontier.
-# │ Show: Log-log axes; green frontier curve; orange/red/purple points; labels.
-# │ How: Exponential saturation curve; scatter + annotate; book_style.setup_plot().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot compute-optimal frontier curve; show data-starved vs. compute-
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.6))
-
-# Compute-optimal frontier curve
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-x = np.logspace(0, 3, 200)
-y = 95 - 45 * np.exp(-0.8 * np.log(x))
-
-# Suboptimal region fill
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.fill_between(x, 50, y, color='gray', alpha=0.08)
-
-# Frontier curve
-ax.plot(x, y, color=COLORS['GreenLine'], linewidth=2.5, label='Compute-optimal frontier', zorder=3)
-
-# Data-starved point
-ax.scatter([100], [72], color=COLORS['OrangeLine'], s=100, zorder=4, edgecolors='white')
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.annotate('', xy=(100, 83), xytext=(100, 73), arrowprops=dict(arrowstyle='->', color=COLORS['OrangeLine'], lw=1.5, linestyle='dashed'))
-ax.text(
-    110,
-    78,
-    'Better data\nselection',
-    fontsize=8,
-    color=COLORS['OrangeLine'],
-    va='center',
-    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
-)
-ax.text(
-    100,
-    70,
-    'Data-starved',
-    fontsize=9,
-    fontweight='bold',
-    color=COLORS['OrangeLine'],
-    ha='center',
-    va='center',
-    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
-)
-
-# Compute-starved point
-ax.scatter([10], [62], color=COLORS['RedLine'], s=100, zorder=4, edgecolors='white')
-ax.annotate('', xy=(28, 74), xytext=(11, 63), arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=1.5, linestyle='dashed'))
-ax.text(
-    12,
-    68,
-    'More\ntraining',
-    fontsize=8,
-    color=COLORS['RedLine'],
-    va='bottom',
-    ha='center',
-    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
-)
-ax.text(
-    10,
-    60,
-    'Compute-starved',
-    fontsize=9,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    ha='center',
-    va='center',
-    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
-)
-
-# Optimal point—lands exactly on the frontier curve y = 95 - 45 * x^-0.8 at x = 300.
-ax.scatter([300], [94.6], color=COLORS['VioletLine'], s=100, zorder=4, edgecolors='white')
-ax.text(
-    295,
-    92.7,
-    'Optimal',
-    fontsize=9,
-    fontweight='bold',
-    color=COLORS['VioletLine'],
-    ha='center',
-    va='center',
-    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
-)
-
-# Suboptimal region label
-ax.text(25, 54, 'Suboptimal region', fontsize=9, color='gray', bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2))
-
-ax.set_xscale('log')
-ax.set_xlabel('Training Compute (normalized units)')
-ax.set_ylabel('Model Performance (Accuracy)')
-ax.set_xlim(1, 1000)
-ax.set_ylim(50, 100)
-ax.set_xticks([1, 10, 100, 1000])
-ax.set_xticklabels(['$10^0$', '$10^1$', '$10^2$', '$10^3$'])
-ax.set_yticks([50, 60, 70, 80, 90, 100])
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-Against a frontier fitted from controlled sweeps, an operating point's location motivates further experiments. The directional vectors charted in @fig-compute-optimal-frontier illustrate two candidate interventions: additional training compute and improved data selection at fixed compute. Controlled changes to model size, data, and training allocation determine which intervention helps; a point below the frontier does not identify a unique remedy. Points near a fitted frontier remain specific to the model family, dataset, objective, and compute range used to estimate it.
-
-```{python}
-#| echo: false
-#| label: chinchilla-diagnostic-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHINCHILLA D/P DIAGNOSTIC ANCHORS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Interpreting the Chinchilla result" subsection and the
-# │          [^fn-chinchilla-token-ratio] footnote.
-# │
-# │ Goal:    Anchor the GPT-3 / Llama 2 70B reference D/P ratios.
-# │ Show:    Reference D/P ratios for both models and the
-# │          token-count growth implied by doubling the compute budget.
-# │ How:     Divide training tokens by parameter counts for each reference
-# │          model; compute sqrt(2) - 1 for the doubling growth percent.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-
-import mlsysim.core.units as c
-from mlsysim.fmt import fmt_percent, fmt_ratio
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ChinchillaDiagnostic:
-    # LOAD
-    from mlsysim import Models
-
-    m_gpt3 = Models.Language.GPT3
-    m_llama2 = Models.Language.Llama2_70B
-
-    tokens_per_param_opt = 20
-    llama2_70b_training_tokens = 2.0 * c.TRILLION * c.count
-    compute_multiplier = 2.0
-
-    # EXECUTE
-    gpt3_dn_ratio = (Models.Language.GPT3.training_tokens.to(c.count) / m_gpt3.parameters.to(c.param)).to("").magnitude
-    llama2_dn_ratio = (llama2_70b_training_tokens / m_llama2.parameters.to(c.param)).to("").magnitude
-    doubling_token_growth_pct = (math.sqrt(compute_multiplier) - 1) * 100
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tokens_per_param_opt_str = fmt_ratio(tokens_per_param_opt, precision=0, commas=False)
-    gpt3_dn_ratio_str = fmt_ratio(gpt3_dn_ratio, precision=1, commas=False)
-    llama2_dn_ratio_str = fmt_ratio(llama2_dn_ratio, precision=1, commas=False)
-    doubling_token_growth_pct_str = fmt_percent(doubling_token_growth_pct / 100, precision=1, commas=False, style='prose')
-```
-
-#### Interpreting the Chinchilla result {.unnumbered}
-
-Within the fitted Chinchilla regime, compute-optimal model parameters and training tokens grew at roughly equal rates.[^fn-chinchilla-token-ratio] Specifically, training a dense transformer requires approximately $6\Parameters\DatasetSize$ FLOPs ($2\Parameters\DatasetSize$ for the forward pass and $4\Parameters\DatasetSize$ for the backward pass, where $\Parameters$ is parameter count and $\DatasetSize$ is token count). Under an equal scaling regime where parameters and tokens grow proportionally ($\Parameters \propto \DatasetSize$), total compute scales quadratically ($\Operations \propto \DatasetSize^2$), directly implying that optimal token count scales as the square root of the compute budget ($\DatasetSize_{\text{opt}} \propto \sqrt{\Operations}$). Doubling compute therefore corresponds to about $\sqrt{2} - 1$, or `{python} ChinchillaDiagnostic.doubling_token_growth_pct_str`, more tokens under those assumptions. The commonly quoted `{python} ChinchillaDiagnostic.tokens_per_param_opt_str` tokens per parameter is a useful reference point from that study, not a universal optimum.
-
-[^fn-chinchilla-token-ratio]: [offset=-1mm] **Tokens per parameter**\index{Chinchilla!tokens-per-parameter diagnostic}: The ratio $\DatasetSize/\Parameters$ compares training tokens with model parameters; GPT-3 used approximately `{python} ChinchillaDiagnostic.gpt3_dn_ratio_str` tokens per parameter [@brown2020language], while Llama 2 70B used approximately `{python} ChinchillaDiagnostic.llama2_dn_ratio_str` [@touvron2023llama2]. These descriptive ratios do not establish whether either run is compute-optimal under a different architecture, corpus, objective, or hardware budget. Controlled model-size and token-count sweeps are required for that diagnosis.
-
-#### Applying the diagnostic {.unnumbered}
-
-If a training run underperforms expectations, extending one run can reveal whether additional optimization steps still help, but a plateau does not identify data starvation by itself. Learning-rate schedules, optimization limits, model capacity, and data quality can all produce a plateau. A reliable diagnosis compares controlled runs that vary model size, token count, and compute allocation while holding the evaluation protocol fixed.
-
-@Fig-ppd-curve charts this divergence over varying dataset fractions: the efficient selection curve (solid blue) bends sharply into an accuracy plateau near 25 percent of the data, whereas uniform random sampling (dashed gray) ascends gradually across the entire budget. The horizontal separation marks the reduction in required samples, while the vertical red arrow isolates the substantial performance gap achieved under an identical 20 percent data budget.
-
-::: {#fig-ppd-curve fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Diminishing Returns of Data**: The synthetic data-efficient curve (blue) reaches the same plateau with fewer samples than random sampling (gray). The vertical red arrow marks the modeled performance gap at a fixed dataset size; measured curves need not have this shape." fig-alt="Line chart with Dataset Size (% of Total) on the x-axis and Model Accuracy (%) on the y-axis. A gray dashed Random Sampling curve rises gradually, while a blue Efficient Selection curve rises more steeply and reaches the same plateau earlier; the area between them is lightly shaded blue. A vertical red double-headed arrow is labeled Performance Gap (Same Data Budget)."}
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DIMINISHING RETURNS FIGURE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-ppd-curve (Measuring Data Selection section)
-# │
-# │ Goal: Visualize the performance benefits of data selection.
-# │ Show: That efficient selection reaches the accuracy plateau faster than random sampling.
-# │ How: Plot exponential saturation curves for random vs. curated datasets.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Visualize the performance benefits of data selection.
-import numpy as np
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
-
-# —Plot: Efficient vs Random Data Selection ---
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-x = np.linspace(0, 100, 200)
-y_random = 95 * (1 - np.exp(-0.04 * x))
-y_efficient = 95 * (1 - np.exp(-0.15 * x))
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(x, y_random, '--', color=COLORS['grid'], label='Random Sampling', linewidth=2)
-ax.plot(x, y_efficient, '-', color=COLORS['BlueLine'], label='Efficient Selection', linewidth=2.5)
-ax.fill_between(x, y_random, y_efficient, color=COLORS['BlueL'], alpha=0.1)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_xlabel('Dataset Size (% of Total)')
-ax.set_ylabel('Model Accuracy (%)')
-ax.set_xlim(0, 100)
-ax.set_ylim(0, 100)
-
-idx = 40
-x_val, y_eff, y_rnd = x[idx], y_efficient[idx], y_random[idx]
-ax.annotate("", xy=(x_val, y_eff), xytext=(x_val, y_rnd), arrowprops=dict(arrowstyle="<->", color=COLORS['RedLine'], lw=1.0))
-ax.text(
-    x_val + 0.7,
-    (y_eff + y_rnd) / 1.88,
-    "Performance Gap\n(Same Data Budget)",
-    color=COLORS['RedLine'],
-    fontsize=8,
-    va='center',
-    fontweight='bold',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3),
-)
-
-ax.legend(loc='lower right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-These evaluation metrics govern the transition point where indiscriminate data collection yields to targeted curation, identifying when marginal samples waste training compute rather than improving generalization. Yet algorithmic efficiency does not guarantee that a reduced dataset preserves model quality across operational edge cases.
-
-Data selection techniques implicitly rank sample value, and validating that a curated dataset preserves model quality requires systematic benchmarking across three dimensions. Coverage metrics validate that coreset selection preserved representation across classes and demographic groups. Distribution alignment metrics (such as KL divergence and population stability index, which @sec-appdx-data-foundations-measuring-drift-divergence-a6dd defines) detect whether the curated training set drifted from the deployment distribution. Label quality metrics (inter-annotator agreement, confident learning) validate that active learning did not introduce systematic labeling errors. A 50 percent dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
-
-::: {.column-margin .margin-pointer}
-↪ Coverage, label-quality, and distribution-alignment checks are developed into a full data-benchmarking protocol in @sec-benchmarking-data-benchmarking-22f9.
-:::
-
-The validation target can itself be unreliable. Benchmark accuracy can overstate generalization when test sets fail to capture operational distribution shifts, demanding the same scrutiny for evaluation benchmarks as for curated training sets.
-
-::: {#exmp-data-selection-benchmark-replication-gap .callout-example title="The benchmark replication gap"}
-
-**Scenario**: Classifiers evaluated on newly collected test sets experienced 3 to 15 percentage-point accuracy drops on CIFAR-10 and 11 to 14 points on ImageNet [@recht2019imagenet].
-
-**Diagnosis**: The replicated collection produced slightly harder images than the original test sets. The study found that benchmark adaptivity did not explain the gap, even though repeated use of a fixed test set remains a general evaluation risk.
-
-**Systems lesson**: Evaluation-set construction affects measured generalization. Data-selection pipelines should validate curated subsets on independently collected and deployment-relevant test sets rather than trusting one long-reused benchmark.
-
-:::
-
-An efficiency gain measured against a single benchmark can evaporate under distribution shift; a curated subset must demonstrate consistent quality across multiple held-out distributions before its reported reduction ratio is trusted.
-
-::: {#lhs-data-selection-lighthouse-data-selection .callout-lighthouse title="Lighthouse data selection"}
-
-Data selection principles apply to all five lighthouse models, though the dominant constraint determines the technique. @Tbl-data-selection-lighthouse-priorities maps each workload to a priority. Compute-bound ResNet-50 training benefits from coreset selection, while GPT-2/Llama training relies on deduplication and quality filtering to cut the raw tokens it must process. MobileNetV2's strict latency and power constraints shift the focus from training efficiency to validating that any data augmentation preserves the invariances required by the target model and deployment environment. DLRM, bound by memory capacity, uses interaction deduplication to cut redundant examples and embedding pruning to shrink massive embedding tables by dropping or rehashing cold IDs. Finally, the tiny Keyword Spotting model overcomes extreme data constraints by using augmentation and synthesis to build robust datasets from minimal seed samples.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.35}
-```
-
-| **Lighthouse**       | **Primary Bottleneck**                         | **Data Selection Priority**                                                                                          |
-|:---------------------|:-----------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
-| **ResNet-50**        | Compute                                        | Coreset selection directly reduces training FLOPs                                                                    |
-| **GPT-2/Llama**      | Training compute (tokens $\times$ FLOPs/token) | Deduplication and quality filtering cut tokens processed; curriculum may improve token efficiency                    |
-| **MobileNetV2**      | Latency/Power                                  | Validate augmentation against the target model and deployment invariances                                            |
-| **DLRM**             | Memory capacity                                | Interaction deduplication cuts examples; embedding pruning shrinks tables only when cold IDs are dropped or rehashed |
-| **Keyword Spotting** | Extreme constraints                            | Augmentation and synthesis create datasets from minimal seeds                                                        |
-
-: **Data Selection Priorities by Lighthouse**: Primary bottleneck and candidate data-selection priority for each lighthouse workload. The pairing suggests a hypothesis to test; the dominant resource constraint alone does not guarantee that a technique pays off. {#tbl-data-selection-lighthouse-priorities}
-
-```{=latex}
-\endgroup
-```
-
-Across these workloads, data selection functions as a systems optimization tailored to relieve whichever physical resource binds the pipeline.
-
-:::
-
-Disciplined metrics separate genuine compute savings from deferred computational debt: a selection strategy must be evaluated against its stated objective, counting the overhead of scoring, filtering, and staging samples alongside training, labeling, or reuse savings at target quality. When teams optimize selection algorithms against isolated benchmarks rather than end-to-end pipeline constraints, intuitive heuristics frequently backfire—wasting cluster cycles on scoring overhead, destabilizing optimization trajectories, or silently corrupting downstream generalization. Examining these recurrent failure modes reveals how data selection breaks down in production and how systems engineers diagnose them before launching expensive training runs.
-
-::: {#chk-data-selection-acceptance-evidence .callout-checkpoint title="Accepting a data intervention"}
-
-A smaller training pool is one observation in the acceptance decision. Connect the measurements to the constraint the intervention was meant to relieve.
-
-- [ ] **Time savings**: Identify the scoring, coordination, and training times needed to compare a selected subset with full-data training at the same target quality.
-- [ ] **Cost objective**: Explain how an active-learning pipeline could reduce total expenditure even if it takes longer to train, and identify the costs that must enter that comparison.
-- [ ] **Coverage**: Decide whether unchanged aggregate accuracy is sufficient when a deployment-critical rare slice regresses, and name the additional validation evidence needed.
-
-:::
-
 ## Static Pruning {#sec-data-selection-static-pruning-a390}
 
 Web-scale scraping routinely gathers terabytes of boilerplate text, duplicate images, and malformed records that waste cluster compute before a single valid gradient is calculated. Static pruning\index{Static pruning!pretraining filtration} and pretraining filtration eliminate this uninformative volume upstream of the training loop. By purging redundant and corrupt records before target-model training, static filtration shrinks the operation count $(O)$ without modifying model architectures or execution kernels.
@@ -2565,167 +2218,6 @@ Labels are one form of supervision; a pretext task can also derive a learning si
 
 : **Self-Supervised Pretext Tasks by Modality**: Each task extracts supervision from data structure rather than human labels, enabling pretraining on large-scale unlabeled corpora. {#tbl-self-supervised-tasks .striped .hover tbl-colwidths="[30,30,40]"}
 
-### The economics of amortization {#sec-data-selection-economics-amortization-98bb}
-
-The centrality of self-supervised learning to foundation-model workflows stems directly from cost amortization\index{Cost amortization!self-supervised pretraining}. A foundation model is a broadly pretrained reusable base model adapted to downstream tasks through fine-tuning. This architecture divides costs into two phases: an expensive upfront pretraining investment executed once on unlabeled data, and lightweight task-specific adaptations reused across many applications (@tbl-cost-amortization).
-
-| **Approach**                   | **Labels per Task** | **Compute per Task**  |     **Data Acquisition** |
-|:-------------------------------|:--------------------|:----------------------|-------------------------:|
-| **Train from scratch**         | 100K–1M labeled     | 100% full training    | Task-specific collection |
-| **Fine-tune foundation model** | 100–1K labeled      | 1–5% of full training | Reuse pretraining corpus |
-
-: **Illustrative Foundation-Model Amortization**: The label and compute ranges are scenario assumptions. They illustrate why reuse can lower marginal task cost when representations transfer, not a universal fine-tuning ratio. {#tbl-cost-amortization .striped .hover}
-
-```{python}
-#| echo: false
-#| label: foundation-cost-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FOUNDATION MODEL COST AMORTIZATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Economics of Amortization" section and @tbl-cost-amortization
-# │
-# │ Goal: Demonstrate the economic shift toward foundation models.
-# │ Show: That fine-tuning yields a 100× label reduction and 20× marginal compute drop.
-# │ How: Contrast total costs for 10 tasks trained from scratch vs. fine-tuned.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import USD, count, hour
-from mlsysim.fmt import fmt_percent, fmt, fmt_count, fmt_usd, check
-
-class FoundationCostAmortization:
-    """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    scratch_compute_per_task = 1000 * hour  # scenario assumption: GPU-hours per task
-    task_count = 10  # number of tasks
-    pretrain_compute = 10000 * hour  # scenario assumption: one-time GPU-hours
-    finetune_compute_per_task = 50 * hour  # scenario assumption: GPU-hours per task
-    labels_per_task_scratch = 100_000 * count  # scenario assumption: labels from scratch
-    cost_per_label = 1 * (USD / count)  # scenario assumption: label price
-    labels_per_task_finetune = 1_000 * count  # scenario assumption: labels for fine-tuning
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    scratch_compute_total = scratch_compute_per_task * task_count
-    foundation_compute_total = pretrain_compute + (finetune_compute_per_task * task_count)
-
-    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * task_count
-    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * task_count
-
-    label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
-    marginal_compute_reduction = (scratch_compute_per_task / finetune_compute_per_task).to("").magnitude
-    crossover_tasks_value = (pretrain_compute / (scratch_compute_per_task - finetune_compute_per_task)).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(label_cost_reduction > 1.0, "Fine-tuning must require fewer labels than scratch training.")
-    check(marginal_compute_reduction > 1.0, "Fine-tuning marginal compute must be less than scratch training.")
-    check(abs(crossover_tasks_value - 10.53) < 0.1, f"Expected ~10.5 crossover tasks, got {crossover_tasks_value:.2f}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    n_tasks_str = fmt(task_count, precision=0, commas=False)
-    cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=0, commas=False)
-    labels_per_task_scratch_str = fmt_count(labels_per_task_scratch, precision=0, commas=True)
-    # Currency prefix + M/K suffixes use fmt() prefix/suffix discipline.
-    label_cost_scratch_total_str = fmt_usd(label_cost_scratch_total, precision=0, commas=False, scale="M")
-    cost_scratch_per_task_str = fmt_count(
-        scratch_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
-    )
-    cost_scratch_total_str = fmt_count(scratch_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    cost_foundation_total_str = fmt_count(
-        foundation_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
-    )
-    labels_per_task_finetune_str = fmt_count(labels_per_task_finetune, precision=0, commas=True)
-    label_cost_finetune_total_str = fmt_usd(label_cost_finetune_total, precision=0, commas=False, scale="K")
-    cost_finetune_value_str = fmt_count(
-        finetune_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
-    )
-    cost_pretrain_value_str = fmt_count(pretrain_compute.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
-    marginal_compute_reduction_mult_str = fmt_multiple(marginal_compute_reduction, precision=0, commas=False)
-    crossover_tasks_str = fmt(crossover_tasks_value, precision=1, commas=False)
-    label_cost_reduction_factor_mult_str = fmt_multiple(label_cost_reduction, precision=0, commas=True)
-```
-
-To illustrate this economic transformation, consider a company building `{python} FoundationCostAmortization.n_tasks_str` specialized classifiers. Under the scenario assumptions, each task trained from scratch needs `{python} FoundationCostAmortization.labels_per_task_scratch_str` labels at `{python} FoundationCostAmortization.cost_per_label_str` per label, for `{python} FoundationCostAmortization.label_cost_scratch_total_str` across all tasks. The modeled compute burden is `{python} FoundationCostAmortization.cost_scratch_total_str`.
-
-The fine-tuning scenario pays `{python} FoundationCostAmortization.cost_pretrain_value_str` once, then assigns `{python} FoundationCostAmortization.labels_per_task_finetune_str` labels and `{python} FoundationCostAmortization.cost_finetune_value_str` of compute to each task. Across all `{python} FoundationCostAmortization.n_tasks_str` tasks, the modeled fine-tuning labels cost `{python} FoundationCostAmortization.label_cost_finetune_total_str`.
-
-Under these inputs, labeling cost drops by `{python} FoundationCostAmortization.label_cost_reduction_factor_mult_str` and per-task marginal compute by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`. These are consequences of the chosen scenario values, while total compute becomes favorable only after enough downstream tasks amortize pretraining.
-
-Fine-tuning becomes economical when representations transfer effectively and downstream task count exceeds the break-even threshold. The side-by-side bar charts in @fig-amortization-comparison contrast the cost structures across ten downstream tasks: training from scratch expends a constant 1,000 GPU-hours per task (totaling 10,000 GPU-hours), whereas the foundation model approach absorbs a 10,000 GPU-hour pretraining bar upfront but collapses subsequent task fine-tuning to just 50 GPU-hours per bar.
-
-::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires `{python} FoundationCostAmortization.cost_scratch_per_task_str` per task (`{python} FoundationCostAmortization.cost_scratch_total_str` total for `{python} FoundationCostAmortization.n_tasks_str` tasks). The foundation model approach (right) pays `{python} FoundationCostAmortization.cost_pretrain_value_str` upfront for pretraining but reduces each subsequent task to just `{python} FoundationCostAmortization.cost_finetune_value_str`. At `{python} FoundationCostAmortization.n_tasks_str` tasks the totals are comparable (`{python} FoundationCostAmortization.cost_scratch_total_str` vs. `{python} FoundationCostAmortization.cost_foundation_total_str`), but the per-task marginal cost drops by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`, and the crossover favoring the foundation model occurs around `{python} FoundationCostAmortization.crossover_tasks_str` tasks. The plotted `{python} FoundationCostAmortization.n_tasks_str`-task snapshot therefore remains just below that break-even point." fig-alt="Two bar charts side by side. Left (train from scratch) shows equal per-task GPU-hour bars totaling the scratch-training cost. Right (foundation model) shows one tall pretraining bar followed by short fine-tuning bars per task."}
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST AMORTIZATION COMPARISON (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-amortization-comparison—foundation model cost structure
-# │
-# │ Goal: Contrast train-from-scratch (10×1,000 hrs) vs foundation model
-# │       (10,000 upfront + 10×50 fine-tune); show crossover at ~11 tasks.
-# │ Show: Side-by-side bar charts; total labels; 20× per-task marginal drop.
-# │ How: matplotlib subplots; stacked/grouped bars; book_style.set_book_style().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Contrast train-from-scratch (10×1,000 hrs) vs foundation model
-import numpy as np
-import matplotlib.pyplot as plt
-from binder.tools.figures import style as book_style
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-book_style.set_book_style()
-COLORS = book_style.COLORS
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.1))
-
-tasks = np.arange(1, 11)
-
-# Left: Train from Scratch
-ax1.bar(tasks, [1] * 10, color=COLORS['RedL'], edgecolor=COLORS['RedLine'], linewidth=0.8, width=0.6)
-ax1.set_title('Train from Scratch', fontweight='bold', fontsize=11)
-ax1.set_xlabel('Task Number')
-ax1.set_ylabel('Cost (1000 GPU-hours)')
-ax1.set_ylim(0, 12)
-ax1.set_xticks(tasks)
-ax1.set_yticks([0, 2, 4, 6, 8, 10])
-ax1.spines['top'].set_visible(False)
-ax1.spines['right'].set_visible(False)
-ax1.grid(False)
-ax1.text(5.5, 11, 'Total: 10,000 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['RedLine'])
-
-# Right: Foundation Model
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-fm_tasks = np.arange(0, 11)
-fm_labels = ['Pre'] + [str(i) for i in range(1, 11)]
-pre_train = [10] + [0] * 10
-fine_tune = [0] + [0.05] * 10
-
-ax2.bar(fm_tasks, pre_train, color=COLORS['BlueL'], edgecolor=COLORS['BlueLine'], linewidth=0.8, width=0.6, label='Pre-training')
-ax2.bar(fm_tasks, fine_tune, bottom=pre_train, color=COLORS['GreenL'], edgecolor=COLORS['GreenLine'], linewidth=0.8, width=0.6, label='Fine-tuning')
-ax2.set_title('Foundation Model', fontweight='bold', fontsize=11)
-ax2.set_xlabel('Task Number')
-ax2.set_ylim(0, 12)
-ax2.set_xticks(fm_tasks)
-ax2.set_xticklabels(fm_labels)
-ax2.set_yticks([0, 2, 4, 6, 8, 10])
-ax2.spines['top'].set_visible(False)
-ax2.spines['right'].set_visible(False)
-ax2.grid(False)
-ax2.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-ax2.text(5.5, 11, 'Total: 10,500 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['BlueLine'])
-
-plt.tight_layout()
-plt.show()
-plt.close()
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-```
-
-:::
-
 ### Foundation model paradigm {#sec-data-selection-foundation-model-paradigm-f0f1}
 
 When its pretraining cost is reused across tasks, SSL supports the **foundation model paradigm**\index{Foundation model!definition}\index{Self-supervised learning!foundation model paradigm}[^fn-foundation-model-risk] [@bommasani2021opportunities]. The core data selection principles—coreset selection, curriculum learning, and active learning—remain essential within this paradigm. Pretraining corpus curation applies deduplication and quality filtering at web scale, while downstream selection dictates which fine-tuning examples maximize task-specific transfer.
@@ -3639,7 +3131,9 @@ Suppose labeling costs `{python} BreakevenCalc.cost_label_str`, active learning 
 
 Break-even occurs when avoided labeling costs equal selection overhead. When an unlabeled candidate pool $U$ contains millions of uncurated examples, repeatedly scoring it across multiple rounds scales compute with $|U| \times c_{\text{infer}}$, meaning an algorithmic reduction in labeled samples can be erased if proxy inference costs are not carefully bounded.
 
-### Amortization across training runs {#sec-data-selection-amortization-across-training-runs-f6b8}
+### Amortization: The Economics of Reusability {#sec-data-selection-amortization-reusability}
+
+#### Amortization across training runs {.unnumbered}
 
 Static data selection techniques decouple dataset curation from the model training loop. Computational filters—such as MinHash deduplication, exact $n$-gram indexing, or embedding clustering—require substantial upfront engineering and preprocessing compute. However, production model development is inherently iterative: hyperparameter search, neural architecture search, ablation studies, and seed sweeps repeatedly train on the identical curated corpus. Evaluating these techniques on a single isolated run misrepresents their economics. **Amortized return on investment (ROI)**\index{Return on investment!amortized} accounts for how upfront curation investments spread across an entire training campaign:
 $$
@@ -3732,6 +3226,168 @@ Because the initial infrastructure and signature-generation costs are fixed, eac
 Deduplication achieves high investment leverage because eliminating redundant sequences reduces host-storage footprint and avoids wasted gradient updates across every downstream architecture. Sample-selection methods conditioned on proxy gradients or uncertainty scores transfer within a model family or between related architectures, but their rankings must be revalidated when the target model, task, or data changes, which narrows their amortization window relative to deduplication. For exploratory or one-off training runs, low-overhead methods like uniform random sampling or basic augmentation may offer better ROI. A static scoring pass can still pay for itself in one run if its measured savings exceed its cost at target quality.
 
 Standard cost models assume a centralized data pipeline where a single host process evaluates importance metrics across a unified dataset. Scaling to high-throughput multi-accelerator training shards datasets across independent storage volumes and distributed worker ranks, erecting communication and synchronization bottlenecks that can dismantle these idealized single-node economics.
+
+
+#### Amortization across tasks: Foundation models {.unnumbered}
+
+The centrality of self-supervised learning to foundation-model workflows stems directly from cost amortization\index{Cost amortization!self-supervised pretraining}. A foundation model is a broadly pretrained reusable base model adapted to downstream tasks through fine-tuning. This architecture divides costs into two phases: an expensive upfront pretraining investment executed once on unlabeled data, and lightweight task-specific adaptations reused across many applications (@tbl-cost-amortization).
+
+| **Approach**                   | **Labels per Task** | **Compute per Task**  |     **Data Acquisition** |
+|:-------------------------------|:--------------------|:----------------------|-------------------------:|
+| **Train from scratch**         | 100K–1M labeled     | 100% full training    | Task-specific collection |
+| **Fine-tune foundation model** | 100–1K labeled      | 1–5% of full training | Reuse pretraining corpus |
+
+: **Illustrative Foundation-Model Amortization**: The label and compute ranges are scenario assumptions. They illustrate why reuse can lower marginal task cost when representations transfer, not a universal fine-tuning ratio. {#tbl-cost-amortization .striped .hover}
+
+```{python}
+#| echo: false
+#| label: foundation-cost-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FOUNDATION MODEL COST AMORTIZATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Economics of Amortization" section and @tbl-cost-amortization
+# │
+# │ Goal: Demonstrate the economic shift toward foundation models.
+# │ Show: That fine-tuning yields a 100× label reduction and 20× marginal compute drop.
+# │ How: Contrast total costs for 10 tasks trained from scratch vs. fine-tuned.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import USD, count, hour
+from mlsysim.fmt import fmt_percent, fmt, fmt_count, fmt_usd, check
+
+class FoundationCostAmortization:
+    """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    scratch_compute_per_task = 1000 * hour  # scenario assumption: GPU-hours per task
+    task_count = 10  # number of tasks
+    pretrain_compute = 10000 * hour  # scenario assumption: one-time GPU-hours
+    finetune_compute_per_task = 50 * hour  # scenario assumption: GPU-hours per task
+    labels_per_task_scratch = 100_000 * count  # scenario assumption: labels from scratch
+    cost_per_label = 1 * (USD / count)  # scenario assumption: label price
+    labels_per_task_finetune = 1_000 * count  # scenario assumption: labels for fine-tuning
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    scratch_compute_total = scratch_compute_per_task * task_count
+    foundation_compute_total = pretrain_compute + (finetune_compute_per_task * task_count)
+
+    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * task_count
+    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * task_count
+
+    label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
+    marginal_compute_reduction = (scratch_compute_per_task / finetune_compute_per_task).to("").magnitude
+    crossover_tasks_value = (pretrain_compute / (scratch_compute_per_task - finetune_compute_per_task)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(label_cost_reduction > 1.0, "Fine-tuning must require fewer labels than scratch training.")
+    check(marginal_compute_reduction > 1.0, "Fine-tuning marginal compute must be less than scratch training.")
+    check(abs(crossover_tasks_value - 10.53) < 0.1, f"Expected ~10.5 crossover tasks, got {crossover_tasks_value:.2f}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    n_tasks_str = fmt(task_count, precision=0, commas=False)
+    cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=0, commas=False)
+    labels_per_task_scratch_str = fmt_count(labels_per_task_scratch, precision=0, commas=True)
+    # Currency prefix + M/K suffixes use fmt() prefix/suffix discipline.
+    label_cost_scratch_total_str = fmt_usd(label_cost_scratch_total, precision=0, commas=False, scale="M")
+    cost_scratch_per_task_str = fmt_count(
+        scratch_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
+    )
+    cost_scratch_total_str = fmt_count(scratch_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    cost_foundation_total_str = fmt_count(
+        foundation_compute_total.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
+    )
+    labels_per_task_finetune_str = fmt_count(labels_per_task_finetune, precision=0, commas=True)
+    label_cost_finetune_total_str = fmt_usd(label_cost_finetune_total, precision=0, commas=False, scale="K")
+    cost_finetune_value_str = fmt_count(
+        finetune_compute_per_task.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours"
+    )
+    cost_pretrain_value_str = fmt_count(pretrain_compute.to(hour).magnitude, precision=0, commas=True, label="GPU-hour", plural_label="GPU-hours")
+    marginal_compute_reduction_mult_str = fmt_multiple(marginal_compute_reduction, precision=0, commas=False)
+    crossover_tasks_str = fmt(crossover_tasks_value, precision=1, commas=False)
+    label_cost_reduction_factor_mult_str = fmt_multiple(label_cost_reduction, precision=0, commas=True)
+```
+
+To illustrate this economic transformation, consider a company building `{python} FoundationCostAmortization.n_tasks_str` specialized classifiers. Under the scenario assumptions, each task trained from scratch needs `{python} FoundationCostAmortization.labels_per_task_scratch_str` labels at `{python} FoundationCostAmortization.cost_per_label_str` per label, for `{python} FoundationCostAmortization.label_cost_scratch_total_str` across all tasks. The modeled compute burden is `{python} FoundationCostAmortization.cost_scratch_total_str`.
+
+The fine-tuning scenario pays `{python} FoundationCostAmortization.cost_pretrain_value_str` once, then assigns `{python} FoundationCostAmortization.labels_per_task_finetune_str` labels and `{python} FoundationCostAmortization.cost_finetune_value_str` of compute to each task. Across all `{python} FoundationCostAmortization.n_tasks_str` tasks, the modeled fine-tuning labels cost `{python} FoundationCostAmortization.label_cost_finetune_total_str`.
+
+Under these inputs, labeling cost drops by `{python} FoundationCostAmortization.label_cost_reduction_factor_mult_str` and per-task marginal compute by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`. These are consequences of the chosen scenario values, while total compute becomes favorable only after enough downstream tasks amortize pretraining.
+
+Fine-tuning becomes economical when representations transfer effectively and downstream task count exceeds the break-even threshold. The side-by-side bar charts in @fig-amortization-comparison contrast the cost structures across ten downstream tasks: training from scratch expends a constant 1,000 GPU-hours per task (totaling 10,000 GPU-hours), whereas the foundation model approach absorbs a 10,000 GPU-hour pretraining bar upfront but collapses subsequent task fine-tuning to just 50 GPU-hours per bar.
+
+::: {#fig-amortization-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cost Amortization in Foundation Models**: Training from scratch (left) requires `{python} FoundationCostAmortization.cost_scratch_per_task_str` per task (`{python} FoundationCostAmortization.cost_scratch_total_str` total for `{python} FoundationCostAmortization.n_tasks_str` tasks). The foundation model approach (right) pays `{python} FoundationCostAmortization.cost_pretrain_value_str` upfront for pretraining but reduces each subsequent task to just `{python} FoundationCostAmortization.cost_finetune_value_str`. At `{python} FoundationCostAmortization.n_tasks_str` tasks the totals are comparable (`{python} FoundationCostAmortization.cost_scratch_total_str` vs. `{python} FoundationCostAmortization.cost_foundation_total_str`), but the per-task marginal cost drops by `{python} FoundationCostAmortization.marginal_compute_reduction_mult_str`, and the crossover favoring the foundation model occurs around `{python} FoundationCostAmortization.crossover_tasks_str` tasks. The plotted `{python} FoundationCostAmortization.n_tasks_str`-task snapshot therefore remains just below that break-even point." fig-alt="Two bar charts side by side. Left (train from scratch) shows equal per-task GPU-hour bars totaling the scratch-training cost. Right (foundation model) shows one tall pretraining bar followed by short fine-tuning bars per task."}
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST AMORTIZATION COMPARISON (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-amortization-comparison—foundation model cost structure
+# │
+# │ Goal: Contrast train-from-scratch (10×1,000 hrs) vs foundation model
+# │       (10,000 upfront + 10×50 fine-tune); show crossover at ~11 tasks.
+# │ Show: Side-by-side bar charts; total labels; 20× per-task marginal drop.
+# │ How: matplotlib subplots; stacked/grouped bars; book_style.set_book_style().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Contrast train-from-scratch (10×1,000 hrs) vs foundation model
+import numpy as np
+import matplotlib.pyplot as plt
+from binder.tools.figures import style as book_style
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+book_style.set_book_style()
+COLORS = book_style.COLORS
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.1))
+
+tasks = np.arange(1, 11)
+
+# Left: Train from Scratch
+ax1.bar(tasks, [1] * 10, color=COLORS['RedL'], edgecolor=COLORS['RedLine'], linewidth=0.8, width=0.6)
+ax1.set_title('Train from Scratch', fontweight='bold', fontsize=11)
+ax1.set_xlabel('Task Number')
+ax1.set_ylabel('Cost (1000 GPU-hours)')
+ax1.set_ylim(0, 12)
+ax1.set_xticks(tasks)
+ax1.set_yticks([0, 2, 4, 6, 8, 10])
+ax1.spines['top'].set_visible(False)
+ax1.spines['right'].set_visible(False)
+ax1.grid(False)
+ax1.text(5.5, 11, 'Total: 10,000 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['RedLine'])
+
+# Right: Foundation Model
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+fm_tasks = np.arange(0, 11)
+fm_labels = ['Pre'] + [str(i) for i in range(1, 11)]
+pre_train = [10] + [0] * 10
+fine_tune = [0] + [0.05] * 10
+
+ax2.bar(fm_tasks, pre_train, color=COLORS['BlueL'], edgecolor=COLORS['BlueLine'], linewidth=0.8, width=0.6, label='Pre-training')
+ax2.bar(fm_tasks, fine_tune, bottom=pre_train, color=COLORS['GreenL'], edgecolor=COLORS['GreenLine'], linewidth=0.8, width=0.6, label='Fine-tuning')
+ax2.set_title('Foundation Model', fontweight='bold', fontsize=11)
+ax2.set_xlabel('Task Number')
+ax2.set_ylim(0, 12)
+ax2.set_xticks(fm_tasks)
+ax2.set_xticklabels(fm_labels)
+ax2.set_yticks([0, 2, 4, 6, 8, 10])
+ax2.spines['top'].set_visible(False)
+ax2.spines['right'].set_visible(False)
+ax2.grid(False)
+ax2.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+ax2.text(5.5, 11, 'Total: 10,500 GPU-hours', ha='center', fontsize=9, fontweight='bold', color=COLORS['BlueLine'])
+
+plt.tight_layout()
+plt.show()
+plt.close()
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+```
+
+:::
 
 ## Distributed Selection {#sec-data-selection-distributed-selection-d03e}
 
@@ -4318,6 +3974,353 @@ drawcolor=black,filllcolor=cyan!10!, Linewidth=0.75pt,filllcirclecolor=red}};
 
 Tracing artifacts through the pipeline in @fig-optimization-stack reveals why data selection occupies an asymmetric position at the head of the optimization stack: pruning raw inputs reduces upstream training FLOPs, but does not automatically shrink parameter footprint, improve quantization headroom, or relax serving latency constraints in the downstream compression and hardware stages. Each downstream tier inherits both the computational savings and any representational deficits created upstream; an aggressive filter that discards rare but critical edge cases can force downstream engineers to train longer or abandon aggressive quantization to preserve task accuracy.
 
+
+## Measurement Framework {#sec-data-selection-measurement-framework-733b}
+
+Deploying a model trained on an aggressively filtered dataset can yield unexpected regressions in production: an autonomous vehicle perception model might maintain high aggregate precision while failing on rare pedestrian crossings pruned as low-density noise. The cross-layer stack makes a disciplined measurement framework\index{Measurement framework!data selection metrics} essential. Every data selection technique claims to improve efficiency, but only rigorous measurement separates genuine training savings from shifted computational debt or degradation on safety-critical tail distributions. The core metrics in @sec-data-selection-core-metrics-32e9 tie sample reduction to task accuracy, arithmetic throughput, and deployment slice coverage so that a smaller dataset is judged by what it preserves under production stress, rather than by the raw volume it discards alone.
+
+### Core metrics {#sec-data-selection-core-metrics-32e9}
+
+The core metrics connect sample reduction to model quality instead of reporting accuracy alone, and they are the measurable proxies for the information-compute ratio (@sec-data-selection-informationcompute-ratio-8c0b). Because ICR's numerator cannot be observed directly, performance-per-data and the learning curve stand in for learning gained per sample, which becomes learning per FLOP once per-sample cost is fixed. The compression ratio measures how much of the denominator a selection removes at fixed quality. They measure accuracy gain per sample (performance-per-data), cumulative learning efficiency across dataset scales (area under the learning curve), and dataset reduction at a target accuracy (data compression ratio).
+
+#### Performance-per-data {.unnumbered}
+
+The most direct metric, **performance-per-data (PPD)**\index{Performance-per-data!metric definition}, measures accuracy gain per sample:
+$$
+\text{PPD}(n) = \frac{\text{Accuracy}(n) - \text{Accuracy}(0)}{n}
+$$
+where $n$ is the number of training samples. A higher PPD indicates greater average improvement per sample over the stated interval. Its shape must be measured because diminishing returns and their onset are workload-dependent.
+
+#### Area under the learning curve {.unnumbered}
+
+Rather than comparing at a single point, the **area under the learning curve**\index{Area under the learning curve!definition} (AULC) integrates performance across all dataset sizes:
+$$
+\text{AULC} = \int_0^D \text{Accuracy}(n) \, dn
+$$
+where $n$ is the dataset size and $D$ is the total dataset size.
+
+For the same metric and integration range, a higher AULC means stronger integrated performance across dataset sizes, though one strategy need not outperform the other at every size. Comparisons must use the same upper limit $D$ or normalize the integral.
+
+#### Data compression ratio {.unnumbered}
+
+For coreset methods, the **data compression ratio**\index{Data compression ratio!definition} (DCR) measures how much data reduction is achieved at a target accuracy:
+$$
+\text{DCR} = \frac{D_{\text{full}}}{D_{\text{coreset}}} \text{ at } \text{Accuracy}_{\text{target}}
+$$
+
+A DCR of 5$\times$ means the coreset achieves target accuracy with 20 percent of the data.
+
+### The compute-optimal frontier {#sec-data-selection-computeoptimal-frontier-24ba}
+
+While the core metrics in @sec-data-selection-core-metrics-32e9 measure individual techniques, a higher-level diagnostic is also needed to test whether the overall training strategy is data-limited or compute-limited. Neural scaling-law experiments [@kaplan2020scaling; @hoffmann2022chinchilla] fit power-law relationships over particular model families, datasets, and compute ranges. Controlled sweeps can use those fitted relationships to compare model and data allocations, but no single ratio diagnoses every training run.
+
+The Chinchilla study\index{Chinchilla!compute-optimal training}[^fn-chinchilla-scaling-law] [@hoffmann2022chinchilla] fit a compute-optimal balance between model size and training data within its experimental regime. Allocations on either side of that fitted balance used the study's compute budget less effectively.
+
+[^fn-chinchilla-scaling-law]: **Chinchilla**\index{Chinchilla!compute-optimal scaling}: Chinchilla is a 70-billion-parameter language model trained on 1.4 trillion tokens. In the experiments reported by @hoffmann2022chinchilla, it outperformed the larger GPT-3 on most evaluated tasks under a similar training-compute budget. The fitted compute-optimal allocation scaled parameters and tokens at roughly equal rates within the study's experimental regime; it is not a universal prescription for every architecture, dataset, or training recipe.
+
+The optimal balance defines a **compute-optimal frontier**\index{Compute-optimal frontier!Chinchilla scaling laws}: the best achievable performance at each compute budget when data and model size are properly balanced. @Fig-compute-optimal-frontier plots this diagnostic curve over normalized training compute, isolating the optimal operating envelope on the green frontier from the compute-starved and data-starved allocations charted in the suboptimal region below.
+
+::: {#fig-compute-optimal-frontier fig-env="figure" fig-pos="H" fig-cap="**Illustrative Compute-Optimal Frontier**: The green curve is a conceptual frontier over normalized compute, not a fitted result from Chinchilla. Points below it illustrate allocations that a controlled model-size and token-count sweep might identify as data- or compute-limited." fig-alt="Semi-log plot with normalized training compute from 10^0 to 10^3 on the logarithmic x-axis and model performance from 50 to 100 on the y-axis. A green compute-optimal frontier bounds a gray-shaded suboptimal region. Orange Data-starved and red Compute-starved points below the curve have dashed arrows labeled Better data selection and More training, respectively; a violet Optimal point lies on the curve."}
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPUTE-OPTIMAL FRONTIER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-compute-optimal-frontier—Measuring Data Selection section
+# │
+# │ Goal: Plot compute-optimal frontier curve; show data-starved vs compute-
+# │       starved operating points and arrows toward frontier.
+# │ Show: Log-log axes; green frontier curve; orange/red/purple points; labels.
+# │ How: Exponential saturation curve; scatter + annotate; book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Plot compute-optimal frontier curve; show data-starved vs. compute-
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.6))
+
+# Compute-optimal frontier curve
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+x = np.logspace(0, 3, 200)
+y = 95 - 45 * np.exp(-0.8 * np.log(x))
+
+# Suboptimal region fill
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.fill_between(x, 50, y, color='gray', alpha=0.08)
+
+# Frontier curve
+ax.plot(x, y, color=COLORS['GreenLine'], linewidth=2.5, label='Compute-optimal frontier', zorder=3)
+
+# Data-starved point
+ax.scatter([100], [72], color=COLORS['OrangeLine'], s=100, zorder=4, edgecolors='white')
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.annotate('', xy=(100, 83), xytext=(100, 73), arrowprops=dict(arrowstyle='->', color=COLORS['OrangeLine'], lw=1.5, linestyle='dashed'))
+ax.text(
+    110,
+    78,
+    'Better data\nselection',
+    fontsize=8,
+    color=COLORS['OrangeLine'],
+    va='center',
+    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
+)
+ax.text(
+    100,
+    70,
+    'Data-starved',
+    fontsize=9,
+    fontweight='bold',
+    color=COLORS['OrangeLine'],
+    ha='center',
+    va='center',
+    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
+)
+
+# Compute-starved point
+ax.scatter([10], [62], color=COLORS['RedLine'], s=100, zorder=4, edgecolors='white')
+ax.annotate('', xy=(28, 74), xytext=(11, 63), arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=1.5, linestyle='dashed'))
+ax.text(
+    12,
+    68,
+    'More\ntraining',
+    fontsize=8,
+    color=COLORS['RedLine'],
+    va='bottom',
+    ha='center',
+    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
+)
+ax.text(
+    10,
+    60,
+    'Compute-starved',
+    fontsize=9,
+    fontweight='bold',
+    color=COLORS['RedLine'],
+    ha='center',
+    va='center',
+    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
+)
+
+# Optimal point—lands exactly on the frontier curve y = 95 - 45 * x^-0.8 at x = 300.
+ax.scatter([300], [94.6], color=COLORS['VioletLine'], s=100, zorder=4, edgecolors='white')
+ax.text(
+    295,
+    92.7,
+    'Optimal',
+    fontsize=9,
+    fontweight='bold',
+    color=COLORS['VioletLine'],
+    ha='center',
+    va='center',
+    bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2),
+)
+
+# Suboptimal region label
+ax.text(25, 54, 'Suboptimal region', fontsize=9, color='gray', bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2))
+
+ax.set_xscale('log')
+ax.set_xlabel('Training Compute (normalized units)')
+ax.set_ylabel('Model Performance (Accuracy)')
+ax.set_xlim(1, 1000)
+ax.set_ylim(50, 100)
+ax.set_xticks([1, 10, 100, 1000])
+ax.set_xticklabels(['$10^0$', '$10^1$', '$10^2$', '$10^3$'])
+ax.set_yticks([50, 60, 70, 80, 90, 100])
+ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+plt.show()
+plt.close()
+```
+
+:::
+
+Against a frontier fitted from controlled sweeps, an operating point's location motivates further experiments. The directional vectors charted in @fig-compute-optimal-frontier illustrate two candidate interventions: additional training compute and improved data selection at fixed compute. Controlled changes to model size, data, and training allocation determine which intervention helps; a point below the frontier does not identify a unique remedy. Points near a fitted frontier remain specific to the model family, dataset, objective, and compute range used to estimate it.
+
+```{python}
+#| echo: false
+#| label: chinchilla-diagnostic-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHINCHILLA D/P DIAGNOSTIC ANCHORS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Interpreting the Chinchilla result" subsection and the
+# │          [^fn-chinchilla-token-ratio] footnote.
+# │
+# │ Goal:    Anchor the GPT-3 / Llama 2 70B reference D/P ratios.
+# │ Show:    Reference D/P ratios for both models and the
+# │          token-count growth implied by doubling the compute budget.
+# │ How:     Divide training tokens by parameter counts for each reference
+# │          model; compute sqrt(2) - 1 for the doubling growth percent.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+
+import mlsysim.core.units as c
+from mlsysim.fmt import fmt_percent, fmt_ratio
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ChinchillaDiagnostic:
+    # LOAD
+    from mlsysim import Models
+
+    m_gpt3 = Models.Language.GPT3
+    m_llama2 = Models.Language.Llama2_70B
+
+    tokens_per_param_opt = 20
+    llama2_70b_training_tokens = 2.0 * c.TRILLION * c.count
+    compute_multiplier = 2.0
+
+    # EXECUTE
+    gpt3_dn_ratio = (Models.Language.GPT3.training_tokens.to(c.count) / m_gpt3.parameters.to(c.param)).to("").magnitude
+    llama2_dn_ratio = (llama2_70b_training_tokens / m_llama2.parameters.to(c.param)).to("").magnitude
+    doubling_token_growth_pct = (math.sqrt(compute_multiplier) - 1) * 100
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    tokens_per_param_opt_str = fmt_ratio(tokens_per_param_opt, precision=0, commas=False)
+    gpt3_dn_ratio_str = fmt_ratio(gpt3_dn_ratio, precision=1, commas=False)
+    llama2_dn_ratio_str = fmt_ratio(llama2_dn_ratio, precision=1, commas=False)
+    doubling_token_growth_pct_str = fmt_percent(doubling_token_growth_pct / 100, precision=1, commas=False, style='prose')
+```
+
+#### Interpreting the Chinchilla result {.unnumbered}
+
+Within the fitted Chinchilla regime, compute-optimal model parameters and training tokens grew at roughly equal rates.[^fn-chinchilla-token-ratio] Specifically, training a dense transformer requires approximately $6\Parameters\DatasetSize$ FLOPs ($2\Parameters\DatasetSize$ for the forward pass and $4\Parameters\DatasetSize$ for the backward pass, where $\Parameters$ is parameter count and $\DatasetSize$ is token count). Under an equal scaling regime where parameters and tokens grow proportionally ($\Parameters \propto \DatasetSize$), total compute scales quadratically ($\Operations \propto \DatasetSize^2$), directly implying that optimal token count scales as the square root of the compute budget ($\DatasetSize_{\text{opt}} \propto \sqrt{\Operations}$). Doubling compute therefore corresponds to about $\sqrt{2} - 1$, or `{python} ChinchillaDiagnostic.doubling_token_growth_pct_str`, more tokens under those assumptions. The commonly quoted `{python} ChinchillaDiagnostic.tokens_per_param_opt_str` tokens per parameter is a useful reference point from that study, not a universal optimum.
+
+[^fn-chinchilla-token-ratio]: [offset=-1mm] **Tokens per parameter**\index{Chinchilla!tokens-per-parameter diagnostic}: The ratio $\DatasetSize/\Parameters$ compares training tokens with model parameters; GPT-3 used approximately `{python} ChinchillaDiagnostic.gpt3_dn_ratio_str` tokens per parameter [@brown2020language], while Llama 2 70B used approximately `{python} ChinchillaDiagnostic.llama2_dn_ratio_str` [@touvron2023llama2]. These descriptive ratios do not establish whether either run is compute-optimal under a different architecture, corpus, objective, or hardware budget. Controlled model-size and token-count sweeps are required for that diagnosis.
+
+#### Applying the diagnostic {.unnumbered}
+
+If a training run underperforms expectations, extending one run can reveal whether additional optimization steps still help, but a plateau does not identify data starvation by itself. Learning-rate schedules, optimization limits, model capacity, and data quality can all produce a plateau. A reliable diagnosis compares controlled runs that vary model size, token count, and compute allocation while holding the evaluation protocol fixed.
+
+@Fig-ppd-curve charts this divergence over varying dataset fractions: the efficient selection curve (solid blue) bends sharply into an accuracy plateau near 25 percent of the data, whereas uniform random sampling (dashed gray) ascends gradually across the entire budget. The horizontal separation marks the reduction in required samples, while the vertical red arrow isolates the substantial performance gap achieved under an identical 20 percent data budget.
+
+::: {#fig-ppd-curve fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Diminishing Returns of Data**: The synthetic data-efficient curve (blue) reaches the same plateau with fewer samples than random sampling (gray). The vertical red arrow marks the modeled performance gap at a fixed dataset size; measured curves need not have this shape." fig-alt="Line chart with Dataset Size (% of Total) on the x-axis and Model Accuracy (%) on the y-axis. A gray dashed Random Sampling curve rises gradually, while a blue Efficient Selection curve rises more steeply and reaches the same plateau earlier; the area between them is lightly shaded blue. A vertical red double-headed arrow is labeled Performance Gap (Same Data Budget)."}
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DIMINISHING RETURNS FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-ppd-curve (Measuring Data Selection section)
+# │
+# │ Goal: Visualize the performance benefits of data selection.
+# │ Show: That efficient selection reaches the accuracy plateau faster than random sampling.
+# │ How: Plot exponential saturation curves for random vs. curated datasets.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visualize the performance benefits of data selection.
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
+
+# —Plot: Efficient vs Random Data Selection ---
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+x = np.linspace(0, 100, 200)
+y_random = 95 * (1 - np.exp(-0.04 * x))
+y_efficient = 95 * (1 - np.exp(-0.15 * x))
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(x, y_random, '--', color=COLORS['grid'], label='Random Sampling', linewidth=2)
+ax.plot(x, y_efficient, '-', color=COLORS['BlueLine'], label='Efficient Selection', linewidth=2.5)
+ax.fill_between(x, y_random, y_efficient, color=COLORS['BlueL'], alpha=0.1)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_xlabel('Dataset Size (% of Total)')
+ax.set_ylabel('Model Accuracy (%)')
+ax.set_xlim(0, 100)
+ax.set_ylim(0, 100)
+
+idx = 40
+x_val, y_eff, y_rnd = x[idx], y_efficient[idx], y_random[idx]
+ax.annotate("", xy=(x_val, y_eff), xytext=(x_val, y_rnd), arrowprops=dict(arrowstyle="<->", color=COLORS['RedLine'], lw=1.0))
+ax.text(
+    x_val + 0.7,
+    (y_eff + y_rnd) / 1.88,
+    "Performance Gap\n(Same Data Budget)",
+    color=COLORS['RedLine'],
+    fontsize=8,
+    va='center',
+    fontweight='bold',
+    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3),
+)
+
+ax.legend(loc='lower right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+plt.show()
+plt.close()
+```
+
+:::
+
+These evaluation metrics govern the transition point where indiscriminate data collection yields to targeted curation, identifying when marginal samples waste training compute rather than improving generalization. Yet algorithmic efficiency does not guarantee that a reduced dataset preserves model quality across operational edge cases.
+
+Data selection techniques implicitly rank sample value, and validating that a curated dataset preserves model quality requires systematic benchmarking across three dimensions. Coverage metrics validate that coreset selection preserved representation across classes and demographic groups. Distribution alignment metrics (such as KL divergence and population stability index, which @sec-appdx-data-foundations-measuring-drift-divergence-a6dd defines) detect whether the curated training set drifted from the deployment distribution. Label quality metrics (inter-annotator agreement, confident learning) validate that active learning did not introduce systematic labeling errors. A 50 percent dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
+
+::: {.column-margin .margin-pointer}
+↪ Coverage, label-quality, and distribution-alignment checks are developed into a full data-benchmarking protocol in @sec-benchmarking-data-benchmarking-22f9.
+:::
+
+The validation target can itself be unreliable. Benchmark accuracy can overstate generalization when test sets fail to capture operational distribution shifts, demanding the same scrutiny for evaluation benchmarks as for curated training sets.
+
+::: {#exmp-data-selection-benchmark-replication-gap .callout-example title="The benchmark replication gap"}
+
+**Scenario**: Classifiers evaluated on newly collected test sets experienced 3 to 15 percentage-point accuracy drops on CIFAR-10 and 11 to 14 points on ImageNet [@recht2019imagenet].
+
+**Diagnosis**: The replicated collection produced slightly harder images than the original test sets. The study found that benchmark adaptivity did not explain the gap, even though repeated use of a fixed test set remains a general evaluation risk.
+
+**Systems lesson**: Evaluation-set construction affects measured generalization. Data-selection pipelines should validate curated subsets on independently collected and deployment-relevant test sets rather than trusting one long-reused benchmark.
+
+:::
+
+An efficiency gain measured against a single benchmark can evaporate under distribution shift; a curated subset must demonstrate consistent quality across multiple held-out distributions before its reported reduction ratio is trusted.
+
+::: {#lhs-data-selection-lighthouse-data-selection .callout-lighthouse title="Lighthouse data selection"}
+
+Data selection principles apply to all five lighthouse models, though the dominant constraint determines the technique. @Tbl-data-selection-lighthouse-priorities maps each workload to a priority. Compute-bound ResNet-50 training benefits from coreset selection, while GPT-2/Llama training relies on deduplication and quality filtering to cut the raw tokens it must process. MobileNetV2's strict latency and power constraints shift the focus from training efficiency to validating that any data augmentation preserves the invariances required by the target model and deployment environment. DLRM, bound by memory capacity, uses interaction deduplication to cut redundant examples and embedding pruning to shrink massive embedding tables by dropping or rehashing cold IDs. Finally, the tiny Keyword Spotting model overcomes extreme data constraints by using augmentation and synthesis to build robust datasets from minimal seed samples.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.35}
+```
+
+| **Lighthouse**       | **Primary Bottleneck**                         | **Data Selection Priority**                                                                                          |
+|:---------------------|:-----------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
+| **ResNet-50**        | Compute                                        | Coreset selection directly reduces training FLOPs                                                                    |
+| **GPT-2/Llama**      | Training compute (tokens $\times$ FLOPs/token) | Deduplication and quality filtering cut tokens processed; curriculum may improve token efficiency                    |
+| **MobileNetV2**      | Latency/Power                                  | Validate augmentation against the target model and deployment invariances                                            |
+| **DLRM**             | Memory capacity                                | Interaction deduplication cuts examples; embedding pruning shrinks tables only when cold IDs are dropped or rehashed |
+| **Keyword Spotting** | Extreme constraints                            | Augmentation and synthesis create datasets from minimal seeds                                                        |
+
+: **Data Selection Priorities by Lighthouse**: Primary bottleneck and candidate data-selection priority for each lighthouse workload. The pairing suggests a hypothesis to test; the dominant resource constraint alone does not guarantee that a technique pays off. {#tbl-data-selection-lighthouse-priorities}
+
+```{=latex}
+\endgroup
+```
+
+Across these workloads, data selection functions as a systems optimization tailored to relieve whichever physical resource binds the pipeline.
+
+:::
+
+Disciplined metrics separate genuine compute savings from deferred computational debt: a selection strategy must be evaluated against its stated objective, counting the overhead of scoring, filtering, and staging samples alongside training, labeling, or reuse savings at target quality. When teams optimize selection algorithms against isolated benchmarks rather than end-to-end pipeline constraints, intuitive heuristics frequently backfire—wasting cluster cycles on scoring overhead, destabilizing optimization trajectories, or silently corrupting downstream generalization. Examining these recurrent failure modes reveals how data selection breaks down in production and how systems engineers diagnose them before launching expensive training runs.
+
+::: {#chk-data-selection-acceptance-evidence .callout-checkpoint title="Accepting a data intervention"}
+
+A smaller training pool is one observation in the acceptance decision. Connect the measurements to the constraint the intervention was meant to relieve.
+
+- [ ] **Time savings**: Identify the scoring, coordination, and training times needed to compare a selected subset with full-data training at the same target quality.
+- [ ] **Cost objective**: Explain how an active-learning pipeline could reduce total expenditure even if it takes longer to train, and identify the costs that must enter that comparison.
+- [ ] **Coverage**: Decide whether unchanged aggregate accuracy is sufficient when a deployment-critical rare slice regresses, and name the additional validation evidence needed.
+
+:::
 
 ## Decision Framework {#sec-data-selection-decision-framework-0261}
 
