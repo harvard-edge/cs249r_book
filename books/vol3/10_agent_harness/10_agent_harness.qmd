@@ -59,7 +59,7 @@ The runtime components examined so far each address part of this operational env
 
 The agent harness provides this missing supervisory layer by taking ownership of the execution loop for an individual trajectory. Under this model, the agent proposes candidate actions, while the harness determines whether each step runs immediately, yields to waiting tasks, or halts entirely. Crucially, the harness enforces these transitions against an execution record that only the runtime can modify. Two systems principles govern this supervisory loop. First, every outbound model call or tool dispatch must pass an explicit admission check—evaluating active operator signals, capability grants, cluster capacity, and remaining budget—at the exact instant it would execute. Second, the runtime tracks in-flight operations with strict accountability: no pause signal, timeout, or cancellation serves as proof that running work has stopped or that its cost is settled. Outstanding operations retain a named owner and track unresolved side effects until concrete evidence settles their state.
 
-Tracing a single repair turn through the harness illustrates this division of labor between model proposal and supervisory control. From that baseline, the harness architecture develops in the order these operational decisions arise. Contrasting the unmanaged ReAct loop with a managed runtime loop (@sec-vol3-controlplane-need) establishes why the model cannot govern itself. The trajectory record (@sec-vol3-controlplane-acb) provides the runtime's authoritative account of execution, while guarded trajectory states (@sec-vol3-controlplane-statemachine) establish formal transition rules for that state. External control actions (@sec-vol3-controlplane-signals) allow operators to pause, cancel, or terminate an agent safely at deterministic boundaries. When an agent pauses for background processing or human review, supervised waiting (@sec-vol3-controlplane-yielding) and approval gates (@sec-vol3-controlplane-hitl) preserve supervision without leaking resources or losing execution state. At cluster scale, trajectory scheduling (@sec-vol3-controlplane-scheduling) arbitrates shared model service across competing tasks, while resource budgets enforce explicit bounds on cumulative consumption. Throughout this design, the supervisory record resides in host memory; ensuring that these guarantees survive host failure is the work of durable execution (@sec-vol3-durable-execution).
+Tracing a single repair turn through the harness illustrates this division of labor between model proposal and supervisory control. From that baseline, the harness architecture develops in the order these operational decisions arise. The trajectory record (@sec-vol3-controlplane-acb) provides the runtime's authoritative account of execution, while guarded trajectory states (@sec-vol3-controlplane-statemachine) establish formal transition rules for that state. External control actions (@sec-vol3-controlplane-signals) allow operators to pause, cancel, or terminate an agent safely at deterministic boundaries. When an agent pauses for background processing or human review, supervised waiting (@sec-vol3-controlplane-yielding) and approval gates (@sec-vol3-controlplane-hitl) preserve supervision without leaking resources or losing execution state. At cluster scale, trajectory scheduling (@sec-vol3-controlplane-scheduling) arbitrates shared model service across competing tasks, while resource budgets (@sec-vol3-controlplane-accounting) enforce explicit bounds on cumulative consumption. Throughout this design, the supervisory record resides in host memory; ensuring that these guarantees survive host failure is the work of durable execution (@sec-vol3-durable-execution).
 
 ## The Loop and the Harness {#sec-vol3-controlplane-need}
 
@@ -222,7 +222,7 @@ Action approval introduces a controlled detour to this cycle. An approved action
 
 ### Transition guards and the admission check {#sec-vol3-agent-harness-transition-guards}
 
-Navigating a legal edge in the state machine is merely a necessary condition for progress, not an unconditional entitlement to execute. Before the runtime admits new work—whether invoking a model or dispatching a tool—it evaluates a comprehensive set of predicates known as the *admission check*. This check enforces several simultaneous invariants: no pending control holds may exist; the active context, credentials, and required action approvals must remain valid; upstream data dependencies must be resolved; and adequate deadline slack and downstream service capacity must be confirmed. Furthermore, the runtime must reserve the operation's bounded financial liability from the task budget without encroaching on the dedicated finalization reserve. For tool calls, the admission check also verifies that arguments are structurally complete. Because system state evolves continuously, this evaluation holds only for the instant it executes. An approval granted seconds earlier or a scheduling decision made on a previous tick does not carry forward; if an unresolved prior operation blocks a dependent mutation, the trajectory cannot dispatch that mutation even if it remains in `READY` for independent work.
+Navigating a legal edge in the state machine is merely a necessary condition for progress, not an unconditional entitlement to execute. Before the runtime admits new work—whether invoking a model or dispatching a tool—it evaluates a comprehensive set of predicates known as the *admission check*. This check enforces several simultaneous invariants: no pending control holds may exist; the active context, credentials, and required action approvals must remain valid; upstream data dependencies must be resolved; and adequate deadline slack and downstream service capacity must be confirmed. Furthermore, the runtime must reserve the operation's bounded financial liability from the task budget without encroaching on the dedicated finalization reserve (@sec-vol3-controlplane-accounting). For tool calls, the admission check also verifies that arguments are structurally complete. Because system state evolves continuously, this evaluation holds only for the instant it executes. An approval granted seconds earlier or a scheduling decision made on a previous tick does not carry forward; if an unresolved prior operation blocks a dependent mutation, the trajectory cannot dispatch that mutation even if it remains in `READY` for independent work.
 
 The admission check and its state updates execute as a single atomic transaction. Protected by the trajectory record lock,[^fn-record-lock-monitor] the harness evaluates the guard predicates, reserves the required liability, registers the outgoing invocation or attempt ID, marks the expected observation as eligible, and commits the state transition. Only after releasing the lock does the runtime transmit the request over the network. This design enforces the *register-before-send rule*. Registering state prior to dispatch ensures that ultra-low-latency responses never arrive before the local record exists to receive them. Conversely, transmitting requests strictly outside the critical section prevents slow network I/O, stalled inference endpoints, or lagging tool services from blocking concurrent control actions, scheduler ticks, or arriving results from other workers.
 
@@ -335,7 +335,7 @@ External control decouples receiving a request from establishing the physical ex
 
 ### Admission boundaries and active generation {#sec-vol3-agent-harness-admission-boundaries}
 
-A **turn boundary**\index{Turn boundary!definition} is an explicit checkpoint where the harness evaluates whether execution may proceed before admitting its next operation. Turn boundaries occur immediately before dispatching an inference call to a foundation model and immediately before invoking any external tool, including each individually admitted call within a proposed parallel batch. At the turn boundaries established by the guarded transitions, the harness leverages the trajectory lock to safely apply pending control signals without race conditions. This boundary provides a local admission guarantee: instead of obscuring system state behind the timestamp of an operator's stop button, it leaves all remaining obligations explicit and inspectable.
+A **turn boundary**\index{Turn boundary!definition} is an explicit checkpoint where the harness evaluates whether execution may proceed before admitting its next operation. Turn boundaries occur immediately before dispatching an inference call to a foundation model and immediately before invoking any external tool, including each individually admitted call within a proposed parallel batch. Because the admission check evaluates control flags under the trajectory record lock, a pause or cancellation cannot slip into a race window between inspecting a flag and dispatching work. This boundary provides a local admission guarantee: instead of obscuring system state behind the timestamp of an operator's stop button, it leaves all remaining obligations explicit and inspectable.
 
 Local candidate processing does not have to wait for remote model generation to finish. The harness can initiate **streaming cancellation**\index{Streaming cancellation!definition}, commanding the serving engine to stop generating an in-progress reply, terminating the invocation's eligibility to produce an actionable candidate, and retaining partial output solely for bounded diagnosis. A canceled or truncated payload must never become a dispatchable call—even if a tolerant JSON parser closes dangling brackets, even if a valid tool call prefix appeared before the abort signal, or even if an apparently complete response arrives across the wire after eligibility was withdrawn. The quarantining rule of invariant closure (principle \ref{pri-invariant-closure}) holds unconditionally, regardless of how the invocation ended. Late-arriving evidence remains useful only to reconcile accounting usage or explain what the serving engine executed.
 
@@ -773,7 +773,7 @@ These three control layers operate in concert. Fair-sharing policies determine w
 
 ## Budgets and Ceilings {#sec-vol3-controlplane-accounting}
 
-Consider an agent attempting a software repair: its accumulated bill already approaches the allocated task budget, while an asynchronous test suite dispatched minutes earlier has yet to report its cloud execution charges. Proposing another model invocation introduces new, uncommitted liability. While future cluster scheduling mechanisms determine when a candidate call should receive accelerator service, scheduling alone cannot determine whether the trajectory has sufficient funds remaining to afford it. To prevent runaway spending, the harness must enforce an admission control rule that accounts for both inflight work and worst-case execution liabilities before dispatching another request.
+Consider an agent attempting a software repair: its accumulated bill already approaches the allocated task budget, while an asynchronous test suite dispatched minutes earlier has yet to report its cloud execution charges. Proposing another model invocation introduces new, uncommitted liability. A fair scheduler determines when that candidate call should receive accelerator service, but scheduling alone cannot determine whether the trajectory has sufficient funds remaining to afford it. To prevent runaway spending, the harness must enforce an admission control rule that accounts for both inflight work and worst-case execution liabilities before dispatching another request.
 
 ### Multi-dimensional budget vectors {#sec-vol3-harness-multidim-budgets}
 
@@ -854,12 +854,6 @@ def run_turn(rec):
 :::
 
 The `reserve` step evaluates @eq-vol3-bounded-liability-admission and aborts the state transition whenever the proposed invocation exceeds available headroom; `route_status` maps terminal inference conditions according to @tbl-vol3-harness-status-routing. For clarity, the listing abstracts batched invocation checks and multi-step approval lifecycles, both of which adhere strictly to the register-before-send discipline.
-
-The bounded liability for an inflight generation request is calculated using the undiscounted input rate and the hard output ceiling:
-
-$$
-\text{liability} = \PertokenPricesIn n_{\text{in}} + \PertokenPricesOut \OutputLimit
-$$ {#eq-vol3-harness-liability}
 
 Even when the unreserved balance remains strictly positive, it may prove insufficient to cover the maximum liability of the next operation. A naive spend check admits such a call on the basis of past settled invoices, only to exceed the budget ceiling once the provider bills the resulting tokens. While shrinking the requested maximum output tokens can lower the call's worst-case liability, this optimization succeeds only if prompt tokens and outstanding tool charges still fit within the margin. Furthermore, external paid tools that lack enforceable execution timeouts or bounded billing tiers cannot provide a finite liability ceiling. Under a strict enforcement policy, the harness must either reject such open-ended tools outright, substitute bounded proxies, or explicitly declare an approximate threshold that tolerates financial overshoot. Enforcing a client-side network timeout does not provide an immutable cost ceiling because the remote provider may continue billing until its own worker processes finish.
 
@@ -947,23 +941,136 @@ Settlement replaces an estimated reservation with verified consumption once the 
 
 Prompt caching discounts demand identical accounting rigor. Before dispatching a request, the admission controller must reserve funds at the standard undiscounted input rate unless the service-level agreement contractually guarantees cache hits for specific prompt prefixes. Once the provider reports verified execution data, the harness settles the transaction according to the actual cached and uncached token counts. Similarly, while terminating an inflight model stream early can limit output charges, the admission gate cannot gamble on speculative cancellations when authorizing subsequent tasks. Enforcing an unyielding ceiling requires adherence to classic systems design: complete mediation across all requests [@saltzer1975], conservative worst-case reservation bounds, and authoritative settlement driven solely by verified execution records.
 
-### Metered accounting {#sec-vol3-harness-metered-accounting}
+### Metered accounting and prefix cache reuse {#sec-vol3-harness-metered-accounting}
 
-Once an operation successfully concludes, the harness must reconcile the ledger. Settled cumulative expenditure through turn $t$ is tallied across disjoint billing categories, replacing the prior reservations:
+Modern inference providers structure billing tiers by partitioning token usage into distinct categories: uncached input tokens ($n_{\text{in}}$), cached prompt tokens ($n_{\text{cache}}$), and generated output tokens ($n_{\text{out}}$). For any completed turn $t$, the harness updates the accumulated financial ledger according to:
 
-$$
-C^{(t)} = C^{(t-1)} + \PertokenPricesIn n_{\text{in}}^{(t)} + \PertokenPricesCache n_{\text{cache}}^{(t)} + \PertokenPricesOut n_{\text{out}}^{(t)} + \sum_j c_{\text{tool}}(a_{t,j})
-$$
+$$C^{(t)} = C^{(t-1)} + \PertokenPricesIn\, n_{\text{in}}^{(t)} + \PertokenPricesCache\, n_{\text{cache}}^{(t)} + \PertokenPricesOut\, n_{\text{out}}^{(t)} + \sum_{j} c_{\text{tool}}(a_{t,j})$$
 
-### Staged escalation and budget sizing {#sec-vol3-harness-staged-escalation}
+where input token categories are mutually disjoint, unit pricing matches token dimensions, and each tool execution charge $c_{\text{tool}}$ posts exactly once to the ledger. This settled accounting equation defines how inflight escrow reservations convert into finalized balance decrements. The dominant cost driver varies substantially across workloads and provider contracts; a large input prompt volume does not necessarily imply that prompt processing dominates the aggregate bill.
 
-The multi-dimensional budget vector $\TrajectoryBudget = \langle H_{\max}, N_{\max}, T_{\max}, \CostCeiling \rangle$ tracks turns, tokens, elapsed time, and cost. The maximum indicator ratio $\max_i (\text{used}_i / \text{allowance}_i)$ serves as the primary signal for staged interventions. For instance, as the bottleneck dimension approaches its ceiling, the control plane may pause exploratory execution while permitting validation and finalization.
+The accompanying analysis examines this dynamic by modeling the append-only context workload introduced in notebook \ref{nbk-02-price-of-a-trajectory}. Whereas that earlier scenario measured raw compute throughput, here we apply a tiered billing contract to the same token distributions. The scenario assumes that the inference engine successfully reuses KV cache states for the static system prompt and prior turns, while billing all newly appended turn observations and tool outputs as uncached input. In practice, achieving these cache discounts requires runtime support: compatible server-side KV cache state must remain resident in accelerator memory, as append-only conversational text alone does not guarantee a cache hit across distributed inference workers.
 
-Sizing these budget ceilings correctly depends on the overall systems economics, specifically the amortized cost of both successful and failed trajectories. The cost per accepted task effectively bounds how much should be spent on any single run (see @eq-vol3-harness-cost-per-accepted-task):
+```{python}
+#| label: calc-vol3-harness-budget
+#| echo: false
+# METERING ONE TRAJECTORY AGAINST ITS BUDGET (LEGO)
+# Goal: Compare current allowance fractions under two hypothetical billing cases.
+# Assumptions: Chapter 02 append-only counts; all calls settled; no paid tools;
+#             no outstanding reservations. This is not a next-call admission test.
+from mlsysim import *
+from mlsysim.fmt import fmt, fmt_int, fmt_usd, fmt_percent, check
 
-$$
-\CostPerAcceptedTaskEff = \frac{\mathbb{E}[\AttemptCost]}{\AcceptanceProbability}
-$$ {#eq-vol3-harness-cost-per-accepted-task}
+class HarnessBudget:
+    # 1. LOAD: registry trajectory length and declared scenario inputs.
+    agent = Agents.Coding.SWE_Bench_Runner
+    turns = agent.max_trajectory_steps
+    s_base = 8_000
+    delta = 1_500  # appended output plus tool-observation tokens
+    k_out = 200
+    p_in, p_cache, p_out = 3.00, 0.30, 15.00  # hypothetical dollars/million tokens
+    h_max, n_max = 40, 2_000_000
+    t_max, t_wall = 900, 460  # hypothetical elapsed allowance/readout, seconds
+    c_max = 3.50  # hypothetical dollar allowance
+
+    # 2. EXECUTE: distinguish effective token counts from billed categories.
+    n_in = turns * s_base + delta * turns * (turns - 1) // 2
+    n_uncached = s_base + delta * (turns - 1)
+    n_cached = n_in - n_uncached
+    n_out = turns * k_out
+    n_total = n_in + n_out
+    c_total = (n_uncached * p_in + n_cached * p_cache + n_out * p_out) / 1e6
+    c_total_nocache = (n_in * p_in + n_out * p_out) / 1e6
+    rho_turns, rho_tokens = turns / h_max, n_total / n_max
+    rho_wall, rho_dollars = t_wall / t_max, c_total / c_max
+    rho_dollars_nocache = c_total_nocache / c_max
+
+    # 3. GUARD: these are current fractions, not future binding predictions.
+    check(n_uncached + n_cached == n_in, "Disjoint input billing categories")
+    check(0 <= n_uncached <= n_in, "Valid reuse accounting")
+    check(rho_turns == max(rho_turns, rho_tokens, rho_wall, rho_dollars), "Largest current cached-case fraction is turns")
+    check(rho_dollars_nocache > max(rho_turns, rho_tokens, rho_wall), "Largest current uncached-case fraction is dollars")
+    check(max(rho_turns, rho_tokens, rho_wall, rho_dollars_nocache) < 1, "No scenario allowance is exhausted")
+
+    # 4. OUTPUT: every display export is consumed below.
+    turns_str, h_max_str = fmt_int(turns), fmt_int(h_max)
+    n_max_m_str = fmt_int(n_max / 1e6)
+    t_max_str, t_wall_str = fmt_int(t_max), fmt_int(t_wall)
+    c_max_str = fmt_usd(c_max, precision=2)
+    p_in_str, p_cache_str, p_out_str = fmt_usd(p_in), fmt_usd(p_cache, precision=2), fmt_usd(p_out)
+    n_total_str = fmt_int(n_total)
+    c_total_str, c_total_nocache_str = fmt_usd(c_total, precision=2), fmt_usd(c_total_nocache, precision=2)
+    rho_turns_str = fmt_percent(rho_turns, style="prose")
+    rho_tokens_str = fmt_percent(rho_tokens, style="prose")
+    rho_wall_str = fmt_percent(rho_wall, style="prose")
+    rho_dollars_str = fmt_percent(rho_dollars, style="prose")
+    rho_dollars_nocache_str = fmt_percent(rho_dollars_nocache, style="prose")
+    s_base_str, delta_str, k_out_str = fmt_int(s_base), fmt_int(delta), fmt_int(k_out)
+    n_in_str, n_cached_str = fmt_int(n_in), fmt_int(n_cached)
+    cache_ratio_str = fmt(round(c_total_nocache, 2) / round(c_total, 2), precision=1)  # ratio of displayed values
+```
+
+::: {#nbk-10-multi-dimensional-accounting-and-prefix-cache .callout-notebook title="Metering a trajectory against its budget"}
+
+**Problem**: The coding workload has completed `{python} HarnessBudget.turns_str` turns under hypothetical allowances of `{python} HarnessBudget.h_max_str` turns, `{python} HarnessBudget.n_max_m_str` million effective input-plus-output tokens, `{python} HarnessBudget.t_max_str` s elapsed, and `{python} HarnessBudget.c_max_str`. The clock reads `{python} HarnessBudget.t_wall_str` s. Assume all usage is settled, no paid-tool charges, and prices of `{python} HarnessBudget.p_in_str` per million uncached input tokens, `{python} HarnessBudget.p_cache_str` per million cached input tokens, and `{python} HarnessBudget.p_out_str` per million output tokens. Which allowance has the largest current used fraction in the reuse and no-reuse cases?
+
+**Math**: With a base prompt of `{python} HarnessBudget.s_base_str` tokens, `{python} HarnessBudget.delta_str` tokens appended per turn, and `{python} HarnessBudget.k_out_str` output tokens per turn, @eq-vol3-trajectory-resend gives `{python} HarnessBudget.n_in_str` input tokens over the trajectory, `{python} HarnessBudget.n_total_str` with output. Under prefix reuse, every turn's earlier prefix is billed as cached input, `{python} HarnessBudget.n_cached_str` tokens, so the model charge is `{python} HarnessBudget.c_total_str`. Billed entirely as uncached input, the same tokens cost `{python} HarnessBudget.c_total_nocache_str`.
+
+**Result**: With reuse, the trajectory has used `{python} HarnessBudget.rho_turns_str` of its turns, `{python} HarnessBudget.rho_tokens_str` of its tokens, `{python} HarnessBudget.rho_wall_str` of its time, and `{python} HarnessBudget.rho_dollars_str` of its dollars, so turns lead. Without reuse, dollars lead at `{python} HarnessBudget.rho_dollars_nocache_str`.
+
+**Systems insight**: The leading dimension changes when caching fails. The token meter counts cached input in full and cannot see the change; the dollar meter rises `{python} HarnessBudget.cache_ratio_str` times for the same tokens. A harness that sizes $\CostCeiling$ from the cached bill will therefore meet its dollar ceiling first on exactly the trajectories that miss the cache. Reserve at the undiscounted rate and size the dollar allowance from the no-reuse cost; prefix reuse then lowers the cost per attempt, the numerator of cost per accepted task, by that same ratio instead of silently raising the risk of a budget stop.
+
+:::
+
+### Staged budget escalation and enforcement {#sec-vol3-harness-staged-escalation}
+
+A well-designed harness introduces progressive interventions before the admission gate forcibly shuts down exploratory execution. A primary health indicator is the maximum consumed fraction across all active budget dimensions: $\max(\rho_H, \rho_N, \rho_T, \rho_C)$. Factoring unbilled reservations into these fractions provides a far more accurate early warning signal than inspecting settled invoices alone, while the wall-clock timer yields the temporal fraction $\rho_T$. This multi-dimensional indicator steers adaptive interventions, even as the underlying gate continues to evaluate bounded liabilities independently across each axis.
+
+@Tbl-vol3-budget-triggers delineates the progressive escalation stages that precede hard enforcement. A deployment policy transitions through these stages based on remaining headroom and anticipated downstream requirements, avoiding arbitrary or static percentage thresholds.
+
+| Stage        | Harness action                                                                            | Scope and limitation                                                                                 |
+|:-------------|:------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
+| **Steer**    | Supply the remaining allowance and ask for a smaller next step or final report            | Changes the model's information, not the admission bound                                             |
+| **Restrict** | Narrow specific grants or disable new delegation                                          | Blocks newly disallowed admissions; retained authority and outstanding work still require accounting |
+| **Finalize** | Stop ordinary continuation and use protected resources for checks, reporting, and cleanup | Does not erase charges or effects already in flight; unresolved duties retain an owner               |
+
+: **Budget Intervention Stages**: Adaptations can preserve useful work near an allowance, but every admitted operation still passes the bounded-liability test. {#tbl-vol3-budget-triggers tbl-colwidths="[16,40,44]"}
+
+Context compaction represents one practical mitigation when sufficient budget remains to execute it without destroying critical state. However, invoking a summarization model consumes additional tokens and inevitably discards nuance. Similarly, downgrading an agent's permissions to read-only tools prevents irreversible state mutations, but read operations can still incur significant financial costs and leak sensitive context arguments to external retrieval APIs. Revoking delegation privileges stops the spawning of child agents, yet leaves existing background subtasks active and their reserved liabilities intact. Furthermore, dynamically mutating the tool schema presented in the prompt invalidates previously cached prompt prefixes from the modification point onward, inadvertently trading inference caching efficiency for reduced tool exposure.
+
+::: {.column-margin .margin-pointer}
+↩ The prompt reduction and information loss of each compaction method are established in @sec-vol3-context-engineering-compaction-method.
+:::
+
+When a trajectory enters the finalization stage due to budget exhaustion, the system must not compromise its validation standards. If an expensive regression test remains inflight, its escrow reservation must remain locked until final usage telemetry settles the charge. The final diagnostic report must accurately report candidate `r18` and record which validation suites completed successfully, rather than treating an early unit test pass as substitute verification for incomplete end-to-end checks.
+
+### Choosing a ceiling from task evidence {#sec-vol3-agent-harness-choosing-ceiling}
+
+Enforcing an immutable ceiling guarantees system safety, but setting appropriate numerical thresholds requires empirical validation across representative task distributions. Systems engineers evaluate candidate budget vectors by testing the end-to-end control policy across a workload sample while holding models, tool suites, and acceptance tests constant. We compute policy efficiency by tracking accepted tasks divided by total attempted tasks, capturing both catastrophic failures and trajectories halted by budget exhaustion. System evaluations must report total dollar expenditure, wall-clock latency, unresolved background liabilities, and operator intervention frequency alongside raw task completion. This metric forms the cost per accepted task (@eq-vol3-cost-per-accepted-task), which amortizes the expenses of failed and abandoned runs across successful completions. Budget limits appear artificially inexpensive whenever benchmark evaluations omit failed trajectories from the denominator. As @kapoor2024agents demonstrate, evaluating agent accuracy in isolation from cost produces needlessly fragile and expensive architectures; engineering robust systems requires joint optimization across both dimensions.
+
+Baseline profiling under unconstrained budgets reveals the empirical completion time and token distributions of successful trajectories, highlighting candidate threshold targets. However, because early steering, throttling, and finalization alter downstream model reasoning, engineers must evaluate the complete policy empirically rather than assuming post-hoc truncation models reality. In practice, empirical cost-benefit curves rarely display a sharp knee. The operational decision rule selects the budget ceiling that minimizes cost per accepted task while keeping unresolved liabilities and manual interventions within acceptable operational bounds. When performance differences fall within empirical measurement uncertainty, simpler budget policies take precedence.
+
+::: {.column-margin .margin-pointer}
+↪ Matched-budget comparison of complete policies under one fixed resource envelope is developed in @sec-vol3-evaluation-matched-budgets.
+:::
+
+::: {#chk-10-budget-admission .callout-checkpoint title="A budget is an admission decision"}
+
+The repair trajectory is paused with an unresolved paid test job. A smaller model call would fit the currently unreserved allowance, but the task's elapsed deadline has passed.
+
+- [ ] **Admission**: Why does a fitting dollar reservation not permit the call under the current task contract?
+- [ ] **Settlement**: Which evidence would release the test job's unused reservation, and why is its timeout insufficient?
+- [ ] **Finalization**: How can the harness fund a final report while preserving responsibility for the unknown job charge?
+- [ ] **Admission estimate**: In notebook \ref{nbk-10-bounded-liability-admission}, the test job settles and releases half its reservation. Estimate the largest input the same call could then carry at its full output allowance.
+- [ ] **Ceiling choice**: Policy A accepts more tasks but incurs more total cost and more unresolved liabilities than policy B. Which quantity decides between them, and what trial evidence do you need before trusting the difference?
+
+:::
+
+Budget accounting tracks aggregate resource consumption rather than semantic problem-solving progress. Identifying a stalled repair loop before budget exhaustion requires synthesizing evidence across repeated tool failures, prompt state divergence, and environment transitions. Within the broader harness architecture, multi-dimensional admission control provides the final pillar of the supervisory control plane: state records track ownership and outstanding liabilities, lifecycle transitions govern execution state, schedulers balance multi-tenant concurrency, and bounded admission limits financial exposure without relying on model self-restraint.
+
+::: {.column-margin .margin-pointer}
+↪ Progress evidence for detecting a trajectory that loops without advancing is developed in @sec-vol3-failure-recovery-progress-evidence.
+:::
 
 ## Fallacies and Pitfalls {#sec-vol3-agent-harness-fallacies}
 
@@ -1051,7 +1158,7 @@ The synchronization cost of this discipline is modest: a brief critical section 
 |:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
 | $t_{\text{boundary}} \approx \OutputLimit \times \PertokenDecodeTime$                                                                                                                   | Worst-case control response latency when waiting for generation completion; streaming cancellation eliminates this dependence on $\OutputLimit$         | @sec-vol3-controlplane-signals       |
 | $\text{actual} + \text{reserved} + \text{proposed liability} + \text{finalization reserve} \leq \text{allowance}$                                                                       | Bounded-liability admission gate; permits dispatch only when all cumulative resource dimensions accommodate active work and final checks                | @eq-vol3-bounded-liability-admission |
-| $\text{liability} = \PertokenPricesIn\, n_{\text{in}} + \PertokenPricesOut\, \OutputLimit$                                                                                              | Worst-case reservation for an inflight model invocation, priced at undiscounted input rates and maximum output token allowance                          | @eq-vol3-harness-liability           |
+| $\text{liability} = \PertokenPricesIn\, n_{\text{in}} + \PertokenPricesOut\, \OutputLimit$                                                                                              | Worst-case reservation for an inflight model invocation, priced at undiscounted input rates and maximum output token allowance                          | @sec-vol3-controlplane-accounting    |
 | $C^{(t)} = C^{(t-1)} + \PertokenPricesIn n_{\text{in}}^{(t)} + \PertokenPricesCache n_{\text{cache}}^{(t)} + \PertokenPricesOut n_{\text{out}}^{(t)} + \sum_j c_{\text{tool}}(a_{t,j})$ | Settled cumulative expenditure through turn $t$ across disjoint billing categories, reconciling and replacing prior reservations                        | @sec-vol3-harness-metered-accounting |
 | $\TrajectoryBudget = \langle H_{\max}, N_{\max}, T_{\max}, \CostCeiling \rangle$, indicator $\max_i (\text{used}_i / \text{allowance}_i)$                                               | Multi-dimensional budget vector across turns, tokens, elapsed time, and cost; the bottleneck ratio steers staged intervention policies                  | @sec-vol3-harness-staged-escalation  |
 | $\text{calls per round} = w \times \text{quantum} / (n_{\text{in}} + \OutputLimit)$                                                                                                     | Deficit round-robin dispatch rate; class weights establish scheduling shares, while prompt and generation sizes dictate turn latency                    | @sec-vol3-controlplane-scheduling    |

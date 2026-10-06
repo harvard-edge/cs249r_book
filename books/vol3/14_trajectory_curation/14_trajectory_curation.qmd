@@ -198,6 +198,10 @@ A single recorded agent interaction can populate three distinct learning artifac
 
 A **preference comparison**\index{Preference comparison!definition} pairs alternative trajectories generated from a shared initial context, attaching an explicit, justified preference ordering. Two runs of a task form a valid comparison pair only when their initial state, environment configuration, and accessible action spaces are identical. Furthermore, a failing or degraded run belongs in the rejected slot only when an evaluator records explicit diagnostic criteria explaining why its trajectory was inferior. These supporting assessments, tie-breaking criteria, and conditioning contexts allow offline preference optimization methods to construct statistically sound loss objectives.
 
+::: {.column-margin .margin-pointer}
+↪ The trajectory preference loss, which scores the preferred and dispreferred records against a frozen reference policy, is developed in @sec-vol3-fine-tuning-preference-loss.
+:::
+
 A **rollout fixture**\index{Rollout fixture!definition} bundles a reproducible task environment, versioned configuration fixtures, and an automated grading specification to support online exploration during reward-based reinforcement learning. An unsuccessful execution attempt often reveals a valuable environmental corner case even when none of its recorded actions warrant imitation. In this setting, the trace does not provide demonstration data; rather, it seeds a versioned simulation fixture that recreates the problematic state so the policy can explore alternative trajectories and optimize against the reward specification.
 
 ::: {.column-margin .margin-pointer}
@@ -284,27 +288,6 @@ System privileges and tool access grants must remain explicit and immutably enfo
 ::: {.column-margin .margin-pointer}
 ↩ The reset contract, which catalogs every piece of state that teardown must clear before an environment serves a new lease, is established in @sec-vol3-sandboxes-pooling-reset.
 :::
-
-### Fault injection {#sec-vol3-trajectory-curation-fault-injection}
-
-In production, natural execution occasionally exposes an agent to network drops, service timeouts, and tool errors. However, relying solely on spontaneous operational failures leaves massive blind spots in the training distribution. Systematic **fault injection**\index{Fault injection!recovery collection}[^fn-fault-injection-chaos] proactively bridges these coverage gaps. A rigorous collection protocol logs the injection configuration version, the targeted tool invocation or observation stream, the simulated system state, and the expected remediation policy. Crucially, fault injection operates strictly within established security constraints: injecting a network timeout or file lock grants the agent no auxiliary privileges to install unapproved packages, escalate filesystem permissions, or circumvent human approval barriers. Each condition in @tbl-vol3-fault-injection-taxonomy names the causal distinction the fixture must preserve and the response a curator should assess.
-
-[^fn-fault-injection-chaos]: **Fault Injection**: Deliberately introducing failures to evaluate operational resilience is a cornerstone of systems engineering, popularized in distributed infrastructure as chaos engineering—conducting controlled experiments that inject server, network, and disk failures into live clusters to validate steady-state guarantees [@basiri2016]. Curation adopts the methodological rigor rather than the live production venue. Faults are introduced within versioned, hermetic test fixtures where every injected condition is recorded and environment semantics remain deterministic. This ensures that synthesized demonstrations teach genuine fault recovery rather than learning to exploit idiosyncrasies of the simulation harness. \index{Fault injection!chaos engineering}
-
-| Collection condition                               | Required causal distinction                                    | Candidate response to assess                                   |
-|:---------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------|
-| Malformed proposal rejected locally                | No operation was dispatched                                    | Inspect the schema and correct the represented error           |
-| Partial search result                              | Missing content is distinguished from an empty complete result | Request a valid continuation or report insufficient evidence   |
-| Lost acknowledgment after a state-changing request | The endpoint may have acted despite the missing reply          | Reconcile the identified operation before a dependent retry    |
-| Unavailable capability or exhausted allowance      | The original goal may be unreachable within the grant          | Stop or hand off with accurate scope and owned residual duties |
-
-: **Fault Conditions for Recovery Collection**: Each condition preserves the relation between observations and possible effects. The criterion evaluates an appropriate response, not compulsory autonomous repair. {#tbl-vol3-fault-injection-taxonomy}
-
-Consider the lost-acknowledgment scenario in @tbl-vol3-fault-injection-taxonomy. When a mock harness drops an acknowledgment after committing a mutating remote procedure call, the simulated environment must faithfully retain the side effects of that committed call in its subsequent state. If the mock were to return a connection reset while silently rolling back the server state to a clean slate, it would misrepresent the distributed systems challenge, teaching the agent a naive retry pattern that causes double-execution bugs in production. Replay determinism requires that subsequent model actions receive state observations strictly consistent with prior mutations.
-
-Similarly, an engineering team must differentiate between tasks designed for autonomous remediation and those designed for graceful degradation. A recovery objective requires an authorized, reachable remediation path within the test environment; a safe-stopping objective, by contrast, deliberately closes all remediation paths to teach the agent to halt cleanly and notify an operator. These represent two distinct behavioral objectives with separate evaluation rubrics. Reliability coverage must therefore be tracked separately across unprompted agent mistakes and declared synthetic faults, while documenting any production failure modes that the collection fixture cannot replicate.
-
-#
 
 A well-designed collection fixture unifies the task specification and grading criteria with an explicit learning objective, a capture contract, and a structured distribution of variants. Before launching collection workers across this task matrix, however, systems engineers must partition and quarantine held-out evaluation tasks. Reserving these unpolluted benchmarks is the focus of @sec-vol3-flywheel-evaluation.
 
@@ -403,6 +386,27 @@ To capture meaningful similarity in agent trajectories, feature extraction must 
 
 [^fn-minhash-resemblance-curation]: **MinHash**: Minwise independent permutations were introduced to detect near-duplicate web pages at search-engine scale, where exhaustive all-pairs comparison is computationally prohibitive [@broder1997resemblance]. MinHash maps an arbitrary-sized feature set to a fixed-size signature such that the probability of two signatures matching on any given component equals the Jaccard similarity of their underlying sets. This allows a curation pipeline to index and screen a large trajectory corpus in linear time and memory, deferring expensive all-pairs comparisons to a small subset of candidate matches. \index{MinHash!origin}
 
+For nonempty finite feature sets $X_1$ and $X_2$, the Jaccard similarity $J(X_1,X_2)$ and the theoretical MinHash collision probability satisfy:
+
+$$J(X_1,X_2)=\frac{|X_1\cap X_2|}{|X_1\cup X_2|}, \qquad
+\Pr\!\left(\min_{x\in X_1}\sigma(x)=\min_{x\in X_2}\sigma(x)\right)=J(X_1,X_2).$$
+
+Here, $\sigma$ denotes a uniformly random permutation of the universal feature vocabulary. The minimum hash values under $\sigma$ coincide precisely when the first element of $X_1\cup X_2$ ordered by $\sigma$ lies within their intersection $X_1\cap X_2$. By drawing $n_\sigma$ independent random permutations, the fraction of matching signature components serves as an unbiased estimator of $J(X_1,X_2)$ with estimation variance $J(1-J)/n_\sigma$ [@li2022cminhash]. In production implementations, families of pseudo-random universal hash functions approximate true random permutations, and ingestion filters must supply explicit fallback rules for empty feature sets.
+
+To avoid evaluating pairwise MinHash distances across all records, pipelines index signatures using Locality-Sensitive Hashing (LSH).[^fn-lsh-origin-curation] An LSH index partitions an $n_\sigma$-dimensional signature into $b$ bands containing $\BarrierRelativeDegree$ rows each, such that $n_\sigma = br$. Two trajectories become candidate near-duplicates if their signatures match identically across all $\BarrierRelativeDegree$ rows in at least one band. Under the assumption of independent hash components, a pair with Jaccard similarity $J$ matches across all rows of a single band with probability $J^\BarrierRelativeDegree$. The probability that the pair collides in at least one of the $b$ bands is:
+
+$$p_{\text{candidate}}=1-(1-J^\BarrierRelativeDegree)^b.$$
+
+This function produces an S-shaped selection curve rather than a discontinuous threshold. Adjusting $b$ and $\BarrierRelativeDegree$ tunes the retrieval trade-off: choosing fewer rows $\BarrierRelativeDegree$ per band shifts the curve toward lower similarities, capturing more potential duplicates at the cost of generating larger collision buckets and demanding more downstream verification.
+
+[^fn-lsh-origin-curation]: **Locality-Sensitive Hashing**: A hashing framework where collision probability monotonically increases with item similarity, designed for sublinear approximate nearest-neighbor search in high-dimensional spaces [@indyk1998approximate]. Banding MinHash signatures implements LSH for Jaccard similarity. From a systems perspective, banding decouples screening throughput from corpus size: engineers tune parameters $b$ and $\BarrierRelativeDegree$ so that candidate generation aligns directly with available downstream verification bandwidth. \index{Locality-sensitive hashing!origin}
+
+::: {.column-margin}
+![](images/svg/vol3_trajectory_curation_margin_002.svg){width="100%" fig-alt="S-shaped curve of candidate probability against Jaccard similarity from zero to one for 32 bands of 4 rows. The curve stays near zero below 0.2, rises steeply between 0.3 and 0.6, and reaches nearly one by 0.8. Dots mark 87 percent at 0.5 and nearly 100 percent at 0.8."}
+
+*Banding transforms candidate retrieval into an S-shaped probability curve governed by the number of bands and rows.*
+:::
+
 ```{python}
 #| label: lego-14-split-screening-budget
 #| echo: false
@@ -439,13 +443,16 @@ class SplitScreeningBudget:
     check(bands * rows == k, "Complete band partition")
     check(abs(max_standard_error - 0.0441941738) < 1e-9, "Ideal maximum standard error")
     check(signature_bytes.to(byte).magnitude == 512, "Raw bytes per signature")
+    check(abs(matrix_bytes.to(MB).magnitude - 51.2) < 1e-9, "Decimal raw matrix size")
+    check(0.873 < candidate_probabilities[0] < 0.874, "Candidate probability at J=0.5")
+    check(candidate_probabilities[1] > 0.9999999, "Candidate probability at J=0.8")
 
-    # 4. EXPORT: narrative formatting.
+    # 4. OUTPUT: all exports are consumed below.
     k_str = fmt_int(k)
-    se_str = fmt_percent(max_standard_error, precision=1)
-    width_str = fmt_memory(component_bytes, unit=byte, precision=0)
-    signature_str = fmt_memory(signature_bytes, unit=byte, precision=0)
     n_str = fmt_int(n_records)
+    width_str = fmt_qty(component_bytes, byte, precision=0)
+    se_str = fmt(max_standard_error, precision=4)
+    signature_str = fmt_qty(signature_bytes, byte, precision=0)
     matrix_str = fmt_memory(matrix_bytes, unit=MB, precision=1)
     bands_str, rows_str = fmt_int(bands), fmt_int(rows)
     lower_j_str, higher_j_str = [fmt(j, precision=1) for j in similarities]
@@ -731,6 +738,18 @@ class VerificationCascadeEconomicsThroughput:
 
 :::
 
+### Learned scores and scoped judgments {#sec-vol3-trajectory-curation-rankers}
+
+Learned scoring models can rank candidate trajectories for manual review or sub-sample from a pool of eligible examples to optimize diversity or stylistic conciseness. For instance, process reward models evaluate individual reasoning steps and intermediate tool calls rather than relying solely on terminal execution outcomes [@uesato2022solving; @lightman2023let]. While a step-level reward signal highlights likely points of failure, pinpointing the root causal error still requires retrospective human or symbolic review. Furthermore, filtering heavily for trajectory brevity alters the underlying data distribution in subtle ways; curation pipelines must not inadvertently purge the very multi-turn recovery sequences that the model needs to learn robust error-correction.
+
+When tasks require evaluating open-ended prose, user interactions, or design elegance, human raters or judge models provide qualitative evaluation scores governed by explicit rubrics and calibration standards. The principle of verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) defines the operational boundaries of these subjective judges: a learned score ranks candidate solutions and provides scoped evidence for a specific qualitative criterion, provided its input context remains strictly isolated from the agent's internal chain-of-thought gaming. Deterministic verifiers require identical scoping. Every verifier execution must persist metadata identifying the assessor version, rubric hash, extracted evidence, confidence scores, and explicit abstentions. Under no circumstances may an exceptionally high qualitative rating override an unsatisfied deterministic predicate.
+
+::: {.column-margin .margin-pointer}
+↩ Qualitative rubrics and grader calibration standards are established in @sec-vol3-evaluation-grading-calibration.
+:::
+
+Iterated selection against automated scorers concentrates grader blind spots. Pushing a training flywheel against a learned proxy reward initially improves output quality, but excessive optimization eventually leads to proxy collapse: the proxy score continues to rise while true downstream task quality deteriorates [@gao2023scaling]. When subsequent policy generations train on these curated datasets, idiosyncratic biases in the ranker become baked into model behavior. Mitigating this feedback loop requires periodic double-blind audits of both accepted and rejected records, continuous recalibration against held-out ground truth data that is never used for training, and mandatory re-scoring whenever policy architectures or task domains shift. Any data augmentation or trajectory transformation requires fresh verification of its modified payload and token masks—a provenance boundary explored in @sec-vol3-flywheel-provenance.
+
 ::: {#chk-14-admission-cascades-limits .callout-checkpoint title="Defend an admission route"}
 
 A route is defensible when each predicate's verdict and the order of checking can both be justified.
@@ -777,8 +796,8 @@ A ***recovery demonstration***\index{Recovery demonstration!definition} is a cur
 Direct success, recovery, and negative are descriptive behavioral labels rather than blanket permissions for training. A single extended trajectory may begin with straightforward progress, encounter an unexpected environment error, execute a clean recovery, and later stall on an unrelated tool failure. Discarding that entire trajectory wastes genuine engineering signal; conversely, training uncritically on all its tokens teaches the model to replicate its bugs. In an industrial curation pipeline, three distinct verification stages govern data admission:
 
 1. The record-adequacy predicate $\text{chk}_{\text{record}}$ verifies that recorded events, observations, and timestamps faithfully match what actually transpired in the runtime environment.
-2. The usage eligibility predicate $\text{chk}_{\text{use}}$ enforces data-privacy permissions, license constraints, and cross-validation split assignments across every emitted training artifact.
-3. Consumer-specific predicates evaluate whether the process, final outcome, or individual step targets meet the threshold for a particular downstream consumer (such as supervised fine-tuning or preference optimization).
+2. Consumer-specific predicates evaluate whether the process, final outcome, or individual step targets meet the threshold for a particular downstream consumer (such as supervised fine-tuning or preference optimization).
+3. The usage eligibility predicate $\text{chk}_{\text{use}}$ enforces data-privacy permissions, license constraints, and cross-validation split assignments across every emitted training artifact.
 
 @Tbl-vol3-trajectory-taxonomy maps these behavioral categories to their valid learning applications, emphasizing that taxonomy labels describe behavioral evidence rather than granting unconditional admission.
 
@@ -836,6 +855,25 @@ The underlying source trace continues to preserve the original task prompt, tool
 :::
 
 When only a localized recovery window contains sound evidence, the curation harness can admit that isolated segment while marking broader task outcomes as unverified. Furthermore, if post-processing sanitizes credentials or strips sensitive data into `trace_r19_01_redacted_v1`, the curation pipeline must revalidate target spans against the modified tokens. Pruning the malformed call, inserting future validation outputs into an early prompt, or truncating intermediate observations fundamentally alters the causal reasoning problem the model is being trained to solve.
+
+### Fault injection {#sec-vol3-trajectory-curation-fault-injection}
+
+In production, natural execution occasionally exposes an agent to network drops, service timeouts, and tool errors. However, relying solely on spontaneous operational failures leaves massive blind spots in the training distribution. Systematic **fault injection**\index{Fault injection!recovery collection}[^fn-fault-injection-chaos] proactively bridges these coverage gaps. A rigorous collection protocol logs the injection configuration version, the targeted tool invocation or observation stream, the simulated system state, and the expected remediation policy. Crucially, fault injection operates strictly within established security constraints: injecting a network timeout or file lock grants the agent no auxiliary privileges to install unapproved packages, escalate filesystem permissions, or circumvent human approval barriers. Each condition in @tbl-vol3-fault-injection-taxonomy names the causal distinction the fixture must preserve and the response a curator should assess.
+
+[^fn-fault-injection-chaos]: **Fault Injection**: Deliberately introducing failures to evaluate operational resilience is a cornerstone of systems engineering, popularized in distributed infrastructure as chaos engineering—conducting controlled experiments that inject server, network, and disk failures into live clusters to validate steady-state guarantees [@basiri2016]. Curation adopts the methodological rigor rather than the live production venue. Faults are introduced within versioned, hermetic test fixtures where every injected condition is recorded and environment semantics remain deterministic. This ensures that synthesized demonstrations teach genuine fault recovery rather than learning to exploit idiosyncrasies of the simulation harness. \index{Fault injection!chaos engineering}
+
+| Collection condition                               | Required causal distinction                                    | Candidate response to assess                                   |
+|:---------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------|
+| Malformed proposal rejected locally                | No operation was dispatched                                    | Inspect the schema and correct the represented error           |
+| Partial search result                              | Missing content is distinguished from an empty complete result | Request a valid continuation or report insufficient evidence   |
+| Lost acknowledgment after a state-changing request | The endpoint may have acted despite the missing reply          | Reconcile the identified operation before a dependent retry    |
+| Unavailable capability or exhausted allowance      | The original goal may be unreachable within the grant          | Stop or hand off with accurate scope and owned residual duties |
+
+: **Fault Conditions for Recovery Collection**: Each condition preserves the relation between observations and possible effects. The criterion evaluates an appropriate response, not compulsory autonomous repair. {#tbl-vol3-fault-injection-taxonomy}
+
+Consider the lost-acknowledgment scenario in @tbl-vol3-fault-injection-taxonomy. When a mock harness drops an acknowledgment after committing a mutating remote procedure call, the simulated environment must faithfully retain the side effects of that committed call in its subsequent state. If the mock were to return a connection reset while silently rolling back the server state to a clean slate, it would misrepresent the distributed systems challenge, teaching the agent a naive retry pattern that causes double-execution bugs in production. Replay determinism requires that subsequent model actions receive state observations strictly consistent with prior mutations.
+
+Similarly, an engineering team must differentiate between tasks designed for autonomous remediation and those designed for graceful degradation. A recovery objective requires an authorized, reachable remediation path within the test environment; a safe-stopping objective, by contrast, deliberately closes all remediation paths to teach the agent to halt cleanly and notify an operator. These represent two distinct behavioral objectives with separate evaluation rubrics. Reliability coverage must therefore be tracked separately across unprompted agent mistakes and declared synthetic faults, while documenting any production failure modes that the collection fixture cannot replicate.
 
 ### Records, stored tokens, and selected targets {#sec-vol3-trajectory-curation-token-accounting}
 
@@ -937,7 +975,7 @@ class MixedCurationTokenBudgetAllocation:
 
 :::
 
-#### Mixture experiments {#sec-vol3-trajectory-curation-mixture-experiments}
+### Mixture experiments {#sec-vol3-trajectory-curation-mixture-experiments}
 
 While token accounting quantifies the compute and memory footprint of a corpus, empirical mixture experiments determine its practical operational value. A mixture experiment establishes a fixed evaluation protocol, selects a baseline architecture, and evaluates training cohorts across controlled recovery ratios. For example, an ablation study might compare a direct-success baseline against recovery-augmented corpora while holding task domains, base model checkpoints, target-masking criteria, and total training schedules constant. Curation engineers must track trajectory deduplication and replacement meticulously: expanding the recovery fraction under a constrained training budget inevitably reduces coverage of nominal, direct-path tasks.
 
@@ -1090,7 +1128,7 @@ The verification cascade applies the evaluation criteria of @sec-vol3-flywheel-v
 Because distributed workers and network connections inevitably fail, message delivery is retried. Each submission is therefore cryptographically bound to its unique collection run identifier, artifact version, and assessment policy. When the pipeline receives a duplicate identifier with an identical payload, it reuses the existing evaluation decision; if an incoming payload conflicts with an earlier submission under the same identifier, the system diverts the record to an operator investigation queue. Under no circumstances may a transient retry publish duplicate training examples or release a staging reservation twice. Durable ownership and idempotency primitives enforce this invariant without requiring an ad hoc recovery protocol.
 
 ::: {.column-margin .margin-pointer}
-↩ Semantic deduplication of retried writes, which acknowledges an identical retry and rejects a conflicting payload under the same identity, is established in @sec-vol3-persistence-wal.
+↩ Semantic deduplication of retried writes, which acknowledges an identical retry and rejects a conflicting payload under the same identity, is established in @sec-vol3-persistence-engine-design.
 :::
 
 ### Collection credits and staging reserves {#sec-vol3-trajectory-curation-collection-credits}
@@ -1423,6 +1461,10 @@ A **derived record**\index{Derived record!definition} must always be created as 
 
 Heuristic pattern matching and named-entity recognition models act as screening mechanisms rather than complete sanitization guarantees. Engineers must validate these detectors across the full output pipeline using realistic end-to-end test cases, including deeply nested payloads and generated metadata. Synthetic canaries provide an empirical measure of detector recall: the curation audit log must record how many canaries were injected, how many escaped detection, which semantic classes and text transformations were tested, and where the inspection boundary was applied. Observing zero canary escapes bounds the leak probability only for the evaluated canary distribution. Furthermore, false positives impose a severe systems cost, as over-aggressive scrubbing strips necessary context and distorts the training signal.
 
+::: {.column-margin .margin-pointer}
+↩ Canary values, planted synthetic secrets whose escape reveals a leaking path, are established in @sec-vol3-security-detectors-canaries.
+:::
+
 When scrubbing identifiers across multi-step interactions, curators use consistent pseudonyms to preserve relational dependencies across turns while preventing identity linkage beyond the access scope that the trace's disclosure boundary permits. Tokenization effects require careful handling: replacing an identifier with a fixed-width placeholder often alters the sequence's token count and attention boundaries. Similarly, reserializing a structured payload can preserve outer JSON or YAML formatting while silently breaking nested shell escaping, regular expression matches, or tool invocation syntax. Consequently, checking that an artifact parses successfully is entirely distinct from verifying that it still supports the intended learning target.
 
 ::: {.column-margin .margin-pointer}
@@ -1468,9 +1510,9 @@ A well-architected trajectory record possesses a verifiable origin, an explicit 
 
 ## Case Study: Curating the Repair Record {#sec-vol3-flywheel-synthesis}
 
-To see how trajectory curation operates in practice end-to-end, we return to the automated code-repair recovery run, `collection_run_r19_01`, introduced in @sec-vol3-flywheel-curation. Recall that in this scenario, the agent started from baseline workspace `pool_fixture_v1` and eventually produced a patched workspace, `ws_r20`. After an initial malformed edit (`e2`) was rejected, the agent successfully recovered by inspecting the schema (`e3`) and submitting a corrected edit (`e4`) that satisfied the evaluation suite under `repair_accept_v1`.
+To see how trajectory curation operates in practice, consider an automated code-repair pipeline processing a recovery run, `collection_run_r19_01`. In this scenario, an agent attempted to fix a software defect starting from baseline workspace `pool_fixture_v1` and eventually produced a patched workspace, `ws_r20`. During execution, the agent generated a malformed edit proposal that the execution harness intercepted and refused before dispatch. Rather than crashing, the agent inspected the tool schema, submitted a corrected edit that passed harness validation, and satisfied the candidate evaluation suite under `repair_accept_v1`. The raw execution trace, `trace_r19_01`, records this entire sequence while preserving immutable provenance: the preceding failed trial's verdict on `ws_r19` and the baseline `test_r18` operations remain unaltered. The curation challenge is deciding which segments of this messy execution record belong in an upstream learning artifact.
 
-While we already established how the target policy `recovery_targets_v1` slices this trace into conditioning context versus supervised learning targets, isolating tokens is only one part of the curation challenge. To admit this raw execution record (`trace_r19_01`) into an upstream learning artifact, we must now layer on the remaining pipeline stages: verifying the transformed record, tracking its provenance, and publishing it to a corpus manifest.
+Our proposed training objective is to teach models how to recover from harness refusals: inspecting schemas after an error, generating grounded corrections, and producing concise final reports. The target policy `recovery_targets_v1` selects the schema query `e3`, the corrected edit `e4`, and the final summary `e6` as supervised learning targets—the specific tokens over which gradient updates occur. Meanwhile, the agent's initial malformed proposal at `e2` and the test summary at `e5` remain in the trace as conditioning context. Curation must also retain the initial environment prompt, file context, and intermediate tool responses. Without this surrounding context, isolated action events lose their causal grounding and provide no signal for next-token prediction.
 
 ### Admission of the derived view {#sec-vol3-trajectory-curation-derived-view-admission}
 

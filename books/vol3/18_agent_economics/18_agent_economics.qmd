@@ -63,7 +63,7 @@ The runtime built so far can already say part of what the team needs. The evalua
 
 This chapter builds the account that joins spending to accepted outcomes. @Sec-vol3-intro-horizon-arithmetic introduced cost per accepted task, the expected cost of an attempt divided by the probability that the attempt is accepted, as one of the book's two quantitative fundamentals. Here that ratio becomes something a team can measure over a real cohort of tasks. Its numerator holds every charge an attempt incurs, its denominator counts only outcomes accepted under one declared contract, and each lever the runtime controls (reuse, retries, acceleration, routing, capacity, and delegation) is worth buying only if it lowers the ratio or buys a deadline the objective values.
 
-The account comes first, in @sec-vol3-agent-economics-accounting, together with the rules that keep failed, canceled, and still-pending work inside it. @Sec-vol3-agent-economics-caching prices what the runtime pays to carry context from call to call, while @sec-vol3-agent-economics-reasoning-retry-budgets determines how many attempts it should buy. @Sec-vol3-agent-economics-criticalpath finds where faster execution actually shortens a task, @sec-vol3-agent-economics-cascades decides which model should attempt the work at all, and @sec-vol3-agent-economics-capacity sizes the services that concurrent trajectories hold and wait on. @Sec-vol3-agent-economics-governance then makes spending limits hold across delegated children and late bills. @Sec-vol3-agent-economics-selection then compares whole architectures under one contract, and @sec-vol3-agent-economics-synthesis prices all four lighthouse workloads to show that each is bound by a different term of the same account.
+The account comes first, in @sec-vol3-agent-economics-accounting, together with the rules that keep failed, canceled, and still-pending work inside it. @Sec-vol3-agent-economics-caching prices what the runtime pays to carry context from call to call and how many attempts it should buy. @Sec-vol3-agent-economics-criticalpath finds where faster execution actually shortens a task, and @sec-vol3-agent-economics-cascades decides which model should attempt the work at all. @Sec-vol3-agent-economics-capacity sizes the services that concurrent trajectories hold and wait on, and @sec-vol3-agent-economics-governance makes spending limits hold across delegated children and late bills. @Sec-vol3-agent-economics-selection then compares whole architectures under one contract, and @sec-vol3-agent-economics-synthesis prices all four lighthouse workloads to show that each is bound by a different term of the same account.
 
 ## Cost per Accepted Task {#sec-vol3-agent-economics-accounting}
 
@@ -237,7 +237,7 @@ A rigorous matched comparison holds the acceptance contract and maximum resource
 
 Decomposing system costs in this manner immediately reveals which architectural optimizations yield the highest return. The dominant term in the trajectory account varies significantly across agent workloads, as detailed across the four lighthouse benchmarks evaluated in @sec-vol3-agent-economics-synthesis. In automated bug repair, for instance, repeated prompt context constitutes the overwhelming majority of inference charges. Implementing prefix caching and context compaction drastically reduces the cost of maintaining conversational history across turns, while tuned reasoning limits and adaptive retry budgets curtail the total count of model invocations.
 
-## Context Cache Economics {#sec-vol3-agent-economics-caching}
+## Caching and Reasoning Budgets {#sec-vol3-agent-economics-caching}
 
 When an agent interacts with a language model across multiple turns, identical prompt prefixes recur across successive invocations. Rather than recomputing attention states on every call, modern inference engines retain and share these activations across requests. While reused key-value (KV) state lowers processing costs significantly, it is not free. System designers must price this reuse accurately to evaluate fundamental operational trade-offs: whether compacting context reduces overall billing, and whether purchasing additional inference attempts lowers the ultimate cost per accepted task under a fixed verification contract. Both context validation principles and cache management mechanics govern when such reuse is physically permissible.
 
@@ -405,7 +405,7 @@ Here $N_{\min}$ represents the **payback horizon**\index{Payback horizon!definit
 
 :::
 
-## Execution and Reasoning Budgets {#sec-vol3-agent-economics-reasoning-retry-budgets}
+### Reasoning and retry budgets {#sec-vol3-agent-economics-reasoning-retry-budgets}
 
 An agent runtime can also allocate budget dynamically by purchasing deeper internal reasoning within a single invocation or by funding multiple independent execution attempts. A configured reasoning token limit acts as an upper ceiling rather than a fixed spend. Financial accounting must track actual billed token consumption and its empirical effect on task acceptance under an identical evaluation contract. Because internal deliberation generates tokens serially, systems engineers must evaluate this extra compute against increased turn latency.
 
@@ -484,8 +484,6 @@ Production workloads rarely exhibit a single, uniform success probability $\Hidd
 Generating extra candidate solutions also introduces verification risk. As analyzed in @sec-vol3-test-time-compute-selection-costs, repeated sampling raises the chance of a false acceptance, where a flawed candidate satisfies test assertions without truly solving the underlying task. Passing an automated check provides domain-specific verification evidence rather than an absolute guarantee of correctness. Ultimately, prefix caching, context compaction, and retry policies govern what compute resources an agent runtime purchases; determining how those purchased operations dictate end-to-end latency requires analyzing the critical execution path.
 
 ## Critical-Path Latency {#sec-vol3-agent-economics-criticalpath}
-
-End-to-end execution time is not merely a user-experience metric; it is a primary driver of the environment and sandbox holding cost ($C_{\text{sandbox}}^{(t)}$) established in our fundamental task account. When a task routes to an overloaded model tier or waits for external tools, it holds costly compute resources open.
 
 Accelerating a model call rarely yields a proportional reduction in end-to-end task time. In realistic agent workflows, container provisioning, repository setup, test suite execution, tool I/O, and consensus validation often dominate total elapsed time. Evaluating an acceleration technique therefore requires an end-to-end systems perspective: how much wall-clock time does the proposed change strip from the critical path to a declared endpoint, what compute and memory resources does it consume, and does the accelerated execution preserve the required acceptance evidence? Tracing exposes where time actually goes, while economic accounting determines whether accelerating that specific span is worth the operational cost.
 
@@ -587,7 +585,110 @@ class CriticalPath:
 
 ### Span types and their levers {#sec-vol3-agent-economics-span-levers}
 
-Once distributed traces identify the critical path, engineers can target specific bottlenecks: optimizing prompt layouts for cache hits, compressing reasoning budgets, running independent tools concurrently, or deploying warm sandbox pools. However, concurrency gains diminish when tools contend for local resources or when a downstream tool requires an earlier output. While speculative environment preparation or early test-suite stopping can yield latency improvements, they do not change the core verification contract. Final task acceptance still demands full test coverage, and any compute resources consumed by aborted or speculative jobs must remain on the trajectory ledger.
+Once distributed traces identify the critical path, engineers can target the specific bottlenecks governing each span. @Tbl-vol3-span-taxonomy maps the primary span types of an agent trace to the physical factors governing their duration and the engineering levers available to compress them.
+
+| Span                 | What sets its duration                         | What shortens it                                                         |
+|:---------------------|:-----------------------------------------------|:-------------------------------------------------------------------------|
+| Model, reading input | Context length, prefix-cache misses, queueing  | Cache-stable layout, smaller context, less queueing                      |
+| Model, generating    | Output and reasoning tokens                    | Shorter outputs, smaller reasoning budget, speculative decoding          |
+| Sandbox and tools    | Build size, test-suite size, cold starts       | Warm pools, snapshots, build caches, test selection, parallel tool calls |
+| Network and services | Round trips, payload size, provider throttling | Response caching, prefetching, rate-limit headroom                       |
+| Runtime              | Parsing, validation, logging, snapshotting     | Streaming parsers, incremental snapshots                                 |
+
+: **Trajectory Span Types**: What bounds each kind of span on an agent's critical path and which techniques shorten it. Each lever is admissible only if the accepted result still meets the same acceptance contract and coverage. {#tbl-vol3-span-taxonomy}
+
+When tool operations are independent, the runtime can dispatch them concurrently provided security policies, authorization boundaries, and resource reservations permit parallel execution. If three tool calls dispatch simultaneously without I/O contention and all three must complete before the agent continues, the synchronization join waits only for the longest operation rather than the sum of all three. However, concurrency gains diminish when tools contend for local resources, when dispatch is staggered, or when a downstream tool requires the output of an earlier call. In the sandbox domain, warm container pools, pre-baked filesystem snapshots, and persistent build caches dramatically reduce environment initialization spans, subject to strict isolation and teardown guarantees before each reuse.
+
+::: {.column-margin .margin-pointer}
+↩ The reset contract that a pooled or snapshot-restored sandbox must satisfy before serving a new lease is established in @sec-vol3-sandboxes-pooling-reset.
+:::
+
+Environment preparation can overlap model generation if the runtime executes speculative setup within a sandboxed, isolated scope that commits no external side effects before the full model response is validated and authorized. Streaming tokens from an LLM does not constitute an authorized execution intent; even a speculative read operation might violate an access boundary or leak uncommitted state. If the model output subsequently alters the required tool call or aborts, the runtime must discard speculative work, release allocated resources, and record any incurred compute charges in the task account.
+
+Early stopping alters the evidentiary value of an execution as well as its duration. In a validation pipeline, a single failing assertion in a mandatory test immediately proves that a candidate solution is unacceptable, allowing the runtime to short-circuit the remaining suite. Conversely, an early pass confirms only a single check; it provides zero evidence regarding the remainder of the test suite. Intelligent test prioritization and streaming failure detection thus accelerate defect rejection during intermediate iterations. However, final task acceptance still demands full test coverage across the declared verification contract. Furthermore, canceling a running check does not instantly free resources; active worker processes must unwind cleanly, and any intermediate compute costs remain on the ledger until the underlying jobs settle.
+
+::: {.column-margin .margin-pointer}
+↩ Cancellation as an asynchronous control action, whose job may finish or keep running after the request and leave cleanup obligations unsettled, is established in @sec-vol3-tool-calling-async-governance.
+:::
+
+### Profitability boundaries for speculative decoding {#sec-vol3-agent-economics-speculative}
+
+Autoregressive decoding is memory-bandwidth bound. Speculative decoding is an inference serving optimization whose latency and throughput depend on drafting accuracy and memory bandwidth constraints. From an agent economics standpoint, speculative decoding represents an engineering trade-off: it is worth deploying only if the resulting end-to-end latency reduction justifies the additional memory footprint and compute overhead.
+
+::: {.column-margin .margin-pointer}
+↩ The weight-transfer floor that makes single-stream decoding memory-bandwidth bound is established in @sec-vol3-foundation-model-per-call-work-estimate.
+:::
+
+In speculative decoding, a lightweight draft model[^fn-speculative-draft-lineage] proposes $\gamma$ candidate tokens per speculation round, and the larger target model verifies them in a single forward pass, accepting the longest matching prefix and generating one continuation token of its own [@leviathan2023fast; @chen2023accelerating]. Let the computational cost of generating one draft token equal a fraction $\LinkBandwidth$ of a standard target decoding step, and let $\bar \MicrobatchCount$ denote the mean number of draft tokens accepted per round. If evaluating $\gamma$ proposed tokens in parallel costs approximately one target step, each round yields $\bar \MicrobatchCount + 1$ verified tokens in the time equivalent to $\gamma\beta + 1$ target decoding steps. The resulting decoding speedup for an isolated stream is
+
+$$S_{\text{spec}}=\frac{\bar \MicrobatchCount+1}{\gamma\beta+1}.$$ {#eq-vol3-spec-speedup}
+
+[^fn-speculative-draft-lineage]: **Draft-then-Verify Decoding**: The idea predates large language models. Blockwise parallel decoding predicted several future positions at once and backed off to the longest prefix a scoring model validated [@stern2018blockwise]. Speculative decoding moved the proposals into a separate small draft model and added an acceptance rule under which sampled outputs keep the target model's distribution, which is why its savings are purely a cost and latency question rather than a quality trade.
+
+Speculative execution accelerates the generation stream if and only if $\bar \MicrobatchCount > \gamma\beta$—that is, when the average number of accepted draft tokens exceeds the amortized drafting cost. When acceptance falls below this break-even threshold, drafting overhead accumulates faster than verification saves time, actively degrading generation latency. Furthermore, the assumption that parallel verification takes no longer than a single decoding step holds only when single-stream generation is memory-bandwidth bound (principle \ref{pri-vol3-memory-bandwidth-decoding}). As concurrent serving loads increase and large batch sizes shift accelerator utilization toward compute saturation, evaluating $\gamma$ tokens concurrently incurs substantial arithmetic overhead, eroding the latency advantage.
+
+This break-even condition models arithmetic steps within an isolated model call. In a production agent serving architecture, the end-to-end path incurs additional coordination costs: synchronizing draft and target model processes, memory bus transfers, KV-cache management, and wasted compute when early stopping cancels generation mid-trajectory. Under production fleet load, hosting the draft model also reserves high-bandwidth memory (HBM) and matrix units that could otherwise serve concurrent requests, while variable-length verification batches complicate target scheduler batching. Engineering decisions must therefore be validated under representative production traffic, measuring complete-call latency percentiles, aggregate accelerator utilization, queueing delays, and end-to-end task completion rates against the baseline configuration. A high token acceptance rate $\bar \MicrobatchCount / \gamma$ is merely an intermediate serving metric; it does not guarantee economic efficiency at the agent trajectory level.
+
+```{python}
+#| label: calc-vol3-agent-economics-spec-composition
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPECULATIVE SPEEDUP COMPOSED WITH THE TRAJECTORY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @eq-vol3-spec-speedup in @sec-vol3-agent-economics-speculative.
+# │ Goal: Show the call-level boundary and its bounded trajectory payoff.
+# │ Show: Speedup above and below break-even; effect on the serial episode.
+# │ How:  S = (m + 1) / (gamma * r + 1), then T' = T[(1 - f) + f / S].
+# │ Note: Reads CriticalPath (model share, episode length) from the earlier
+# │       cell. Draft length, cost ratio, and acceptance are scenario inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import second
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_qty
+
+class SpecComposition:
+    # ┌── 1. LOAD (Scenario inputs; episode from CriticalPath) ──────────────
+    gamma = 5  # scenario: draft tokens proposed per round
+    r = 0.08  # scenario: draft token cost as a fraction of a target step
+    m_high, m_low = 3.6, 0.3  # scenario: mean accepted draft tokens per round
+    f = CriticalPath.model_fraction
+    total_s = CriticalPath.total_s
+
+    # ┌── 2. EXECUTE (Call-level speedup, then fixed-work composition) ─────
+    breakeven = gamma * r
+    s_high = (m_high + 1) / (gamma * r + 1)
+    s_low = (m_low + 1) / (gamma * r + 1)
+    t_high = total_s * ((1 - f) + f / s_high)
+    t_low = total_s * ((1 - f) + f / s_low)
+    traj_high = total_s / t_high
+    traj_bound = 1 / (1 - f)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_high > breakeven > m_low >= 0, "One case on each side of the break-even")
+    check(s_high > 1 > s_low, "Break-even separates speedup from slowdown")
+    check(1 < traj_high < traj_bound and t_low > total_s, "Trajectory gain is bounded; slowdown lengthens it")
+    check(abs(traj_bound - CriticalPath.limiting_speedup) < 1e-9, "Same bound as the instant-model case")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    gamma_str = fmt_int(gamma)
+    r_str = fmt(r, precision=2)
+    breakeven_str = fmt(breakeven, precision=1)
+    m_high_str, m_low_str = fmt(m_high, precision=1), fmt(m_low, precision=1)
+    s_high_mult_str = fmt_multiple(s_high, precision=2)
+    s_low_mult_str = fmt_multiple(s_low, precision=2)
+    t_high_str = fmt_qty(t_high * second, second, precision=1)
+    t_low_str = fmt_qty(t_low * second, second, precision=1)
+    traj_high_mult_str = fmt_multiple(traj_high, precision=2)
+```
+
+To evaluate how speculative decoding impacts the complete agent workflow, we substitute the call-level speedup $S_{\text{spec}}$ for the acceleration factor $x$ in Amdahl's formulation from notebook \ref{nbk-18-critical-path-investment}. Because non-model spans remain unaffected, the maximum trajectory-level speedup remains strictly bounded by $1/(1-f)$.
+
+Consider a concrete deployment scenario where the draft model proposes `{python} SpecComposition.gamma_str` tokens per round at a relative cost of `{python} SpecComposition.r_str` per token. The break-even threshold requires accepting at least `{python} SpecComposition.breakeven_str` draft tokens per round. If the draft model aligns well with the agent's prompt distribution and achieves `{python} SpecComposition.m_high_str` accepted tokens per round, @eq-vol3-spec-speedup yields an isolated call speedup of `{python} SpecComposition.s_high_mult_str`. Applying this substantial speedup to every model invocation within the serial episode of @tbl-vol3-trace-critical-path reduces total elapsed time from `{python} CriticalPath.total_str` to `{python} SpecComposition.t_high_str`—a modest `{python} SpecComposition.traj_high_mult_str` speedup for the overall episode. Conversely, if a complex reasoning task drops acceptance to `{python} SpecComposition.m_low_str` tokens per round, the system drops below break-even: call-level performance degrades to `{python} SpecComposition.s_low_mult_str` of baseline speed, expanding total episode duration to `{python} SpecComposition.t_low_str`. @Fig-vol3-critical-path-waterfall plots these interventions as four horizontal stacked bars on an elapsed-time axis: required test suites and sandbox lifecycle operations establish an irreducible non-model floor (marked by the dashed red boundary), demonstrating that even instantaneous model inference shortens the overall episode by less than a tenth.
+
+::: {#fig-vol3-critical-path-waterfall fig-env="figure" fig-pos="htb" fig-cap="**Faster Model Calls, a Barely Shorter Episode**: The serial repair episode of @tbl-vol3-trace-critical-path drawn to scale, each bar partitioned into disjoint category sums rather than a chronological trace. Required tests and sandbox lifecycle form a non-model floor that no model acceleration crosses. A `{python} CriticalPath.model_speedup_mult_str` model speedup and a `{python} SpecComposition.s_high_mult_str` speculative speedup on the calls each shorten the episode by less than a tenth, and even instant model calls stop at the floor. The runtime-status interval is too short to draw at this scale." fig-alt="Four horizontal stacked bars on a shared elapsed-time axis. Each bar has a long required-tests segment, a shorter sandbox creation and export segment, and a model-calls segment at its right end, with its end time and speedup labeled. The model segment is widest in the baseline bar, narrower for model calls four times faster and for speculative decoding, and absent for instant model calls. A dashed red line marks the non-model floor where the model segment begins, and a dashed gray line marks the baseline end."}
+![](images/svg/fig-vol3-critical-path-waterfall.svg)
+:::
+
+Accelerating a component on the critical path directly expands deadline headroom, whereas accelerating an off-critical operation primarily frees hardware capacity or lowers hosting costs. An optimization can justify higher operational expense if shaving critical-path latency satisfies a stringent user-facing service-level agreement (SLA); conversely, an optimization that boosts raw token generation rate should be rejected if interconnect contention or server overhead erases those savings at the workflow level. Deploying speculative decoding in an agent system therefore hinges on two distinct boundaries: the serving engine must satisfy the micro-level condition $\bar \MicrobatchCount > \gamma\beta$ under realistic production concurrency, and the overall agent workflow must possess a sufficiently large model fraction $f$ to make the macro-level ceiling $1/(1-f)$ worth pursuing.
 
 ::: {#chk-18-whole-trajectory-economics .callout-checkpoint title="Cost and time per accepted task"}
 
@@ -599,7 +700,6 @@ Before routing calls across models, check the account and the clock.
 - [ ] **Critical-path estimate**: Model calls take `{python} CriticalPath.fraction_str` of the serial episode. Before reading the table again, estimate the largest whole-episode speedup any model acceleration can buy, and decide whether halving the test interval would beat it.
 
 :::
-
 ## Model Cascades and Routing {#sec-vol3-agent-economics-cascades}
 
 Critical-path analysis reveals where faster execution accelerates an agent workflow, but routing decides which model configuration should attempt the work in the first place. A small, specialized model often completes a constrained code transformation at negligible cost, whereas a frontier model justifies its higher expense when diagnosing complex, ambiguous system failures. A **model cascade**\index{Model cascade!definition}[^fn-cascade-viola-jones] evaluates a task through a sequence of configurations, beginning with an inexpensive tier and escalating only when necessary—an architecture formalized for language model APIs in FrugalGPT [@chen2023frugalgpt]. The economic value of a cascade depends directly on three operational quantities: the fraction of requests resolved by cheaper tiers, the overhead of their failed attempts, and the difficulty distribution of tasks that escalate.
@@ -611,6 +711,25 @@ Every exit from a cascade must satisfy the same declared acceptance contract. A 
 ### Direct routing and conditional escalation {#sec-vol3-agent-economics-direct-routing-escalation}
 
 A **direct router**\index{Direct router!definition} inspects incoming task features to select a model configuration upfront, prior to generation. In contrast, a cascade speculatively executes an initial attempt on an inexpensive tier, assesses the candidate against an acceptance contract, and escalates only when that attempt fails. The two architectures incur failure costs in fundamentally different ways. A mistaken direct route either assigns a complex task to an underpowered model (degrading task acceptance) or sends a routine query to an expensive frontier model (wasting budget). Conversely, an ill-fated cheap-first cascade choice always expends budget and latency on an unviable attempt before escalating, even when a higher tier ultimately salvages the task.
+
+For a three-tier cascade, let $q_j$ denote the conditional probability of acceptance at tier $j$, given that the request reached tier $j$. Assume every task not accepted at a lower tier continues to the next tier, with no additional retry, cancellation, or stopping branch. The **reach probabilities**\index{Reach probability!definition}, the probability that a task arrives at each tier, are $r_1=1$, $r_2=1-q_1$, and $r_3=(1-q_1)(1-q_2)$. This product reflects the probability chain rule rather than an assumption that tiers fail independently. Because later tiers receive an adversarially selected remainder of harder tasks, their conditional acceptance rates cannot be copied from full-workload benchmarks.
+
+Let $c_j$ be the mean generation and associated execution cost conditional on reaching tier $j$, excluding its gate, and let $g_j$ be that gate's mean cost. Let $t_j$ and $v_j$ be the corresponding mean durations. Real systems must budget for prompt caching, sandbox preparation, and environment cleanup within these terms rather than pricing output tokens alone. Linearity of expectation gives
+
+$$
+\mathbb{E}[C_{\text{cascade}}]=\sum_{j=1}^{3}r_j(c_j+g_j),
+\qquad \AcceptanceProbability=\sum_{j=1}^{3}r_jq_j.
+$$
+
+For a serial cascade where all elapsed intervals are represented, the mean duration is
+
+$$
+\mathbb{E}[T_{\text{cascade}}]=\sum_{j=1}^{3}r_j(t_j+v_j).
+$$
+
+The final tier must pay for its verification gate as well. With deterministic stage durations, a task reaching every tier takes $\sum_j(t_j+v_j)$; with variable durations and queueing, characterizing tail percentiles requires the measured empirical distribution. A policy that stops early or leaves assessments unresolved uses its actual reach probabilities and reports those outcomes separately.
+
+The planning metric of cost per accepted task is $\mathbb{E}[C_{\text{cascade}}]/\AcceptanceProbability$, which amortizes the cost of every reached tier across accepted outcomes rather than crediting only successful paths. Evaluating a direct frontier policy requires measuring its baseline acceptance rate across the full target cohort, since its performance on that general distribution is a fundamentally different quantity from its rate on the filtered escalation subset.
 
 ```{python}
 #| label: calc-vol3-agent-economics-cascade
@@ -699,31 +818,6 @@ class CascadeCost:
     lower_tier_toll_str = fmt_usd(lower_tier_toll, precision=4)
 ```
 
-@Fig-vol3-model-cascade-flowchart diagrams this three-tier screening cascade. Initiated tasks filter through identical contract gates at Tier 1 and Tier 2. Accepted outputs are routed immediately to task exit, while only rejected residuals escalate to the next tier. Dual financial ledgers at the bottom compare the aggregate cost per accepted task against a direct frontier baseline.
-
-::: {#fig-vol3-model-cascade-flowchart fig-env="figure" fig-pos="htb" fig-cap="**A Gated Three-Tier Cascade**: Every tier's candidate faces the same acceptance contract, and every gate charges its assessment whether or not the candidate passes, including the final gate. Accepted results exit at the tier that produced them and only the rejected remainder escalates, so reach falls from `{python} CascadeCost.tasks_str` tasks to `{python} CascadeCost.third_reached_str`. The ledger compares cost per accepted result, which charges every rejected attempt to the accepted outcomes, with the separately stipulated direct frontier baseline." fig-alt="Flow diagram. An initiated-tasks box feeds tier 1 and then a gate labeled same contract. Pass arrows lead from each gate to an accepted box, and reject arrows lead down from the tier 1 and tier 2 gates to the next tier, each followed by its own gate. The tier 3 gate's reject arrow ends in an unresolved box, and a total accepted box sits below the accepted column. Two ledger boxes at the bottom give the cascade's total cost, cost per initiated task, and cost per accepted result, and the direct frontier policy's total cost, accepted count, and cost per accepted result."}
-![](images/svg/multi_agent_token_cascade_routing_v2.svg)
-:::
-
-For a three-tier cascade, let $q_j$ denote the conditional probability of acceptance at tier $j$, given that the request reached tier $j$. Assume every task not accepted at a lower tier continues to the next tier, with no additional retry, cancellation, or stopping branch. The **reach probabilities**\index{Reach probability!definition}, the probability that a task arrives at each tier, are $r_1=1$, $r_2=1-q_1$, and $r_3=(1-q_1)(1-q_2)$. This product reflects the probability chain rule rather than an assumption that tiers fail independently. Because later tiers receive an adversarially selected remainder of harder tasks, their conditional acceptance rates cannot be copied from full-workload benchmarks.
-
-Let $c_j$ be the mean generation and associated execution cost conditional on reaching tier $j$, excluding its gate, and let $g_j$ be that gate's mean cost. Let $t_j$ and $v_j$ be the corresponding mean durations. Real systems must budget for prompt caching, sandbox preparation, and environment cleanup within these terms rather than pricing output tokens alone. Linearity of expectation gives
-
-$$
-\mathbb{E}[C_{\text{cascade}}]=\sum_{j=1}^{3}r_j(c_j+g_j),
-\qquad \AcceptanceProbability=\sum_{j=1}^{3}r_jq_j.
-$$
-
-For a serial cascade where all elapsed intervals are represented, the mean duration is
-
-$$
-\mathbb{E}[T_{\text{cascade}}]=\sum_{j=1}^{3}r_j(t_j+v_j).
-$$
-
-The final tier must pay for its verification gate as well. With deterministic stage durations, a task reaching every tier takes $\sum_j(t_j+v_j)$; with variable durations and queueing, characterizing tail percentiles requires the measured empirical distribution. A policy that stops early or leaves assessments unresolved uses its actual reach probabilities and reports those outcomes separately.
-
-The planning metric of cost per accepted task is $\mathbb{E}[C_{\text{cascade}}]/\AcceptanceProbability$, which amortizes the cost of every reached tier across accepted outcomes rather than crediting only successful paths. Evaluating a direct frontier policy requires measuring its baseline acceptance rate across the full target cohort, since its performance on that general distribution is a fundamentally different quantity from its rate on the filtered escalation subset.
-
 ::: {#nbk-18-cost-and-latency-trade-offs-in .callout-notebook title="Price the accepted result at every exit"}
 
 **Problem:** In a workload of `{python} CascadeCost.tasks_str` code-editing tasks, should an engineering team deploy a multi-tier cascade or route all requests directly to a frontier model to minimize cost per accepted result, and what latency penalty does the cascade incur?
@@ -738,6 +832,12 @@ Under these deterministic execution times, the cascade averages `{python} Cascad
 
 **Systems insight**: Direct frontier dispatch costs `{python} CascadeCost.direct_ratio_mult_str` as much per accepted result as the cascade because `{python} CascadeCost.first_exit_str` of all tasks exit at tier 1, where execution and verification costs represent a negligible fraction of a frontier call. The cascade trades latency for cost: tasks that escalate through all tiers accumulate only `{python} CascadeCost.lower_tier_toll_str` in lower-tier tolls, but they incur `{python} CascadeCost.all_tiers_time_str` of serialized latency compared to `{python} CascadeCost.direct_time_str` under direct dispatch. Because cost savings scale with the early exit rate, the critical architectural lever is hybrid routing: dispatching tasks predicted to fail early stages directly to the frontier tier eliminates the latency penalty for time-sensitive tasks while capturing cascade savings across the remaining workload.
 
+:::
+
+@Fig-vol3-model-cascade-flowchart diagrams this three-tier screening cascade: initiated tasks filter through identical contract gates at Tier 1 and Tier 2, routing accepted outputs immediately to task exit while only rejected residuals escalate to the next tier, with dual financial ledgers at the bottom comparing aggregate cost per accepted task against a direct frontier baseline.
+
+::: {#fig-vol3-model-cascade-flowchart fig-env="figure" fig-pos="htb" fig-cap="**A Gated Three-Tier Cascade**: Every tier's candidate faces the same acceptance contract, and every gate charges its assessment whether or not the candidate passes, including the final gate. Accepted results exit at the tier that produced them and only the rejected remainder escalates, so reach falls from `{python} CascadeCost.tasks_str` tasks to `{python} CascadeCost.third_reached_str`. The ledger compares cost per accepted result, which charges every rejected attempt to the accepted outcomes, with the separately stipulated direct frontier baseline." fig-alt="Flow diagram. An initiated-tasks box feeds tier 1 and then a gate labeled same contract. Pass arrows lead from each gate to an accepted box, and reject arrows lead down from the tier 1 and tier 2 gates to the next tier, each followed by its own gate. The tier 3 gate's reject arrow ends in an unresolved box, and a total accepted box sits below the accepted column. Two ledger boxes at the bottom give the cascade's total cost, cost per initiated task, and cost per accepted result, and the direct frontier policy's total cost, accepted count, and cost per accepted result."}
+![](images/svg/multi_agent_token_cascade_routing_v2.svg)
 :::
 
 ### Gate errors and the decision to continue {#sec-vol3-agent-economics-gate-errors}
@@ -984,7 +1084,7 @@ class TailCompounding:
 Mean metrics also obscure how tail latency compounds across multi-step execution. If each of $\PointToPointMessageSize$ serial calls independently exceeds its 99th-percentile latency with probability $p_{\text{tail}}$, the trajectory encounters at least one such delay with probability $1-(1-p_{\text{tail}})^\PointToPointMessageSize$—horizon compounding, as defined in @sec-vol3-intro-horizon-arithmetic, applied to latency. For a trajectory of `{python} TailCompounding.n_calls_str` serial calls, each with tail probability `{python} TailCompounding.p_tail_str`, the probability of experiencing at least one tail delay reaches `{python} TailCompounding.p_hit_str`. Sizing a fleet solely for acceptable per-call latency therefore still yields routinely slow end-to-end trajectories. This dynamic is the serial equivalent of the fan-out straggler problem in distributed systems [@dean2013tail]. Correlated delays, such as a shared queue that remains backlogged across successive steps, alter the exact probability but preserve the core operational lesson: provision and schedule against trajectory-level percentiles rather than per-call means (principle \ref{pri-vol3-trajectory-goodput})\index{Principle!trajectory goodput and the accepted task}.
 
 ::: {.column-margin .margin-pointer}
-↩ The parallel counterpart, an all-results barrier exposed to fan-out stragglers, is established in @sec-vol3-multiagent-quorum.
+↩ The parallel counterpart, an all-results barrier exposed to fan-out stragglers, is established in @sec-vol3-multiagent-hedged-requests.
 :::
 
 Integrating queueing delays completes the model-routing framework of @sec-vol3-agent-economics-cascades. A dynamic router compares eligible *remaining paths*—incorporating queue and service delays, retained-resource costs, verification checks, and potential escalation paths—under an identical quality contract. Because dispatching decisions alter the arrival rates that produced the initial delay estimates, the router must refresh queue projections whenever traffic shifts. Separating interactive and batch pools, or enforcing priority scheduling, protects latency-bound work at a quantifiable cost in fairness and cluster utilization.
@@ -1469,6 +1569,10 @@ Multi-agent delegation obeys this same objective-first economic evaluation when 
 ↩ The matched single-controller baseline against which multi-agent delegation is benchmarked is established in @sec-vol3-multiagent-evaluation.
 :::
 
+## Cost per Accepted Task by Archetype {#sec-vol3-agent-economics-synthesis}
+
+Our earlier analysis of the dependency-upgrade pipeline priced three competing architectures for a single, focused task. Real-world systems, however, exhibit vastly different cost structures. The four lighthouse workloads test our economic accounting framework under fundamentally different operating stresses. The software repair agent accumulates an expanding workspace context over extended multi-turn trajectories. The research agent (lighthouse \ref{lhs-vol3-research-agent}) fans out parallel requests across untrusted external sources. The remediation agent (lighthouse \ref{lhs-vol3-remediation-agent}) exercises high-privilege authority over live production infrastructure. Finally, the customer support agent (lighthouse \ref{lhs-vol3-support-agent}) processes high volumes of brief sessions against tight latency targets. Because the dominant cost term differs fundamentally across these four archetypes, each workload responds to an entirely different optimization lever.
+
 ```{python}
 #| label: calc-vol3-agent-economics-lighthouses
 #| echo: false
@@ -1593,10 +1697,6 @@ class LighthouseEconomics:
     handoff_str = fmt_usd(handoff, precision=0)
     dp_pts_str = fmt_int(round(dp * 100))
 ```
-
-## Synthesis: Pricing the Archetypes {#sec-vol3-agent-economics-synthesis}
-
-To consolidate the economic framework presented in this chapter, we evaluate the cost per accepted task across the four distinct workload archetypes. By applying our standardized accounting ledger to each domain, we reveal that while token tariffs receive disproportionate attention, the true binding constraint varies radically depending on the operational environment.
 
 ::: {#lhs-18-cost-per-accepted-by-archetype .callout-lighthouse title="Cost per accepted task by archetype"}
 
@@ -1742,18 +1842,19 @@ The most effective optimization target depends on which component dominates the 
 
 @Tbl-vol3-agent-economics-key-equations gathers the governing economic relations developed throughout this chapter, along with the operational assumptions—such as cohort settlement, prefix cache dynamics, independent retries, or stationary queueing—under which each holds.
 
-| Equation                                                                                                                                                                                                                             | What it bounds or decides                                                                                                                   | Where derived                                            |
-|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------|
-| $\CostPerAcceptedTaskEff=\dfrac{\sum_{i=1}^{\NumberOfDevices}C_{\text{task},i}}{\AcceptedTasks}=C_{\text{succ}}+\dfrac{1-\PermessageLatency}{\PermessageLatency}C_{\text{fail}}$                                                     | Cost per accepted task over a settled cohort; each accepted task carries $(1-\PermessageLatency)/\PermessageLatency$ nonaccepted ones       | @sec-vol3-agent-economics-accounting                     |
-| $C_{\text{session}}=\sum_{t=1}^{\Horizon}\left[\PertokenPricesIn(S^{(t)}-S_{\text{hit}}^{(t)})+\PertokenPricesCache{}S_{\text{hit}}^{(t)}+\PertokenPricesOut{}K^{(t)}\right]$                                                        | Token bill of a trajectory under a declared tariff; prefix reuse lowers the coefficient of the quadratic re-read term without removing it   | @eq-vol3-agent-economics-session-bill                    |
-| $N_{\min}=1+\left\lceil U/s\right\rceil$, with $U=\PertokenPricesOut{}K_{\text{sum}}+\PertokenPricesIn{}S_{\text{comp}}$ and $s=\PertokenPricesCache(\SequenceLength-S_{\text{comp}})$                                               | Payback horizon of compaction; fewer remaining calls than $N_{\min}$ means compaction loses money on price alone                            | @sec-vol3-agent-economics-caching                        |
-| $Q_k=1-(1-\HiddenDimensionFour)^k$ at $c/\HiddenDimensionFour$ per acceptance; $p_{\text{loop}}(H_{\max})=1-\prod_{t=1}^{H_{\max}}(1-q_t)$                                                                                           | Coverage and price of sequential retry with early stopping, and the yield of a bounded loop from its conditional turn rates                 | @sec-vol3-agent-economics-caching, @eq-vol3-loop-success |
-| $T_{\text{crit}}=\max_{\pi\in\Pi}\sum_{\SpeedAtDetection\in\pi}t(\SpeedAtDetection)$                                                                                                                                                 | Completion time set by the longest dependent path; accelerating a nonlimiting branch leaves it unchanged                                    | @eq-vol3-critical-path                                   |
-| $\mathbb{E}[C_{\text{cascade}}]=\sum_j r_j(c_j+g_j)$ and $\AcceptanceProbability=\sum_j r_jq_j$                                                                                                                                      | Reach-weighted price and acceptance of a gated cascade; every reached tier pays for its call and its gate                                   | @sec-vol3-agent-economics-cascades                       |
-| $\ConcurrentTrajectories=\ConcurrentTrajectoriesTwo\mathbb{E}[\TrajectoryDuration]$ and $\ServingUtilization(\PermessageLatency)=\dfrac{\TrajectoryGoodput\,\mathbb{E}[N_{\text{call}}]}{\PermessageLatency \WorkerCountWorkers\mu}$ | Mean occupancy of each held resource, and the offered load a goodput target imposes; lower acceptance raises load as $1/\PermessageLatency$ | @eq-vol3-trajectory-concurrency                          |
-| $\mathbb{E}[T_{\text{queue}}]\approx\dfrac{c_a^2+c_s^2}{2}\dfrac{\ServingUtilization}{1-\ServingUtilization}\mathbb{E}[T_{\text{svc}}]$                                                                                              | Heavy-traffic estimate of mean queue wait at one server; sets the utilization a latency target can afford                                   | @eq-vol3-kingman-gg1                                     |
-| $u^*=\dfrac{C_{\text{fixed}}}{3600\mu_{\text{out}}(c_{\text{API}}-c_{\text{ded}})}$                                                                                                                                                  | Delivered load above which dedicated capacity costs less than a per-token API at a fixed token mix                                          | @eq-vol3-breakeven-utilization                           |
-| $C_{\max,k}=E_k+R_k+F_k$ with $E(t)+R(t)\le \CostCeiling$                                                                                                                                                                            | Conserved spending across descendants; admission reserves a bound $\bar c$, and only settlement releases it                                 | @sec-vol3-agent-economics-governance                     |
+| Equation                                                                                                                                                                                                                             | What it bounds or decides                                                                                                                   | Where derived                                                 |
+|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------|
+| $\CostPerAcceptedTaskEff=\dfrac{\sum_{i=1}^{\NumberOfDevices}C_{\text{task},i}}{\AcceptedTasks}=C_{\text{succ}}+\dfrac{1-\PermessageLatency}{\PermessageLatency}C_{\text{fail}}$                                                     | Cost per accepted task over a settled cohort; each accepted task carries $(1-\PermessageLatency)/\PermessageLatency$ nonaccepted ones       | @sec-vol3-agent-economics-accounting                          |
+| $C_{\text{session}}=\sum_{t=1}^{\Horizon}\left[\PertokenPricesIn(S^{(t)}-S_{\text{hit}}^{(t)})+\PertokenPricesCache{}S_{\text{hit}}^{(t)}+\PertokenPricesOut{}K^{(t)}\right]$                                                        | Token bill of a trajectory under a declared tariff; prefix reuse lowers the coefficient of the quadratic re-read term without removing it   | @eq-vol3-agent-economics-session-bill                         |
+| $N_{\min}=1+\left\lceil U/s\right\rceil$, with $U=\PertokenPricesOut{}K_{\text{sum}}+\PertokenPricesIn{}S_{\text{comp}}$ and $s=\PertokenPricesCache(\SequenceLength-S_{\text{comp}})$                                               | Payback horizon of compaction; fewer remaining calls than $N_{\min}$ means compaction loses money on price alone                            | @sec-vol3-agent-economics-caching                             |
+| $Q_k=1-(1-\HiddenDimensionFour)^k$ at $c/\HiddenDimensionFour$ per acceptance; $p_{\text{loop}}(H_{\max})=1-\prod_{t=1}^{H_{\max}}(1-q_t)$                                                                                           | Coverage and price of sequential retry with early stopping, and the yield of a bounded loop from its conditional turn rates                 | @sec-vol3-agent-economics-caching, @eq-vol3-loop-success      |
+| $T_{\text{crit}}=\max_{\pi\in\Pi}\sum_{\SpeedAtDetection\in\pi}t(\SpeedAtDetection)$                                                                                                                                                 | Completion time set by the longest dependent path; accelerating a nonlimiting branch leaves it unchanged                                    | @eq-vol3-critical-path                                        |
+| $S_{\text{spec}}=\dfrac{\bar \MicrobatchCount+1}{\gamma\beta+1}$, then $\Time'=\Time\left[(1-f)+f/S_{\text{spec}}\right]$                                                                                                            | Speculation pays on the call only when $\bar \MicrobatchCount>\gamma\beta$; the trajectory gains at most $1/(1-f)$                          | @eq-vol3-spec-speedup, @sec-vol3-agent-economics-criticalpath |
+| $\mathbb{E}[C_{\text{cascade}}]=\sum_j r_j(c_j+g_j)$ and $\AcceptanceProbability=\sum_j r_jq_j$                                                                                                                                      | Reach-weighted price and acceptance of a gated cascade; every reached tier pays for its call and its gate                                   | @sec-vol3-agent-economics-cascades                            |
+| $\ConcurrentTrajectories=\ConcurrentTrajectoriesTwo\mathbb{E}[\TrajectoryDuration]$ and $\ServingUtilization(\PermessageLatency)=\dfrac{\TrajectoryGoodput\,\mathbb{E}[N_{\text{call}}]}{\PermessageLatency \WorkerCountWorkers\mu}$ | Mean occupancy of each held resource, and the offered load a goodput target imposes; lower acceptance raises load as $1/\PermessageLatency$ | @eq-vol3-trajectory-concurrency                               |
+| $\mathbb{E}[T_{\text{queue}}]\approx\dfrac{c_a^2+c_s^2}{2}\dfrac{\ServingUtilization}{1-\ServingUtilization}\mathbb{E}[T_{\text{svc}}]$                                                                                              | Heavy-traffic estimate of mean queue wait at one server; sets the utilization a latency target can afford                                   | @eq-vol3-kingman-gg1                                          |
+| $u^*=\dfrac{C_{\text{fixed}}}{3600\mu_{\text{out}}(c_{\text{API}}-c_{\text{ded}})}$                                                                                                                                                  | Delivered load above which dedicated capacity costs less than a per-token API at a fixed token mix                                          | @eq-vol3-breakeven-utilization                                |
+| $C_{\max,k}=E_k+R_k+F_k$ with $E(t)+R(t)\le \CostCeiling$                                                                                                                                                                            | Conserved spending across descendants; admission reserves a bound $\bar c$, and only settlement releases it                                 | @sec-vol3-agent-economics-governance                          |
 
 : **Key Equations of Agent Economics**: Each relation holds only under the assumptions stated where it is derived, such as a settled cohort, ideal prefix reuse, conditionally independent attempts, a stationary single-server queue, or enforceable charge bounds. {#tbl-vol3-agent-economics-key-equations tbl-colwidths="[42,40,18]"}
 
