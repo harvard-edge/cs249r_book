@@ -1136,89 +1136,6 @@ Standardization transforms these empirical lessons into a shared engineering met
 
 ## Compression benchmarks
 
-When evaluating compressed models, a Pareto frontier identifies non-dominated choices that balance efficiency against accuracy. Aggregate metrics often hide calibration and tail-case degradation, as shown for MobileNetV2 in @tbl-benchmarking-mobilenet-int8-validation.
-
-::: {.column-margin}
-![](images/svg/vol1_benchmarking_margin_004.svg){width="100%" fig-alt="Tiny Pareto frontier with one dominated point."}
-
-*A dominated model is no better on either axis and worse on at least one.*
-:::
-
-```{python}
-#| echo: false
-#| label: mobilenet-int8-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOBILENET INT8 COMPRESSION METRICS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "MobileNetV2 INT8 Compression"—complete validation
-# │          protocol for INT8 quantization of MobileNetV2
-# │
-# │ Goal: Demonstrate the necessity of multi-dimensional compression benchmarks.
-# │ Show: That INT8 quantization preserves accuracy while yielding 4× size reduction.
-# │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.core.units import Mparam, BYTES_FP32, BYTES_INT8, MB
-from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
-
-class MobileNetINT8Calc:
-    """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _mobilenet_v2 = Models.Vision.MobileNetV2
-    acc_fp32 = 71.8
-    params = _mobilenet_v2.parameters
-    size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
-    size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
-    acc_int8 = 70.9
-    top5_fp32 = 91.0
-    top5_int8 = 90.4
-    ece_fp32 = 0.031
-    ece_int8 = 0.089
-    edge_fp32 = 68.2
-    edge_int8 = 61.4
-    edge_occlusion_pct = 50
-    edge_lux = 100
-    edge_rotation_deg = 30
-    real_world_edge_pct = 5
-    confidence_threshold_pct = 85
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    acc_drop = acc_fp32 - acc_int8
-    edge_drop = edge_fp32 - edge_int8
-    size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
-    check(acc_drop < 1.0, f"Expected <1 point top-1 drop, got {acc_drop:.1f}")
-    check(edge_drop > acc_drop, "Edge-case drop should exceed aggregate top-1 drop.")
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mv2_acc_fp32_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='symbol')
-    mv2_acc_fp32_prose_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='prose')
-    mv2_params_m_str = fmt_params(params, scale='M', precision=1, commas=False)
-    mv2_size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, commas=False)
-    mv2_size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
-    mv2_acc_int8_str = fmt_percent(acc_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_acc_drop_str = fmt_pp(acc_drop, precision=1, commas=False, attributive=True)  # 0.9
-    mv2_acc_drop_tbl_str = fmt_pp(acc_drop, precision=1, commas=False, style="symbol")  # 0.9
-    mv2_top5_fp32_str = fmt_percent(top5_fp32 / 100, precision=0, commas=False, style='symbol')
-    mv2_top5_int8_str = fmt_percent(top5_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_ece_fp32_str = fmt(ece_fp32, precision=3, commas=False)
-    mv2_ece_int8_str = fmt(ece_int8, precision=3, commas=False)
-    mv2_edge_fp32_str = fmt_percent(edge_fp32 / 100, precision=1, commas=False, style='symbol')
-    mv2_edge_int8_str = fmt_percent(edge_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
-```
-
-| **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                                |
-|:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------------------------------------------|
-| **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_tbl_str` drop; below 1 percentage-point threshold) |
-| **Top-5 accuracy**     | `{python} MobileNetINT8Calc.mv2_top5_fp32_str` | `{python} MobileNetINT8Calc.mv2_top5_int8_str` | ✓ (below the stated accuracy-loss threshold)                                                   |
-| **Calibration ECE**    | `{python} MobileNetINT8Calc.mv2_ece_fp32_str`  | `{python} MobileNetINT8Calc.mv2_ece_int8_str`  | No (degraded)                                                                                  |
-| **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | No (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_tbl_str`)                                |
-
-: **MobileNetV2 INT8 Postcompression Metrics**: Illustrative FP32 and INT8 values for top-1 and top-5 accuracy, calibration error, and edge-case accuracy, showing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[20,13,19,48]"}
-
-**Edge-case definition**: Images with $>$ `{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, $<$ `{python} MobileNetINT8Calc.edge_lux_str` lighting, or $>$ `{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
 
 Two benchmark categories recur often enough across the optimization pipeline to warrant specialized checklists: compression benchmarks, which a pruned or quantized model must pass before deployment, and mobile and edge benchmarks, which power and thermal boundaries strictly constrain. Each composes the task, data, model, metrics, harness, and run rules while enforcing domain-specific limits. Compression validation requires a multi-metric protocol that balances size reduction against accuracy and latency (@tbl-benchmarking-mobilenet-int8-validation), while edge deployment requires sustained-power measurement under realistic thermal and duty-cycle constraints (@sec-benchmarking-power-measurement-techniques-bcc2).
 
@@ -1939,6 +1856,8 @@ plt.close()
 
 ### LLM evaluation taxonomy
 
+### LLM evaluation taxonomy
+
 For large language models, evaluation must span multiple dimensions—such as recognition, safety, and responsiveness—because no single score establishes production readiness (@tbl-llm-benchmark-failure-taxonomy).
 
 | **Deployment failure to rule out**     | **Metric or benchmark family**                                 | **What the score reveals**                                                                                                                       | **What the score cannot prove**                                                                                                                        |
@@ -1994,6 +1913,8 @@ class LLMThroughputCalc:
     slow_tokens_per_s_str = fmt_rate(slow_tokens_per_s, 'tokens/s', precision=0, commas=False)
     fast_tokens_per_s_str = fmt_rate(fast_tokens_per_s, 'tokens/s', precision=0, commas=False)
 
+
+### Model-centric vs. data-centric AI
 
 ### Model-centric vs. data-centric AI
 
@@ -2156,6 +2077,8 @@ filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
 ```
 :::
 
+
+### AI performance vs. human baselines
 
 ### AI performance vs. human baselines
 
