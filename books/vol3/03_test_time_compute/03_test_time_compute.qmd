@@ -126,7 +126,7 @@ Up to this point, the repair agent operates entirely within a bounded model invo
 ↩ The bounded single-invocation model contract is established in @sec-vol3-foundation-model-contract.
 :::
 
-Assembling this runtime policy requires addressing several interrelated architectural challenges. @Sec-vol3-test-time-compute-computation-allocation formalizes how a runtime allocates finite work across reasoning depth, candidate breadth, and empirical feedback under an overall output ceiling. @Sec-vol3-test-time-compute-candidate-diversity analyzes when expanding the candidate pool translates to higher-quality selections, while @sec-vol3-test-time-compute-verification evaluates how much trust a passing test suite genuinely warrants. When dynamic feedback disproves an intermediate deduction, @sec-vol3-test-time-compute-planning-revision preserves reusable work rather than restarting search from scratch. Finally, @sec-vol3-test-time-compute-bounded-search establishes global search ceilings and sound stopping rules, setting up @sec-vol3-test-time-compute-strategy-design to evaluate complete deliberation policies under shared operational deadlines.
+Assembling this runtime policy requires addressing several interrelated architectural challenges. @Sec-vol3-test-time-compute-computation-allocation formalizes how a runtime allocates finite work across reasoning depth, candidate breadth, and empirical feedback under an overall output ceiling. @Sec-vol3-test-time-compute-candidate-diversity analyzes when expanding the candidate pool translates to higher-quality selections, while @sec-vol3-test-time-compute-verification evaluates how much trust a passing test suite genuinely warrants. When dynamic feedback disproves an intermediate deduction, @sec-vol3-test-time-compute-planning-revision preserves reusable work rather than restarting search from scratch. From there, @sec-vol3-test-time-compute-bounded-search-structures shapes how individual candidates are explored, while @sec-vol3-test-time-compute-bounded-search establishes global search ceilings and sound stopping rules, setting up @sec-vol3-test-time-compute-strategy-design to evaluate complete deliberation policies under shared operational deadlines.
 
 ## Three Compute Allocation Axes {#sec-vol3-test-time-compute-computation-allocation}
 
@@ -169,14 +169,10 @@ Because parallel candidates share no sequential dependencies, breadth exposes fi
 Accelerator memory is where breadth extracts its price. Each active generation stream must maintain its own key-value (KV) cache for the tokens it generates. When the serving system implements prefix sharing, the $\SequenceLength$-token prompt is stored once in memory, and the peak KV cache demand scales as
 
 $$
-\KvcacheMemory^{\text{breadth}} \propto \SequenceLength + \sum_{n=1}^{\NumberOfDevices} K_n
+\KvcacheMemory^{\text{breadth}} \propto \SequenceLength + \sum_{\PointToPointMessageSize=1}^{\NumberOfDevices} K_n
 $$
 
 Without shared prefix caching, the serving engine stores $\NumberOfDevices$ redundant copies of the prompt's KV tensors, causing memory demand to scale as $NS + \sum_n K_n$. When aggregate KV cache allocations exceed hardware capacity, the serving engine must partition candidates into sequential execution waves. Once forced into waves, breadth latency degrades from the duration of the single longest candidate toward the sum of all candidates, while memory thrashing and queueing delays increase individual token latencies. Whether identical prompt prefixes share physical memory or receive provider billing discounts depends on the serving engine's implementation.
-
-::: {.column-margin .margin-pointer}
-↪ Block sharing, which stores a common prompt's KV state once for every candidate that branches from it, is developed in @sec-vol3-kv-cache-cow-prefix-sharing.
-:::
 
 Breadth also shifts the operational burden downstream: generating a wide pool of candidates pays off only if the system can accurately select the best option or synthesize their differences. A candidate pool containing an optimal patch provides no value without an effective selector. In a study of repeated sampling, @brown2024monkeys showed that while the probability of at least one candidate being correct (pass@$k$) continued to rise across four orders of magnitude of samples, practical selection heuristics such as majority voting and learned reward models plateaued after several hundred samples. Candidate selection is therefore an active consumer of compute and verification budget rather than an incidental final step.
 
@@ -192,10 +188,6 @@ $$S^{(t)} = \BasePromptLength + \sum_{j=1}^{t-1}(K_j + \lvert o_j\rvert)$$
 
 This compounding input context inflates prompt prefill latency, accelerator memory usage, and token billing on every round. Although context-compaction techniques can summarize earlier attempts or drop obsolete diagnostic traces, the allocation policy must account for the full token volume dispatched to the model API.
 
-::: {.column-margin .margin-pointer}
-↪ Context-compaction methods and their scheduling within the request budget are developed in @sec-vol3-context-engineering-compaction.
-:::
-
 ### The three axes under one output ceiling {#sec-vol3-test-time-compute-common-output-ceiling}
 
 Runtimes schedule these three allocation axes against four resource dimensions: input and output token counts, critical-path wall-clock latency, peak retained accelerator state, and external information acquisition. Let $T_{\text{prefill}}(\SequenceLength)$ be the time required to ingest an $\SequenceLength$-token prompt, $\PertokenDecodeTime$ the per-token decoding step time, $\CodecDecodeTime(\Top)$ the total generation time for $\Top$ tokens, and $t_{\text{check},\BarrierRelativeDegree}$ the duration of the external check in feedback round $\BarrierRelativeDegree$. With $K_{\text{ext}}$ tokens of extended depth, $\NumberOfDevices$ breadth candidates executed concurrently, and $\Horizon$ feedback turns, the critical paths decompose as
@@ -203,7 +195,7 @@ Runtimes schedule these three allocation axes against four resource dimensions: 
 $$
 \begin{aligned}
 T^{\text{depth}} &\approx T_{\text{prefill}}(\SequenceLength) + K_{\text{ext}}\,\PertokenDecodeTime,\\
-T^{\text{breadth}} &\approx T_{\text{prefill}}(\SequenceLength) + \max_{n} \CodecDecodeTime(K_n),\\
+T^{\text{breadth}} &\approx T_{\text{prefill}}(\SequenceLength) + \max_{\PointToPointMessageSize} \CodecDecodeTime(K_n),\\
 T^{\text{feedback}} &\approx \sum_{t=1}^{\Horizon}\bigl(T_{\text{prefill}}(S^{(t)}) + \CodecDecodeTime(\TorqueAndBackemfConstants) + t_{\text{check},t}\bigr).
 \end{aligned}
 $$ {#eq-vol3-allocation-critical-path}
@@ -350,11 +342,7 @@ Treating depth as a per-call budget allows the runtime to allocate tokens dynami
 
 Because an execution engine cannot directly observe intrinsic task difficulty a priori, it must approximate difficulty using low-latency, low-cost heuristics before committing an expensive deliberation budget. Practical heuristics include consensus among two or three low-temperature pilot samples, the output of fast static analysis linters, and historical error rates across similar task classes. When pilot signals demonstrate high consensus or pass static checks cleanly, the runtime allocates a minimal token budget to a single candidate. When pilot samples diverge or linters flag structural ambiguities, the scheduler escalates the request to a broader search or an iterative feedback loop. If a decision remains unresolved after exhausting a bounded budget ceiling, the runtime halts deliberation and escalates to a human operator rather than burning additional tokens on low-probability convergence. Each routing heuristic acts as a predictive classifier whose precision and recall must be empirically validated against held-out task distributions.
 
-In production agent workflows, internal reasoning depth and external search breadth naturally compose. An individual candidate rollout may utilize sufficient depth to generate a structurally coherent, well-reasoned code patch; the runtime then samples several such reasoned candidates across the breadth axis and filters them through an automated test harness along the feedback axis. However, this composition must be tuned to real system bottlenecks: slow tool execution inflates feedback latency along the critical path, whereas imprecise test suites diminish the informational value of feedback observations. Finally, there is a fundamental duality between test-time verification and offline model training: the validation checks used by a test-time runtime to accept candidate outputs represent the exact reward functions leveraged during reinforcement learning with verifiable rewards. Any edge cases, false positives, or specification gaps present in test-time acceptance checks inevitably become vulnerabilities if transferred into the training reward loop.
-
-::: {.column-margin .margin-pointer}
-↪ How an acceptance check becomes a training reward, and how its gaps are exploited during training, is developed in @sec-vol3-rlvr-rewards.
-:::
+In production agent workflows, internal reasoning depth and external search breadth naturally compose. An individual candidate rollout may utilize sufficient depth to generate a structurally coherent, well-reasoned code patch; the runtime then samples several such reasoned candidates across the breadth axis and filters them through an automated test harness along the feedback axis. However, this composition must be tuned to real system bottlenecks: slow tool execution inflates feedback latency along the critical path, whereas imprecise test suites diminish the informational value of feedback observations. Finally, there is a fundamental duality between test-time verification and offline model training. Any edge cases, false positives, or specification gaps present in test-time acceptance checks become training vulnerabilities if they are later used to fine-tune the model.
 
 ::: {#chk-03-compute-allocation-axes .callout-checkpoint title="Choosing an allocation"}
 
@@ -422,32 +410,11 @@ A production runtime pipelines these checks to maximize rejection efficiency, or
 
 **pass@$k$**\index{Pass at k!definition} measures the probability that at least one of $k$ sampled candidates passes the specified tests [@chen2021evaluating].[^fn-passk-metric-origin]
 
-[^fn-passk-metric-origin]: **Origin of pass@$k$**: The metric was introduced to score program synthesis by functional correctness rather than by textual similarity to a reference [@kulal2019spoc]. Because plugging the observed pass fraction $c/n$ into $1-(1-c/n)^k$ biases the estimate of what breadth buys, @chen2021evaluating replaced it with the combinatorial estimator derived below. \index{Pass at k!origin} It measures availability in the pool, not the success rate of the output a deployed selector returns.
-
-For a fixed task and fixed generation policy, suppose independent samples each pass the tests with probability $\HiddenDimensionFour$. The probability that all $k$ samples fail is $(1-\HiddenDimensionFour)^k$, so
-
-$$
-\operatorname{pass@}k = 1-(1-\HiddenDimensionFour)^k.
-$$
-
-This expression is conditional on that task and sampling policy. To summarize a workload with different task-level pass probabilities, average the task-level quantities; substituting the workload's average $\HiddenDimensionFour$ generally gives a different result. For an adaptive policy that revises its prompt after feedback, evaluate the policy's resulting pools rather than assuming they follow this fixed-distribution formula.
-
-In a benchmark, generate $n \ge k$ candidates for a task and let $c$ pass the fixed test criterion. Of the $\binom{n}{k}$ subsets of size $k$, exactly $\binom{n-c}{k}$ contain only failures. The subset estimator is therefore
-
-$$
-\widehat{\operatorname{pass@}k}
-= 1-\frac{\binom{n-c}{k}}{\binom{n}{k}},
-$$
-
-with the numerator taken as zero when $n-c<k$. Under independent, identically distributed sampling for the fixed task, this estimates the probability that a fresh pool of $k$ candidates contains a test-passing member without bias; @sec-vol3-appendix-math-pass-at-k derives this expectation and details evaluation without factorials. Benchmark results average these estimates over tasks [@chen2021evaluating].
+[^fn-passk-metric-origin]: **Origin of pass@$k$**: The metric was introduced to score program synthesis by functional correctness rather than by textual similarity to a reference [@kulal2019spoc]. Because plugging the observed pass fraction $c/\PointToPointMessageSize$ into $1-(1-c/\PointToPointMessageSize)^k$ biases the estimate of what breadth buys, @chen2021evaluating replaced it with a combinatorial estimator based on the hypergeometric distribution. \index{Pass at k!origin} It measures availability in the pool, not the success rate of the output a deployed selector returns.
 
 The relationship to deployed selection follows from the event being measured. If the selector must return an unchanged member of the same pool, it cannot return a test-passing candidate when the pool contains none. Its probability of returning a test-passing candidate is therefore at most pass@$k$, counting abstention as no returned pass. A selector that always finds a passing member whenever one exists reaches this ceiling; whether the deployed selector does, within the deployment's checking budget, is a separate measurement.
 
 The predicate is passing these tests, which is narrower than satisfying the complete task requirements, and the ceiling covers only selectors that return an unchanged pool member; a selector that repairs candidates or synthesizes a new one generates additional artifacts. Report candidate availability alongside selected-output performance under the relevant criterion.
-
-::: {.column-margin .margin-pointer}
-↪ The distinction between pass@$k$ over a candidate pool and consistency over repeated system runs is developed in @sec-vol3-evaluation-pass-k.
-:::
 
 ::: {.column-margin}
 ![](images/svg/vol3_ttc_margin_pass_at_n.svg){width="100%" fig-alt="Four horizontal green bars for pools of 1, 2, 4, and 8 candidates, labeled 30, 51, 76, and 94 percent."}
@@ -555,7 +522,7 @@ Step-level checks evaluate intermediate claims or state transitions. In our repa
 
 A ***process reward model*** (PRM)\index{Process reward model!definition} is a learned scorer that assigns a value to each intermediate step of a candidate trajectory, conditioned on the task context and the preceding steps.
 
-1.  **Significance**: Step scores allow search algorithms to prune unpromising branches early, keeping beam search and tree search within finite computational budgets (@sec-vol3-test-time-compute-tree-growth).
+1.  **Significance**: Step scores allow search algorithms to prune unpromising branches early, keeping bounded searches within finite computational budgets (@sec-vol3-test-time-compute-tree-growth).
 2.  **Distinction**: An outcome reward model evaluates only terminal states; a process reward model assigns credit across intermediate steps. This early steering capability requires dense step-level supervision, which costs substantially more to gather than automated test outcomes.
 3.  **Common pitfall**: Mistaking a high step score for verified correctness. A process reward model provides heuristic guidance for ranking and pruning, but it offers no formal guarantees and satisfies no closure evidence level.
 
@@ -569,7 +536,7 @@ $$
 \sum_{j=1}^{J}\left(\SequenceLength + j\,\Delta S_{\text{step}}\right) = JS + \frac{J(J+1)}{2}\,\Delta S_{\text{step}}
 $$ {#eq-vol3-prm-rescoring}
 
-scorer input tokens, an overhead that scales quadratically with trajectory length $J$. The beam-search estimate later in this chapter (notebook \ref{nbk-03-compute-allocation-and-latency-trade-offs}) bills exactly the sum in @eq-vol3-prm-rescoring, with $\SequenceLength$ excluded, for every retained prefix. Incremental evaluation eliminates this quadratic burden when the serving engine supports prefix caching, reducing the marginal per-step cost to $\Delta S_{\text{step}}$ tokens. Evaluators that require the complete candidate or lack cache-aware serving pay the full quadratic cost. Verification scheduling must therefore account directly for prompt length, caching efficiency, and invocation latency.
+scorer input tokens, an overhead that scales quadratically with trajectory length $J$. An expanded search estimate as detailed subsequently (notebook \ref{nbk-03-compute-allocation-and-latency-trade-offs}) bills exactly the sum in @eq-vol3-prm-rescoring, with $\SequenceLength$ excluded, for every retained prefix. Incremental evaluation eliminates this quadratic burden when the serving engine supports prefix caching, reducing the marginal per-step cost to $\Delta S_{\text{step}}$ tokens. Evaluators that require the complete candidate or lack cache-aware serving pay the full quadratic cost. Verification scheduling must therefore account directly for prompt length, caching efficiency, and invocation latency.
 
 @Tbl-vol3-verifier-classes compares four common classes of checks by their inspection scope, failure modes, and deterministic guarantees, mapping each to the closure evidence levels defined in @sec-vol3-intro-invariant-closure. Compilers and sealed test suites establish bounded, reproducible properties within their domains, whereas learned reward models serve strictly as heuristic ranking instruments.
 
@@ -607,7 +574,7 @@ While @eq-vol3-verifier-precision governs the population of passing candidates, 
 
 ```{python}
 #| echo: false
-#| label: compute-vol3-ttc-check-yield
+#| label: calc-vol3-ttc-check-yield
 # ┌── LEGO ─────────────────────────────────────────────────────────────────────
 # │ Context: nbk-03-compute-overhead-and-yield-under
 # │ Goal: Separate passing-set precision, selection coverage, and incident loss.
@@ -808,10 +775,6 @@ Verifier blind spots compound across large candidate pools following the same bi
 
 In the connection-pool scenario, consider an agent attempting to fix a broken notification path. The test suite pass rate can increase because a patch fixes the missing wake-up signal, or because the patch deletes the unit test assertion that detects blocked worker threads. Both alterations improve the raw score, but only the first resolves the underlying defect. The candidate under evaluation must therefore remain strictly isolated from the verification criteria, preventing generated code from tampering with authoritative test definitions or synthesizing fabricated pass signals. When candidate code executes within the same process address space as the evaluation harness, it can monkey-patch runtime assertion routines—the most acute form of adversarial Goodhart. Verification cycles generate value only while the resulting evaluation evidence remains trustworthy and uncorrupted.
 
-::: {.column-margin .margin-pointer}
-↪ Grader isolation, which keeps test definitions, grading scripts, and pass signals outside the candidate's reach, is developed in @sec-vol3-evaluation-gyms-grader-isolation.
-:::
-
 Sandboxing the evaluator preserves verification integrity but does not expand its intrinsic coverage: a sealed regression suite still misses unexercised thread schedules, and a learned judge still risks favoring persuasive but erroneous code. Verification protocols must therefore measure the end-to-end outputs produced by the deployed search policy across target token budgets, accounting explicitly for false acceptances and abstentions. Increasing confidence requires orthogonal, independent verification mechanisms; evaluating another correlated heuristic score adds negligible informational value.
 
 Effective verification also yields fine-grained execution artifacts that subsequent search stages can reuse, including specific contradicted hypotheses, verified sub-invariants, and passing regression subsets. When an agent refines a candidate, localized modifications often leave earlier sub-verifications intact. Explicitly modeling these verification dependencies allows the search runtime to selectively invalidate obsolete assertions while preserving valid intermediate proofs, avoiding the computational overhead of rescoring unchanged reasoning trajectories from scratch.
@@ -855,13 +818,7 @@ When an input artifact changes or an assumption fails, the runtime marks that no
 
 Explicit version identifiers and environment hashes make artifact invalidation deterministic, but an observation is only as reliable as its boundary assumptions. For instance, an integration test that queries an external network service may fail to reproduce even if local repository files remain bit-identical. Conversely, an edit to an unrelated documentation file should not invalidate unit test results whose code paths and inputs were unaffected. Safe artifact reuse depends on verifying the full operational context—including sandbox isolation, mock definitions, and declared inputs—rather than relying solely on timestamps or file paths.
 
-Systems architects must also maintain a strict distinction between planning representations and physical execution state. The candidate graph tracks uncommitted hypotheses and their supporting rationales; in contrast, reading source files, modifying a filesystem, or running integration binaries in a sandbox produce concrete external side effects. Removing an invalidated candidate node from memory does not undo a filesystem modification or release an allocated cloud container. The agent runtime must manage physical idempotency, rollback, and cleanup through dedicated failure recovery protocols.
-
-::: {.column-margin .margin-pointer}
-↪ Compensation and cleanup of external effects that outlive an abandoned candidate branch are developed in @sec-vol3-failure-recovery-branch-compensation.
-:::
-
-### Revision scope {#sec-vol3-test-time-compute-revision-mechanics}
+Systems architects must also maintain a strict distinction between planning representations and physical execution state. The candidate graph tracks uncommitted hypotheses and their supporting rationales; in contrast, reading source files, modifying a filesystem, or running integration binaries in a sandbox produce concrete external side effects. Removing an invalidated candidate node from memory does not undo a filesystem modification or release an allocated cloud container. ### Revision scope {#sec-vol3-test-time-compute-revision-mechanics}
 
 When initiating a scoped revision, the runtime constructs a targeted prompt containing the current task constraints, the still-valid upstream frontier, the empirical observations that invalidated prior hypotheses, and the precise set of nodes marked for replacement. In the connection-pool scenario, the model is prompted for an alternative failure diagnosis, a corresponding patch, and an updated verification suite, omitting unchanged API definitions and repository metadata. Once the model returns candidates, the runtime verifies both that the replacements align with the retained artifacts and that their newly declared prerequisites are satisfied. Crucially, a replacement that appears locally valid may still introduce latent incompatibilities with preserved downstream nodes.
 
@@ -880,7 +837,7 @@ The decision flowchart in @fig-vol3-hierarchical-revision triages these three re
 While local repair minimizes token generation, it is not universally the optimal strategy. If an invalidation strikes at the foundational framing of a problem, or if the candidate dependency graph has grown complex and unreliable, performing full regeneration from scratch often yields a more coherent artifact that is easier to validate. However, full regeneration forces the model to reproduce already-settled material, risking accidental regressions in code sections that were previously correct. Deciding between localized revision and complete regeneration requires weighing the scope of invalidated dependencies against the combined latency, token budget, and validation cost of resynthesizing the candidate.
 
 ```{python}
-#| label: lego-candidate-plan-revision
+#| label: calc-vol3-candidate-plan-revision
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ CANDIDATE PLAN REVISION OUTPUT
@@ -932,13 +889,7 @@ class PlanRevision:
 
 :::
 
-This idealized model isolates the immediate generation savings of localized regeneration. In production systems, however, those savings must be weighed against the overhead of tracking dynamic dependencies, assembling specialized prompts with retained context, and executing verification tests on hybrid plans. When a candidate plan transitions from deliberative search to actual execution, it shifts from an uncommitted dependency graph to active runtime state—a lifecycle managed by the agent harness and persisted across infrastructure faults via durable execution frameworks.
-
-::: {.column-margin .margin-pointer}
-↪ Persisting committed plan state across worker and infrastructure faults is developed in @sec-vol3-durable-execution.
-:::
-
-### Limits on repeated revision {#sec-vol3-test-time-compute-replanning-thrashing}
+This idealized model isolates the immediate generation savings of localized regeneration. In production systems, however, those savings must be weighed against the overhead of tracking dynamic dependencies, assembling specialized prompts with retained context, and executing verification tests on hybrid plans. When a candidate plan transitions from deliberative search to actual execution, it shifts from an uncommitted dependency graph to active runtime state. ### Limits on repeated revision {#sec-vol3-test-time-compute-replanning-thrashing}
 
 Iterative plan revision risks degenerating into unproductive replanning cycles. Without explicit termination policies, a model can oscillate between conflicting diagnoses, generate cosmetically distinct patches that suffer from identical logical flaws, or churn compute by reacting to non-fatal compiler warnings. The runtime must determine whether a newly proposed revision reflects genuine evidence updates or merely stochastic variation. A diagnostic warning warrants plan revision only when it directly challenges a core premise of the candidate; its severity tag alone should not trigger regeneration.
 
@@ -946,9 +897,9 @@ To prevent thrashing, the runtime enforces strict budget ceilings across model i
 
 Explicit dependency graphs allow an agent runtime to retain proven artifacts and concentrate compute exclusively where hypotheses fail. Balancing these localized revisions against exploration of competing candidate plans requires an overarching resource allocation strategy—one that balances the cumulative compute already sunk into a candidate against the remaining budget authorized by the search policy.
 
-## Search Stopping Criteria {#sec-vol3-test-time-compute-bounded-search}
+## Bounded Search Structures {#sec-vol3-test-time-compute-bounded-search-structures}
 
-At each decision point, an automated repair agent can generate an entirely new patch, extend an existing partial candidate by one step, or execute a diagnostic probe to disambiguate competing failure explanations. Each option draws against the same finite task budget while imposing distinct scheduling constraints and dependencies. A diagnostic check that gates the next code extension sits squarely on the critical path. In contrast, candidate generation requests can execute concurrently across available worker pools, whereas abandoning an unviable branch still incurs the unrecoverable cost of the tokens and runtime work already spent. Designing an effective search policy therefore requires explicit mechanisms to track admitted work, quantify pending resource consumption, and enforce principled stopping criteria.
+The plan formulation strategies described earlier dictate the structural forms a candidate plan can take. Translating those plans into actionable progress requires a generation mechanism that can traverse the massive space of potential tokens and actions. At each decision point, an automated repair agent can generate an entirely new patch, extend an existing partial candidate by one step, or execute a diagnostic probe to disambiguate competing failure explanations. Each option draws against the same finite task budget while imposing distinct scheduling constraints and dependencies. A diagnostic check that gates the next code extension sits squarely on the critical path. In contrast, candidate generation requests can execute concurrently across available worker pools, whereas abandoning an unviable branch still incurs the unrecoverable cost of the tokens and runtime work already spent. Designing an effective search policy therefore requires explicit mechanisms to track admitted work, quantify pending resource consumption, and enforce principled stopping criteria.
 
 ### Search structures {#sec-vol3-test-time-compute-search-structures}
 
@@ -971,10 +922,6 @@ where $Q(s,a)$ represents the empirical mean return observed through extension $
 [^fn-puct-prior-bonus]: **From UCT to PUCT**: The UCT rule treated each node's choice of extension as a multi-armed bandit, adding an exploration bonus that shrinks as an extension accumulates visits [@kocsis2006bandit]. PUCT weights that bonus by a predictor's prior over the arms [@rosin2011multi], which is what lets a language model's own step probabilities concentrate a small budget on plausible extensions. A miscalibrated prior steers visits away from correct but unlikely steps just as effectively. \index{Monte Carlo tree search!PUCT}
 
 @Fig-vol3-search-topologies diagrams where each search structure prunes during candidate expansion: best-of-$\NumberOfDevices$ generates complete candidates independently and defers selection to the end; beam search generates extensions and prunes low-scoring partial candidates at each step boundary; and tree search selectively expands leaves via upper confidence bounds, updating visit counts along the path. @Tbl-vol3-search-topologies summarizes their pruning points, concurrency characteristics, state footprints, and prefix sharing.
-
-::: {.column-margin .margin-pointer}
-↪ Radix prefix caching, which lets later requests for a branch reuse the KV state of its shared ancestors, is developed in @sec-vol3-kv-cache-radix-lookup.
-:::
 
 ::: {#fig-vol3-search-topologies fig-env="figure" fig-pos="htb" fig-cap="**Where Each Search Structure Prunes**: Best-of-$\NumberOfDevices$ generates complete candidates independently and discards all but the selected one only at the end. Beam search generates the beam width times the extensions per candidate at each step, scores them, and keeps the beam width. Tree search expands the leaf its selection rule favors, evaluates it, and updates visit counts and value estimates along the path to the root. The drawings show structure only; the pool size, beam width, and depth are illustrative." fig-alt="Three panels of node diagrams. Best-of-N: a prompt node branches into four chains of three generated nodes each; past a dashed line labeled select, one final node is marked selected and three are marked pruned. Beam: a prompt node branches into two nodes, each of which generates two children; a dashed line labeled score, keep 2 marks two children pruned, the two survivors each generate two more, and a second dashed line labeled keep 2 marks two retained and two pruned. Tree search: an uneven tree in which one path from the prompt is drawn bold and ends at a new leaf labeled evaluated V, with a note that the bold path updates N and Q; other nodes are drawn dashed as not yet expanded. A legend identifies prompt, generated, retained or selected, generated then pruned, and not yet expanded nodes."}
 ![](images/svg/search_topologies_comparison.svg)
@@ -1072,11 +1019,11 @@ Two systems caveats govern this branching model. First, intermediate checks that
 
 While a partial patch is an ephemeral candidate data structure, evaluating it requires concrete execution against a target environment. If one search branch mutates files in a shared workspace and a sibling branch subsequently runs against that modified working tree, the sibling's test outcomes no longer reflect its own proposed edits. A robust runtime must therefore isolate execution environments so that every observation binds strictly to the candidate patch and workspace snapshot that produced it. Stateful or mutating branches require independent execution containers, copy-on-write filesystem forks, or deterministic rollback procedures that restore a clean baseline before subsequent branches execute.
 
-::: {.column-margin .margin-pointer}
-↪ Copy-on-write task workspaces that keep each run's file modifications private are developed in @sec-vol3-sandboxes-cow-provisioning.
-:::
-
 Workspace isolation incurs substantial systems overhead even when a search branch is ultimately discarded. Concurrent sandboxes consume host memory, storage volumes, container daemon process slots, and network bandwidth, while their logged outputs accumulate in the agent's working context. Even read-only diagnostic commands require sandboxed execution permissions and can inadvertently leak environment variables or credentials into search traces. Crucially, pruning a candidate drops it from the active search frontier, but computational backtracking cannot undo remote side effects such as outbound network requests or database writes. Dedicated sandbox containment mechanisms enforce these operational boundaries, ensuring that search policies budget external actions under the reality that tree traversal cannot reverse real-world side effects.
+
+## Search Stopping Criteria {#sec-vol3-test-time-compute-bounded-search}
+
+Regardless of the search structure chosen to explore candidates, the runtime must eventually conclude its search and return a decision. The criteria for halting exploration span budget exhaustion, time limits, and the discovery of a verified solution.
 
 ### A resource ledger for the whole search {#sec-vol3-test-time-compute-resource-ledger}
 
@@ -1085,7 +1032,7 @@ Managing search budgets requires maintaining separate ledgers for financial expe
 Elapsed wall-clock latency depends entirely on how execution scheduling maps these demands onto hardware. Sequential search phases sum latency along the critical path, parallel candidate evaluations overlap across available worker threads, and limited thread or GPU allocations force excess requests into batched waves. Peak live state introduces yet another independent constraint. It reflects the maximum footprint held simultaneously in memory and storage—including active KV caches, candidate ASTs, diagnostic logs, and running sandboxes—rather than the cumulative volume of candidates generated over the task lifetime. An optimization that reduces aggregate completion tokens often increases input token reprocessing, introduces synchronization barriers, or balloons memory occupancy. Tracking these dimensions in separate ledger accounts prevents composite cost metrics from masking critical systems bottlenecks.
 
 ```{python}
-#| label: lego-bounded-search-ledger
+#| label: calc-vol3-bounded-search-ledger
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ BOUNDED SEARCH RESOURCE LEDGER
@@ -1232,10 +1179,6 @@ The beam expands frontiers of `{python} SearchLedger.frontier_counts_str` extens
 ### Admission limits and pending work {#sec-vol3-test-time-compute-admission-limits}
 
 A task-wide quota must restrict new candidate admissions prior to dispatch, because capacity overruns discovered after concurrent requests complete represent non-refundable expenditures. Before dispatching any candidate extension, the runtime reserves its maximum allowed completion tokens along with all associated validation and sandbox execution allowances. The sum of settled consumption and outstanding reservations must remain strictly within configured ceilings. Unused quota reservations return to the available budget pool only after the runtime verifies that the corresponding request has concluded without further liability. Enforcing hard spending limits therefore requires downstream model and tool services to provide strict, enforceable billing bounds or deterministic settlement receipts; purely local accounting provides only an unverified approximation.
-
-::: {.column-margin .margin-pointer}
-↪ Bounded-liability reservation and settlement mechanisms are developed in @sec-vol3-agent-harness-reservation-settlement.
-:::
 
 Resource management policies must similarly decouple search depth from elapsed execution time. A depth ceiling bounds the chain of sequential model extensions or tool interactions, whereas a deadline bounds overall user latency. When the deadline expires, the runtime ceases admitting new work, discards late arrivals from the expired search phase, and issues cancellation requests to downstream services. However, as @sec-vol3-foundation-model-streaming-cancellation establishes, transmitting a cancellation signal does not guarantee immediate remote termination; a service that does not honor it consumes the call's entire token allowance. Until remote serving layers settle the transaction and confirm termination, the scheduler must maintain outstanding reservations in the ledger.
 
@@ -1479,9 +1422,9 @@ Test-time compute transforms the cost of a decision into an explicit architectur
 
 | **Equation**                                                                                                                                                                                                                          | **What it bounds or decides**                                                                                                            | **Where derived**                     |
 |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------|
-| $T^{\text{depth}} \approx T_{\text{prefill}}(\SequenceLength) + K_{\text{ext}}\,\PertokenDecodeTime$, $\; T^{\text{breadth}} \approx T_{\text{prefill}}(\SequenceLength) + \max_{n} \CodecDecodeTime(K_n)$                            | Critical path of extending one candidate vs. sampling $\NumberOfDevices$ concurrently, given capacity for all $\NumberOfDevices$ streams | @eq-vol3-allocation-critical-path     |
+| $T^{\text{depth}} \approx T_{\text{prefill}}(\SequenceLength) + K_{\text{ext}}\,\PertokenDecodeTime$, $\; T^{\text{breadth}} \approx T_{\text{prefill}}(\SequenceLength) + \max_{\PointToPointMessageSize} \CodecDecodeTime(K_n)$     | Critical path of extending one candidate vs. sampling $\NumberOfDevices$ concurrently, given capacity for all $\NumberOfDevices$ streams | @eq-vol3-allocation-critical-path     |
 | $T^{\text{feedback}} \approx \sum_{t=1}^{\Horizon}\bigl(T_{\text{prefill}}(S^{(t)}) + \CodecDecodeTime(\TorqueAndBackemfConstants) + t_{\text{check},t}\bigr)$, $\; S^{(t)} = \BasePromptLength + \sum_{j<t}(K_j + \lvert o_j\rvert)$ | Latency and input growth of observation-conditioned revision under an append-only context                                                | @eq-vol3-allocation-critical-path     |
-| $\operatorname{pass@}k = 1-(1-\HiddenDimensionFour)^k$, $\; \widehat{\operatorname{pass@}k} = 1-\binom{n-c}{k}/\binom{n}{k}$                                                                                                          | Candidate availability for one task, and the ceiling on any selector that returns an unchanged pool member                               | @sec-vol3-test-time-compute-pass-at-k |
+| $\operatorname{pass@}k = 1-(1-\HiddenDimensionFour)^k$, $\; \widehat{\operatorname{pass@}k} = 1-\binom{\PointToPointMessageSize-c}{k}/\binom{\PointToPointMessageSize}{k}$                                                            | Candidate availability for one task, and the ceiling on any selector that returns an unchanged pool member                               | @sec-vol3-test-time-compute-pass-at-k |
 | $\CostPerAcceptedTaskEff = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$                                                                                                                                                           | Whether added deliberation raises $\AcceptanceProbability$ faster than it raises the attempt cost                                        | @eq-vol3-cost-per-accepted-task       |
 | $\Pi_V = \HiddenDimensionFour(1-\VerifierFalseacceptanceFr) / [\HiddenDimensionFour(1-\VerifierFalseacceptanceFr) + (1-\HiddenDimensionFour)\,\VerifierFalseacceptance]$                                                              | Share of passing candidates that are valid; unchanged by pool size at fixed rates                                                        | @eq-vol3-verifier-precision           |
 | $\sum_{j=1}^{J}(\SequenceLength + j\,\Delta S_{\text{step}}) = JS + \tfrac{J(J+1)}{2}\,\Delta S_{\text{step}}$                                                                                                                        | Scorer input for step-level checks that rescore each growing prefix without reuse                                                        | @eq-vol3-prm-rescoring                |

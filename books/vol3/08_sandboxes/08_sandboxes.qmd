@@ -303,7 +303,7 @@ An expiry states when a grant stops authorizing new use. Closing an open file de
 
 Suppose the repair's edit phase ends while a worker still holds a writable source handle. Rejecting new edit requests alone leaves that handle as a possible write path. The transition must stop or constrain the worker, revoke the usable reference where supported, or move subsequent work into an appropriately restricted execution context. The runtime must record what it has actually confirmed rather than equating a changed policy record with completed revocation.
 
-External effects have their own boundary. A broker can stop accepting new requests after expiry, but a previously admitted remote operation may still complete. A lease or cancellation request does not settle that effect or justify a retry. Environment teardown and readiness for reuse receive their full treatment in @sec-vol3-sandboxes-pooling-reset; here the requirement is that authority have an enforced lifetime rather than an advisory timestamp.
+External effects have their own boundary. A broker can stop accepting new requests after expiry, but a previously admitted remote operation may still complete. A lease or cancellation request does not settle that effect or justify a retry. Here the requirement is that authority have an enforced lifetime rather than an advisory timestamp.
 
 ::: {.column-margin .margin-pointer}
 ↩ Why an unsettled remote outcome does not justify a blind retry is established in @sec-vol3-tool-calling-idempotency.
@@ -326,9 +326,9 @@ Scoped access still leaves a placement decision: whether the executing code must
 
 For example, the repair worker requests a fetch from its approved private repository through a host-owned source-service adapter. The broker checks the bound task identity, repository, operation, destination, and current grant, then performs the credentialed request without returning the credential. Permission to fetch does not permit a push or access to another repository. The worker can cause a narrowly authorized use of the credential without possessing the credential itself.
 
-Brokering requires a supported mediation arrangement. An application adapter can make the upstream request directly; a proxy can attach credentials only where it can legitimately inspect and modify the relevant protocol exchange. A signing service likewise needs to authorize what it signs, not merely conceal its key. @Sec-vol3-sandboxes-egress-enforcement develops how the runtime constrains routes that might bypass these interfaces. If a tool genuinely requires a credential inside the guest, a narrowly scoped, short-lived credential shrinks the scope and window of exposure, while the guest still possesses it for that window.
+Brokering requires a supported mediation arrangement. An application adapter can make the upstream request directly; a proxy can attach credentials only where it can legitimately inspect and modify the relevant protocol exchange. A signing service likewise needs to authorize what it signs, not merely conceal its key. The runtime must enforce strict egress controls to constrain routes that might bypass these interfaces. If a tool genuinely requires a credential inside the guest, a narrowly scoped, short-lived credential shrinks the scope and window of exposure, while the guest still possesses it for that window.
 
-Keeping selected credentials outside the guest removes the most valuable target from the README attack, and from the environment dump in the Gemini CLI incident. The environment and repository content remain sensitive, and a brokered operation can still be misused within its permitted scope. Secret placement, access permission, and whether an allowed request's data may flow to its recipient are three distinct concerns; @sec-vol3-security-taint-tracking develops the last, and this chapter establishes where authority resides and how execution is confined to it.
+Keeping selected credentials outside the guest removes the most valuable target from the README attack, and from the environment dump in the Gemini CLI incident. The environment and repository content remain sensitive, and a brokered operation can still be misused within its permitted scope. Secret placement, access permission, and whether an allowed request's data may flow to its recipient are three distinct concerns; subsequent design layers develops the last, and this chapter establishes where authority resides and how execution is confined to it.
 
 Capabilities and brokering specify the resources the runtime intends to expose, but they depend on enforcement that running code cannot bypass or modify under the stated threat model. Enforcing those limits in practice requires an execution envelope, evaluated by what it shares with the host and which components uphold its boundary.
 
@@ -513,24 +513,11 @@ class EnvelopeAmortization:
 
 :::
 
-### Accelerator and device access {#sec-vol3-sandboxes-gpu}
-
-When agent workflows incorporate hardware accelerators (such as GPUs or TPUs) for model inference, data processing, or compiled tensor kernels, the physical device joins the isolation boundary. Integrating accelerators introduces four core systems challenges:
-
-1. Auditing the host driver and ioctl surface exposed to the sandbox.
-2. Enforcing compute and device-memory partitioning.
-3. Containing device-level faults to prevent cascading crashes across adjacent tenants.
-4. Ensuring deterministic memory scrubbing and state reset between workload reassignments.
-
-Offloading accelerator tasks to a remote microservice replaces direct hardware passthrough with a structured RPC interface, shifting the isolation burden to service-side multi-tenancy and admission controls.
-
-Direct hardware assignment exposes the host to device direct memory access (DMA), enabling peripheral devices to read and write arbitrary host physical addresses independently of CPU page tables. Standard CPU address-space isolation provides no protection against rogue DMA transactions. As detailed in the Linux VFIO framework [@linux2024vfio], secure device assignment requires an I/O Memory Management Unit (IOMMU) to translate and restrict device DMA requests through dedicated I/O page tables. Because IOMMU groups are dictated by PCIe interconnect topologies, peer-to-peer routing capabilities, and Access Control Services (ACS) support, the true physical isolation boundary often encompasses multiple slots or an entire PCIe root complex. Even when vendors advertise hardware partitioning mechanisms (such as single-root I/O virtualization, or SR-IOV, and multi-instance GPU slicing), system architects must independently validate fault domain boundaries, driver vulnerability exposure, and sanitize device memory during re-provisioning, because CPU-level virtualization guarantees terminate at the PCIe bus.
-
-The selected envelope establishes a rigorous execution boundary, resource policy, and lifecycle for compute. Multi-turn workflows, however, impose a parallel state continuity requirement: iterative test cycles require access to code modifications and intermediate artifacts generated across preceding turns. Decoupling this persistent filesystem state from the transient lifecycle of worker processes and sandboxes requires a dedicated task-local workspace architecture governed by explicit retention and export policies.
+Because trajectory-long reuse relies on retaining state between calls to amortize these setup costs, the runtime must securely manage the filesystem layers that back this state. The workspace must provide the agent with a persistent scratchpad for its intermediate artifacts while preventing those edits from permanently corrupting the base image.
 
 ## The Agent Workspace {#sec-vol3-sandboxes-cow}
 
-Multi-step agent tasks require files to persist across individual tool invocations. In a software repair task, for example, an agent generates an edit to create candidate patch `r18`, executes a subsequent shell command to compile the code, and finally runs a test suite that produces an evaluation report. Spawning a fresh process for every command protects the host from runaway memory allocations or lingering background jobs, but those separate processes must still view and modify a shared, continuous filesystem state. Conversely, keeping a single process alive does not establish boundaries around which files the agent may alter. An agent execution environment therefore requires an explicit workspace policy independent of its execution envelope.
+An agent execution environment requires an explicit workspace policy independent of its execution envelope.
 
 That workspace policy delineates four critical boundaries: the immutable source baseline, the task's private modifications, temporary scratch space, and the artifacts eligible for final export. Generated commands execute strictly within a designated task workspace, isolated entirely from the host's primary working tree or operational directories. For a code repair run, candidate edits and intermediate build artifacts reside inside this task workspace. At the same time, authoritative acceptance test suites, benchmark harnesses, and reporting mechanisms remain strictly outside the agent's writable scope, even when the agent is permitted to write temporary test output into a monitored scratch directory.
 
@@ -635,7 +622,7 @@ Even with copy-on-write efficiency, private task storage requires hard bounds. U
 
 ### Workspace leases {#sec-vol3-sandboxes-lease}
 
-A **workspace lease**\index{Workspace lease!definition} establishes a formal contract binding a provisioned workspace to a specific task, owner, authorized execution envelope, and operational lifetime. In multi-turn agent workflows, an agent relies on intermediate build caches, compiler outputs, and preliminary code edits surviving between turns. The workspace lease ensures this private state persists across sequential tool calls without exposing those modifications to subsequent or concurrent tenants. When an agent dispatches a new command within its assigned turn, the runtime attaches the executing process to the leased workspace; conversely, a new task receives an entirely separate, freshly provisioned environment.
+A **workspace lease**\index{Workspace lease!definition} establishes a formal contract binding a provisioned workspace to a specific task, owner, authorized execution envelope, and operational lifetime. When an agent dispatches a new command within its assigned turn, the runtime attaches the executing process to the leased workspace; conversely, a new task receives an entirely separate, freshly provisioned environment.
 
 ::: {.column-margin .margin-pointer}
 ↪ Checkpoints that bind the lease's workspace files to a committed log position, so private state survives a worker crash as well as a turn boundary, are developed in @sec-vol3-persistence-checkpointing.
@@ -651,7 +638,7 @@ When a task concludes, the runtime must extract permissible deliverables before 
 
 Runtimes must never simply archive the raw upper filesystem layer as the task deliverable. In an overlay filesystem, the upper layer contains kernel whiteout markers, internal metadata, compiler caches, temporary build artifacts, and potentially leaked environment secrets. Export pipelines must explicitly parse, filter, and validate deliverables into clean formats, such as standard diffs and vetted test reports. Even then, an exported patch represents only a candidate proposal rather than proof of correctness. Downstream release engineering pipelines must independently verify that the patch applies cleanly to trunk and passes authoritative continuous integration checks under trusted credentials before merging into a production repository.
 
-Once legitimate deliverables are extracted, the runtime discards the remaining private state following the sandbox pooling and recycling policies developed in @sec-vol3-sandboxes-pooling.
+Once legitimate deliverables are extracted, the runtime discards the remaining private state following strict pooling and recycling policies.
 
 Regulating artifact export secures the primary file-based egress channel from the workspace. However, arbitrary code executing inside a sandbox can also open network sockets to exfiltrate proprietary source code, internal test fixtures, or discovered security vulnerabilities. Maintaining storage isolation across turns addresses only half the containment challenge; robust sandboxing architectures must enforce strict network egress controls independently of storage continuity.
 
@@ -707,15 +694,52 @@ Finally, outbound communication channels must adhere to strict temporal lifecycl
 
 ## Sandbox Pools and Reset {#sec-vol3-sandboxes-pooling}
 
-When an autonomous agent tackles a software engineering task, its execution trajectory requires state continuity across multiple reasoning turns. The agent inspects the repository, modifies a source file such as `src/pool.py`, installs a testing utility, and runs diagnostic suites. For the agent to make progress, its edits, build artifacts, and running helper processes must persist between individual tool calls. The subsequent tenant, however, requires an entirely clean slate. It must inherit neither modified files nor lingering background daemons, active network sockets, or ambient security credentials left behind by the prior trajectory. Sandbox pooling reconciles these competing requirements: it preserves intra-trajectory continuity while guaranteeing inter-tenant isolation and minimizing the wait time for a fresh environment. The pool maintains a standby reserve of clean, pre-warmed execution instances to absorb incoming arrivals instantly, and an instance whose lease has ended rejoins the ready fleet only after a complete, verified reset—regardless of what status code its final tool returned.
-
-Two naive extremes bracket this virtualization design space. At one end, spawning an ephemeral execution envelope for every individual tool call guarantees that no mutable state carries over between calls. However, this strategy forces every tool invocation to pay the full latency and resource cost of system boot, and the control plane must explicitly serialize and pass the entire workspace across the boundary on every turn. At the other end, reusing a single long-lived environment across different tasks incurs zero startup delay between trajectories, but mutable state inevitably accumulates within the guest—including arbitrary files, corrupted configurations, or stealthy backdoors planted by prompt injections. A sandbox pool charts an efficient middle path. It initializes instances in advance, holds them in a standby reserve, leases each instance to a single trajectory for that trajectory's entire lifespan (@sec-vol3-sandboxes-lease), and flags the instance as tainted the moment the lease expires. The tainted instance remains strictly unavailable until external hypervisor or operating system mechanisms either restore it to a verified baseline or destroy it entirely.
+Enforcing complete network teardown and workspace sanitization across every task boundary incurs significant latency. To guarantee isolation without delaying the next agent trajectory, the runtime must manage a sandbox pool. The pool maintains a standby reserve of clean, pre-warmed execution instances to absorb incoming arrivals instantly. An instance whose lease has ended rejoins the ready fleet only after a complete, verified reset—regardless of what status code its final tool returned.
 
 ### The reset contract {#sec-vol3-sandboxes-pooling-reset}
 
 A **reset contract**\index{Reset contract!definition} defines the precise conditions under which an execution environment may be cleared to serve a new lease, cataloging all state that teardown or restoration must cover. In practice, this boundary extends far beyond the workspace directory on disk. A command executed by an agent can spawn background processes, leave network connections half-open, alter kernel-level runtime parameters, or enqueue asynchronous tasks inside host-managed services. Simply removing the files that the agent was expected to modify leaves these residual objects untouched. Standard operating-system primitives provide numerous avenues for state to elude naive file-based scrubbing: a rogue daemon can double-fork to detach from the task's process group, an abstract Unix domain socket leaves no entry in the filesystem, tokens can linger in the kernel keyring, scheduled cron jobs can trigger after the lease has completed, or modified helper scripts can shadow tools earlier on the search path.
 
 To eliminate cross-tenant leakage, the supervisor immediately fences an expiring lease before cleanup begins. It halts incoming tool invocations under that lease and revokes its communication channels, credentials, and network authority. Next, the supervisor quiesces and terminates all owned execution, including child processes, background workers, and pending host-side tasks bound to the environment. A wall-clock timeout, error condition, or explicit cancellation signal initiates this sequence, but teardown requires positive confirmation from the enforcement layer rather than assumptions based on elapsed time. If the virtualization layer cannot conclusively verify that all execution has ceased or that shared hardware resources have been cleanly severed, the supervisor isolates and destroys the instance rather than returning it to the pool.
+
+On a POSIX host, that boundary for a local command is typically a **process group**\index{POSIX process group!definition}, which establishes the set of processes reached by a single signal. A tool that executes `bash -c "make && pytest"` spawns a shell, which in turn spawns `make`, compiler subprocesses, the test runner, and multiple worker threads or forks. Signaling only the top-level shell process terminates the shell, but leaves orphaned descendants reparented to the system init process (`PID 1`). These orphaned processes continue consuming CPU cycles, holding file system locks, and keeping socket descriptors open. To prevent orphan leaks, the execution adapter configures each job as the leader of its own process group at spawn time—calling `setpgid(0, 0)` in the child before invoking `exec`—and directs all signals to the entire group. It sends `SIGTERM` first, granting processes a bounded grace period to flush buffers and release external resources, followed by an uncatchable `SIGKILL`. @Lst-vol3-process-group-teardown implements this escalation pattern and reports the verified outcome. If an untrusted process deliberately creates a new session or process group to escape group signaling, the runtime must rely on kernel-level isolation boundaries.
+
+::: {#lst-vol3-process-group-teardown lst-cap="**Process-group teardown with escalation**: The job leads its own group, so one signal reaches every descendant still in it. Liveness is probed with signal 0 after reaping exited children, and a group that survives `SIGKILL` is reported as unconfirmed rather than assumed stopped."}
+```python
+import os, signal, subprocess, time
+
+def spawn_job(argv):
+    proc = subprocess.Popen(argv, process_group=0)  # setpgid(0, 0)
+    return proc.pid                  # the leader's PID is the group ID
+
+def group_alive(pgid):
+    try:                             # reap exited children of ours,
+        while os.waitpid(-pgid, os.WNOHANG)[0] > 0:  # or zombies
+            pass                                     # still count
+    except ChildProcessError:        # no children of ours remain
+        pass
+    try:
+        os.killpg(pgid, 0)           # signal 0 probes, delivers nothing
+        return True
+    except ProcessLookupError:
+        return False
+
+def terminate_group(pgid, grace_s=3.0):
+    for sig, wait_s in ((signal.SIGTERM, grace_s), (signal.SIGKILL, 1.0)):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:   # group already gone
+            return "exited" if sig == signal.SIGTERM else "terminated"
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            if not group_alive(pgid):
+                return "terminated" if sig == signal.SIGTERM else "killed"
+            time.sleep(0.05)
+    return "unconfirmed"             # report it; do not claim a stop
+```
+:::
+
+Two subtle POSIX semantics govern the correctness of this routine. First, when invoking non-blocking `os.waitpid(-pgid, os.WNOHANG)`, a return value of zero indicates that child processes still exist in the group and none has changed state yet; it does not indicate that the process group has cleared. The runtime continues reaping until no direct child processes remain, at which point the system call raises `ChildProcessError`. Second, sending signal 0 via `os.killpg(pgid, 0)` delivers no actual signal to the target group; the kernel simply performs error checking, confirming whether any process matching that group ID still exists and is accessible. Probing with signal 0 directly determines whether any group member remains alive after signal delivery.
 
 Once all writers inside the sandbox are confirmed quiescent, the supervisor extracts and persists only those outputs explicitly permitted by the task's export policy. In a code repair scenario, these artifacts typically include the unified `git diff` of candidate edits and bounded test execution logs linked to the target repository commit. If an implementation attempts to export artifacts while the guest is still executing, it must enforce an explicit consistency boundary so that concurrent, in-flight writes cannot silently alter or corrupt the data being exported.
 
@@ -754,64 +778,15 @@ Lazy restoration techniques defer paging memory into RAM until the guest explici
 
 [^fn-lazy-restore-faults]: **Lazy Snapshot Restore**\index{Snapshot restore!lazy paging}: A study of serverless functions restored from microVM snapshots attributed their high startup latency to page faults that bring guest memory in from disk one page at a time [@ustiugov2021benchmarking]. Recording the stable working set of pages a function touches after restore and prefetching it in one pass substantially reduced that latency. For an agent pool, the analogous working set is the interpreter, toolchain, and dependency pages the first tool call touches, and its size, not the snapshot's, sets the first command's latency.
 
-### Pool dimensioning under bursty traffic {#sec-vol3-sandboxes-pooling-queueing}
-
-To absorb traffic without incurring cold-boot delays, a pool maintains a **standby reserve**\index{Standby reserve!definition} of clean, unassigned instances. Admitting a new trajectory consumes one standby instance and binds it to the task. Concurrently, the provisioning engine replenishes the reserve, while expired leases remain quarantined until fulfilling their reset contract. The pool's operational policy must explicitly define whether waiting tasks take scheduling precedence over rebuilding standby instances, how many parallel snapshot restorations the host can sustain without thrashing memory buses, and how the admission controller responds when physical memory or CPU capacity is exhausted. These operational rules give concrete meaning to the reserve sizing calculation.
-
-Dimensioning a sandbox pool requires reasoning across two distinct timescales: long-run fleet capacity and short-run burst readiness. Little's law [@little1961] governs long-run fleet sizing. Under a steady flow with an admitted arrival rate $\ArrivalRate$ and a mean lease holding duration $\FallbackHold$, the average number of active sandbox leases is
-
-$$
-N_{\text{active}} = \ArrivalRate \, \FallbackHold
-$$ {#eq-vol3-pool-active}
-
-::: {.column-margin .margin-pointer}
-↩ Little's law for resident queueing capacity is established in @sec-vol3-kv-workload-dynamics.
-:::
-
-Because an agent sandbox lease spans the complete multi-turn trajectory rather than an individual tool execution, the agent's deliberative horizon sets the holding duration. An environment remains occupied while the model samples tokens, waits on inference queues, and executes test suites. Little's law defines the average concurrency, but it provides neither a hard ceiling on concurrent resource consumption nor a guarantee that a newly arrived task will find a warm instance waiting. Variable trajectory lengths, sudden arrival bursts, and teardown latencies necessitate strict admission limits alongside explicit queueing, rejection, or backpressure policies.
-
-The standby reserve addresses the short timescale: the replenishment window $T_{\text{init}}$ required to prepare a single clean instance. The instance provisioning architecture dictates this duration. A cold boot pays the cumulative latencies of virtual machine monitor startup, guest kernel initialization, and user-space runtime setup: $T_{\text{cold}} = T_{\text{vmm}} + T_{\text{kernel}} + T_{\text{user}}$. For agent environments, $T_{\text{user}}$ dominates because starting language runtimes, importing heavy libraries, and warming compiler caches take several seconds. Restoring from a pre-initialized snapshot replaces kernel boot and user-space configuration with the high-speed restoration of memory mappings, processor registers, and device states, reducing $T_{\text{init}}$ to tens of milliseconds. Snapshotting also fundamentally restructures memory bus traffic during arrival bursts. Cold-booting $N_{\text{burst}}$ instances forces the host memory system to populate $N_{\text{burst}} M_{\text{guest}}$ bytes within $T_{\text{cold}}$, whereas $N_{\text{burst}}$ restored instances allocate only the $N_{\text{burst}} M_{\text{dirty}}$ private pages they actually write, spreading write bandwidth across the duration of the trajectory rather than concentrating it at startup.
-
-If every admission immediately triggers one background replenishment task and arrivals across a replenishment window follow a Poisson distribution with mean $\ArrivalRate T_{\text{init}}$, the standby reserve exhausts its capacity when more than $N_{\text{reserve}}$ tasks arrive during a single replenishment interval. To maintain the probability of finding an empty reserve below a target stockout probability $\SmallConstant$, the normal approximation yields
-
-$$
-N_{\text{reserve}} \ge \ArrivalRate T_{\text{init}} + z_{1-\SmallConstant}\sqrt{\ArrivalRate T_{\text{init}}}
-$$ {#eq-vol3-pool-reserve}
-
-where $z_{1-\SmallConstant}$ denotes the standard normal quantile.[^fn-square-root-staffing] When the expected number of arrivals during replenishment is large, this normal approximation holds reliably; when the expected count is small, the sizing must evaluate the Poisson tail directly. Host resident memory requirements follow from copy-on-write page sharing across one golden template, private dirty pages accumulated by active leases, and base overheads for standby instances:
-
-$$
-M_{\text{pool}} = M_{\text{template}} + N_{\text{active}} \, M_{\text{dirty}} + N_{\text{reserve}} \, M_{\text{standby}}
-$$ {#eq-vol3-pool-memory}
-
-Notebook \ref{nbk-08-reserve-from-arrival-rate} applies these sizing relationships to a steady arrival stream.
-
-[^fn-square-root-staffing]: **Square-Root Staffing**\index{Square-root staffing}: The reserve rule has the form of the square-root staffing rule for many-server queues, which provisions the mean load plus a margin proportional to its square root. @halfin1981heavy showed that holding the margin's coefficient fixed keeps the probability of waiting at a stable value strictly between zero and one as the offered load grows. The margin relative to the mean shrinks as $1/\sqrt{\ArrivalRate T_{\text{init}}}$, so a busy pool needs proportionally fewer spare instances than a quiet one.
+### Queueing and capacity {#sec-vol3-sandboxes-pooling-queueing}
 
 ```{python}
-#| label: calc-vol3-sandbox-pool-reserve
+#| label: lego-08-reserve-from-arrival-rate
 #| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ STEADY-ARRIVAL POOL SIZING (LITTLE'S LAW, POISSON RESERVE, COW MEMORY)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Notebook nbk-08-reserve-from-arrival-rate in
-# │          @sec-vol3-sandboxes-pooling-queueing.
-# │
-# │ Goal: Size active leases, a standby reserve, and resident memory from an
-# │       arrival rate, a lease duration, and a snapshot restore time.
-# │ Show: Active leases, stockout probability for a reserve of one, and
-# │       resident memory with and without copy-on-write sharing.
-# │ How:  @eq-vol3-pool-active, the Poisson tail behind @eq-vol3-pool-reserve,
-# │       and @eq-vol3-pool-memory.
-# │
-# │ Note: The registry sandbox profile values are teaching assumptions
-# │       (provenance catalog), not measurements of a product.
-# └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
 
 def poisson_tail(mu, s):
-    """P(more than s Poisson arrivals with mean mu)."""
     return 1 - sum(math.exp(-mu) * mu**k / math.factorial(k) for k in range(s + 1))
 
 class SandboxPoolReserve:
@@ -875,128 +850,32 @@ class SandboxPoolReserve:
     reserve_slow_str = fmt_int(reserve_slow)
 ```
 
-::: {#nbk-08-reserve-from-arrival-rate .callout-notebook title="Sizing a pool from its arrival rate"}
+Snapshot restoration reduces guest startup overhead to milliseconds—down to `{python} SandboxPoolReserve.t_init_str` in our baseline configuration. However, boot latency is rarely the dominant infrastructure expense. The primary cost of sandboxing stems from cumulative memory residency across the lease horizon. At an arrival rate of `{python} SandboxPoolReserve.arrival_rate_str` trajectories per second and lease durations of `{python} SandboxPoolReserve.t_hold_str`, the pool sustains `{python} SandboxPoolReserve.n_active_str` concurrent leases. Even when leveraging copy-on-write page sharing across guests, the fleet holds roughly `{python} SandboxPoolReserve.m_pool_str` of resident host memory, compared to the `{python} SandboxPoolReserve.m_private_str` required by isolated private images. Sandbox provisioning must be budgeted by memory-seconds per trajectory—a quantity that scales directly with the lease hold time $\FallbackHold$—rather than evaluated solely by boot time.
 
-**Problem**: A platform admits `{python} SandboxPoolReserve.arrival_rate_str` coding trajectories per second, and each holds its lease for `{python} SandboxPoolReserve.t_hold_str`. In the chapter's illustrative sandbox profile, restoring one clean instance from its snapshot takes `{python} SandboxPoolReserve.t_init_str` and a full guest image is `{python} SandboxPoolReserve.m_guest_str`. Each active lease writes about `{python} SandboxPoolReserve.m_dirty_str` of private pages, and each standby keeps `{python} SandboxPoolReserve.m_standby_str`. Does a reserve of one keep the chance of finding standby empty below `{python} SandboxPoolReserve.target_miss_str`, and how much resident memory do the active leases need?
+The key capacity constraints are formalized by four core equations. By Little's Law, the mean number of active leases $N_{\text{active}}$ scales directly with the arrival rate $\ArrivalRate$ and the trajectory hold time $\FallbackHold$:
 
-**Math**: By @eq-vol3-pool-active, active leases average $\ArrivalRate \FallbackHold$ = `{python} SandboxPoolReserve.arrival_rate_str` per second × `{python} SandboxPoolReserve.t_hold_str` = `{python} SandboxPoolReserve.n_active_str`. Arrivals during one restore average $\ArrivalRate T_{\text{init}}$ = `{python} SandboxPoolReserve.mu_init_str`, far too small a mean for the normal approximation in @eq-vol3-pool-reserve, so the Poisson tail is read directly. A reserve of one runs dry only if two or more arrive within one restore, with probability $1 - e^{-\ArrivalRate T_{\text{init}}}(1 + \ArrivalRate T_{\text{init}}) \approx$ `{python} SandboxPoolReserve.p_dry_str`, below the target. Private guest images for every active lease would occupy about `{python} SandboxPoolReserve.m_private_str`. With copy-on-write, @eq-vol3-pool-memory gives about `{python} SandboxPoolReserve.m_pool_str`, `{python} SandboxPoolReserve.cow_ratio_mult_str` less.
+$$
+N_{\text{active}} = \ArrivalRate \, \FallbackHold
+$$ {#eq-vol3-pool-active}
 
-**Systems insight**: The agent's trajectory horizon, rather than the latency of individual tool calls, dictates overall fleet cost. Active leases and their resident memory grow linearly in $\FallbackHold$, so doubling trajectory length doubles the memory term, while copy-on-write sharing keeps a fleet of per-trajectory microVMs affordable. The reserve is governed instead by $\ArrivalRate T_{\text{init}}$ and is sharply sensitive to it: a reserve of one meets the target only while restore stays below about `{python} SandboxPoolReserve.t_init_max_str`, and a `{python} SandboxPoolReserve.slow_factor_mult_str` slower cold boot ($\ArrivalRate T_{\text{init}}$ = `{python} SandboxPoolReserve.mu_slow_str`) needs a reserve of `{python} SandboxPoolReserve.reserve_slow_str`. Because every attempt holds its sandbox for $\FallbackHold$, sandbox residency is part of $\mathbb{E}[\AttemptCost]$ in the cost per accepted task $\CostPerAcceptedTaskEff$ (@eq-vol3-cost-per-accepted-task), and a rejected attempt pays it again. The estimate assumes steady Poisson arrivals and prompt reclamation; the next notebook treats a burst.
+The resident host memory required to sustain this pool, $M_{\text{pool}}$, must account for the shared baseline, the active leases, and the standby reserve:
 
-:::
+$$
+M_{\text{pool}} = M_{\text{template}} + N_{\text{active}} M_{\text{dirty}} + N_{\text{reserve}} M_{\text{standby}}
+$$ {#eq-vol3-pool-memory}
 
-::: {.column-margin}
-![](images/svg/vol3_sandboxes_margin_stockout_knee.svg){width="100%" fig-alt="Log-scale curve of the probability that a reserve of one standby instance runs dry, rising with restore time; a dot marks the snapshot restore below a dashed red target line, and the region past the curve's crossing of the target is shaded red."}
+To satisfy a target stockout probability $\SmallConstant$ (the risk of finding the standby pool empty), the required reserve $N_{\text{reserve}}$ must cover the expected initialization demand $\ArrivalRate T_{\text{init}}$. For small means, this is derived directly from the Poisson tail; for larger means, a normal approximation with a corresponding z-score $z_{1-\SmallConstant}$ is used:
 
-*A reserve of one holds only while restore stays fast; the stockout tail climbs steeply.*
-:::
+$$
+N_{\text{reserve}} \ge \ArrivalRate T_{\text{init}} + z_{1-\SmallConstant}\sqrt{\ArrivalRate T_{\text{init}}}
+$$ {#eq-vol3-pool-reserve}
 
-While steady Poisson arrivals provide a baseline for continuous operations, agent workloads frequently experience sudden synchronized surges—such as an automated continuous-integration suite launching parallel repair tasks. Notebook \ref{nbk-08-sizing-a-pre-warmed-microvm-pool} analyzes a deterministic burst to trace standby consumption, queue draining, and memory budgeting when arrival volume temporarily outstrips replenishment capacity.
+Finally, during a traffic burst of $N_{\text{burst}}$ concurrent requests, if the reserve is exhausted, the maximum wait time for the last admitted trajectory depends on the number of parallel restore workers $w$:
 
-```{python}
-#| label: calc-vol3-sandbox-pool-sizing
-#| echo: false
-# What: Drain a specified burst, then restore the clean reserve.
-# How: Fixed parallel restore rounds and a scoped resident-memory ledger.
-import math
-from mlsysim import *
+$$
+T_{\text{wait}} \le \lceil (N_{\text{burst}} - N_{\text{reserve}})/w \rceil \, T_{\text{init}}\n\$\$
 
-class SandboxPoolSizing:
-    # 1. LOAD — hypothetical policy and measured-quantity placeholders.
-    burst = 12
-    reserve = 4
-    restore_workers = 2
-    restore_time = Agents.Coding.SWE_Bench_Runner.sandbox_snapshot_restore_latency  # illustrative profile, at stated concurrency
-    shared_resident = 1 * GiB
-    active_private = 64 * MiB
-    standby_private = 8 * MiB
-    control_per_instance = 8 * MiB  # monitor, page tables, and control state
-    headroom = 256 * MiB  # designated allowance, not a safety guarantee
-
-    # 2. EXECUTE — no new arrivals, lease returns, or restore failures.
-    queued = burst - reserve
-    admission_rounds = math.ceil(queued / restore_workers)
-    last_admission = admission_rounds * restore_time
-    reserve_rounds = math.ceil(reserve / restore_workers)
-    reserve_ready = last_admission + reserve_rounds * restore_time
-    workers_doubled = 2 * restore_workers  # sensitivity: twice the restore concurrency
-    last_admission_doubled = math.ceil(queued / workers_doubled) * restore_time
-    instances = burst + reserve
-    active_total = burst * active_private
-    standby_total = reserve * standby_private
-    control_total = instances * control_per_instance
-    resident_budget = shared_resident + active_total + standby_total + control_total + headroom
-
-    # 3. GUARD — exact scenario checks, not a stochastic availability claim.
-    check(queued == 8 and admission_rounds == 4, "Reserve supplies initial admissions")
-    check(last_admission == 60 * ms, "Queued work precedes reserve rebuilding")
-    check(reserve_ready == 90 * ms, "Reserve replenishment takes two further rounds")
-    check(last_admission_doubled == 30 * ms, "Doubling workers halves the drain")
-    check(resident_budget == 2208 * MiB, "All stated residency terms are charged")
-
-    # 4. OUTPUT — every displayed quantity has a named formatted export.
-    burst_str = fmt_count(burst * count)
-    reserve_str = fmt_count(reserve * count)
-    workers_str = fmt_count(restore_workers * count)
-    restore_str = fmt_time(restore_time, unit="ms", precision=0)
-    queued_str = fmt_count(queued * count)
-    rounds_str = fmt_count(admission_rounds * count)
-    last_admission_str = fmt_time(last_admission, unit="ms", precision=0)
-    reserve_rounds_str = fmt_count(reserve_rounds * count)
-    reserve_ready_str = fmt_time(reserve_ready, unit="ms", precision=0)
-    workers_doubled_str = fmt_count(workers_doubled * count)
-    last_admission_doubled_str = fmt_time(last_admission_doubled, unit="ms", precision=0)
-    instances_str = fmt_count(instances * count)
-    shared_str = fmt_memory(shared_resident, unit=MB, precision=2)
-    active_private_str = fmt_memory(active_private, unit=MB, precision=2)
-    standby_private_str = fmt_memory(standby_private, unit=MB, precision=2)
-    control_each_str = fmt_memory(control_per_instance, unit=MB, precision=2)
-    headroom_str = fmt_memory(headroom, unit=MB, precision=2)
-    active_total_str = fmt_memory(active_total, unit=MB, precision=2)
-    standby_total_str = fmt_memory(standby_total, unit=MB, precision=2)
-    control_total_str = fmt_memory(control_total, unit=MB, precision=2)
-    resident_budget_str = fmt_memory(resident_budget, unit=MB, precision=2)
-```
-
-::: {#nbk-08-sizing-a-pre-warmed-microvm-pool .callout-notebook title="Consuming and replenishing a ready reserve"}
-
-**Problem**: How long does a specified burst wait for clean environments, and what resident-memory allowance supports the resulting active leases and rebuilt reserve?
-
-**Variables**: A hypothetical pool starts with `{python} SandboxPoolSizing.reserve_str` clean standby instances and no active leases. At the initial instant, `{python} SandboxPoolSizing.burst_str` tasks arrive together. The supervisor admits as many as standby permits, then prioritizes queued tasks over rebuilding the reserve. It can restore `{python} SandboxPoolSizing.workers_str` instances concurrently, each taking exactly `{python} SandboxPoolSizing.restore_str` to become ready under that concurrency. Assume sufficient execution slots for all tasks, no other arrivals, no lease returns during the calculation, and no restore failures. Handoff and dispatch time are negligible in this model; the restore interval includes the required readiness work.
-
-**Math**: Initial admission consumes the reserve, leaving `{python} SandboxPoolSizing.burst_str` − `{python} SandboxPoolSizing.reserve_str` = `{python} SandboxPoolSizing.queued_str` tasks waiting. The workers serve those tasks in `{python} SandboxPoolSizing.rounds_str` rounds of `{python} SandboxPoolSizing.restore_str`, so the last admission occurs at `{python} SandboxPoolSizing.last_admission_str`. Rebuilding the original reserve takes another `{python} SandboxPoolSizing.reserve_rounds_str` rounds. The pool has its full reserve again at `{python} SandboxPoolSizing.reserve_ready_str`, while all `{python} SandboxPoolSizing.burst_str` admitted leases remain active. Admitting the burst finishes allocating the environments, but the trajectories themselves continue executing.
-
-For an illustrative memory allowance at that final state, suppose immutable resident pages consume `{python} SandboxPoolSizing.shared_str` shared across the pool. Each active instance has `{python} SandboxPoolSizing.active_private_str` of additional private resident state, and each standby has `{python} SandboxPoolSizing.standby_private_str`. The resulting `{python} SandboxPoolSizing.instances_str` instances each require `{python} SandboxPoolSizing.control_each_str` for monitor, page-table, and control state. Reserve another `{python} SandboxPoolSizing.headroom_str` of headroom. The following ledger displays decimal MB rounded to two places; component sums and reservations use the unrounded byte quantities:
-
-`{python} SandboxPoolSizing.shared_str` shared + `{python} SandboxPoolSizing.active_total_str` active-private + `{python} SandboxPoolSizing.standby_total_str` standby-private + `{python} SandboxPoolSizing.control_total_str` control + `{python} SandboxPoolSizing.headroom_str` headroom $\approx$ `{python} SandboxPoolSizing.resident_budget_str`.
-
-The private-state terms include resident writable workspace pages, so the workspace is charged once. The total is a pool-residency allowance: host and broker services, storage caches, disk, and accelerator memory sit outside it, transient restore buffers must fit the stated headroom, and enforcement uses exact byte counts rather than the rounded display.
-
-**Systems insight**: The standby reserve governs instantaneous admission capacity, while restoration concurrency dictates queue drainage rate. The last admission waits $\lceil (N_{\text{burst}} - N_{\text{reserve}})/w \rceil \, T_{\text{init}}$ for a burst of $N_{\text{burst}}$ tasks, a reserve of $N_{\text{reserve}}$, and $w$ restore workers, so `{python} SandboxPoolSizing.workers_doubled_str` workers instead of `{python} SandboxPoolSizing.workers_str` cut the wait from `{python} SandboxPoolSizing.last_admission_str` to `{python} SandboxPoolSizing.last_admission_doubled_str`, provided restores do not slow under the added concurrency. Each added standby admits one more task immediately and costs `{python} SandboxPoolSizing.standby_private_str` of idle private memory. The trace is deterministic; a different arrival pattern needs its own calculation.
-
-:::
-
-An exhausted reserve must trigger explicit queueing, deferral, or rejection signals—it must never license the supervisor to lease an unreset or unverified sandbox to bypass admission bottlenecks. Admission control must also track physical resource headroom across active execution and background restoration. Instances awaiting teardown or memory scrubbing continue to occupy host memory and hypervisor tracking tables without providing usable standby capacity. Delays in resetting expired leases therefore represent hidden capacity drains that systems architects must measure alongside restore latency and trajectory duration.
-
-::: {#chk-08-pool-sizing .callout-checkpoint title="Sizing and reclaiming a pool"}
-
-The pool equations and the reset contract answer each of these.
-
-- [ ] **Active-lease estimate**: Arrivals double while trajectories become half as long. Estimate the change in mean active leases, and name which term of @eq-vol3-pool-memory moves.
-- [ ] **Reserve sensitivity**: A cold boot replaces snapshot restore and takes an order of magnitude longer. Estimate $\ArrivalRate T_{\text{init}}$ from the inputs of Notebook \ref{nbk-08-reserve-from-arrival-rate} and decide whether a reserve of one still meets the stockout target.
-- [ ] **Reset coverage**: A reclaimed instance passed a scan for leftover files, but a daemon from the previous lease still holds a socket. Which state domain of @tbl-vol3-reset-architectures failed, and may the instance return to standby?
-
-:::
-
-### Sandboxes as evaluation and rollout substrate {#sec-vol3-sandboxes-substrate}
-
-The same lifecycle architecture provides the foundation for systematic agent evaluation and large-scale training rollouts. Benchmarks that evaluate code-generation agents by executing a target repository's native test suite, such as SWE-bench [@jimenez2024swebench], depend directly on this substrate. A pinned baseline snapshot and a rigorous reset protocol eliminate cross-test contamination from prior agent attempts, while mounting test runners under read-only permissions prevents candidate patches from modifying the acceptance checks. Sandboxed tests retain access to private writable scratch storage and controlled logging channels. However, systems engineers must decouple execution guarantees from task semantics: the sandbox guarantees isolated, reproducible execution, but it cannot ensure that a test suite provides comprehensive code coverage or that external dependencies, non-deterministic timers, and floating-point variations will not alter benchmark outcomes.
-
-::: {.column-margin .margin-pointer}
-↪ Repeated runs, confidence intervals, and paired comparisons for agents evaluated on this substrate are developed in @sec-vol3-evaluation-rigor.
-:::
-
-Sandbox pooling delivers bounded, reproducible execution with task-local continuity under explicit provisioning policies. It provides a hardened security boundary and operational reset guarantees, separating the mechanics of sandboxed runtime isolation from the higher-level assessment of whether an agent's actions achieved their intended engineering goals.
+Together, these queueing dynamics demonstrate that sandbox provisioning is a continuous capacity-management problem, not just a one-time configuration. Balancing reserve sizes against arrival rates and lease durations ensures the system can absorb traffic bursts without compromising the strict reset contracts necessary for multi-tenant isolation.
 
 ## Fallacies and Pitfalls {#sec-vol3-sandboxes-fallacies}
 
@@ -1017,7 +896,7 @@ Architectural labels like "container" or "microVM" specify virtualization mechan
 ::: {.fallacy-pitfall}
 **Fallacy**: *The cost of strong isolation is its startup latency.*
 
-Snapshot restoration reduces guest startup overhead to milliseconds—down to `{python} SandboxPoolReserve.t_init_str` in our baseline configuration. However, boot latency is rarely the dominant infrastructure expense. The primary cost of sandboxing stems from cumulative memory residency across the lease horizon. At an arrival rate of `{python} SandboxPoolReserve.arrival_rate_str` trajectories per second and lease durations of `{python} SandboxPoolReserve.t_hold_str`, the pool sustains `{python} SandboxPoolReserve.n_active_str` concurrent leases. Even when leveraging copy-on-write page sharing across guests, the fleet holds roughly `{python} SandboxPoolReserve.m_pool_str` of resident host memory, compared to the `{python} SandboxPoolReserve.m_private_str` required by isolated private images (Notebook \ref{nbk-08-reserve-from-arrival-rate}). Sandbox provisioning must be budgeted by memory-seconds per trajectory—a quantity that scales directly with the lease hold time $\FallbackHold$—rather than evaluated solely by boot time.
+Removing snapshot restoration reduces guest startup overhead to milliseconds, leading many to assume latency is the primary barrier to isolation. However, boot latency is rarely the dominant infrastructure expense. As established in @@sec-vol3-sandboxes-pooling-queueing, the primary cost of sandboxing stems from cumulative memory residency across the lease horizon. Sizing calculations must measure initialization latency under the target concurrency of the anticipated burst rather than in quiescent conditions, as reserve sizing and memory consumption grow with trajectory duration and concurrent load.
 :::
 
 ::: {.fallacy-pitfall}
@@ -1035,7 +914,7 @@ Files represent only one of the four state domains cataloged in @tbl-vol3-reset-
 ::: {.fallacy-pitfall}
 **Pitfall**: *Sizing the standby reserve from a restore time measured on an idle host.*
 
-Determining standby pool capacity from initialization benchmarks gathered on an unloaded system severely underestimates provisioning requirements. Reserve sizing is governed by the traffic intensity parameter $\ArrivalRate T_{\text{init}}$, where queue-overflow probabilities follow a steep Poisson tail distribution. In our illustrative profile, a standby reserve of one instance satisfies a `{python} SandboxPoolReserve.target_miss_str` stockout objective only as long as snapshot restore completes in under `{python} SandboxPoolReserve.t_init_max_str`. If initialization degrades by a factor of `{python} SandboxPoolReserve.slow_factor_mult_str`—typical during an unoptimized cold boot—the required reserve jumps to `{python} SandboxPoolReserve.reserve_slow_str` instances. Under burst traffic, concurrent VM restoration, host cache contention, and lazy demand paging across copy-on-write regions degrade $T_{\text{init}}$ precisely when capacity is most critical. Sizing calculations must measure initialization latency under the target concurrency of the anticipated burst rather than in quiescent conditions (Notebook \ref{nbk-08-sizing-a-pre-warmed-microvm-pool}).
+Determining standby pool capacity from initialization benchmarks gathered on an unloaded system severely underestimates provisioning requirements. Reserve sizing is governed by the traffic intensity parameter $\ArrivalRate T_{\text{init}}$, where queue-overflow probabilities follow a steep Poisson tail distribution. In our illustrative profile, a standby reserve of one instance satisfies a `{python} SandboxPoolReserve.target_miss_str` stockout objective only as long as snapshot restore completes in under `{python} SandboxPoolReserve.t_init_max_str`. If initialization degrades by a factor of `{python} SandboxPoolReserve.slow_factor_mult_str`—typical during an unoptimized cold boot—the required reserve jumps to `{python} SandboxPoolReserve.reserve_slow_str` instances. Under burst traffic, concurrent VM restoration, host cache contention, and lazy demand paging across copy-on-write regions degrade $T_{\text{init}}$ precisely when capacity is most critical. Sizing calculations must measure initialization latency under the target concurrency of the anticipated burst rather than in quiescent conditions.
 :::
 ## Summary {#sec-vol3-sandboxes-summary}
 

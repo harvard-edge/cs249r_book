@@ -113,12 +113,8 @@ Every event envelope contains a trajectory identifier, a unique event identifier
 | `ContextBuilt`, `ModelReplied`                  | Model-call identity, immutable delivered-input manifest and bytes or available references, assembly and request configuration, reply status and payload, raw signals and available provider provenance | Recover what was supplied and observed without resampling the historical invocation                              |
 | `Authorized`, `BudgetReserved`, `BudgetSettled` | Decision and policy version, invocation or operation identity, reservation bound, actual usage evidence, remaining unresolved liability, protected finalization reserve                                | Rebuild admission and accounting, not merely a remaining-balance scalar                                          |
 | `ToolIntent`, `ToolResult`                      | Logical operation and transport attempt identities, represented operation and arguments, applicable revision and repeat contract, job handle when known, outcome evidence and observation completeness | Preserve possible dispatch and its evidence; a pending, partial, or timeout result does not establish settlement |
-| `ControlChanged`, `PlanChanged`                 | Control request and issuer, guarded state and grant changes, record and control versions, plan revision and dependencies, observation eligibility, resource and outstanding-obligation owners          | Restore the continuation separately from work that remains unresolved                                            |
-| `ApprovalRequested`, `ApprovalResolved`         | Exact held action and relevant versions, authorized reviewer and decision evidence, expiry, withdrawal or refusal status                                                                               | Restore the held decision without treating an old approval as current dispatch permission                        |
-| `Compacted`, `RuntimeInput`                     | Recorded summary and dependencies; clocks, identifiers, policy/configuration inputs, and event-order information captured at the declared replay boundary                                              | Preserve the actual inputs used by context assembly or supervisory decisions                                     |
-| `Checkpoint`                                    | Exact covered log boundary, compatible record and workspace manifests, required artifact references and integrity information                                                                          | Select an available base for reconstructing the record and workspace through a later suffix                      |
 
-: **Trajectory log schema**: Event families preserve the control and evidence contract across a crash. The log records observations and decisions, not automatic proof that an external effect settled or a task succeeded. {#tbl-vol3-durable-log-schema}
+: **Core Trajectory Log Schema**: Core event families preserve the control and evidence contract across a crash. The log records observations and decisions, not automatic proof that an external effect settled or a task succeeded. {#tbl-vol3-durable-log-schema}
 
 Our software repair worksheet illustrates how these identifiers link distributed lifecycle events. Alongside the workspace snapshot `ws_r18`, the identifier `operation_id=test_r18` designates the logical test suite invocation, while `attempt_id=attempt1` tracks the specific network transport attempt. If an asynchronous test executor returns an acknowledgment containing a cluster job identifier such as `job_tests_18`, that handle correlates future asynchronous callbacks with the original operation. However, a recovering worker can discover this link only if that acknowledgment was durably flushed to the log before the crash. A durable `ToolResult` may record an active execution state, a timeout, or a completed test report; the reducer interprets these payloads according to their authenticated provenance. If an asynchronous execution finishes after the supervisor has already timed out the enclosing step, the late-arriving `ToolResult` updates the historical operation ledger rather than corrupting an obsolete execution branch.
 
@@ -224,11 +220,9 @@ Database write-ahead logging forces a modification's log record to stable storag
 
 When surviving evidence proves insufficient to resolve an action, the ledger maintains ownership for reconciliation or explicit operator intervention across timeouts, pauses, and terminal execution paths. Independent branches of execution can proceed under their own guards while dependent operations await resolution. @Sec-vol3-sagas-architecture develops the compensating actions that remediate established effects.
 
-### Group commit {#sec-vol3-durable-execution-group-commit}
+::: {#psp-11-wal-group-commit .callout-perspective title="Performance optimization: Group commit"}
 
-An agent runtime managing dozens of concurrent trajectories incurs a separate durable storage barrier for every single dispatch. Under a replicated quorum contract, each barrier translates into a network round trip to remote storage nodes. **Group commit**\index{Group commit!definition}[^fn-group-commit-origin] mitigates this overhead by coalescing multiple ready log records into a single shared storage acknowledgment [@dewitt1984]. A batch coordinator aggregates pending intent records, issues one consolidated write to the replicated store, and unblocks individual dispatches only after receiving a successful quorum acknowledgment. Even within a batch, every individual trajectory strictly maintains write-ahead intent ordering before transmission.
-
-[^fn-group-commit-origin]: **Group Commit Origin**: DeWitt and colleagues introduced group commit for main-memory database systems, where memory transactions executed so quickly that the physical log write at each commit became the primary throughput bottleneck [@dewitt1984]. Agent dispatch enters the same regime whenever durable intent logging requires a network round trip to a storage quorum, allowing classical database batching techniques to apply directly to trajectory logging. \index{Group commit!main-memory databases}
+An agent runtime managing dozens of concurrent trajectories incurs a separate durable storage barrier for every single dispatch. Under a replicated quorum contract, each barrier translates into a network round trip to remote storage nodes. **Group commit**\index{Group commit!definition} mitigates this overhead by coalescing multiple ready log records into a single shared storage acknowledgment [@dewitt1984]. A batch coordinator aggregates pending intent records, issues one consolidated write to the replicated store, and unblocks individual dispatches only after receiving a successful quorum acknowledgment. Even within a batch, every individual trajectory strictly maintains write-ahead intent ordering before transmission.
 
 ::: {.column-margin}
 ![](images/svg/vol3_durable_margin_001.svg){width="100%" fig-alt="Timeline with five arrival dots at staggered times, each followed by a horizontal line ending at a dashed vertical line labeled ack. Below the lines, a gray box labeled gather is followed by a purple box labeled flush that ends at the ack line. Text below reads first waits gather plus flush and last still waits the flush."}
@@ -287,6 +281,8 @@ class GroupCommit:
 
 Increasing the batch size reduces storage overhead per record but increases the queueing delay experienced by early arrivals. Under light traffic, aggregation delay dominates, making a batch flush timer essential to bound tail latency. Under heavy load, throughput amortization keeps queue depths manageable, though very large payloads can eventually inflate the storage operation itself. With a `{python} GroupCommit.timer_str` ms timer and a `{python} GroupCommit.ack_str` ms quorum acknowledgment, a batch of `{python} GroupCommit.batch_str` intents incurs only `{python} GroupCommit.work_str` ms of amortized storage work per intent; yet the first arrival waits `{python} GroupCommit.first_str` ms, and even the final arrival still waits the full `{python} GroupCommit.ack_str` ms storage round trip. The systems design principle is clear: size the batch timer strictly within the allowable dispatch latency budget, instrument queueing delay separately from storage service time, and never compromise the declared durability domain simply to shave milliseconds off dispatch latency.
 
+:::
+
 ::: {#chk-11-wal-invariants .callout-checkpoint title="Intent, evidence, and the durability domain"}
 
 - [ ] **Failure domain**: The worker acknowledges an intent locally, dispatches the test, then permanently loses its disk before asynchronous replication. Does the remote replica's missing intent license a fresh dispatch, and which acknowledgment in @tbl-vol3-durable-ack-domains would have made that inference sound?
@@ -307,7 +303,14 @@ A **checkpoint**\index{Checkpoint!definition} binds a recoverable record snapsho
 
 ### Consistent recovery boundaries {#sec-vol3-durable-execution-recovery-boundaries}
 
-We define the checkpoint boundary $j_{\text{ckpt}}$ as an authoritative log position rather than a loose model turn, mirroring the fold boundary $j$. A checkpoint manifest serves as the formal contract for this boundary. It explicitly binds $j_{\text{ckpt}}$ to the record snapshot, the workspace snapshot, references to external artifacts, cryptographic hashes for integrity, and the reducer schema versions required to interpret them. The control record snapshot captures cumulative resource consumption, active budget reservations, approval states, and in-flight operations with their assigned worker leases. These obligations persist in the record even while a crashed agent awaits replacement.
+We define the checkpoint boundary $j_{\text{ckpt}}$ as an authoritative log position rather than a loose model turn, mirroring the fold boundary $j$. A checkpoint manifest serves as the formal contract for this boundary (see @tbl-vol3-durable-checkpoint-schema).
+
+| Event family | Required contents                                                                                                             | Reconstruction use                                                                          |
+|:-------------|:------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|
+| `Checkpoint` | Exact covered log boundary, compatible record and workspace manifests, required artifact references and integrity information | Select an available base for reconstructing the record and workspace through a later suffix |
+
+: **Checkpoint Schema**: The checkpoint event formalizes the recovery boundary in the log. {#tbl-vol3-durable-checkpoint-schema}
+ It explicitly binds $j_{\text{ckpt}}$ to the record snapshot, the workspace snapshot, references to external artifacts, cryptographic hashes for integrity, and the reducer schema versions required to interpret them. The control record snapshot captures cumulative resource consumption, active budget reservations, approval states, and in-flight operations with their assigned worker leases. These obligations persist in the record even while a crashed agent awaits replacement.
 
 The capture protocol must guarantee mutual consistency among these distributed components. One design pauses workspace mutations, drains in-flight disk writes, and synchronizes the record and filesystem at a quiescent boundary. An alternative design treats workspace states as content-addressed, immutable trees, mapping each versioned root directly to a log boundary. Reading the database record and the filesystem independently without synchronization does not qualify—it produces torn reads that corrupt recovery.[^fn-consistent-cut-checkpoint] External tasks may remain in flight during capture, provided the checkpoint explicitly records their unresolved status and idempotency tokens.
 
@@ -406,188 +409,7 @@ Periodic compaction can compress an extended delta chain back into a consolidate
 
 Selecting an optimal checkpoint cadence balances the runtime overhead of taking snapshots against the time required to reconstruct the suffix after a crash. When logged events and workspace deltas survive host failure, replaying that suffix incurs only the modest cost of reading, validating, folding, and applying recorded mutations—completely avoiding expensive foundation-model inferences. The agent resumes dispatching new model calls only after state reconstruction and guarded resume succeed.
 
-Classical checkpointing models address a fundamentally harsher failure regime: one where a crash obliterates all in-flight work, forcing the system to recompute from the last checkpoint.[^fn-young-restart-dumps] In agentic execution, this unrecoverable loss occurs when an external tool invocation fails mid-flight, an unlogged model call is interrupted, or local filesystem modifications bypass the write-ahead log. Under Poisson failure assumptions, each crash discards an average of half a checkpoint interval of execution. Balancing that expected loss against the pause overhead of writing snapshots determines the classical checkpoint interval.
-
-[^fn-young-restart-dumps]: **Checkpoint Interval Lineage**: Young posed the problem for long batch jobs that saved restart information periodically so that a random failure need not restart the job from the beginning [@young1974]. The derivation assumes that lost work must be computed again; a trajectory whose turns are logged violates that assumption, which is why the interval lengthens once the log absorbs the lost-work term. \index{Young's approximation!origin}
-
-```{python}
-#| label: calc-vol3-durable-young-interval
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ YOUNG'S CHECKPOINT INTERVAL AND THE FLAT OPTIMUM (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @eq-vol3-young-interval, @thrm-11-young-checkpoint-interval, and
-# │          the cadence notebook that follows it.
-# │
-# │ Goal: Price the interval for work that must be re-executed after a crash.
-# │ Show: T*_ckpt, overhead at T*_ckpt, and overhead when T*_ckpt is missed.
-# │ How:  w(T_ckpt) = T_save/T_ckpt + T_ckpt/(2 M); T*_ckpt = sqrt(2 T_save M);
-# │       w(x T*_ckpt) / w(T*_ckpt) = (x + 1/x) / 2.
-# │ Note: Scenario pause and failure rate, not measured values.
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim.fmt import fmt_int, fmt_percent, check
-
-class YoungInterval:
-    # ┌── 1. LOAD (scenario inputs, not measurements) ─────────────────────
-    t_save_s = 2.0  # pause per checkpoint, including durable publication
-    mtbf_min = 10  # mean time between work-losing failures, minutes
-    miss_small = 2  # interval off by this factor in either direction
-    miss_big = 10  # interval off by an order of magnitude
-
-    # ┌── 2. EXECUTE ──────────────────────────────────────────────────────
-    mtbf_s = mtbf_min * 60
-    tau_star_s = math.sqrt(2 * t_save_s * mtbf_s)
-
-    def overhead(tau, t_save=t_save_s, mtbf=mtbf_s):
-        return t_save / tau + tau / (2 * mtbf)
-
-    w_star = overhead(tau_star_s)
-    w_small = overhead(tau_star_s * miss_small)
-    w_big = overhead(tau_star_s / miss_big)
-    small_penalty = w_small / w_star - 1
-
-    # ┌── 3. GUARD (prose claims) ─────────────────────────────────────────
-    check(48 < tau_star_s < 50, "tau* is about 49 s")
-    check(abs(w_star - math.sqrt(2 * t_save_s / mtbf_s)) < 1e-12, "Overhead at optimum is sqrt(2 T/M)")
-    check(abs(overhead(tau_star_s / miss_small) - w_small) < 1e-12, "Missing by x or 1/x costs the same")
-    check(abs(small_penalty - 0.25) < 1e-9, "A factor-of-two miss costs 25 percent more")
-    check(abs(w_big / w_star - (miss_big + 1 / miss_big) / 2) < 1e-9, "Order-of-magnitude miss ratio")
-    check(0.40 < w_big < 0.42, "Tenfold miss gives about 41 percent overhead")
-
-    # ┌── 4. OUTPUT ───────────────────────────────────────────────────────
-    t_save_str = fmt_int(t_save_s)
-    mtbf_str = fmt_int(mtbf_min)
-    tau_star_str = fmt_int(tau_star_s)
-    w_star_str = fmt_percent(w_star, precision=1, style="prose")
-    miss_small_str = fmt_int(miss_small)
-    miss_big_str = fmt_int(miss_big)
-    small_penalty_str = fmt_percent(small_penalty, style="prose")
-    w_big_str = f"{fmt_int(w_big * 100)} percent"
-```
-
-::: {#thrm-11-young-checkpoint-interval .callout-theorem title="Optimal checkpoint interval (Young's approximation)"}
-
-*A checkpoint taken too often wastes pauses; one taken too rarely wastes re-execution after each failure.* When failures are rare, Poisson, and independent of progress, each failure loses on average half an interval of useful work, and the pause is small relative to the interval, **Young's approximation**\index{Young's approximation!checkpoint interval} [@young1974] gives the useful-work interval between checkpoints that minimizes expected overhead:
-
-$$\OptimalCheckpointIntervalCkpt \approx \sqrt{2\,\CheckpointWriteTime\,\MeanTimeBetweenFailures}$$ {#eq-vol3-young-interval}
-
-*   **Checkpoint write time** ($\CheckpointWriteTime$): Time execution stops to capture and durably publish one checkpoint.
-*   **Mean time between failures** ($\MeanTimeBetweenFailures$): Expected time between crashes that lose unrecorded work.
-*   **Overhead at the optimum**: The cadence-dependent overhead is $\sqrt{2\,\CheckpointWriteTime/\MeanTimeBetweenFailures}$ of useful time. @Sec-vol3-appendix-math-daly derives the interval, from which this overhead follows, and @daly2006 refines both for failures during saving and recovery.
-*   **Sensitivity**: For a `{python} YoungInterval.t_save_str` s pause and a mean time between failures of `{python} YoungInterval.mtbf_str` minutes, $\OptimalCheckpointIntervalCkpt \approx$ `{python} YoungInterval.tau_star_str` s and the overhead is `{python} YoungInterval.w_star_str`. The minimum is flat: an interval off by a factor of `{python} YoungInterval.miss_small_str` in either direction raises overhead by only `{python} YoungInterval.small_penalty_str`, while a factor-of-`{python} YoungInterval.miss_big_str` miss raises it to `{python} YoungInterval.w_big_str`.
-
-:::
-
-Appending events to a persistent trajectory log fundamentally alters this trade-off by reducing the lost-work penalty without changing the snapshot pause. In distributed systems literature, pairing periodic snapshots with an append-only log of nondeterministic inputs is termed log-based rollback recovery [@elnozahy2002survey].[^fn-determinant-model-reply] When an agent durably records model outputs and workspace diffs turn by turn, recovery costs only the time to replay and validate those entries rather than re-executing inference. Substituting this smaller replay cost into the optimization lengthens the ideal checkpoint interval by the square root of the cost ratio. Only unlogged, in-flight operations—such as an interrupted HTTP call to an LLM provider—still suffer full re-execution penalties governed strictly by @eq-vol3-young-interval.
-
-[^fn-determinant-model-reply]: **Determinants**: Log-based recovery protocols record each nondeterministic event as a determinant, the information needed to reproduce its outcome during recovery, and are classified by when determinants reach stable storage [@elnozahy2002survey]. In an agent trajectory the model reply is the dominant determinant: a sampled reply cannot be regenerated, so logging it is what lets the fold replace re-execution. \index{Rollback recovery!log-based}
-
-::: {.column-margin}
-![](images/svg/vol3_durable_margin_003.svg){width="100%" fig-alt="A U-shaped purple curve of overhead against checkpoint interval on a logarithmic axis, with a dot at its minimum labeled T star, a shaded band around the minimum labeled flat, and the axis ends labeled too often and too rarely."}
-
-*Overhead is flat near the optimum interval and steep far from it.*
-:::
-
-We can quantify the total overhead $T_{\text{overhead}}(k)$ across different checkpoint strides $k$ on an illustrative failure trace. Let $N_k$ denote the number of checkpoints taken at stride $k$, let $\CheckpointWriteTime$ represent the checkpoint write time as defined in @eq-vol3-young-interval, let $T_{\text{restore}}$ denote the baseline restore latency per crash, and let $T_{\text{recon}}$ represent the reconstruction cost per completed turn in the suffix. If crash $i$ leaves $H_{\text{suffix},i}(k)$ completed turns beyond the most recent checkpoint, the total time lost to snapshotting and recovery is:
-
-$$T_{\text{overhead}}(k) = N_k \CheckpointWriteTime + N_{\text{crash}} T_{\text{restore}} + T_{\text{recon}}\sum_i H_{\text{suffix},i}(k).$$
-
-All three terms are expressed in seconds. Aggregating reconstruction costs on a per-turn basis simplifies the model, though in production a single turn's suffix may encompass multiple fine-grained log records.
-
-```{python}
-#| label: calc-vol3-durable-checkpoint-cadence
-#| echo: false
-# CHECKPOINT AND RECORDED-SUFFIX COST (LEGO)
-# Goal: Compare three cadences on a fixed illustrative failure trace and check
-#       them against the logged square-root balance.
-# Scope: Serial capture pauses and reconstruction only; no resampled model calls.
-import math
-from mlsysim.fmt import fmt, fmt_int, fmt_multiple, check
-
-class CheckpointCadence:
-    # 1. LOAD: hypothetical inputs, not measured system performance.
-    turns = 100
-    crashes = (37, 83)  # after these completed turns; independent of cadence
-    strides = (10, 25, 50)
-    checkpoint_s = 0.5  # serial pause including durable publication
-    base_restore_s = 1.0  # per crash, fixed across these three policies
-    suffix_turn_s = 0.1  # read/validate/fold/apply per turn's recorded changes
-    reexec_turn_s = 20.0  # re-execute one turn's model call and tools if unlogged
-
-    # 2. EXECUTE: checkpoint at each multiple, including final handoff at 100.
-    rows = []
-    for stride in strides:
-        count = turns // stride
-        suffixes_list = []
-        for crash in crashes:
-            suffixes_list.append(crash % stride)
-        suffixes = tuple(suffixes_list)
-        suffix_turns = sum(suffixes)
-        capture_s = count * checkpoint_s
-        recovery_s = len(crashes) * base_restore_s + suffix_turns * suffix_turn_s
-        total_s = capture_s + recovery_s
-        rows.append((stride, count, suffixes, capture_s, recovery_s, total_s))
-    best = min(rows, key=lambda row: row[5])
-
-    # Logged square-root balance: per-turn cost c/k + lam * r * k / 2.
-    crash_rate = len(crashes) / turns  # crashes per completed turn
-    k_star_logged = math.sqrt(2 * checkpoint_s / (crash_rate * suffix_turn_s))
-    k_star_reexec = math.sqrt(2 * checkpoint_s / (crash_rate * reexec_turn_s))
-    stride_gain = math.sqrt(reexec_turn_s / suffix_turn_s)
-
-    # Checkpoint after every turn (used by the fallacies section).
-    every_turn_total_s = turns * checkpoint_s + len(crashes) * base_restore_s
-
-    # 3. GUARD: independent arithmetic checks for this finite worksheet.
-    for stride in strides:
-        check(turns % stride == 0, "Final handoff checkpoint included")
-    check([row[2] for row in rows] == [(7, 3), (12, 8), (37, 33)], "Correct checkpoint ages")
-    check([row[1] for row in rows] == [10, 4, 2], "Capture counts")
-    check(all(abs(row[5] - expected) < 1e-9 for row, expected in zip(rows, (8.0, 6.0, 10.0))), "Included seconds")
-    check(best[0] == 25, "Best of three on this trace, not a universal optimum")
-    check(20 < k_star_logged < 25, "Logged balance lands near the winning stride")
-    check(abs(k_star_logged / k_star_reexec - stride_gain) < 1e-9, "Stride gain is sqrt of cost ratio")
-    check(abs(every_turn_total_s - 52.0) < 1e-9, "Every-turn policy costs 52 s")
-    check(every_turn_total_s > 8 * best[5], "Every-turn policy is far worse than the best stride")
-
-    # 4. OUTPUT: all exported strings have inline consumers.
-    turns_str = fmt_int(turns)
-    crashes_str = " and ".join(fmt_int(value) for value in crashes)
-    capture_str = fmt(checkpoint_s, precision=1)
-    base_str = fmt_int(base_restore_s)
-    suffix_str = fmt(suffix_turn_s, precision=1)
-    reexec_str = fmt_int(reexec_turn_s)
-    stride10_str, stride25_str, stride50_str = (fmt_int(s) for s in strides)
-    best_str = fmt_int(best[0])
-    best_total_str = fmt_int(best[5])
-    total10_str, total25_str, total50_str = (fmt_int(row[5]) for row in rows)
-    recovery10_str, recovery25_str, recovery50_str = (fmt_int(row[4]) for row in rows)
-    _trace_strings = []
-    for row in rows:
-        ages = " and ".join(fmt_int(age) for age in row[2])
-        _trace_strings.append(f"{fmt_int(row[1])} checkpoints and reconstructs suffixes of {ages} turns")
-    trace10_str, trace25_str, trace50_str = _trace_strings
-    crash_rate_str = fmt(crash_rate, precision=2)
-    k_logged_str = fmt_int(k_star_logged)
-    k_reexec_str = fmt(k_star_reexec, precision=1)
-    stride_gain_mult_str = fmt_multiple(stride_gain, precision=1)
-    every_turn_str = fmt_int(every_turn_total_s)
-
-CheckpointCadence.trace_strings = CheckpointCadence._trace_strings
-```
-
-::: {#nbk-11-checkpoint-cadence .callout-notebook title="Checkpoint cadence on a fixed crash trace"}
-
-**Problem**: A hypothetical trajectory completes `{python} CheckpointCadence.turns_str` turns, with crashes after turns `{python} CheckpointCadence.crashes_str`. Each published checkpoint pauses execution for `{python} CheckpointCadence.capture_str` s. Each crash costs `{python} CheckpointCadence.base_str` s to restore the checkpoint plus `{python} CheckpointCadence.suffix_str` s per turn of recorded events and workspace changes since it. An initial checkpoint exists, every required suffix survives, and each policy also checkpoints at the final turn; only capture and reconstruction time count. Which stride, `{python} CheckpointCadence.stride10_str`, `{python} CheckpointCadence.stride25_str`, or `{python} CheckpointCadence.stride50_str` turns, spends the least time on this trace?
-
-**Math**: The `{python} CheckpointCadence.stride10_str`-turn policy publishes `{python} CheckpointCadence.trace10_str`. The `{python} CheckpointCadence.stride25_str`-turn policy publishes `{python} CheckpointCadence.trace25_str`. The `{python} CheckpointCadence.stride50_str`-turn policy publishes `{python} CheckpointCadence.trace50_str`. Reconstruction totals are `{python} CheckpointCadence.recovery10_str` s, `{python} CheckpointCadence.recovery25_str` s, and `{python} CheckpointCadence.recovery50_str` s; adding capture pauses gives $T_{\text{overhead}}(k)$ of `{python} CheckpointCadence.total10_str` s, `{python} CheckpointCadence.total25_str` s, and `{python} CheckpointCadence.total50_str` s. The logged form of the balance replaces re-executed work with reconstruction at $T_{\text{recon}}$ per turn. With failure rate $\MeanTimeBetweenFailuresThree =$ `{python} CheckpointCadence.crash_rate_str` crashes per turn, $k^\ast = \sqrt{2\CheckpointWriteTime/(\MeanTimeBetweenFailuresThree T_{\text{recon}})} \approx$ `{python} CheckpointCadence.k_logged_str` turns. If each lost turn instead had to be re-executed at $T_{\text{exec}}$ = `{python} CheckpointCadence.reexec_str` s, the same balance gives $k^\ast \approx$ `{python} CheckpointCadence.k_reexec_str` turns.
-
-**Result**: The `{python} CheckpointCadence.best_str`-turn stride wins on this trace, at `{python} CheckpointCadence.best_total_str` s, next to the balance point of about `{python} CheckpointCadence.k_logged_str` turns.
-
-**Systems insight**: Logging each turn's events and workspace changes lengthens the best stride by $\sqrt{r_{\text{exec}}/\BarrierRelativeDegree}$, about `{python} CheckpointCadence.stride_gain_mult_str` here, because a crash then costs reconstruction instead of repeated model calls. The stride moves with the square root of each knob: quadrupling the capture pause doubles it, and so does quartering the crash rate. Because the optimum is flat (theorem \ref{thrm-11-young-checkpoint-interval}), a stride within a factor of `{python} YoungInterval.miss_small_str` of the balance point costs at most `{python} YoungInterval.small_penalty_str` extra overhead; measure $\CheckpointWriteTime$, $\BarrierRelativeDegree$, and the crash rate from fault-injection traces before tuning more finely.
-
-:::
+Classical checkpointing models balance the overhead of writing frequent snapshots against the time lost recomputing from scratch after a crash. However, appending events to a persistent trajectory log fundamentally alters this trade-off. When an agent durably records model outputs and workspace diffs turn by turn, recovery only costs the time to replay and validate those entries rather than re-executing inference. Because replaying a deterministic event log is orders of magnitude cheaper than invoking new model calls, logging each turn drastically lengthens the optimal checkpoint stride. Systems designers should measure snapshot overhead and log replay times under realistic fault injection, then select a checkpoint cadence that minimizes total elapsed recovery time rather than optimizing for hypothetical inference losses.
 
 Operational transitions—such as waiting for human approval, compacting execution context, or performing a zero-downtime worker handoff—justify taking an opportunistic, out-of-cadence checkpoint if doing so truncates pending recovery chains or enables log pruning. If the record and workspace artifacts are already durable and recoverable, these boundary events require no extra snapshot. Checkpoint cadence remains an efficiency trade-off, whereas intent ordering is an absolute correctness invariant that no cadence optimization can relax.
 
@@ -643,7 +465,15 @@ For `test_r18`, the worker queries the tool endpoint to recover the job and its 
 
 The same rigorous accounting applies to financial and computational budgets. The worker reconstructs `actual_consumption`, `outstanding_reservations`, and the protected `finalization_reserve` by replaying all recorded `BudgetReserved` and `BudgetSettled` transitions. External model providers and compute clusters do not refund resources because an orchestrator crashed mid-flight. A partial usage report settles only the verified fraction of a call, while the unverified remainder stays locked in outstanding reservations. The replacement worker explicitly inherits the duty to retrieve final usage evidence or formally forfeit the reserved allocation.
 
-Control transitions and human approvals remain authoritative across failures. A trajectory recovered in the `PAUSED` state remains suspended, and a trajectory that reached a terminal continuation remains terminal. An approval recorded prior to the crash can continue waiting for dispatch capacity in `AWAITING_APPROVAL`, while an approval that has expired, become stale, or been explicitly revoked remains void across all workers. When authenticated results arrive late—after an operation has timed out or the trajectory has paused—they update the `operation_ledger` to maintain an accurate audit log, rather than retroactively mutating an obsolete conversation turn. The current owner must validate those newly settled facts before admitting them into subsequent model contexts.
+Control transitions and human approvals remain authoritative across failures (see @tbl-vol3-durable-approval-schema).
+
+| Event family                            | Required contents                                                                                                                                                                             | Reconstruction use                                                                        |
+|:----------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------|
+| `ControlChanged`, `PlanChanged`         | Control request and issuer, guarded state and grant changes, record and control versions, plan revision and dependencies, observation eligibility, resource and outstanding-obligation owners | Restore the continuation separately from work that remains unresolved                     |
+| `ApprovalRequested`, `ApprovalResolved` | Exact held action and relevant versions, authorized reviewer and decision evidence, expiry, withdrawal or refusal status                                                                      | Restore the held decision without treating an old approval as current dispatch permission |
+
+: **Approval and Control Schema**: These events ensure that human approvals and control transitions remain authoritative across failures. {#tbl-vol3-durable-approval-schema}
+ A trajectory recovered in the `PAUSED` state remains suspended, and a trajectory that reached a terminal continuation remains terminal. An approval recorded prior to the crash can continue waiting for dispatch capacity in `AWAITING_APPROVAL`, while an approval that has expired, become stale, or been explicitly revoked remains void across all workers. When authenticated results arrive late—after an operation has timed out or the trajectory has paused—they update the `operation_ledger` to maintain an accurate audit log, rather than retroactively mutating an obsolete conversation turn. The current owner must validate those newly settled facts before admitting them into subsequent model contexts.
 
 ### Continuation admission {#sec-vol3-durable-execution-continuation-admission}
 
@@ -779,13 +609,13 @@ A **counterfactual branch**\index{Counterfactual branch!definition} is thus a di
 ↪ The statistical methods that turn repeated runs over a task distribution into reliability claims are developed in @sec-vol3-evaluation-rigor.
 :::
 
-## Locating a Divergence {#sec-vol3-persistence-non-determinism}
+### Locating a divergence {#sec-vol3-persistence-non-determinism}
 
 When an automated software-repair workflow undergoes regression replay, execution proceeds uneventfully until reaching the recorded targeted-test result for candidate patch `r18`. The stored test result itself remains identical, but a revised harness assembles a subtly different observation context for the subsequent model call. Waiting until the final repair verdict to compare the runs obscures this earlier discrepancy under layers of compounding tool calls and token generations. Effective debugging requires pinpointing the exact architectural boundary where two executions first cease to agree within the recorded evidence.
 
 A **divergence point**\index{Divergence point!definition} is the first observable mismatch under a declared equivalence relation: between recorded and reconstructed state, between historical and revised harness logic on captured inputs, or between a golden trace and a live execution. Every comparison must explicitly define both its boundary and its equivalence criteria. In practice, two serialized JSON payloads might differ in a harmless trace identifier while representing the same permitted operation. Conversely, two tool invocations cannot be treated as equivalent simply because their shell commands match if they execute against different repository commits or working trees. A coarse turn counter obscures these distinctions when context assembly, model inference, authorization policy checks, and tool dispatch all unfold within a single turn.
 
-### Boundary-by-boundary comparison {#sec-vol3-durable-execution-boundary-comparison}
+#### Boundary-by-boundary comparison {#sec-vol3-durable-execution-boundary-comparison}
 
 A disciplined boundary comparison starts at a verified checkpoint or initial state and steps forward through corresponding events in their recorded sequence. Stable invocation and operation identifiers align the traces across runs, preserving any concurrency ordering or partial-order dependencies required by the replay contract. At each boundary, the diagnostic runtime evaluates three elements: the inputs delivered to that stage, the transformation configured for it (such as a prompt template, parser, or security filter), and the resulting output. @Tbl-vol3-nondeterminism-mitigation organizes this diagnostic evidence by the earliest architectural boundary where a mismatch surfaces, preventing engineers from confusing downstream symptoms with root causes.
 
@@ -802,7 +632,7 @@ Consider again the candidate patch `r18`. Suppose the original trace recorded th
 
 Localization granularity depends entirely on what artifacts survive in the persistent store. A surviving cryptographic digest confirms that bytes changed but hides the omitted text, while recording only the agent's final answer conceals every intermediate boundary. An informative diagnostic report identifies both the last boundary that verified successfully and the specific missing record that halted further automated comparison, rather than attributing the failure to whichever component appears last in the execution trace.
 
-### Localization and explanation {#sec-vol3-durable-execution-localization-explanation}
+#### Localization and explanation {#sec-vol3-durable-execution-localization-explanation}
 
 A cryptographic context digest verifies the byte-level integrity of the payload it covers, but it proves nothing about execution state outside that hash. Matching digests guarantee identical prompt text, yet sampling temperatures, decoding penalties, external tool schemas excluded from the hashed payload, model snapshot revisions, and provider configurations may still differ. Even when a visible request matches across every byte and parameter, hosted inference endpoints can exhibit server-side variations. Conversely, unequal digests prove that the input representation changed, but explaining *why* requires inspecting the payload diff alongside its provenance metadata. Engineers must examine both the retained content and its lineage before drawing conclusions from hash comparisons.
 
@@ -812,7 +642,7 @@ Live model invocations can diverge even on identical prompts due to hardware and
 ↩ Floating-point reduction order and other sources of serving-path non-determinism are established in @sec-vol3-foundation-model-repetition-replay.
 :::
 
-Regression replay controls this cascading variance by supplying captured outputs at a declared boundary, following the principles developed in @sec-vol3-persistence-replay. However, this isolation holds only if the harness captures every external dependency. If an authorization decision or scheduling check consults an unrecorded host clock, an unversioned environment variable, or a dynamic feature flag, determinism across that boundary collapses. When such leaks occur, developers must either capture the missing environmental inputs into the event log or narrow the replay scope to subcomponents with fully hermetic boundaries. Targeted interface interception in the harness achieves this control without requiring heavy, whole-machine snapshot infrastructure.
+Regression replay controls this cascading variance by supplying captured outputs at a declared boundary, following the principles developed in this section. However, this isolation holds only if the harness captures every external dependency. If an authorization decision or scheduling check consults an unrecorded host clock, an unversioned environment variable, or a dynamic feature flag, determinism across that boundary collapses. When such leaks occur, developers must either capture the missing environmental inputs into the event log or narrow the replay scope to subcomponents with fully hermetic boundaries. Targeted interface interception in the harness achieves this control without requiring heavy, whole-machine snapshot infrastructure.
 
 Sound diagnostic localization therefore yields a bounded engineering claim rather than an unverified causal leap. It specifies the earliest observed mismatch, catalogs the configurations and input artifacts confirmed to be identical, highlights the explicit differences found, and flags any missing evidence. While counterfactual replays can test whether a specific change explains the failure, observing an altered outcome in one trace does not prove that a fix behaves reliably across diverse workloads. Distribution-scale evaluation establishes the causal and statistical methodology needed to evaluate those system-wide claims; durable execution supplies the auditable evidence required to begin that inquiry.
 
@@ -945,32 +775,76 @@ Once a checkpoint at sequence $j_{\text{ckpt}}$ is durably published, online rec
 
 Compaction preserves current recovery while deliberately shortening the historical replay horizon. Downstream systems cannot substitute a later agent context for an earlier one once the original inputs have expired. Similarly, squashing incremental workspace deltas into a single snapshot preserves the latest workspace tree while shedding intermediate revisions. A compaction policy must therefore explicitly define the surviving replay interval. An uncompacted event history grows monotonically with every turn, regardless of how tightly the agent manages its prompt token budget.
 
-Systems engineers must not confuse log compaction with context compaction. Context compaction operates on prompt token budgets: when conversational history approaches model context limits, the runtime condenses prior turns and commits a `Compacted` event to the log. This event records the exact summary text delivered to subsequent model calls, preserving deterministic replay for future turns. The underlying historical events and payloads that generated the summary remain governed by their own retention policies rather than vanishing when the context window shrinks. Diagnostic telemetry can follow aggressive downsampling or retention rules; in contrast, recovery-critical events and payloads must remain bit-for-bit complete throughout their promised operational lifetime.
+Systems engineers must not confuse log compaction with context compaction. Context compaction operates on prompt token budgets: when conversational history approaches model context limits, the runtime condenses prior turns and commits a `Compacted` event to the log. This event records the exact summary text delivered to subsequent model calls, preserving deterministic replay for future turns (see @tbl-vol3-durable-compaction-schema).
+
+| Event family                | Required contents                                                                                                                                         | Reconstruction use                                                           |
+|:----------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
+| `Compacted`, `RuntimeInput` | Recorded summary and dependencies; clocks, identifiers, policy/configuration inputs, and event-order information captured at the declared replay boundary | Preserve the actual inputs used by context assembly or supervisory decisions |
+
+: **Compaction Schema**: These events preserve the exact summary text delivered to subsequent model calls after context limits are reached. {#tbl-vol3-durable-compaction-schema}
+ The underlying historical events and payloads that generated the summary remain governed by their own retention policies rather than vanishing when the context window shrinks. Diagnostic telemetry can follow aggressive downsampling or retention rules; in contrast, recovery-critical events and payloads must remain bit-for-bit complete throughout their promised operational lifetime.
+
+```{python}
+#| label: calc-vol3-durable-young-interval
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ YOUNG INTERVAL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The theorem box for Young's approximation.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent
+
+class YoungInterval:
+    # 1. LOAD
+    t_save_s = 2.0
+    mtbf_min = 10
+    miss_small = 2
+    miss_big = 10
+
+    # 2. EXECUTE
+    mtbf_s = mtbf_min * 60
+    tau_star_s = math.sqrt(2 * t_save_s * mtbf_s)
+
+    def overhead(tau, t_save=t_save_s, mtbf=mtbf_s):
+        return t_save / tau + tau / (2 * mtbf)
+
+    w_star = overhead(tau_star_s)
+    w_small = overhead(tau_star_s * miss_small)
+    w_big = overhead(tau_star_s / miss_big)
+    small_penalty = w_small / w_star - 1
+
+    # 3. GUARD
+    check(48 < tau_star_s < 50, "tau* is about 49 s")
+
+    # 4. OUTPUT
+    miss_small_str = fmt_int(miss_small)
+    mtbf_str = fmt_int(mtbf_min)
+    tau_star_str = fmt_int(tau_star_s)
+    w_star_str = fmt_percent(w_star, precision=1, style="prose")
+    small_penalty_str = fmt_percent(small_penalty, precision=0, style="prose")
+    t_save_str = fmt(t_save_s, precision=0)
+    miss_big_str = fmt_int(miss_big)
+    w_big_str = fmt_percent(w_big, precision=1, style="prose")
+```
+
+::: {#thrm-11-young-checkpoint-interval .callout-theorem title="Optimal checkpoint interval (Young's approximation)"}
+
+*A checkpoint taken too often wastes pauses; one taken too rarely wastes re-execution after each failure.* When failures are rare, Poisson, and independent of progress, each failure loses on average half an interval of useful work, and the pause is small relative to the interval, **Young's approximation**\index{Young's approximation!checkpoint interval} [@young1974] gives the useful-work interval between checkpoints that minimizes expected overhead:
+
+$$\OptimalCheckpointIntervalCkpt \approx \sqrt{2\,\CheckpointWriteTime\,\MeanTimeBetweenFailures}$$ {#eq-vol3-young-interval}
+
+*   **Checkpoint pause** ($\CheckpointWriteTime$): Time execution stops to capture and durably publish one checkpoint.
+*   **Mean time between failures** ($\MeanTimeBetweenFailures$): Expected time between crashes that lose unrecorded work.
+*   **Overhead at the optimum**: The cadence-dependent overhead is $\sqrt{2\,\CheckpointWriteTime/\MeanTimeBetweenFailures}$ of useful time. @Sec-vol3-appendix-math-daly derives both results, and @daly2006 refines them for failures during saving and recovery.
+
+**Pitfall**: *Missing the interval by an order of magnitude.* For a `{python} YoungInterval.t_save_str` s pause and a mean time between failures of `{python} YoungInterval.mtbf_str` minutes, $\OptimalCheckpointIntervalCkpt \approx$ `{python} YoungInterval.tau_star_str` s and the overhead is `{python} YoungInterval.w_star_str`. The minimum is flat: an interval off by a factor of `{python} YoungInterval.miss_small_str` in either direction raises overhead by only `{python} YoungInterval.small_penalty_str`, while a factor-of-`{python} YoungInterval.miss_big_str` miss raises it to `{python} YoungInterval.w_big_str`.
+
+:::
 
 ::: {.column-margin .margin-pointer}
 ↪ Sampling and retention policies for diagnostic traces are developed in @sec-vol3-evaluation-budgets.
 :::
-
-### The storage engine contract {#sec-vol3-persistence-engine-design}
-
-A storage layer can quietly undermine durable execution guarantees if its ingestion mechanics ignore distributed failure modes. Consider an ingestion retry following a lost network acknowledgment: suppose the retried batch carries a timeout `ToolResult` for `test_r18` under an event identity that the storage engine already populated with later success evidence. A naive database uniqueness constraint (such as an `ON CONFLICT DO NOTHING` clause) would accept the first write and silently drop the retried timeout. Ingestion pipelines must instead perform semantic deduplication by comparing the immutable envelope and payload against the stored record under a declared canonical encoding. An identical retry safely returns an acknowledgment for the existing record. In contrast, an incoming payload with conflicting data signals an integrity violation or a split-brain coordination failure, not an idempotent duplicate. Conflicting evidence must trigger an immediate error or be recorded as a distinct event evaluated by the operation ledger. Most critically, deduplicating an event insertion in a database does not deduplicate an external side effect that has already occurred in the outside world.
-
-The same discipline applies across every primitive operation in the storage engine: append, retry, migration, and eviction. Circular buffers may overwrite entries only after confirming that no active recovery or replay contract still depends on them. If the storage engine cannot safely commit incoming records due to transient faults or disk saturation, the runtime must exert backpressure, stalling task execution rather than proceeding speculatively. Secondary analytical replicas may lag behind primary write logs only if a durable, synchronized copy already satisfies the recovery service-level agreement within the declared failure domain. During tier migration, an engine can retire a local source copy only after every referenced payload body—not merely its index entry—has arrived and verified at the cold storage destination. Similarly, out-of-order replication streams can stage future records, but they must advertise a recoverable prefix strictly up to the first missing sequence gap. Finally, while fresh appends must validate active worker leases and fencing tokens to prevent zombie writes, replicated historical events must preserve their original worker provenance and timestamps rather than being rewritten with the credentials of the replicating node.
-
-At the physical layer, an append-only event model can be implemented over any storage engine that guarantees deterministic ordering. Key-value stores based on log-structured merge trees (LSM trees) [@oneil1996log], for example, index immutable events under composite trajectory and sequence keys. In an LSM tree, storage-level compaction periodically merges sorted string tables on disk to reclaim space from tombstones and optimize read paths, reorganizing physical bytes without altering the logical sequence of events. In contrast, overwriting an existing event with a newer state representation is a destructive application-level mutation. Such overwrites are permissible only when an explicit retention contract authorizes the older evidence to be discarded, because the chronological order of observations and decisions constitutes the agent's causal chain.
-
-Engineers should evaluate storage engines against five core systems criteria: the durable-acknowledgment boundary (local disk, quorum fsync, or multi-region replication), sequential read throughput during reconstruction, atomic fencing support, payload artifact integration, and write amplification costs. A single relational or key-value store suffices for modest deployments. As throughput scales, architectures often bifurcate into an online recovery store optimized for low-latency point lookups by trajectory ID and an offline analytical store optimized for columnar scans over historical replays. However, introducing secondary storage copies compounds operational complexity: every additional replica demands its own prefix synchronization, completeness verification, and retention policy.
-
-::: {#chk-11-storage-retention .callout-checkpoint title="Retention is a recovery promise"}
-
-- [ ] **Missing dependency**: The checkpoint manifest and suffix survive, but `ws_r18` is gone. Which reconstruction claim is no longer supported, and why does its digest not repair the loss?
-- [ ] **Replication window**: A local intent is acknowledged and its tool request dispatched before the remote copy arrives. Which declared failure domain would make that ordering insufficient?
-- [ ] **Replication window**: A local intent is acknowledged and its tool request dispatched before the remote copy arrives. Which declared failure domain would make that ordering insufficient?
-- [ ] **Conflicting retry**: An incoming event has an existing sequence number but different result content. Why must ingestion reject the conflict rather than silently accept the duplicate key?
-
-:::
-
-Retention completes the reconstruction contract by guaranteeing that committed evidence and required artifacts remain accessible when disaster strikes. A storage engine faithfully preserves recorded uncertainties, but determining whether an external operation actually succeeded or produced correct side effects requires active reconciliation. Resolving in-flight ambiguities and reconciling orphan operations belong to effect-recovery policy, not to the storage engine.
 
 ## Fallacies and Pitfalls {#sec-vol3-durable-execution-fallacies}
 
@@ -1011,6 +885,75 @@ class RerunReproduction:
     q_str = fmt_percent(q, style="prose")
     horizon_str = fmt_int(horizon)
     p_all_str = fmt_percent(p_all, style="prose")
+
+class CheckpointCadence:
+    # 1. LOAD: hypothetical inputs, not measured system performance.
+    turns = 100
+    crashes = (37, 83)  # after these completed turns; independent of cadence
+    strides = (10, 25, 50)
+    checkpoint_s = 0.5  # serial pause including durable publication
+    base_restore_s = 1.0  # per crash, fixed across these three policies
+    suffix_turn_s = 0.1  # read/validate/fold/apply per turn's recorded changes
+    reexec_turn_s = 20.0  # re-execute one turn's model call and tools if unlogged
+
+    # 2. EXECUTE: checkpoint at each multiple, including final handoff at 100.
+    rows = []
+    for stride in strides:
+        count = turns // stride
+        suffixes_list = []
+        for crash in crashes:
+            suffixes_list.append(crash % stride)
+        suffixes = tuple(suffixes_list)
+        suffix_turns = sum(suffixes)
+        capture_s = count * checkpoint_s
+        recovery_s = len(crashes) * base_restore_s + suffix_turns * suffix_turn_s
+        total_s = capture_s + recovery_s
+        rows.append((stride, count, suffixes, capture_s, recovery_s, total_s))
+    best = min(rows, key=lambda row: row[5])
+
+    # Logged square-root balance: per-turn cost c/k + lam * r * k / 2.
+    crash_rate = len(crashes) / turns  # crashes per completed turn
+    k_star_logged = math.sqrt(2 * checkpoint_s / (crash_rate * suffix_turn_s))
+    k_star_reexec = math.sqrt(2 * checkpoint_s / (crash_rate * reexec_turn_s))
+    stride_gain = math.sqrt(reexec_turn_s / suffix_turn_s)
+
+    # Checkpoint after every turn (used by the fallacies section).
+    every_turn_total_s = turns * checkpoint_s + len(crashes) * base_restore_s
+
+    # 3. GUARD: independent arithmetic checks for this finite worksheet.
+    for stride in strides:
+        check(turns % stride == 0, "Final handoff checkpoint included")
+    check([row[2] for row in rows] == [(7, 3), (12, 8), (37, 33)], "Correct checkpoint ages")
+    check([row[1] for row in rows] == [10, 4, 2], "Capture counts")
+    check(all(abs(row[5] - expected) < 1e-9 for row, expected in zip(rows, (8.0, 6.0, 10.0))), "Included seconds")
+    check(best[0] == 25, "Best of three on this trace, not a universal optimum")
+    check(20 < k_star_logged < 25, "Logged balance lands near the winning stride")
+    check(abs(k_star_logged / k_star_reexec - stride_gain) < 1e-9, "Stride gain is sqrt of cost ratio")
+    check(abs(every_turn_total_s - 52.0) < 1e-9, "Every-turn policy costs 52 s")
+    check(every_turn_total_s > 8 * best[5], "Every-turn policy is far worse than the best stride")
+
+    # 4. OUTPUT: all exported strings have inline consumers.
+    turns_str = fmt_int(turns)
+    crashes_str = " and ".join(fmt_int(value) for value in crashes)
+    capture_str = fmt(checkpoint_s, precision=1)
+    base_str = fmt_int(base_restore_s)
+    suffix_str = fmt(suffix_turn_s, precision=1)
+    reexec_str = fmt_int(reexec_turn_s)
+    stride10_str, stride25_str, stride50_str = (fmt_int(s) for s in strides)
+    best_str = fmt_int(best[0])
+    best_total_str = fmt_int(best[5])
+    total10_str, total25_str, total50_str = (fmt_int(row[5]) for row in rows)
+    recovery10_str, recovery25_str, recovery50_str = (fmt_int(row[4]) for row in rows)
+    trace_strings = []
+    for row in rows:
+        ages = " and ".join(fmt_int(age) for age in row[2])
+        trace_strings.append(f"{fmt_int(row[1])} checkpoints and reconstructs suffixes of {ages} turns")
+    trace10_str, trace25_str, trace50_str = trace_strings
+    crash_rate_str = fmt(crash_rate, precision=2)
+    k_logged_str = fmt_int(k_star_logged)
+    k_reexec_str = fmt(k_star_reexec, precision=1)
+    stride_gain_mult_str = fmt_multiple(stride_gain, precision=1)
+    every_turn_str = fmt_int(every_turn_total_s)
 ```
 
 ::: {.fallacy-pitfall}

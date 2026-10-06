@@ -408,11 +408,13 @@ class ResearchReport:
 
 :::
 
-Uncontrolled fan-out illustrates the necessity of formal admission control in multi-agent architectures. Relying solely on prompt instructions to curb subtask generation is insufficient: an unconstrained model can still hallucinate redundant branches or trigger cascading worker requests. Crucially, simply allocating each child a budget fraction smaller than the parent's remaining funds fails to protect the system, as a burst of concurrent siblings can issue overlapping claims that collectively exceed available capacity. The runtime admission controller must atomically reserve each child's maximum potential liability against the shared task budget before dispatching execution, an invariant that @sec-vol3-multiagent-authority formalizes across hierarchical delegation trees. Production runtimes must independently enforce four distinct bounds: fan-out breadth (maximum children per parent), concurrent active slots (maximum parallel executions), recursion depth (maximum delegation layers), and absolute deadlines. A shallow tree can still exhaust resources through excessive breadth, while a strict concurrency cap can still permit an unbounded sequence of sequential worker allocations.
+Uncontrolled fan-out illustrates the necessity of formal admission control in multi-agent architectures. Relying solely on prompt instructions to curb subtask generation is insufficient: an unconstrained model can still hallucinate redundant branches or trigger cascading worker requests. Crucially, simply allocating each child a budget fraction smaller than the parent's remaining funds fails to protect the system, as a burst of concurrent siblings can issue overlapping claims that collectively exceed available capacity. The runtime admission controller must atomically reserve each child's maximum potential liability against the shared task budget before dispatching execution, an invariant formalized across hierarchical delegation trees. Production runtimes must independently enforce four distinct bounds: fan-out breadth (maximum children per parent), concurrent active slots (maximum parallel executions), recursion depth (maximum delegation layers), and absolute deadlines. A shallow tree can still exhaust resources through excessive breadth, while a strict concurrency cap can still permit an unbounded sequence of sequential worker allocations.
 
 ::: {.column-margin .margin-pointer}
 ↩ Bounded-liability admission, which reserves an operation's maximum charge before admitting it, is established in @sec-vol3-agent-harness-reservation-settlement.
 :::
+
+### Supervision trees {#sec-vol3-multiagent-supervision-trees}
 
 Beyond resource management, dispatching a child agent establishes lifecycle ownership. A child's running trajectory, pending tool invocations, and uncommitted side effects typically outlive the ephemeral model call that spawned it. The **supervision tree**\index{Supervision tree!definition} defines how the runtime isolates faults and manages recovery when a child encounters an unrecoverable failure. Drawing directly from the battle-tested principles of Erlang/OTP (Open Telecom Platform) supervision trees,[^fn-erlang-supervisor-trees] systems formalize recovery through explicit, per-supervisor restart strategies [@armstrong2003making; @armstrong2007erlang]:
 
@@ -526,7 +528,7 @@ The return payload in @lst-vol3-task-receipt describes a candidate change ready 
 
 The write-set record reflects the diff actually produced in the isolated workspace rather than the worker's conversational recollection of what it modified. Similarly, the dependency record captures observed file reads, loaded package versions, configuration files, and external environment flags, bounded by explicit tracing coverage. The checker report records the exact candidate hash, the test command, the container environment, and the exit status. This mechanism implements the *scoped-evidence rule*: a check result establishes an outcome for one identified candidate, checker, and environment, and authorizes nothing beyond it. If the runtime cannot produce or verify every piece of mandatory evidence, the return status transitions to `evidence_unavailable` rather than `complete`.
 
-The usage record accounts for charged and reserved work across tokens, wall-clock time, and tool invocations. The settlement record distinguishes a stop acknowledgment, confirmed resource release, and unresolved background operations with retained owners. A `complete` return and the final settlement of every operation are therefore distinct statuses. This separation becomes critical when the parent cancels an execution branch (@sec-vol3-multiagent-backpressure), ensuring that task termination does not leave orphaned background processes or dangling locks. Optional prose explanations may be shortened or omitted when space is constrained, with the omission explicitly recorded, while required identities, statuses, and evidence references pass intact. If the mandatory structural fields alone exceed `receipt_bytes`, the runtime generates an explicit payload-size failure rather than returning a truncated record.
+The usage record accounts for charged and reserved work across tokens, wall-clock time, and tool invocations. The settlement record distinguishes a stop acknowledgment, confirmed resource release, and unresolved background operations with retained owners. A `complete` return and the final settlement of every operation are therefore distinct statuses. This separation becomes critical This separation becomes critical during cancellation cascades, ensuring that terminating an agent's execution branch does not leave orphaned background processes or dangling locks, ensuring that task termination does not leave orphaned background processes or dangling locks. Optional prose explanations may be shortened or omitted when space is constrained, with the omission explicitly recorded, while required identities, statuses, and evidence references pass intact. If the mandatory structural fields alone exceed `receipt_bytes`, the runtime generates an explicit payload-size failure rather than returning a truncated record.
 
 ### Reference passing and selective reads {#sec-vol3-multiagent-reference-passing}
 
@@ -676,10 +678,10 @@ class WriteCollision:
 *Shared writes pass even odds at five workers, long before a fleet feels large.*
 :::
 
-These collisions manifest surprisingly early as agent concurrency grows. Suppose a repository contains $n$ files and each of $\WorkerCountWorkers$ workers modifies $w$ distinct files, chosen uniformly and independently at random. Worker $k+1$ avoids overlapping with all preceding workers only if it selects its $w$ files exclusively from the $n-kw$ files that earlier workers left untouched. The probability that all $\WorkerCountWorkers$ write sets remain pairwise disjoint is therefore
+These collisions manifest surprisingly early as agent concurrency grows. Suppose a repository contains $\PointToPointMessageSize$ files and each of $\WorkerCountWorkers$ workers modifies $w$ distinct files, chosen uniformly and independently at random. Worker $k+1$ avoids overlapping with all preceding workers only if it selects its $w$ files exclusively from the $\PointToPointMessageSize-kw$ files that earlier workers left untouched. The probability that all $\WorkerCountWorkers$ write sets remain pairwise disjoint is therefore
 
 $$
-\Pr(\text{no shared write})=\prod_{k=1}^{\WorkerCountWorkers-1}\frac{\binom{n-kw}{w}}{\binom{n}{w}}\approx\exp\left(-\frac{\WorkerCountWorkers(\WorkerCountWorkers-1)w^2}{2n}\right).
+\Pr(\text{no shared write})=\prod_{k=1}^{\WorkerCountWorkers-1}\frac{\binom{\PointToPointMessageSize-kw}{w}}{\binom{\PointToPointMessageSize}{w}}\approx\exp\left(-\frac{\WorkerCountWorkers(\WorkerCountWorkers-1)w^2}{2n}\right).
 $$ {#eq-vol3-multiagent-write-collision}
 
 @Eq-vol3-multiagent-write-collision is the birthday bound[^fn-birthday-bound-collision] generalized to multi-file write sets. Because the exponent scales quadratically with the number of worker pairs rather than linearly with worker count, collision odds mount rapidly. In a benchmark repository of `{python} WriteCollision.files_str` files where each worker touches `{python} WriteCollision.writes_str` files, even `{python} WriteCollision.small_fleet_str` concurrent workers collide with probability `{python} WriteCollision.small_collision_str`. At `{python} WriteCollision.even_odds_fleet_str` workers, a write collision becomes more likely than not, and scaling to `{python} WriteCollision.large_fleet_str` workers drives the collision probability to `{python} WriteCollision.large_collision_str`. In practice, uniform random access represents an unrealistically optimistic lower bound; actual agent modifications heavily cluster around package manifests, central routing tables, and shared configuration files. Rigorous workspace isolation is therefore an architectural prerequisite for multi-agent coordination, rather than a performance tuning knob reserved for massive worker pools.
@@ -785,6 +787,10 @@ To protect shared external services against delayed or partitioned workers, leas
 :::
 
 Guarded publication provides a robust concurrency framework for serializing concurrent state transitions. However, systems engineers must remember its scope: OCC guarantees only structural and dependency consistency, not semantic correctness. If multiple workers inherit the same flawed assumptions from a shared planner, each worker can satisfy every step of the guarded publication protocol and cleanly commit a flawed patch to the repository.
+
+::: {.callout-chapter-connection title="From systems mechanics to statistical evaluation"}
+While Git worktrees and Optimistic Concurrency Control ensure that concurrent workers do not clobber each other's physical bytes, they offer zero protection against the models themselves making the same logical mistakes. Moving from *how to merge files safely* to *how to trust the merged logic* requires shifting from mechanical systems engineering to statistical AI evaluation, analyzing how groups of models reach (and fail at) consensus.
+:::
 
 ## Correlated Ensemble Failures {#sec-vol3-multiagent-consensus}
 
@@ -988,7 +994,7 @@ Consensus among worker agents must never be confused with authoritative executio
 
 Validation evidence also carries a finite lifetime while asynchronous workers execute in parallel. If an upstream orchestrator rejects an intermediate candidate patch or alters its task plan, downstream worker agents may continue computing on stale state. Robust agent runtimes must invalidate and reject superseded work while properly terminating and accounting for in-flight child processes.
 
-## Cancellation Cascades {#sec-vol3-multiagent-backpressure}
+## Cancellation and Flow Control {#sec-vol3-multiagent-backpressure}
 
 Suppose the supervisor cancels `migration_task_01` while `worker_interface_01` awaits an external test job and `worker_caller_01` finishes generating a candidate patch. Even if the caller's patch passes its local validation checks after the supervisor initiates cancellation, the runtime must ensure that the patch remains strictly unpublishable. Meanwhile, an external testing service may have already accepted the interface worker's test request, incurring resource and billing charges that remain unsettled long after the worker process halts. In single-agent execution, a cancellation signal simply interrupts a local loop or an outstanding remote inference call. In a multi-agent system, that control boundary must span an entire hierarchy of distributed descendants.
 
@@ -1018,7 +1024,7 @@ To determine cancellation scope, the runtime traces delegation lineage rather th
 
 The ordering of events at each admission and publication gate dictates the precise boundary of cancellation. Suppose an admission gateway accepts `worker_interface_01`'s test operation, logs its unique operation identity along with its resource reservation, and begins transmitting the request. If the parent task cancels before a reply arrives, that test operation remains admitted and must proceed through the settlement protocol. However, any subsequent request from either child that arrives at that gateway after the cancellation decision is serialized will be rejected immediately. Result publication follows the exact same linear order. The integration path must re-verify task eligibility at the atomic publication boundary: if the cancellation commits first, it blocks publication of any patch, regardless of whether that patch passed every local check. If publication commits before the cancellation is serialized at the boundary, the resulting state change stands as a durable modification that the recovery contract must handle.
 
-Under this architecture, a supervisor can authoritatively report that its gateways deny new work and reject publications without falsely claiming that a disconnected or remote worker process has already halted. A remote enforcement gateway that loses connectivity to the central control plane must fail closed. If a gateway instead relies on cached authorization tokens, it operates under an explicit stale-authorization window and cannot guarantee immediate, subtree-wide revocation (@sec-vol3-multiagent-authority).
+Under this architecture, a supervisor can authoritatively report that its gateways deny new work and reject publications without falsely claiming that a disconnected or remote worker process has already halted. A remote enforcement gateway that loses connectivity to the central control plane must fail closed. If a gateway instead relies on cached authorization tokens, it operates under an explicit stale-authorization window and cannot guarantee immediate, subtree-wide revocation.
 
 ### Evidence preservation during cleanup {#sec-vol3-multiagent-cleanup-evidence}
 
@@ -1037,176 +1043,19 @@ For an outstanding test request, the runtime retains the operation identity, exe
 
 Cleanup operations cannot execute under the revoked worker's authority; the runtime must provision a separately scoped administrative credential and a protected resource allowance. Furthermore, tearing down an allocated environment is itself an asynchronous operation with an uncertain outcome. Scratch workspace or container deletion must block until all relevant filesystem writers have terminated and required diagnostic artifacts have been safely archived. An asynchronous background sweeper reconciles registered physical allocations against these pending evidentiary obligations before unlinking directories or recycling sandbox containers.
 
-### Hedged requests and speculative work {#sec-vol3-multiagent-hedged-requests}
+### Flow control and credit windows {#sec-vol3-multiagent-flow-control}
 
-::: {.column-margin}
-![](images/svg/vol3_multi_agent_barrier_odds.svg){width="100%" fig-alt="A falling curve of the probability that every worker finishes by the deadline against fleet size from 1 to 16, crossing a dashed even-odds line at a red dot labeled 7 workers."}
+In a dynamic supervision tree, a worker might recursively spawn descendants at a rate that exceeds the runtime's capacity or the user's budget. To prevent unbounded expansion, the runtime must exert **backpressure** through flow control mechanisms.
 
-*Waiting for every worker drops on-time odds below half by seven workers.*
-:::
+Rather than allowing unbounded queues, supervisors enforce a **credit window** ($N_{	ext{win}}$) on their delegates. A worker is granted a specific number of execution credits. When it completes a task or reaches a synchronization barrier, it returns a receipt, freeing up a credit. If the worker exhausts its credit window, its attempts to spawn new sub-tasks block until outstanding receipts are settled. This mechanism bounds the concurrent liability of any branch in the supervision tree.
 
-Cancellation is not merely a defensive mechanism for handling failures or user aborts; it also serves as an essential primitive for speculative execution and latency management. When an agent workflow fans out across multiple subtasks, waiting for every parallel worker exposes the entire system to stragglers—the classic tail-at-scale problem [@dean2013tail]. Consider $\WorkerCountWorkers$ parallel workers with independent and identically distributed completion times $T_i$ required to produce an admissible result. If $F(t)=\Pr(T_i\le t)$ represents the cumulative probability of a single worker finishing within time $t$, an **all-results barrier**\index{All-results barrier!definition}, which requires every worker to complete, achieves a deadline completion probability of
+### Fan-out completion and quorums {#sec-vol3-multiagent-quorum}
 
-$$\Pr\bigl(\max_i T_i\le t\bigr)=F(t)^{\WorkerCountWorkers}.$$
+When a task is partitioned across a fan-out topology (e.g., dispatching five independent research agents to investigate different log files), the supervisor must define the condition for the barrier's release.
 
-Because an admissible result requires completing all declared validation checks, this joint probability decays exponentially as the fan-out $\WorkerCountWorkers$ grows. In production systems, correlated queueing delays, shared rate limits, and heterogeneous prompt lengths break the idealized independent model and worsen the tail degradation. However, if the task contract permits any $k$ interchangeable admissible results out of $\WorkerCountWorkers$ replicas, the probability of meeting the deadline becomes
+Waiting for all $N$ workers often results in tail-latency domination, where the slowest worker stalls the entire pipeline. To mitigate this, supervisors implement **$k$-of-$N$ quorum** completion rules. The barrier releases as soon as $k$ valid receipts are returned. Once the quorum is reached, the supervisor immediately signals the cancellation tree to terminate the remaining $N-k$ workers, reclaiming their pending execution budgets.
 
-$$\Pr(T_{(k)}\le t)=\sum_{j=k}^{\WorkerCountWorkers}\binom{\WorkerCountWorkers}{j} F(t)^j[1-F(t)]^{\WorkerCountWorkers-j},$$
-
-where $T_{(k)}$ denotes the arrival time of the $k$th admissible result. This $k$-of-$\WorkerCountWorkers$ stopping rule applies strictly to interchangeable outputs—for example, parallel candidate retrieval or redundant reasoning paths. In our migration scenario, by contrast, the system requires both the interface update and the caller refactor; no majority of completed caller patches can stand in for a missing interface patch.
-
-```{python}
-#| label: calc-vol3-multiagent-completion-tail
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DEADLINE COMPLETION UNDER AN EXPLICIT INDEPENDENCE MODEL
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-multiagent-backpressure, notebook immediately below.
-# │ Goal: Compare two stopping rules when the contract permits k of N_workers results.
-# │ Show: Scenario inputs and probabilities of sufficient results by a deadline.
-# │ How: Evaluate the binomial tail and independently enumerate all outcomes.
-# │ Note: Hypothetical probabilities, not measured agent or provider latency.
-# └─────────────────────────────────────────────────────────────────────────────
-from itertools import product
-from math import comb
-from mlsysim.core.units import second
-from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time
-
-class FanoutCompletion:
-    # ┌── 1. LOAD (Scenario assumptions) ───────────────────────────────────
-    workers = 8
-    required = 6
-    deadline = 10 * second
-    admissible_probability = 0.90
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    all_probability = admissible_probability**workers
-    # Smallest fan-out whose all-results barrier falls below even odds.
-    even_odds_workers = 1
-    while admissible_probability**even_odds_workers >= 0.5:
-        even_odds_workers += 1
-    enough_probability = 0.0
-    for completed in range(required, workers + 1):
-        enough_probability += comb(workers, completed) * admissible_probability**completed * (1 - admissible_probability) ** (workers - completed)
-    enumeration_probability = 0.0
-    total_probability = 0.0
-    for outcomes in product((0, 1), repeat=workers):
-        completed = sum(outcomes)
-        weight = admissible_probability**completed * (1 - admissible_probability) ** (workers - completed)
-        total_probability += weight
-        if completed >= required:
-            enumeration_probability += weight
-
-    # ┌── 3. GUARD (Invariants and displayed results) ───────────────────────
-    check(1 <= required <= workers, "Completion count must fit the fleet")
-    check(abs(total_probability - 1.0) < 1e-12, "Outcome mass must sum to one")
-    check(abs(enough_probability - enumeration_probability) < 1e-12, "Binomial tail must match exhaustive enumeration")
-    check(abs(all_probability - 0.43046721) < 1e-12, "All-results probability drift")
-    check(abs(enough_probability - 0.96190821) < 1e-12, "Permitted stopping probability drift")
-    check(enough_probability > all_probability, "Earlier stopping must improve this deadline probability")
-    check(even_odds_workers == 7, "Seven workers first drop the barrier below even odds")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    workers_str = fmt_int(workers)
-    required_str = fmt_int(required)
-    deadline_str = fmt_time(deadline, unit=second, precision=0)
-    admissible_str = fmt_percent(admissible_probability, precision=0, style="prose")
-    all_str = fmt_percent(all_probability, precision=2, style="prose")
-    enough_str = fmt_percent(enough_probability, precision=2, style="prose")
-    even_odds_workers_str = fmt_int(even_odds_workers)
-```
-
-::: {#nbk-17-hedged-subtasks-and-tail-latency .callout-notebook title="A completion contract changes the barrier"}
-
-**Problem**: A hypothetical read-only analysis task permits any `{python} FanoutCompletion.required_str` interchangeable admissible results from `{python} FanoutCompletion.workers_str` workers. Each worker independently has a `{python} FanoutCompletion.admissible_str` probability of returning such a result within `{python} FanoutCompletion.deadline_str` of dispatch, including its checks. What is the probability of having sufficient results by that deadline, compared with waiting for every worker?
-
-**Math**: Requiring every result gives $F(t)^{\WorkerCountWorkers}$, or `{python} FanoutCompletion.all_str`. Summing the binomial probabilities for `{python} FanoutCompletion.required_str` through `{python} FanoutCompletion.workers_str` completions gives `{python} FanoutCompletion.enough_str`.
-
-**Systems insight**: An all-results barrier multiplies the deadline probability by $F(t)$ for every worker added; at this per-worker rate it drops below even odds at just `{python} FanoutCompletion.even_odds_workers_str` workers. Where the contract permits interchangeable results, a $k$-of-$\WorkerCountWorkers$ stopping rule recovers most of the lost probability. Where it does not, the fan-out itself must shrink or the per-worker tail must be cut. The workers still running after the rule fires consume resources until cancellation takes effect, and that work belongs in the cost account.
-
-:::
-
-**Hedging**\index{Hedging!definition}[^fn-hedged-requests-tail] mitigates tail latency by dispatching a redundant replacement attempt after a specified delay while the original worker continues running, subsequently accepting whichever admissible result completes first [@dean2013tail]. Hedging functions smoothly for read-only analyses and sandboxed candidate patches where a single runtime publication gate arbitrates the winner and cancels redundant runners. However, speculative hedging introduces acute hazards if an agent executes external mutating actions. Unless the destination service implements a strict duplicate-effect or idempotency contract, a trailing or canceled worker can easily execute irreversible side effects before its cancellation signal is processed. Furthermore, speculative attempts consume real token allowances and concurrency slots; dispatching hedges into a congested inference cluster amplifies queue depth and prolongs the very tail latencies the mechanism was intended to truncate.
-
-::: {.column-margin .margin-pointer}
-↩ Uncertain outcomes and the endpoint deduplication contracts that make a repeated mutation safe are established in @sec-vol3-tool-calling-idempotency.
-:::
-
-[^fn-hedged-requests-tail]: **Hedged Requests**\index{Hedging!delay threshold}: Dean and Barroso's recipe defers the second request until the first has been outstanding longer than the 95th-percentile expected latency, which bounds the extra load to roughly the fraction of requests that are that slow. For agents the delay matters more than for storage reads, because each hedge is a full model trajectory with its own reservation, and a hedge issued too early doubles spend on the common case to shorten the rare one.
-
-### Credit-based flow control {#sec-vol3-multiagent-credit-flow-control}
-
-Even when every child agent operates within its assigned token budget, rate mismatches between pipeline stages can destabilize the system: a fast producer can rapidly overwhelm a slower consumer, causing queues to fill with increasingly stale candidate items.
-
-```{python}
-#| label: calc-vol3-multiagent-rate-mismatch
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PRODUCER/CONSUMER RATE MISMATCH (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Prose in @sec-vol3-multiagent-backpressure, "Bound outstanding
-# │          work without blocking control", before and after the credit
-# │          invariant.
-# │ Goal: Show why an unbounded queue diverges and how a credit window bounds
-# │       the time an item waits.
-# │ Show: Consumer service rate, queue growth over a horizon, the wait behind
-# │       that queue, and the Little's-law residence under a fixed window.
-# │ How: mu = decode rate / tokens per item; dQ/dt = lambda - mu; residence
-# │      of a full window = W / mu.
-# │ Note: Stipulated rates for a hypothetical pipeline, not measured serving.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import second, minute, hour
-from mlsysim.fmt import check, fmt_int, fmt_ratio, fmt_time
-
-class RateMismatch:
-    # ┌── 1. LOAD (Stipulated rates) ───────────────────────────────────────
-    consumer_tokens_per_s = 40
-    tokens_per_item = 500
-    producer_items_per_s = 5
-    horizon = 600 * second
-    credits = 8
-
-    # ┌── 2. EXECUTE (Service rate, divergence, and bounded residence) ─────
-    service_rate = consumer_tokens_per_s / tokens_per_item  # items/s
-    growth_rate = producer_items_per_s - service_rate  # items/s
-    backlog = growth_rate * horizon.to(second).magnitude  # items
-    backlog_wait = (backlog / service_rate) * second
-    window_residence = (credits / service_rate) * second
-
-    # ┌── 3. GUARD (Prose claims) ─────────────────────────────────────────
-    check(abs(service_rate - 0.08) < 1e-12, "Consumer service rate")
-    check(growth_rate > 0, "Queue must diverge under this mismatch")
-    check(abs(backlog - 2952) < 1e-6, "Backlog after the horizon")
-    check(10 * hour < backlog_wait < 10.5 * hour, "Wait behind the backlog is about ten hours")
-    check(abs(window_residence.to(second).magnitude - 100) < 1e-9, "Window residence")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    consumer_rate_str = fmt_int(consumer_tokens_per_s)
-    tokens_per_item_str = fmt_int(tokens_per_item)
-    producer_rate_str = fmt_int(producer_items_per_s)
-    service_rate_str = fmt_ratio(service_rate, precision=2)
-    horizon_str = fmt_time(horizon, unit=minute, precision=0, style="word")
-    backlog_str = fmt_int(backlog)
-    backlog_wait_str = fmt_time(backlog_wait, unit=hour, precision=1, style="word")
-    credits_str = fmt_int(credits)
-    window_residence_str = fmt_time(window_residence, unit=second, precision=0, style="word")
-```
-
-Consider an upstream agent that lists files and emits candidate diffs at $\ArrivalRate =$ `{python} RateMismatch.producer_rate_str` items per second. A downstream reviewer model generates a `{python} RateMismatch.tokens_per_item_str`-token critique for each item at a decode speed of `{python} RateMismatch.consumer_rate_str` tokens per second, yielding an effective service rate of only $\CoulombFrictionCoefficient =$ `{python} RateMismatch.service_rate_str` items per second. In an unconstrained queue, the backlog expands at the net rate $\ArrivalRate - \CoulombFrictionCoefficient$. After `{python} RateMismatch.horizon_str`, the queue accumulates `{python} RateMismatch.backlog_str` unreviewed items, and a newly submitted diff faces an estimated queue wait of `{python} RateMismatch.backlog_wait_str`. Long before process memory is exhausted, the queued items become functionally obsolete: the repository state they reference has diverged, reproducing the stale-context failure mode at the inter-agent pipeline level. Per-agent token budgets fail to prevent this collapse because each individual candidate item is inexpensive to generate.
-
-A finite **credit window**\index{Credit window!definition}[^fn-credit-flow-multiagent] prevents this divergence by bounding the number of admitted, in-flight items, mirroring how aggregate financial budgets cap token expenditure. Let $N_{\text{win}}$ denote the fixed credit capacity of the channel, $N_{\text{free}}$ the unallocated credits held by the producer, and $N_{\text{out}}$ the outstanding admitted items currently circulating in the pipeline. The runtime enforces the structural invariant:
-
-$$N_{\text{free}}+N_{\text{out}}=N_{\text{win}},\qquad N_{\text{free}}\ge0,\quad N_{\text{out}}\ge0.$$
-
-[^fn-credit-flow-multiagent]: **Credit-Based Flow Control**\index{Credit-based flow control}: In the credit schemes developed for switched networks, a sender transmits only while it holds credits that the receiver issued for free buffer space, so congestion can delay traffic but never overflow a buffer [@kung1995credit]. An agent pipeline inherits the guarantee and the hazard together: credits bound memory and staleness, and a lost credit return silently shrinks the window unless the ledger is reconciled.
-
-Under this discipline, admitting a new work item requires the producer to acquire and attach an available credit. That credit remains tied to the item while it traverses the network, waits in downstream queues, undergoes evaluation, or reserves output buffer space. The runtime returns the credit to the producer's pool only when the item reaches a designated capacity-release boundary. Credit returns are processed atomically and with at-most-once semantics: network disconnections trigger ledger reconciliation against the authoritative runtime state rather than granting producers a fresh batch of credits, preventing synthetic credit inflation.
-
-Beyond protecting buffer memory, credit windows establish a strict upper bound on queue staleness. By Little's law (@eq-vol3-littles-law), the average number of items held, here credits in use $\bar{N}_{\text{slot}}$, equals their arrival rate $\lambda_{\text{arr}}$ multiplied by their average residence time $\bar{T}_{\text{hold}}$. In a fully saturated credit window operating at consumer drain rate $\CoulombFrictionCoefficient$, the residence time of any candidate cannot exceed $N_{\text{win}}/\CoulombFrictionCoefficient$. With a window of $N_{\text{win}} =$ `{python} RateMismatch.credits_str` credits in the pipeline above, candidate wait time is capped at `{python} RateMismatch.window_residence_str` instead of ballooning across hours. When credits are exhausted, the producer yields execution instead of flooding the pipeline with artifacts destined to be obsolete upon inspection. Furthermore, if each in-flight payload is constrained to at most $\DataVolume$ bytes, total memory occupancy cannot exceed $N_{\text{win}}\DataVolume$. This demonstrates why payload return bounds (@sec-vol3-multiagent-contracts) serve as crucial admission-control parameters rather than mere prompt formatting conventions.
-
-Crucially, exhausting data credits must never starve control-plane traffic. Signals such as cancellation commands, credit reconciliation messages, execution status receipts, and financial settlement records travel over reserved out-of-band control channels. The runtime must reject new task admissions whenever doing so would risk exhausting the execution slots reserved for downstream consumers and cleanup handlers; otherwise, upstream producers waiting for credits will block the very consumers needed to release them, deadlocking the system. Finally, releasing a channel credit must not be conflated with releasing an external resource or refunding a financial commitment: credit reclamation restores pipeline capacity, whereas financial settlement accounts for external cost.
-
-Together, cancellation hierarchies and credit-based flow control bound the volume, lifetime, and financial exposure of in-flight work while keeping control paths responsive. Yet enforcing these boundaries across distributed child agents ultimately hinges on the authority model governing each node: what capabilities each descendant holds, how delegation is verified, and how fresh that authorization must be when validated at a remote gateway (@sec-vol3-multiagent-authority).
+While cancellation trees and flow control manage an agent's lifecycle—dictating when a worker is permitted to run—they do not restrict what the worker is authorized to do while it is active.
 
 ## Attenuated Capability Delegation {#sec-vol3-multiagent-authority}
 
@@ -1661,6 +1510,46 @@ A cancellation request immediately closes admission for new subtasks, but active
 
 **Fallacy**: *If each worker usually finishes on time, the fan-out usually finishes on time.*
 
+```{python}
+#| label: calc-vol3-fanout-completion
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FALLACY: INDEPENDENT ON-TIME WORKERS IMPLY ON-TIME FAN-OUT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from itertools import product
+from math import comb
+
+class FanoutCompletion:
+    # ┌── 1. LOAD (Scenario assumptions) ───────────────────────────────────
+    workers = 8
+    required = 6
+    deadline = 10 * second
+    admissible_probability = 0.90
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    all_probability = admissible_probability**workers
+    even_odds_workers = 1
+    while admissible_probability**even_odds_workers >= 0.5:
+        even_odds_workers += 1
+    enough_probability = 0.0
+    for completed in range(required, workers + 1):
+        enough_probability += comb(workers, completed) * admissible_probability**completed * (1 - admissible_probability) ** (workers - completed)
+
+    # ┌── 3. GUARD (Invariants and displayed results) ───────────────────────
+    check(1 <= required <= workers, "Completion count must fit the fleet")
+    check(even_odds_workers == 7, "Seven workers first drop the barrier below even odds")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    workers_str = fmt_int(workers)
+    # required_str = fmt_int(required)
+    deadline_str = fmt_time(deadline, unit=second, precision=0)
+    admissible_str = fmt_percent(admissible_probability, precision=0, style="prose")
+    all_str = fmt_percent(all_probability, precision=2, style="prose")
+    enough_str = fmt_percent(enough_probability, precision=2, style="prose")
+    even_odds_workers_str = fmt_int(even_odds_workers)
+```
+
 Synchronizing multiple concurrent workers behind an all-results barrier compounds tail latency exponentially. Because every worker must complete before the barrier can lift, the overall probability of on-time completion multiplies each individual worker's success rate. With an individual on-time probability of `{python} FanoutCompletion.admissible_str` per worker, a fan-out of `{python} FanoutCompletion.workers_str` workers completes within the deadline only `{python} FanoutCompletion.all_str` of the time, and barrier success falls below even odds once the fleet reaches `{python} FanoutCompletion.even_odds_workers_str` workers (@sec-vol3-multiagent-backpressure). Where the system contract accepts interchangeable or quorum-based results, implementing a stopping rule restores `{python} FanoutCompletion.enough_str`; where every subtask is strictly required, the orchestrator must reduce fan-out width to keep tail latency bounded.
 
 :::
@@ -1679,9 +1568,6 @@ Consider the multi-agent software migration examined across this chapter: separa
 | $T_{\text{finish}}\ge\max\left(W/\WorkerCountWorkers,T_{\text{crit}}\right)$                                                                                                                                                                                                                                                    | Lower bound on makespan; adding worker capacity beyond peak concurrency cannot beat the critical-path term                                                                                              | @eq-vol3-multiagent-dag-bound                                    |
 | $\Pr(\text{no shared write})\approx\exp\left(-\dfrac{\WorkerCountWorkers(\WorkerCountWorkers-1)w^2}{2n}\right)$                                                                                                                                                                                                                 | Probability that uniform write sets remain disjoint; collision risk scales quadratically with worker pairs, requiring isolated workspaces                                                               | @eq-vol3-multiagent-write-collision                              |
 | $\CommunicationcomputationRatio=\dfrac{\operatorname{Var}(Q)}{\HiddenDimensionFour(1-\HiddenDimensionFour)}$, $\text{majority false approval} \to \Pr(Q>1/2)$                                                                                                                                                                   | Correlation among reviewer errors and the asymptotic error floor that adding homogeneous reviewers cannot reduce                                                                                        | @sec-vol3-multiagent-consensus                                   |
-| $F(t)^{\WorkerCountWorkers}$ against $\Pr(T_{(k)}\le t)=\sum_{j=k}^{\WorkerCountWorkers}\binom{\WorkerCountWorkers}{j} F(t)^j[1-F(t)]^{\WorkerCountWorkers-j}$                                                                                                                                                                  | Deadline probability of an all-worker barrier vs. a $k$-of-$\WorkerCountWorkers$ quorum; applies only when partial results are interchangeable                                                          | @sec-vol3-multiagent-backpressure                                |
-| $N_{\text{free}}+N_{\text{out}}=N_{\text{win}}$, $\text{residence} \approx N_{\text{win}}/\CoulombFrictionCoefficient$                                                                                                                                                                                                          | Credit-window invariant; bounds outstanding concurrent tasks, queuing staleness, and total context payload occupancy $N_{\text{win}}\DataVolume$                                                        | @sec-vol3-multiagent-backpressure                                |
-| $\mathcal{A}(\Gamma_{\text{child}})\subseteq\mathcal{A}(\Gamma_{\text{parent}})$                                                                                                                                                                                                                                                | Authority attenuation across delegation hops; capabilities monotonically narrow, while consumable allowances are partitioned and reserved atomically                                                    | @sec-vol3-multiagent-authority                                   |
 | Cost-per-accepted-task ratio $=\BarrierRelativeDegree\,p_{\text{single}}/p_{\text{multi}}$                                                                                                                                                                                                                                      | Cost-effectiveness threshold; multi-agent execution with token overhead multiple $\BarrierRelativeDegree$ lowers effective cost only if task acceptance increases by more than $\BarrierRelativeDegree$ | @eq-vol3-cost-per-accepted-task, @sec-vol3-multiagent-evaluation |
 | $\text{Speedup}(\WorkerCountWorkers)=\dfrac{\WorkerCountWorkers}{1+\ContentionAndCoherencyCoefficients(\WorkerCountWorkers-1)+\ContentionAndCoherencyCoefficientsTwo \WorkerCountWorkers(\WorkerCountWorkers-1)}$, $N^*_{\text{workers}}=\sqrt{(1-\ContentionAndCoherencyCoefficients)/\ContentionAndCoherencyCoefficientsTwo}$ | System capacity under contention and coherency penalties; identifies optimal fan-out $N^*_{\text{workers}}$ and the retrograde regime where additional concurrency degrades throughput                  | @eq-vol3-multiagent-usl, @eq-vol3-multiagent-usl-peak            |
 
@@ -1701,24 +1587,6 @@ Consider the multi-agent software migration examined across this chapter: separa
 
 The coordination tax (principle \ref{pri-vol3-coordination-tax}) manifests in the serialized handoffs, validation barriers, and residual dependencies that remain after decomposing a task. Invariant closure (principle \ref{pri-invariant-closure}) mandates that these architectural boundaries maintain strict external validation and effect gating, ensuring that peer consensus among models is never mistaken for authoritative execution rights. Finally, trajectory-level encapsulation (principle \ref{pri-vol3-trajectory-encapsulation}) enforces that delegated permissions narrow monotonically across child generations, while consumable execution budgets and unsettled side effects remain completely accounted for by the runtime.
 
-## Historical Perspective and Further Reading {#sec-vol3-multi-agent-history}
-
-The question of when dividing computational work yields a net speedup is older than autonomous software agents. Gene Amdahl's 1967 argument established that serial execution fractions strictly cap the speedup achievable by adding processors [@amdahl1967]. Two years later, Ronald Graham showed that while greedy list scheduling lands close to the theoretical dependency bound, adding parallel resources can paradoxically increase total completion time [@graham1969bounds]. Neil Gunther later unified these dynamics in the Universal Scalability Law, introducing a pairwise coherency penalty to explain how crosstalk and contention turn throughput saturation into outright performance collapse [@gunther2008general]. Across successive computing generations, systems architects repeatedly encountered the same hard reality: coordination overhead and coherency penalties, rather than the raw supply of workers, dictate practical scale.
-
-Distributed artificial intelligence confronted the handoff problem in the 1970s. The Hearsay-II speech-understanding system coordinated independent, opportunistic knowledge sources through a shared blackboard [@erman1980hearsay]. Carl Hewitt's actor model abandoned shared memory entirely, giving each autonomous agent private local state and routing interactions through addressed messages [@hewitt1973actor]. Reid Smith formalized structured delegation in the Contract Net Protocol, turning task announcement, bidding, and award into an explicit, typed exchange between a manager and prospective contractors [@smith1980contract].
-
-Over the following decades, classical distributed systems research supplied the precise operational controls that multi-agent architectures require today. Kung and Robinson introduced optimistic concurrency control, permitting workers to execute tentatively against private workspace copies and validate isolation before committing [@kung1981optimistic]. Birrell and Nelson established typed remote procedure calls with explicit failure semantics, replacing unstructured message passing with formal client-server contracts [@birrell1984rpc]. Gray and Cheriton solved distributed state synchronization and lock management through time-bounded leases [@gray1989leases]. Joe Armstrong formalized supervision trees within Erlang, demonstrating how structured hierarchies and crash-only semantics allow runtimes to restart failed processes from clean, known states [@armstrong2003making]. Finally, object-capability systems eliminated ambient authority by embedding access rights directly into object references rather than relying on global identity checks [@dennis1966; @hardy1988confused], an approach later extended through cryptographically attenuable tokens with chained caveats [@birgisson2014macaroons].
-
-Redundancy followed a parallel trajectory of high theoretical promises followed by sobering empirical corrections. The Condorcet jury theorem [@condorcet1785essai] and John von Neumann's multiplexed majority organs [@vonneumann1956probabilistic] demonstrated that aggregating independent votes can synthesize near-perfect reliability from noisy components. Leslie Lamport, Robert Shostak, and Marshall Pease proved the rigorous mathematical bounds of Byzantine fault tolerance, establishing that consensus requires a two-thirds majority when participants can fail arbitrarily or act maliciously [@lamport1982byzantine]. However, the core assumption underlying these models—statistical independence among voter errors—collapsed when applied to software. John Knight and Nancy Leveson demonstrated experimentally that independently written programs fail coincidentally on the same edge cases far more often than chance predicts [@knight1986experimental]. Dave Eckhardt and Larry Lee provided the analytical explanation: complex problem domains harbor intrinsically difficult input regions that induce correlated failures across diverse implementations [@eckhardt1985theoretical].
-
-Modern language-model architectures have revived every one of these paradigms simultaneously. Self-consistency leverages majority voting across sampled reasoning paths [@wang2022self], multi-agent debate structures iterative argumentation across model instances [@du2023improving], and conversational frameworks coordinate role-playing agents over structured communication graphs [@wu2023autogen]. In enterprise production, orchestrator-worker patterns unlock significant capability gains on complex software tasks, but they do so while multiplying token consumption and latency by orders of magnitude [@anthropic2025multiagent]. Systematic empirical analyses of multi-agent failures reveal that the field has re-encountered classical distributed failure modes: ill-defined task boundaries, uncoordinated handoffs, and verification bottlenecks that silently propagate errors rather than catching them [@cemri2025multiagent].
-
-- **The Contract Net Protocol** [@smith1980contract]. The foundational text on structured delegation. Smith frames task distribution as a typed, negotiated protocol—showing that the essential elements of modern task envelopes, from capability announcements to formal awards, were established long before language models existed.
-- **An Experimental Evaluation of the Assumption of Independence in Multiversion Programming** [@knight1986experimental]. The landmark controlled experiment that disproved the assumption of independent software failures. This paper provides the standard methodological blueprint for evaluating whether an ensemble of redundant agent reviewers yields genuine reliability gains or merely inflates inference cost.
-- ***Making Reliable Distributed Systems in the Presence of Software Errors*** [@armstrong2003making]. Armstrong's doctoral dissertation detailing the architecture of Erlang. It articulates the operational rationale for supervision trees, fail-stop process isolation, and restart strategies, mapping directly to how orchestrators should manage the lifecycles and blast radiuses of child agent trajectories.
-- **A General Theory of Computational Scalability Based on Rational Functions** [@gunther2008general]. Gunther derives the Universal Scalability Law directly from queueing models. The derivation clarifies the physical distinction between contention and coherency, explaining why serial bottlenecks and cross-agent communication demand fundamentally different architectural fixes.
-- **Why Do Multi-Agent LLM Systems Fail?** [@cemri2025multiagent]. An extensive empirical taxonomy analyzing real-world multi-agent failure traces. It serves as an indispensable field catalog of the specification gaps, uncoordinated handoffs, and verification failures that production runtime environments must actively prevent.
-
 ## Exercises {#sec-vol3-multi-agent-exercises}
 
 Every given below is a hypothetical problem input, not a measurement of a real system. Each problem ends in a design decision, and the calculation exists to justify it.
@@ -1728,7 +1596,7 @@ Every given below is a hypothetical problem input, not a measurement of a real s
    b. Two proposals compete for the same engineering effort: halving the per-worker overhead to $\gamma=0.005$, or halving the serial work so that $\ParallelFraction=0.95$. Compute the best integer count and its speedup under each proposal.
    c. Decide which proposal to fund once worker spend is counted, and state which proposal alone can ever deliver a speedup above $10\times$.
 
-2. **Hot files in a shared workspace (Basic).** A repository holds $n=5{,}000$ files, and each worker writes $w=20$ of them, chosen uniformly and independently.
+2. **Hot files in a shared workspace (Basic).** A repository holds $\PointToPointMessageSize=5{,}000$ files, and each worker writes $w=20$ of them, chosen uniformly and independently.
    a. Using @eq-vol3-multiagent-write-collision, compute the probability of at least one shared write for $\WorkerCountWorkers=2$ and $\WorkerCountWorkers=4$ workers, both exactly and by the exponential approximation. Find the smallest fleet for which a shared write is more likely than not.
    b. Each worker also edits one shared dependency manifest with probability $0.3$, independently of its other writes. For four workers, compute the probability that at least two edit the manifest, and the probability of any shared write at all.
    c. A colleague proposes a single shared working directory for four workers because "collisions are under 40 percent." Decide, and name the two hazards of @sec-vol3-multiagent-concurrency that remain even when no two workers write the same file.

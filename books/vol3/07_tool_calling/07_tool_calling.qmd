@@ -65,7 +65,7 @@ This chapter builds the runtime's tool boundary, the path between a proposed cal
 ↩ The separation of proposal, effect, and observation is established in @sec-vol3-intro-trajectory-systems-boundary.
 :::
 
-The sections follow one call and then widen. @Sec-vol3-tool-calling-unix-analogy lays out the mediated round trip and the protection requirement that organizes it. @Sec-vol3-tool-calling-schemas types the request and couples action-time checks to the effect, and @sec-vol3-tool-calling-mcp separates discovering a tool from being allowed to use it. @Sec-vol3-tool-calling-idempotency decides when an uncertain effect may be retried. @Sec-vol3-tool-calling-streaming and @sec-vol3-tool-calling-observation-parsing bound what returns to the model without losing what it means. @Sec-vol3-tool-calling-async extends the contract to jobs that outlive a model turn, and @sec-vol3-tool-calling-toolkit-design and @sec-vol3-tool-calling-visual-actuation use those mechanics to evaluate tool catalogs and computer-use interfaces.
+The sections follow one call and then widen. @Sec-vol3-tool-calling-unix-analogy lays out the mediated round trip and the protection requirement that organizes it. @Sec-vol3-tool-calling-schemas types the request and couples action-time checks to the effect, and @sec-vol3-tool-calling-mcp separates discovering a tool from being allowed to use it. @Sec-vol3-tool-calling-idempotency decides when an uncertain effect may be retried. @Sec-vol3-tool-calling-streaming details how to bound what returns to the model without losing what it means. @Sec-vol3-tool-calling-async extends the contract to jobs that outlive a model turn, and @sec-vol3-tool-calling-toolkit-design and @sec-vol3-tool-calling-visual-actuation use those mechanics to evaluate tool catalogs and computer-use interfaces.
 
 ## Tool Subsystem Architecture {#sec-vol3-tool-calling-unix-analogy}
 
@@ -235,13 +235,13 @@ Following a conflict, the runtime directs the agent to perform an authorized rea
 
 This concurrency guarantee holds only as long as all mutations route through the shared coordination boundary. If external processes or unmanaged scripts modify files directly on disk, bypassing the version service, version tokens offer no protection and the endpoint cannot ensure integrity. Dry-run previews follow the identical principle. A dry run confirms that a proposed patch applies cleanly against revision `r17` at the moment of evaluation, but it establishes no lock on that revision. The runtime must re-verify all preconditions, permissions, and version tokens when executing the live write.
 
-Receiving a successful `r18` confirmation verifies that the file modification committed to disk, but it does not establish that the underlying connection-pool bug has been resolved. Demonstrating functional correctness requires empirical validation: a subsequent passing run of `test_waiter_notified_on_return` provides concrete evidence that the patch resolves the targeted race condition, while broader task acceptance continues to follow the project's verification suite. At the network layer, a dropped reply leaves the caller uncertain whether the server committed the edit or failed before processing the payload. The retry and idempotency contracts analyzed in @sec-vol3-tool-calling-idempotency resolve this operational uncertainty.
+Receiving a successful `r18` confirmation verifies that the file modification committed to disk, but it does not establish that the underlying connection-pool bug has been resolved. Demonstrating functional correctness requires empirical validation: a subsequent passing run of `test_waiter_notified_on_return` provides concrete evidence that the patch resolves the targeted race condition, while broader task acceptance continues to follow the project's verification suite. At the network layer, a dropped reply leaves the caller uncertain whether the server committed the edit or failed before processing the payload. Rigorous retry and idempotency contracts resolve this operational uncertainty.
 
 ### Rejection diagnostics {#sec-vol3-tool-calling-rejection-diagnostics}
 
 When an operation fails, the runtime must return a structured, bounded diagnostic that isolates the failure condition without leaking information beyond the task's authorized grants. For example, a structural rejection should identify the missing `expected_version` property, and a concurrency conflict should state that revision `r17` has been superseded. Conversely, permission rejections must refuse access cleanly without exposing directory structures, environment variables, or path hints that an agent might probe. The runtime logs whether a rejection originated locally during client-side schema validation or remotely at the service endpoint, allowing downstream decision logic to distinguish between an unattempted proposal and a failed remote mutation. Clear, bounded diagnostics provide the model with the exact evidence needed to synthesize a valid revision, which must then traverse the same validation pipeline.
 
-Every tool descriptor exposed to an agent consumes context window capacity. Deciding which descriptors to stage dynamically, and balancing expressive specialized tools against minimal generic primitives, forms the toolkit-design challenge addressed in @sec-vol3-tool-calling-toolkit-design. Before an agent can select or execute tools, however, the runtime requires a standardized transport protocol to discover, bind, and communicate with external service interfaces.
+Every tool descriptor exposed to an agent consumes context window capacity. Deciding which descriptors to stage dynamically, and balancing expressive specialized tools against minimal generic primitives, forms a central toolkit-design challenge. Before an agent can select or execute tools, however, the runtime requires a standardized transport protocol to discover, bind, and communicate with external service interfaces.
 
 ## Interoperable Tool Discovery {#sec-vol3-tool-calling-mcp}
 
@@ -523,7 +523,7 @@ The canonical failure mode in tool execution is a **pipe deadlock**\index{Pipe d
 
 [^fn-circular-wait-deadlock]: **Circular Wait**: Coffman, Elphick, and Shoshani identified four conditions that must all hold for a deadlock: mutual exclusion, hold and wait, no preemption, and a circular chain of processes each waiting on the next [@coffman1971]. Two full pipes satisfy all four, since each side holds its own buffer, cannot take the other's, and waits on it. A readiness loop removes the circular wait, because the host never blocks on one channel while the other has bytes to move. \index{Deadlock!circular wait}
 
-An operational capture policy must also define explicit behavior when limits are reached. When incoming data exceeds a retention threshold, the runtime can either drop subsequent bytes while continuing to drain the pipe to prevent process stalls, or actively terminate the executing process. The runtime must persist telemetry recording which policy was triggered and whether byte loss occurred. Because continuously reading and discarding gigabytes of runaway output still burns CPU cycles and context-switch overhead, an output-volume limit complements execution timeouts and kernel resource controls (such as POSIX process quotas or cgroup limits) rather than replacing them. Process termination is itself an asynchronous state transition with its own failure semantics, addressed alongside cancellation mechanisms in @sec-vol3-tool-calling-async-governance.
+An operational capture policy must also define explicit behavior when limits are reached. When incoming data exceeds a retention threshold, the runtime can either drop subsequent bytes while continuing to drain the pipe to prevent process stalls, or actively terminate the executing process. The runtime must persist telemetry recording which policy was triggered and whether byte loss occurred. Because continuously reading and discarding gigabytes of runaway output still burns CPU cycles and context-switch overhead, an output-volume limit complements execution timeouts and kernel resource controls (such as POSIX process quotas or cgroup limits) rather than replacing them. Process termination is itself an asynchronous state transition with its own failure semantics.
 
 Within these capture boundaries, the runtime extracts the most informative evidence for model evaluation. For software engineering and compilation workloads, preserving an initial prefix and a trailing suffix captures the critical context: build systems print environment configuration, command invocations, and compilation flags at the start, while emitting panic stack traces, assertion failures, and summary verdicts at the very end. However, intermediate warnings or early test failures can easily be lost in the omitted middle. A production capture policy must therefore disclose the exact magnitude of its omissions, while specialized diagnostic filters can selectively extract recognized error patterns from the middle stream.
 
@@ -640,67 +640,7 @@ Structured tools can eliminate unmanageable payloads altogether by partitioning 
 :::
 
 The placement of continuation state highlights a critical systems trade-off amplified by agentic workloads: stateful server-side cursors vs. stateless client tokens. A stateful cursor maintains an open database cursor, transaction snapshot, or cache entry on the server until the client finishes iterating. However, autonomous agents abandon search trajectories routinely; an informative diagnostic on the first page often redirects the agent's entire plan, causing abandoned server sessions to accumulate until garbage collection or time-to-live timeouts reclaim them. A **stateless cursor**\index{Stateless cursor!definition} avoids server-side state by encoding the continuation position directly within the token passed to the client. The backend serializes a query descriptor, the last evaluated sort key, and an issuance timestamp into a payload $d$, returning the authenticated token $d \parallel \text{MAC}_{\text{key}}(d)$ signed with a secret server key. When the client returns the token, the backend verifies the message authentication code and expiration time, ensuring resistance against client-side tampering without consuming server memory. The trade-offs for stateless cursors are relaxed consistency and increased prompt overhead: resumption queries typically evaluate against live data rather than an isolated snapshot, and serialized cryptographic tokens consume valuable prompt tokens.
-Enforcing bounded capture and disciplined staging guarantees that tool output fits within allocated context budgets without exhausting host memory or deadlocking child processes. Securing that payload against semantic ambiguity and untrusted manipulation forms the subsequent layer of the tool execution runtime.
-
-## Terminal Output Normalization {#sec-vol3-tool-calling-observation-parsing}
-
-When a command-line tool executes interactively, it redraws progress indicators with carriage returns and styles diagnostics with terminal escape sequences. Captured directly at the byte level, standard output does not represent the clean visual layout a human engineer sees on a terminal screen. Wherever possible, tool adapters should invoke command-line utilities in noninteractive or batch modes (for example, `--batch` or `--no-color`), or ideally request structured machine-readable outputs such as JSON or JUnit XML. Structured reports provide discrete test identifiers, execution timings, and explicit assertions, eliminating the brittle heuristics required to parse colored progress logs. Even so, structured formatting is merely a transport convention; receiving a syntactically valid JSON payload does not guarantee that the tool performed all required checks or that its outputs can be trusted without schema validation and memory bounds.
-
-When terminal output is unavoidable, the adapter must enforce a declared normalization policy backed by a stateful virtual terminal emulator or bounded screen buffer. Removing ANSI color sequences (`\x1b[31m`) is straightforward, but naively stripping control bytes like carriage returns (`\r`) or cursor positioning sequences silently corrupts output semantics.[^fn-terminal-control-functions] Because a carriage return moves the cursor to the beginning of the line without advancing to the next, a terminal progress indicator updates by repeatedly overwriting existing text. Stripping `\r` without simulating terminal geometry causes overwritten states to concatenate, turning `Running... \rFailed!` into `Running... Failed!` or accumulating megabytes of repeated progress fragments. The adapter's parser must therefore maintain cursor coordinates across chunked streaming reads while bounding its internal buffer allocations. When an adapter supports only a subset of control sequences, it must explicitly mark unsupported or incomplete escape sequences rather than discarding them silently. Because collapsing interactive updates into a final snapshot loses intermediate state transitions, the runtime should retain the raw byte stream in secondary storage as an authoritative audit log while delivering only the normalized, bounded representation to the model context.
-
-[^fn-terminal-control-functions]: **Terminal Control Functions**: The escape sequences that color and reposition terminal text were standardized in ECMA-48, first published in 1976 and adopted internationally as ISO/IEC 6429 [@ecma1991control]. In that specification, carriage return moves the active position to the initial position of the line, allowing a terminal progress bar to overwrite the same line hundreds of times. A byte-level capture preserves every intermediate redraw; consequently, an interactive run that appears as a single line on screen can consume an agent's entire observation token budget unless the adapter interprets or collapses these control sequences. \index{ECMA-48!terminal normalization}
-
-Tool adapters must preserve the provenance of standard output (`stdout`) and standard error (`stderr`) while treating stream assignments as advisory conventions. In Unix environments, programs frequently emit progress updates, debugging traces, or configuration warnings across either descriptor, and capturing the two streams through separate pipes forfeits their relative temporal interleaving. When chronological event ordering is essential for root-cause diagnosis, adapters should multiplex streams using pseudo-terminal (pty) pairs or timestamped chunk logging. In extracting diagnostics, the adapter should rely on known tool schemas—such as compiler error formats or language tracebacks—retaining source file paths and line offsets, while reporting parsing failures explicitly rather than guessing a root cause from an incomplete fragment. Normalizing terminal output cleans up presentation, but the resulting text carries no intrinsic authority. Safe serialization practices, including escaping control characters and enforcing UTF-8 boundaries, protect the agent's structural messaging format from delimiter injection, while the evidence-scope rule continues to dictate what the text actually proves.
-
-### Process status and evidential scope {#sec-vol3-tool-calling-process-status}
-
-The adapter must determine process disposition directly from operating system primitives—such as `waitpid` status macros or container runtime lifecycle events—rather than parsing success messages from output logs. Querying the process supervisor allows the adapter to report an unambiguous exit code,[^fn-exit-status-bits] an unhandled terminating signal, or a timeout without textual speculation. Observing an end-of-file condition on standard streams does not prove that a process has completed its work: a daemon or worker process can close its inherited descriptors while continuing to execute asynchronously in the background. Conversely, a broken communication socket or interrupted execution channel leaves the state of any requested side effects uncertain.
-
-[^fn-exit-status-bits]: **Eight-Bit Exit Status**: Under POSIX semantics, a parent process inspects child termination through status macros like `WIFEXITED` and `WEXITSTATUS`, which yield only the low-order eight bits (values 0–255) of the argument passed to `exit`. A program that terminates with exit code 256 wraps modulo 256 and appears to the parent as exit status 0. Furthermore, standard shells synthesize synthetic return codes above 128 when a process is killed by a signal (for example, 137 for `SIGKILL` 9 or 139 for `SIGSEGV` 11), collapsing fatal OS signals into ambiguous numerical exit statuses. An adapter that records explicit disposition variants—such as `exited(code)` vs. `signaled(sig)`—avoids truncating or conflating these conditions. \index{Exit status!POSIX}
-
-An exit status of zero is an application convention rather than definitive proof that every required validation ran to completion. Three recurring systems failures illustrate this divergence. First, a test runner pointed at an incorrect directory path or unmatched pattern filter may discover zero tests and exit cleanly with status 0. Second, a shell script executed without `set -e` and `set -o pipefail` can suffer a fatal failure in an early command yet still return status 0 because the final pipeline stage succeeds. Third, an API client can catch an internal runtime exception, print the error payload to standard output, and terminate with code 0 because the transport exchange itself finished without an unhandled crash. Under the evidence-scope rule, the adapter treats the operating system process status as a single evidentiary signal. It correlates this status with structured output payloads and the specific acceptance criteria defined by the task. In a connection-pool repair, for instance, confirming that a targeted reproduction test passes on workspace revision `r18` proves only that the reproducer succeeded; it does not substantiate broader system stability or justify full patch acceptance.
-
-@Lst-vol3-observation-sanitization illustrates this distinction. In this scenario, the adapter executed a targeted test against an explicit workspace snapshot (`r18`), parsed its structured assertions, and captured the full output stream within its retention budget. Only a bounded summary is staged into the prompt context. These fields represent an illustrative adapter contract rather than an immutable tool schema.
-
-::: {#lst-vol3-observation-sanitization lst-cap="**A bounded result with scoped evidence**: Process disposition, tested source, check outcome, and observation completeness answer different questions."}
-```json
-{
-  "call_id": "call_test_42",
-  "scope": {"repository": "repair-workspace", "revision": "r18"},
-  "process": {"state": "exited", "exit_code": 0},
-  "check": {
-    "target": "tests/test_pool.py::test_waiter_notified_on_return",
-    "outcome": "passed",
-    "broader_regression_checks": "not_run"
-  },
-  "observation": {
-    "capture": "complete",
-    "staged_view": "excerpt",
-    "selection": "invocation header and final test summary",
-    "text": "Target: tests/test_pool.py::test_waiter_notified_on_return\n[intermediate output omitted]\nResult: passed",
-    "omission_notice": "Intermediate output omitted from this view.",
-    "inspection_handle": "obs_42",
-    "retention": "until this task ends"
-  }
-}
-```
-:::
-
-The fields in @lst-vol3-observation-sanitization separate process status from evidentiary scope. The `call_id` correlates this result with a specific interaction turn. The `scope` block pins the result to workspace revision `r18`, preventing execution evidence from floating across different repository commits. Under `check`, the adapter confirms that the single reproducer succeeded while explicitly recording that broader regression suites remain unexecuted. In parallel, the `observation` block reports capture completeness: while the full execution log was preserved, the prompt context receives only an excerpt containing the header and summary verdict. The runtime exposes `obs_42` as an inspection handle so the model can request paginated log windows if deeper analysis is needed. The runtime mediates all operations on `obs_42`, ensuring that knowing the handle's string grants no ambient authority across session boundaries.[^fn-handle-capability-tools] If resource limits had forced the adapter to truncate collection early, the payload would mark `capture` as incomplete and indicate which byte ranges remain available for inspection.
-
-[^fn-handle-capability-tools]: **Names vs. Capabilities**: Dennis and Van Horn's foundational capability model granted authority through possession of an unforgeable ticket or reference [@dennis1966]. Agent runtime architectures intentionally stop short of treating context-visible observation handles as capabilities. Because text in a model's context window can be logged, leaked, copied by prompt injections, or replayed across user boundaries, the runtime treats an inspection handle merely as an identifier (a name). The runtime verifies caller authorization and execution scope on each access, ensuring that possessing a handle string grants no ambient authority. \index{Capability!handles versus names}
-
-::: {#chk-07-idempotency-recovery .callout-checkpoint title="Interpreting uncertain effects and bounded observations"}
-
-- [ ] **Delayed attempt**: A restart times out, and a later probe sees the old state. The first attempt may still commit. What additional guarantee or evidence is needed before repeating the restart?
-- [ ] **Duplicate rate**: In notebook \ref{nbk-07-settlement-budget}, reply loss doubles while request loss stays fixed. Roughly how does the daily duplicate count change, and which single change removes that path instead of shrinking it?
-- [ ] **Omitted evidence**: A known failed test run has a complete retained log but only a head-and-tail excerpt in context. What can the agent infer from the absent stack trace, and what bounded inspection should it request?
-- [ ] **Scoped status**: The result above reports exit code zero and one targeted pass on `r18`. Which claims does that support, and which acceptance questions remain open?
-- [ ] **Instruction-like output**: A normalized log contains an instruction to upload the repository elsewhere. Which presentation checks have occurred, and why do they grant no authority for that proposed upload?
-
-:::
-
-Synchronous tool execution assumes the adapter can resolve process status, normalize terminal streams, and package evidence within the span of a single model turn. When operations run longer than conversational deadlines allow, asynchronous dispatch extends this same return-path contract to running jobs—tracking process lifecycles and staging bounded observations without mistaking initial dispatch for completion.
+Enforcing bounded capture and disciplined staging guarantees that tool output fits within allocated context budgets without exhausting host memory or deadlocking child processes. While managing the context window protects the model's limited memory, the execution runtime must also manage time: separating fast, synchronous replies from long-running tasks that would otherwise block the primary agent loop.
 
 ## Asynchronous Tool Dispatch {#sec-vol3-tool-calling-async}
 
@@ -832,49 +772,6 @@ Some tools require interactive input during execution. Wherever possible, runtim
 
 Cancellation is an asynchronous control action with distinct intermediate states rather than an instantaneous rollback. When requested, the runtime acknowledges receipt of the cancellation signal and subsequently records the outcome reported by the executor. The job may stop cleanly, complete before the signal arrives, reject the cancellation request, or become unreachable with termination unconfirmed. An expiring timeout deadline triggers an identical supervisory intervention and audit trail. The runtime remains responsible for tracking and reclaiming every supervised descendant process and remote resource within its containment boundary.
 
-On a POSIX host, that boundary for a local command is typically a **process group**\index{POSIX process group!definition}, which establishes the set of processes reached by a single signal. A tool that executes `bash -c "make && pytest"` spawns a shell, which in turn spawns `make`, compiler subprocesses, the test runner, and multiple worker threads or forks. Signaling only the top-level shell process terminates the shell, but leaves orphaned descendants reparented to the system init process (`PID 1`). These orphaned processes continue consuming CPU cycles, holding file system locks, and keeping socket descriptors open. To prevent orphan leaks, the execution adapter configures each job as the leader of its own process group at spawn time—calling `setpgid(0, 0)` in the child before invoking `exec`—and directs all signals to the entire group. It sends `SIGTERM` first, granting processes a bounded grace period to flush buffers and release external resources, followed by an uncatchable `SIGKILL`. @Lst-vol3-process-group-teardown implements this escalation pattern and reports the verified outcome. If an untrusted process deliberately creates a new session or process group to escape group signaling, the runtime must rely on kernel-level isolation boundaries.
-
-::: {.column-margin .margin-pointer}
-↪ Tearing down processes that detach from the task's process group, as part of a sandbox's reset contract, is developed in @sec-vol3-sandboxes-pooling-reset.
-:::
-
-::: {#lst-vol3-process-group-teardown lst-cap="**Process-group teardown with escalation**: The job leads its own group, so one signal reaches every descendant still in it. Liveness is probed with signal 0 after reaping exited children, and a group that survives `SIGKILL` is reported as unconfirmed rather than assumed stopped."}
-```python
-import os, signal, subprocess, time
-
-def spawn_job(argv):
-    proc = subprocess.Popen(argv, process_group=0)  # setpgid(0, 0)
-    return proc.pid                  # the leader's PID is the group ID
-
-def group_alive(pgid):
-    try:                             # reap exited children of ours,
-        while os.waitpid(-pgid, os.WNOHANG)[0] > 0:  # or zombies
-            pass                                     # still count
-    except ChildProcessError:        # no children of ours remain
-        pass
-    try:
-        os.killpg(pgid, 0)           # signal 0 probes, delivers nothing
-        return True
-    except ProcessLookupError:
-        return False
-
-def terminate_group(pgid, grace_s=3.0):
-    for sig, wait_s in ((signal.SIGTERM, grace_s), (signal.SIGKILL, 1.0)):
-        try:
-            os.killpg(pgid, sig)
-        except ProcessLookupError:   # group already gone
-            return "exited" if sig == signal.SIGTERM else "terminated"
-        deadline = time.monotonic() + wait_s
-        while time.monotonic() < deadline:
-            if not group_alive(pgid):
-                return "terminated" if sig == signal.SIGTERM else "killed"
-            time.sleep(0.05)
-    return "unconfirmed"             # report it; do not claim a stop
-```
-:::
-
-Two subtle POSIX semantics govern the correctness of this routine. First, when invoking non-blocking `os.waitpid(-pgid, os.WNOHANG)`, a return value of zero indicates that child processes still exist in the group and none has changed state yet; it does not indicate that the process group has cleared. The runtime continues reaping until no direct child processes remain, at which point the system call raises `ChildProcessError`. Second, sending signal 0 via `os.killpg(pgid, 0)` delivers no actual signal to the target group; the kernel simply performs error checking, confirming whether any process matching that group ID still exists and is accessible. Probing with signal 0 directly determines whether any group member remains alive after signal delivery.
-
 Even when process termination is confirmed, stopping an execution does not roll back side effects that occurred before the signal arrived. A canceled deployment script may already have mutated external cloud resources, and a canceled test run may leave temporary database tables behind. The final observation emitted by the runtime must record all known side effects, pending cleanup obligations, and ambiguous states. In the system's execution ledger, a status of "canceled" confirms that execution halted; it does not signify that the system returned to its original state.
 
 ::: {.column-margin .margin-pointer}
@@ -884,6 +781,8 @@ Even when process termination is confirmed, stopping an execution does not roll 
 An asynchronous tool interface thus preserves the invariant guarantees of tool execution across extended time horizons: it acknowledges queued work without stalling the client, enforces strict resource boundaries, emits bounded observations, and distinguishes requested operations from confirmed system states. Managing complex toolkits over time ultimately requires structuring tool sets so that long-running operations and their corresponding inspection handles form a coherent, self-consistent operational surface.
 
 ## Designing the Active Toolkit {#sec-vol3-tool-calling-toolkit-design}
+
+The preceding sections established the rigorous lifecycle of a **single** tool invocation—from schema validation and dispatch to observation truncation and asynchronous polling. We now zoom out from the micro-level execution of one tool to the macro-level orchestration of the **entire tool catalog**. Designing the active toolkit requires balancing context budgets against model cognitive load, ensuring the agent has exactly the capabilities it needs without violating the runtime's authorization boundaries.
 
 An agent diagnosing and repairing an exhausted database connection pool requires concrete operations: inspecting source files, applying candidate patches, executing test suites, and analyzing run-time diagnostics. Toolkit design governs how an agent runtime exposes these capabilities to the foundation model. If an interface exposes too little functionality per invocation, the model must coordinate low-level state across dozens of turns; if it exposes an unconstrained catalog, the context window fills with irrelevant tool schemas that bloat prefill latency and degrade decision quality. The goal of toolkit design is to expose operations so that the model can choose an appropriate next step without carrying unnecessary definitions or managing avoidable intermediate state.
 
@@ -999,13 +898,15 @@ Tool implementations should also adopt defensive defaults grounded in physical s
 
 ### Catalog evaluation {#sec-vol3-tool-calling-catalog-evaluation}
 
-Rigorous evaluation of toolkit designs requires isolating the effects of granularity and staging policy by holding all other experimental factors constant: the benchmark task distribution, initial workspace snapshots, model checkpoints, generation parameters, token budgets, and verification suites. In the connection-pool repair workload, test trials must exercise realistic failure modes: locating relevant source files across deep directory hierarchies, applying patches against concurrently modified buffers, interpreting noisy test failure logs, and recovering gracefully when a necessary tool descriptor is omitted from the initial active toolkit. These targeted trials disentangle catalog coverage limitations from model selection errors, and separate model selection accuracy from execution-time runtime failures.
+Adding a new tool to an agent's catalog is not a free improvement in capability. Expanding the interface surface area forces the model to discriminate among more options during every turn, increasing the probability of selection errors, malformed arguments, or rejected preconditions. Because a recovered error still consumes inference tokens and wall-clock latency, and an unrecovered error aborts the entire trajectory, these failures must be priced into the cost of the toolkit design.
 
-Comprehensive evaluation logs must record selection errors, malformed arguments, rejected preconditions, unnecessary discovery calls, recovery turns, and uncontained side effects alongside binary task completion. Cost accounting should measure serialized descriptor tokens, retrieval and reranking latency, execution sandbox compute time, observation overhead, and cumulative tokens wasted on failed trajectories. A recovered tool selection error costs inference turns and latency, whereas an unrecovered error aborts the task; consequently, toolkits are ranked by total cost per accepted task rather than the simple probability of avoiding selection errors. Furthermore, when comparing designs that require fundamentally different security postures—such as an unconstrained command runner vs. a constrained AST manipulation tool—evaluations must report those privilege differences explicitly rather than attributing performance gaps solely to catalog size.
+Consequently, toolkits are evaluated not by counting available functions or checking if a task is theoretically possible, but by measuring the total cost per accepted task across a representative workload. If splitting a generic `file_edit` tool into targeted `append_line` and `delete_line` operations reduces the model's hallucination rate, the savings from fewer failed trajectories must be weighed against the extra descriptor tokens the model must read on every single turn. Furthermore, when comparing designs that require fundamentally different security postures—such as an unconstrained shell runner versus a strict AST manipulator—evaluations must report the change in H·S·A exposure alongside any performance gains, making the risk-reward trade-off explicit.
 
 The ultimate objective of toolkit engineering is an active catalog whose contracts align with workload demands while keeping execution costs and failure modes transparent. Static staging, on-demand selection, task-level abstractions, and expressive command runners represent trade-offs to evaluate against these cost and reliability metrics. The same engineering principles apply when an agent interacts with a graphical user interface instead of a programmatic API: mouse clicks, keyboard events, and visual screen parsers impose their own granularity challenges, prefill budgets, and containment boundaries.
 
 ## Visual Actuation and Computer Use {#sec-vol3-tool-calling-visual-actuation}
+
+The text-based APIs and shell commands discussed so far represent the most structured form of tool calling. To stress-test the architectural invariant of complete mediation, we now apply the chapter's rigorous execution contracts to a highly dynamic, unstructured modality: pixel-based graphical user interfaces.
 
 Consider the staging-container restart scenario when an administrative web dashboard provides no programmatic API. A **computer-use tool**\index{Computer-use tool!definition} bridges this interface gap by rendering visual screenshots to the model and translating model-generated targets into synthetic mouse clicks, keystrokes, or scrolling gestures—the low-level input space pioneered in early web-agent research [@shi2017world]. Operating on raw pixels does not relax system invariants. While the model proposes an interaction based on an observed frame, the execution runtime retains responsibility for validating arguments, enforcing authorization, dispatching OS events, and interpreting observations. A coordinate within display boundaries merely confirms that an event can reach the window manager, offering no assurance about the state mutation that the event will trigger.
 
@@ -1058,7 +959,7 @@ A timeout records missing knowledge, not a failure. Under the blind-retry model 
 ::: {.fallacy-pitfall}
 **Fallacy**: *A zero exit status establishes task completion.*
 
-Exit status is the invoked program's convention. A runner that discovers zero tests, a script without `pipefail`, and a client that prints its error and exits normally all return zero (@sec-vol3-tool-calling-observation-parsing). The `r18` reproducer pass supports one exercised connection-pool case; acceptance follows the task's evidence standard (principle \ref{pri-invariant-closure}).
+Exit status is the invoked program's convention. A runner that discovers zero tests, a script without `pipefail`, and a client that prints its error and exits normally all return zero. The `r18` reproducer pass supports one exercised connection-pool case; acceptance follows the task's evidence standard (principle \ref{pri-invariant-closure}).
 :::
 
 ::: {.fallacy-pitfall}
@@ -1126,7 +1027,6 @@ For further reading:
 - Birrell and Nelson, "Implementing Remote Procedure Calls" [@birrell1984rpc]. The foundational paper on RPC and the clearest exposition of distributed failure semantics. It establishes why a caller can never be completely certain whether an unacknowledged remote call executed, providing the theoretical basis for retry budgets and timeout policies.
 - Ousterhout, *A Philosophy of Software Design* [@ousterhout2018philosophy]. A masterclass on interface design and deep modules. The book's criteria for module depth and interface complexity provide concrete guidance for sizing tool APIs so models can invoke them effectively without leaking implementation details.
 - Helland, "Idempotence Is Not a Medical Condition" [@helland2012idempotence]. A practical guide to designing distributed systems that survive retries by pushing deduplication and idempotence keys into receiver interfaces, directly applicable to tool runtime dispatch.
-- Ousterhout, *A Philosophy of Software Design* [@ousterhout2018philosophy]. A masterclass on interface design and deep modules. The book's criteria for module depth and interface complexity provide concrete guidance for sizing tool APIs so models can invoke them effectively without leaking implementation details.
 - Yang et al., "SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering" [@yang2024sweagent]. An empirical demonstration that designing clean, model-oriented tool interfaces is just as vital to agent performance as scaling the underlying language model.
 
 ## Exercises {#sec-vol3-tool-calling-exercises}

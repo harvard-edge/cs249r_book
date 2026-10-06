@@ -273,7 +273,7 @@ A decoding rule selects a token from these scores, and the chosen token is appen
 
 In an inference serving engine, the decode loop processes the prompt, computes next-token logits, selects an output token, appends it to the prefix context, and repeats this cycle until triggering a termination condition. Generation can terminate normally when the model emits an explicit end-of-sequence token or matches a caller-configured stop sequence. Alternatively, an execution engine may halt generation prematurely when reaching an output token limit, or abort unexpectedly due to an infrastructure timeout or network disconnect. Serving interfaces must report these stop reasons explicitly: receiving an incomplete JSON object due to a hit token limit requires different recovery handling than receiving a cleanly terminated tool call. Crucially, a clean stop sequence merely signals that the model finished generating text; it provides no guarantee that the underlying task succeeded.
 
-Production Transformer implementations [@vaswani2017] eliminate redundant computation across decoding steps by maintaining a *key-value (KV) cache*:[^fn-kv-cache-derived] memory buffers that store intermediate attention keys and values derived from previously processed tokens. Reusing this state avoids recomputing projections for historical tokens at every step. For a fixed full-attention architecture and storage precision, retaining more tokens requires more cache capacity. This cache represents transient intermediate computational state rather than an authoritative audit log proving which tools executed or what their external effects were. Cache organization and capacity planning are developed in @sec-vol3-kv-cache; the direct operational consequence is that the prompt and generated output both contribute to a call's memory footprint and resource demand.
+Production Transformer implementations [@vaswani2017] eliminate redundant computation across decoding steps by maintaining a *key-value (KV) cache*:[^fn-kv-cache-derived] memory buffers that store intermediate attention keys and values derived from previously processed tokens. Reusing this state avoids recomputing projections for historical tokens at every step. For a fixed full-attention architecture and storage precision, retaining more tokens requires more cache capacity. This cache represents transient intermediate computational state rather than an authoritative audit log proving which tools executed or what their external effects were. Holding state pins GPU memory and limits concurrent request throughput; the direct operational consequence is that the prompt and generated output both contribute to a call's memory footprint and resource demand.
 
 [^fn-kv-cache-derived]: **Key-Value (KV) Cache**: In causal attention, key and value vectors at a given position depend solely on that token and its predecessors, so once computed they remain static throughout subsequent sequence expansion. Retaining them in device memory turns each new decode step from full-sequence recomputation into a single new row projection per layer alongside a read of stored rows. Consequently, cache capacity and memory bandwidth, rather than floating-point arithmetic, become the primary operational constraints as context windows expand. \index{KV cache!why reuse is exact}
 
@@ -283,118 +283,11 @@ Because each generated token extends a dependent sequence, output length is the 
 
 ### Sampling controls {#sec-vol3-foundation-model-sampling-controls}
 
-For positive **temperature**\index{Temperature (sampling)!definition}[^fn-sampling-temperature-origin] $\tau_{\text{temp}}$, softmax converts the logits into next-token probabilities:
+The inference engine provides parameters to reshape the output distribution before selecting a token. **Temperature** ($\tau_{\text{temp}}$)\index{Temperature (sampling)!definition} scales the raw logits before they are converted into probabilities. Lowering temperature sharply concentrates probability mass on the highest-scoring tokens, reducing output variance, while raising it produces a flatter distribution that encourages diverse selections. **Greedy decoding**\index{Greedy decoding!definition} bypasses stochastic sampling entirely, deterministically selecting the maximum-scoring token at each step.
 
-$$\Pr(y_t = \SpeedAtDetection \mid x_{1:\SequenceLength}, y_{<t}) = \frac{\exp\left(z_{t, \SpeedAtDetection} / \tau_{\text{temp}}\right)}{\sum_{w \in \Vocabulary} \exp\left(z_{t, w} / \tau_{\text{temp}}\right)}$$ {#eq-temperature-softmax}
+Truncation filters restrict the pool of eligible tokens. **Top-$k$ sampling**\index{Top-k sampling!definition} limits selection to a fixed number of highest-scoring tokens, while **Top-$\HiddenDimensionFour$ sampling**\index{Top-p sampling!definition} (nucleus sampling) retains tokens until their cumulative probability reaches a defined threshold, allowing the candidate pool size to adapt to distribution entropy.
 
-Unit temperature ($\tau_{\text{temp}} = 1.0$) leaves the logits unscaled. Lowering a positive temperature amplifies logit disparities, sharply concentrating probability mass on higher-scoring tokens; raising it compresses logit differences and makes the distribution flatter. With a finite vocabulary and finite logits, the distribution approaches uniformity as temperature grows without bound. Systems engineers should treat temperature strictly as an entropy modulator rather than a confidence metric. Because next-token cross-entropy training minimizes sequence prediction error rather than calibrating scores as estimates of task success, high token likelihood does not verify that a completed response is logically sound or correct.
-
-[^fn-sampling-temperature-origin]: **Temperature**: The nomenclature comes from statistical mechanics, where the Boltzmann distribution weights a state of energy $E$ by $\exp(-E/k_B \Time)$; reading each negative logit as an energy makes @eq-temperature-softmax mathematically identical. In thermodynamic systems, high temperature distributes particles across many states, whereas low temperature collapses the system toward its ground state. In language model decoding, scaling temperature balances candidate exploration against exploitation of the mode without altering which token scores highest. \index{Temperature (sampling)!Boltzmann origin}
-
-**Greedy decoding**\index{Greedy decoding!definition} instead selects the maximum-scoring token: $\operatorname{argmax}_{\SpeedAtDetection \in \Vocabulary} z_{t,\SpeedAtDetection}$, combined with a consistent tie-breaking rule. Given fixed logits and a fixed tie rule, that selection is deterministic. While serving APIs frequently expose greedy decoding through a temperature-zero setting, the runtime executes this via direct argmax selection rather than evaluating @eq-temperature-softmax with division by zero. As positive temperature approaches zero, softmax concentrates all probability mass on the maximum; if several logits share the maximum, that mathematical limit alone does not select among them.
-
-Sampling can also restrict which tokens remain eligible. **Top-$k$ sampling**\index{Top-k sampling!definition} [@fan2018hierarchical] retains the $k$ highest-scoring tokens, according to a defined tie rule, and renormalizes their probabilities. **Top-$\HiddenDimensionFour$ sampling**\index{Top-p sampling!definition}, also called nucleus sampling, sorts tokens by descending probability and retains the shortest leading sequence whose cumulative mass reaches threshold $\HiddenDimensionFour$ [@holtzman2020curious], subsequently renormalizing that active set. Top-$k$ fixes the candidate count regardless of context, retaining implausible tail tokens when the distribution is peaked and cutting viable candidates when the distribution is flat. Top-$\HiddenDimensionFour$ resolves this rigidity by allowing the candidate pool size to adapt dynamically to distribution entropy. When temperature scaling and truncation are combined, their evaluation order and the runtime's numerical conventions form an explicit part of the decoding configuration.
-
-Crucially, neither filter identifies valid file paths, truthful statements, or safe operations. A rare token may be essential to a correct identifier or software patch, while a highly probable continuation may propose an incorrect file name. Truncation filters alter the distribution of candidates exposed to downstream execution, and evaluation against external task criteria determines whether that modification improves performance.
-
-::: {.column-margin}
-![](images/svg/nucleus_truncation_margin.svg){width="100%" fig-alt="Five probability bars for tokens v1 to v5 at unit temperature. v1 is labeled 78 percent and v2 17 percent, both in blue under a bracket labeled top-p 0.90. v3, v4, and v5 are in red with a zero above each and the label tail cut."}
-
-*Nucleus truncation keeps two tokens here and zeroes the whole tail.*
-:::
-
-```{python}
-#| label: lego-logit-scaling-truncation
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LOGIT SCALING AND TRUNCATION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @nbk-02-logit-scaling-and-truncation-on
-# │ Goal: Compare temperature and nucleus sampling for the same hypothetical logits.
-# │ Show: Sharpening and truncation redistribute probability, not correctness.
-# │ How: Normalize exponentials, select a cumulative-probability prefix, renormalize.
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import *
-from mlsysim.fmt import check, fmt, fmt_math, fmt_multiple, fmt_percent
-
-class LogitScalingTruncation:
-    """Sampling transformations for a fixed hypothetical vocabulary."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    logits = [12.0, 10.5, 9.0, 6.0, 3.0]
-    tau_base = 1.0
-    tau_sharp = 0.5
-    p_nucleus = 0.90
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    exp_tau1 = []
-    for z in logits:
-        exp_tau1.append(math.exp(z / tau_base))
-    sum_exp_tau1 = sum(exp_tau1)
-    probs_tau1 = []
-    for e in exp_tau1:
-        probs_tau1.append(e / sum_exp_tau1)
-    exp_tau05 = []
-    for z in logits:
-        exp_tau05.append(math.exp(z / tau_sharp))
-    sum_exp_tau05 = sum(exp_tau05)
-    probs_tau05 = []
-    for e in exp_tau05:
-        probs_tau05.append(e / sum_exp_tau05)
-    sum_nuc = probs_tau1[0] + probs_tau1[1]
-    p_nuc_v1 = probs_tau1[0] / sum_nuc
-    p_nuc_v2 = probs_tau1[1] / sum_nuc
-    tail_base = 1 - probs_tau1[0]  # probability of drawing any non-top token
-    tail_sharp = 1 - probs_tau05[0]
-    tail_ratio = tail_base / tail_sharp
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(sum(probs_tau1) - 1.0) < 1e-12, "Baseline distribution must normalize")
-    check(abs(sum(probs_tau05) - 1.0) < 1e-12, "Sharpened distribution must normalize")
-    check(abs(probs_tau1[0] - 0.7840) < 0.001, "Unexpected tau=1.0 top prob")
-    check(abs(probs_tau05[0] - 0.950324648968) < 1e-9, "Unexpected tau=0.5 top prob")
-    check(abs(sum_nuc - 0.9589) < 0.001, "Unexpected nucleus denominator")
-    check(probs_tau1[0] < p_nucleus <= sum_nuc, "Nucleus must contain exactly two tokens")
-    check(abs(p_nuc_v1 - 0.8176) < 0.001, "Unexpected nucleus v1 prob")
-    check(abs(p_nuc_v2 - 0.1824) < 0.001, "Unexpected nucleus v2 prob")
-    check(abs(p_nuc_v1 + p_nuc_v2 - 1.0) < 1e-12, "Nucleus must normalize")
-    check(3 < tail_ratio < 6, "Halving temperature should shrink the non-top tail several-fold")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    logits_math = fmt_math(rf"\mathbf{{z}}_t = [{', '.join(f'{v:g}' for v in logits)}]")
-    base_vector_math = fmt_math(rf"\mathbf{{p}}_{{\tau_{{\text{{temp}}}}=1}} \approx [{', '.join(f'{v:.4f}' for v in probs_tau1)}]")
-    sharp_first_str = fmt(probs_tau05[0], precision=4, commas=False)
-    sum_exp_tau1_str = fmt(sum_exp_tau1, precision=1, commas=False)
-    tau_base_str = fmt(tau_base, precision=0, commas=False)
-    tau_sharp_str = fmt(tau_sharp, precision=1, commas=False)
-    top_mass_pct_str = fmt_percent(probs_tau05[0], precision=1, style="prose")
-    p_nucleus_str = fmt(p_nucleus, precision=2, commas=False)
-    first_prob_str = fmt(probs_tau1[0], precision=4, commas=False)
-    second_prob_str = fmt(probs_tau1[1], precision=4, commas=False)
-    nucleus_mass_str = fmt(sum_nuc, precision=4, commas=False)
-    nucleus_first_str = fmt(p_nuc_v1, precision=4, commas=False)
-    nucleus_second_str = fmt(p_nuc_v2, precision=4, commas=False)
-    tail_base_pct_str = fmt_percent(tail_base, precision=1, style="prose")
-    tail_sharp_pct_str = fmt_percent(tail_sharp, precision=1, style="prose")
-    tail_ratio_mult_str = fmt_multiple(tail_ratio, precision=1)
-```
-
-::: {#nbk-02-logit-scaling-and-truncation-on .callout-notebook title="Temperature and truncation on the same logits"}
-
-**Problem**: A hypothetical vocabulary $\Vocabulary = \{v_1, v_2, v_3, v_4, v_5\}$ has logits `{python} LogitScalingTruncation.logits_math`, held fixed so that differences arise strictly from the decoding configuration. How much probability mass concentrates onto the top token when halving the temperature, and which tokens survive nucleus truncation?
-
-**Math**: At temperature $\tau_{\text{temp}} =$ `{python} LogitScalingTruncation.tau_base_str`, the exponentiated logits sum to `{python} LogitScalingTruncation.sum_exp_tau1_str`. Normalizing each exponential by this partition sum yields the baseline distribution:
-
-`{python} LogitScalingTruncation.base_vector_math`.
-
-Halving the temperature to $\tau_{\text{temp}} =$ `{python} LogitScalingTruncation.tau_sharp_str` doubles the exponent of each term. Following normalization, the probability of the mode $v_1$ surges to `{python} LogitScalingTruncation.sharp_first_str`, capturing `{python} LogitScalingTruncation.top_mass_pct_str` of the total distribution. All lower-ranked tokens retain positive probability under untruncated softmax.
-
-Returning to unit temperature and applying nucleus truncation with $\HiddenDimensionFour =$ `{python} LogitScalingTruncation.p_nucleus_str` evaluates cumulative probability mass. The lead token $v_1$ provides `{python} LogitScalingTruncation.first_prob_str`, which falls short of the threshold. Incorporating $v_2$ (`{python} LogitScalingTruncation.second_prob_str`) brings cumulative coverage to `{python} LogitScalingTruncation.nucleus_mass_str`, which satisfies the threshold and defines the active nucleus as $\{v_1, v_2\}$. Renormalizing across this active set assigns probability `{python} LogitScalingTruncation.nucleus_first_str` to $v_1$ and `{python} LogitScalingTruncation.nucleus_second_str` to $v_2$, while strictly zeroing the remaining tail tokens $\{v_3, v_4, v_5\}$.
-
-**Systems insight**: Temperature governs candidate diversity. Halving temperature compresses the non-top probability tail from `{python} LogitScalingTruncation.tail_base_pct_str` to `{python} LogitScalingTruncation.tail_sharp_pct_str`, achieving a `{python} LogitScalingTruncation.tail_ratio_mult_str` reduction, whereas nucleus truncation eliminates the tail entirely. Repeated calls produce diverse outputs only when probability mass occupies this tail—the exact stochastic resource that parallel candidate sampling draws on in @sec-vol3-test-time-compute-breadth-axis. Because neither transformation ensures that the highest-scoring candidate is correct, engineering teams configure decoding parameters based on empirical task pass rates rather than raw model likelihood.
-
-:::
+Crucially, systems engineers should treat these mechanisms strictly as entropy modulators. High token likelihood does not verify that a completed response is logically sound or correct. A rare token may be essential to a correct identifier or software patch, while a highly probable continuation may confidently propose an incorrect file name. Modifying temperature or applying nucleus truncation governs the diversity of candidates exposed to downstream execution, but only rigorous external validation---such as syntactic checks or sandboxed execution---can determine if a proposed candidate actually satisfies the task requirements.
 
 ### Repetition and replay {#sec-vol3-foundation-model-repetition-replay}
 
@@ -449,111 +342,7 @@ class ServingPostmortem:
 
 Production failures of this nature define the baseline instrumentation required for agentic infrastructure. Comprehensive diagnostic logs must capture the exact prompt payload, model and tokenizer revision hashes, decoding hyperparameters, configured token limits, and any backend routing or seed metadata. Alongside input parameters, the system must record the raw response payload, the explicit finish reason, and token usage metrics. When diagnosing downstream agent failures, developers should distinguish between replaying a recorded trajectory and re-querying the model. Replaying a recorded trace isolates downstream execution logic from model nondeterminism, whereas issuing a repeated API call tests the resilience of the agent across sampling variations. Rigorous evaluation frameworks must measure and report this repeated-call variance rather than assuming consistent single-call execution.
 
-Ultimately, an agent runtime ingests candidate tokens produced under a specific decoding configuration and terminated by a specific boundary condition. Even an uncorrupted, high-probability `read_file` proposal might reference an absent path or violate sandbox directory restrictions. The autoregressive generation process determines how a candidate sequence is synthesized; downstream systems must establish the verification harnesses and guardrails required to evaluate whether that sequence can safely execute.
-
-## Candidate Sequence Verification {#sec-vol3-foundation-model-continuations}
-
-Consider an automated repair agent that issues a tool call to `read_file` with `path` set to `src/pool.py`. The generated payload might conform strictly to the advertised schema, but syntactic conformance guarantees nothing about the underlying filesystem. The target file might not exist in the active workspace. Worse, a path pointing to private credential files outside the repository would parse with equal syntactic perfection. Generative inference produces a candidate token sequence; neither high statistical likelihood nor schema conformance determines whether the runtime environment can safely act on it.
-
-The same distinction applies when the model emits a source code patch rather than an inspection request. A candidate patch can parse cleanly, compile against existing headers, and pass a sequential unit test while leaving the underlying race condition untouched. Each verification check answers a narrow, specific question rather than certifying overall task satisfaction. Robust candidate verification systems must track these separate dimensions of evidence explicitly rather than collapsing them into a single, undifferentiated notion of validity.
-
-### Likelihood and checked properties {#sec-vol3-foundation-model-likelihood-checked-properties}
-
-Autoregressive generation assigns probabilities based on patterns in training data and context tokens, reflecting linguistic familiarity rather than operational truth. Whether a generated path exists on disk, whether the caller holds read permissions, and whether an altered function preserves system invariants depend entirely on the operational environment and the task contract. An obsolete or nonexistent path often receives substantial model probability simply because it matches common directory conventions in the training corpus.
-
-Sound verification begins by pairing each concrete property with the precise evidence required to validate it. For a `read_file` invocation, a schema validator checks that the payload contains only supported keys and provides a string-valued `path`. A passing result proves syntactic schema membership—assuming the validator implements the schema dialect faithfully and inspects the exact object forwarded to execution. Proving that the target file exists requires probing the filesystem, while establishing access rights requires evaluating the agent's current security grant against host operating system policies.
-
-Static analysis and dynamic testing support fundamentally different operational claims. A compiler verifies type consistency and language constraints under fixed configuration flags, whereas a linter detects anti-patterns through static heuristic rules. Dynamic test suites execute concrete code paths and record runtime assertions. In the connection-pool scenario, a test that exercises single-threaded checkout and release operations provides zero empirical evidence regarding thread safety under concurrent contention. Even a repeatable, passing test verdict can leave critical execution paths completely unexercised.
-
-Architecturally, these boundaries require the execution runtime to treat generated model output strictly as untrusted data rather than direct control flow. A candidate tool call remains passive data until an authorized tool handler ingests, verifies, and dispatches it. That handler enforces access boundaries at execution time,[^fn-complete-mediation-handler] completely independent of any self-assertions the model makes regarding its own permissions. Similarly, evaluating an untrusted patch requires running arbitrary machine instructions, demanding isolated execution sandboxes even during preliminary test runs.
-
-[^fn-complete-mediation-handler]: **Complete Mediation**: One of the design principles that @saltzer1975 set out for protection systems: every access to every object is checked against current authority at the moment of access, not remembered from an earlier decision. The tool handler applies the same rule to a model's proposal, so a path validated when the request was composed is checked again when the read executes, closing the gap in which the grant or the file could have changed. \index{Complete mediation!tool handler}
-
-### Self-review and external evidence {#sec-vol3-foundation-model-self-review-evidence}
-
-Prompts that instruct a model to inspect or refine its own patch can surface shallow syntax errors or expose omitted edge cases. Crucially, however, model-based self-review is simply another autoregressive generation step sampled from the same parameter distribution and conditioned on the same incomplete context. When the generator operates under an incorrect assumption about an API or concurrency model, a self-review prompt typically reinforces that assumption rather than exposing it. Re-prompting does not create statistical independence. Empirical evaluations of self-correction without external grounding demonstrate this limit clearly: across complex reasoning tasks, models prompted to inspect their own answers rarely improve their accuracy and frequently introduce regressions [@huang2024cannot].
-
-Engineers must maintain a firm conceptual separation between candidate refinement and formal property certification. A model-generated critique can guide iterative search, but deterministic external tools—compilers, linters, sandboxed test harnesses, and kernel access-control checks—must provide the definitive ground truth. No critique emitted by a model, whether self-generated or evaluated by an auxiliary judge model, carries the authority to validate a security boundary or approve deployment. When systems do employ learned judge models as secondary evaluators, their verdicts must be treated as noisy signals with measurable false-positive rates and known systematic biases, such as preferences for verbose explanations or specific candidate positions [@zheng2023judging].
-
-A conditional-probability calculation clarifies why fallible verification gates leave residual risk. The following model parameters reflect a hypothetical scenario evaluating a candidate patch against a concurrency specification:
-
-```{python}
-#| label: calc-vol3-candidate-checker-posterior
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ RESIDUAL DEFECT RATE AFTER A FALLIBLE CHECK (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-foundation-model-continuations, hypothetical checker case.
-# │ Goal: Quantify defects among candidates receiving a passing verdict.
-# │ Show: The conditional defect rate under explicitly assumed checker rates.
-# │ How: Apply Bayes' rule; no independence assumption between repeated checks.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-
-class CandidateCheckerPosterior:
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    defect_rate = 0.18  # hypothetical share violating the specified property
-    false_accept_rate = 0.65  # hypothetical P(PASS | Defective)
-    valid_accept_rate = 0.85  # hypothetical P(PASS | Valid)
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    defective_pass = false_accept_rate * defect_rate
-    valid_pass = valid_accept_rate * (1 - defect_rate)
-    posterior = defective_pass / (defective_pass + valid_pass)
-    catch_rate = 1 - false_accept_rate  # share of defective patches rejected
-    valid_reject = 1 - valid_accept_rate  # share of valid patches rejected
-    fa_half = false_accept_rate / 2  # sensitivity: a checker with half the false-accept rate
-    posterior_half = (fa_half * defect_rate) / (fa_half * defect_rate + valid_pass)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(posterior - 0.1437346437346437) < 1e-12, "The assumed rates must leave about 14.37 percent defective passes")
-    check(0 < posterior < defect_rate, "This checker reduces but does not eliminate the assumed defect rate")
-    check(posterior_half < posterior / 1.5, "Halving false accepts must cut the residual substantially")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    defect_pct_str = fmt_percent(defect_rate, precision=0, style="prose")
-    false_accept_str = fmt(false_accept_rate, precision=2, commas=False)
-    valid_accept_str = fmt(valid_accept_rate, precision=2, commas=False)
-    posterior_pct_str = fmt_percent(posterior, precision=2, style="prose")
-    catch_pct_str = fmt_percent(catch_rate, precision=0, style="prose")
-    valid_reject_pct_str = fmt_percent(valid_reject, precision=0, style="prose")
-    fa_half_str = fmt(fa_half, precision=3, commas=False)
-    posterior_half_pct_str = fmt_percent(posterior_half, precision=1, style="prose")
-    substitution_math = fmt_math(
-        rf"\frac{{{false_accept_rate} \times {defect_rate}}}"
-        rf"{{({false_accept_rate} \times {defect_rate}) + "
-        rf"({valid_accept_rate} \times (1 - {defect_rate}))}}"
-        rf"\approx {posterior * 100:.2f}\%"
-    )
-```
-
-::: {#psp-02-the-fallacy-of-correlated-self-verification .callout-perspective title="What a passing verdict leaves unresolved"}
-
-Suppose `{python} CandidateCheckerPosterior.defect_pct_str` of generated patches violate a specified behavioral property. For this population, assume the checker passes defective patches with probability $\VerifierFalseacceptance =$ `{python} CandidateCheckerPosterior.false_accept_str` and passes valid patches with probability `{python} CandidateCheckerPosterior.valid_accept_str`. Let $\SmallConstant$ denote the defect rate and $\VerifierFalseacceptance$ the false-accept rate. Bayes' rule gives the fraction of defective patches among the passing results:
-
-$$\Pr(\text{Defective} \mid \text{PASS}) = \frac{\VerifierFalseacceptance \cdot \SmallConstant}{\VerifierFalseacceptance \cdot \SmallConstant + \Pr(\text{PASS} \mid \text{Valid}) \cdot (1 - \SmallConstant)}$$
-
-Substituting the assumed rates gives `{python} CandidateCheckerPosterior.substitution_math`. The defect share among passing patches falls only from `{python} CandidateCheckerPosterior.defect_pct_str` to `{python} CandidateCheckerPosterior.posterior_pct_str`, because the checker rejects `{python} CandidateCheckerPosterior.catch_pct_str` of defective patches while also rejecting `{python} CandidateCheckerPosterior.valid_reject_pct_str` of valid ones. The lever is $\VerifierFalseacceptance$: a checker with half the false-accept rate, `{python} CandidateCheckerPosterior.fa_half_str`, lowers the residual to `{python} CandidateCheckerPosterior.posterior_half_pct_str`. Repeating the same check buys no such guarantee, because its behavior on the surviving candidates is correlated with the first pass. Every defective patch that passes also inflates the apparent acceptance probability $\AcceptanceProbability$ in the cost per accepted task (@eq-vol3-cost-per-accepted-task).
-
-A sound checker for the exact property drives $\VerifierFalseacceptance$ to zero under its assumptions. Determinism alone does not supply soundness, and soundness for schema membership does not extend to patch behavior. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) underscores a primary design rule: select each validation gate based on the specific property it establishes and its false-accept rate, letting the task contract determine what residual defect rate the system can safely tolerate.
-
-:::
-
-### A pipeline of scoped checks {#sec-vol3-foundation-model-scoped-check-pipeline}
-
-In production systems, executing full end-to-end integration tests or sandboxed reproduction scripts is orders of magnitude more expensive than parsing JSON or running a static linter. Consequently, the runtime organizes candidate verification into an ascending cascade, rejecting malformed or unauthorized requests early before spending compute on deep behavioral evaluation. Staging checks by cost optimizes throughput, but each gate validates an orthogonal property rather than an increasingly strict approximation of overall correctness. @Tbl-verification-layers categorizes these verification layers alongside their computational overhead and formal evidentiary boundaries.
-
-| Verification layer        | Gate mechanism                                   | Property or evidence                                             | Cost to account for                            | Limit of the claim                                                |
-|:--------------------------|:-------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------|:------------------------------------------------------------------|
-| **Syntax and schema**     | Parser and schema validator                      | Required fields, supported types, and declared value constraints | Parsing and validation                         | Does not establish permission or correct values beyond the schema |
-| **Authorization**         | Task permission check and enforcing tool handler | Requested operation and target fall within the current grant     | Policy lookup and mediation                    | Permission does not establish that the operation serves the goal  |
-| **Static analysis**       | Compiler, type checker, or linter                | Properties covered by the selected analysis and configuration    | Analysis of the candidate and its dependencies | Coverage depends on the checker and language assumptions          |
-| **Behavioral evaluation** | Controlled execution and designated tests        | Observed outcomes for the exercised inputs and conditions        | Environment preparation and execution          | Passing cases do not establish untested behavior                  |
-: **Scoped candidate checks**: A passing result supports a named claim, not every property needed for task acceptance. The runtime preserves these distinctions when composing the checks. {#tbl-verification-layers tbl-colwidths="[17,19,24,16,24]"}
-
-Consider how this tiered pipeline evaluates an inspection request. Before dispatching `read_file`, the runtime verifies that the candidate stream completed normally, confirms that the argument payload conforms to schema types, and checks that the targeted path falls within current sandbox grants. Executing the read operation simply feeds environmental state back to the agent for subsequent reasoning cycles rather than completing the overall bug fix. Conversely, when evaluating a proposed patch, the pipeline validates patch syntax and file targets, applies the diff inside an isolated scratch workspace, and triggers targeted unit tests. Final acceptance adheres to the task contract's explicit evidentiary standard, escalating to human review when automated checks cannot decisively settle safety or correctness criteria.
-
-Every stage in this pipeline assumes an explicit understanding of what the upstream model service returned. Standard parsers evaluate syntax in isolation; a JSON parser, for example, cannot distinguish between a fully formed response and a truncated string that happens to close its braces by coincidence. A passing check must never promote an interrupted generation into a verified candidate. Instead, the runtime relies on the model invocation contract—incorporating stop reasons, token length limits, and explicit finish metadata—to certify that a candidate sequence is genuinely complete before initiating downstream verification.
+Ultimately, an agent runtime ingests candidate tokens produced under a specific decoding configuration and terminated by a specific boundary condition. Even an uncorrupted, high-probability `read_file` proposal might reference an absent path or violate sandbox directory restrictions. The autoregressive generation process determines how a candidate sequence is synthesized; Because generation can halt unpredictably due to limits or timeouts, the system's first requirement is not to verify the text, but to establish whether the generation finished cleanly. This requires a formal invocation contract.
 
 ## The Invocation Contract {#sec-vol3-foundation-model-contract}
 
@@ -791,6 +580,112 @@ A repair agent uses constrained decoding for file-reading proposals. Its runtime
 :::
 
 Constrained decoding eliminates an entire class of syntax failures before dispatch, but a structurally valid invocation still requires sufficient compute budget to reach completion and external empirical evidence to justify execution. An agent architecture must account for schema compilation, input prompt processing, and token generation as distinct latency and cost factors. Balancing these overheads against the risk of unconstrained retries determines whether grammar-guided decoding delivers a net performance and reliability gain for a given task.
+
+## Candidate Sequence Verification {#sec-vol3-foundation-model-continuations}
+
+Consider an automated repair agent that issues a tool call to `read_file` with `path` set to `src/pool.py`. The generated payload might conform strictly to the advertised schema, but syntactic conformance guarantees nothing about the underlying filesystem. The target file might not exist in the active workspace. Worse, a path pointing to private credential files outside the repository would parse with equal syntactic perfection. Generative inference produces a candidate token sequence; neither high statistical likelihood nor schema conformance determines whether the runtime environment can safely act on it.
+
+The same distinction applies when the model emits a source code patch rather than an inspection request. A candidate patch can parse cleanly, compile against existing headers, and pass a sequential unit test while leaving the underlying race condition untouched. Each verification check answers a narrow, specific question rather than certifying overall task satisfaction. Robust candidate verification systems must track these separate dimensions of evidence explicitly rather than collapsing them into a single, undifferentiated notion of validity.
+
+### Likelihood and checked properties {#sec-vol3-foundation-model-likelihood-checked-properties}
+
+Autoregressive generation assigns probabilities based on patterns in training data and context tokens, reflecting linguistic familiarity rather than operational truth. Whether a generated path exists on disk, whether the caller holds read permissions, and whether an altered function preserves system invariants depend entirely on the operational environment and the task contract. An obsolete or nonexistent path often receives substantial model probability simply because it matches common directory conventions in the training corpus.
+
+Sound verification begins by pairing each concrete property with the precise evidence required to validate it. For a `read_file` invocation, a schema validator checks that the payload contains only supported keys and provides a string-valued `path`. A passing result proves syntactic schema membership—assuming the validator implements the schema dialect faithfully and inspects the exact object forwarded to execution. Proving that the target file exists requires probing the filesystem, while establishing access rights requires evaluating the agent's current security grant against host operating system policies.
+
+Static analysis and dynamic testing support fundamentally different operational claims. A compiler verifies type consistency and language constraints under fixed configuration flags, whereas a linter detects anti-patterns through static heuristic rules. Dynamic test suites execute concrete code paths and record runtime assertions. In the connection-pool scenario, a test that exercises single-threaded checkout and release operations provides zero empirical evidence regarding thread safety under concurrent contention. Even a repeatable, passing test verdict can leave critical execution paths completely unexercised.
+
+Architecturally, these boundaries require the execution runtime to treat generated model output strictly as untrusted data rather than direct control flow. A candidate tool call remains passive data until an authorized tool handler ingests, verifies, and dispatches it. That handler enforces access boundaries at execution time,[^fn-complete-mediation-handler] completely independent of any self-assertions the model makes regarding its own permissions. Similarly, evaluating an untrusted patch requires running arbitrary machine instructions, demanding isolated execution sandboxes even during preliminary test runs.
+
+[^fn-complete-mediation-handler]: **Complete Mediation**: One of the design principles that @saltzer1975 set out for protection systems: every access to every object is checked against current authority at the moment of access, not remembered from an earlier decision. The tool handler applies the same rule to a model's proposal, so a path validated when the request was composed is checked again when the read executes, closing the gap in which the grant or the file could have changed. \index{Complete mediation!tool handler}
+
+### Self-review and external evidence {#sec-vol3-foundation-model-self-review-evidence}
+
+Prompts that instruct a model to inspect or refine its own patch can surface shallow syntax errors or expose omitted edge cases. Crucially, however, model-based self-review is simply another autoregressive generation step sampled from the same parameter distribution and conditioned on the same incomplete context. When the generator operates under an incorrect assumption about an API or concurrency model, a self-review prompt typically reinforces that assumption rather than exposing it. Re-prompting does not create statistical independence. Empirical evaluations of self-correction without external grounding demonstrate this limit clearly: across complex reasoning tasks, models prompted to inspect their own answers rarely improve their accuracy and frequently introduce regressions [@huang2024cannot].
+
+Engineers must maintain a firm conceptual separation between candidate refinement and formal property certification. A model-generated critique can guide iterative search, but deterministic external tools—compilers, linters, sandboxed test harnesses, and kernel access-control checks—must provide the definitive ground truth. No critique emitted by a model, whether self-generated or evaluated by an auxiliary judge model, carries the authority to validate a security boundary or approve deployment. When systems do employ learned judge models as secondary evaluators, their verdicts must be treated as noisy signals with measurable false-positive rates and known systematic biases, such as preferences for verbose explanations or specific candidate positions [@zheng2023judging].
+
+A conditional-probability calculation clarifies why fallible verification gates leave residual risk. The following model parameters reflect a hypothetical scenario evaluating a candidate patch against a concurrency specification:
+
+```{python}
+#| label: calc-vol3-candidate-checker-posterior
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESIDUAL DEFECT RATE AFTER A FALLIBLE CHECK (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-foundation-model-continuations, hypothetical checker case.
+# │ Goal: Quantify defects among candidates receiving a passing verdict.
+# │ Show: The conditional defect rate under explicitly assumed checker rates.
+# │ How: Apply Bayes' rule; no independence assumption between repeated checks.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class CandidateCheckerPosterior:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    defect_rate = 0.18  # hypothetical share violating the specified property
+    false_accept_rate = 0.65  # hypothetical P(PASS | Defective)
+    valid_accept_rate = 0.85  # hypothetical P(PASS | Valid)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    defective_pass = false_accept_rate * defect_rate
+    valid_pass = valid_accept_rate * (1 - defect_rate)
+    posterior = defective_pass / (defective_pass + valid_pass)
+    catch_rate = 1 - false_accept_rate  # share of defective patches rejected
+    valid_reject = 1 - valid_accept_rate  # share of valid patches rejected
+    fa_half = false_accept_rate / 2  # sensitivity: a checker with half the false-accept rate
+    posterior_half = (fa_half * defect_rate) / (fa_half * defect_rate + valid_pass)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(posterior - 0.1437346437346437) < 1e-12, "The assumed rates must leave about 14.37 percent defective passes")
+    check(0 < posterior < defect_rate, "This checker reduces but does not eliminate the assumed defect rate")
+    check(posterior_half < posterior / 1.5, "Halving false accepts must cut the residual substantially")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    defect_pct_str = fmt_percent(defect_rate, precision=0, style="prose")
+    false_accept_str = fmt(false_accept_rate, precision=2, commas=False)
+    valid_accept_str = fmt(valid_accept_rate, precision=2, commas=False)
+    posterior_pct_str = fmt_percent(posterior, precision=2, style="prose")
+    catch_pct_str = fmt_percent(catch_rate, precision=0, style="prose")
+    valid_reject_pct_str = fmt_percent(valid_reject, precision=0, style="prose")
+    fa_half_str = fmt(fa_half, precision=3, commas=False)
+    posterior_half_pct_str = fmt_percent(posterior_half, precision=1, style="prose")
+    substitution_math = fmt_math(
+        rf"\frac{{{false_accept_rate} \times {defect_rate}}}"
+        rf"{{({false_accept_rate} \times {defect_rate}) + "
+        rf"({valid_accept_rate} \times (1 - {defect_rate}))}}"
+        rf"\approx {posterior * 100:.2f}\%"
+    )
+```
+
+::: {#psp-02-the-fallacy-of-correlated-self-verification .callout-perspective title="What a passing verdict leaves unresolved"}
+
+Suppose `{python} CandidateCheckerPosterior.defect_pct_str` of generated patches violate a specified behavioral property. For this population, assume the checker passes defective patches with probability $\VerifierFalseacceptance =$ `{python} CandidateCheckerPosterior.false_accept_str` and passes valid patches with probability `{python} CandidateCheckerPosterior.valid_accept_str`. Let $\SmallConstant$ denote the defect rate and $\VerifierFalseacceptance$ the false-accept rate. Bayes' rule gives the fraction of defective patches among the passing results:
+
+$$\Pr(\text{Defective} \mid \text{PASS}) = \frac{\VerifierFalseacceptance \cdot \SmallConstant}{\VerifierFalseacceptance \cdot \SmallConstant + \Pr(\text{PASS} \mid \text{Valid}) \cdot (1 - \SmallConstant)}$$
+
+Substituting the assumed rates gives `{python} CandidateCheckerPosterior.substitution_math`. The defect share among passing patches falls only from `{python} CandidateCheckerPosterior.defect_pct_str` to `{python} CandidateCheckerPosterior.posterior_pct_str`, because the checker rejects `{python} CandidateCheckerPosterior.catch_pct_str` of defective patches while also rejecting `{python} CandidateCheckerPosterior.valid_reject_pct_str` of valid ones. The lever is $\VerifierFalseacceptance$: a checker with half the false-accept rate, `{python} CandidateCheckerPosterior.fa_half_str`, lowers the residual to `{python} CandidateCheckerPosterior.posterior_half_pct_str`. Repeating the same check buys no such guarantee, because its behavior on the surviving candidates is correlated with the first pass. Every defective patch that passes also inflates the apparent acceptance probability $\AcceptanceProbability$ in the cost per accepted task (@eq-vol3-cost-per-accepted-task).
+
+A sound checker for the exact property drives $\VerifierFalseacceptance$ to zero under its assumptions. Determinism alone does not supply soundness, and soundness for schema membership does not extend to patch behavior. The verification asymmetry (principle \ref{pri-vol3-verification-asymmetry}) underscores a primary design rule: select each validation gate based on the specific property it establishes and its false-accept rate, letting the task contract determine what residual defect rate the system can safely tolerate.
+
+:::
+
+### A pipeline of scoped checks {#sec-vol3-foundation-model-scoped-check-pipeline}
+
+In production systems, executing full end-to-end integration tests or sandboxed reproduction scripts is orders of magnitude more expensive than parsing JSON or running a static linter. Consequently, the runtime organizes candidate verification into an ascending cascade, rejecting malformed or unauthorized requests early before spending compute on deep behavioral evaluation. Staging checks by cost optimizes throughput, but each gate validates an orthogonal property rather than an increasingly strict approximation of overall correctness. @Tbl-verification-layers categorizes these verification layers alongside their computational overhead and formal evidentiary boundaries.
+
+| Verification layer        | Gate mechanism                                   | Property or evidence                                             | Cost to account for                            | Limit of the claim                                                |
+|:--------------------------|:-------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------|:------------------------------------------------------------------|
+| **Syntax and schema**     | Parser and schema validator                      | Required fields, supported types, and declared value constraints | Parsing and validation                         | Does not establish permission or correct values beyond the schema |
+| **Authorization**         | Task permission check and enforcing tool handler | Requested operation and target fall within the current grant     | Policy lookup and mediation                    | Permission does not establish that the operation serves the goal  |
+| **Static analysis**       | Compiler, type checker, or linter                | Properties covered by the selected analysis and configuration    | Analysis of the candidate and its dependencies | Coverage depends on the checker and language assumptions          |
+| **Behavioral evaluation** | Controlled execution and designated tests        | Observed outcomes for the exercised inputs and conditions        | Environment preparation and execution          | Passing cases do not establish untested behavior                  |
+: **Scoped candidate checks**: A passing result supports a named claim, not every property needed for task acceptance. The runtime preserves these distinctions when composing the checks. {#tbl-verification-layers tbl-colwidths="[17,19,24,16,24]"}
+
+Consider how this tiered pipeline evaluates an inspection request. Before dispatching `read_file`, the runtime verifies that the candidate stream completed normally, confirms that the argument payload conforms to schema types, and checks that the targeted path falls within current sandbox grants. Executing the read operation simply feeds environmental state back to the agent for subsequent reasoning cycles rather than completing the overall bug fix. Conversely, when evaluating a proposed patch, the pipeline validates patch syntax and file targets, applies the diff inside an isolated scratch workspace, and triggers targeted unit tests. Final acceptance adheres to the task contract's explicit evidentiary standard, escalating to human review when automated checks cannot decisively settle safety or correctness criteria.
+
+Every stage in this pipeline assumes an explicit understanding of what the upstream model service returned. Standard parsers evaluate syntax in isolation; a JSON parser, for example, cannot distinguish between a fully formed response and a truncated string that happens to close its braces by coincidence. A passing check must never promote an interrupted generation into a verified candidate. Instead, the runtime relies on the model invocation contract—incorporating stop reasons, token length limits, and explicit finish metadata—to certify that a candidate sequence is genuinely complete before initiating downstream verification.
+
+While these rigorous verification pipelines determine task success, generating and validating these candidates consumes substantial computational resources.
 
 ## The Cost of a Model Call {#sec-vol3-foundation-model-cost}
 
@@ -1060,10 +955,6 @@ class LatencyByArchetype:
 
 Retaining intermediate activations in memory introduces an explicit storage cost. Caching a long prefix occupies GPU high-bandwidth memory that cannot be allocated to concurrent request batches. Holding that KV state active across long external tool invocations pins valuable memory while the GPU sits idle. When memory pressure triggers cache eviction, the serving system discards intermediate attention activations rather than the underlying context; the agent runtime can always reconstruct the prompt from its local logs, albeit at the cost of recomputing the prefill forward pass. Context selection and KV-cache management thus represent two distinct system decisions: context engineering determines what evidence the model observes, whereas cache retention policies govern whether storing derived attention state is worth the memory footprint.
 
-::: {.column-margin .margin-pointer}
-↪ The choice to keep, move, or drop attention state held through a tool wait is developed in @sec-vol3-kvcache-swapping.
-:::
-
 Wall-clock latency, hardware compute work, and billed API cost represent distinct accounting dimensions. Commercial inference providers typically bill uncached prompt tokens, cached prompt tokens, and generated completion tokens at widely divergent rates, whereas on-premise infrastructure amortizes fixed hardware acquisition and power costs across dynamic utilization. Consequently, token-count ratios do not directly mirror monetary expense. At the full task horizon, end-to-end expenditure also encompasses failed tool executions, retry attempts, sandboxed validation runs, and idle accelerator reservations during tool waits. The analytical per-call estimate provides only one fundamental building block of this comprehensive systems budget.
 
 ::: {#chk-02-price-of-a-call .callout-checkpoint title="Pricing calls and trajectories"}
@@ -1097,10 +988,6 @@ The constraint mechanism introduces a third independent axis. An agent architect
 ### Matched-budget comparison {#sec-vol3-foundation-model-matched-budget-comparison}
 
 To evaluate competing interfaces fairly, an experimental harness must enforce matched budgets across all trials. In our connection-pool repair benchmark, every trial starts from an identical repository snapshot and defect description. We hold constant the model weights, sampling parameters, diagnostic tooling, and acceptance test suites. Crucially, each interface operates under identical resource ceilings (such as maximum wall-clock time and token allocations) and the same retry policy. Instruction prompts and response payloads will naturally exhibit different token counts, because prompt overhead and verbosity are intrinsic properties of the interface under test. Matched budgets do not require equal token consumption across designs; rather, they subject each candidate to identical operating boundaries and accounting rules.
-
-::: {.column-margin .margin-pointer}
-↪ Matched-budget comparison of complete agent policies, charging every initiated trial to the cost per accepted task, is developed in @sec-vol3-evaluation-matched-budgets.
-:::
 
 The accounting boundary must be defined explicitly. An invocation deadline measures single-turn inference latency, concluding when the runtime receives and normalizes the model's generated response. A task deadline governs the complete agent lifecycle, including payload parsing, workspace patching, test compilation, and test execution. Every retry, unparsable output, and failing test execution draws against this cumulative task budget. Benchmarks that grant free retries following malformed responses subsidize brittle interfaces and corrupt comparative latency metrics.
 
@@ -1184,7 +1071,7 @@ A status of `COMPLETED` merely indicates that the serving engine finished genera
 ::: {.fallacy-pitfall}
 **Fallacy**: *Valid JSON means a safe and correct tool call.*
 
-A JSON object satisfies its schema as long as its fields match the declared types, regardless of whether the payload is safe, authorized, or logically sound. A tool call containing a file path string conforms to schema validation whether that path names the intended target, an outdated file, or an unauthorized directory outside the permitted workspace. As outlined in @tbl-vol3-verification-dimensions, schema checks establish structural validity, whereas authorization policies and task evidence govern security boundaries and functional correctness. The same gap recurs at the behavioral level: a test checker that exhibits a false accept rate of `{python} CandidateCheckerPosterior.false_accept_str` on defective patches still leaves `{python} CandidateCheckerPosterior.posterior_pct_str` of its passing candidates defective in practice. Furthermore, under grammar-constrained decoding, an interrupted sequence remains an incomplete, broken payload even if every token emitted prior to truncation was structurally legal.
+A JSON object satisfies its schema as long as its fields match the declared types, regardless of whether the payload is safe, authorized, or logically sound. A tool call containing a file path string conforms to schema validation whether that path names the intended target, an outdated file, or an unauthorized directory outside the permitted workspace. As outlined in @tbl-verification-layers, schema checks establish structural validity, whereas authorization policies and task evidence govern security boundaries and functional correctness. The same gap recurs at the behavioral level: a test checker that exhibits a false accept rate of `{python} CandidateCheckerPosterior.false_accept_str` on defective patches still leaves `{python} CandidateCheckerPosterior.posterior_pct_str` of its passing candidates defective in practice. Furthermore, under grammar-constrained decoding, an interrupted sequence remains an incomplete, broken payload even if every token emitted prior to truncation was structurally legal.
 :::
 
 ::: {.fallacy-pitfall}
@@ -1211,7 +1098,7 @@ A repair agent interacts with a foundation model through a strictly bounded requ
 |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------|:-----------------------------------------------|
 | $\SequenceLength \le \ContextWindow - \OutputLimit$                                                                                                                                         | Admissibility of a serialized request while preserving required output headroom                  | @sec-vol3-foundation-model-tokenization        |
 | $\Pr(y_{1:K} \mid x_{1:S}) = \prod_{t=1}^{K} \Pr(y_t \mid x_{1:S}, y_{1:t-1})$                                                                                                              | Sequential probability factorization defining token-by-token autoregressive generation           | @eq-autoregressive-factorization               |
-| $\Pr(y_t = v \mid x_{1:S}, y_{<t}) \propto \exp\left(z_{t, v} / \tau_{\text{temp}}\right)$                                                                                                  | Temperature scaling trading sample diversity against distribution concentration                  | @eq-temperature-softmax                        |
+| $\Pr(y_t = v \mid x_{1:S}, y_{<t}) \propto \exp\left(z_{t, v} / \tau_{\text{temp}}\right)$                                                                                                  | Temperature scaling trading sample diversity against distribution concentration                  | eq-temperature-softmax                         |
 | $p_{t, i} \propto \exp(z_{t, i})$ for $i \in \mathcal{V}_{\text{valid}}(q_t)$, else $0$                                                                                                     | Token logits masked by a grammar constraint to enforce syntactic form                            | @sec-vol3-foundation-model-grammar-constrained |
 | $\Pr(\text{Defective} \mid \text{PASS}) = \frac{\VerifierFalseacceptance \SmallConstant}{\VerifierFalseacceptance \SmallConstant + \Pr(\text{PASS} \mid \text{Valid})(1 - \SmallConstant)}$ | Residual defect probability among candidate outputs accepted by a fallible checker               | @sec-vol3-foundation-model-continuations       |
 | $\CallLatency = T_{\text{prep}} + T_{\text{queue}} + T_{\text{prefill}} + \CodecDecodeTime + T_{\text{post}}$                                                                               | Stage decomposition of end-to-end invocation latency identifying operational bottlenecks         | @eq-vol3-call-latency                          |
@@ -1277,9 +1164,8 @@ All quantities below are hypothetical problem givens, chosen to be round, and de
 
 **5. Ordering fallible checks (Intermediate).** Suppose 25 percent of generated connection-pool patches violate the required concurrency property. Checker A (compile and unit tests) passes defective patches with $\VerifierFalseacceptance = 0.5$ and valid ones with probability 0.9, at \$0.02 per run. Checker B (a concurrency stress test) has $\VerifierFalseacceptance = 0.2$ and passes valid patches with probability 0.8, at \$0.30 per run. The task contract tolerates at most 5 percent defective patches among those accepted.
 
-(c) Measurement shows that among defective patches that pass A, B passes 40 percent rather than 20 percent, because both miss races that the unit tests never schedule. Recompute the residual, state whether the pipeline still meets the contract, and propose one change to the checking design that attacks the correlation rather than adding another run of either checker.
-(b) Assume the two checkers' verdicts are conditionally independent given a patch's validity. Compute the residual for requiring both, the fraction of candidates accepted, and the expected checking cost per candidate when A runs first and B runs only on A's passes, and when B runs first.
-(c) Measurement shows that among defective patches that pass A, B passes 40 percent rather than 20 percent, because both miss races that the unit tests never schedule. Recompute the residual, state whether the pipeline still meets the contract, and propose one change to the checking design that attacks the correlation rather than adding another run of either checker.
+(a) Assume the two checkers' verdicts are conditionally independent given a patch's validity. Compute the residual for requiring both, the fraction of candidates accepted, and the expected checking cost per candidate when A runs first and B runs only on A's passes, and when B runs first.
+(b) Measurement shows that among defective patches that pass A, B passes 40 percent rather than 20 percent, because both miss races that the unit tests never schedule. Recompute the residual, state whether the pipeline still meets the contract, and propose one change to the checking design that attacks the correlation rather than adding another run of either checker.
 
 **6. Reject early, or never emit (Intermediate).** A tool-calling service handles 10,000 proposals a day with prompts of 8,000 tokens and replies averaging 400 tokens, at $t_{\text{prefill}} = 80$ µs and $\PertokenDecodeTime = 10$ ms per token. Of these proposals, 6 percent violate the argument schema; the violation first appears at decode step 40 on average, and such a response otherwise runs 600 tokens before stopping. Every failed attempt is followed by one retry, which you may assume succeeds. Three designs are proposed: validate after completion; validate the stream and cancel at the first illegal token (@sec-vol3-foundation-model-contract); or grammar-constrained decoding, which removes schema violations but adds 0.3 ms of mask work to every generated token.
 
