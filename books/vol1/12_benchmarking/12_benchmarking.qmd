@@ -306,542 +306,6 @@ Standardization transforms these empirical lessons into a shared engineering met
 
 : **Benchmark Evolution**: Evolution of computing benchmarks from synthetic operations to ML-specific evaluation. Each generation addressed limitations of its predecessors, culminating in MLPerf's synthesis of representative workloads, multi-objective metrics, and integrated system measurement. {#tbl-benchmark-evolution tbl-colwidths="[12,9,23,20,36]"}
 
-## Model and Data Evaluation {#sec-benchmarking-model-data-benchmarking-e0ca}
-
-System benchmarks confirm that hardware delivers promised training throughput and inference latency, but hardware validation alone cannot ensure deployment success. Model and data evaluation verify that compression preserves accuracy and that training data enables robust generalization. Historical progress on ImageNet established the accuracy trajectory against which model compression techniques are evaluated (@fig-imagenet-challenge).
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: ResNet footnote — MLPerf reference-workload spec.
-# │ Goal: Pin ResNet-50 parameter count and per-image FLOP profile to the model registry.
-# └───────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.core.units import GFLOPs
-from mlsysim.fmt import fmt_params, fmt_flops, check
-
-class ResNetSpec:
-    """ResNet-50 canonical parameter and FLOP profile for the MLPerf reference footnote."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params = Models.Vision.ResNet50.parameters
-    flops = Models.Vision.ResNet50.inference_flops
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(20e6 <= float(params.magnitude) <= 30e6, "ResNet-50 params should be ~25M.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    resnet_params_str = fmt_params(params)
-    resnet_gflops_str = fmt_flops(flops, unit=GFLOPs, precision=1, commas=False)
-```
-
-::: {#fig-imagenet-challenge fig-env="figure" fig-pos="htb" fig-cap="**ImageNet Challenge Progression**: AlexNet marks the largest one-year drop in the series; ZFNet, VGGNet, GoogLeNet, and ResNet extend that decline, defining the accuracy trajectory against which later compression trade-offs are judged. Sources: [@russakovsky2015; @krizhevsky2012imagenet; @he2016]." fig-alt="Line graph of ImageNet top-5 error from 2010 to 2015, with points labeled Baseline in 2010 and 2011, AlexNet in 2012, ZFNet in 2013, VGGNet and GoogLeNet in 2014, and ResNet in 2015; error falls from 28.2 percent to 3.57 percent."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ IMAGENET CHALLENGE PROGRESSION FIGURE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-imagenet-challenge—line plot of ImageNet top-5 error rate
-# │          from 2010 (28.2%) to 2015 (3.57%) with model labels
-# │
-# │ Goal: Visualize the historical progression of ImageNet benchmarks.
-# │ Show: The transition from accuracy-only to multi-dimensional evaluation.
-# │ How: Plot top-5 error rates for architectural milestones (AlexNet to ResNet).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Visualize the historical progression of ImageNet benchmarks.
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.1))
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-years = [2010, 2011, 2012, 2013, 2014, 2014, 2015]
-models = ["Baseline", "Baseline", "AlexNet", "ZFNet", "VGGNet", "GoogLeNet", "ResNet"]
-errors = [28.2, 25.8, 16.4, 11.7, 7.3, 6.7, 3.57]
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(years, errors, color=COLORS['BlueLine'], linewidth=1.5, zorder=1)
-ax.scatter(years, errors, color=COLORS['RedLine'], s=50, zorder=2, edgecolors='white')
-
-# -------------------------------------------------------------------------
-# Default Label Style
-# -------------------------------------------------------------------------
-default_label_style = {
-    "xytext": (5, 8),
-    "textcoords": "offset points",
-    "fontsize": 9,
-    "ha": "left",
-    "va": "bottom",
-    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
-}
-
-# -------------------------------------------------------------------------
-# Individual Label Styles by Point Index
-# Indices: 0, 1, 2, 3, 4, 5, 6
-# -------------------------------------------------------------------------
-label_styles = {
-    0: {"xytext": (5, 2), "ha": "left"},  # Baseline (2010)
-    1: {"xytext": (5, 2), "ha": "left"},  # Baseline (2011)
-    2: {"xytext": (5, 2), "ha": "left"},  # AlexNet
-    3: {"xytext": (5, 2), "ha": "left"},  # ZFNet
-    4: {"xytext": (-5, 5), "ha": "left"},  # VGGNet
-    5: {"xytext": (5, -6), "ha": "right", "va": "top"},  # GoogLeNet
-    6: {"xytext": (5, -6), "ha": "right", "va": "top"},  # ResNet
-}
-
-for i, (year, model, error) in enumerate(zip(years, models, errors)):
-    style = default_label_style.copy()
-    style.update(label_styles.get(i, {}))
-    ax.annotate(model, (year, error), **style)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_ylim(0, 30)
-ax.set_xlabel('Year')
-ax.set_ylabel('Top-5 Error (%)')
-plt.show()
-plt.close()
-```
-
-:::
-
-
-When evaluating compressed models, a Pareto frontier identifies non-dominated choices that balance efficiency against accuracy. Aggregate metrics often hide calibration and tail-case degradation, as shown for MobileNetV2 in @tbl-benchmarking-mobilenet-int8-validation.
-
-::: {.column-margin}
-![](images/svg/vol1_benchmarking_margin_004.svg){width="100%" fig-alt="Tiny Pareto frontier with one dominated point."}
-
-*A dominated model is no better on either axis and worse on at least one.*
-:::
-
-```{python}
-#| echo: false
-#| label: mobilenet-int8-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOBILENET INT8 COMPRESSION METRICS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "MobileNetV2 INT8 Compression"—complete validation
-# │          protocol for INT8 quantization of MobileNetV2
-# │
-# │ Goal: Demonstrate the necessity of multi-dimensional compression benchmarks.
-# │ Show: That INT8 quantization preserves accuracy while yielding 4× size reduction.
-# │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.core.units import Mparam, BYTES_FP32, BYTES_INT8, MB
-from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
-
-class MobileNetINT8Calc:
-    """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _mobilenet_v2 = Models.Vision.MobileNetV2
-    acc_fp32 = 71.8
-    params = _mobilenet_v2.parameters
-    size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
-    size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
-    acc_int8 = 70.9
-    top5_fp32 = 91.0
-    top5_int8 = 90.4
-    ece_fp32 = 0.031
-    ece_int8 = 0.089
-    edge_fp32 = 68.2
-    edge_int8 = 61.4
-    edge_occlusion_pct = 50
-    edge_lux = 100
-    edge_rotation_deg = 30
-    real_world_edge_pct = 5
-    confidence_threshold_pct = 85
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    acc_drop = acc_fp32 - acc_int8
-    edge_drop = edge_fp32 - edge_int8
-    size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
-    check(acc_drop < 1.0, f"Expected <1 point top-1 drop, got {acc_drop:.1f}")
-    check(edge_drop > acc_drop, "Edge-case drop should exceed aggregate top-1 drop.")
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mv2_acc_fp32_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='symbol')
-    mv2_acc_fp32_prose_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='prose')
-    mv2_params_m_str = fmt_params(params, scale='M', precision=1, commas=False)
-    mv2_size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, commas=False)
-    mv2_size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
-    mv2_acc_int8_str = fmt_percent(acc_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_acc_drop_str = fmt_pp(acc_drop, precision=1, commas=False, attributive=True)  # 0.9
-    mv2_acc_drop_tbl_str = fmt_pp(acc_drop, precision=1, commas=False, style="symbol")  # 0.9
-    mv2_top5_fp32_str = fmt_percent(top5_fp32 / 100, precision=0, commas=False, style='symbol')
-    mv2_top5_int8_str = fmt_percent(top5_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_ece_fp32_str = fmt(ece_fp32, precision=3, commas=False)
-    mv2_ece_int8_str = fmt(ece_int8, precision=3, commas=False)
-    mv2_edge_fp32_str = fmt_percent(edge_fp32 / 100, precision=1, commas=False, style='symbol')
-    mv2_edge_int8_str = fmt_percent(edge_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
-
-| **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                                |
-|:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------------------------------------------|
-| **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_tbl_str` drop; below 1 percentage-point threshold) |
-| **Top-5 accuracy**     | `{python} MobileNetINT8Calc.mv2_top5_fp32_str` | `{python} MobileNetINT8Calc.mv2_top5_int8_str` | ✓ (below the stated accuracy-loss threshold)                                                   |
-| **Calibration ECE**    | `{python} MobileNetINT8Calc.mv2_ece_fp32_str`  | `{python} MobileNetINT8Calc.mv2_ece_int8_str`  | No (degraded)                                                                                  |
-| **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | No (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_tbl_str`)                                |
-
-: **MobileNetV2 INT8 Postcompression Metrics**: Illustrative FP32 and INT8 values for top-1 and top-5 accuracy, calibration error, and edge-case accuracy, showing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[20,13,19,48]"}
-
-**Edge-case definition**: Images with $>$ `{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, $<$ `{python} MobileNetINT8Calc.edge_lux_str` lighting, or $>$ `{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
-
-
-
-For large language models, evaluation must span multiple dimensions—such as recognition, safety, and responsiveness—because no single score establishes production readiness (@tbl-llm-benchmark-failure-taxonomy).
-
-| **Deployment failure to rule out**     | **Metric or benchmark family**                                 | **What the score reveals**                                                                                                                       | **What the score cannot prove**                                                                                                                        |
-|:---------------------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **The model recognizes facts poorly**  | MMLU (Massive Multitask Language Understanding)                | Broad factual and disciplinary knowledge across fifty-seven subjects, with scores interpretable against chance-level multiple-choice performance | Whether the model can generate grounded open-ended answers rather than choose among multiple-choice options                                            |
-| **The model is capable but unsafe**    | HELM (Holistic Evaluation of Language Models)                  | Accuracy alongside calibration, robustness, fairness, bias, toxicity, and efficiency                                                             | Whether one aggregate score captures the deployment risk; a model can be strong on accuracy and weak on calibration, safety, cost, or prompt stability |
-| **The model predicts its corpus well** | Perplexity                                                     | Held-out next-token prediction on the same corpus; a perplexity of 10 means the model is "10-way confused" on average                            | Whether generated answers are helpful, safe, or grounded outside that corpus                                                                           |
-| **The model feels slow in use**        | First-token latency, inter-token latency, and token throughput | Prompt-processing delay before generation starts and decode speed after generation begins                                                        | Whether a single throughput number hides poor interactive responsiveness, especially when batching improves throughput but worsens first-token latency |
-
-: **Failure-Oriented LLM Benchmark Taxonomy**: LLM metrics are useful when each score is tied to the deployment failure it is meant to rule out. Recognition, holistic behavior, corpus prediction, and responsiveness expose different risks, so no single score establishes production readiness. {#tbl-llm-benchmark-failure-taxonomy tbl-colwidths="[17,22,30,31]"}
-
-[^fn-mmlu-knowledge-benchmark]: **MMLU (massive multitask language understanding)**\index{MMLU!format limitation}: Introduced by @hendrycks2021mmlu with 15,908 multiple-choice questions across fifty-seven subjects. MMLU's benchmarking limitation is its format: multiple-choice recognition is not the same task as open-ended generation, so an MMLU score should not be read as direct evidence that a model can produce grounded free-form answers in production.
-
-[^fn-helm-holistic-evaluation]: **HELM (holistic evaluation of language models)**\index{HELM!multi-dimensional evaluation}: Stanford's 2022 evaluation framework tested a broad set of models across seven dimensions (accuracy, calibration, robustness, fairness, bias, toxicity, efficiency) [@liang2022helm]. HELM's contribution is methodological: by evaluating models that score similarly on accuracy but diverge on calibration or toxicity, it demonstrates that single-metric leaderboards systematically hide failure modes that matter for production deployment.
-
-[^fn-perplexity-language-metric]: **Perplexity**\index{Perplexity!etymology}\index{Perplexity!serving interpretation}: From Latin *perplexus* (entangled); in information theory, $2^{H(p)}$ where $H$ is entropy. A perplexity of 10 means the model is "10-way confused" on average. The systems consequence is interpretive rather than direct memory accounting: perplexity measures held-out next-token prediction on a corpus, while serving memory pressure is governed by context length, batch size, model shape, and decoding state; KV-cache management is a separate serving problem [@kwon2023].
-
-
-```{python}
-#| echo: false
-#| label: llm-throughput-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LLM THROUGHPUT CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Prose bullet on "tokens/s" in the LLM benchmarking
-# │          metrics discussion
-# │
-# │ Goal: Convert abstract token rates into tangible wall-clock times.
-# │ Show: That a 4× throughput gain reduces response time from 30s to 7.5s.
-# │ How: Calculate response duration for a 750-token payload across token rates.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_rate
-
-class LLMThroughputCalc:
-    """25 vs 100 tok/s on a 750-token response: 30 s vs 7.5 s—a 4× user-perceived difference."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    response_tokens = 750  # ~500 words
-    slow_tokens_per_s = 25
-    fast_tokens_per_s = 100
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    slow_sec = response_tokens / slow_tokens_per_s
-    fast_sec = response_tokens / fast_tokens_per_s
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(slow_sec == 30.0, f"Slow throughput should yield 30.0s, got {slow_sec}")
-    check(fast_sec == 7.5, f"Fast throughput should yield 7.5s, got {fast_sec}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    slow_s_str = fmt_time(slow_sec, "second", precision=0, commas=False, style="word")
-    fast_s_str = fmt_time(fast_sec, "second", precision=1, commas=False, style="word")
-    response_tokens_str = fmt_count(response_tokens, commas=False, label="token")
-    slow_tokens_per_s_str = fmt_rate(slow_tokens_per_s, 'tokens/s', precision=0, commas=False)
-    fast_tokens_per_s_str = fmt_rate(fast_tokens_per_s, 'tokens/s', precision=0, commas=False)
-
-
-Distribution alignment challenges highlight two complementary paradigms: iterating on model architecture versus refining dataset quality (@fig-model-vs-data).
-
-::: {#fig-model-vs-data fig-env="figure" fig-pos="htb" fig-cap="**Development Paradigms**: Model-centric AI iterates on architecture while holding the dataset fixed, whereas data-centric AI iterates on annotations, diversity, and bias while holding the architecture fixed. The double arrow marks the approaches as complementary." fig-alt="Side-by-side diagrams: model-centric AI shows data cylinders feeding CPU with feedback loop to model, data-centric AI shows feedback loop to data instead. Double arrow indicates complementary approaches."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\sffamily]
-\tikzset{Line/.style={line width=1.25pt,black!50,-{Latex[length=3mm,width=2mm]}}
-}
-%CPU
-\tikzset{%
- pics/cpu/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=CPU\picname,scale=\scalefac, every node/.append style={transform shape}]
-\node[fill=\filllcolor,minimum width=66, minimum height=66,
-            rounded corners=2,outer sep=2pt] (C1) {};
-\node[fill=white,minimum width=54, minimum height=54] (C2) {};
-\node[fill=\filllcolor!40,minimum width=44, minimum height=44] (C3) {\large CPU};
-
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=3, minimum height=15,
-           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=3, minimum height=15,
-           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=15, minimum height=3,
-           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=\filllcolor,minimum width=15, minimum height=3,
-           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
-}
- \end{scope}
-     }
-  }
-}
-%CPU
-\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
-minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
-pics/data/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=DATA\picname,scale=\scalefac, every node/.append style={transform shape}]
-\node[mycylinder,fill=\filllcolor!50] (A) {};
-\node[mycylinder, above=of A,fill=\filllcolor!30] (B) {};
-\node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
-\fill[\filllcolor!50!black]($(C.west)!0.12!(C.east)$)circle(3pt);
-\fill[\filllcolor!50!black]($(B.west)!0.12!(B.east)$)circle(3pt);
-\fill[\filllcolor!50!black]($(A.west)!0.12!(A.east)$)circle(3pt);
- \end{scope}
-     }
-  }
-}
-%lokot
-\tikzset{
-pics/lokot/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
-\fill[fill=\filllcolor](0,0)--(2.7,0)--++(270:1.6)to[out=270,in=0](1.85,-2.45)
---++(180:1.1)to[out=180,in=270](0,-1.3)--cycle;
-\fill[fill=white](1.32,-0.9)+(230:0.3)
-arc[start angle=230, end angle=-50, radius=0.3]--++(280:0.75)--++(180:0.62)--cycle;
-\path[](0.27,0)circle(1pt)coordinate(K1);
-\path[](0.57,0)circle(1pt)coordinate(K2);
-\path[](2.10,0)circle(1pt)coordinate(K3);
-\path[](2.4,0)circle(1pt)coordinate(K4);
-%
-\path[](K1)--++(90:0.6)coordinate(KK1);
-\path[](K2)--++(90:0.5)coordinate(KK2);
-\path[](K4)--++(90:0.6)coordinate(KK4);
-\path[](K3)--++(90:0.5)coordinate(KK3);
-\fill[fill=\filllcolor](K1)--(KK1)to[out=90,in=90,distance=37](KK4)--(K4)
---(K3)--(KK3)to[out=90,in=90,distance=29](KK2)--(K2)--cycle;
-\end{scope}
-    }
-  }
-}
-\pgfkeys{
-  /channel/.cd,
-   Depth/.store in=\Depth,
-  Height/.store in=\Height,
-  Width/.store in=\Width,
-  filllcirclecolor/.store in=\filllcirclecolor,
-  filllcolor/.store in=\filllcolor,
-  drawcolor/.store in=\drawcolor,
-  drawcircle/.store in=\drawcircle,
-  scalefac/.store in=\scalefac,
-  Linewidth/.store in=\Linewidth,
-  picname/.store in=\picname,
-  filllcolor=BrownLine,
-  filllcirclecolor=violet!20,
-  drawcolor=black,
-  drawcircle=violet,
-  scalefac=1,
-  Linewidth=0.5pt,
-  Depth=1.3,
-  Height=0.8,
-  Width=1.1,
-  picname=C
-}
-
-%Data
-\pic[shift={(0,0)}] at  (0,0){data={scalefac=0.75,picname=1,filllcolor=RedLine, Linewidth=1.0pt}};
-%padlock
-\pic[shift={(0,0)}] at  (0.5,2){lokot={scalefac=0.22,picname=1,drawcolor=OrangeLine!70!,
-filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
-%CPU
-\pic[shift={(0,-0.2)}] at  (4.5,1){cpu={scalefac=0.6,picname=1,filllcolor=BlueLine, Linewidth=0.7pt}};
-\node[below=0.15 of DO3](MO){Model};
-\path[red](MO)-|coordinate(D)(A);
-\node[]at(D){Data};
-\draw[Line,shorten <=4pt,shorten >=11pt](B.east)--++(0:25mm);
-\draw[Line,shorten <=8pt,shorten >=8pt,]($(DE3)!0.5!(DE4)$)--++(0:1)--++(90:1.8)-|
-node[above,text=black](TXT){Systematically enhance the model}($(GO3)!0.5!(GO4)$);
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,
-yshift=2mm,
-fill=BackColor,fit=(D)(DATA1)(CPU1)(TXT),line width=0.75pt](BB){};
-\node[below=4pt of  BB.north,inner sep=0pt,xshift=3,
-anchor=north,fill=BackColor]{\textbf{Model-centric AI}};
-%%%%%%%%%%%%%%%%%
-%right
-%%%%%%%%%%%%%%%%%%%%
-\begin{scope}[node distance=-0.15,shift={(13.5,0)},local bounding box = 2DATA]
-\pic[shift={(0,0)}] at  (0,0){data={scalefac=0.75,picname=2,filllcolor=RedLine, Linewidth=1.0pt}};
-\pic[shift={(0,-0.2)}] at  (4.5,1){cpu={scalefac=0.6,picname=2,filllcolor=BlueLine, Linewidth=0.7pt}};
-\pic[shift={(0,0)}] at  (4.75,1.69){lokot={scalefac=0.22,picname=2,drawcolor=OrangeLine!70!,
-filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
-%
-\draw[Line,shorten <=4pt,shorten >=11pt](B)--($(LE3)!0.5!(LE4)$);
-
-\node[below=0.15of CPU2](2MO){Model};
-\path[red](2MO)-|coordinate(2D)(DATA2);
-\node[]at(2D){Data};
-
-\draw[Line](CPU2.east)--++(0:1)coordinate(DE)--++(90:1.8)-|
-           node[above,text=black,pos=0.25](2TXT){Systematically enhance the data}(DATA2);
-%
-\scoped[on background layer]
-\node[draw=GreenLine,inner xsep=5mm,inner ysep=5mm,
-           yshift=2mm, fill=GreenL!50,fit=(2D)(DATA2)(CPU2)(2TXT)(DE),line width=0.75pt](2BB){};
-\node[below=4pt of  2BB.north,inner sep=0pt,xshift=3,
-           anchor=north]{\textbf{Data-centric AI}};
-\end{scope}
-%%%%
-\node[double arrow, fill=red!80!black!90,
-           minimum width = 10pt, double arrow head extend=4pt,
-           minimum height=35mm](DA) at($(BB.east)!0.5!(2BB.west)$){};
-\node[below=0.2of DA]{Complementary};
- \end{tikzpicture}
-
-```
-:::
-
-
-Even with rigorous protocols, static benchmarks face dataset saturation, where models rapidly exhaust a test suite's discriminating headroom (@fig-dataset-saturation).
-
-::: {#fig-dataset-saturation fig-env="figure" fig-pos="htb" fig-cap="**Dataset Saturation**: The zero line denotes reported human performance; each curve's crossing marks a capability for which the static benchmark has less remaining discriminating headroom. The crossings do not distinguish genuine capability gains from optimization to the evaluation set. Sources: [@perrault2024artificial; @kiela2021]." fig-alt="Line chart showing five AI capabilities crossing human performance baseline from 1998 to 2020: handwriting, speech, image recognition, reading comprehension, and language understanding."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-%\node[anchor=south west]at(-0.93,-0.76){%
-%\includegraphics[scale=0.7]{1}};
-
-\begin{axis}[clip=false,
-   axis line style={draw=none},
-  /pgf/number format/.cd,
- 1000 sep={},
-  width=155mm,%155.9mm,
-  height=80mm,%58.0mm,
-  axis x line*=bottom,
-  legend style={at={(0.16,0.98)}, anchor=north},
-  legend cell align=left,
-  title style={yshift=-2pt,font=\fontsize{9pt}{9}\selectfont\sffamily},
-  ylabel style={align=center,font=\footnotesize\sffamily},
-  xmin=1997,
-  xmax=2022,
-  xtick={2000,2005,2010,2015,2020},
-   x tick label style={rotate=0, anchor=north},
-  ymin=-100, ymax=24,
-  ytick={-100,-80,...,20},
-  yticklabels={$-$100,$-$80,$-$60,$-$40,$-$20,0,+20},
-  ylabel={Test score of the AI relative\\ to human performance},
-  title={Language and image recognition capabilities of AI systems have improved rapidly},
-  grid=both,
-  major grid style={black!60},
-  minor grid style={draw=none},
-  minor x tick num=4,
-  minor x tick  style={thin,black!60},
-  tick label style={/pgf/number format/assume math mode=true},
-  ticklabel style={font=\footnotesize\sffamily},
-  xticklabel style={yshift=-3pt},
-]
-%Handwriting recognition
-\addplot[OrangeLine,mark=*,
-mark size=2pt,line width=1.5pt,
-]
-coordinates{
-(1998,-100)(1998,-80)(2002,-48)(2003,-27)(2006,-25)(2010,-20)(2012,-5)(2013,-1)(2018,2)
-}node[pos=0.67,above=3mm]{Handwriting recognition};
-%Speech recognition
-\addplot[RedLine,mark=*,
-mark size=2.0pt,line width=1.5pt,
-] coordinates{
-(1998,-100)(2011,-66)(2013,-53)(2014,-28)(2015,-26)(2015,-9)(2016,-5)(2016,-1.2)(2017,0.5)(2018,2)
-}node[pos=0.17,above=3mm]{Speech recognition};
-%Image recognition
-\addplot[GreenD,mark=*,
-mark size=2.0pt,line width=1.5pt,
-] coordinates{
-(2009,-100)(2012,-44)(2014,-11.5)(2014,-7)(2015,1)(2016,6)(2018,11.5)(2019,9)(2020,16)
-}node[pos=0.13,left=2mm,anchor=north east]{Image recognition};
-%Reading comprehension
-\addplot[cyan!90!black,mark=*,
-mark size=2.0pt,line width=1.5pt,
-] coordinates{
-(2016,-100)(2016,-34)(2017,-30)(2017,-9)(2018,6)(2019,18)(2020,19)
-}node[pos=0.23,left=2mm,anchor=north east,align=right]{Reading\\ comprehension};
-%Language understanding
-\addplot[red,mark=*,
-mark size=2.0pt,line width=1.5pt,
-] coordinates{
-(2018,-100)(2018,-68)(2019,-64)(2019,-25)(2019,0)(2019,4)(2020,8)(2020,12)
-}node[pos=0.23,right=2mm,anchor=north west,align=left]{Language\\ understanding};
-%
-\draw[font=\fontsize{7pt}{9}\selectfont\sffamily,latex-](axis cs:1996.5,-104)to[bend right=25]++(320:9mm)
-node[align=left,below right=2mm and 1mm,anchor=west]{The capability of each AI system is normalized\\
-to an initial performance $-$100};
-\draw[font=\fontsize{7pt}{9}\selectfont\sffamily,latex-](axis cs:1996.8,2)to[bend left=25]++(30:6mm)
-node[align=left, right=1mm,anchor=west]{Human performance, as the benchmark, is set to zero};
-%
-\draw[red,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,-1)--
-node[font=\fontsize{7pt}{9}\selectfont\sffamily,right,text=black]{AI systems perform worse}
-(axis cs:2021,-19);
-\draw[red,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,1)--
-node[align=left,font=\fontsize{7pt}{9}\selectfont\sffamily,right,text=black]{AI systems perform better than\\
-the humans who did these tests}
-(axis cs:2021,19);
-\coordinate(A)at(axis cs:1994,-100);
-\coordinate(B)at(axis cs:2027.5,-100);
-\coordinate(C)at(axis cs:2027.5,0);
-\coordinate(C1)at(axis cs:2027.5,25);
-\coordinate(D)at(axis cs:1994,0);
-\coordinate(D1)at(axis cs:1994,25);
-\scoped[on background layer]
-\fill[fill=magenta!5](A)--(B)--(C)--(D)--cycle;
-\scoped[on background layer]
-\fill[fill=green!5](D)--(C)--(C1)--(D1)--cycle;
-\end{axis}
-\end{tikzpicture}
-```
-
-:::
-
-### Holistic system-model-data evaluation {#sec-benchmarking-holistic-systemmodeldata-evaluation-8fda}
-
-Passing system, model, and data benchmarks independently is not enough. A system benchmark can validate hardware performance, a model benchmark can verify that compression preserved quality, and a data benchmark can assess training set representativeness, yet the deployed system can still fail because the three dimensions interact. Real-world AI performance emerges from that interaction, and optimizing one dimension can expose weaknesses in another.
-
-Consider a concrete failure cascade: an engineering team achieves target throughput on MLPerf Inference by deploying an INT8-quantized vision model on a specialized accelerator. System benchmarks pass. However, because quantization scale factors and zero points were calibrated strictly against ImageNet validation samples, deploying the model onto a factory floor reveals severe accuracy degradation. Factory illumination introduces dynamic ranges that exceed the calibration clipping thresholds, truncating feature activations. A targeted model quality benchmark across varied exposure levels would have exposed this numerical sensitivity. Tracing the failure upstream reveals that the training pipeline contained no industrial imagery—a data distribution gap that no amount of accelerator optimization or runtime kernel tuning can resolve.
-
-Cross-dimensional coupling implies that a passing benchmark in one domain can be invalidated by an unmeasured failure in another:
-
-- **System success + model failure**: Hardware delivers promised throughput, but aggressive compression degrades accuracy below deployment thresholds.
-- **System success + data failure**: Fast inference executes on benchmark inputs, but training data bias causes severe accuracy disparities across demographic subgroups.
-- **Model success + system failure**: The model produces accurate predictions, but tail latency variance under concurrent load violates service-level agreements.
-- **Model success + data failure**: Validation yields high accuracy on held-out test sets, but production distribution shift causes silent degradation.
-
-These failure modes map directly onto the tripartite D·A·M taxonomy diagrammed in the Venn intersections of @fig-ai-triad, though benchmark evaluation lenses do not align one-to-one with isolated physical vertices. Data benchmarks evaluate input distribution quality and coverage ($\text{D}$); model benchmarks assess learned algorithmic representations and numerical robustness ($\text{A}$); and system benchmarks expose hardware execution, kernel efficiency, and memory-interconnect traffic ($\text{M}$). Holistic evaluation validates the pairwise and central intersections where these domains meet—ensuring that optimizations across the Part III pipeline (data selection $\rightarrow$ model compression $\rightarrow$ hardware acceleration) do not introduce hidden cross-axis regressions.
-
-The D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!diagnostic framework} provides a diagnostic framework for systematically identifying which axis limits performance. @Tbl-dam-bottleneck formalizes this approach by crossing each D·A·M axis with the three fundamental bottleneck types.
-
-| **Component** | **Compute-Bound**                                    | **Memory-Bound**                                     | **I/O-Bound**                                            |
-|:--------------|:-----------------------------------------------------|:-----------------------------------------------------|:---------------------------------------------------------|
-| **Data**      | Preprocessing too slow (augmentation, tokenization)  | Dataset exceeds RAM (spills to disk)                 | Storage cannot feed GPU (disk throughput limit)          |
-| **Algorithm** | Model too large for hardware (FLOPs exceed capacity) | Activations exceed memory (batch size limited)       | Gradient sync slower than compute (distributed training) |
-| **Machine**   | GPU utilization saturated (need faster accelerator)  | Memory bandwidth saturated (need more HBM bandwidth) | Network/PCIe bandwidth saturated (need faster links)     |
-
-: **D·A·M Bottleneck Diagnostic Matrix**: Each cell describes a performance constraint symptom, and the row identifies which D·A·M axis to address. When performance stalls, this matrix turns the first diagnostic move into an axis-specific check of Data, Algorithm, or Machine. {#tbl-dam-bottleneck tbl-colwidths="[12,29,30,29]"}
-
-Applying this matrix organizes hypotheses when system telemetry diverges from theoretical hardware peaks. If an accelerator achieves only 30 percent GPU utilization during training, an engineer might prematurely blame the model architecture (Algorithm row) and attempt model surgery. Profiling often reveals instead that host-side data workers saturating CPU cores on image augmentation or tokenization cannot feed batches fast enough across PCIe (Data row, Compute-Bound column: "Preprocessing too slow"). The accelerator stalls not from algorithmic inefficiency, but from input pipeline starvation. The matrix guides investigation; traces and controlled interventions establish which physical subsystem is binding.
-
-::: {.column-margin .margin-pointer}
-↪ A production troubleshooting matrix that maps common failure symptoms to a candidate D·A·M axis and the measurement that confirms it is operationalized in @sec-appdx-dam-taxonomy-production-troubleshooting-02fb.
-:::
-
-Validation under controlled laboratory conditions differs from validation in production. A laboratory protocol may fix data, simplify arrivals, or isolate execution to answer a controlled question; other protocols deliberately vary those conditions. In production, all three assumptions can break simultaneously: data drifts, traffic spikes unpredictably, and concurrent workloads compete for shared hardware resources. The final dimension of benchmarking asks whether laboratory results hold under operational conditions.
-
-
 ## Benchmark Components {#sec-benchmarking-benchmark-components-97cc}
 
 Choosing between micro, macro, and end-to-end granularity determines what a benchmark can diagnose, but every benchmark must specify the task, data, model, metrics, harness, system context, and run rules that make its results interpretable. Micro-benchmarks isolate specific hardware execution limits—such as streaming memory bandwidth or tensor core throughput—using synthetic tensor operations. Macro-benchmarks evaluate full-graph execution over standardized datasets like ImageNet. End-to-end benchmarks capture the complete pipeline, incorporating data ingestion, host-to-device transfers, batch assembly, and inference execution. Across all three granularities, benchmark components cannot be selected in isolation: each component fixes physical and algorithmic boundary conditions for the next.
@@ -1318,59 +782,6 @@ The deployed anomaly detection workflow in @fig-benchmark-components records the
 Which of these metrics governs viability depends entirely on the deployment environment and its physical constraints. Energy per inference dictates battery life on untethered edge devices and bounds power distribution limits and cooling costs in server racks. Model size determines whether weights reside entirely within fast on-chip SRAM or spill into off-chip DRAM, while in multi-tenant cloud accelerators, parameter volume dictates how many model replicas fit within HBM. Inference latency determines whether the system satisfies real-time deadlines on streaming audio without dropping frames, whereas batching trades per-sample latency for higher throughput by amortizing weight-transfer overhead across multiple inputs. These metrics expose direct engineering trade-offs: reducing model size below `{python} AnomalySpecs.anomaly_params_k_str` parameters can reduce memory traffic and execution time on a supported path, but risks degrading the `{python} AnomalySpecs.anomaly_auc_str` AUC detection accuracy. Whether these measurements constitute a passing benchmark depends on the operational envelope; the benchmark specification standardizes the evaluation protocol, but application requirements dictate the acceptance thresholds.
 
 Two benchmark categories recur often enough across the optimization pipeline to warrant specialized checklists: compression benchmarks, which a pruned or quantized model must pass before deployment, and mobile and edge benchmarks, which power and thermal boundaries strictly constrain. Each composes the task, data, model, metrics, harness, and run rules while enforcing domain-specific limits. Compression validation requires a multi-metric protocol that balances size reduction against accuracy and latency (@sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4), while edge deployment requires sustained-power measurement under realistic thermal and duty-cycle constraints (@sec-benchmarking-power-measurement-techniques-bcc2).
-
-### Compression benchmarks {#sec-benchmarking-compression-benchmarks-9cf0}
-
-```{python}
-#| echo: false
-#| label: compression-model-specs
-from mlsysim.fmt import fmt_count
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMPRESSION BENCHMARK MODEL SPECS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Compression Benchmarks prose (~2 paragraphs below).
-# │
-# │ Goal: Provide MobileNetV2 and ResNet-50 parameter counts for the
-# │       compression efficiency comparison.
-# │ Show: Parameter counts, parameter ratio, and accuracy-per-parameter ratio.
-# │ How:  Read from Digital Twins via Models.Vision.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-class CompressionModelSpecs:
-    """MobileNetV2 vs ResNet-50 parameter counts for compression benchmarks."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _mobilenet_m = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
-    _resnet50_m = Models.Vision.ResNet50.parameters.to(Mparam).magnitude
-    _mobilenet_top1 = 72
-    _resnet50_top1 = 76
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _param_ratio = _resnet50_m / _mobilenet_m
-    _accuracy_per_param_ratio = (_mobilenet_top1 / _mobilenet_m) / (_resnet50_top1 / _resnet50_m)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(_param_ratio > 7, f"Expected MobileNetV2 to have >7x fewer params, got {_param_ratio:.1f}x")
-    check(_accuracy_per_param_ratio > 6, f"Expected >6x accuracy-per-parameter ratio, got {_accuracy_per_param_ratio:.1f}x")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mobilenet_params_m_str = fmt_count(_mobilenet_m * MILLION, scale='M', precision=1, commas=False)
-    resnet50_params_m_str = fmt_count(_resnet50_m * MILLION, scale='M', precision=1, commas=False)
-    mobilenet_top1_str = fmt_percent(round(_mobilenet_top1) / 100, precision=0, commas=False, style='prose')
-    resnet50_top1_str = fmt_percent(round(_resnet50_top1) / 100, precision=0, commas=False, style='prose')
-    param_ratio_mult_str = fmt_multiple(_param_ratio, precision=1, commas=False)
-    accuracy_per_param_ratio_mult_str = fmt_multiple(_accuracy_per_param_ratio, precision=1, commas=False)
-```
-
-Neural network compression (pruning, quantization, knowledge distillation, and architecture optimization) requires specialized benchmarks because compression reshapes the trade-off landscape: every byte saved or operation eliminated must be weighed against potential accuracy loss and hardware compatibility. The most basic compression metric is raw size reduction: parameter count, memory footprint in bytes, and compressed storage requirements. Size alone, however, is misleading. On ImageNet, MobileNetV2 achieves approximately `{python} CompressionModelSpecs.mobilenet_top1_str` top-1 accuracy with `{python} CompressionModelSpecs.mobilenet_params_m_str` parameters vs. ResNet-50's `{python} CompressionModelSpecs.resnet50_top1_str` accuracy with `{python} CompressionModelSpecs.resnet50_params_m_str` parameters, about `{python} CompressionModelSpecs.param_ratio_mult_str` fewer parameters at comparable accuracy, or roughly `{python} CompressionModelSpecs.accuracy_per_param_ratio_mult_str` more accuracy per parameter [@sandler2018; @he2016].
-
-Pruning benchmarks must distinguish between structured and unstructured approaches, because they produce qualitatively different results on real hardware. Structured pruning removes entire neurons or filters, yielding smaller dense operations that conventional kernels can exploit [@li2017pruning]. Unstructured pruning eliminates individual weights and can produce very sparse models, but realizing actual speedups requires specialized sparse computation support—meaning benchmark protocols must specify hardware platform and software implementation [@han2015deep; @gale2019state].
-
-Quantization benchmarks evaluate precision reduction across data types. In the illustrative MobileNetV2 scenario, INT8 reduces raw weight storage by 4$\times$ and the assumed latency values yield the speedup in example \ref{exmp-benchmarking-benchmarking-vision-model-edge-deployment}; realized performance depends on the hardware and implementation. The precision-accuracy trade-off is analyzed in @sec-benchmarking-inference-metrics-78d4 and the energy implications in @sec-benchmarking-power-measurement-boundaries-982c [@jacob2018]. Mixed-precision\index{Mixed-precision!layer-wise precision assignment} approaches push further by applying different precision levels to different layers: critical layers retain FP16 while computation-heavy layers use INT8 or INT4, enabling fine-grained efficiency optimization. Knowledge distillation\index{Knowledge distillation!benchmark evaluation} adds another dimension: a smaller student model can preserve much of a teacher's behavior while reducing size and inference cost, but benchmarking must verify that the student generalizes rather than merely memorizing the teacher's outputs [@hinton2015distilling].
-
-Critically, acceleration factors vary dramatically across hardware platforms: sparse models, reduced-precision models, and efficient architectures only deliver speedups when the target runtime has kernels, memory layouts, and accelerator support that exploit them. Current benchmark suites like MLPerf focus primarily on standardized reference models, while production deployments often use compressed or hardware-specific variants. This gap between what benchmarks measure and what production actually runs remains one of the field's most consequential blind spots.
 
 ### Mobile and edge benchmarks {#sec-benchmarking-mobile-edge-benchmarks-fd4f}
 
@@ -2401,6 +1812,543 @@ Standardizing system benchmarks requires formalizing the D·A·M taxonomy so tha
 The MLPerf Inference benchmark applies this discipline to production deployment constraints [@reddi2020]. An accelerator cannot simply report peak throughput under infinite batching if interactive serving requires guaranteed responsiveness. The benchmark defines distinct evaluation scenarios for different physical operating regimes. For interactive environments, Server mode injects queries following a Poisson arrival process under workload-specific tail-latency constraints, while SingleStream mode reports the scenario-defined latency percentile for one query at a time. For non-interactive throughput, Offline mode measures throughput with inputs supplied upfront. By standardizing these execution boundaries, community benchmarks account for queueing delays and host-to-device PCIe transfers, making the tested load and timing boundary explicit when interpreting a throughput claim.
 
 Community standards establish reproducible measurement boundaries, but they do not dictate the physical scale at which evaluation occurs. A measurement can target an isolated matrix multiplication kernel or profile an end-to-end multi-accelerator training run, and each scope diagnoses distinct physical bottlenecks. The depth of measurement determines which architectural limits can be isolated, establishing the role of benchmarking granularity.
+
+## Model and Data Evaluation {#sec-benchmarking-model-data-benchmarking-e0ca}
+
+System benchmarks confirm that hardware delivers promised training throughput and inference latency, but hardware validation alone cannot ensure deployment success. Model and data evaluation verify that compression preserves accuracy and that training data enables robust generalization. Historical progress on ImageNet established the accuracy trajectory against which model compression techniques are evaluated (@fig-imagenet-challenge).
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: ResNet footnote — MLPerf reference-workload spec.
+# │ Goal: Pin ResNet-50 parameter count and per-image FLOP profile to the model registry.
+# └───────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.core.units import GFLOPs
+from mlsysim.fmt import fmt_params, fmt_flops, check
+
+class ResNetSpec:
+    """ResNet-50 canonical parameter and FLOP profile for the MLPerf reference footnote."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    params = Models.Vision.ResNet50.parameters
+    flops = Models.Vision.ResNet50.inference_flops
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(20e6 <= float(params.magnitude) <= 30e6, "ResNet-50 params should be ~25M.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    resnet_params_str = fmt_params(params)
+    resnet_gflops_str = fmt_flops(flops, unit=GFLOPs, precision=1, commas=False)
+```
+
+::: {#fig-imagenet-challenge fig-env="figure" fig-pos="htb" fig-cap="**ImageNet Challenge Progression**: AlexNet marks the largest one-year drop in the series; ZFNet, VGGNet, GoogLeNet, and ResNet extend that decline, defining the accuracy trajectory against which later compression trade-offs are judged. Sources: [@russakovsky2015; @krizhevsky2012imagenet; @he2016]." fig-alt="Line graph of ImageNet top-5 error from 2010 to 2015, with points labeled Baseline in 2010 and 2011, AlexNet in 2012, ZFNet in 2013, VGGNet and GoogLeNet in 2014, and ResNet in 2015; error falls from 28.2 percent to 3.57 percent."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ IMAGENET CHALLENGE PROGRESSION FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-imagenet-challenge—line plot of ImageNet top-5 error rate
+# │          from 2010 (28.2%) to 2015 (3.57%) with model labels
+# │
+# │ Goal: Visualize the historical progression of ImageNet benchmarks.
+# │ Show: The transition from accuracy-only to multi-dimensional evaluation.
+# │ How: Plot top-5 error rates for architectural milestones (AlexNet to ResNet).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Visualize the historical progression of ImageNet benchmarks.
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.1))
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+years = [2010, 2011, 2012, 2013, 2014, 2014, 2015]
+models = ["Baseline", "Baseline", "AlexNet", "ZFNet", "VGGNet", "GoogLeNet", "ResNet"]
+errors = [28.2, 25.8, 16.4, 11.7, 7.3, 6.7, 3.57]
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(years, errors, color=COLORS['BlueLine'], linewidth=1.5, zorder=1)
+ax.scatter(years, errors, color=COLORS['RedLine'], s=50, zorder=2, edgecolors='white')
+
+# -------------------------------------------------------------------------
+# Default Label Style
+# -------------------------------------------------------------------------
+default_label_style = {
+    "xytext": (5, 8),
+    "textcoords": "offset points",
+    "fontsize": 9,
+    "ha": "left",
+    "va": "bottom",
+    "bbox": dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8),
+}
+
+# -------------------------------------------------------------------------
+# Individual Label Styles by Point Index
+# Indices: 0, 1, 2, 3, 4, 5, 6
+# -------------------------------------------------------------------------
+label_styles = {
+    0: {"xytext": (5, 2), "ha": "left"},  # Baseline (2010)
+    1: {"xytext": (5, 2), "ha": "left"},  # Baseline (2011)
+    2: {"xytext": (5, 2), "ha": "left"},  # AlexNet
+    3: {"xytext": (5, 2), "ha": "left"},  # ZFNet
+    4: {"xytext": (-5, 5), "ha": "left"},  # VGGNet
+    5: {"xytext": (5, -6), "ha": "right", "va": "top"},  # GoogLeNet
+    6: {"xytext": (5, -6), "ha": "right", "va": "top"},  # ResNet
+}
+
+for i, (year, model, error) in enumerate(zip(years, models, errors)):
+    style = default_label_style.copy()
+    style.update(label_styles.get(i, {}))
+    ax.annotate(model, (year, error), **style)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_ylim(0, 30)
+ax.set_xlabel('Year')
+ax.set_ylabel('Top-5 Error (%)')
+plt.show()
+plt.close()
+```
+
+:::
+
+
+When evaluating compressed models, a Pareto frontier identifies non-dominated choices that balance efficiency against accuracy. Aggregate metrics often hide calibration and tail-case degradation, as shown for MobileNetV2 in @tbl-benchmarking-mobilenet-int8-validation.
+
+::: {.column-margin}
+![](images/svg/vol1_benchmarking_margin_004.svg){width="100%" fig-alt="Tiny Pareto frontier with one dominated point."}
+
+*A dominated model is no better on either axis and worse on at least one.*
+:::
+
+```{python}
+#| echo: false
+#| label: mobilenet-int8-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOBILENET INT8 COMPRESSION METRICS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "MobileNetV2 INT8 Compression"—complete validation
+# │          protocol for INT8 quantization of MobileNetV2
+# │
+# │ Goal: Demonstrate the necessity of multi-dimensional compression benchmarks.
+# │ Show: That INT8 quantization preserves accuracy while yielding 4× size reduction.
+# │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.core.units import Mparam, BYTES_FP32, BYTES_INT8, MB
+from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
+
+class MobileNetINT8Calc:
+    """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _mobilenet_v2 = Models.Vision.MobileNetV2
+    acc_fp32 = 71.8
+    params = _mobilenet_v2.parameters
+    size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
+    size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
+    acc_int8 = 70.9
+    top5_fp32 = 91.0
+    top5_int8 = 90.4
+    ece_fp32 = 0.031
+    ece_int8 = 0.089
+    edge_fp32 = 68.2
+    edge_int8 = 61.4
+    edge_occlusion_pct = 50
+    edge_lux = 100
+    edge_rotation_deg = 30
+    real_world_edge_pct = 5
+    confidence_threshold_pct = 85
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    acc_drop = acc_fp32 - acc_int8
+    edge_drop = edge_fp32 - edge_int8
+    size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
+    check(acc_drop < 1.0, f"Expected <1 point top-1 drop, got {acc_drop:.1f}")
+    check(edge_drop > acc_drop, "Edge-case drop should exceed aggregate top-1 drop.")
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    mv2_acc_fp32_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='symbol')
+    mv2_acc_fp32_prose_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='prose')
+    mv2_params_m_str = fmt_params(params, scale='M', precision=1, commas=False)
+    mv2_size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, commas=False)
+    mv2_size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
+    mv2_acc_int8_str = fmt_percent(acc_int8 / 100, precision=1, commas=False, style='symbol')
+    mv2_acc_drop_str = fmt_pp(acc_drop, precision=1, commas=False, attributive=True)  # 0.9
+    mv2_acc_drop_tbl_str = fmt_pp(acc_drop, precision=1, commas=False, style="symbol")  # 0.9
+    mv2_top5_fp32_str = fmt_percent(top5_fp32 / 100, precision=0, commas=False, style='symbol')
+    mv2_top5_int8_str = fmt_percent(top5_int8 / 100, precision=1, commas=False, style='symbol')
+    mv2_ece_fp32_str = fmt(ece_fp32, precision=3, commas=False)
+    mv2_ece_int8_str = fmt(ece_int8, precision=3, commas=False)
+    mv2_edge_fp32_str = fmt_percent(edge_fp32 / 100, precision=1, commas=False, style='symbol')
+    mv2_edge_int8_str = fmt_percent(edge_int8 / 100, precision=1, commas=False, style='symbol')
+    mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
+```
+
+| **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                                |
+|:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------------------------------------------|
+| **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_tbl_str` drop; below 1 percentage-point threshold) |
+| **Top-5 accuracy**     | `{python} MobileNetINT8Calc.mv2_top5_fp32_str` | `{python} MobileNetINT8Calc.mv2_top5_int8_str` | ✓ (below the stated accuracy-loss threshold)                                                   |
+| **Calibration ECE**    | `{python} MobileNetINT8Calc.mv2_ece_fp32_str`  | `{python} MobileNetINT8Calc.mv2_ece_int8_str`  | No (degraded)                                                                                  |
+| **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | No (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_tbl_str`)                                |
+
+: **MobileNetV2 INT8 Postcompression Metrics**: Illustrative FP32 and INT8 values for top-1 and top-5 accuracy, calibration error, and edge-case accuracy, showing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[20,13,19,48]"}
+
+**Edge-case definition**: Images with $>$ `{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, $<$ `{python} MobileNetINT8Calc.edge_lux_str` lighting, or $>$ `{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
+
+
+
+For large language models, evaluation must span multiple dimensions—such as recognition, safety, and responsiveness—because no single score establishes production readiness (@tbl-llm-benchmark-failure-taxonomy).
+
+| **Deployment failure to rule out**     | **Metric or benchmark family**                                 | **What the score reveals**                                                                                                                       | **What the score cannot prove**                                                                                                                        |
+|:---------------------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **The model recognizes facts poorly**  | MMLU (Massive Multitask Language Understanding)                | Broad factual and disciplinary knowledge across fifty-seven subjects, with scores interpretable against chance-level multiple-choice performance | Whether the model can generate grounded open-ended answers rather than choose among multiple-choice options                                            |
+| **The model is capable but unsafe**    | HELM (Holistic Evaluation of Language Models)                  | Accuracy alongside calibration, robustness, fairness, bias, toxicity, and efficiency                                                             | Whether one aggregate score captures the deployment risk; a model can be strong on accuracy and weak on calibration, safety, cost, or prompt stability |
+| **The model predicts its corpus well** | Perplexity                                                     | Held-out next-token prediction on the same corpus; a perplexity of 10 means the model is "10-way confused" on average                            | Whether generated answers are helpful, safe, or grounded outside that corpus                                                                           |
+| **The model feels slow in use**        | First-token latency, inter-token latency, and token throughput | Prompt-processing delay before generation starts and decode speed after generation begins                                                        | Whether a single throughput number hides poor interactive responsiveness, especially when batching improves throughput but worsens first-token latency |
+
+: **Failure-Oriented LLM Benchmark Taxonomy**: LLM metrics are useful when each score is tied to the deployment failure it is meant to rule out. Recognition, holistic behavior, corpus prediction, and responsiveness expose different risks, so no single score establishes production readiness. {#tbl-llm-benchmark-failure-taxonomy tbl-colwidths="[17,22,30,31]"}
+
+[^fn-mmlu-knowledge-benchmark]: **MMLU (massive multitask language understanding)**\index{MMLU!format limitation}: Introduced by @hendrycks2021mmlu with 15,908 multiple-choice questions across fifty-seven subjects. MMLU's benchmarking limitation is its format: multiple-choice recognition is not the same task as open-ended generation, so an MMLU score should not be read as direct evidence that a model can produce grounded free-form answers in production.
+
+[^fn-helm-holistic-evaluation]: **HELM (holistic evaluation of language models)**\index{HELM!multi-dimensional evaluation}: Stanford's 2022 evaluation framework tested a broad set of models across seven dimensions (accuracy, calibration, robustness, fairness, bias, toxicity, efficiency) [@liang2022helm]. HELM's contribution is methodological: by evaluating models that score similarly on accuracy but diverge on calibration or toxicity, it demonstrates that single-metric leaderboards systematically hide failure modes that matter for production deployment.
+
+[^fn-perplexity-language-metric]: **Perplexity**\index{Perplexity!etymology}\index{Perplexity!serving interpretation}: From Latin *perplexus* (entangled); in information theory, $2^{H(p)}$ where $H$ is entropy. A perplexity of 10 means the model is "10-way confused" on average. The systems consequence is interpretive rather than direct memory accounting: perplexity measures held-out next-token prediction on a corpus, while serving memory pressure is governed by context length, batch size, model shape, and decoding state; KV-cache management is a separate serving problem [@kwon2023].
+
+
+```{python}
+#| echo: false
+#| label: llm-throughput-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LLM THROUGHPUT CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Prose bullet on "tokens/s" in the LLM benchmarking
+# │          metrics discussion
+# │
+# │ Goal: Convert abstract token rates into tangible wall-clock times.
+# │ Show: That a 4× throughput gain reduces response time from 30s to 7.5s.
+# │ How: Calculate response duration for a 750-token payload across token rates.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check, fmt_rate
+
+class LLMThroughputCalc:
+    """25 vs 100 tok/s on a 750-token response: 30 s vs 7.5 s—a 4× user-perceived difference."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    response_tokens = 750  # ~500 words
+    slow_tokens_per_s = 25
+    fast_tokens_per_s = 100
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    slow_sec = response_tokens / slow_tokens_per_s
+    fast_sec = response_tokens / fast_tokens_per_s
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(slow_sec == 30.0, f"Slow throughput should yield 30.0s, got {slow_sec}")
+    check(fast_sec == 7.5, f"Fast throughput should yield 7.5s, got {fast_sec}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    slow_s_str = fmt_time(slow_sec, "second", precision=0, commas=False, style="word")
+    fast_s_str = fmt_time(fast_sec, "second", precision=1, commas=False, style="word")
+    response_tokens_str = fmt_count(response_tokens, commas=False, label="token")
+    slow_tokens_per_s_str = fmt_rate(slow_tokens_per_s, 'tokens/s', precision=0, commas=False)
+    fast_tokens_per_s_str = fmt_rate(fast_tokens_per_s, 'tokens/s', precision=0, commas=False)
+
+
+Distribution alignment challenges highlight two complementary paradigms: iterating on model architecture versus refining dataset quality (@fig-model-vs-data).
+
+::: {#fig-model-vs-data fig-env="figure" fig-pos="htb" fig-cap="**Development Paradigms**: Model-centric AI iterates on architecture while holding the dataset fixed, whereas data-centric AI iterates on annotations, diversity, and bias while holding the architecture fixed. The double arrow marks the approaches as complementary." fig-alt="Side-by-side diagrams: model-centric AI shows data cylinders feeding CPU with feedback loop to model, data-centric AI shows feedback loop to data instead. Double arrow indicates complementary approaches."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\sffamily]
+\tikzset{Line/.style={line width=1.25pt,black!50,-{Latex[length=3mm,width=2mm]}}
+}
+%CPU
+\tikzset{%
+ pics/cpu/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=CPU\picname,scale=\scalefac, every node/.append style={transform shape}]
+\node[fill=\filllcolor,minimum width=66, minimum height=66,
+            rounded corners=2,outer sep=2pt] (C1) {};
+\node[fill=white,minimum width=54, minimum height=54] (C2) {};
+\node[fill=\filllcolor!40,minimum width=44, minimum height=44] (C3) {\large CPU};
+
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
+}
+ \end{scope}
+     }
+  }
+}
+%CPU
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=DATA\picname,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\filllcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\filllcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
+\fill[\filllcolor!50!black]($(C.west)!0.12!(C.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(B.west)!0.12!(B.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(A.west)!0.12!(A.east)$)circle(3pt);
+ \end{scope}
+     }
+  }
+}
+%lokot
+\tikzset{
+pics/lokot/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\fill[fill=\filllcolor](0,0)--(2.7,0)--++(270:1.6)to[out=270,in=0](1.85,-2.45)
+--++(180:1.1)to[out=180,in=270](0,-1.3)--cycle;
+\fill[fill=white](1.32,-0.9)+(230:0.3)
+arc[start angle=230, end angle=-50, radius=0.3]--++(280:0.75)--++(180:0.62)--cycle;
+\path[](0.27,0)circle(1pt)coordinate(K1);
+\path[](0.57,0)circle(1pt)coordinate(K2);
+\path[](2.10,0)circle(1pt)coordinate(K3);
+\path[](2.4,0)circle(1pt)coordinate(K4);
+%
+\path[](K1)--++(90:0.6)coordinate(KK1);
+\path[](K2)--++(90:0.5)coordinate(KK2);
+\path[](K4)--++(90:0.6)coordinate(KK4);
+\path[](K3)--++(90:0.5)coordinate(KK3);
+\fill[fill=\filllcolor](K1)--(KK1)to[out=90,in=90,distance=37](KK4)--(K4)
+--(K3)--(KK3)to[out=90,in=90,distance=29](KK2)--(K2)--cycle;
+\end{scope}
+    }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=1.3,
+  Height=0.8,
+  Width=1.1,
+  picname=C
+}
+
+%Data
+\pic[shift={(0,0)}] at  (0,0){data={scalefac=0.75,picname=1,filllcolor=RedLine, Linewidth=1.0pt}};
+%padlock
+\pic[shift={(0,0)}] at  (0.5,2){lokot={scalefac=0.22,picname=1,drawcolor=OrangeLine!70!,
+filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
+%CPU
+\pic[shift={(0,-0.2)}] at  (4.5,1){cpu={scalefac=0.6,picname=1,filllcolor=BlueLine, Linewidth=0.7pt}};
+\node[below=0.15 of DO3](MO){Model};
+\path[red](MO)-|coordinate(D)(A);
+\node[]at(D){Data};
+\draw[Line,shorten <=4pt,shorten >=11pt](B.east)--++(0:25mm);
+\draw[Line,shorten <=8pt,shorten >=8pt,]($(DE3)!0.5!(DE4)$)--++(0:1)--++(90:1.8)-|
+node[above,text=black](TXT){Systematically enhance the model}($(GO3)!0.5!(GO4)$);
+%
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,
+yshift=2mm,
+fill=BackColor,fit=(D)(DATA1)(CPU1)(TXT),line width=0.75pt](BB){};
+\node[below=4pt of  BB.north,inner sep=0pt,xshift=3,
+anchor=north,fill=BackColor]{\textbf{Model-centric AI}};
+%%%%%%%%%%%%%%%%%
+%right
+%%%%%%%%%%%%%%%%%%%%
+\begin{scope}[node distance=-0.15,shift={(13.5,0)},local bounding box = 2DATA]
+\pic[shift={(0,0)}] at  (0,0){data={scalefac=0.75,picname=2,filllcolor=RedLine, Linewidth=1.0pt}};
+\pic[shift={(0,-0.2)}] at  (4.5,1){cpu={scalefac=0.6,picname=2,filllcolor=BlueLine, Linewidth=0.7pt}};
+\pic[shift={(0,0)}] at  (4.75,1.69){lokot={scalefac=0.22,picname=2,drawcolor=OrangeLine!70!,
+filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
+%
+\draw[Line,shorten <=4pt,shorten >=11pt](B)--($(LE3)!0.5!(LE4)$);
+
+\node[below=0.15of CPU2](2MO){Model};
+\path[red](2MO)-|coordinate(2D)(DATA2);
+\node[]at(2D){Data};
+
+\draw[Line](CPU2.east)--++(0:1)coordinate(DE)--++(90:1.8)-|
+           node[above,text=black,pos=0.25](2TXT){Systematically enhance the data}(DATA2);
+%
+\scoped[on background layer]
+\node[draw=GreenLine,inner xsep=5mm,inner ysep=5mm,
+           yshift=2mm, fill=GreenL!50,fit=(2D)(DATA2)(CPU2)(2TXT)(DE),line width=0.75pt](2BB){};
+\node[below=4pt of  2BB.north,inner sep=0pt,xshift=3,
+           anchor=north]{\textbf{Data-centric AI}};
+\end{scope}
+%%%%
+\node[double arrow, fill=red!80!black!90,
+           minimum width = 10pt, double arrow head extend=4pt,
+           minimum height=35mm](DA) at($(BB.east)!0.5!(2BB.west)$){};
+\node[below=0.2of DA]{Complementary};
+ \end{tikzpicture}
+
+```
+:::
+
+
+Even with rigorous protocols, static benchmarks face dataset saturation, where models rapidly exhaust a test suite's discriminating headroom (@fig-dataset-saturation).
+
+::: {#fig-dataset-saturation fig-env="figure" fig-pos="htb" fig-cap="**Dataset Saturation**: The zero line denotes reported human performance; each curve's crossing marks a capability for which the static benchmark has less remaining discriminating headroom. The crossings do not distinguish genuine capability gains from optimization to the evaluation set. Sources: [@perrault2024artificial; @kiela2021]." fig-alt="Line chart showing five AI capabilities crossing human performance baseline from 1998 to 2020: handwriting, speech, image recognition, reading comprehension, and language understanding."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+%\node[anchor=south west]at(-0.93,-0.76){%
+%\includegraphics[scale=0.7]{1}};
+
+\begin{axis}[clip=false,
+   axis line style={draw=none},
+  /pgf/number format/.cd,
+ 1000 sep={},
+  width=155mm,%155.9mm,
+  height=80mm,%58.0mm,
+  axis x line*=bottom,
+  legend style={at={(0.16,0.98)}, anchor=north},
+  legend cell align=left,
+  title style={yshift=-2pt,font=\fontsize{9pt}{9}\selectfont\sffamily},
+  ylabel style={align=center,font=\footnotesize\sffamily},
+  xmin=1997,
+  xmax=2022,
+  xtick={2000,2005,2010,2015,2020},
+   x tick label style={rotate=0, anchor=north},
+  ymin=-100, ymax=24,
+  ytick={-100,-80,...,20},
+  yticklabels={$-$100,$-$80,$-$60,$-$40,$-$20,0,+20},
+  ylabel={Test score of the AI relative\\ to human performance},
+  title={Language and image recognition capabilities of AI systems have improved rapidly},
+  grid=both,
+  major grid style={black!60},
+  minor grid style={draw=none},
+  minor x tick num=4,
+  minor x tick  style={thin,black!60},
+  tick label style={/pgf/number format/assume math mode=true},
+  ticklabel style={font=\footnotesize\sffamily},
+  xticklabel style={yshift=-3pt},
+]
+%Handwriting recognition
+\addplot[OrangeLine,mark=*,
+mark size=2pt,line width=1.5pt,
+]
+coordinates{
+(1998,-100)(1998,-80)(2002,-48)(2003,-27)(2006,-25)(2010,-20)(2012,-5)(2013,-1)(2018,2)
+}node[pos=0.67,above=3mm]{Handwriting recognition};
+%Speech recognition
+\addplot[RedLine,mark=*,
+mark size=2.0pt,line width=1.5pt,
+] coordinates{
+(1998,-100)(2011,-66)(2013,-53)(2014,-28)(2015,-26)(2015,-9)(2016,-5)(2016,-1.2)(2017,0.5)(2018,2)
+}node[pos=0.17,above=3mm]{Speech recognition};
+%Image recognition
+\addplot[GreenD,mark=*,
+mark size=2.0pt,line width=1.5pt,
+] coordinates{
+(2009,-100)(2012,-44)(2014,-11.5)(2014,-7)(2015,1)(2016,6)(2018,11.5)(2019,9)(2020,16)
+}node[pos=0.13,left=2mm,anchor=north east]{Image recognition};
+%Reading comprehension
+\addplot[cyan!90!black,mark=*,
+mark size=2.0pt,line width=1.5pt,
+] coordinates{
+(2016,-100)(2016,-34)(2017,-30)(2017,-9)(2018,6)(2019,18)(2020,19)
+}node[pos=0.23,left=2mm,anchor=north east,align=right]{Reading\\ comprehension};
+%Language understanding
+\addplot[red,mark=*,
+mark size=2.0pt,line width=1.5pt,
+] coordinates{
+(2018,-100)(2018,-68)(2019,-64)(2019,-25)(2019,0)(2019,4)(2020,8)(2020,12)
+}node[pos=0.23,right=2mm,anchor=north west,align=left]{Language\\ understanding};
+%
+\draw[font=\fontsize{7pt}{9}\selectfont\sffamily,latex-](axis cs:1996.5,-104)to[bend right=25]++(320:9mm)
+node[align=left,below right=2mm and 1mm,anchor=west]{The capability of each AI system is normalized\\
+to an initial performance $-$100};
+\draw[font=\fontsize{7pt}{9}\selectfont\sffamily,latex-](axis cs:1996.8,2)to[bend left=25]++(30:6mm)
+node[align=left, right=1mm,anchor=west]{Human performance, as the benchmark, is set to zero};
+%
+\draw[red,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,-1)--
+node[font=\fontsize{7pt}{9}\selectfont\sffamily,right,text=black]{AI systems perform worse}
+(axis cs:2021,-19);
+\draw[red,line width=2pt,{Triangle[width=6pt,length=5pt]}-{Triangle[width=5pt,length=6pt]}](axis cs:2021,1)--
+node[align=left,font=\fontsize{7pt}{9}\selectfont\sffamily,right,text=black]{AI systems perform better than\\
+the humans who did these tests}
+(axis cs:2021,19);
+\coordinate(A)at(axis cs:1994,-100);
+\coordinate(B)at(axis cs:2027.5,-100);
+\coordinate(C)at(axis cs:2027.5,0);
+\coordinate(C1)at(axis cs:2027.5,25);
+\coordinate(D)at(axis cs:1994,0);
+\coordinate(D1)at(axis cs:1994,25);
+\scoped[on background layer]
+\fill[fill=magenta!5](A)--(B)--(C)--(D)--cycle;
+\scoped[on background layer]
+\fill[fill=green!5](D)--(C)--(C1)--(D1)--cycle;
+\end{axis}
+\end{tikzpicture}
+```
+
+:::
+
+### Holistic system-model-data evaluation {#sec-benchmarking-holistic-systemmodeldata-evaluation-8fda}
+
+Passing system, model, and data benchmarks independently is not enough. A system benchmark can validate hardware performance, a model benchmark can verify that compression preserved quality, and a data benchmark can assess training set representativeness, yet the deployed system can still fail because the three dimensions interact. Real-world AI performance emerges from that interaction, and optimizing one dimension can expose weaknesses in another.
+
+Consider a concrete failure cascade: an engineering team achieves target throughput on MLPerf Inference by deploying an INT8-quantized vision model on a specialized accelerator. System benchmarks pass. However, because quantization scale factors and zero points were calibrated strictly against ImageNet validation samples, deploying the model onto a factory floor reveals severe accuracy degradation. Factory illumination introduces dynamic ranges that exceed the calibration clipping thresholds, truncating feature activations. A targeted model quality benchmark across varied exposure levels would have exposed this numerical sensitivity. Tracing the failure upstream reveals that the training pipeline contained no industrial imagery—a data distribution gap that no amount of accelerator optimization or runtime kernel tuning can resolve.
+
+Cross-dimensional coupling implies that a passing benchmark in one domain can be invalidated by an unmeasured failure in another:
+
+- **System success + model failure**: Hardware delivers promised throughput, but aggressive compression degrades accuracy below deployment thresholds.
+- **System success + data failure**: Fast inference executes on benchmark inputs, but training data bias causes severe accuracy disparities across demographic subgroups.
+- **Model success + system failure**: The model produces accurate predictions, but tail latency variance under concurrent load violates service-level agreements.
+- **Model success + data failure**: Validation yields high accuracy on held-out test sets, but production distribution shift causes silent degradation.
+
+These failure modes map directly onto the tripartite D·A·M taxonomy diagrammed in the Venn intersections of @fig-ai-triad, though benchmark evaluation lenses do not align one-to-one with isolated physical vertices. Data benchmarks evaluate input distribution quality and coverage ($\text{D}$); model benchmarks assess learned algorithmic representations and numerical robustness ($\text{A}$); and system benchmarks expose hardware execution, kernel efficiency, and memory-interconnect traffic ($\text{M}$). Holistic evaluation validates the pairwise and central intersections where these domains meet—ensuring that optimizations across the Part III pipeline (data selection $\rightarrow$ model compression $\rightarrow$ hardware acceleration) do not introduce hidden cross-axis regressions.
+
+The D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!diagnostic framework} provides a diagnostic framework for systematically identifying which axis limits performance. @Tbl-dam-bottleneck formalizes this approach by crossing each D·A·M axis with the three fundamental bottleneck types.
+
+| **Component** | **Compute-Bound**                                    | **Memory-Bound**                                     | **I/O-Bound**                                            |
+|:--------------|:-----------------------------------------------------|:-----------------------------------------------------|:---------------------------------------------------------|
+| **Data**      | Preprocessing too slow (augmentation, tokenization)  | Dataset exceeds RAM (spills to disk)                 | Storage cannot feed GPU (disk throughput limit)          |
+| **Algorithm** | Model too large for hardware (FLOPs exceed capacity) | Activations exceed memory (batch size limited)       | Gradient sync slower than compute (distributed training) |
+| **Machine**   | GPU utilization saturated (need faster accelerator)  | Memory bandwidth saturated (need more HBM bandwidth) | Network/PCIe bandwidth saturated (need faster links)     |
+
+: **D·A·M Bottleneck Diagnostic Matrix**: Each cell describes a performance constraint symptom, and the row identifies which D·A·M axis to address. When performance stalls, this matrix turns the first diagnostic move into an axis-specific check of Data, Algorithm, or Machine. {#tbl-dam-bottleneck tbl-colwidths="[12,29,30,29]"}
+
+Applying this matrix organizes hypotheses when system telemetry diverges from theoretical hardware peaks. If an accelerator achieves only 30 percent GPU utilization during training, an engineer might prematurely blame the model architecture (Algorithm row) and attempt model surgery. Profiling often reveals instead that host-side data workers saturating CPU cores on image augmentation or tokenization cannot feed batches fast enough across PCIe (Data row, Compute-Bound column: "Preprocessing too slow"). The accelerator stalls not from algorithmic inefficiency, but from input pipeline starvation. The matrix guides investigation; traces and controlled interventions establish which physical subsystem is binding.
+
+::: {.column-margin .margin-pointer}
+↪ A production troubleshooting matrix that maps common failure symptoms to a candidate D·A·M axis and the measurement that confirms it is operationalized in @sec-appdx-dam-taxonomy-production-troubleshooting-02fb.
+:::
+
+Validation under controlled laboratory conditions differs from validation in production. A laboratory protocol may fix data, simplify arrivals, or isolate execution to answer a controlled question; other protocols deliberately vary those conditions. In production, all three assumptions can break simultaneously: data drifts, traffic spikes unpredictably, and concurrent workloads compete for shared hardware resources. The final dimension of benchmarking asks whether laboratory results hold under operational conditions.
+
 
 ## Training vs. Inference {#sec-benchmarking-training-vs-inference-evaluation-a3be}
 
