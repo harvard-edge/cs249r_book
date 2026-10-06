@@ -139,75 +139,6 @@ class TrainingScenarios:
     )
 ```
 
-## Training-Time Law {#sec-model-training-iron-law-training-performance-a53f}
-
-PaLM's loss spikes show how directly lost progress becomes lost time at frontier scale, because every discarded step is paid for again on the full cluster. Pricing that cost, and every other one, requires a decomposition of training time into its physical constituents.
-
-The iron law of ML systems (principle \ref{pri-iron-law}) supplies that decomposition once it is specialized to training.\index{Training!training-time law}\index{Training-time law!utilization gap} The training-time form of the iron law, which this chapter shortens to the training-time law, keeps the compute term as the organizing equation so that every optimization technique maps to one of its factors.
-
-::: {#dfn-training-iron-law-training-performance .callout-definition title="The training-time law"}
-
-***The training-time law***\index{Training-time law!definition} expresses training time through the workload's operation count and its effective achieved throughput:
-$$T_{\text{train}} = \frac{O}{\PeakRate \times \EfficiencyHw}$$ {#eq-training-iron-law}
-
-Here $\EfficiencyHw$ is an effective end-to-end utilization factor, the achieved model-operation rate divided by the relevant hardware peak. Data stalls, communication, synchronization, launch overhead, and inefficient kernels all reduce this factor. Prefetching and overlap can hide part of those costs but do not guarantee their removal.
-
-1.  Significance: In the D·A·M taxonomy, these terms map to distinct optimization levers: $O$ is governed by Data (training token count) and Algorithm (model architecture or compression methods such as pruning and distillation), $\PeakRate$ is governed by the Machine (hardware execution units at the chosen numerical precision), and $\EfficiencyHw$ is the effective systems utilization factor and primary engineering target (@narayanan2021 measured 44 to 52 percent of theoretical peak throughput across GPT models trained on A100 clusters). @Sec-model-compression defines the compression techniques; here they serve only to show where such methods enter the accounting.
-2.  Distinction: The general iron law exposes data movement, computation, and latency separately. This training form folds every source of lost throughput into $\EfficiencyHw$, making it useful for budget accounting but insufficient for diagnosing which underlying term is responsible.
-3.  Common pitfall: A frequent misconception is that $\EfficiencyHw$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\EfficiencyHw$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
-
-:::
-
-@Eq-training-iron-law reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware selection and precision formats, or improve utilization through pipeline orchestration. Core training optimization techniques target one or more of these levers, as summarized in @tbl-iron-law-mapping.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Technique**                   | **Term Affected**               | **Mechanism**                                                                  |
-|:--------------------------------|:--------------------------------|:-------------------------------------------------------------------------------|
-| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑               | Uses supported lower-precision hardware paths                                  |
-| **Data Prefetching**            | Utilization ↑                   | Reduces accelerator idle time waiting for data                                 |
-| **Gradient Checkpointing**      | Memory ↓, Operations ↑          | Reduces saved activations by recomputing selected values                       |
-| **Gradient Accumulation**       | Memory ↓, Synchronization ↓     | Builds an effective batch from serialized micro-batches                        |
-| **Operator Fusion**             | Memory Traffic ↓, Overhead ↓    | Avoids intermediate transfers and reduces kernel launches                      |
-| **FlashAttention**              | Memory Traffic ↓, Utilization ↑ | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs |
-
-: **Iron law optimization mapping**: Optimization techniques mapped to iron law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping tbl-colwidths="[25,27,48]"}
-
-```{=latex}
-\endgroup
-```
-
-The training-time law focuses on execution efficiency---how fast the hardware processes a given workload. It does not capture data-side factors such as data quality, dataset size, or curriculum design, which affect how many total operations $O$ are needed to reach a target accuracy. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $O$ without touching hardware at all. Holding the workload fixed, the question is how to execute it as fast as possible.
-
-::: {.column-margin .margin-pointer}
-↪ Data selection, which shrinks total operations ($O$) by keeping the examples that return the most learning per unit of compute, is developed in @sec-data-selection-data-selection-fundamentals-e839.
-:::
-
-Actual training throughput remains below the arithmetic peak whenever kernels, data delivery, or communication leave resources idle. Scaling to multiple accelerators introduces additional communication overhead, a trade-off quantified in @sec-model-training-scaling-training-systems-adfd.
-
-::: {#chk-training-physics-training .callout-checkpoint title="The physics of training"}
-
-Training speed is governed by the utilization of hardware peaks.
-
-**Utilization gap**
-
-- [ ] **Peak vs. real**: why does sustained end-to-end utilization remain below the arithmetic peak?
-- [ ] **Utilization losses**: which pipeline stalls introduced earlier reduce $\EfficiencyHw$, and which can prefetching or overlap hide?
-- [ ] **Order of magnitude**: a frontier run needs on the order of $10^{23}$ FLOPs at a utilization $\EfficiencyHw$ well below 1. Estimate which lever shortens wall-clock time more, doubling $\PeakRate$ or doubling $\EfficiencyHw$, and why, in practice, the two levers differ in cost and reachability even though the training-time law treats them symmetrically.
-
-:::
-
-The training-time law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the binding constraint has shifted over time as hardware and algorithms co-evolved. In 1986, Rumelhart and colleagues popularized backpropagation for multilayer neural networks [@rumelhart1986]. In 2012, AlexNet trained an ImageNet classifier in five to six days on two GPUs [@krizhevsky2012imagenet], demonstrating how well neural-network parallelism mapped to graphics hardware. By 2017, transformers\index{Transformer!training evolution} [@vaswani2017] shifted attention toward large-scale sequence modeling and high-throughput accelerator kernels. GPT-3\index{GPT-3!training compute} in 2020 consumed about $3.14 \times 10^{23}$ FLOPs [@brown2020language], making utilization $(\EfficiencyHw)$ critical. By 2023, training efficiency improved through targeted systems optimizations: FlashAttention reduces memory traffic while improving $\EfficiencyHw$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $\PeakRate$. Each innovation addresses a specific iron-law bottleneck.
-
-That history is the bitter lesson seen from inside the training system. None of these milestones succeeded by encoding more human expertise. Backpropagation supplied a general recipe, and each later step let that recipe absorb more computation, more parameters, and more data. The systems consequence is what makes training engineering matter. If capability tracks the computation a general method can absorb, then every point of $\EfficiencyHw$ lost to stalls, and every gigabyte of memory that forces a smaller model or batch, is capability forgone at a fixed budget. The first obligation of a training system is therefore to convert its compute budget into useful operations as completely as the hardware allows.
-
-::: {.column-margin .margin-pointer}
-↩ The bitter lesson, that general methods which absorb more computation outperform encoded human expertise, is established in @sec-introduction-bitter-lesson-79c7.
-:::
-
 ```{python}
 #| echo: false
 #| label: gpt2-lighthouse-hardware-calc
@@ -329,7 +260,12 @@ Any mismatch in the throughput of these stages creates **accelerator bubbles**\i
 
 Training systems budget compute, memory, and data flow under the training-time iron law, using reference workloads such as GPT-2 to price bottlenecks before applying targeted optimizations (mixed precision, tiled attention kernels, gradient accumulation, activation checkpointing, and prefetching) before scaling beyond a single host.
 
-Computational intensity, memory pressure, and data dependencies compound in large-scale execution: a single unmitigated numerical explosion can invalidate thousands of accelerator-hours.
+
+
+
+## Training-Time Law {#sec-model-training-iron-law-training-performance-a53f}
+
+Every discarded training step is paid for again on the full cluster—a reality made painfully clear by the training instability of frontier models. Pricing that cost, and every other one, requires a decomposition of training time into its physical constituents.
 
 ::: {#ws-training-palm-loss-spikes .callout-war-story title="The PaLM loss spikes (2022)"}
 
@@ -345,9 +281,74 @@ Computational intensity, memory pressure, and data dependencies compound in larg
 
 :::
 
+The iron law of ML systems (principle \ref{pri-iron-law}) supplies that decomposition once it is specialized to training.\index{Training!training-time law}\index{Training-time law!utilization gap} The training-time form of the iron law, which this chapter shortens to the training-time law, keeps the compute term as the organizing equation so that every optimization technique maps to one of its factors.
+
+::: {#dfn-training-iron-law-training-performance .callout-definition title="The training-time law"}
+
+***The training-time law***\index{Training-time law!definition} expresses training time through the workload's operation count and its effective achieved throughput:
+$$T_{\text{train}} = \frac{O}{\PeakRate \times \EfficiencyHw}$$ {#eq-training-iron-law}
+
+Here $\EfficiencyHw$ is an effective end-to-end utilization factor, the achieved model-operation rate divided by the relevant hardware peak. Data stalls, communication, synchronization, launch overhead, and inefficient kernels all reduce this factor. Prefetching and overlap can hide part of those costs but do not guarantee their removal.
+
+1.  Significance: In the D·A·M taxonomy, these terms map to distinct optimization levers: $O$ is governed by Data (training token count) and Algorithm (model architecture or compression methods such as pruning and distillation), $\PeakRate$ is governed by the Machine (hardware execution units at the chosen numerical precision), and $\EfficiencyHw$ is the effective systems utilization factor and primary engineering target (@narayanan2021 measured 44 to 52 percent of theoretical peak throughput across GPT models trained on A100 clusters). @Sec-model-compression defines the compression techniques; here they serve only to show where such methods enter the accounting.
+2.  Distinction: The general iron law exposes data movement, computation, and latency separately. This training form folds every source of lost throughput into $\EfficiencyHw$, making it useful for budget accounting but insufficient for diagnosing which underlying term is responsible.
+3.  Common pitfall: A frequent misconception is that $\EfficiencyHw$ is fixed by hardware. System efficiency is a pipeline property: memory bandwidth saturation, kernel launch overhead, and synchronization barriers each reduce $\EfficiencyHw$ independently, and diagnosing which factor dominates requires profiling rather than reading hardware specs.
+
+:::
+
+@Eq-training-iron-law reveals three levers for improvement: reduce total operations through algorithmic innovation, increase peak throughput through hardware selection and precision formats, or improve utilization through pipeline orchestration. Core training optimization techniques target one or more of these levers, as summarized in @tbl-iron-law-mapping.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Technique**                   | **Term Affected**               | **Mechanism**                                                                  |
+|:--------------------------------|:--------------------------------|:-------------------------------------------------------------------------------|
+| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑               | Uses supported lower-precision hardware paths                                  |
+| **Data Prefetching**            | Utilization ↑                   | Reduces accelerator idle time waiting for data                                 |
+| **Gradient Checkpointing**      | Memory ↓, Operations ↑          | Reduces saved activations by recomputing selected values                       |
+| **Gradient Accumulation**       | Memory ↓, Synchronization ↓     | Builds an effective batch from serialized micro-batches                        |
+| **Operator Fusion**             | Memory Traffic ↓, Overhead ↓    | Avoids intermediate transfers and reduces kernel launches                      |
+| **FlashAttention**              | Memory Traffic ↓, Utilization ↑ | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs |
+
+: **Iron law optimization mapping**: Optimization techniques mapped to iron law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping tbl-colwidths="[25,27,48]"}
+
+```{=latex}
+\endgroup
+```
+
+The training-time law focuses on execution efficiency---how fast the hardware processes a given workload. It does not capture data-side factors such as data quality, dataset size, or curriculum design, which affect how many total operations $O$ are needed to reach a target accuracy. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $O$ without touching hardware at all. Holding the workload fixed, the question is how to execute it as fast as possible.
+
+::: {.column-margin .margin-pointer}
+↪ Data selection, which shrinks total operations ($O$) by keeping the examples that return the most learning per unit of compute, is developed in @sec-data-selection-data-selection-fundamentals-e839.
+:::
+
+Actual training throughput remains below the arithmetic peak whenever kernels, data delivery, or communication leave resources idle. Scaling to multiple accelerators introduces additional communication overhead, a trade-off quantified in @sec-model-training-scaling-training-systems-adfd.
+
+::: {#chk-training-physics-training .callout-checkpoint title="The physics of training"}
+
+Training speed is governed by the utilization of hardware peaks.
+
+**Utilization gap**
+
+- [ ] **Peak vs. real**: why does sustained end-to-end utilization remain below the arithmetic peak?
+- [ ] **Utilization losses**: which pipeline stalls introduced earlier reduce $\EfficiencyHw$, and which can prefetching or overlap hide?
+- [ ] **Order of magnitude**: a frontier run needs on the order of $10^{23}$ FLOPs at a utilization $\EfficiencyHw$ well below 1. Estimate which lever shortens wall-clock time more, doubling $\PeakRate$ or doubling $\EfficiencyHw$, and why, in practice, the two levers differ in cost and reachability even though the training-time law treats them symmetrically.
+
+:::
+
+The training-time law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the binding constraint has shifted over time as hardware and algorithms co-evolved. In 1986, Rumelhart and colleagues popularized backpropagation for multilayer neural networks [@rumelhart1986]. In 2012, AlexNet trained an ImageNet classifier in five to six days on two GPUs [@krizhevsky2012imagenet], demonstrating how well neural-network parallelism mapped to graphics hardware. By 2017, transformers\index{Transformer!training evolution} [@vaswani2017] shifted attention toward large-scale sequence modeling and high-throughput accelerator kernels. GPT-3\index{GPT-3!training compute} in 2020 consumed about $3.14 \times 10^{23}$ FLOPs [@brown2020language], making utilization $(\EfficiencyHw)$ critical. By 2023, training efficiency improved through targeted systems optimizations: FlashAttention reduces memory traffic while improving $\EfficiencyHw$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $\PeakRate$. Each innovation addresses a specific iron-law bottleneck.
+
+That history is the bitter lesson seen from inside the training system. None of these milestones succeeded by encoding more human expertise. Backpropagation supplied a general recipe, and each later step let that recipe absorb more computation, more parameters, and more data. The systems consequence is what makes training engineering matter. If capability tracks the computation a general method can absorb, then every point of $\EfficiencyHw$ lost to stalls, and every gigabyte of memory that forces a smaller model or batch, is capability forgone at a fixed budget. The first obligation of a training system is therefore to convert its compute budget into useful operations as completely as the hardware allows.
+
+::: {.column-margin .margin-pointer}
+↩ The bitter lesson, that general methods which absorb more computation outperform encoded human expertise, is established in @sec-introduction-bitter-lesson-79c7.
+:::
+
 ## Case Study: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
 
-In inference, GPT-2\index{GPT-2!training lighthouse} serves as the Bandwidth Hog lighthouse. Here it recurs as the chapter's stable workload for testing each training cost and optimization.
+To see how these theoretical constraints—computational intensity, memory pressure, and the training-time law—manifest in practice, we need a concrete workload. In inference, GPT-2\index{GPT-2!training lighthouse} serves as the Bandwidth Hog lighthouse. Here it recurs as the chapter's stable workload for testing each training cost and optimization.
 
 ::: {.column-margin .margin-pointer}
 ↩ GPT-2's inference archetype as the Bandwidth Hog, a workload bound by data movement rather than arithmetic, is established in @sec-ml-systems-workload-archetypes-fd10.

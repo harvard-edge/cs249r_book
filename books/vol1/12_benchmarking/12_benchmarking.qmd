@@ -1136,124 +1136,91 @@ Standardization transforms these empirical lessons into a shared engineering met
 
 ## Compression benchmarks
 
-Two benchmark categories recur often enough across the optimization pipeline to warrant specialized checklists: compression benchmarks, which a pruned or quantized model must pass before deployment, and mobile and edge benchmarks, which power and thermal boundaries strictly constrain. Each composes the task, data, model, metrics, harness, and run rules while enforcing domain-specific limits. Compression validation requires a multi-metric protocol that balances size reduction against accuracy and latency (@sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4), while edge deployment requires sustained-power measurement under realistic thermal and duty-cycle constraints (@sec-benchmarking-power-measurement-techniques-bcc2).
-
-## Mobile and edge benchmarks {#sec-benchmarking-mobile-edge-benchmarks-fd4f}
-
-Unlike data centers with kilowatt-scale power delivery and active cooling infrastructure, mobile and edge deployments\index{Edge deployment!constraint triangle} operate within strict milliwatt- to watt-scale power envelopes and passive thermal dissipation limits. Benchmarking these systems requires navigating an interdependent triangle of power consumption, inference latency, and model accuracy, where optimizing any two typically degrades the third. @Tbl-edge-vs-cloud-constraints contrasts these operational constraints against cloud environments.
-
-```{=latex}
-\begingroup
-%\renewcommand{\arraystretch}{1.3}
-```
-
-| **Constraint** | **Cloud Impact**     | **Edge Impact**             |
-|:---------------|:---------------------|:----------------------------|
-| **Power**      | Operational cost     | Device energy budget        |
-| **Latency**    | Service-level target | Local response deadline     |
-| **Accuracy**   | Task-quality target  | Balanced with power/latency |
-
-: **Edge vs. Cloud Deployment Constraints**: Typical cloud deployments treat power as an operating cost and latency as a service target, while edge deployments often face tighter energy and response-time limits that constrain achievable accuracy. {#tbl-edge-vs-cloud-constraints}
-
-```{=latex}
-\endgroup
-```
-
-Consider a smartphone camera executing real-time object detection at 30 frames per second within a 3 W to 5 W thermal envelope. In this setting, an efficient architecture such as MobileNet serves as a realistic benchmark target where a larger ResNet model would violate thermal limits, despite the larger model's superior accuracy in cloud evaluations. An edge benchmark must therefore evaluate accuracy jointly with sustained power and thermal dissipation. The peak-versus-sustained gap established in @sec-benchmarking-machine-learning-benchmarking-framework-70b8 can be especially acute at the edge: a passively cooled device has less capacity to shed continuous inference heat than an actively cooled server. Both environments must remain within their cooling limits. As junction temperatures rise, the dynamic thermal management (DTM) controller scales down operating voltage and clock frequency, causing sustained throughput to drop sharply below burst-mode peaks. That thermal mechanism makes the cooling configuration part of the benchmark contract.
-
-::: {#exmp-benchmarking-benchmarking-edge .callout-example title="Benchmarking the edge"}
-
-**Scenario**: An edge engineering team benchmarks a smart doorbell chip with a vendor-advertised "1 W AI" power specification.
-
-**Diagnosis**: Early burst-mode testing matches vendor claims, but continuous inference loop execution builds up junction heat, triggering thermal throttling and dropping steady-state throughput.
-
-**Systems lesson**: Short burst benchmarks obscure long-term thermal throttling. Benchmarking edge ML workloads requires continuous, sustained execution testing to reflect true operational hardware limits.
-
-:::
+When evaluating compressed models, a Pareto frontier identifies non-dominated choices that balance efficiency against accuracy. Aggregate metrics often hide calibration and tail-case degradation, as shown for MobileNetV2 in @tbl-benchmarking-mobilenet-int8-validation.
 
 ::: {.column-margin}
-![](images/svg/vol1_benchmarking_margin_003.svg){width="100%" fig-alt="FPS holds briefly then drops at thermal throttling knee."}
+![](images/svg/vol1_benchmarking_margin_004.svg){width="100%" fig-alt="Tiny Pareto frontier with one dominated point."}
 
-*Burst benchmark FPS collapses once thermal throttling sets in.*
+*A dominated model is no better on either axis and worse on at least one.*
 :::
-
-Throttling is the most visible way a short measurement flatters edge hardware. Idle power, duty cycle, and the data movement around the accelerator can distort a headline number too, so each needs checking before a vendor claim informs a design decision.
 
 ```{python}
 #| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Edge benchmark reality-check callout (peak-vs-sustained).
-# │ Goal: Keep a vendor-peak vs. sustained-throughput scenario local to the callout.
-# └───────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.core.units import TOPS, milliwatt, second, watt
-from mlsysim.fmt import check, fmt_ops_rate, fmt_percent, fmt_power, fmt_qty_range, fmt_time
+#| label: mobilenet-int8-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOBILENET INT8 COMPRESSION METRICS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "MobileNetV2 INT8 Compression"—complete validation
+# │          protocol for INT8 quantization of MobileNetV2
+# │
+# │ Goal: Demonstrate the necessity of multi-dimensional compression benchmarks.
+# │ Show: That INT8 quantization preserves accuracy while yielding 4× size reduction.
+# │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.core.units import Mparam, BYTES_FP32, BYTES_INT8, MB
+from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
 
-class MobileNpuScenario:
-    """Illustrative mobile NPU peak-throughput scenario for the sustained-performance contrast."""
+class MobileNetINT8Calc:
+    """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
 
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    peak = 45 * TOPS  # scenario assumption: advertised mobile NPU marketing peak
-    sustained = 20 * TOPS  # scenario assumption: sustained thermal-throttled NPU throughput
-    min_sustained_duration = 30 * second  # scenario assumption: minimum sustained benchmark window
-    idle_power = 50 * milliwatt  # scenario assumption: idle device draw
-    active_power = 2 * watt  # scenario assumption: active inference draw
-    duty_cycle = 0.01  # scenario assumption: inference active share
-    tdp_low = 3 * watt  # scenario assumption: mobile edge thermal envelope lower bound
-    tdp_high = 5 * watt  # scenario assumption: mobile edge thermal envelope upper bound
-
-    # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────
-    effective_power = idle_power * (1 - duty_cycle) + active_power * duty_cycle
-
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _mobilenet_v2 = Models.Vision.MobileNetV2
+    acc_fp32 = 71.8
+    params = _mobilenet_v2.parameters
+    size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
+    size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
+    acc_int8 = 70.9
+    top5_fp32 = 91.0
+    top5_int8 = 90.4
+    ece_fp32 = 0.031
+    ece_int8 = 0.089
+    edge_fp32 = 68.2
+    edge_int8 = 61.4
+    edge_occlusion_pct = 50
+    edge_lux = 100
+    edge_rotation_deg = 30
+    real_world_edge_pct = 5
+    confidence_threshold_pct = 85
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    acc_drop = acc_fp32 - acc_int8
+    edge_drop = edge_fp32 - edge_int8
+    size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(44 <= peak.to(TOPS).magnitude <= 46, "Illustrative peak should be ~45 TOPS.")
-    check(sustained < peak, "Sustained throughput should be below advertised peak.")
-    check(idle_power < effective_power < active_power, "Duty-cycle power should sit between idle and active power.")
-
+    check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
+    check(acc_drop < 1.0, f"Expected <1 point top-1 drop, got {acc_drop:.1f}")
+    check(edge_drop > acc_drop, "Edge-case drop should exceed aggregate top-1 drop.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mobile_peak_tops_str = fmt_ops_rate(peak, unit=TOPS, precision=0, commas=False)
-    mobile_sustained_tops_str = fmt_ops_rate(sustained, unit=TOPS, precision=0, commas=False)
-    min_sustained_duration_str = fmt_time(min_sustained_duration, second, precision=0, commas=False)
-    idle_power_mw_str = fmt_power(idle_power, unit=milliwatt, precision=0, commas=False)
-    active_power_w_str = fmt_power(active_power, unit=watt, precision=0, commas=False)
-    duty_cycle_pct_str = fmt_percent(duty_cycle, precision=0, commas=False, style="prose")
-    effective_power_mw_str = fmt_power(effective_power, unit=milliwatt, precision=1, commas=False, approx=True)
+    mv2_acc_fp32_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='symbol')
+    mv2_acc_fp32_prose_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='prose')
+    mv2_params_m_str = fmt_params(params, scale='M', precision=1, commas=False)
+    mv2_size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, commas=False)
+    mv2_size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
+    mv2_acc_int8_str = fmt_percent(acc_int8 / 100, precision=1, commas=False, style='symbol')
+    mv2_acc_drop_str = fmt_pp(acc_drop, precision=1, commas=False, attributive=True)  # 0.9
+    mv2_acc_drop_tbl_str = fmt_pp(acc_drop, precision=1, commas=False, style="symbol")  # 0.9
+    mv2_top5_fp32_str = fmt_percent(top5_fp32 / 100, precision=0, commas=False, style='symbol')
+    mv2_top5_int8_str = fmt_percent(top5_int8 / 100, precision=1, commas=False, style='symbol')
+    mv2_ece_fp32_str = fmt(ece_fp32, precision=3, commas=False)
+    mv2_ece_int8_str = fmt(ece_int8, precision=3, commas=False)
+    mv2_edge_fp32_str = fmt_percent(edge_fp32 / 100, precision=1, commas=False, style='symbol')
+    mv2_edge_int8_str = fmt_percent(edge_int8 / 100, precision=1, commas=False, style='symbol')
+    mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
 ```
 
-::: {#psp-benchmarking-edge-benchmark-reality-check .callout-perspective title="Edge benchmark reality check"}
+| **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                                |
+|:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------------------------------------------|
+| **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_tbl_str` drop; below 1 percentage-point threshold) |
+| **Top-5 accuracy**     | `{python} MobileNetINT8Calc.mv2_top5_fp32_str` | `{python} MobileNetINT8Calc.mv2_top5_int8_str` | ✓ (below the stated accuracy-loss threshold)                                                   |
+| **Calibration ECE**    | `{python} MobileNetINT8Calc.mv2_ece_fp32_str`  | `{python} MobileNetINT8Calc.mv2_ece_int8_str`  | No (degraded)                                                                                  |
+| **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | No (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_tbl_str`)                                |
 
-When evaluating edge hardware claims, four factors determine whether vendor numbers translate to real-world performance:
+: **MobileNetV2 INT8 Postcompression Metrics**: Illustrative FP32 and INT8 values for top-1 and top-5 accuracy, calibration error, and edge-case accuracy, showing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[20,13,19,48]"}
 
-1. **Peak vs. sustained**: A vendor may advertise `{python} MobileNpuScenario.mobile_peak_tops_str` peak throughput while a sustained thermal run delivers closer to `{python} MobileNpuScenario.mobile_sustained_tops_str`. In this scenario, use a sustained run longer than `{python} MobileNpuScenario.min_sustained_duration_str` and verify thermal stabilization; also test the deployment duty cycle.
-2. **Power at idle vs. active**: In this scenario, a device consuming `{python} MobileNpuScenario.idle_power_mw_str` idle and `{python} MobileNpuScenario.active_power_w_str` active could report active draw for marketing, but if the application runs inference `{python} MobileNpuScenario.duty_cycle_pct_str` of the time, effective power draw is `{python} MobileNpuScenario.effective_power_mw_str`, not `{python} MobileNpuScenario.active_power_w_str`.
-3. **Thermal envelope**: Edge devices often operate inside a narrow TDP envelope. Exceeding it triggers throttling, so benchmark reports omitting thermal conditions are incomplete.
-4. **End-to-end vs. accelerator-only**: NPU benchmarks often exclude data transfer overhead. Moving image data from camera to NPU and back can exceed inference time for small models.
+**Edge-case definition**: Images with $>$ `{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, $<$ `{python} MobileNetINT8Calc.edge_lux_str` lighting, or $>$ `{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
 
-:::
-
-Because passive thermal dissipation caps sustained power draw, mobile SoC architects cannot rely on high-frequency monolithic cores. Instead, they divide execution across specialized compute blocks tailored to distinct arithmetic patterns. This hardware specialization shifts edge benchmarking from evaluating an isolated core to characterizing multi-processor coordination across the entire SoC.
-
-### Heterogeneous processor coordination {#sec-benchmarking-heterogeneous-processor-coordination-68cf}
-
-A modern mobile SoC packages CPUs, GPUs, digital signal processors (DSPs), and neural processing units (NPUs)\index{NPU!neural network acceleration} onto a single die sharing system memory and a common thermal budget. Each processing unit targets a distinct compute pattern: CPUs handle irregular control flow, dynamic batching, and sequential post-processing; GPUs execute parallel floating-point operations and unquantized fallback layers; DSPs process low-power streaming vector mathematics for always-on sensing; and NPUs execute dense, quantized matrix multiplications (typically INT8 or INT4) with specialized systolic arrays or multiply-accumulate engines.
-
-Benchmarking must evaluate pipeline orchestration rather than isolated kernel throughput. In an end-to-end voice assistant, for example, an ultra-low-power DSP continuously monitors microphone audio for a wake-word; upon detection, the system wakes the NPU to execute acoustic feature extraction and speech recognition, before passing token sequences to the CPU for language understanding and dialogue logic. Single-processor benchmarks evaluate only the isolated compute time of each stage, missing three dominant sources of system overhead: the latency of waking accelerators from deep sleep states, the bus contention when multiple engines access shared DRAM simultaneously, and the memory bandwidth consumed by transposing tensor layouts (such as converting NCHW CPU layouts into tiled NHWC formats required by the NPU). Benchmarks that report only compute time obscure these data movement and scheduling penalties.
-
-### Battery and thermal benchmarking {#sec-benchmarking-battery-thermal-benchmarking-79dd}
-
-Battery drain\index{Benchmarking!battery, duty cycle specification} depends on total energy consumed over time rather than peak instantaneous power. Computational photography bursts consume multiple watts for hundreds of milliseconds during image capture, whereas background sensor processing must remain within a milliwatt-scale budget to deliver multi-day battery life. Characterizing battery impact requires measuring the total energy consumption $\TotalEnergy = \int P_{\text{device}}(t)\,dt$ across representative operational profiles, where $P_{\text{device}}(t)$ is the instantaneous power the device draws at time $t$.
-
-The dominant operational variable is the workload duty cycle $\alpha_{\text{duty}}$, defined as the fraction of time the accelerator actively runs inference. For an active power draw $P_{\text{active}}$ and standby power draw $P_{\text{idle}}$, the average power is:
-$$P_{\text{avg}} = \alpha_{\text{duty}} P_{\text{active}} + (1 - \alpha_{\text{duty}}) P_{\text{idle}}$$
-For intermittent workloads like a smart doorbell camera ($\alpha_{\text{duty}} \ll 0.01$), standby power $P_{\text{idle}}$ and memory retention power dictate battery lifetime, making active inference efficiency secondary. For continuous pipelines like video analytics ($\alpha_{\text{duty}} \approx 1.0$), active inference energy $E_{\text{inf}} = P_{\text{active}} \cdot T_{\text{inf}}$ dominates. Furthermore, elevated operating temperatures increase semiconductor leakage current, causing static power dissipation to climb as the device heats up. Benchmarking battery impact therefore requires measuring both active and standby power across the operational duty cycle while monitoring junction temperature over extended multi-minute runs.
-
-### Edge-cloud coordination {#sec-benchmarking-edgecloud-coordination-061d}
-
-When edge devices offload computation to remote servers over 5G or Wi-Fi networks, benchmarking must evaluate the combined edge-cloud pipeline rather than local execution in isolation. While cellular standards such as URLLC[^fn-urllc-latency-guarantee] define aggressive radio-interface latency targets, real-world cellular and Wi-Fi channels introduce packet jitter, tail latency, and transient disconnections. Workload splitting benchmarks must therefore evaluate four system behaviors under emulated network impairment: the decision boundary for local versus remote execution, round-trip transmission overhead for intermediate activations versus raw sensor inputs, fallback mechanisms when network connectivity drops (such as degrading to a compact on-device model), and privacy policies restricting raw data egress. For safety-critical perception the decision boundary is fixed, because an automotive stack on a tens-of-milliseconds control loop cannot tolerate wide-area tail latency, so it runs locally and reserves the uplink for non-time-critical telemetry.
-
-[^fn-urllc-latency-guarantee]: **URLLC (ultra-reliable low-latency communication)**\index{URLLC!edge inference constraint}: ITU-R defines a 1 ms radio-interface user-plane latency target and 99.999 percent successful delivery within 1 ms for a 32-byte packet under specified test conditions. These radio-interface targets are not a sub-1-ms end-to-end application guarantee. Edge-inference benchmarks should report radio or network latency and compute latency separately and together, alongside model quality.
-
-Across both cloud data centers and edge devices, benchmarking methodology divides along a fundamental operational boundary: whether the system is executing training or inference. Training executes forward and backward passes, saving or recomputing activations to calculate gradients and updating model weights, with communication when training is distributed. Inference omits the backward pass and can release an activation after its last forward consumer, while retaining state such as KV caches when needed. Both phases can use fusion and reduced precision, but their memory access patterns, arithmetic intensities, and dependencies differ enough to require distinct benchmark objectives.
+Two benchmark categories recur often enough across the optimization pipeline to warrant specialized checklists: compression benchmarks, which a pruned or quantized model must pass before deployment, and mobile and edge benchmarks, which power and thermal boundaries strictly constrain. Each composes the task, data, model, metrics, harness, and run rules while enforcing domain-specific limits. Compression validation requires a multi-metric protocol that balances size reduction against accuracy and latency (@tbl-benchmarking-mobilenet-int8-validation), while edge deployment requires sustained-power measurement under realistic thermal and duty-cycle constraints (@sec-benchmarking-power-measurement-techniques-bcc2).
 
 ## System Benchmarking {#sec-benchmarking-system-benchmarking-umbrella}
 
@@ -1851,7 +1818,7 @@ Year,Y
 
 :::
 
-The ImageNet example places GPU adoption alongside falling error rates without isolating either contribution; @sec-benchmarking-model-benchmarking-4847 revisits this progression through model-specific architectural milestones. Effective system benchmarking, however, requires understanding the relationship between workload characteristics and hardware utilization. Modern AI systems rarely achieve theoretical peak performance due to interactions between computational patterns, memory hierarchies, and system architectures. This gap between theoretical and achieved performance shapes the design of meaningful system benchmarks.
+The ImageNet example places GPU adoption alongside falling error rates without isolating either contribution; @sec-benchmarking-model-data-benchmarking-e0ca revisits this progression through model-specific architectural milestones. Effective system benchmarking, however, requires understanding the relationship between workload characteristics and hardware utilization. Modern AI systems rarely achieve theoretical peak performance due to interactions between computational patterns, memory hierarchies, and system architectures. This gap between theoretical and achieved performance shapes the design of meaningful system benchmarks.
 
 Realistic hardware utilization patterns are essential for actionable benchmark design. As the preceding roofline analysis illustrated, GPU utilization varies with batch size and model architecture; the compute-bound value of `{python} BertRoofline.utilization_peak_pct_str` is an assumption, while `{python} BertRoofline.bert_util_b1_str` is the single-request roofline upper bound under the weights-only traffic assumption. These patterns extend to memory bandwidth: parameter-heavy transformer inference and activation-heavy convolutional workloads stress different parts of the memory hierarchy, directly impacting achievable performance across different precision levels.
 
@@ -1863,7 +1830,7 @@ Hardware utilization metrics become meaningless for comparative systems evaluati
 
 Reliable benchmarking standards require broad multi-organizational consensus to prevent selective reporting. In mature engineering domains, this consensus formalizes through bodies such as IEEE working groups [@ieee_working_groups] and ISO/IEC technical committees [@iso_tc], which establish rigorous measurement specifications such as IEEE 2416 [@ieee_2416_2019] for system power modeling. In machine learning systems, where hardware architectures and model structures evolve rapidly, consortia such as MLCommons provide the operational framework needed to maintain living benchmark suites. By providing open-source reference implementations paired with strict compliance verification rules, these consortia ensure that performance numbers reported across different laboratories represent comparable workloads under the same version, division, quality target, and scenario rules.
 
-Standardizing system benchmarks requires formalizing the D·A·M taxonomy so that evaluations isolate the Machine without confounding changes to the Algorithm or Data. The MLPerf Training benchmark enforces this separation by measuring time-to-train to a specified quality target rather than raw floating-point throughput or epoch duration [@mattson2020mlperf]. A hardware platform that achieves high TFLOPS through aggressive low-precision scaling provides a time-to-quality benefit only if faster steps outweigh any extra work needed to reach the target; a run that misses the target is not a valid success. In its closed division, where every submitter must run the reference model and reach the same quality target (@sec-benchmarking-mlperf-inference-4b4a), the rules constrain the workload while permitting specified tunable hyperparameters and approved numerical formats. Quality and compliance checks establish which hardware, compiler, and training-configuration improvements constitute valid submissions.
+Standardizing system benchmarks requires formalizing the D·A·M taxonomy so that evaluations isolate the Machine without confounding changes to the Algorithm or Data. The MLPerf Training benchmark enforces this separation by measuring time-to-train to a specified quality target rather than raw floating-point throughput or epoch duration [@mattson2020mlperf]. A hardware platform that achieves high TFLOPS through aggressive low-precision scaling provides a time-to-quality benefit only if faster steps outweigh any extra work needed to reach the target; a run that misses the target is not a valid success. In its closed division, where every submitter must run the reference model and reach the same quality target (@sec-benchmarking-mlperf-inference-benchmarks-e878), the rules constrain the workload while permitting specified tunable hyperparameters and approved numerical formats. Quality and compliance checks establish which hardware, compiler, and training-configuration improvements constitute valid submissions.
 
 The MLPerf Inference benchmark applies this discipline to production deployment constraints [@reddi2020]. An accelerator cannot simply report peak throughput under infinite batching if interactive serving requires guaranteed responsiveness. The benchmark defines distinct evaluation scenarios for different physical operating regimes. For interactive environments, Server mode injects queries following a Poisson arrival process under workload-specific tail-latency constraints, while SingleStream mode reports the scenario-defined latency percentile for one query at a time. For non-interactive throughput, Offline mode measures throughput with inputs supplied upfront. By standardizing these execution boundaries, community benchmarks account for queueing delays and host-to-device PCIe transfers, making the tested load and timing boundary explicit when interpreting a throughput claim.
 
@@ -1969,89 +1936,8 @@ plt.close()
 
 :::
 
-When evaluating compressed models, a Pareto frontier identifies non-dominated choices that balance efficiency against accuracy. Aggregate metrics often hide calibration and tail-case degradation, as shown for MobileNetV2 in @tbl-benchmarking-mobilenet-int8-validation.
 
-::: {.column-margin}
-![](images/svg/vol1_benchmarking_margin_004.svg){width="100%" fig-alt="Tiny Pareto frontier with one dominated point."}
-
-*A dominated model is no better on either axis and worse on at least one.*
-:::
-
-```{python}
-#| echo: false
-#| label: mobilenet-int8-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOBILENET INT8 COMPRESSION METRICS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "MobileNetV2 INT8 Compression"—complete validation
-# │          protocol for INT8 quantization of MobileNetV2
-# │
-# │ Goal: Demonstrate the necessity of multi-dimensional compression benchmarks.
-# │ Show: That INT8 quantization preserves accuracy while yielding 4× size reduction.
-# │ How: Compare accuracy, ECE, and model size for FP32 vs. INT8 MobileNetV2.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.core.units import Mparam, BYTES_FP32, BYTES_INT8, MB
-from mlsysim.fmt import fmt, fmt_illuminance, check, fmt_memory, fmt_params, fmt_pp
-
-class MobileNetINT8Calc:
-    """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _mobilenet_v2 = Models.Vision.MobileNetV2
-    acc_fp32 = 71.8
-    params = _mobilenet_v2.parameters
-    size_fp32 = _mobilenet_v2.size_in_bytes(BYTES_FP32)
-    size_int8 = _mobilenet_v2.size_in_bytes(BYTES_INT8)
-    acc_int8 = 70.9
-    top5_fp32 = 91.0
-    top5_int8 = 90.4
-    ece_fp32 = 0.031
-    ece_int8 = 0.089
-    edge_fp32 = 68.2
-    edge_int8 = 61.4
-    edge_occlusion_pct = 50
-    edge_lux = 100
-    edge_rotation_deg = 30
-    real_world_edge_pct = 5
-    confidence_threshold_pct = 85
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    acc_drop = acc_fp32 - acc_int8
-    edge_drop = edge_fp32 - edge_int8
-    size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
-    check(acc_drop < 1.0, f"Expected <1 point top-1 drop, got {acc_drop:.1f}")
-    check(edge_drop > acc_drop, "Edge-case drop should exceed aggregate top-1 drop.")
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mv2_acc_fp32_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='symbol')
-    mv2_acc_fp32_prose_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='prose')
-    mv2_params_m_str = fmt_params(params, scale='M', precision=1, commas=False)
-    mv2_size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, commas=False)
-    mv2_size_int8_mb_str = fmt_memory(size_int8, unit=MB, precision=1, commas=False)
-    mv2_acc_int8_str = fmt_percent(acc_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_acc_drop_str = fmt_pp(acc_drop, precision=1, commas=False, attributive=True)  # 0.9
-    mv2_acc_drop_tbl_str = fmt_pp(acc_drop, precision=1, commas=False, style="symbol")  # 0.9
-    mv2_top5_fp32_str = fmt_percent(top5_fp32 / 100, precision=0, commas=False, style='symbol')
-    mv2_top5_int8_str = fmt_percent(top5_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_ece_fp32_str = fmt(ece_fp32, precision=3, commas=False)
-    mv2_ece_int8_str = fmt(ece_int8, precision=3, commas=False)
-    mv2_edge_fp32_str = fmt_percent(edge_fp32 / 100, precision=1, commas=False, style='symbol')
-    mv2_edge_int8_str = fmt_percent(edge_int8 / 100, precision=1, commas=False, style='symbol')
-    mv2_edge_drop_str = fmt_pp(edge_drop, precision=1, commas=False)
-```
-
-| **Metric**             |                    **FP32**                    |                    **INT8**                    | **Acceptable?**                                                                                |
-|:-----------------------|:----------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------------------------------------------|
-| **Top-1 accuracy**     | `{python} MobileNetINT8Calc.mv2_acc_fp32_str`  | `{python} MobileNetINT8Calc.mv2_acc_int8_str`  | ✓ (`{python} MobileNetINT8Calc.mv2_acc_drop_tbl_str` drop; below 1 percentage-point threshold) |
-| **Top-5 accuracy**     | `{python} MobileNetINT8Calc.mv2_top5_fp32_str` | `{python} MobileNetINT8Calc.mv2_top5_int8_str` | ✓ (below the stated accuracy-loss threshold)                                                   |
-| **Calibration ECE**    | `{python} MobileNetINT8Calc.mv2_ece_fp32_str`  | `{python} MobileNetINT8Calc.mv2_ece_int8_str`  | No (degraded)                                                                                  |
-| **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | No (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_tbl_str`)                                |
-
-: **MobileNetV2 INT8 Postcompression Metrics**: Illustrative FP32 and INT8 values for top-1 and top-5 accuracy, calibration error, and edge-case accuracy, showing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[20,13,19,48]"}
-
-**Edge-case definition**: Images with $>$ `{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, $<$ `{python} MobileNetINT8Calc.edge_lux_str` lighting, or $>$ `{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
+### LLM evaluation taxonomy
 
 For large language models, evaluation must span multiple dimensions—such as recognition, safety, and responsiveness—because no single score establishes production readiness (@tbl-llm-benchmark-failure-taxonomy).
 
@@ -2108,6 +1994,8 @@ class LLMThroughputCalc:
     slow_tokens_per_s_str = fmt_rate(slow_tokens_per_s, 'tokens/s', precision=0, commas=False)
     fast_tokens_per_s_str = fmt_rate(fast_tokens_per_s, 'tokens/s', precision=0, commas=False)
 
+
+### Model-centric vs. data-centric AI
 
 Distribution alignment challenges highlight two complementary paradigms: iterating on model architecture versus refining dataset quality (@fig-model-vs-data).
 
@@ -2268,6 +2156,8 @@ filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
 ```
 :::
 
+
+### AI performance vs. human baselines
 
 Even with rigorous protocols, static benchmarks face dataset saturation, where models rapidly exhaust a test suite's discriminating headroom (@fig-dataset-saturation).
 
@@ -3516,6 +3406,123 @@ The SingleStream result illustrates why benchmarking requires matching the MLPer
 The scenarios explain why the same hardware can report dramatically different benchmark numbers. In an illustrative comparison, an accelerator with high Offline throughput can sustain much lower Server-mode throughput once p99 latency constraints and queuing overhead are enforced, because Server mode cannot always use maximum batch sizes. When evaluating hardware for a specific application, selecting the appropriate scenario makes the result relevant; production-representative validation tests whether it transfers. The MobileNetV2 result therefore makes scenario selection a deployment requirement rather than a reporting choice.
 
 Training benchmarks measure learning speed; inference benchmarks measure serving speed. Yet both measures share a critical blind spot: they say nothing about *how much energy* the system consumes to achieve that speed. A system that sets throughput records while consuming kilowatts of power may be economically unsustainable or physically impossible to deploy at the edge. Completing the evaluation picture requires power measurement\index{Power measurement!evaluation triad completion}: measuring the energy cost of performance.
+
+## Mobile and edge benchmarks {#sec-benchmarking-mobile-edge-benchmarks-fd4f}
+
+Unlike data centers with kilowatt-scale power delivery and active cooling infrastructure, mobile and edge deployments\index{Edge deployment!constraint triangle} operate within strict milliwatt- to watt-scale power envelopes and passive thermal dissipation limits. Benchmarking these systems requires navigating an interdependent triangle of power consumption, inference latency, and model accuracy, where optimizing any two typically degrades the third. @Tbl-edge-vs-cloud-constraints contrasts these operational constraints against cloud environments.
+
+```{=latex}
+\begingroup
+%\renewcommand{\arraystretch}{1.3}
+```
+
+| **Constraint** | **Cloud Impact**     | **Edge Impact**             |
+|:---------------|:---------------------|:----------------------------|
+| **Power**      | Operational cost     | Device energy budget        |
+| **Latency**    | Service-level target | Local response deadline     |
+| **Accuracy**   | Task-quality target  | Balanced with power/latency |
+
+: **Edge vs. Cloud Deployment Constraints**: Typical cloud deployments treat power as an operating cost and latency as a service target, while edge deployments often face tighter energy and response-time limits that constrain achievable accuracy. {#tbl-edge-vs-cloud-constraints}
+
+```{=latex}
+\endgroup
+```
+
+Consider a smartphone camera executing real-time object detection at 30 frames per second within a 3 W to 5 W thermal envelope. In this setting, an efficient architecture such as MobileNet serves as a realistic benchmark target where a larger ResNet model would violate thermal limits, despite the larger model's superior accuracy in cloud evaluations. An edge benchmark must therefore evaluate accuracy jointly with sustained power and thermal dissipation. The peak-versus-sustained gap established in @sec-benchmarking-machine-learning-benchmarking-framework-70b8 can be especially acute at the edge: a passively cooled device has less capacity to shed continuous inference heat than an actively cooled server. Both environments must remain within their cooling limits. As junction temperatures rise, the dynamic thermal management (DTM) controller scales down operating voltage and clock frequency, causing sustained throughput to drop sharply below burst-mode peaks. That thermal mechanism makes the cooling configuration part of the benchmark contract.
+
+::: {#exmp-benchmarking-benchmarking-edge .callout-example title="Benchmarking the edge"}
+
+**Scenario**: An edge engineering team benchmarks a smart doorbell chip with a vendor-advertised "1 W AI" power specification.
+
+**Diagnosis**: Early burst-mode testing matches vendor claims, but continuous inference loop execution builds up junction heat, triggering thermal throttling and dropping steady-state throughput.
+
+**Systems lesson**: Short burst benchmarks obscure long-term thermal throttling. Benchmarking edge ML workloads requires continuous, sustained execution testing to reflect true operational hardware limits.
+
+:::
+
+::: {.column-margin}
+![](images/svg/vol1_benchmarking_margin_003.svg){width="100%" fig-alt="FPS holds briefly then drops at thermal throttling knee."}
+
+*Burst benchmark FPS collapses once thermal throttling sets in.*
+:::
+
+Throttling is the most visible way a short measurement flatters edge hardware. Idle power, duty cycle, and the data movement around the accelerator can distort a headline number too, so each needs checking before a vendor claim informs a design decision.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Edge benchmark reality-check callout (peak-vs-sustained).
+# │ Goal: Keep a vendor-peak vs. sustained-throughput scenario local to the callout.
+# └───────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import TOPS, milliwatt, second, watt
+from mlsysim.fmt import check, fmt_ops_rate, fmt_percent, fmt_power, fmt_qty_range, fmt_time
+
+class MobileNpuScenario:
+    """Illustrative mobile NPU peak-throughput scenario for the sustained-performance contrast."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    peak = 45 * TOPS  # scenario assumption: advertised mobile NPU marketing peak
+    sustained = 20 * TOPS  # scenario assumption: sustained thermal-throttled NPU throughput
+    min_sustained_duration = 30 * second  # scenario assumption: minimum sustained benchmark window
+    idle_power = 50 * milliwatt  # scenario assumption: idle device draw
+    active_power = 2 * watt  # scenario assumption: active inference draw
+    duty_cycle = 0.01  # scenario assumption: inference active share
+    tdp_low = 3 * watt  # scenario assumption: mobile edge thermal envelope lower bound
+    tdp_high = 5 * watt  # scenario assumption: mobile edge thermal envelope upper bound
+
+    # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────
+    effective_power = idle_power * (1 - duty_cycle) + active_power * duty_cycle
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(44 <= peak.to(TOPS).magnitude <= 46, "Illustrative peak should be ~45 TOPS.")
+    check(sustained < peak, "Sustained throughput should be below advertised peak.")
+    check(idle_power < effective_power < active_power, "Duty-cycle power should sit between idle and active power.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    mobile_peak_tops_str = fmt_ops_rate(peak, unit=TOPS, precision=0, commas=False)
+    mobile_sustained_tops_str = fmt_ops_rate(sustained, unit=TOPS, precision=0, commas=False)
+    min_sustained_duration_str = fmt_time(min_sustained_duration, second, precision=0, commas=False)
+    idle_power_mw_str = fmt_power(idle_power, unit=milliwatt, precision=0, commas=False)
+    active_power_w_str = fmt_power(active_power, unit=watt, precision=0, commas=False)
+    duty_cycle_pct_str = fmt_percent(duty_cycle, precision=0, commas=False, style="prose")
+    effective_power_mw_str = fmt_power(effective_power, unit=milliwatt, precision=1, commas=False, approx=True)
+```
+
+::: {#psp-benchmarking-edge-benchmark-reality-check .callout-perspective title="Edge benchmark reality check"}
+
+When evaluating edge hardware claims, four factors determine whether vendor numbers translate to real-world performance:
+
+1. **Peak vs. sustained**: A vendor may advertise `{python} MobileNpuScenario.mobile_peak_tops_str` peak throughput while a sustained thermal run delivers closer to `{python} MobileNpuScenario.mobile_sustained_tops_str`. In this scenario, use a sustained run longer than `{python} MobileNpuScenario.min_sustained_duration_str` and verify thermal stabilization; also test the deployment duty cycle.
+2. **Power at idle vs. active**: In this scenario, a device consuming `{python} MobileNpuScenario.idle_power_mw_str` idle and `{python} MobileNpuScenario.active_power_w_str` active could report active draw for marketing, but if the application runs inference `{python} MobileNpuScenario.duty_cycle_pct_str` of the time, effective power draw is `{python} MobileNpuScenario.effective_power_mw_str`, not `{python} MobileNpuScenario.active_power_w_str`.
+3. **Thermal envelope**: Edge devices often operate inside a narrow TDP envelope. Exceeding it triggers throttling, so benchmark reports omitting thermal conditions are incomplete.
+4. **End-to-end vs. accelerator-only**: NPU benchmarks often exclude data transfer overhead. Moving image data from camera to NPU and back can exceed inference time for small models.
+
+:::
+
+Because passive thermal dissipation caps sustained power draw, mobile SoC architects cannot rely on high-frequency monolithic cores. Instead, they divide execution across specialized compute blocks tailored to distinct arithmetic patterns. This hardware specialization shifts edge benchmarking from evaluating an isolated core to characterizing multi-processor coordination across the entire SoC.
+
+### Heterogeneous processor coordination {#sec-benchmarking-heterogeneous-processor-coordination-68cf}
+
+A modern mobile SoC packages CPUs, GPUs, digital signal processors (DSPs), and neural processing units (NPUs)\index{NPU!neural network acceleration} onto a single die sharing system memory and a common thermal budget. Each processing unit targets a distinct compute pattern: CPUs handle irregular control flow, dynamic batching, and sequential post-processing; GPUs execute parallel floating-point operations and unquantized fallback layers; DSPs process low-power streaming vector mathematics for always-on sensing; and NPUs execute dense, quantized matrix multiplications (typically INT8 or INT4) with specialized systolic arrays or multiply-accumulate engines.
+
+Benchmarking must evaluate pipeline orchestration rather than isolated kernel throughput. In an end-to-end voice assistant, for example, an ultra-low-power DSP continuously monitors microphone audio for a wake-word; upon detection, the system wakes the NPU to execute acoustic feature extraction and speech recognition, before passing token sequences to the CPU for language understanding and dialogue logic. Single-processor benchmarks evaluate only the isolated compute time of each stage, missing three dominant sources of system overhead: the latency of waking accelerators from deep sleep states, the bus contention when multiple engines access shared DRAM simultaneously, and the memory bandwidth consumed by transposing tensor layouts (such as converting NCHW CPU layouts into tiled NHWC formats required by the NPU). Benchmarks that report only compute time obscure these data movement and scheduling penalties.
+
+### Battery and thermal benchmarking {#sec-benchmarking-battery-thermal-benchmarking-79dd}
+
+Battery drain\index{Benchmarking!battery, duty cycle specification} depends on total energy consumed over time rather than peak instantaneous power. Computational photography bursts consume multiple watts for hundreds of milliseconds during image capture, whereas background sensor processing must remain within a milliwatt-scale budget to deliver multi-day battery life. Characterizing battery impact requires measuring the total energy consumption $\TotalEnergy = \int P_{\text{device}}(t)\,dt$ across representative operational profiles, where $P_{\text{device}}(t)$ is the instantaneous power the device draws at time $t$.
+
+The dominant operational variable is the workload duty cycle $\alpha_{\text{duty}}$, defined as the fraction of time the accelerator actively runs inference. For an active power draw $P_{\text{active}}$ and standby power draw $P_{\text{idle}}$, the average power is:
+$$P_{\text{avg}} = \alpha_{\text{duty}} P_{\text{active}} + (1 - \alpha_{\text{duty}}) P_{\text{idle}}$$
+For intermittent workloads like a smart doorbell camera ($\alpha_{\text{duty}} \ll 0.01$), standby power $P_{\text{idle}}$ and memory retention power dictate battery lifetime, making active inference efficiency secondary. For continuous pipelines like video analytics ($\alpha_{\text{duty}} \approx 1.0$), active inference energy $E_{\text{inf}} = P_{\text{active}} \cdot T_{\text{inf}}$ dominates. Furthermore, elevated operating temperatures increase semiconductor leakage current, causing static power dissipation to climb as the device heats up. Benchmarking battery impact therefore requires measuring both active and standby power across the operational duty cycle while monitoring junction temperature over extended multi-minute runs.
+
+### Edge-cloud coordination {#sec-benchmarking-edgecloud-coordination-061d}
+
+When edge devices offload computation to remote servers over 5G or Wi-Fi networks, benchmarking must evaluate the combined edge-cloud pipeline rather than local execution in isolation. While cellular standards such as URLLC[^fn-urllc-latency-guarantee] define aggressive radio-interface latency targets, real-world cellular and Wi-Fi channels introduce packet jitter, tail latency, and transient disconnections. Workload splitting benchmarks must therefore evaluate four system behaviors under emulated network impairment: the decision boundary for local versus remote execution, round-trip transmission overhead for intermediate activations versus raw sensor inputs, fallback mechanisms when network connectivity drops (such as degrading to a compact on-device model), and privacy policies restricting raw data egress. For safety-critical perception the decision boundary is fixed, because an automotive stack on a tens-of-milliseconds control loop cannot tolerate wide-area tail latency, so it runs locally and reserves the uplink for non-time-critical telemetry.
+
+[^fn-urllc-latency-guarantee]: **URLLC (ultra-reliable low-latency communication)**\index{URLLC!edge inference constraint}: ITU-R defines a 1 ms radio-interface user-plane latency target and 99.999 percent successful delivery within 1 ms for a 32-byte packet under specified test conditions. These radio-interface targets are not a sub-1-ms end-to-end application guarantee. Edge-inference benchmarks should report radio or network latency and compute latency separately and together, alongside model quality.
+
+Across both cloud data centers and edge devices, benchmarking methodology divides along a fundamental operational boundary: whether the system is executing training or inference. Training executes forward and backward passes, saving or recomputing activations to calculate gradients and updating model weights, with communication when training is distributed. Inference omits the backward pass and can release an activation after its last forward consumer, while retaining state such as KV caches when needed. Both phases can use fusion and reduced precision, but their memory access patterns, arithmetic intensities, and dependencies differ enough to require distinct benchmark objectives.
 
 ## Power Measurement Techniques {#sec-benchmarking-power-measurement-techniques-bcc2}
 
