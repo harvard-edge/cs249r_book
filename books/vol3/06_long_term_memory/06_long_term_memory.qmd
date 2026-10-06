@@ -273,7 +273,7 @@ Every staged token also incurs concrete inference engine overhead beyond occupyi
 
 Each question presents a retrieval outcome; decide what operational conclusions it licenses.
 
-- [ ] **Deadline vs. completion**: A search reaches its deadline with no matches. Which status does it return, and which conclusion that a completed literal scan of the same snapshot would support is unavailable here?
+- [ ] **Stale excerpt**: A query for current source returns an r17 excerpt after the workspace reaches r18. Which historical diagnostic inferences remain valid, and what must happen before the excerpt informs an r18 edit?
 - [ ] **Deadline vs. completion**: A search reaches its deadline with no matches. Which status does it return, and which conclusion that a completed literal scan of the same snapshot would support is unavailable here?
 - [ ] **Payload estimate**: If per-record metadata doubled from the value in notebook \ref{nbk-06-retrieval-payload-ledger}, how many complete records would fit the same allowance, and what must the runtime measure before dispatching the call?
 
@@ -328,7 +328,7 @@ $$
 \operatorname{score}(x,Q)=\sum_{q\in Q}\operatorname{IDF}(q)
 \frac{f(q,x)(k_1+1)}{f(q,x)+k_1(1-b+b\lvert x\rvert/\overline{\lvert x\rvert})},
 \qquad
-\operatorname{IDF}(q)=\ln\left(1+\frac{\NumberOfDevices-\PointToPointMessageSize(q)+0.5}{\PointToPointMessageSize(q)+0.5}\right).
+\operatorname{IDF}(q)=\ln\left(1+\frac{N-n(q)+0.5}{n(q)+0.5}\right).
 $$
 
 Here $Q$ contains the query terms, $x$ is an indexed document, $f(q,x)$ is the term frequency of $q$ in $x$, $\lvert x\rvert$ is the document length in analyzer terms, and $\overline{\lvert x\rvert}$ is the collection's mean document length. The corpus contains $N$ documents in total, of which $n(q)$ contain query term $q$. Crucially, these term lengths represent analyzer counts rather than the foundation model's token counts. The tuning parameter $k_1>0$ controls term-frequency saturation: at a fixed document length, the marginal score contribution asymptotically approaches $k_1+1$ as frequency grows. The parameter $b\in[0,1]$ modulates document-length normalization, with $b=1$ fully penalizing documents proportional to their relative length and $b=0$ disabling length normalization entirely. Because ranking depends on these structural mechanics, document chunk boundaries, analyzer choices, and parameter settings fundamentally alter candidate scores even when the underlying source text remains unchanged.
@@ -380,7 +380,7 @@ class BM25Ranking:
     long_score_str = fmt_ratio(long_score, precision=2)
 ```
 
-**Scenario**: Consider a hypothetical index of `{python} BM25Ranking.documents_str` documents with a mean length of `{python} BM25Ranking.average_length_str` analyzer terms. A single query term appears in `{python} BM25Ranking.matching_documents_str` documents. With $k_1=$ `{python} BM25Ranking.k1_str` and $b=$ `{python} BM25Ranking.b_str`, its inverse document frequency is `{python} BM25Ranking.idf_str`.
+::: {#exmp-06-quantitative-bm25-score-dynamics-on .callout-example title="A higher lexical score is a ranking decision"}
 **Scenario**: Consider a hypothetical index of `{python} BM25Ranking.documents_str` documents with a mean length of `{python} BM25Ranking.average_length_str` analyzer terms. A single query term appears in `{python} BM25Ranking.matching_documents_str` documents. With $k_1=$ `{python} BM25Ranking.k1_str` and $b=$ `{python} BM25Ranking.b_str`, its inverse document frequency is `{python} BM25Ranking.idf_str`.
 
 **Analysis**: A short candidate contains `{python} BM25Ranking.short_length_str` terms and `{python} BM25Ranking.short_frequency_str` occurrence of the query term; a long candidate contains `{python} BM25Ranking.long_length_str` terms and `{python} BM25Ranking.long_frequency_str` occurrences. Substituting these counts into the scoring rule gives `{python} BM25Ranking.short_score_str` for the short candidate and `{python} BM25Ranking.long_score_str` for the long candidate. Repetition alone does not determine their order: saturation and length normalization outweigh the long candidate's additional occurrences.
@@ -554,7 +554,7 @@ Rather than navigating a graph over full-precision vectors, an inverted file ind
 Product quantization then compresses every stored vector. It splits the $d$ dimensions into $m$ distinct subvectors of dimension $d/m$. For each subspace, $k$-means trains a codebook of 256 centroids, allowing any subvector to be represented by a single one-byte index $c_j \in [0, 255]$ indicating its nearest centroid. Storing a compressed vector therefore requires only $m$ bytes. At query time, the uncompressed query vector $\mathbf{q}$ is segmented into the same $m$ subspaces. The runtime precomputes an asymmetric distance lookup table $\text{LUT}[j, c]$, which stores the squared Euclidean distance between the query's $j$-th subvector and centroid $c$ in subspace $j$. The approximate distance between the query $\mathbf{q}$ and a stored quantized vector $\mathbf{x}$ with codes $c_1, \dots, c_m$ reduces to summing table lookups:
 
 $$
-\tilde{\HiddenDimension}(\mathbf{q}, \MechanicalPlantState) = \sum_{j=1}^{\MicrobatchCount} \text{LUT}[j, c_j].
+\tilde{d}(\mathbf{q}, \mathbf{x}) = \sum_{j=1}^{m} \text{LUT}[j, c_j].
 $$ {#eq-vol3-pq-adc}
 
 @Eq-vol3-pq-adc transforms an expensive, bandwidth-bound $d$-component dot product into $m$ single-byte reads and table lookups. Because the lookup table is small enough to stay in CPU cache, evaluation proceeds at high arithmetic intensity. The parameter $n_{\text{probe}}$ balances recall against the number of cells scanned, while the subvector count $m$ trades distance fidelity against bytes per code. Systems commonly recover distance accuracy by re-scoring a short candidate list against full-precision vectors stored on secondary media or remote memory. This architecture scales gracefully to billions of vectors on accelerators [@johnson2019billion]. However, the quantization codebooks and coarse centroids are calibrated on the vector distribution present during index construction; as the corpus drifts or if the embedding model changes, quantization error compounds until the index is retrained. @Fig-vol3-ivf-pq diagrams this dual-pipeline architecture side by side: the offline build splits vectors into $m = 64$ subvectors, quantizing each into a 1-byte codebook index appended to coarse Voronoi cells, while online query execution probes the $n_{\text{probe}}$ nearest cells and scores candidates through fast asymmetric distance table lookups.
@@ -572,7 +572,7 @@ $$ {#eq-vol3-pq-adc}
 # │ Context: @tbl-vol3-ann-tradeoffs and the cost line before it.
 # │ Goal: Size HNSW links and PQ codes for the exact-scan notebook's corpus.
 # │ Show: 2.56 GB of links beside 15.36 GB of vectors; 0.64 GB of codes (24x).
-# │ How: Stipulated M=32 links of 8 bytes; K=64 one-byte PQ subcodes.
+# │ How: Stipulated M=32 links of 8 bytes; m=64 one-byte PQ subcodes.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import BYTES_FP32, GB, KB, byte
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_multiple
@@ -1433,7 +1433,7 @@ Every quantity below is a hypothetical given chosen for round arithmetic, not a 
 
 (a) Compute the bytes, FLOPs, and arithmetic intensity of one exact scan, and compare the intensity with the host's ridge point.
 (b) What is the bandwidth floor for one full scan, and how many eligible vectors can an exact scan cover within the budget?
-(d) Would storing the full corpus as INT8 bring an unfiltered exact scan within budget?
+(c) A scope filter restricts most queries to one project of 150,000 vectors. Should those queries use an exact scan or an ANN index?
 (d) Would storing the full corpus as INT8 bring an unfiltered exact scan within budget?
 
 **3. How much agreement buys (Basic).** Lexical search returns P, Q, R, S in that order, and dense search returns S, T, P, U. Every candidate is fully scoped to the same `r18` snapshot, ties break by candidate identifier, and the runtime stages three records.
@@ -1444,9 +1444,9 @@ Every quantity below is a hypothetical given chosen for round arithmetic, not a 
 
 **4. How much the task names (Intermediate).** Transfer the choice of retrieval policy (@sec-vol3-long-term-memory-agentic-retrieval) to the research agent (lighthouse \ref{lhs-vol3-research-agent}), whose store holds notes distilled from fetched pages. Every model round takes 4 s, and retrieval operations are fast enough to ignore. Each note serializes to 600 tokens with its metadata, the retrieval allowance is 6,144 tokens, and everything retrieved stays in context until the answer. Three policies are available. A *direct read* stages exactly the records the task names, with no extra round. *Pre-staging* stages the top 8 ranked notes before the first call; when that set lacks needed evidence, the model falls back to probing for what is missing. A *model-directed probe* costs one model round and returns 2 notes. Every policy ends with one answer round. Three tasks arrive:
 
-- R1: “Reconcile pinned notes `\PointToPointMessageSize-4412` and `\PointToPointMessageSize-4413`.” The evidence is those two notes. Pre-staging captures both with probability 0.9, and a miss costs one probe round. Directed search needs one probe round.
+- R1: “Reconcile pinned notes `n-4412` and `n-4413`.” The evidence is those two notes. Pre-staging captures both with probability 0.9, and a miss costs one probe round. Directed search needs one probe round.
 - R2: “What has earlier work in this project established about battery fade under fast charging?” The evidence is three unnamed notes. Pre-staging captures all three with probability 0.8, and a miss costs one probe round. Directed search needs two probe rounds.
-- R3: “Trace where the 40 percent figure in `\PointToPointMessageSize-4412` came from.” The evidence is `\PointToPointMessageSize-4412` and three further notes, each found only from a citation in the one before. Pre-staging includes `\PointToPointMessageSize-4412` but captures the whole chain with probability 0.1, and a miss costs three dependent probe rounds. Directed search needs four dependent probe rounds.
+- R3: “Trace where the 40 percent figure in `n-4412` came from.” The evidence is `n-4412` and three further notes, each found only from a citation in the one before. Pre-staging includes `n-4412` but captures the whole chain with probability 0.1, and a miss costs three dependent probe rounds. Directed search needs four dependent probe rounds.
 
 (a) For R1, compute the expected latency and staged tokens of each policy. Which policy wins, and what does pre-staging add that the research agent's binding constraint makes costly?
 (b) For R2, compare pre-staging with directed search in expected latency, expected staged tokens, and worst-case staged tokens against the allowance. Which should the runtime choose?
