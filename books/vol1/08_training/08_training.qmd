@@ -789,92 +789,7 @@ Optimization algorithms translate error gradients into parameter updates that st
 
 #### Gradient-based optimization methods {#sec-model-training-gradientbased-optimization-methods-9798}
 
-Gradient descent is the fundamental optimization algorithm: it iteratively adjusts parameters in the direction of steepest descent. That conceptual formulation assumes modest networks on single devices. At hardware scale, gradient descent and its variants collide with physical bottlenecks: memory capacity limits how many activations and optimizer states remain resident, while memory bandwidth limits how rapidly parameters update.
-
-::: {.column-margin .margin-pointer}
-↩ Gradient descent and its parameter-update rule are established in @sec-neural-computation-parameter-update-algorithms-b592.
-:::
-
-##### Gradient descent {#sec-model-training-gradient-descent-4034}
-
-Gradient descent\index{Gradient descent!parameter optimization}\index{Gradient descent!training foundation}\index{Gradient descent!etymology}\index{Gradient descent!full-batch computation} is the mathematical foundation of neural network training, iteratively adjusting parameters to minimize a loss function. In training systems, this mathematical operation translates into specific computational patterns. For each iteration, the system must execute four dependent operations:
-
-1. Compute forward pass activations
-2. Calculate loss value
-3. Compute gradients through backpropagation
-4. Update parameters using the gradient values
-
-The computational demands of gradient descent scale with both model size and dataset size. Computing gradients requires storing intermediate activations during the forward pass for backpropagation. These activations consume memory proportional to the depth of the network and the number of examples being processed.
-
-Traditional gradient descent processes the entire dataset before each parameter update. For a training set with one million examples, the system must compute an aggregate gradient over all examples before taking one step. Let $D$ denote the number of examples in the training dataset, let $B_{\text{micro}}$ denote the examples resident for one forward/backward pass, and let $T_{\text{forward+backward per example}}$ denote the amortized forward/backward time per example under the chosen micro-batch execution regime, and let $\ActivationMemoryActivations$ denote the peak activation memory. Gradient accumulation composes multiple micro-batches into one larger effective batch. The peak-memory relation in @eq-gd-memory and the step-time relation in @eq-gd-time capture the implementation distinction:
-$$ \ActivationMemoryActivations \propto B_{\text{micro}} $$ {#eq-gd-memory}
-$$ T_{\text{step}} \propto D \times T_{\text{forward+backward per example}} $$ {#eq-gd-time}
-
-Full-batch training does not require storing every example's activations simultaneously if the dataset is streamed or microbatched; peak memory is governed by the examples held in memory at once. The systems problem is still severe: processing $D=1{,}000{,}000$ examples before each update creates million-example iteration times where parameters remain frozen, reducing the rate at which the model can learn from data.
-
-Hardware-friendly variants relax the need for an exact full-dataset gradient on every update. Stochastic gradient descent (SGD)\index{Stochastic gradient descent!gradient estimation}\index{Stochastic gradient descent!etymology}\index{Stochastic gradient descent!Robbins and Monro}[^fn-sgd-robbins-monro] estimates gradients from sampled examples or mini-batches rather than the entire dataset. This changes update frequency and gradient variance while allowing each update to operate on a bounded working set.
-
-[^fn-sgd-robbins-monro]: **Stochastic gradient descent\index{Gradient descent!gradient noise}**\index{Stochastic gradient descent!memory-utilization trade-off}: "Stochastic" from Greek *stochastikos* ("able to guess"); rather than waiting for an exact full-dataset gradient, SGD updates from sampled examples or mini-batches. Full-batch and stochastic methods can both stream data through bounded micro-batches, so their peak activation memory is determined by the resident micro-batch rather than by dataset size alone. Their central difference is how many sampled gradients contribute to each parameter update.
-
-Evaluating single examples ($\BatchSize=1$) can reduce accelerator efficiency when each example supplies only one row to a dense layer. Modern accelerators achieve peak throughput by mapping large general matrix multiplication (GEMM) operations across systolic arrays and single instruction, multiple data (SIMD) execution units. In that case, layer operations become matrix-vector products (GEMV), reducing arithmetic intensity to $\mathcal{O}(1)$ operations per byte transferred from device memory. Sequence and spatial dimensions can still supply multiple rows even at batch size one. For a bandwidth-limited matrix-vector operation, compute units wait for DRAM or HBM transfers. Simultaneously, single-example updates require reading parameter tensors from device memory, applying gradients, and writing updated weights back after every sample, saturating memory bandwidth without amortizing parameter access across multiple inputs.
-
-##### Mini-batch processing {#sec-model-training-minibatch-processing-4eb0}
-
-Mini-batch gradient descent\index{Mini-batch processing!accelerator efficiency} emerges as a practical compromise between full-batch and stochastic methods, an algorithm-machine co-design that computes gradients over small batches of examples aligned with modern accelerator architectures [@dean2012large]. The batch size $\BatchSize$ becomes a key system parameter, influencing both computational efficiency and memory requirements.
-
-::: {#dfn-training-batch-processing .callout-definition title="Batch processing"}
-
-***Batch processing***\index{Batch processing!definition} aggregates multiple training examples into tensor operations that amortize fixed per-step overhead across $\BatchSize$ examples and can expose more parallel work. Increasing $\BatchSize$ may improve occupancy and arithmetic intensity, but it does not guarantee that every operation becomes compute bound.
-
-1.  Significance: Throughput often increases with batch size until the target hardware is sufficiently occupied, while the number and quality of updates needed for convergence follow a separate workload-dependent curve. Goyal et al. demonstrated a ResNet-50 ImageNet recipe at $\BatchSize=8{,}192$ using linear learning-rate scaling and warmup [@goyal2017accurate]. That result is a configuration-specific demonstration rather than a universal critical batch size\index{Critical batch size!throughput-convergence limit}.
-2.  Distinction: A mini-batch update averages gradients over $\BatchSize$ examples. Under independent, similarly distributed samples, the standard deviation of this mean decreases approximately as $1/\sqrt{\BatchSize}$. The update processes more data than a single-example update, so its net data movement and time depend on reuse, implementation, and how batch size changes the number of updates required.
-3.  Common pitfall: A frequent misconception is that linear learning-rate scaling ($\eta_{\text{new}} = \eta_{\text{base}} \times B_{\text{new}}/B_{\text{base}}$) works at any batch size. It is a training recipe that commonly requires warmup and empirical validation, and its useful range depends on the model, data, optimizer, and target accuracy.
-
-:::
-
-The choice of batch size $\BatchSize$ directly governs accelerator memory allocation. The partial decomposition in @eq-batch-memory-decomposition separates fixed parameter and gradient storage from the batch-dependent activation working set; optimizer states, any master weights, and runtime workspaces must also enter the full budget:
-$$
-\text{Memory Required} = \WeightMemoryWeights + \GradientMemoryGradients + \ActivationMemoryActivations, \qquad \ActivationMemoryActivations \propto \BatchSize
-$$ {#eq-batch-memory-decomposition}
-
-Because the activation term scales with $\BatchSize$ while parameter and gradient memory stay fixed, doubling the batch doubles the activation working set, and a model that fits comfortably at a small batch can exhaust the 40--80 GB of HBM on a high-end training accelerator once the batch grows. @Sec-model-training-memory-management-c1ec works this budget through layer by layer for \mbox{ResNet-50.}
-
-Increasing batch size can move dense operations toward the compute-bound regime by increasing weight reuse. In dense feedforward and attention projections, parameter weights loaded from HBM into on-chip SRAM are reused across all $\BatchSize$ samples in the batch. For weight-traffic-dominated projections, arithmetic intensity initially increases with $\BatchSize$, amortizing parameter reads; shape and the hardware ridge point determine whether compute throughput becomes limiting. Learning-rate scaling and warmup can preserve convergence over a validated range of batch sizes [@goyal2017accurate].
-
-::: {.column-margin .margin-pointer}
-⇄ **Contrast:** Training packs large batches to amortize weight transfers and saturate arithmetic units, whereas online serving inverts the priority to per-request latency under stochastic arrivals, as analyzed in @sec-model-serving-serving-paradigm-9634.
-:::
-
-Because activation memory scales linearly with $\BatchSize$, the capacity of accelerator HBM bounds the maximum batch size that can execute in a single forward/backward pass. When the batch size required for high hardware occupancy or stable convergence exceeds device memory, systems decouple execution batch size from optimization batch size using gradient accumulation. The system executes multiple smaller micro-batches ($\BatchSize_{\text{micro}}$), serializing their execution to keep peak activation memory bounded as described in @eq-gd-memory, accumulates the resulting gradients in place, and triggers the optimizer update only once the cumulative effective batch is complete.
-
-#### Adaptive and momentum-based optimizers {#sec-model-training-adaptive-momentumbased-optimizers-f079}
-
-Basic SGD applies a uniform scalar learning rate to every parameter tensor, which can stall training when loss curvature differs by orders of magnitude across dimensions. Momentum\index{Optimizer!momentum-based methods}\index{Optimizer!adaptive learning rate} smooths updates using directional gradient history, RMSprop adapts individual step sizes using squared-gradient magnitudes, and Adam combines first-moment tracking with adaptive second-moment scaling [@kingma2014adam]. While these algorithmic enhancements can reduce the total optimization steps required to converge, they do so by introducing persistent auxiliary state that directly increases accelerator memory pressure and memory-bus traffic.
-
-##### Momentum-based methods {#sec-model-training-momentumbased-methods-504c}
-
-Momentum methods\index{Momentum!optimization physics}\index{Momentum!memory overhead}[^fn-momentum-polyak-acceleration] address SGD's oscillation problem by accumulating a velocity vector across iterations, damping high-frequency oscillations along steep ravines. In hardware, this smoothing requires allocating and maintaining a persistent velocity tensor matching the exact shape and precision of the model parameters. Parameters and this auxiliary state together occupy $2\times$ the parameter footprint before gradients and activations are counted.
-
-[^fn-momentum-polyak-acceleration]: **Momentum**\index{Momentum!memory overhead}: Borrowed from physics, where momentum (mass $\times$ velocity) describes an object's tendency to continue moving. The metaphor explains the design because accumulated velocity smooths noisy gradients and can reduce the iterations needed for convergence. The systems cost is one additional velocity value per parameter, while Adam maintains two moment values per parameter.
-
-##### Adaptive learning rate methods {#sec-model-training-adaptive-learning-rate-methods-1328}
-
-While momentum smooths gradient direction, it does not address the different scales of gradients across parameters. RMSprop\index{RMSprop!adaptive step sizes}[^fn-rmsprop-hinton-optimizer] solves this by maintaining a moving average of squared gradients for each parameter, automatically reducing step sizes for parameters with historically large gradients. Adapting step sizes per parameter requires maintaining a running average of squared gradients $s_t$, imposing a $2\times$ static memory overhead equivalent to momentum. Furthermore, computing this running average introduces elementwise square and square-root kernels during each parameter update.
-
-[^fn-rmsprop-hinton-optimizer]: **RMSprop**\index{RMSprop!origin and Adam inheritance}: Proposed by Geoffrey Hinton in Lecture 6e of his 2012 Coursera course—never published in a peer-reviewed paper, making it perhaps the most influential optimizer disseminated via a slide deck. RMSprop divides the learning rate by a running average of recent gradient magnitudes, adapting step sizes per parameter. This per-parameter adaptation is what Adam inherits as its second moment $v_t$, directly contributing to Adam's 3$\times$ memory overhead described in @sec-model-training-optimization-algorithm-system-implications-f9f2.
-
-##### Adam optimization {#sec-model-training-adam-optimization-5c42}
-
-Adam\index{Adam optimizer!convergence properties}\index{Adam optimizer!Kingma and Ba}[^fn-adam-optimizer-memory] combines the benefits of both momentum and RMSprop: momentum's gradient smoothing addresses noisy updates, while RMSprop's adaptive scaling handles parameter-specific step sizes. This combination maintains two moving averages for each parameter. Here $m_t$ and $v_t$ are the first- and second-moment buffers, $\beta_1$ and $\beta_2$ are their decay factors, and $\epsilon$ is the numerical-stability constant in the denominator:
-\begin{gather*}
-m_t = \beta_1 m_{t-1} + (1-\beta_1)\nabla \LossFunction(\ModelParameters_t)
-\\[0.5ex]
-v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla \LossFunction(\ModelParameters_t)\big)^2
-\\[0.5ex]
-\hat{m}_t = \frac{m_t}{1-\beta_1^t}, \qquad \hat{v}_t = \frac{v_t}{1-\beta_2^t}
-\\[0.5ex]
-\ModelParameters_{t+1} = \ModelParameters_t - \LearningRate \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \SmallConstant}
-\end{gather*}
+Modern deep learning optimization is dominated by first-order gradient methods. Rather than dwelling on the calculus of SGD, Momentum, and Adam, our systems focus is on their memory footprint. Each algorithm maintains different state tensors per parameter, which dictates the memory capacity required during training as summarized in @tbl-optimizer-properties.
 
 ```{python}
 #| echo: false
@@ -917,8 +832,6 @@ class AdamMemory:
 # Note: Use AdamMemory.adam_overhead_mb_str directly.
 ```
 
-Maintaining both moment buffers triples the parameter-plus-optimizer-state footprint: the training system must allocate two persistent state tensors ($m_t$ and $v_t$) alongside the parameter tensors. For a 100M-parameter model, those auxiliary vectors alone add `{python} AdamMemory.adam_overhead_mb_str` beyond weight storage.
-
 ```{python}
 #| echo: false
 #| label: optimizer-scenarios-calc
@@ -945,8 +858,6 @@ class OptimizerScenarios:
     adam_7b_params_str = fmt_params(adam_7b_params, precision=0)
     adam_7b_state_gb_str = fmt_memory(adam_7b_state, unit=GB, precision=0, commas=False)
 ```
-
-[^fn-adam-optimizer-memory]: **Adam (adaptive moment estimation)**\index{Adam optimizer!memory overhead}: The two moving averages are the first moment (momentum) and second moment (uncentered variance) of the gradients, stored for every model parameter. For a `{python} OptimizerScenarios.adam_7b_params_str` model, Adam's FP32 moment tensors alone consume 56 GB; the full standard mixed-precision training state before activations is `{python} OptimizerScenarios.adam_7b_state_gb_str` once FP16 weights, FP16 gradients, FP32 master weights, and Adam moments are counted together.
 
 #### Optimization algorithm system implications {#sec-model-training-optimization-algorithm-system-implications-f9f2}
 
@@ -1150,268 +1061,6 @@ Schedules such as cosine annealing\index{Cosine annealing!learning rate schedule
 
 Parameter update rules define trajectories given gradient vectors, but assume those gradients are already materialized. For billion-parameter networks, gradient evaluation constitutes the dominant computational and memory burden of the training loop. The mechanics of gradient generation—rather than the optimizer step itself—dictate training memory budgets and runtime.
 
-### Backpropagation mechanics {#sec-model-training-backpropagation-mechanics-0b64}
-
-Backpropagation\index{Backpropagation!computational cost}\index{Backpropagation!memory requirements} evaluates parameter gradients by traversing the network's computational graph in reverse topological order\index{Automatic differentiation!computational graph}. In forward inference, an activation buffer can be released after its final consumer. Training extends some of these lifetimes: computing the gradient with respect to a linear layer's parameters requires its forward input. The backward computation must obtain the values required by each derivative, either from saved state or by recomputation. Retaining those values in HBM can make activation storage the binding memory constraint of large-scale training.
-
-::: {.column-margin .margin-pointer}
-↩ The mathematical foundation of backpropagation via the chain rule is established in @sec-neural-computation-gradient-computation-backpropagation-dacf.
-:::
-
-@Sec-neural-computation-gradient-computation-backpropagation-dacf establishes the mathematical foundation: the chain rule\index{Chain rule!backpropagation foundation} decomposes gradient evaluation into layer-by-layer vector-Jacobian products, pulling error signals backward from the scalar loss to input parameters. At systems scale, the central question is not what backpropagation computes, but what it costs in memory capacity and arithmetic throughput. The layer operations from @sec-model-training-mathematical-operations-neural-networks-ddac produce forward values needed by the backward pass. Computing $\frac{\partial \LossFunction}{\partial \mathbf{W}^{(\LayerIndex)}}$ requires the corresponding forward inputs, whose retention creates the training memory equation\index{Training!memory equation} that gradient checkpointing\index{Gradient checkpointing!memory reduction} later exploits.
-
-Computationally, backpropagation through a linear layer $\mathbf{Z} = \mathbf{A}\mathbf{W}$ uses two distinct matrix multiplications when both input and weight gradients are requested: one evaluates the activation gradient $\nabla_{\mathbf{A}}\LossFunction = (\nabla_{\mathbf{Z}}\LossFunction)\mathbf{W}^T$ to propagate the error signal upstream, and the other evaluates the parameter gradient $\nabla_{\mathbf{W}}\LossFunction = \mathbf{A}^T(\nabla_{\mathbf{Z}}\LossFunction)$ to update the weights. These products permute the forward matrix dimensions but each has the same leading FLOP count, so their combined arithmetic work is twice that of the forward product. This establishes the standard systems convention that one complete training step requires approximately three times the forward-pass FLOPs ($1\times$ forward $+ 2\times$ backward).
-
-```{python}
-#| echo: false
-#| label: gpt2-activation-memory-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-2 ACTIVATION MEMORY CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Backpropagation Mechanics section and Activation Memory
-# │          Requirements callout—per-layer and total activation memory
-# │
-# │ Goal: Decompose the transformer training memory footprint.
-# │ Show: That activations scale with batch size and eventually dwarf weights.
-# │ How: Calculate memory for attention, FFN, and optimizer states.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
-from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_memory_capacity, fmt_percent
-from mlsysim.physics import calc_activation_memory
-
-# ┌── LEGO ───────────────────────────────────────────────
-class GPT2ActivationMemory:
-    """
-    Namespace for Activation Memory breakdown.
-    Scenario: Comparing Activations vs Parameters for GPT-2 XL training.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Architecture
-    model = Models.Language.GPT2
-    hidden_dim = Models.Language.GPT2.hidden_dim
-    layers = Models.Language.GPT2.layers
-    heads = Models.Language.GPT2.heads
-    head_dim = hidden_dim // heads
-
-    # Config
-    batch_size = 4
-    seq_len = 1024
-    bytes_per_val = BYTES_FP16.to(byte).magnitude
-
-    # Derived
-    ffn_dim = hidden_dim * 4
-
-    # Hardware
-    v100_mem = Hardware.Cloud.V100.memory.capacity
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Use library formula for activations
-    total_act = calc_activation_memory(
-        n_layers=layers, seq_len=seq_len, batch_size=batch_size, hidden_dim=hidden_dim, n_heads=heads, precision_bytes=bytes_per_val, strategy="none"
-    )
-
-    # Individual parts for formatting (approximate for display)
-    attn_act = batch_size * seq_len * hidden_dim * 4 * BYTES_FP16
-    ffn_act = batch_size * seq_len * ffn_dim * BYTES_FP16
-    # Attention-score buffers (Korthikanti et al. 2023): QK^T scores, softmax
-    # output, and dropout mask together cost 5*a*S^2*B bytes per layer at FP16 —
-    # the dominant term, and exactly what selective recomputation discards.
-    attn_scores = (5 * heads * seq_len * seq_len * batch_size) * byte
-    layernorm = 10.0 * MB
-    per_layer = attn_act + ffn_act + attn_scores + layernorm
-
-    # Step 5: C. Parameters & State
-    params = model.size_in_bytes(BYTES_FP16)
-    grad = params
-    master = model.size_in_bytes(BYTES_FP32)
-    opt = model.size_in_bytes(BYTES_ADAM_STATE)
-
-    peak = total_act + params + grad + master + opt
-
-    # Step 6: D. Optimizations
-    ckpt_act = calc_activation_memory(
-        n_layers=layers,
-        seq_len=seq_len,
-        batch_size=batch_size,
-        hidden_dim=hidden_dim,
-        n_heads=heads,
-        precision_bytes=bytes_per_val,
-        strategy="selective",
-    )
-    ckpt_reduction_pct = (1 - ckpt_act / total_act).to("").magnitude
-    ckpt_peak = ckpt_act + params + grad + master + opt
-    act_fp32 = total_act * 2
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    total_act_value = total_act.to(GB).magnitude
-    params_value = params.to(GB).magnitude
-    check(total_act_value >= params_value, f"Activations ({total_act_value:.1f}G) should exceed Params ({params_value:.1f}G).")
-    check(ckpt_peak > v100_mem, "Selective recomputation scenario should remain above raw V100 capacity before workspace")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    batch_size_str = fmt(batch_size, precision=0, commas=False)
-    seq_len_str = fmt(seq_len, precision=0, commas=False)
-    n_layers_str = fmt_count(layers, commas=False, label="layer")
-    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
-    ffn_dim_str = fmt(ffn_dim, precision=0, commas=False)
-
-    attn_act_mb_str = fmt_memory(attn_act, unit=MB, precision=1, commas=False)
-    ffn_act_mb_str = fmt_memory(ffn_act, unit=MB, precision=1, commas=False)
-    attn_scores_mb_str = fmt_memory(attn_scores, unit=MB, precision=1, commas=False)
-    heads_str = fmt(heads, precision=0, commas=False)
-    layernorm_mb_str = fmt_memory(layernorm, unit=MB, precision=0, commas=False)
-    per_layer_mb_str = fmt_memory(per_layer, unit=MB, precision=1, commas=False)
-
-    total_act_gb_str = fmt_memory(total_act, unit=GB, precision=1, commas=False)
-    params_gb_str = fmt_memory(params, unit=GB, precision=0, commas=False)
-    grad_gb_str = fmt_memory(grad, unit=GB, precision=0, commas=False)
-    master_gb_str = fmt_memory(master, unit=GB, precision=0, commas=False)
-    opt_gb_str = fmt_memory(opt, unit=GB, precision=0, commas=False)
-    peak_gb_str = fmt_memory(peak, unit=GB, precision=1, commas=False)
-    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
-
-    ckpt_reduction_str = fmt_percent(ckpt_reduction_pct, precision=1, commas=False, style="prose")
-    ckpt_act_gb_str = fmt_memory(ckpt_act, unit=GB, commas=False)
-    ckpt_peak_gb_str = fmt_memory(ckpt_peak, unit=GB, precision=1, commas=False)
-    act_fp32_gb_str = fmt_memory(act_fp32, unit=GB, precision=1, commas=False)
-
-# Note: Use GPT2ActivationMemory.total_act_gb_str directly.
-```
-
-A simple three-layer network processing MNIST requires kilobytes of activation storage. In contrast, GPT-2 processing a single batch requires over `{python} GPT2ActivationMemory.total_act_gb_str`—surpassing the total high-bandwidth memory capacity of a standard accelerator. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e prices each term of the full training memory equation ($\TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations$) for GPT-2. Modern ML frameworks automate gradient evaluation through automatic differentiation, but managing the resulting memory footprint and arithmetic schedule remains an unavoidable systems engineering responsibility.
-
-::: {.column-margin}
-```{=latex}
-\vspace*{-33mm}
-```
-![](images/svg/vol1_training_margin_001.svg){width="100%" fig-alt="Three-rung memory ladder comparing kilobyte-scale MNIST activations, a 32 GB V100 HBM ceiling, and GPT-2 activation memory above that ceiling."}
-
-*Activation memory spans MNIST toys to GPT-scale training.*
-:::
-
-#### Activation memory requirements {#sec-model-training-activation-memory-requirements-f44c}
-
-Training memory partitions into four distinct state categories:
-
-* saved forward activations required by backward derivative rules,
-* model parameters,
-* parameter gradients, and
-* optimizer state and any higher-precision master weights.
-
-Consider a batch of training examples passing through a network. The forward pass computes and stores:
-\begin{gather*}
-\mathbf{Z}^{(\LayerIndex)} = \mathbf{A}^{(\LayerIndex-1)}\mathbf{W}^{(\LayerIndex)} + \mathbf{b}^{(\LayerIndex)}
-\\
-\mathbf{A}^{(\LayerIndex)} = f(\mathbf{Z}^{(\LayerIndex)})
-\end{gather*}
-
-To compute the parameter gradient $\nabla_{\mathbf{W}^{(\LayerIndex)}}\LossFunction = (\mathbf{A}^{(\LayerIndex-1)})^T(\nabla_{\mathbf{Z}^{(\LayerIndex)}}\LossFunction)$, the backward rule must read the layer's input activations $\mathbf{A}^{(\LayerIndex-1)}$. To propagate the error signal upstream through the nonlinear activation function via $\nabla_{\mathbf{Z}^{(\LayerIndex)}}\LossFunction = (\nabla_{\mathbf{A}^{(\LayerIndex)}}\LossFunction) \odot f'(\mathbf{Z}^{(\LayerIndex)})$, the kernel requires either the pre-activation tensor $\mathbf{Z}^{(\LayerIndex)}$ (as in GELU) or the post-activation output $\mathbf{A}^{(\LayerIndex)}$ (when $f'$ can be computed from the output, as in sigmoid, or via a 1-bit boolean mask in ReLU). Fused kernels and selective recomputation can compress this saved footprint. Nevertheless, because activations scale with batch size $\BatchSize$ and sequence length $\SequenceLength$, their storage demands grow with the data dimension, whereas parameter and optimizer memory remain fixed by the model architecture. The GPT-2 calculation in notebook \ref{nbk-training-gpt-2-activation-memory-breakdown} decomposes this memory pressure across attention blocks, feed-forward sublayers, and optimizer states.
-
-```{python}
-#| echo: false
-#| label: gpt2-activation-memory-bridge
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-2 ACTIVATION MEMORY—BRIDGE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Activation Memory Breakdown callout
-# │ Goal:    Bridge class-level values to module-level exports
-```
-
-::: {#nbk-training-gpt-2-activation-memory-breakdown .callout-notebook title="GPT-2 activation memory breakdown"}
-
-For GPT-2 with batch size $\BatchSize$ = `{python} GPT2ActivationMemory.batch_size_str`, sequence length $\SequenceLength$ = `{python} GPT2ActivationMemory.seq_len_str`, hidden dimension $\HiddenDimension$ = `{python} GPT2ActivationMemory.hidden_dim_str`, and `{python} GPT2ActivationMemory.n_layers_str`:
-
-**Math**:
-
-- Attention activations: $\BatchSize \times \SequenceLength \times \HiddenDimension \times 4$ (Q, K, V, output) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.hidden_dim_str` $\times$ $4 \times 2$ bytes (FP16) = `{python} GPT2ActivationMemory.attn_act_mb_str`
-- FFN activations: $\BatchSize \times \SequenceLength \times (4\HiddenDimension)$ (intermediate expansion) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.ffn_dim_str` $\times$ 2 bytes = `{python} GPT2ActivationMemory.ffn_act_mb_str`
-- Attention scores: $5 \times \NumberOfAttentionHeads \times \SequenceLength^2 \times \BatchSize$ bytes for the $\SequenceLength{\times}\SequenceLength$ score, softmax, and dropout buffers. With `{python} GPT2ActivationMemory.heads_str` heads, this term reaches `{python} GPT2ActivationMemory.attn_scores_mb_str` per layer—the dominant term, quadratic in sequence length, and exactly what selective recomputation discards
-- Layer norm states: Minimal (~`{python} GPT2ActivationMemory.layernorm_mb_str` per layer)
-- Total per layer: ~`{python} GPT2ActivationMemory.per_layer_mb_str` (attention + FFN + attention scores + layer norm states)
-
-**Result**:
-
-- Total activation memory (library estimate, includes residual-stream and framework buffers beyond the line items above): `{python} GPT2ActivationMemory.total_act_gb_str`
-- Parameters (FP16): `{python} GPT2ActivationMemory.params_gb_str`
-- Gradients: `{python} GPT2ActivationMemory.grad_gb_str`
-- Master weights (FP32): `{python} GPT2ActivationMemory.master_gb_str`
-- Adam moment state (FP32): `{python} GPT2ActivationMemory.opt_gb_str`
-- Peak memory during training: ~`{python} GPT2ActivationMemory.peak_gb_str`
-
-This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` capacity.
-
-**Solutions**:
-
-1. Selective activation recomputation: Discard attention intermediates and recompute them during backward, reducing this modeled activation term by `{python} GPT2ActivationMemory.ckpt_reduction_str` to ~`{python} GPT2ActivationMemory.ckpt_act_gb_str`; the additional work depends on the implementation
-2. Activation CPU offloading: Store some activations in CPU RAM, transfer during backward pass
-3. Mixed precision: FP16 activations (already applied) vs. FP32 (would be `{python} GPT2ActivationMemory.act_fp32_gb_str`)
-4. Reduced micro-batch size and gradient accumulation: Build a larger effective batch from multiple memory-feasible forward/backward passes
-
-**Systems insight**: Even after selective recomputation, the modeled activations plus static state total about `{python} GPT2ActivationMemory.ckpt_peak_gb_str`, slightly above the raw `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` V100 capacity before workspace and allocator overhead. Full recomputation, sharding, offload, or a smaller micro-batch is therefore still required for this representation.
-
-:::
-
-This breakdown illustrates the practical engineering decisions required when accelerator memory falls short. The same trade-off between stored activations, recomputation, and batch size drives the memory-computation analysis that follows.
-
-::: {#chk-training-memory-compute-trade-off .callout-checkpoint title="The memory-compute trade-off"}
-
-Training large models requires managing the memory wall, the gap between accelerator compute throughput and memory bandwidth.
-
-**Bottleneck**
-
-- [ ] **Activation memory**: Explain why activations stored for backpropagation dominate memory usage and, for some model shapes and recipes, exceed parameter footprint by more than 10$\times$.
-- [ ] **Optimization strategy**: Explain how gradient checkpointing trades additional forward compute for memory capacity.
-- [ ] **Memory estimate**: For GPT-2 (1.5B parameters) in mixed precision, estimate each training state component (weights, gradients, optimizer state, and activations at batch size 32), identify the largest term, and determine whether the total fits on a 32 GB accelerator.
-
-**Scaling limits**
-
-- [ ] **Batch size constraints**: Explain why memory capacity limits the maximum batch size, and how gradient accumulation sidesteps this limit without expanding memory.
-
-:::
-
-#### Memory-computation trade-offs {#sec-model-training-memorycomputation-tradeoffs-411e}
-
-Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-computation tradeoff!training systems}. Each forward pass generates values that backward rules may request. For a simplified network model with $\NumberOfLayers$ layers, let $s_{\LayerIndex}$ denote the bytes of saved intermediate state per example at layer $\LayerIndex$ and $\ActivationMemoryActivations^{(\ell)}$ the bytes of saved activation outputs per example. Under this per-example convention, their storage scales linearly with batch size and is approximated by @eq-activation-memory-per-batch:
-
-$$ \ActivationMemoryActivations = \BatchSize \times \sum_{\LayerIndex=1}^{\NumberOfLayers} \left(s_{\LayerIndex} + \ActivationMemoryActivations^{(\LayerIndex)}\right) $$ {#eq-activation-memory-per-batch}
-
-This memory requirement compounds with the weights, gradients, and optimizer memory discussed in @sec-model-training-optimization-algorithm-system-implications-f9f2. @Eq-total-training-memory gives a conceptual training-state decomposition:
-$$ \TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations $$ {#eq-total-training-memory}
-
-The runtime peak can exceed this sum because temporary workspaces, communication buffers, allocator behavior, and framework bookkeeping also occupy memory. To reduce the activation term, training systems can strategically recompute intermediate values during backward rather than storing them. This increases computational work but can enable deeper networks or larger batches on memory-constrained hardware [@chen2016training]. @Algo-gradient-checkpointing makes the trade explicit: the forward pass keeps activations at only a sparse set of checkpoint layers, and the backward pass recomputes the rest on demand.
-
-```pseudocode
-#| label: algo-gradient-checkpointing
-#| pdf-line-number: true
-#| pdf-right-comment: false
-#| html-comment-delimiter: "▷"
-\begin{algorithm}
-\caption{Gradient checkpointing (activation recomputation)}
-\begin{algorithmic}
-\Require $\NumberOfLayers$-layer network; checkpoint set $\mathcal{C} \subseteq \{1,\dots,\NumberOfLayers\}$ (e.g., every $\sqrt{\NumberOfLayers}$ layers)
-\Ensure parameter gradients, at reduced peak activation memory
-\For{$\LayerIndex = 1$ to $\NumberOfLayers$}
-    \State forward layer $\LayerIndex$; store its activation only if $\LayerIndex \in \mathcal{C}$ \Comment{drop the rest}
-\EndFor
-\For{$\LayerIndex = \NumberOfLayers$ down to $1$}
-    \If{the activation of layer $\LayerIndex$ was dropped}
-        \State recompute the forward segment from the nearest stored checkpoint through layer $\LayerIndex$
-    \EndIf
-    \State compute the layer's gradient; free the activation
-\EndFor
-\State \Return the accumulated gradients
-\end{algorithmic}
-\end{algorithm}
-```
-
-In this segment schedule, recomputed intermediate values remain available until their backward consumers finish; recomputing a segment afresh for each layer would add more work. For layers with comparable activation sizes and forward costs, spacing checkpoints uniformly every $\sqrt{\NumberOfLayers}$ layers reduces peak activation memory from $\mathcal{O}(\NumberOfLayers)$ to $\mathcal{O}(\sqrt{\NumberOfLayers})$ at the cost of one additional forward pass of arithmetic per training step [@chen2016training]. This increases total step computation from roughly $3\times$ to $4\times$ the forward-pass FLOPs, trading extra arithmetic operations for a substantially reduced activation footprint. Actual fit and wall-clock overhead still depend on the full memory budget and execution profile.
-
-Capacity is only one of two physical constraints imposed by memory; the other is bandwidth\index{Accelerator!memory bandwidth limitations}. Accelerators provide massive matrix compute throughput, but shuttling intermediate activation tensors between off-chip High Bandwidth Memory (HBM) and on-chip SRAM frequently saturates the memory bus [@jouppi2017]. Even when activations fit comfortably within HBM capacity, the time required to read and write them can dwarf the arithmetic execution time. To relieve this memory bus pressure, modern training engines fuse elementwise operations directly into preceding matrix multiplications and stage gradient computations through on-chip SRAM tiles rather than global memory. At the runtime level, framework caching allocators\index{ML framework!dynamic memory management} track tensor lifetimes across the computation graph, recycling memory blocks as soon as an activation's final backward consumer completes [@paszke2019pytorch].
-
-Forward propagation, gradient computation, and parameter updates define *what* training systems must compute. An operation's name alone, however, does not reveal *where* the system stalls. Matrix shape, operator fusion, numerical precision, and the memory hierarchy determine whether arithmetic throughput or data movement binds execution. Arithmetic intensity provides the analytical tool to quantify that balance.
 
 ### Arithmetic intensity {#sec-model-training-arithmetic-intensity-training-bottlenecks-4446}
 
@@ -2837,6 +2486,270 @@ Doubling the batch size to `{python} ResNetMemoryScaling.resnet_batch_64_str` do
 Because accelerator memory (`{python} ResNetMemoryScaling.gpu_mem_range_min_gb_str`–`{python} ResNetMemoryScaling.gpu_mem_range_max_gb_str` on contemporary hardware) must hold activations, parameters, gradients, and optimizer states simultaneously, memory capacity rather than compute throughput frequently caps the feasible batch size. Two system-level techniques relieve this capacity bottleneck: activation checkpointing\index{Activation checkpointing!recomputation trade-off} discards intermediate activations during the forward pass and recomputes them during the backward pass, trading redundant arithmetic for reduced storage; and mixed-precision training halves memory traffic and storage per value by adopting 16-bit floating-point formats. Both techniques are analyzed in detail in @sec-model-training-pipeline-optimizations-cd9d.
 
 During backpropagation (@sec-model-training-backpropagation-mechanics-0b64), the backward pass\index{Backward pass!gradient computation}\index{Backward pass!memory operations} traverses the network in reverse order, consuming retained forward activations to compute parameter and activation gradients at roughly twice the arithmetic cost of the forward pass. Memory requirements shift dynamically across layers. In ResNet-50, mid-network layers expand to `{python} ResNetMemoryScaling.mid_layer_filters_value_str` filters from the initial `{python} ResNetMemoryScaling.bwd_filters_value_str`, where reduced spatial map dimensions partly compensate for higher channel depth. Across `{python} ResNetMemoryScaling.resnet_layers_str`, the backward-pass activation working set reaches approximately `{python} ResNetMemoryScaling.bwd_total_grad_gb_str` before accounting for parameter gradients and optimizer state. Peak memory footprint reflects retained forward activations, active gradient buffers, temporary workspaces, and the runtime allocation schedule rather than the width of a single layer alone.
+
+### Backpropagation mechanics {#sec-model-training-backpropagation-mechanics-0b64}
+
+Backpropagation\index{Backpropagation!computational cost}\index{Backpropagation!memory requirements} evaluates parameter gradients by traversing the network's computational graph in reverse topological order\index{Automatic differentiation!computational graph}. In forward inference, an activation buffer can be released after its final consumer. Training extends some of these lifetimes: computing the gradient with respect to a linear layer's parameters requires its forward input. The backward computation must obtain the values required by each derivative, either from saved state or by recomputation. Retaining those values in HBM can make activation storage the binding memory constraint of large-scale training.
+
+::: {.column-margin .margin-pointer}
+↩ The mathematical foundation of backpropagation via the chain rule is established in @sec-neural-computation-gradient-computation-backpropagation-dacf.
+:::
+
+@Sec-neural-computation-gradient-computation-backpropagation-dacf establishes the mathematical foundation: the chain rule\index{Chain rule!backpropagation foundation} decomposes gradient evaluation into layer-by-layer vector-Jacobian products, pulling error signals backward from the scalar loss to input parameters. At systems scale, the central question is not what backpropagation computes, but what it costs in memory capacity and arithmetic throughput. The layer operations from @sec-model-training-mathematical-operations-neural-networks-ddac produce forward values needed by the backward pass. Computing $\frac{\partial \LossFunction}{\partial \mathbf{W}^{(\LayerIndex)}}$ requires the corresponding forward inputs, whose retention creates the training memory equation\index{Training!memory equation} that gradient checkpointing\index{Gradient checkpointing!memory reduction} later exploits.
+
+Computationally, backpropagation through a linear layer $\mathbf{Z} = \mathbf{A}\mathbf{W}$ uses two distinct matrix multiplications when both input and weight gradients are requested: one evaluates the activation gradient $\nabla_{\mathbf{A}}\LossFunction = (\nabla_{\mathbf{Z}}\LossFunction)\mathbf{W}^T$ to propagate the error signal upstream, and the other evaluates the parameter gradient $\nabla_{\mathbf{W}}\LossFunction = \mathbf{A}^T(\nabla_{\mathbf{Z}}\LossFunction)$ to update the weights. These products permute the forward matrix dimensions but each has the same leading FLOP count, so their combined arithmetic work is twice that of the forward product. This establishes the standard systems convention that one complete training step requires approximately three times the forward-pass FLOPs ($1\times$ forward $+ 2\times$ backward).
+
+```{python}
+#| echo: false
+#| label: gpt2-activation-memory-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 ACTIVATION MEMORY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Backpropagation Mechanics section and Activation Memory
+# │          Requirements callout—per-layer and total activation memory
+# │
+# │ Goal: Decompose the transformer training memory footprint.
+# │ Show: That activations scale with batch size and eventually dwarf weights.
+# │ How: Calculate memory for attention, FFN, and optimizer states.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Models
+from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_memory_capacity, fmt_percent
+from mlsysim.physics import calc_activation_memory
+
+# ┌── LEGO ───────────────────────────────────────────────
+class GPT2ActivationMemory:
+    """
+    Namespace for Activation Memory breakdown.
+    Scenario: Comparing Activations vs Parameters for GPT-2 XL training.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # Architecture
+    model = Models.Language.GPT2
+    hidden_dim = Models.Language.GPT2.hidden_dim
+    layers = Models.Language.GPT2.layers
+    heads = Models.Language.GPT2.heads
+    head_dim = hidden_dim // heads
+
+    # Config
+    batch_size = 4
+    seq_len = 1024
+    bytes_per_val = BYTES_FP16.to(byte).magnitude
+
+    # Derived
+    ffn_dim = hidden_dim * 4
+
+    # Hardware
+    v100_mem = Hardware.Cloud.V100.memory.capacity
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Use library formula for activations
+    total_act = calc_activation_memory(
+        n_layers=layers, seq_len=seq_len, batch_size=batch_size, hidden_dim=hidden_dim, n_heads=heads, precision_bytes=bytes_per_val, strategy="none"
+    )
+
+    # Individual parts for formatting (approximate for display)
+    attn_act = batch_size * seq_len * hidden_dim * 4 * BYTES_FP16
+    ffn_act = batch_size * seq_len * ffn_dim * BYTES_FP16
+    # Attention-score buffers (Korthikanti et al. 2023): QK^T scores, softmax
+    # output, and dropout mask together cost 5*a*S^2*B bytes per layer at FP16 —
+    # the dominant term, and exactly what selective recomputation discards.
+    attn_scores = (5 * heads * seq_len * seq_len * batch_size) * byte
+    layernorm = 10.0 * MB
+    per_layer = attn_act + ffn_act + attn_scores + layernorm
+
+    # Step 5: C. Parameters & State
+    params = model.size_in_bytes(BYTES_FP16)
+    grad = params
+    master = model.size_in_bytes(BYTES_FP32)
+    opt = model.size_in_bytes(BYTES_ADAM_STATE)
+
+    peak = total_act + params + grad + master + opt
+
+    # Step 6: D. Optimizations
+    ckpt_act = calc_activation_memory(
+        n_layers=layers,
+        seq_len=seq_len,
+        batch_size=batch_size,
+        hidden_dim=hidden_dim,
+        n_heads=heads,
+        precision_bytes=bytes_per_val,
+        strategy="selective",
+    )
+    ckpt_reduction_pct = (1 - ckpt_act / total_act).to("").magnitude
+    ckpt_peak = ckpt_act + params + grad + master + opt
+    act_fp32 = total_act * 2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    total_act_value = total_act.to(GB).magnitude
+    params_value = params.to(GB).magnitude
+    check(total_act_value >= params_value, f"Activations ({total_act_value:.1f}G) should exceed Params ({params_value:.1f}G).")
+    check(ckpt_peak > v100_mem, "Selective recomputation scenario should remain above raw V100 capacity before workspace")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    batch_size_str = fmt(batch_size, precision=0, commas=False)
+    seq_len_str = fmt(seq_len, precision=0, commas=False)
+    n_layers_str = fmt_count(layers, commas=False, label="layer")
+    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
+    ffn_dim_str = fmt(ffn_dim, precision=0, commas=False)
+
+    attn_act_mb_str = fmt_memory(attn_act, unit=MB, precision=1, commas=False)
+    ffn_act_mb_str = fmt_memory(ffn_act, unit=MB, precision=1, commas=False)
+    attn_scores_mb_str = fmt_memory(attn_scores, unit=MB, precision=1, commas=False)
+    heads_str = fmt(heads, precision=0, commas=False)
+    layernorm_mb_str = fmt_memory(layernorm, unit=MB, precision=0, commas=False)
+    per_layer_mb_str = fmt_memory(per_layer, unit=MB, precision=1, commas=False)
+
+    total_act_gb_str = fmt_memory(total_act, unit=GB, precision=1, commas=False)
+    params_gb_str = fmt_memory(params, unit=GB, precision=0, commas=False)
+    grad_gb_str = fmt_memory(grad, unit=GB, precision=0, commas=False)
+    master_gb_str = fmt_memory(master, unit=GB, precision=0, commas=False)
+    opt_gb_str = fmt_memory(opt, unit=GB, precision=0, commas=False)
+    peak_gb_str = fmt_memory(peak, unit=GB, precision=1, commas=False)
+    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
+
+    ckpt_reduction_str = fmt_percent(ckpt_reduction_pct, precision=1, commas=False, style="prose")
+    ckpt_act_gb_str = fmt_memory(ckpt_act, unit=GB, commas=False)
+    ckpt_peak_gb_str = fmt_memory(ckpt_peak, unit=GB, precision=1, commas=False)
+    act_fp32_gb_str = fmt_memory(act_fp32, unit=GB, precision=1, commas=False)
+
+# Note: Use GPT2ActivationMemory.total_act_gb_str directly.
+```
+
+A simple three-layer network processing MNIST requires kilobytes of activation storage. In contrast, GPT-2 processing a single batch requires over `{python} GPT2ActivationMemory.total_act_gb_str`—surpassing the total high-bandwidth memory capacity of a standard accelerator. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e prices each term of the full training memory equation ($\TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations$) for GPT-2. Modern ML frameworks automate gradient evaluation through automatic differentiation, but managing the resulting memory footprint and arithmetic schedule remains an unavoidable systems engineering responsibility.
+
+::: {.column-margin}
+```{=latex}
+\vspace*{-33mm}
+```
+![](images/svg/vol1_training_margin_001.svg){width="100%" fig-alt="Three-rung memory ladder comparing kilobyte-scale MNIST activations, a 32 GB V100 HBM ceiling, and GPT-2 activation memory above that ceiling."}
+
+*Activation memory spans MNIST toys to GPT-scale training.*
+:::
+
+#### Activation memory requirements {#sec-model-training-activation-memory-requirements-f44c}
+
+Training memory partitions into four distinct state categories:
+
+* saved forward activations required by backward derivative rules,
+* model parameters,
+* parameter gradients, and
+* optimizer state and any higher-precision master weights.
+
+Consider a batch of training examples passing through a network. The forward pass computes and stores:
+\begin{gather*}
+\mathbf{Z}^{(\LayerIndex)} = \mathbf{A}^{(\LayerIndex-1)}\mathbf{W}^{(\LayerIndex)} + \mathbf{b}^{(\LayerIndex)}
+\\
+\mathbf{A}^{(\LayerIndex)} = f(\mathbf{Z}^{(\LayerIndex)})
+\end{gather*}
+
+To compute the parameter gradient $\nabla_{\mathbf{W}^{(\LayerIndex)}}\LossFunction = (\mathbf{A}^{(\LayerIndex-1)})^T(\nabla_{\mathbf{Z}^{(\LayerIndex)}}\LossFunction)$, the backward rule must read the layer's input activations $\mathbf{A}^{(\LayerIndex-1)}$. To propagate the error signal upstream through the nonlinear activation function via $\nabla_{\mathbf{Z}^{(\LayerIndex)}}\LossFunction = (\nabla_{\mathbf{A}^{(\LayerIndex)}}\LossFunction) \odot f'(\mathbf{Z}^{(\LayerIndex)})$, the kernel requires either the pre-activation tensor $\mathbf{Z}^{(\LayerIndex)}$ (as in GELU) or the post-activation output $\mathbf{A}^{(\LayerIndex)}$ (when $f'$ can be computed from the output, as in sigmoid, or via a 1-bit boolean mask in ReLU). Fused kernels and selective recomputation can compress this saved footprint. Nevertheless, because activations scale with batch size $\BatchSize$ and sequence length $\SequenceLength$, their storage demands grow with the data dimension, whereas parameter and optimizer memory remain fixed by the model architecture. The GPT-2 calculation in notebook \ref{nbk-training-gpt-2-activation-memory-breakdown} decomposes this memory pressure across attention blocks, feed-forward sublayers, and optimizer states.
+
+```{python}
+#| echo: false
+#| label: gpt2-activation-memory-bridge
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 ACTIVATION MEMORY—BRIDGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Activation Memory Breakdown callout
+# │ Goal:    Bridge class-level values to module-level exports
+```
+
+::: {#nbk-training-gpt-2-activation-memory-breakdown .callout-notebook title="GPT-2 activation memory breakdown"}
+
+For GPT-2 with batch size $\BatchSize$ = `{python} GPT2ActivationMemory.batch_size_str`, sequence length $\SequenceLength$ = `{python} GPT2ActivationMemory.seq_len_str`, hidden dimension $\HiddenDimension$ = `{python} GPT2ActivationMemory.hidden_dim_str`, and `{python} GPT2ActivationMemory.n_layers_str`:
+
+**Math**:
+
+- Attention activations: $\BatchSize \times \SequenceLength \times \HiddenDimension \times 4$ (Q, K, V, output) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.hidden_dim_str` $\times$ $4 \times 2$ bytes (FP16) = `{python} GPT2ActivationMemory.attn_act_mb_str`
+- FFN activations: $\BatchSize \times \SequenceLength \times (4\HiddenDimension)$ (intermediate expansion) = `{python} GPT2ActivationMemory.batch_size_str` $\times$ `{python} GPT2ActivationMemory.seq_len_str` $\times$ `{python} GPT2ActivationMemory.ffn_dim_str` $\times$ 2 bytes = `{python} GPT2ActivationMemory.ffn_act_mb_str`
+- Attention scores: $5 \times \NumberOfAttentionHeads \times \SequenceLength^2 \times \BatchSize$ bytes for the $\SequenceLength{\times}\SequenceLength$ score, softmax, and dropout buffers. With `{python} GPT2ActivationMemory.heads_str` heads, this term reaches `{python} GPT2ActivationMemory.attn_scores_mb_str` per layer—the dominant term, quadratic in sequence length, and exactly what selective recomputation discards
+- Layer norm states: Minimal (~`{python} GPT2ActivationMemory.layernorm_mb_str` per layer)
+- Total per layer: ~`{python} GPT2ActivationMemory.per_layer_mb_str` (attention + FFN + attention scores + layer norm states)
+
+**Result**:
+
+- Total activation memory (library estimate, includes residual-stream and framework buffers beyond the line items above): `{python} GPT2ActivationMemory.total_act_gb_str`
+- Parameters (FP16): `{python} GPT2ActivationMemory.params_gb_str`
+- Gradients: `{python} GPT2ActivationMemory.grad_gb_str`
+- Master weights (FP32): `{python} GPT2ActivationMemory.master_gb_str`
+- Adam moment state (FP32): `{python} GPT2ActivationMemory.opt_gb_str`
+- Peak memory during training: ~`{python} GPT2ActivationMemory.peak_gb_str`
+
+This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` capacity.
+
+**Solutions**:
+
+1. Selective activation recomputation: Discard attention intermediates and recompute them during backward, reducing this modeled activation term by `{python} GPT2ActivationMemory.ckpt_reduction_str` to ~`{python} GPT2ActivationMemory.ckpt_act_gb_str`; the additional work depends on the implementation
+2. Activation CPU offloading: Store some activations in CPU RAM, transfer during backward pass
+3. Mixed precision: FP16 activations (already applied) vs. FP32 (would be `{python} GPT2ActivationMemory.act_fp32_gb_str`)
+4. Reduced micro-batch size and gradient accumulation: Build a larger effective batch from multiple memory-feasible forward/backward passes
+
+**Systems insight**: Even after selective recomputation, the modeled activations plus static state total about `{python} GPT2ActivationMemory.ckpt_peak_gb_str`, slightly above the raw `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` V100 capacity before workspace and allocator overhead. Full recomputation, sharding, offload, or a smaller micro-batch is therefore still required for this representation.
+
+:::
+
+This breakdown illustrates the practical engineering decisions required when accelerator memory falls short. The same trade-off between stored activations, recomputation, and batch size drives the memory-computation analysis that follows.
+
+::: {#chk-training-memory-compute-trade-off .callout-checkpoint title="The memory-compute trade-off"}
+
+Training large models requires managing the memory wall, the gap between accelerator compute throughput and memory bandwidth.
+
+**Bottleneck**
+
+- [ ] **Activation memory**: Explain why activations stored for backpropagation dominate memory usage and, for some model shapes and recipes, exceed parameter footprint by more than 10$\times$.
+- [ ] **Optimization strategy**: Explain how gradient checkpointing trades additional forward compute for memory capacity.
+- [ ] **Memory estimate**: For GPT-2 (1.5B parameters) in mixed precision, estimate each training state component (weights, gradients, optimizer state, and activations at batch size 32), identify the largest term, and determine whether the total fits on a 32 GB accelerator.
+
+**Scaling limits**
+
+- [ ] **Batch size constraints**: Explain why memory capacity limits the maximum batch size, and how gradient accumulation sidesteps this limit without expanding memory.
+
+:::
+
+#### Memory-computation trade-offs {#sec-model-training-memorycomputation-tradeoffs-411e}
+
+Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-computation tradeoff!training systems}. Each forward pass generates values that backward rules may request. For a simplified network model with $\NumberOfLayers$ layers, let $s_{\LayerIndex}$ denote the bytes of saved intermediate state per example at layer $\LayerIndex$ and $\ActivationMemoryActivations^{(\ell)}$ the bytes of saved activation outputs per example. Under this per-example convention, their storage scales linearly with batch size and is approximated by @eq-activation-memory-per-batch:
+
+$$ \ActivationMemoryActivations = \BatchSize \times \sum_{\LayerIndex=1}^{\NumberOfLayers} \left(s_{\LayerIndex} + \ActivationMemoryActivations^{(\LayerIndex)}\right) $$ {#eq-activation-memory-per-batch}
+
+This memory requirement compounds with the weights, gradients, and optimizer memory discussed in @sec-model-training-optimization-algorithm-system-implications-f9f2. @Eq-total-training-memory gives a conceptual training-state decomposition:
+$$ \TotalMemoryFootprint = \WeightMemoryWeights + \GradientMemoryGradients + \OptimizerstateMemory + \ActivationMemoryActivations $$ {#eq-total-training-memory}
+
+The runtime peak can exceed this sum because temporary workspaces, communication buffers, allocator behavior, and framework bookkeeping also occupy memory. To reduce the activation term, training systems can strategically recompute intermediate values during backward rather than storing them. This increases computational work but can enable deeper networks or larger batches on memory-constrained hardware [@chen2016training]. @Algo-gradient-checkpointing makes the trade explicit: the forward pass keeps activations at only a sparse set of checkpoint layers, and the backward pass recomputes the rest on demand.
+
+```pseudocode
+#| label: algo-gradient-checkpointing
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Gradient checkpointing (activation recomputation)}
+\begin{algorithmic}
+\Require $\NumberOfLayers$-layer network; checkpoint set $\mathcal{C} \subseteq \{1,\dots,\NumberOfLayers\}$ (e.g., every $\sqrt{\NumberOfLayers}$ layers)
+\Ensure parameter gradients, at reduced peak activation memory
+\For{$\LayerIndex = 1$ to $\NumberOfLayers$}
+    \State forward layer $\LayerIndex$; store its activation only if $\LayerIndex \in \mathcal{C}$ \Comment{drop the rest}
+\EndFor
+\For{$\LayerIndex = \NumberOfLayers$ down to $1$}
+    \If{the activation of layer $\LayerIndex$ was dropped}
+        \State recompute the forward segment from the nearest stored checkpoint through layer $\LayerIndex$
+    \EndIf
+    \State compute the layer's gradient; free the activation
+\EndFor
+\State \Return the accumulated gradients
+\end{algorithmic}
+\end{algorithm}
+```
+
+In this segment schedule, recomputed intermediate values remain available until their backward consumers finish; recomputing a segment afresh for each layer would add more work. For layers with comparable activation sizes and forward costs, spacing checkpoints uniformly every $\sqrt{\NumberOfLayers}$ layers reduces peak activation memory from $\mathcal{O}(\NumberOfLayers)$ to $\mathcal{O}(\sqrt{\NumberOfLayers})$ at the cost of one additional forward pass of arithmetic per training step [@chen2016training]. This increases total step computation from roughly $3\times$ to $4\times$ the forward-pass FLOPs, trading extra arithmetic operations for a substantially reduced activation footprint. Actual fit and wall-clock overhead still depend on the full memory budget and execution profile.
+
+Capacity is only one of two physical constraints imposed by memory; the other is bandwidth\index{Accelerator!memory bandwidth limitations}. Accelerators provide massive matrix compute throughput, but shuttling intermediate activation tensors between off-chip High Bandwidth Memory (HBM) and on-chip SRAM frequently saturates the memory bus [@jouppi2017]. Even when activations fit comfortably within HBM capacity, the time required to read and write them can dwarf the arithmetic execution time. To relieve this memory bus pressure, modern training engines fuse elementwise operations directly into preceding matrix multiplications and stage gradient computations through on-chip SRAM tiles rather than global memory. At the runtime level, framework caching allocators\index{ML framework!dynamic memory management} track tensor lifetimes across the computation graph, recycling memory blocks as soon as an activation's final backward consumer completes [@paszke2019pytorch].
+
+Forward propagation, gradient computation, and parameter updates define *what* training systems must compute. An operation's name alone, however, does not reveal *where* the system stalls. Matrix shape, operator fusion, numerical precision, and the memory hierarchy determine whether arithmetic throughput or data movement binds execution. Arithmetic intensity provides the analytical tool to quantify that balance.
+
 
 ### Parameter updates and optimizers {#sec-model-training-parameter-updates-optimizers-b1a4}
 
@@ -6391,9 +6304,7 @@ Partitioning computation across a cluster ultimately transforms training from a 
 
 ### The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
 
-The parallelism strategies in @sec-model-training-singlenode-multigpu-training-c87f and @sec-model-training-scaling-beyond-single-node-a671 represent the convergence of distinct architectural traditions\index{Training!infrastructure evolution}. Modern training platforms integrate paradigms developed across four computing eras, each shaped by the physical constraints and dominant workloads of its time.
-
-Neural network training combines requirements drawn simultaneously from high-performance computing (HPC) and warehouse-scale systems. From HPC, training inherits dense matrix multiplication (GEMM) kernels operating near accelerator compute limits, requiring tightly synchronized parallel execution across devices. From warehouse-scale computing\index{Warehouse-scale computing!training evolution}, multi-day training jobs inherit the necessity of cluster-wide orchestration, asynchronous data ingestion, and automated fault recovery across failure-prone nodes. Standard synchronous data-parallel training executes a global AllReduce collective at every optimizer step. Keeping accelerators supplied with arithmetic without stalling on communication requires high-bandwidth interconnects (such as NVLink and InfiniBand) and DMA runtimes that bypass host operating-system overhead. @Fig-evolution-systems sequences this architectural lineage across four overlapping computing eras—from early mainframe mainstays (ENIAC, IBM System/360) and vector HPC supercomputers (CDC 6600, Cray-1) through warehouse-scale cloud clusters to modern GPU and TPU hypercomputing clusters.
+The parallelism strategies in @sec-model-training-singlenode-multigpu-training-c87f and @sec-model-training-scaling-beyond-single-node-a671 represent the convergence of high-performance scientific computing and warehouse-scale infrastructure that produced today's AI hardware fabrics.
 
 ::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
 
