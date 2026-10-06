@@ -3121,114 +3121,6 @@ Because graceful degradation trades quality for availability, monitoring must ma
 
 After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence. Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
 
-## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
-
-An injected failure is useful evidence only when it resembles the production failure the system must survive. A multi-node training cluster that claims to tolerate network partitions should have that connection severed in a staging environment so engineers can observe what the orchestration layer does. Fault injection\index{Fault injection!testing discipline}\index{Fault injection!tools and frameworks} is the engineering discipline of deliberately perturbing a system to empirically verify that robustness mechanisms work before production traffic discovers the gap. Fault-injection tools for tensors and accelerators cover bit flips, corrupted tensor values, and accelerator-oriented failures [@chen2020tensorfi; @tsai2021; @grafe2023], while network partitions, latency injection, dependency termination, and API-response faults belong to chaos and distributed-systems testing practice [@basiri2016].
-
-### Fault and error models {#sec-ft-fault-error-models}
-
-A fault-injection experiment must specify duration, location, granularity, and propagation path. Its fault model\index{Fault model!abstraction} describes the originating disturbance, such as a transient single-bit upset or a permanent multi-bit defect. Its error model\index{Error model!propagation} describes the resulting corrupted state or computation. Results for transient single-bit faults do not establish resilience to permanent multi-bit defects [@sangchoolie2017].
-
-The injection level determines which propagation paths the experiment includes. A register-level bit flip in a simulator such as gem5 [@binkert2011] can expose effects that a mutation of a PyTorch weight tensor omits. Conversely, hardware may mask an injected fault before software observes it. Location and propagation therefore matter when comparing results across fault models [@sangchoolie2017; @papadimitriou2021].
-
-This divergence highlights the multi-tier filtering formalized by error masking [@mohanram2003]. The flowchart in @fig-error-masking-ft traces how a physical soft error traverses two successive screening diamonds—asking first whether corrupted data is read, and second whether it produces incorrect output or a crash—before escalating to an observable failure. A hardware disturbance that hits an unused functional unit, is overwritten prior to use, or lands in dynamically dead instructions is silently absorbed within the microarchitecture or runtime [@ko2021]. Because tensor-level mutations inject perturbations downstream of these architectural filters, their empirical error rates must be evaluated at that higher abstraction level.
-
-::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. A shaded panel lists microarchitecture-level and software-level masking causes."}
-
-```{.tikz}
-\scalebox{0.77}{
-\begin{tikzpicture}[font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=0.6,
-    draw=RedLine,
-    line width=0.75pt,
-    fill=RedL!60,
-    align=flush center,
-    minimum width=25mm, minimum height=9mm
-  },
-Box2/.style={inner xsep=2pt,
-    node distance=1.4,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL0,
-    align=flush center,
-    minimum width=29mm, minimum height=9mm
-  },
-Box3/.style={inner xsep=2pt,
-    node distance=1.1,
-    draw=GrayLine,
-    line width=0.75pt,
-    fill=white,
-    align=flush left,
-    minimum width=55mm, minimum height=9mm
-  },
-   decision/.style={diamond, minimum width=50mm,node distance=0.6,inner sep=-1ex,
-     minimum height=25mm, align=flush center, draw=GrayLine, fill=GrayL!50}
-}
-\node[Box](B1){Soft error};
-\node[Box,decision,below=of B1](B2){Corrupted  data \\are read?};
-\node[Box,decision,below=of B2](B3){Incorrect  output \\ or  system crash?};
-\node[Box2,right=of B2](B4){\textbf{Masked} \\ (microarchitecture)};
-\node[Box2,right=of B3](B5){\textbf{Masked} \\ (software)};
-\node[Box,below=of B3](B6){Failure};
-%%
-\node[Box3,right=of B4](MLA){\textbf{Microarchitecture-level analysis}
-\\[0.5ex]
-$\bullet$ Errors on unused components
-\\[0.5ex]
-$\bullet$ Overwritten by write operations
-\\[0.5ex]
-$\bullet$ Errors on speculative instructions};
-\node[Box3,right=of B5](SLA){\textbf{Software-level analysis}
-\\[0.5ex]
-$\bullet$ Dynamically dead instructions
-\\[0.5ex]
-$\bullet$ Logical, compare instructions
-\\[0.5ex]
-$\bullet$ Uninfluential branch instructions};
-%%
-\draw[Line,-latex](B1)--(B2);
-\draw[Line,-latex](B2)--
-node[right,font=\footnotesize\sffamily]{Yes}(B3);
-\draw[Line,-latex](B3)--
-node[right,font=\footnotesize\sffamily]{Yes}(B6);
-\draw[Line,-latex](B2)--
-node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B4);
-\draw[Line,-latex](B3)--
-node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B5);
-%fitting
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=5mm,
-yshift=2.5mm,fill=BackColor!50,fit=(B4)(SLA)(MLA),line width=0.75pt](BB2){};
-\node[below=4pt of  BB2.north,inner sep=0pt,
-anchor=north]{\textbf{System-level masking effect analysis}};
-\end{tikzpicture}
-}
-```
-
-:::
-
-These masking effects determine which abstraction level an experiment should target.
-
-### Fault injection methods {#sec-ft-fault-injection-methods}
-
-Fault injection methods trade realism against experimental scale. Hardware-based injection, through field-programmable gate array (FPGA) emulation or accelerated particle-beam exposure of a running accelerator [@velazco2010], supplies the calibration point because its faults pass through the same circuit-level masking as production faults. Software-based injection\index{Fault injection!software-based} is the scalable counterpart. Tools such as PyTorchFI\index{PyTorchFI!fault injection} [@mahmoud2020] perturb weights, activations, and gradients directly, covering many model states quickly without special hardware, and have shown that single bit-level faults can produce severe misclassifications, including "phantom" objects in detection models. The cost is an abstraction gap\index{Fault injection!abstraction gap}: a software tool that mutates a tensor skips the hardware masking that would have absorbed many of the same disturbances. Frameworks such as Fidelity\index{Fidelity!fault injection framework} [@he2020fidelity] narrow that gap by mapping how faults in registers, memory hierarchies, and numerical units become software-visible errors, so that injected faults resemble what physical hardware would produce.
-
-::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
-
-**Scenario**: An engineering team validates a distributed training pipeline using software fault injection, concluding that tensor bit-flips always corrupt model gradient updates.
-
-**Diagnosis**: Hardware-calibrated experiments reveal that software injection bypasses low-level hardware masking effects (such as ECC memory correction and gate-level masking) that prevent many register-level bit-flips from ever mutating software variables.
-
-**Systems lesson**: In this experiment, bypassing hardware masking overstates the effect of the modeled physical faults. Tensor mutation still tests the software response to corrupted values; estimating production vulnerability additionally requires a calibrated model of which physical faults reach those values. The result must be interpreted at the injection level actually tested.
-
-:::
-
-For fleet recovery, the most valuable experiments inject faults at the level where recovery decisions are made. Killing a rank in the middle of a collective, partitioning a node from the rendezvous service, delaying a heartbeat past its timeout, and corrupting one checkpoint shard each exercise one row of @tbl-software-faults-summary-ft. Running these experiments continuously in staging, and in controlled form in production, keeps rarely executed recovery code from decaying between real incidents [@basiri2016]. A detection mechanism can identify corrupted or missing state, but only a recovery mechanism can replace it. Fault persistence determines whether to retry, quarantine, or replace a component, and checkpointing supplies the known-good training state from which any of those paths can resume.
-
-
 ## Distributed Debugging and Observability {#sec-fault-tolerance-reliability-reliability-distributed-debugging-observability-1a7f}
 
 At 2:00 AM, latency on the flagship generative API spikes from 200 ms to 5 seconds, but CPU, memory, and network metrics all look perfectly normal. The latency breach can justify immediate mitigation under a predefined policy; choosing a targeted repair requires locating the stalled work across hundreds of microservices. Distributed debugging and observability provide the diagnostic capability required to locate these invisible bottlenecks.
@@ -3585,6 +3477,113 @@ Cascade failures are particularly insidious because the root cause is obscured b
 :::
 
 Correlating metrics, logs, and traces allows operators to isolate failures and trigger automated remediations before an entire cluster is compromised. How these observability pipelines and fault tolerance strategies operate in practice, however, is best understood through real deployments. Production clusters running frontier models and global services illustrate how organizations translate theoretical reliability models into operational systems.
+
+## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
+
+An injected failure is useful evidence only when it resembles the production failure the system must survive. A multi-node training cluster that claims to tolerate network partitions should have that connection severed in a staging environment so engineers can observe what the orchestration layer does. Fault injection\index{Fault injection!testing discipline}\index{Fault injection!tools and frameworks} is the engineering discipline of deliberately perturbing a system to empirically verify that robustness mechanisms work before production traffic discovers the gap. Fault-injection tools for tensors and accelerators cover bit flips, corrupted tensor values, and accelerator-oriented failures [@chen2020tensorfi; @tsai2021; @grafe2023], while network partitions, latency injection, dependency termination, and API-response faults belong to chaos and distributed-systems testing practice [@basiri2016].
+
+### Fault and error models {#sec-ft-fault-error-models}
+
+A fault-injection experiment must specify duration, location, granularity, and propagation path. Its fault model\index{Fault model!abstraction} describes the originating disturbance, such as a transient single-bit upset or a permanent multi-bit defect. Its error model\index{Error model!propagation} describes the resulting corrupted state or computation. Results for transient single-bit faults do not establish resilience to permanent multi-bit defects [@sangchoolie2017].
+
+The injection level determines which propagation paths the experiment includes. A register-level bit flip in a simulator such as gem5 [@binkert2011] can expose effects that a mutation of a PyTorch weight tensor omits. Conversely, hardware may mask an injected fault before software observes it. Location and propagation therefore matter when comparing results across fault models [@sangchoolie2017; @papadimitriou2021].
+
+This divergence highlights the multi-tier filtering formalized by error masking [@mohanram2003]. The flowchart in @fig-error-masking-ft traces how a physical soft error traverses two successive screening diamonds—asking first whether corrupted data is read, and second whether it produces incorrect output or a crash—before escalating to an observable failure. A hardware disturbance that hits an unused functional unit, is overwritten prior to use, or lands in dynamically dead instructions is silently absorbed within the microarchitecture or runtime [@ko2021]. Because tensor-level mutations inject perturbations downstream of these architectural filters, their empirical error rates must be evaluated at that higher abstraction level.
+
+::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. A shaded panel lists microarchitecture-level and software-level masking causes."}
+
+```{.tikz}
+\scalebox{0.77}{
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner xsep=2pt,
+    node distance=0.6,
+    draw=RedLine,
+    line width=0.75pt,
+    fill=RedL!60,
+    align=flush center,
+    minimum width=25mm, minimum height=9mm
+  },
+Box2/.style={inner xsep=2pt,
+    node distance=1.4,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL0,
+    align=flush center,
+    minimum width=29mm, minimum height=9mm
+  },
+Box3/.style={inner xsep=2pt,
+    node distance=1.1,
+    draw=GrayLine,
+    line width=0.75pt,
+    fill=white,
+    align=flush left,
+    minimum width=55mm, minimum height=9mm
+  },
+   decision/.style={diamond, minimum width=50mm,node distance=0.6,inner sep=-1ex,
+     minimum height=25mm, align=flush center, draw=GrayLine, fill=GrayL!50}
+}
+\node[Box](B1){Soft error};
+\node[Box,decision,below=of B1](B2){Corrupted  data \\are read?};
+\node[Box,decision,below=of B2](B3){Incorrect  output \\ or  system crash?};
+\node[Box2,right=of B2](B4){\textbf{Masked} \\ (microarchitecture)};
+\node[Box2,right=of B3](B5){\textbf{Masked} \\ (software)};
+\node[Box,below=of B3](B6){Failure};
+%%
+\node[Box3,right=of B4](MLA){\textbf{Microarchitecture-level analysis}
+\\[0.5ex]
+$\bullet$ Errors on unused components
+\\[0.5ex]
+$\bullet$ Overwritten by write operations
+\\[0.5ex]
+$\bullet$ Errors on speculative instructions};
+\node[Box3,right=of B5](SLA){\textbf{Software-level analysis}
+\\[0.5ex]
+$\bullet$ Dynamically dead instructions
+\\[0.5ex]
+$\bullet$ Logical, compare instructions
+\\[0.5ex]
+$\bullet$ Uninfluential branch instructions};
+%%
+\draw[Line,-latex](B1)--(B2);
+\draw[Line,-latex](B2)--
+node[right,font=\footnotesize\sffamily]{Yes}(B3);
+\draw[Line,-latex](B3)--
+node[right,font=\footnotesize\sffamily]{Yes}(B6);
+\draw[Line,-latex](B2)--
+node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B4);
+\draw[Line,-latex](B3)--
+node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B5);
+%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=4mm,inner ysep=5mm,
+yshift=2.5mm,fill=BackColor!50,fit=(B4)(SLA)(MLA),line width=0.75pt](BB2){};
+\node[below=4pt of  BB2.north,inner sep=0pt,
+anchor=north]{\textbf{System-level masking effect analysis}};
+\end{tikzpicture}
+}
+```
+
+:::
+
+These masking effects determine which abstraction level an experiment should target.
+
+### Fault injection methods {#sec-ft-fault-injection-methods}
+
+Fault injection methods trade realism against experimental scale. Hardware-based injection, through field-programmable gate array (FPGA) emulation or accelerated particle-beam exposure of a running accelerator [@velazco2010], supplies the calibration point because its faults pass through the same circuit-level masking as production faults. Software-based injection\index{Fault injection!software-based} is the scalable counterpart. Tools such as PyTorchFI\index{PyTorchFI!fault injection} [@mahmoud2020] perturb weights, activations, and gradients directly, covering many model states quickly without special hardware, and have shown that single bit-level faults can produce severe misclassifications, including "phantom" objects in detection models. The cost is an abstraction gap\index{Fault injection!abstraction gap}: a software tool that mutates a tensor skips the hardware masking that would have absorbed many of the same disturbances. Frameworks such as Fidelity\index{Fidelity!fault injection framework} [@he2020fidelity] narrow that gap by mapping how faults in registers, memory hierarchies, and numerical units become software-visible errors, so that injected faults resemble what physical hardware would produce.
+
+::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
+
+**Scenario**: An engineering team validates a distributed training pipeline using software fault injection, concluding that tensor bit-flips always corrupt model gradient updates.
+
+**Diagnosis**: Hardware-calibrated experiments reveal that software injection bypasses low-level hardware masking effects (such as ECC memory correction and gate-level masking) that prevent many register-level bit-flips from ever mutating software variables.
+
+**Systems lesson**: In this experiment, bypassing hardware masking overstates the effect of the modeled physical faults. Tensor mutation still tests the software response to corrupted values; estimating production vulnerability additionally requires a calibrated model of which physical faults reach those values. The result must be interpreted at the injection level actually tested.
+
+:::
+
+For fleet recovery, the most valuable experiments inject faults at the level where recovery decisions are made. Killing a rank in the middle of a collective, partitioning a node from the rendezvous service, delaying a heartbeat past its timeout, and corrupting one checkpoint shard each exercise one row of @tbl-software-faults-summary-ft. Running these experiments continuously in staging, and in controlled form in production, keeps rarely executed recovery code from decaying between real incidents [@basiri2016]. A detection mechanism can identify corrupted or missing state, but only a recovery mechanism can replace it. Fault persistence determines whether to retry, quarantine, or replace a component, and checkpointing supplies the known-good training state from which any of those paths can resume.
 
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 

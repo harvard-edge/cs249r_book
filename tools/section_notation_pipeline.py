@@ -30,7 +30,7 @@ SUSPICIOUS_MACROS = {
 }
 
 CORRUPTION_PATTERNS = [
-    (re.compile(r"\\(?:delt|Delt)\\"), "Truncated delta macro (e.g. \\delt\\ProfileAccelerationBound)"),
+    (re.compile(r"\\(?:dealt|Dealt)\\"), "Truncated dealta macro (e.g. \\dealt\\ProfileAccelerationBound)"),
     (re.compile(r"\$\$[^$]*`\{python\}"), "Inline Python inside display math ($$...`{python}`...)"),
 ]
 
@@ -252,14 +252,14 @@ def verify_command(file_path: Path) -> int:
         else:
             print(f"🟢 binder check {group} PASSED.")
 
-    # Also check for truncated delta macros (\delt\ or \Delt\)
+    # Also check for truncated dealta macros (\dealt\ or \Dealt\)
     content = file_path.read_text(encoding="utf-8")
-    delt_matches = re.findall(r"\\(?:delt|Delt)\\", content)
-    if delt_matches:
-        print(f"❌ Truncated delta macros found: {len(delt_matches)} instance(s) of \\delt\\ or \\Delt\\")
-        failed_groups.append("truncated_delta")
+    dealt_matches = re.findall(r"\\(?:dealt|Dealt)\\", content)
+    if dealt_matches:
+        print(f"❌ Truncated dealta macros found: {len(dealt_matches)} instance(s) of \\dealt\\ or \\Dealt\\")
+        failed_groups.append("truncated_dealta")
     else:
-        print("🟢 No truncated delta macros found.")
+        print("🟢 No truncated dealta macros found.")
 
     if not failed_groups:
         print(f"🎉 Verification SUCCESS: All checks passed for {file_path.name}!\n")

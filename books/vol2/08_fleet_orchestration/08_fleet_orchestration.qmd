@@ -2618,51 +2618,6 @@ One policy for quota borrowing uses four tiers. Production serving\index{Priorit
 
 The safe burst limit follows from reclaimability rather than average SM utilization. The scheduler must measure how quickly borrowed jobs can checkpoint, shrink, or terminate; reserve the I/O and network bandwidth required for that transition; and bound the amount of opportunistic capacity that can be reclaimed within the guarantee's response-time objective. A job that averages 70 percent SM activity may still reserve all device memory and require every rank in its gang, so the remaining 30 percent does not constitute an allocatable device fraction.
 
-### Resource accounting and observability {#sec-fleet-orchestration-resource-accounting}
-
-The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible: the lights are on, but the fans are quiet. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
-
-Three tiers of measurement expose this gap between requested hardware and actual progress. Allocated capacity counts resources reserved for a job. Compute utilization measures hardware activity under a stated counter definition, which can include communication kernels or work later replayed. Productive utilization requires a workload-level measure of retained training progress or serving work that meets its objective, normalized to a declared reference rate. For example, a team allocated 500 GPUs might average 350 active-device equivalents (70 percent activity) while delivering 280 device-equivalents of useful work at the reference rate (56 percent of its allocation). These are time-averaged equivalents, not necessarily distinct sets of active and productive devices. The gap motivates profiling; it does not identify its cause or imply that necessary communication and recovery can all be eliminated.
-
-::: {.column-margin}
-![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Three horizontal orange utilization bars labeled allocated 500, active 350, and productive 280, decreasing from top to bottom."}
-
-*Allocated, active, and productive utilization drift far apart.*
-:::
-
-Attribution in a shared fleet presents a control problem. Every admitted job needs an owner, project, workload class, and preemption contract so the scheduler can apply quota and recovery policy consistently. Kubernetes labels and Slurm accounts carry this scheduling identity.
-
-This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index!definition}, a measure of free GPUs that cannot be allocated due to topology constraints. It must also track preemption rates, spot interruptions, checkpoint traffic, and the recovery overhead they induce. These measurements let the scheduler distinguish idle capacity it can reclaim from allocated capacity whose apparent idleness reflects communication, I/O, or a rigid gang dependency.
-
-Automated anomaly detection turns these metrics into investigation triggers. A sudden spike in a team's consumption to 3$\times$ its historical norm might reflect a runaway submission script or an intentional experiment. A growing queue can indicate insufficient capacity, but it can also reflect quota limits, fragmented placements, or a stalled dependency. A sudden power drop can accompany a shared storage stall, though job completions and changes in workload mix can produce a similar signal. Operators must correlate these alerts with admission decisions and job progress before changing capacity or policy.
-
-::: {#psp-fleet-orchestration-three-utilization-metrics .callout-perspective title="The three utilization metrics"}
-
-Each tier narrows the investigation. Low allocated utilization\index{Utilization!allocated} calls for checking demand, quotas, device health, and placement feasibility. Low compute utilization\index{Utilization!compute} on allocated devices calls for tracing input supply, communication waits, and runtime execution. Low productive utilization\index{Utilization!productive} despite busy kernels calls for comparing retained progress with replay, synchronization, and other overhead. The metric selects the next evidence to collect; it does not by itself select the remedy.
-
-:::
-
-### Security and namespace isolation {#sec-fleet-orchestration-security-isolation}
-
-Multi-tenancy requires not only fair resource allocation but also security isolation that prevents teams from interfering with or observing each other's workloads. The stakes are real: ML models represent significant intellectual property, training data may contain sensitive information subject to privacy regulations, and the models themselves may encode proprietary business logic. Without proper isolation, a compromised or misconfigured workload in one team's namespace could access another team's model weights, training data, or inference traffic.
-
-In Kubernetes environments, namespace separation provides an administrative boundary that must be reinforced by host, device, network, and storage controls. Role-based access control can restrict a team's Kubernetes API operations, including job submission and access to pod logs, within its namespaces. Model artifacts in external storage require their own authorization policies, and cluster-wide scheduling controls require appropriately scoped permissions. Namespace ownership alone does not establish either boundary.
-
-Network policies restrict permitted traffic when the installed network plugin enforces them. A policy can allow communication among an admitted gang while denying unwanted cross-namespace connections, but it must cover the paths the workload actually uses. Ring AllReduce exchanges chunks along ring neighbors, while other collective algorithms use different peer patterns. Host networking and additional device interfaces require verification of the applicable enforcement boundary. Connection filtering does not encrypt gradient traffic; confidentiality on permitted paths requires separate controls. Egress restrictions can reduce exfiltration opportunities, subject to the same enforcement and coverage checks.
-
-@Tbl-gpu-virtualization-isolation-spectrum compares GPU virtualization options across isolation strength, resource efficiency, and workload fit.
-
-| **Option**                  | **Isolation strength**                                             | **Efficiency and flexibility**                         | **Suitable workload or trust boundary**                                    |
-|:----------------------------|:-------------------------------------------------------------------|:-------------------------------------------------------|:---------------------------------------------------------------------------|
-| **Time-slicing**            | Separate contexts; shared performance and device fault domains.    | Flexible; no spatial reservation.                      | Trusted, bursty jobs.                                                      |
-| **MPS**                     | Separate address spaces; shared performance and GPU fault domains. | Concurrent kernels; configurable limits.               | Mutually trusting jobs with measured demand.                               |
-| **MIG**                     | Hardware-partitioned memory, cache, and compute.                   | Predictable; fixed profiles.                           | SLO-sensitive work; external tenants also need platform security controls. |
-| **Full device passthrough** | Exclusive access to the GPU.                                       | Strongest device isolation; lowest packing efficiency. | Jobs that saturate the device or forbid sharing.                           |
-
-: **GPU Virtualization Isolation Spectrum**: GPU sharing mechanisms trade device-resource isolation against packing efficiency. External tenant isolation additionally depends on the host, driver, identity, network, and storage security boundaries. {#tbl-gpu-virtualization-isolation-spectrum tbl-colwidths="[23,27,23,27]"}
-
-The choice depends on the trust boundary between colocated workloads and the performance sensitivity of each workload type. Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In sensitive environments, MIG or dedicated devices can strengthen device-resource isolation, but either mechanism remains one component of the larger host and platform security boundary.
-
 ### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
 
 ::: {.column-margin}
@@ -2729,6 +2684,51 @@ The engineering cost of preemption extends beyond scheduling latency. The **pree
 Reconstructing the distributed data pipeline also belongs in the preemption contract. The checkpoint must preserve the sampling and loader state needed to resume the intended data order, alongside model and optimizer state. If the restart path omits that state, it can repeat or skip samples and lose exact replay of the training trajectory. A different shuffle order does not by itself prove statistical corruption, but the recovery policy must specify which changes are acceptable. The scheduler should therefore measure restoration and pipeline warmup as part of recovery cost, rather than assume that reloading model weights alone makes the job productive.
 
 The resulting `{python} PreemptionTax.recovery_duration_min_attr_str` tax combines discarded execution with reload and warmup time; it is not a measurement of continuous kernel activity after eviction. At `{python} PreemptionTax.gpu_hour_rate_str`, the scenario values each event at `{python} PreemptionTax.cost_per_event_str` in allocation time. Repeating it `{python} PreemptionTax.preemptions_per_day_str` times per day consumes `{python} PreemptionTax.wasted_duration_per_day_h_str` of equivalent allocation time, or `{python} PreemptionTax.wasted_gpu_hours_per_day_str` for this `{python} PreemptionTax.gpus_str`-GPU run. Enforcing **preemption budgets**\index{Preemption Budgets!definition} bounds this disruption, for example by limiting per-job frequency or the fraction of capacity displaced in a time window. When a budget binds, the scheduler must consider waiting, another placement, or a defined emergency exception. The trade-off is reduced recovery churn against delayed admission, measured under the workload's deadlines.
+
+### Resource accounting and observability {#sec-fleet-orchestration-resource-accounting}
+
+The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible: the lights are on, but the fans are quiet. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
+
+Three tiers of measurement expose this gap between requested hardware and actual progress. Allocated capacity counts resources reserved for a job. Compute utilization measures hardware activity under a stated counter definition, which can include communication kernels or work later replayed. Productive utilization requires a workload-level measure of retained training progress or serving work that meets its objective, normalized to a declared reference rate. For example, a team allocated 500 GPUs might average 350 active-device equivalents (70 percent activity) while delivering 280 device-equivalents of useful work at the reference rate (56 percent of its allocation). These are time-averaged equivalents, not necessarily distinct sets of active and productive devices. The gap motivates profiling; it does not identify its cause or imply that necessary communication and recovery can all be eliminated.
+
+::: {.column-margin}
+![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Three horizontal orange utilization bars labeled allocated 500, active 350, and productive 280, decreasing from top to bottom."}
+
+*Allocated, active, and productive utilization drift far apart.*
+:::
+
+Attribution in a shared fleet presents a control problem. Every admitted job needs an owner, project, workload class, and preemption contract so the scheduler can apply quota and recovery policy consistently. Kubernetes labels and Slurm accounts carry this scheduling identity.
+
+This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index**\index{Fragmentation Index!definition}, a measure of free GPUs that cannot be allocated due to topology constraints. It must also track preemption rates, spot interruptions, checkpoint traffic, and the recovery overhead they induce. These measurements let the scheduler distinguish idle capacity it can reclaim from allocated capacity whose apparent idleness reflects communication, I/O, or a rigid gang dependency.
+
+Automated anomaly detection turns these metrics into investigation triggers. A sudden spike in a team's consumption to 3$\times$ its historical norm might reflect a runaway submission script or an intentional experiment. A growing queue can indicate insufficient capacity, but it can also reflect quota limits, fragmented placements, or a stalled dependency. A sudden power drop can accompany a shared storage stall, though job completions and changes in workload mix can produce a similar signal. Operators must correlate these alerts with admission decisions and job progress before changing capacity or policy.
+
+::: {#psp-fleet-orchestration-three-utilization-metrics .callout-perspective title="The three utilization metrics"}
+
+Each tier narrows the investigation. Low allocated utilization\index{Utilization!allocated} calls for checking demand, quotas, device health, and placement feasibility. Low compute utilization\index{Utilization!compute} on allocated devices calls for tracing input supply, communication waits, and runtime execution. Low productive utilization\index{Utilization!productive} despite busy kernels calls for comparing retained progress with replay, synchronization, and other overhead. The metric selects the next evidence to collect; it does not by itself select the remedy.
+
+:::
+
+### Security and namespace isolation {#sec-fleet-orchestration-security-isolation}
+
+Multi-tenancy requires not only fair resource allocation but also security isolation that prevents teams from interfering with or observing each other's workloads. The stakes are real: ML models represent significant intellectual property, training data may contain sensitive information subject to privacy regulations, and the models themselves may encode proprietary business logic. Without proper isolation, a compromised or misconfigured workload in one team's namespace could access another team's model weights, training data, or inference traffic.
+
+In Kubernetes environments, namespace separation provides an administrative boundary that must be reinforced by host, device, network, and storage controls. Role-based access control can restrict a team's Kubernetes API operations, including job submission and access to pod logs, within its namespaces. Model artifacts in external storage require their own authorization policies, and cluster-wide scheduling controls require appropriately scoped permissions. Namespace ownership alone does not establish either boundary.
+
+Network policies restrict permitted traffic when the installed network plugin enforces them. A policy can allow communication among an admitted gang while denying unwanted cross-namespace connections, but it must cover the paths the workload actually uses. Ring AllReduce exchanges chunks along ring neighbors, while other collective algorithms use different peer patterns. Host networking and additional device interfaces require verification of the applicable enforcement boundary. Connection filtering does not encrypt gradient traffic; confidentiality on permitted paths requires separate controls. Egress restrictions can reduce exfiltration opportunities, subject to the same enforcement and coverage checks.
+
+@Tbl-gpu-virtualization-isolation-spectrum compares GPU virtualization options across isolation strength, resource efficiency, and workload fit.
+
+| **Option**                  | **Isolation strength**                                             | **Efficiency and flexibility**                         | **Suitable workload or trust boundary**                                    |
+|:----------------------------|:-------------------------------------------------------------------|:-------------------------------------------------------|:---------------------------------------------------------------------------|
+| **Time-slicing**            | Separate contexts; shared performance and device fault domains.    | Flexible; no spatial reservation.                      | Trusted, bursty jobs.                                                      |
+| **MPS**                     | Separate address spaces; shared performance and GPU fault domains. | Concurrent kernels; configurable limits.               | Mutually trusting jobs with measured demand.                               |
+| **MIG**                     | Hardware-partitioned memory, cache, and compute.                   | Predictable; fixed profiles.                           | SLO-sensitive work; external tenants also need platform security controls. |
+| **Full device passthrough** | Exclusive access to the GPU.                                       | Strongest device isolation; lowest packing efficiency. | Jobs that saturate the device or forbid sharing.                           |
+
+: **GPU Virtualization Isolation Spectrum**: GPU sharing mechanisms trade device-resource isolation against packing efficiency. External tenant isolation additionally depends on the host, driver, identity, network, and storage security boundaries. {#tbl-gpu-virtualization-isolation-spectrum tbl-colwidths="[23,27,23,27]"}
+
+The choice depends on the trust boundary between colocated workloads and the performance sensitivity of each workload type. Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In sensitive environments, MIG or dedicated devices can strengthen device-resource isolation, but either mechanism remains one component of the larger host and platform security boundary.
 
 ### Quota governance and organizational dynamics {#sec-fleet-orchestration-quota-governance}
 

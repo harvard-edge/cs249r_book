@@ -1923,6 +1923,20 @@ An autonomous vehicle's vision system misclassifies a stop sign as a speed limit
 
 Model theft, poisoning, and adversarial inputs all reach the model through an interface the fleet exposes on purpose: a query endpoint, a data feed, or a sensor. A fleet also has interfaces it never exposes to users, between its own workers, tenants, and nodes, and those interfaces carry the next set of threats.
 
+### GPT-2 data extraction case study {#sec-security-privacy-case-study-gpt2-data-extraction-attack-5126}
+
+Design choices can reduce training-data exposure, but good predictive performance alone does not establish privacy. The GPT-2 extraction case shows why storage access control is insufficient once a model has learned sensitive content. In 2020, researchers demonstrated that query access to OpenAI's GPT-2 model could reveal verbatim training examples [@carlini2021extracting]. The attack targeted information exposed through generation rather than direct access to the stored training dataset.
+
+The attack proved remarkably successful at extracting sensitive information directly from the model's outputs. Generating hundreds of thousands of samples, some unconditioned and some seeded with short snippets of internet text, and then ranking them by how much more likely GPT-2 found them than a reference model or compression baseline did, allowed researchers to extract personal information such as names, phone numbers, and email addresses, along with source code, unique identifiers, and other verbatim snippets that the model had memorized from its training data.
+
+The technical approach exploited GPT-2's memorization of rare or repeated text sequences through three stages. Sampling came first. The researchers generated 600,000 samples using top-$n$ sampling, sampling with a temperature that decays over the first generated tokens, and sampling conditioned on short prefixes drawn from internet text. Ranking then applied membership-inference metrics that compare GPT-2's perplexity on a sample against a reference, namely the sample's zlib compression entropy, the perplexity a smaller GPT-2 model assigns it, and GPT-2's perplexity on the lowercased text. A sample that GPT-2 finds far more likely than the reference suggests memorization rather than fluent generalization. Manual verification closed the pipeline. The researchers inspected 1,800 top-ranked candidates, checking them first by internet search and then against the training data with OpenAI's cooperation, and confirmed 604 of them as unique memorized training examples.
+
+The attack challenged the assumption that training data would be "forgotten" after optimization. Some training examples remained recoverable even though the model was designed to generate text rather than retrieve records. Across the GPT-2 family studied (124M to 1.5B parameters), larger models exposed more memorized training data under the evaluation. This comparison motivates testing memorization as models scale; it does not establish a universal relationship between parameter count and privacy loss across different datasets and training procedures.
+
+Filtering, deduplication, and manual review can reduce exposure, but empirical screening does not prove that no sensitive string remains recoverable. Differential privacy addresses a different requirement by bounding how much a protected contribution changes the distribution of released results. It does not prohibit every reproduction of text that appears in training, especially information shared across many records. Its contribution bound and the utility effects of filtering or private training must therefore be evaluated separately.
+
+The result demonstrates why training-data controls need layered mitigations rather than storage access control alone [@carlini2021extracting]. Those layers can include PII filtering, deduplication, extraction-style memorization audits, membership-inference testing, and differential privacy when a formal bound is required. Machine unlearning and policy controls address related lifecycle questions, but their guarantees require separate evidence and validation.
+
 ## Fleet-Internal Trust Boundaries {#sec-security-privacy-fleet-trust-boundaries}
 
 ```{python}
@@ -2066,6 +2080,31 @@ Attestation and key management add coordination work when admission or recovery 
 :::
 
 The four boundaries draw on all three C³ axes. Redundant computation and memory scrubbing add compute work, while tenant-scoped caches can reduce reuse. Robust aggregation and encrypted collectives can add communication cost; attestation and key rotation add coordination. These controls also depend on components beneath the job. A driver with access to plaintext state, a compromised memory path, or an observable power signal can undermine a protection enforced higher in the stack. The hardware threat model must identify which of those components remain trusted and which observations the attacker can obtain.
+
+## Machine Learning Systems as Attack Tools {#sec-security-privacy-ml-systems-become-attack-tools-2f34}
+
+Consider an adversary who records noisy power traces from a device performing encryption. Extracting a key requires finding signal patterns associated with secret-dependent computations. A convolutional neural network can learn those patterns from labeled traces, making part of the analysis a learned classification task. The attacker still needs suitable measurements and training data, but can reuse the trained model across repeated attempts under compatible conditions.
+
+Machine learning changes roles in these attacks. Instead of being the protected asset, a learned model helps an adversary extract secrets, generate deceptive content, or adapt inputs to a target's defenses. @Tbl-offensive-ml-use-cases maps these offensive ML use cases\index{Offensive ML!use cases} to the observation or interface each exploits. The common mechanism is learning a useful attack pattern from examples that would otherwise require manual analysis.
+
+| **Offensive Use Case**                  | **ML Model Type**                               | **Targeted System Vulnerability**                       | **Advantage of ML**                                  |
+|:----------------------------------------|:------------------------------------------------|:--------------------------------------------------------|:-----------------------------------------------------|
+| **Phishing and Social Engineering**     | LLMs                                            | Human perception and communication systems              | Personalized, context-aware message crafting         |
+| **Reconnaissance and Fingerprinting**   | Supervised classifiers, clustering models       | System configuration, network behavior                  | Scalable, automated profiling of system behavior     |
+| **Exploit Generation**                  | Code generation models, fine-tuned transformers | Software bugs, insecure code patterns                   | Automated discovery of candidate exploits            |
+| **Data Extraction (Inference Attacks)** | Classification models, inversion models         | Privacy leakage through model outputs                   | Inference with limited or black-box access           |
+| **Evasion of Detection Systems**        | Adversarial input generators                    | Detection boundaries in deployed ML systems             | Crafting minimally perturbed inputs to evade filters |
+| **Hardware-Level Attacks**              | Deep learning models                            | Physical side-channels (for example, power, timing, EM) | Learning leakage patterns directly from raw signals  |
+
+: **Offensive ML use cases**: This table categorizes how machine learning amplifies cyberattacks by enabling automated content generation, exploiting system vulnerabilities, and increasing attack sophistication; it details the typical ML model, targeted weakness, and resulting advantage for each offensive application. Understanding these use cases is important for developing effective defenses against learning-enabled threats. {#tbl-offensive-ml-use-cases}
+
+A reusable attack model can amortize its training effort across repeated attempts or multiple targets. Its effectiveness still depends on the observations, access, and resources available to the attacker. The defender must therefore evaluate automated probing against the same latency and capacity limits that constrain ordinary service.
+
+Examining these offensive capabilities serves an essential defensive purpose. Security professionals have long recognized that effective defense requires understanding attack methodologies. This principle underlies penetration testing,[^fn-penetration-testing-audit] red team exercises,\index{Red Team Exercises}\index{Red Team!ML security} and threat modeling throughout the cybersecurity industry.
+
+[^fn-penetration-testing-audit]: **Penetration Testing**\index{Penetration Testing!ML limitations}: Authorized simulated attacks evaluate weaknesses within an agreed scope. Infrastructure-focused tests may omit adversarial inputs, extraction through legitimate API queries, or training-data poisoning. An ML assessment must explicitly include these paths and the attacker's permitted access; the name of the assessment does not establish its coverage.
+
+The side-channel case makes this change concrete: the secret remains in hardware, but a learned classifier extracts information from the signals that hardware exposes.
 
 ## Hardware-Level Security Vulnerabilities {#sec-security-privacy-hardwarelevel-security-vulnerabilities-1ab4}
 
@@ -2457,31 +2496,6 @@ Before moving from hardware trust to ML-enabled attacks, check that each securit
 
 These hardware threats endanger the model, its data, and the execution environment that protects them. Machine learning can also change roles: the same pattern-recognition capability that makes models valuable can help an adversary analyze leakage and attack that environment.
 
-### Machine Learning Systems as Attack Tools {#sec-security-privacy-ml-systems-become-attack-tools-2f34}
-
-Consider an adversary who records noisy power traces from a device performing encryption. Extracting a key requires finding signal patterns associated with secret-dependent computations. A convolutional neural network can learn those patterns from labeled traces, making part of the analysis a learned classification task. The attacker still needs suitable measurements and training data, but can reuse the trained model across repeated attempts under compatible conditions.
-
-Machine learning changes roles in these attacks. Instead of being the protected asset, a learned model helps an adversary extract secrets, generate deceptive content, or adapt inputs to a target's defenses. @Tbl-offensive-ml-use-cases maps these offensive ML use cases\index{Offensive ML!use cases} to the observation or interface each exploits. The common mechanism is learning a useful attack pattern from examples that would otherwise require manual analysis.
-
-| **Offensive Use Case**                  | **ML Model Type**                               | **Targeted System Vulnerability**                       | **Advantage of ML**                                  |
-|:----------------------------------------|:------------------------------------------------|:--------------------------------------------------------|:-----------------------------------------------------|
-| **Phishing and Social Engineering**     | LLMs                                            | Human perception and communication systems              | Personalized, context-aware message crafting         |
-| **Reconnaissance and Fingerprinting**   | Supervised classifiers, clustering models       | System configuration, network behavior                  | Scalable, automated profiling of system behavior     |
-| **Exploit Generation**                  | Code generation models, fine-tuned transformers | Software bugs, insecure code patterns                   | Automated discovery of candidate exploits            |
-| **Data Extraction (Inference Attacks)** | Classification models, inversion models         | Privacy leakage through model outputs                   | Inference with limited or black-box access           |
-| **Evasion of Detection Systems**        | Adversarial input generators                    | Detection boundaries in deployed ML systems             | Crafting minimally perturbed inputs to evade filters |
-| **Hardware-Level Attacks**              | Deep learning models                            | Physical side-channels (for example, power, timing, EM) | Learning leakage patterns directly from raw signals  |
-
-: **Offensive ML use cases**: This table categorizes how machine learning amplifies cyberattacks by enabling automated content generation, exploiting system vulnerabilities, and increasing attack sophistication; it details the typical ML model, targeted weakness, and resulting advantage for each offensive application. Understanding these use cases is important for developing effective defenses against learning-enabled threats. {#tbl-offensive-ml-use-cases}
-
-A reusable attack model can amortize its training effort across repeated attempts or multiple targets. Its effectiveness still depends on the observations, access, and resources available to the attacker. The defender must therefore evaluate automated probing against the same latency and capacity limits that constrain ordinary service.
-
-Examining these offensive capabilities serves an essential defensive purpose. Security professionals have long recognized that effective defense requires understanding attack methodologies. This principle underlies penetration testing,[^fn-penetration-testing-audit] red team exercises,\index{Red Team Exercises}\index{Red Team!ML security} and threat modeling throughout the cybersecurity industry.
-
-[^fn-penetration-testing-audit]: **Penetration Testing**\index{Penetration Testing!ML limitations}: Authorized simulated attacks evaluate weaknesses within an agreed scope. Infrastructure-focused tests may omit adversarial inputs, extraction through legitimate API queries, or training-data poisoning. An ML assessment must explicitly include these paths and the attacker's permitted access; the name of the assessment does not establish its coverage.
-
-The side-channel case makes this change concrete: the secret remains in hardware, but a learned classifier extracts information from the signals that hardware exposes.
-
 ### Deep learning for side-channel analysis {#sec-security-privacy-case-study-deep-learning-sca-b0b3}
 
 To illustrate these offensive capabilities concretely, consider a specific case where machine learning transforms traditional attack methodologies. One of the most well-known and reproducible demonstrations of deep-learning-assisted side-channel analysis is the SCAAML framework (Side-Channel Attacks Assisted with Machine Learning) [@bursztein2024; @burszteindc27]. Developed by researchers at Google, SCAAML provides a practical implementation of this learned side-channel pipeline.
@@ -2647,7 +2661,7 @@ Subsequent work expanded on this approach by introducing long-range models capab
 
 Learned side-channel models can reduce the analysis effort or trace count of an attack when suitable training data and measurable leakage are available. In a fleet built from a few part numbers, reusable attack models create correlated risk. Transfer still requires evaluation across devices, firmware, measurement conditions, and countermeasures; matching part numbers alone do not guarantee it. The defensive response must address both the attacker's access to measurements and the leakage of the computation. This combination leads to layered defenses around data, models, and execution infrastructure.
 
-## Comprehensive Defense Architectures {#sec-security-privacy-comprehensive-defense-architectures-48ab}
+## Layer 1: Hardware Defense Architectures {#sec-security-privacy-comprehensive-defense-architectures-48ab}
 
 An adversary who bypasses an API rate limit may still face authorization checks, restricted outputs, or an isolated execution environment. These controls protect different assets and constrain different actions. Secure ML systems use defense in depth to limit what follows from a failed mechanism. The benefit depends on whether the remaining controls retain their enforcement power; several checks that share the same compromised credential or runtime do not provide independent barriers.
 
@@ -3636,8 +3650,7 @@ Together, these hardware primitives support a defense-in-depth strategy for secu
 
 Hardware primitives supply evidence and enforcement for selected platform properties. Deployment controls use those capabilities to decide which model artifacts may load and which callers may use them. The transition from platform assurance to application policy is therefore a composition problem: the loader and serving endpoint must enforce the intended permissions within the protected boundary.
 
-
-## Software and Runtime Defenses {#sec-security-software-runtime-defenses}
+## Layer 2: Software and Runtime Defenses {#sec-security-software-runtime-defenses}
 
 ### Secure model deployment {#sec-security-privacy-secure-model-deployment-e08c}
 
@@ -3755,22 +3768,7 @@ In high-risk applications, such as medical diagnosis, autonomous vehicles, or fi
 
 Model design choices reflect trade-offs between accuracy, robustness, transparency, and system complexity. Making these choices before deployment gives engineers an opportunity to evaluate the resulting behavior and resource cost together. The next case examines a risk that ordinary accuracy evaluation can miss: training examples retained in a model and later exposed through its outputs.
 
-### GPT-2 data extraction case study {#sec-security-privacy-case-study-gpt2-data-extraction-attack-5126}
-
-Design choices can reduce training-data exposure, but good predictive performance alone does not establish privacy. The GPT-2 extraction case shows why storage access control is insufficient once a model has learned sensitive content. In 2020, researchers demonstrated that query access to OpenAI's GPT-2 model could reveal verbatim training examples [@carlini2021extracting]. The attack targeted information exposed through generation rather than direct access to the stored training dataset.
-
-The attack proved remarkably successful at extracting sensitive information directly from the model's outputs. Generating hundreds of thousands of samples, some unconditioned and some seeded with short snippets of internet text, and then ranking them by how much more likely GPT-2 found them than a reference model or compression baseline did, allowed researchers to extract personal information such as names, phone numbers, and email addresses, along with source code, unique identifiers, and other verbatim snippets that the model had memorized from its training data.
-
-The technical approach exploited GPT-2's memorization of rare or repeated text sequences through three stages. Sampling came first. The researchers generated 600,000 samples using top-$n$ sampling, sampling with a temperature that decays over the first generated tokens, and sampling conditioned on short prefixes drawn from internet text. Ranking then applied membership-inference metrics that compare GPT-2's perplexity on a sample against a reference, namely the sample's zlib compression entropy, the perplexity a smaller GPT-2 model assigns it, and GPT-2's perplexity on the lowercased text. A sample that GPT-2 finds far more likely than the reference suggests memorization rather than fluent generalization. Manual verification closed the pipeline. The researchers inspected 1,800 top-ranked candidates, checking them first by internet search and then against the training data with OpenAI's cooperation, and confirmed 604 of them as unique memorized training examples.
-
-The attack challenged the assumption that training data would be "forgotten" after optimization. Some training examples remained recoverable even though the model was designed to generate text rather than retrieve records. Across the GPT-2 family studied (124M to 1.5B parameters), larger models exposed more memorized training data under the evaluation. This comparison motivates testing memorization as models scale; it does not establish a universal relationship between parameter count and privacy loss across different datasets and training procedures.
-
-Filtering, deduplication, and manual review can reduce exposure, but empirical screening does not prove that no sensitive string remains recoverable. Differential privacy addresses a different requirement by bounding how much a protected contribution changes the distribution of released results. It does not prohibit every reproduction of text that appears in training, especially information shared across many records. Its contribution bound and the utility effects of filtering or private training must therefore be evaluated separately.
-
-The result demonstrates why training-data controls need layered mitigations rather than storage access control alone [@carlini2021extracting]. Those layers can include PII filtering, deduplication, extraction-style memorization audits, membership-inference testing, and differential privacy when a formal bound is required. Machine unlearning and policy controls address related lifecycle questions, but their guarantees require separate evidence and validation.
-
-
-## Privacy-Preserving AI {#sec-security-privacy-preserving-ai}
+## Layer 3: Privacy-Preserving AI {#sec-security-privacy-preserving-ai}
 
 ### Privacy-preserving data techniques {#sec-security-privacy-privacypreserving-data-techniques-64f8}
 

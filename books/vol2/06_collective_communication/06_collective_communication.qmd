@@ -409,7 +409,7 @@ To make the AllToAll pattern concrete, consider a mixture-of-experts model with 
 #| echo: false
 #| label: moe-alltoall-calc
 from mlsysim.core.units import BYTES_FP16, GB, KB, MB, microsecond, second
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time, fmt_count
 from mlsysim import Systems
 
 class MoeAllToAll:
@@ -493,46 +493,6 @@ If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllT
 **Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\Bandwidth_{\text{bisect}}$ and $V_{\text{cut}}$ bytes must cross its minimum cut, the exchange also obeys $T\geq V_{\text{cut}}/\Bandwidth_{\text{bisect}}$. Oversubscription reduces $\Bandwidth_{\text{bisect}}$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
 
 :::
-
-#### Dynamic routing and expert imbalance in MoE AllToAll {#sec-collective-communication-moe-dynamic-routing}
-
-The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing, in which every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent. The exchange keeps its two-phase shape, but its buffer sizes, its slowest receiver, and its load on the fabric all become functions of the routing distribution.
-
-Each MoE layer performs two exchanges. In an MoE transformer layer with $E$ experts distributed across $N$ ranks ($E/N$ experts per rank), each rank holds a local batch of $B_{\text{tok}}$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token, inducing two collective communication phases separated by expert computation. During token dispatch\index{All-to-All!dispatch phase}, each rank partitions its $B_{\text{tok}}$ local token activation vectors ($\mathbf{x} \in \mathbb{R}^d$) according to the destination ranks hosting the selected experts, executing an AllToAll collective (or variable-size `AllToAllv`\index{All-to-All!variable-size AllToAllv}) to route tokens across the fabric according to the routing matrix\index{All-to-All!routing matrix}. After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), the token combine\index{All-to-All!combine phase} phase executes a second AllToAll collective to route output vectors back to their originating ranks. Each rank then computes the weighted combination of expert outputs:
-$$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
-
-Because routing is data-dependent, so are the required buffer sizes, even when the input tensor shape is fixed. One simplified model treats assignments of different tokens independently: the count for expert $e$ is then $B_e \sim \text{Binomial}(N B_{\text{tok}}, p_e)$, where $p_e$ is the fixed probability that a token selects expert $e$. Correlated tokens or changing router probabilities require a different count model. To avoid reallocating buffers for every routing decision, a capacity-limited implementation can reserve space using an expert capacity factor\index{Capacity factor!expert routing} $C \ge 1.0$ [@lepikhin2021gshard; @fedus2022switch]:
-$$\text{Capacity}_e = \left\lceil \frac{N \times B_{\text{tok}} \times k}{E} \times C \right\rceil$$
-
-The capacity factor exposes a trade-off between reserved space and retained expert assignments. At uniform expected capacity ($C = 1.0$), some experts can still overflow while others have unused slots. A dropping implementation bypasses excess assignments through the residual connection\index{Token dropping!capacity factor}, changing the computation and potentially harming training quality. Increasing headroom ($C > 1.0$, for example $1.25$–$1.5$) can reduce overflow. If the implementation transmits every reserved slot, its padded payload grows by approximately $C\times$ relative to the uniform capacity-one budget; kernels that skip unused slots need not perform the corresponding dummy computation. A dropless implementation retains every assignment and can use variable-size `AllToAllv` to avoid sending unused slots. It still needs enough memory for the realized counts and remains exposed to routing skew.
-
-Skew turns the most heavily loaded rank into a straggler. Because token routing is determined by input semantics, some experts inevitably receive disproportionate token volumes. An expert receiving $\gamma \times$ the average load ($\gamma > 1$) increases its host GPU's traffic. The host's total receive volume depends on the combined load of all experts assigned to it, which is the rank-level quantity in the bound that follows.
-
-Routing skew can create stragglers\index{Straggler!expert skew} in both communication and expert computation. An inbound reception bottleneck bounds dispatch completion by the most heavily loaded receiver. Other ranks may finish their transfers earlier, but work that needs the delayed expert outputs must wait. The receive budget gives a lower bound before expert computation and the return exchange are counted:
-$$T_{\text{dispatch}} \ge \frac{B_{\text{max}} \times d \times \ElementStorageSize}{\Bandwidth_{\text{rx}}}$$
-where $B_{\text{max}} = \max_r \sum_{e \in \text{rank } r} B_e$ is the largest token batch size any rank $r$ receives. Bisection capacity provides a separate limit. Ring AllReduce exchanges data with logical ring neighbors, whereas AllToAll permits a complete bipartite exchange\index{All-to-All!bipartite exchange}. Under uniform destination assignment, a fraction $(N-1)/N \approx 1$ of tokens leaves its source rank; the fraction crossing nodes or a particular fabric cut depends on placement. In the simplified symmetric fabric model with oversubscription ratio $R:1$, usable bisection bandwidth $\Bandwidth_{\text{bisect}} = (N \cdot \Bandwidth_{\text{inject}}) / (2R)$ bounds the time needed to carry traffic across that cut:
-$$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\Bandwidth_{\text{bisect}}}$$
-
-Scale compounds both problems. To amortize small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]. Intra-node NVLink first coalesces tokens destined for experts on the same remote server node. Participating nodes then exchange aggregated payloads over InfiniBand or RoCE, and receiving GPUs use NVLink to distribute tokens to the GPUs hosting the targeted experts. At the logical level, this replaces $N(N-1)$ directed rank pairs with $\AcceleratorsPerNodeNodes(\AcceleratorsPerNodeNodes-1)$ directed node pairs; actual transport connections depend on the implementation. Coalescing can improve link utilization and reduce startup overhead, but the token bytes still have to cross the required fabric cuts, and skew can still overload a destination.
-
-#### AllToAll schedule selection {#sec-collective-communication-alltoall-schedule-selection}
-
-\index{AllToAll!schedule selection}\index{Collective communication!AllToAll schedules}
-
-AllToAll specifies the destination-specific exchange, not the schedule that carries it. The runtime should choose that schedule from the traffic matrix and physical hierarchy rather than treating every exchange as one flat pattern. @Tbl-alltoall-schedule-selection compares the three common regimes; hierarchical designs such as Tutel's two-dimensional exchange demonstrate why the best schedule can change with message size, scale, and topology [@hwang2023tutel].
-
-| **Schedule**                                                              | **When it fits**                                                                                                              | **Cost exposed**                                                                                                                                                  |
-|:--------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Direct pairwise exchange**\index{All-to-All!pairwise exchange schedule} | Balanced, coarse per-peer chunks on a small or full-bisection process group                                                   | Each rank injects directly to its peers; fine granularity repeats startup and scheduling cost, while oversubscription can bind the bisection                      |
-| **Hierarchical/coalesced exchange**                                       | Many small remote chunks across multi-GPU nodes or rails; pack by remote node, exchange aggregates, then redistribute locally | Coalescing amortizes inter-node startups and respects fast local links, but adds packing, local copies, synchronization, and temporary buffers                    |
-| **Variable-size exchange**                                                | Token or embedding counts differ by destination and padding to the maximum count would waste substantial bandwidth            | Explicit counts and displacements avoid padding, but count exchange and irregular transfers add control overhead; the hottest receiver still sets completion time |
-
-: **AllToAll schedule selection**: The right schedule minimizes the active bound rather than the logical peer count. Direct exchange preserves simplicity, hierarchy coalesces traffic before scarce links, and variable-size exchange removes padding without removing skew. {#tbl-alltoall-schedule-selection tbl-colwidths="[22,37,41]"}
-
-The selection test follows the lower bound developed above. If per-peer chunks are coarse and source injection or fabric bisection already dominates, coalescing cannot remove the byte term and may only add copies. If $N\alpha$ dominates because each remote destination receives a small chunk, hierarchy can replace many inter-node startups with fewer aggregate transfers. If counts are skewed, a variable-size interface prevents padding from inflating $V_{\text{cut}}$, but the schedule must still provision for the maximum receive volume and expert compute load. Consequently, a runtime should benchmark candidate schedules with the observed count distribution, rank placement, and topology; a balanced fixed-size microbenchmark cannot select a production AllToAll schedule.
-
-With the six contracts defined, every row of the travel manifest in @tbl-parallelism-communication-mapping names a primitive whose output and traffic pattern are precise. The sharded data-parallel row repays closer study, because sharding changes how often those primitives run rather than which ones run.
-
 
 ## From Parallelism to Communication Patterns {#sec-communication-collective-operations-collective-operations-communication-fundamentals-44eb}
 
@@ -2358,6 +2318,45 @@ Unlike AllReduce, which computes a single reduction over compatible elements, Al
 ### Mixture-of-Experts network demands {#sec-communication-alltoall-moe}
 Because each token in an MoE model activates only a few experts, the uniform dense reduction of AllReduce is replaced with destination-specific AllToAll traffic. Fine-grained expert dispatch can expose high $\alpha$ (startup cost), larger batches can bind injection or reception bandwidth, and oversubscription or expert skew can make the fabric's bisection capacity or a single hotspot the critical path.
 
+### Dynamic routing and expert imbalance in MoE AllToAll {#sec-collective-communication-moe-dynamic-routing}
+
+The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing, in which every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent. The exchange keeps its two-phase shape, but its buffer sizes, its slowest receiver, and its load on the fabric all become functions of the routing distribution.
+
+Each MoE layer performs two exchanges. In an MoE transformer layer with $E$ experts distributed across $N$ ranks ($E/N$ experts per rank), each rank holds a local batch of $B_{\text{tok}}$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token, inducing two collective communication phases separated by expert computation. During token dispatch\index{All-to-All!dispatch phase}, each rank partitions its $B_{\text{tok}}$ local token activation vectors ($\mathbf{x} \in \mathbb{R}^d$) according to the destination ranks hosting the selected experts, executing an AllToAll collective (or variable-size `AllToAllv`\index{All-to-All!variable-size AllToAllv}) to route tokens across the fabric according to the routing matrix\index{All-to-All!routing matrix}. After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), the token combine\index{All-to-All!combine phase} phase executes a second AllToAll collective to route output vectors back to their originating ranks. Each rank then computes the weighted combination of expert outputs:
+$$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
+
+Because routing is data-dependent, so are the required buffer sizes, even when the input tensor shape is fixed. One simplified model treats assignments of different tokens independently: the count for expert $e$ is then $B_e \sim \text{Binomial}(N B_{\text{tok}}, p_e)$, where $p_e$ is the fixed probability that a token selects expert $e$. Correlated tokens or changing router probabilities require a different count model. To avoid reallocating buffers for every routing decision, a capacity-limited implementation can reserve space using an expert capacity factor\index{Capacity factor!expert routing} $C \ge 1.0$ [@lepikhin2021gshard; @fedus2022switch]:
+$$\text{Capacity}_e = \left\lceil \frac{N \times B_{\text{tok}} \times k}{E} \times C \right\rceil$$
+
+The capacity factor exposes a trade-off between reserved space and retained expert assignments. At uniform expected capacity ($C = 1.0$), some experts can still overflow while others have unused slots. A dropping implementation bypasses excess assignments through the residual connection\index{Token dropping!capacity factor}, changing the computation and potentially harming training quality. Increasing headroom ($C > 1.0$, for example $1.25$–$1.5$) can reduce overflow. If the implementation transmits every reserved slot, its padded payload grows by approximately $C\times$ relative to the uniform capacity-one budget; kernels that skip unused slots need not perform the corresponding dummy computation. A dropless implementation retains every assignment and can use variable-size `AllToAllv` to avoid sending unused slots. It still needs enough memory for the realized counts and remains exposed to routing skew.
+
+Skew turns the most heavily loaded rank into a straggler. Because token routing is determined by input semantics, some experts inevitably receive disproportionate token volumes. An expert receiving $\gamma \times$ the average load ($\gamma > 1$) increases its host GPU's traffic. The host's total receive volume depends on the combined load of all experts assigned to it, which is the rank-level quantity in the bound that follows.
+
+Routing skew can create stragglers\index{Straggler!expert skew} in both communication and expert computation. An inbound reception bottleneck bounds dispatch completion by the most heavily loaded receiver. Other ranks may finish their transfers earlier, but work that needs the delayed expert outputs must wait. The receive budget gives a lower bound before expert computation and the return exchange are counted:
+$$T_{\text{dispatch}} \ge \frac{B_{\text{max}} \times d \times \ElementStorageSize}{\Bandwidth_{\text{rx}}}$$
+where $B_{\text{max}} = \max_r \sum_{e \in \text{rank } r} B_e$ is the largest token batch size any rank $r$ receives. Bisection capacity provides a separate limit. Ring AllReduce exchanges data with logical ring neighbors, whereas AllToAll permits a complete bipartite exchange\index{All-to-All!bipartite exchange}. Under uniform destination assignment, a fraction $(N-1)/N \approx 1$ of tokens leaves its source rank; the fraction crossing nodes or a particular fabric cut depends on placement. In the simplified symmetric fabric model with oversubscription ratio $R:1$, usable bisection bandwidth $\Bandwidth_{\text{bisect}} = (N \cdot \Bandwidth_{\text{inject}}) / (2R)$ bounds the time needed to carry traffic across that cut:
+$$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\Bandwidth_{\text{bisect}}}$$
+
+Scale compounds both problems. To amortize small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective\index{All-to-All!hierarchical exchange} [@hwang2023tutel]. Intra-node NVLink first coalesces tokens destined for experts on the same remote server node. Participating nodes then exchange aggregated payloads over InfiniBand or RoCE, and receiving GPUs use NVLink to distribute tokens to the GPUs hosting the targeted experts. At the logical level, this replaces $N(N-1)$ directed rank pairs with $\AcceleratorsPerNodeNodes(\AcceleratorsPerNodeNodes-1)$ directed node pairs; actual transport connections depend on the implementation. Coalescing can improve link utilization and reduce startup overhead, but the token bytes still have to cross the required fabric cuts, and skew can still overload a destination.
+
+### AllToAll schedule selection {#sec-collective-communication-alltoall-schedule-selection}
+
+\index{AllToAll!schedule selection}\index{Collective communication!AllToAll schedules}
+
+AllToAll specifies the destination-specific exchange, not the schedule that carries it. The runtime should choose that schedule from the traffic matrix and physical hierarchy rather than treating every exchange as one flat pattern. @Tbl-alltoall-schedule-selection compares the three common regimes; hierarchical designs such as Tutel's two-dimensional exchange demonstrate why the best schedule can change with message size, scale, and topology [@hwang2023tutel].
+
+| **Schedule**                                                              | **When it fits**                                                                                                              | **Cost exposed**                                                                                                                                                  |
+|:--------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Direct pairwise exchange**\index{All-to-All!pairwise exchange schedule} | Balanced, coarse per-peer chunks on a small or full-bisection process group                                                   | Each rank injects directly to its peers; fine granularity repeats startup and scheduling cost, while oversubscription can bind the bisection                      |
+| **Hierarchical/coalesced exchange**                                       | Many small remote chunks across multi-GPU nodes or rails; pack by remote node, exchange aggregates, then redistribute locally | Coalescing amortizes inter-node startups and respects fast local links, but adds packing, local copies, synchronization, and temporary buffers                    |
+| **Variable-size exchange**                                                | Token or embedding counts differ by destination and padding to the maximum count would waste substantial bandwidth            | Explicit counts and displacements avoid padding, but count exchange and irregular transfers add control overhead; the hottest receiver still sets completion time |
+
+: **AllToAll schedule selection**: The right schedule minimizes the active bound rather than the logical peer count. Direct exchange preserves simplicity, hierarchy coalesces traffic before scarce links, and variable-size exchange removes padding without removing skew. {#tbl-alltoall-schedule-selection tbl-colwidths="[22,37,41]"}
+
+The selection test follows the lower bound developed above. If per-peer chunks are coarse and source injection or fabric bisection already dominates, coalescing cannot remove the byte term and may only add copies. If $N\alpha$ dominates because each remote destination receives a small chunk, hierarchy can replace many inter-node startups with fewer aggregate transfers. If counts are skewed, a variable-size interface prevents padding from inflating $V_{\text{cut}}$, but the schedule must still provision for the maximum receive volume and expert compute load. Consequently, a runtime should benchmark candidate schedules with the observed count distribution, rank placement, and topology; a balanced fixed-size microbenchmark cannot select a production AllToAll schedule.
+
+With the six contracts defined, every row of the travel manifest in @tbl-parallelism-communication-mapping names a primitive whose output and traffic pattern are precise. The sharded data-parallel row repays closer study, because sharding changes how often those primitives run rather than which ones run.
+
 ## Hierarchical Communication {#sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214}
 
 The AllReduce cost models in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 assume a flat network with uniform endpoint bandwidth. A multi-node GPU cluster instead has distinct local and cross-node communication paths. The reference system examined here has nearly an order-of-magnitude gap between those capacity budgets.
@@ -3203,19 +3202,21 @@ Misalignment between logical and physical topology is a common source of perform
 
 Hierarchical execution and topology-aware routing connect the cost model to a physical placement. The $\alpha$-$\beta$ terms estimate the service required by each scheduled exchange; hierarchy redistributes work across fabric tiers, and rail alignment can balance corresponding-shard traffic across independent ports. None removes shared-capacity limits. Measured collective duration must confirm that the intended placement shortens the dependency path before the design is accepted.
 
-## Gradient Compression Under Bandwidth Scarcity {#sec-communication-collective-operations-collective-operations-gradient-compression-7a5c}
+## Software and Algorithmic Mitigations for Communication Bottlenecks
+
+### Gradient Compression Under Bandwidth Scarcity {#sec-communication-collective-operations-collective-operations-gradient-compression-7a5c}
 
 Even after topology tuning and algorithm selection, a system may remain bandwidth-bound because the physical fabric cannot move gradient payloads fast enough. Reducing the payload can shorten those transfers without changing the fabric. Gradient compression trades numerical fidelity for fewer transmitted bits, so its benefit must be evaluated against the training quality target.
 
 Bandwidth scarcity can arise when training across data centers over wide-area links or on cloud instances with constrained Ethernet networking. A wide-area link offering 10--100$\times$ less bandwidth than the reference InfiniBand fabric would sharply increase the cost of exchanging the same gradient payload. Beyond the data center, federated training on phone-class devices, the Archetype C (Federated MobileNet) regime, faces constrained and intermittently available cellular or Wi-Fi uplinks. Compression can reduce each client's update size, although client updates may summarize several local training steps rather than a single gradient. The techniques examined here offer nominal value-payload reductions of 4--1000$\times$ at different fidelity levels; metadata and aggregation costs reduce the realized savings. The central tension is how much communication can be removed while preserving progress toward the training quality target.
 
-### Precision reduction via quantization {#sec-communication-collective-operations-collective-operations-quantization-reducing-precision-815b}
+#### Precision reduction via quantization {#sec-communication-collective-operations-collective-operations-quantization-reducing-precision-815b}
 
 Quantization is the least disruptive compression lever when bandwidth is binding because it keeps every gradient element but reduces the bits used to represent it. Most gradients are computed in FP32 (32-bit floating point) or BF16 (16-bit brain float), so reducing bit-width directly reduces communication volume. The useful question is how much gradient fidelity the optimizer can absorb across the progression from mild to aggressive quantization.
 
 Half-precision representations such as FP16\index{FP16!definition} serve as a standard baseline for accelerator training. By halving the bit-width of FP32, FP16 delivers a $2\times$ reduction in gradient value bytes, provided its range and precision support the workload's convergence requirements. Moving to INT8\index{INT8!definition} stores each quantized value in one byte, achieving a $4\times$ reduction relative to FP32 before scale metadata. One symmetric scheme uses 255 levels from negative 127 through positive 127. For a nonzero gradient vector, it computes a tensor-wide scaling factor $s = \max(\lvert \mathbf{g} \rvert) / 127$, quantizes via $\mathbf{g}_{\text{int8}} = \text{round}(\mathbf{g}/s)$, and has the receiver reconstruct $\hat{\mathbf{g}} = \mathbf{g}_{\text{int8}} \times s$; an all-zero vector requires a separate zero case. Independently scaled integer vectors cannot be added directly to recover the sum of their reconstructed gradients. The collective must account for each scale and use sufficient accumulator precision, or reconstruct values before reduction. At the extreme, 1-bit SGD\index{1-bit SGD} transmits only the sign of each gradient element ($+1$ or $-1$), yielding a $32\times$ reduction in value bits over FP32. The receiver reconstructs values using a learned or adaptive scaling factor, though the substantial noise introduced by 1-bit quantization can severely degrade convergence without error-feedback mechanisms [@seide2014; @karimireddy2019error].
 
-#### Block quantization for gradient communication {#sec-collective-communication-block-quantization-gradient-communication-c883}
+##### Block quantization for gradient communication {#sec-collective-communication-block-quantization-gradient-communication-c883}
 
 Using a single scaling factor for an entire tensor makes every element's quantization resolution depend on the largest magnitude. When magnitudes vary substantially across the tensor, small gradients may round to zero even in regions whose values could be represented accurately with a smaller scale. Block quantization\index{Block Quantization} addresses this by dividing the gradient tensor into blocks of $b_{\text{block}}$ elements (for example, $b_{\text{block}} = 64$ or $128$) and computing an independent scaling factor per block\index{Block Quantization!block scale factor}. Each block's scaling factor adapts to its local range, improving resolution where that range is smaller at the cost of transmitting $d_{\text{grad}}/b_{\text{block}}$ additional scaling factors for evenly divided blocks.
 
@@ -3223,11 +3224,11 @@ For a gradient vector of dimension $d_{\text{grad}}$ quantized to INT8 with bloc
 
 Interfaces that fuse quantization and reduction must preserve the meaning of each block's scale throughout aggregation. They must also control the resulting numerical error. Deterministic rounding generally introduces bias, whereas suitable randomized quantizers preserve the input in expectation while adding variance. Error feedback addresses accumulated compression error, but the need for it depends on the compressor and optimizer rather than on bit-width alone. Quantization should therefore move only as far down the precision ladder as the convergence budget permits.
 
-### Gradient sparsification methods {#sec-communication-collective-operations-collective-operations-sparsification-transmitting-important-gradients-2cd2}
+#### Gradient sparsification methods {#sec-communication-collective-operations-collective-operations-sparsification-transmitting-important-gradients-2cd2}
 
 Quantization attacks communication volume by reducing the number of bits per gradient element while transmitting every element. An orthogonal approach, sparsification\index{Sparsification}, attacks the problem from the other direction: keep full precision but transmit only a subset of gradient elements, setting the rest to zero.
 
-#### Top-k sparsification {#sec-collective-communication-topk-sparsification-40fc}
+##### Top-k sparsification {#sec-collective-communication-topk-sparsification-40fc}
 
 The most common method is Top-k compression\index{Top-k Sparsification}: for a gradient vector $\mathbf{g} \in \mathbb{R}^{d_{\text{grad}}}$, transmit only the $K_{\text{top}}$ elements with the largest absolute magnitude, setting the rest to zero [@aji2017; @lin2018deep]:
 
@@ -3241,13 +3242,13 @@ For $K_{\text{top}} = 0.001 d_{\text{grad}}$, the encoded message yields a compr
 
 Top-k is not the only sparsification rule. Random-k sparsification\index{Random-k Sparsification} selects $K_{\text{rand}}$ elements uniformly at random and scales them by $d_{\text{grad}}/K_{\text{rand}}$ to maintain an unbiased gradient estimate. Random-k has the advantage of being an unbiased compressor even without error feedback, because $\mathbb{E}[\text{RandomK}(\mathbf{g})] = \mathbf{g}$. Its random selection can discard large components, and rescaling the retained values introduces variance. Top-k retains the largest components but introduces bias. Their convergence behavior therefore depends on the optimizer, residual correction, and gradient distribution; unbiasedness alone does not determine which reaches a quality target sooner.
 
-#### The convergence problem {#sec-collective-communication-convergence-problem-43f6}
+##### The convergence problem {#sec-collective-communication-convergence-problem-43f6}
 
 Naively discarding small gradients with Top-k creates a systematic bias\index{Sparsification!systematic bias}. If a parameter's gradient remains below the selection threshold, even a consistent contribution of 0.01 per step is repeatedly omitted. Over thousands of steps, those omissions can materially change the optimization trajectory. The problem is persistent exclusion, which can occur even when each discarded component looks negligible in isolation.
 
 The bias of uncorrected Top-k means that the usual argument for SGD with an unbiased gradient estimate no longer applies directly. Biased compression can cause convergence failure even when the uncompressed method converges. Deterministic quantization can also repeatedly omit small contributions; randomized quantization and rescaled Random-k instead require accounting for their added variance. Error feedback addresses accumulated compression error for quantized gradients [@seide2014] and for sparsified gradients [@stich2018sparsified; @karimireddy2019error].
 
-### Error feedback and residual accumulation {#sec-communication-collective-operations-error-feedback}
+#### Error feedback and residual accumulation {#sec-communication-collective-operations-error-feedback}
 
 Error feedback controls the accumulated error introduced by compression. At step $t$, the system adds the local residual $\mathbf{e}_t$ to the new gradient $\mathbf{g}_t$, compresses that corrected vector, and transmits the compressed update $\mathbf{v}_t$. The next local accumulator\index{Error Feedback!residual accumulator} stores the difference between the corrected vector and the transmitted update. This residual path defers information so that later updates can recover it under the compressor's convergence assumptions.
 
@@ -3391,7 +3392,7 @@ The error-feedback trace in @tbl-error-feedback runs the same sequence with a re
 
 : **Error-Feedback Compression Trace**: Same five-step sequence under error-feedback compression. {#tbl-error-feedback}
 
-### 1-bit Adam compression-aware optimization {#sec-communication-1bit-adam}
+#### 1-bit Adam compression-aware optimization {#sec-communication-1bit-adam}
 
 Error feedback can restore convergence guarantees for suitable compressors under stated assumptions. When applied directly to gradients, it corrects the transmitted gradient without using the optimizer's internal state. Momentum and second-moment estimates offer other possible quantities to communicate, but compressing them changes how error enters the optimization trajectory. The decision is whether compression should operate on raw gradients or on optimizer state, and what analysis supports that choice.
 
@@ -3474,7 +3475,7 @@ Verify your understanding of when and how to apply gradient compression:
 
 :::
 
-### Bandwidth versus convergence trade-offs in compression {#sec-communication-collective-operations-compression-tradeoffs}
+#### Bandwidth versus convergence trade-offs in compression {#sec-communication-collective-operations-compression-tradeoffs}
 
 Gradient compression is not free; it trades reduced communication for increased variance or bias in the optimization process\index{Gradient Compression!trade-offs}. The comparison in @tbl-gradient-compression-methods summarizes the source-backed patterns from quantization, sparsification, error-feedback, and optimizer-aware compression work [@seide2014; @aji2017; @lin2018deep; @stich2018sparsified; @karimireddy2019error; @tang20211bit].
 
@@ -3487,7 +3488,7 @@ Gradient compression is not free; it trades reduced communication for increased 
 
 : **Gradient Compression Methods**: Encoded-payload ratios relative to FP32. Top-k assumes FP32 values and 32-bit indices; quantization scales and other metadata reduce the stated upper bounds. No method has a fixed convergence penalty across workloads. The right choice depends on whether bandwidth or convergence speed is the binding constraint; evaluate the complete time to the same quality target, including encoding and any additional training steps. {#tbl-gradient-compression-methods}
 
-#### Decision criteria for gradient compression {#sec-collective-communication-use-compression-8519}
+##### Decision criteria for gradient compression {#sec-collective-communication-use-compression-8519}
 
 The decision rule is not the compression ratio alone\index{Gradient Compression!break-even condition}. Compression is worthwhile only when the wall-clock time it saves across the run exceeds its encoding overhead plus the cost of any extra steps that slower convergence requires, so the comparison must be made in time to the same quality target. A high communication-to-computation ratio $\CommunicationTime/(\IronlawTermTimesCompute/N)$ creates an opportunity when that communication is exposed on the critical path. The compressor and optimizer analysis must establish how bias or variance is controlled, including whether error feedback is required; convergence tests then check that the chosen configuration reaches the target.
 
@@ -3571,11 +3572,11 @@ A concrete scenario makes that break-even rule quantitative. Suppose a training 
 
 The same model on a faster network, where communication takes only `{python} CompressionBreakEven.t_comm_fast_ms_str` per step, reverses the verdict. Compression cuts that to `{python} CompressionBreakEven.t_comm_fast_c_ms_str`, saving `{python} CompressionBreakEven.saved_fast_ms_str` per step, but still adds `{python} CompressionBreakEven.extra_steps_str` steps at `{python} CompressionBreakEven.step_fast_c_ms_str` each. The run now takes `{python} CompressionBreakEven.total_fast_c_s_str` instead of `{python} CompressionBreakEven.total_fast_s_str`, `{python} CompressionBreakEven.loss_fast_pct_str` longer. In this serial compute-plus-communication model, the break-even communication-to-computation ratio $\CommunicationTime/(\IronlawTermTimesCompute/N)$ depends on the assumed compression ratio and extra steps, with no separate encoding cost included. A training schedule with overlap must instead compare the exposed time saved against encoding and convergence costs. Scheduling transfers during independent computation offers another way to reduce that exposed time.
 
-## Communication-Computation Overlap {#sec-communication-overlap}
+### Communication-Computation Overlap {#sec-communication-overlap}
 
 A 20-millisecond network delay can effectively disappear, not by upgrading the physical network, but by hiding the communication behind arithmetic. Rather than shrinking payload bytes or restructuring network routes, overlap\index{Communication-computation overlap!pipelining} attacks the residual synchronization delay by scheduling transfers concurrently with independent backward-pass computations.
 
-### Layer-by-layer overlap {#sec-communication-layer-overlap}
+#### Layer-by-layer overlap {#sec-communication-layer-overlap}
 
 Gradient computation during the backward pass proceeds layer by layer, from the output layer back to the input layer. The gradient for layer $\ell$ is available as soon as that layer's backward pass completes, even while layers $\ell-1, \ell-2, \ldots$ are still computing. This creates an opportunity: begin communicating the gradient for layer $\ell$ immediately, while the GPU computes the gradient for layer $\ell-1$.
 
@@ -3587,7 +3588,7 @@ The overlap strategy interacts with algorithm choice from @sec-communication-col
 
 A critical dependency limits this overlap: the optimizer step cannot begin until all required gradient reductions complete. The gradients for the final layers processed (closest to the input) expose their communication latency because no subsequent backward computation remains to mask them.
 
-### Bucket fusion {#sec-communication-bucket-fusion}
+#### Bucket fusion {#sec-communication-bucket-fusion}
 
 The layer-by-layer overlap described in @sec-communication-layer-overlap assumes that each layer's gradient is communicated as a single message. In reality, a transformer layer contains dozens of individual parameter tensors (query, key, value projection matrices, output projection, layer norm parameters, feed-forward weights, and biases). Launching a separate AllReduce for every individual parameter would create thousands of small-message collectives, each paying the full $\alpha$ overhead. To avoid this, DDP uses bucket fusion\index{Bucket Fusion}\index{Bucket Fusion!trade-off} to group parameters into buckets (often configured around tens of megabytes, with 25 MB a common PyTorch reference point) and launches one AllReduce per bucket. The bucket size represents a trade-off: larger buckets amortize $\alpha$ overhead but delay the start of communication (because the bucket cannot be sent until all its parameters have computed gradients). Smaller buckets start communication earlier but pay more $\alpha$ overhead.
 
@@ -3595,7 +3596,7 @@ The optimal bucket size\index{Bucket Fusion!size tuning} depends on gradient-rea
 
 Bucket membership also determines how early communication can begin. A bucket containing one late gradient must wait even if its other gradients are ready. DDP can use reverse parameter registration order as an approximation to backward readiness and, depending on configuration, rebuild buckets from the observed backward order. Registration order need not match forward execution order, especially in models with branches or reused parameters. Grouping gradients that become ready together helps preserve the overlap window while maintaining a consistent collective sequence across ranks.
 
-### Overlap limits and exposed communication {#sec-communication-overlap-limits}
+#### Overlap limits and exposed communication {#sec-communication-overlap-limits}
 
 Communication-computation overlap has fundamental limits. The LogP model's overhead parameter $o$ represents processor time consumed by initiating or completing transfers. In the simplified LogP budget, initiation and completion consume $2o$ per operation on the participating execution resource. When backward compute intervals are short relative to that overhead, hiding network transit may save time while leaving processor overhead as the dominant cost.
 

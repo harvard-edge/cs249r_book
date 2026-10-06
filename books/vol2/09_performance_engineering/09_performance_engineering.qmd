@@ -1636,7 +1636,7 @@ For the fleet case, a step performs `{python} FleetEfficiencyCalc.fleet_useful_f
 
 ::::
 
-#### Detecting scaling regressions {#sec-performance-engineering-detecting-scaling-regressions-7c11}
+### Detecting scaling regressions {#sec-performance-engineering-detecting-scaling-regressions-7c11}
 
 Local resource costs can become exposed delays at scale. A small increase in memory demand may cross an allocation threshold, while a longer host pause on one rank can hold up a synchronized step across the fleet. Communication changes can separately increase network contention. These mechanisms require different evidence, so a local memory regression alone does not diagnose a network-buffer problem. @Tbl-performance-engineering-scaling-regression-tests organizes the tests that connect local changes to distributed behavior before a full-fleet rollout.
 
@@ -3227,7 +3227,79 @@ Graph compilation applies supported rewrites and hardware mappings across captur
 
 Fusion, precision engineering, and graph compilation optimize the same dense computation by moving fewer bytes, using narrower formats, or letting compilers reorganize kernels. Algorithmic transformations change the work itself. Speculative decoding attacks the memory-bound decode loop by trying to accept multiple tokens per target-model pass, while MoE attacks dense-model cost by activating only the experts a token needs. Both techniques can improve the iron-law budget, but both can also create new bottlenecks if their extra control logic, communication, or imbalance exceeds the work they remove.
 
-### Speculative decoding {#sec-performance-engineering-speculative}
+#### Mixture of experts {#sec-performance-engineering-moe}
+
+A mixture-of-experts architecture\index{MoE!performance engineering} can increase total parameter capacity without activating every feed-forward parameter for every token [@fedus2022switch; @lepikhin2021gshard]. Sparse activation changes the relation between total parameters and per-token arithmetic, but it does not guarantee higher quality or lower latency than a dense model at a fixed resource budget. The comparison must hold model quality, batch and sequence distributions, hardware topology, and service objectives constant.
+
+A standard MoE transformer layer replaces the feed-forward network with multiple parallel "expert" FFNs\index{MoE!conditional computation} and a lightweight Router\index{Router!mixture of experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, and load balance. When experts are distributed across GPUs, expert parallelism\index{MoE!expert parallelism} places different experts on different devices, and an AllToAll exchange\index{MoE!all-to-all communication} moves each token's hidden state to its assigned expert before returning the result. The active-parameter savings are valuable only if that routing traffic and any expert imbalance\index{MoE!expert load imbalance} remain smaller than the dense compute they replace.
+
+```{python}
+#| echo: false
+#| label: moe-napkin
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOE ROUTING NAPKIN MATH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-moe, before the metrics paragraph.
+# │
+# │ Goal: Compare the FFN FLOPs that top-k routing skips per token and layer
+# │       with the AllToAll dispatch/combine bytes it adds, then with the fixed
+# │       per-collective launch cost.
+# │ Show: ~176 M params per expert per layer; ~2.1 GFLOP skipped per token per
+# │       layer; ~33 KB moved; ~2.1 us of peak compute vs ~73 ns of NVLink
+# │       transfer; ~10 us of launch per layer, repaid only at ~5 tokens.
+# │ How: expert size = (total - active) / (E - k) / layers from the registry's
+# │      Mixtral 8x7B; FLOPs = 2 x params; bytes = 2 x k x d x 2 (dispatch +
+# │      combine, FP16); launch from Ops.RuntimeOverheads.KernelLaunch.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_count, fmt_flops, fmt_memory, fmt_multiple, fmt_time
+
+class MoeNapkin:
+    """Per-token FLOPs skipped by top-k routing versus AllToAll cost."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    m = Models.Language.Mixtral_8x7B
+    experts = m.experts
+    top_k = m.active_experts_per_token
+    layers = m.layers
+    d_model = m.hidden_dim
+    peak = Hardware.Cloud.H100.compute.peak_flops
+    link_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
+    launch = Ops.RuntimeOverheads.KernelLaunch
+    alltoalls_per_layer = 2  # dispatch and combine
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    expert_params = (m.parameters - m.active_parameters) / (experts - top_k) / layers
+    skipped_flops = 2 * (experts - top_k) * expert_params.to(param).magnitude * flop
+    routed_bytes = 2 * top_k * d_model * BYTES_FP16  # dispatch + combine, FP16
+    skipped_time = (skipped_flops / peak).to(microsecond)
+    transfer_time = (routed_bytes / link_bw).to(nanosecond)
+    launch_per_layer = (alltoalls_per_layer * launch).to(microsecond)
+    breakeven_tokens = (launch_per_layer / (skipped_time - transfer_time)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(experts == 8 and top_k == 2, "Mixtral routes each token to 2 of 8 experts")
+    check((skipped_time / transfer_time).to("").magnitude > 10, "Skipped compute should dwarf the transfer time")
+    check(2 < breakeven_tokens < 10, "Fixed launch cost should need a handful of tokens to repay")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    experts_str = fmt_count(experts, commas=False)
+    top_k_str = fmt_count(top_k, commas=False)
+    expert_params_m_str = fmt_int(round(expert_params.to(param).magnitude / 1e6), commas=False)
+    skipped_gflop_str = fmt_flops(skipped_flops, unit=GFLOP, precision=1, commas=False)
+    routed_kb_str = fmt_memory(routed_bytes, unit=KB, precision=1, commas=False)
+    skipped_time_us_str = fmt_time(skipped_time, microsecond, precision=1, commas=False)
+    transfer_time_ns_str = fmt_time(round(transfer_time.magnitude) * nanosecond, nanosecond, precision=0, commas=False)
+    ratio_mult_str = fmt_multiple(round((skipped_time / transfer_time).to("").magnitude), precision=0, commas=False)
+    launch_per_layer_us_str = fmt_time(launch_per_layer, microsecond, precision=0, commas=False)
+    breakeven_tokens_str = fmt_count(round(breakeven_tokens), commas=False)
+```
+
+A per-token estimate separates arithmetic savings from routing costs. Mixtral 8x7B [@jiang2024mixtral] routes each token to `{python} MoeNapkin.top_k_str` of `{python} MoeNapkin.experts_str` experts, and each expert holds about `{python} MoeNapkin.expert_params_m_str` million parameters per layer. Compared with evaluating every expert, this skips about `{python} MoeNapkin.skipped_gflop_str` per token per layer, equivalent to `{python} MoeNapkin.skipped_time_us_str` at H100 FP16 peak compute. The modeled dispatch-and-combine payload is `{python} MoeNapkin.routed_kb_str` in FP16. Dividing by peak NVLink bandwidth gives `{python} MoeNapkin.transfer_time_ns_str`, roughly `{python} MoeNapkin.ratio_mult_str` less than the peak-compute equivalent. These idealized ratios do not establish actual AllToAll time or compare against a dense model of matched quality. With the scenario's assumed two-launch cost of `{python} MoeNapkin.launch_per_layer_us_str`, the arithmetic comparison crosses over at about `{python} MoeNapkin.breakeven_tokens_str` tokens; achieved bandwidth, topology, and expert imbalance can move that point. In weight-dominated batch-one decode, the relevant saving is instead the expert weights that need not be read, so the comparison must account for skipped bytes as well as routing.
+
+For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication over the workload envelope. Report the number of experts, experts selected per token, expert capacity, token distribution, routing imbalance, dispatch and combine bytes, AllToAll time, dropped or rerouted tokens, and the achieved quality and latency target. Sparse activation improves the iron-law budget only when inactive experts stay off the critical path and routing does not create a larger communication or straggler term.
+
+## Speculative decoding {#sec-performance-engineering-speculative}
 
 ::: {.column-margin}
 ![](images/svg/performance_engineering_specdec_roofline.svg){width="100%" fig-alt="A roofline thumbnail: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A dot labeled 1 token and a higher dot labeled K tokens sit on the slope left of the ridge, with an arrow pointing from the first toward the second."}
@@ -3375,79 +3447,6 @@ With $K =$ `{python} SpeculativeExpectation.draft_len_str`, an acceptance probab
 Speculative decoding pays off when the complete draft-and-verify round costs less per emitted token than ordinary target decoding. Rejections shorten the accepted prefix, but acceptance rate alone does not determine that cost: drafting, verification, cache management, and sampling all contribute. The serving system must therefore tune draft length and draft-model choice against measured latency and throughput under the same output-distribution requirement.
 
 ## Distributed Optimization Interventions
-### Mixture of experts {#sec-performance-engineering-moe}
-
-A mixture-of-experts architecture\index{MoE!performance engineering} can increase total parameter capacity without activating every feed-forward parameter for every token [@fedus2022switch; @lepikhin2021gshard]. Sparse activation changes the relation between total parameters and per-token arithmetic, but it does not guarantee higher quality or lower latency than a dense model at a fixed resource budget. The comparison must hold model quality, batch and sequence distributions, hardware topology, and service objectives constant.
-
-A standard MoE transformer layer replaces the feed-forward network with multiple parallel "expert" FFNs\index{MoE!conditional computation} and a lightweight Router\index{Router!mixture of experts} (also called a gating network) that selects which experts process each token. That architecture shifts the performance problem from dense matrix throughput to routing, memory residency, and load balance. When experts are distributed across GPUs, expert parallelism\index{MoE!expert parallelism} places different experts on different devices, and an AllToAll exchange\index{MoE!all-to-all communication} moves each token's hidden state to its assigned expert before returning the result. The active-parameter savings are valuable only if that routing traffic and any expert imbalance\index{MoE!expert load imbalance} remain smaller than the dense compute they replace.
-
-```{python}
-#| echo: false
-#| label: moe-napkin
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOE ROUTING NAPKIN MATH (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-moe, before the metrics paragraph.
-# │
-# │ Goal: Compare the FFN FLOPs that top-k routing skips per token and layer
-# │       with the AllToAll dispatch/combine bytes it adds, then with the fixed
-# │       per-collective launch cost.
-# │ Show: ~176 M params per expert per layer; ~2.1 GFLOP skipped per token per
-# │       layer; ~33 KB moved; ~2.1 us of peak compute vs ~73 ns of NVLink
-# │       transfer; ~10 us of launch per layer, repaid only at ~5 tokens.
-# │ How: expert size = (total - active) / (E - k) / layers from the registry's
-# │      Mixtral 8x7B; FLOPs = 2 x params; bytes = 2 x k x d x 2 (dispatch +
-# │      combine, FP16); launch from Ops.RuntimeOverheads.KernelLaunch.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_count, fmt_flops, fmt_memory, fmt_multiple, fmt_time
-
-class MoeNapkin:
-    """Per-token FLOPs skipped by top-k routing versus AllToAll cost."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    m = Models.Language.Mixtral_8x7B
-    experts = m.experts
-    top_k = m.active_experts_per_token
-    layers = m.layers
-    d_model = m.hidden_dim
-    peak = Hardware.Cloud.H100.compute.peak_flops
-    link_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    launch = Ops.RuntimeOverheads.KernelLaunch
-    alltoalls_per_layer = 2  # dispatch and combine
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    expert_params = (m.parameters - m.active_parameters) / (experts - top_k) / layers
-    skipped_flops = 2 * (experts - top_k) * expert_params.to(param).magnitude * flop
-    routed_bytes = 2 * top_k * d_model * BYTES_FP16  # dispatch + combine, FP16
-    skipped_time = (skipped_flops / peak).to(microsecond)
-    transfer_time = (routed_bytes / link_bw).to(nanosecond)
-    launch_per_layer = (alltoalls_per_layer * launch).to(microsecond)
-    breakeven_tokens = (launch_per_layer / (skipped_time - transfer_time)).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(experts == 8 and top_k == 2, "Mixtral routes each token to 2 of 8 experts")
-    check((skipped_time / transfer_time).to("").magnitude > 10, "Skipped compute should dwarf the transfer time")
-    check(2 < breakeven_tokens < 10, "Fixed launch cost should need a handful of tokens to repay")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    experts_str = fmt_count(experts, commas=False)
-    top_k_str = fmt_count(top_k, commas=False)
-    expert_params_m_str = fmt_int(round(expert_params.to(param).magnitude / 1e6), commas=False)
-    skipped_gflop_str = fmt_flops(skipped_flops, unit=GFLOP, precision=1, commas=False)
-    routed_kb_str = fmt_memory(routed_bytes, unit=KB, precision=1, commas=False)
-    skipped_time_us_str = fmt_time(skipped_time, microsecond, precision=1, commas=False)
-    transfer_time_ns_str = fmt_time(round(transfer_time.magnitude) * nanosecond, nanosecond, precision=0, commas=False)
-    ratio_mult_str = fmt_multiple(round((skipped_time / transfer_time).to("").magnitude), precision=0, commas=False)
-    launch_per_layer_us_str = fmt_time(launch_per_layer, microsecond, precision=0, commas=False)
-    breakeven_tokens_str = fmt_count(round(breakeven_tokens), commas=False)
-```
-
-A per-token estimate separates arithmetic savings from routing costs. Mixtral 8x7B [@jiang2024mixtral] routes each token to `{python} MoeNapkin.top_k_str` of `{python} MoeNapkin.experts_str` experts, and each expert holds about `{python} MoeNapkin.expert_params_m_str` million parameters per layer. Compared with evaluating every expert, this skips about `{python} MoeNapkin.skipped_gflop_str` per token per layer, equivalent to `{python} MoeNapkin.skipped_time_us_str` at H100 FP16 peak compute. The modeled dispatch-and-combine payload is `{python} MoeNapkin.routed_kb_str` in FP16. Dividing by peak NVLink bandwidth gives `{python} MoeNapkin.transfer_time_ns_str`, roughly `{python} MoeNapkin.ratio_mult_str` less than the peak-compute equivalent. These idealized ratios do not establish actual AllToAll time or compare against a dense model of matched quality. With the scenario's assumed two-launch cost of `{python} MoeNapkin.launch_per_layer_us_str`, the arithmetic comparison crosses over at about `{python} MoeNapkin.breakeven_tokens_str` tokens; achieved bandwidth, topology, and expert imbalance can move that point. In weight-dominated batch-one decode, the relevant saving is instead the expert weights that need not be read, so the comparison must account for skipped bytes as well as routing.
-
-For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication over the workload envelope. Report the number of experts, experts selected per token, expert capacity, token distribution, routing imbalance, dispatch and combine bytes, AllToAll time, dropped or rerouted tokens, and the achieved quality and latency target. Sparse activation improves the iron-law budget only when inactive experts stay off the critical path and routing does not create a larger communication or straggler term.
-
-
 ### Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
 In a multi-GPU training step or tensor-parallel inference pass, an accelerator can finish local computation and then wait for an AllReduce collective to transfer gradients or activations. Communication-computation overlap can shorten this exposed wait by running communication alongside independent computation. CUDA streams and gradient-bucket hooks provide scheduling mechanisms, but concurrency helps only when dependencies permit it and resource contention does not consume the saved time. The performance question is how much communication remains on the critical path after those constraints are accounted for.
