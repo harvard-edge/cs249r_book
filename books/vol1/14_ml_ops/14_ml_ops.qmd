@@ -145,7 +145,11 @@ Reproducibility\index{Reproducibility!versioning principle} requires every artif
 $$\text{Model Output} = f(\text{Code}_v, \text{Data}_v, \text{Config}_v, \text{Environment}_v; \xi)$$ {#eq-model-reproducibility}
 where $v$ identifies an immutable version hash and $\xi$ captures execution nondeterminism. Exact reproduction requires freezing all four versioned inputs alongside random seeds, dataloader sample ordering, deterministic GPU reduction kernels, and identical accelerator hardware architectures.
 
-Fixing random seeds (such as `torch.manual_seed(42)`) still fails to guarantee bitwise reproducibility across training runs on accelerator hardware. Microscopic round-off variances from asynchronous execution compound through non-linear activation functions, causing two runs with identical seeds and identical code to diverge into measurably different model weights unless deterministic reduction algorithms are explicitly enabled.
+Fixing random seeds (such as `torch.manual_seed(42)`) still fails to guarantee bitwise reproducibility across training runs on accelerator hardware. The root cause is finite-precision arithmetic. In exact arithmetic, addition is associative, so $(a + b) + c = a + (b + c)$. Floating-point formats such as FP32, FP16, and BF16 break associativity because each intermediate sum is rounded to fit a finite mantissa width. On an accelerator, some gradient kernels have thousands of concurrent threads accumulate into shared tensors in global memory using hardware atomic instructions (`atomicAdd`). Because warp scheduling and memory-system contention vary from run to run, the order in which those updates reach global memory is not fixed. If Run 1 accumulates three updates $A$, $B$, and $C$ as $(A + B) + C$ and Run 2 accumulates them as $A + (B + C)$, the accumulated gradients can differ in their least significant bits. Over thousands of optimization steps, these microscopic round-off variances compound through non-linear activation functions, causing two runs with identical seeds and identical code to diverge into measurably different model weights unless deterministic reduction algorithms (which enforce a fixed summation tree at the cost of parallel throughput) are explicitly enabled.
+
+::: {.column-margin .margin-pointer}
+↩ The floating-point formats, their dynamic ranges, and where accumulated rounding error matters in training are established in @sec-model-training-mixedprecision-training-9218.
+:::
 
 [^fn-artifact-reproducibility-hashing]: **Artifact**\index{Artifact!reproducibility}: Model weights are realized training outputs; the inputs and randomness that produced them cannot generally be inferred from the parameters. Versioning only code is therefore insufficient, and even versioning code, data, configuration, and environment may not guarantee exact replay when kernels or training are nondeterministic.
 
@@ -1427,9 +1431,23 @@ Formalizing this optimization requires deriving the total cost function from fir
 Model accuracy can degrade over time, creating a staleness cost\index{Staleness cost!accuracy decay model}. For economic planning, a team may fit the observable impact over a stable local regime as an exponential decay process. Here $\gamma$ is a temporal decay rate under the assumption that measured degradation accumulates steadily; it is not determined by distribution divergence alone. The exponential model is a simplification that enables closed-form economic analysis. Let $\AccuracyAtTime$ represent accuracy at time $t$ since last training, and $\InitialAccuracy$ represent initial accuracy. @Eq-accuracy-decay captures this fitted scenario, where the rate $\gamma$ depends on domain volatility and observed outcomes:
 $$\AccuracyAtTime = \InitialAccuracy \cdot e^{-\gamma t}$$ {#eq-accuracy-decay}
 
-This temporal model and the divergence-based drift model in @sec-ml-operations-resource-management-performance-monitoring-afe7 use different predictors and must each be checked against observed outcomes. A longer-horizon fit may include an asymptote. For example, uniform random guessing in balanced classification with $K$ classes has expected accuracy $\text{Accuracy}_{\min} = 1/K$, though this is not a lower bound for an arbitrary classifier. Choosing that asymptote yields the fitted process $\AccuracyAtTime = \text{Accuracy}_{\min} + (\InitialAccuracy - \text{Accuracy}_{\min}) \cdot e^{-\gamma t}$. The unshifted form in @eq-accuracy-decay is a local exponential approximation used to model the early, small-loss regime ($\gamma t \ll 1$) that a proactive retraining interval is designed to enforce.
+This temporal model and the divergence-based drift model in @sec-ml-operations-model-infrastructure-monitoring-3988 use different predictors and must each be checked against observed outcomes. A longer-horizon fit may include an asymptote. For example, uniform random guessing in balanced classification with $K$ classes has expected accuracy $\text{Accuracy}_{\min} = 1/K$, though this is not a lower bound for an arbitrary classifier. Choosing that asymptote yields the fitted process $\AccuracyAtTime = \text{Accuracy}_{\min} + (\InitialAccuracy - \text{Accuracy}_{\min}) \cdot e^{-\gamma t}$. The unshifted form in @eq-accuracy-decay is a separate local exponential approximation used for the integration below. Its later square-root approximation additionally requires the early, small-loss regime ($\gamma t \ll 1$) that a proactive retraining interval is designed to enforce.
 
-To find the optimal retraining interval $T^*$, teams must balance two opposing economic forces. The **staleness cost** accumulates over time as the model's accuracy degrades, acting as a financial tax on the daily query volume ($Q_{\text{day}}$) based on the utility value ($V$) of each prediction. Conversely, the **retraining cost** ($C$) is a fixed expense incurred each time the model is updated, encompassing compute resources, validation efforts, deployment overhead, and rollout risk.
+The cost of staleness accumulates based on the daily query volume $Q_{\text{day}}$ and the value impact $V$ of a unit change in accuracy fraction. Integrating the instantaneous accuracy loss $(\InitialAccuracy - \AccuracyAtTime)$ over the retraining interval $T$ yields @eq-staleness-cost:
+$$
+\begin{array}{>{\displaystyle}c}
+\text{Staleness Cost}(T) = \int_0^T Q_{\text{day}} \cdot V \cdot (\InitialAccuracy - \AccuracyAtTime) \, dt =
+\\
+Q_{\text{day}} \cdot V \cdot \InitialAccuracy \cdot \left(T - \frac{1-e^{-\gamma T}}{\gamma}\right)
+\end{array}$$ {#eq-staleness-cost}
+
+The integral accumulates cost over time $t$ from 0 to $T$, and the closed form follows from substituting @eq-accuracy-decay for $\AccuracyAtTime$.
+
+###### The retraining cost function {.unnumbered}
+
+Each retraining incurs fixed costs including compute, validation, and deployment overhead. @Eq-retrain-cost decomposes these:
+$$\text{Retraining Cost} = C_{\text{compute}} + C_{\text{validation}} + C_{\text{deployment}} + C_{\text{risk}}$$ {#eq-retrain-cost}
+where $C_{\text{compute}}$ is the cost of the training run itself, $C_{\text{validation}}$ is the cost of evaluating the new model before release, $C_{\text{deployment}}$ is the cost of rolling it into production, and $C_{\text{risk}}$ is the expected cost of potential regression from the new model.
 
 ::: {.column-margin}
 ```{=latex}
@@ -1440,7 +1458,12 @@ To find the optimal retraining interval $T^*$, teams must balance two opposing e
 *Stretch retraining too far and staleness cost runs away.*
 :::
 
-Balancing these forces requires finding the interval $T^*$ that minimizes the total combined cost per unit time. When the staleness loss is accumulated over the interval and minimized against the amortized retraining cost, the economic optimum emerges. *(Note: Formal calculus derivations using integrals and Taylor series expansions are omitted here for brevity.)* This optimization yields the square-root economic interval shown in @eq-optimal-retrain. With the parameters in @tbl-retraining-parameters, the approximation places the economic optimum near one day.
+###### Optimal retraining interval {.unnumbered}
+
+The optimal retraining interval $T^*$ minimizes total cost per unit time, as @eq-optimal-interval shows:
+$$T^* = \operatorname{arg\,min}_T \frac{\text{Staleness Cost}(T) + \text{Retraining Cost}}{T}$$ {#eq-optimal-interval}
+
+Under the assumption $\gamma T \ll 1$, a Taylor expansion of the exponential yields the square-root approximation used in the earlier napkin calculation. Specifically, the second-order Taylor approximation $e^{-\gamma T} \approx 1 - \gamma T + \frac{1}{2}(\gamma T)^2$ reduces the bracketed staleness term $\left(T - \frac{1-e^{-\gamma T}}{\gamma}\right)$ to $\frac{1}{2}\gamma T^2$. Dividing total costs by $T$ yields an average cost rate of $\frac{1}{2} Q_{\text{day}} V \InitialAccuracy \gamma T + \frac{C}{T}$, where $C$ is the Retraining Cost of @eq-retrain-cost; differentiating with respect to $T$ and setting the derivative to zero balances marginal staleness loss against amortized setup expense, directly yielding the square-root economic interval in @eq-optimal-retrain. With the parameters in @tbl-retraining-parameters, the approximation places the economic optimum near one day; an exact optimum requires minimizing @eq-optimal-interval without the expansion.
 
 ```{=latex}
 \begingroup
@@ -1569,15 +1592,16 @@ These controls prepare an artifact for release, but deployment must still establ
 ## Deployment and Serving {#sec-ml-operations-production-operations-b76d}
 
 A model that passes every offline gate has still not made a single production decision. Between the validated checkpoint and the first user-facing prediction lie packaging, conversion to a serving runtime, staged exposure to live traffic, and a path back if the new version misbehaves, and at each step the artifact users see can drift from the artifact that was evaluated. Deployment transforms a static checkpoint into a versioned, reproducible execution artifact; serving allocates accelerator memory, stages input batches, and schedules compute kernels to satisfy latency SLOs under dynamic request loads. Operations owns the seams between the two: proving that what ships is what was validated, limiting how much traffic a bad version can reach, and keeping rollback fast enough to use.
+
 ### Infrastructure as code {#sec-ml-operations-infrastructure-management-bf8f}
 
-Three failures illustrate the problem. A model works in staging but fails in production because someone manually provisioned a different GPU type. A training job crashes because a colleague's experiment consumed all available memory. An inference service cannot scale because its resource quotas were set through an informal message six months earlier. These failures share a root cause: infrastructure managed through manual processes rather than code.
+Three failures show how an unmanaged environment drifts away from the one that was validated. A model works in staging but fails in production because someone manually provisioned a different GPU type. A training job crashes because a colleague's experiment consumed all available memory. An inference service cannot scale because its resource quotas were set through an informal message six months earlier. These failures share a root cause: infrastructure managed through manual processes rather than code.
 
 Scalable, resilient infrastructure is foundational for operationalizing ML systems, and **infrastructure as code (IaC)**\index{Infrastructure as code!ML systems} is the practice that makes it reliable. IaC treats infrastructure configuration as software (version-controlled, reviewed, tested, and automatically executed) rather than manually configured through graphical interfaces or command-line tools. This approach brings software engineering discipline to resource management: changes are tracked, configurations can be tested before deployment, and environments can be reliably reproduced.
 
 The specific infrastructure tool matters less than the contract it enforces. Terraform\index{Terraform!infrastructure as code} [@terraform], AWS CloudFormation [@aws_cloudformation], and Ansible [@hatcher2024] represent common ways to version infrastructure definitions alongside application code. In MLOps settings, that versioned definition is what lets a team reproduce the GPU type, network policy, storage permissions, and scaling limits used by a training or serving environment across AWS [@aws], Google Cloud Platform [@google_cloud], Microsoft Azure [@azure], or on-premises infrastructure.
 
-Infrastructure management spans the full ML lifecycle. During training, IaC scripts allocate compute instances with GPU or TPU accelerators, configure distributed storage, and deploy container clusters. Because infrastructure definitions are stored as code, they can be audited, reused, and integrated into CI/CD pipelines ensuring consistency across environments.
+Infrastructure management spans the full ML lifecycle. During training, IaC scripts allocate compute instances with GPU or Tensor Processing Unit (TPU) accelerators, configure distributed storage, and deploy container clusters. Because infrastructure definitions are stored as code, they can be audited, reused, and integrated into CI/CD pipelines ensuring consistency across environments.
 
 Containerization\index{Containerization!ML deployment} provides the same reproducibility boundary for runtime dependencies. Docker [@docker] packages the model, libraries, and serving code into an isolated unit, while orchestration systems such as Kubernetes\index{Kubernetes!ML orchestration} [@kubernetes_orchestration] manage those units across clusters. The operational value is not the container name; it is the ability to deploy the same artifact repeatedly while resource allocation, scaling, and health management remain explicit.
 
@@ -1587,7 +1611,7 @@ To handle changes in workload intensity, including spikes during hyperparameter 
 
 Infrastructure in MLOps is not limited to the cloud. Many deployments span on-premises, cloud, and edge environments, depending on latency, privacy, or regulatory constraints. A robust infrastructure management strategy must accommodate this diversity by offering flexible deployment targets and consistent configuration management across environments.
 
-Infrastructure as code addresses how to provision resources reproducibly, but operators must still decide when and how much capacity to allocate. ML workloads break the assumptions of conventional web provisioning. Training jobs demand high-concurrency bursts across distributed accelerator topologies, creating friction between cluster utilization efficiency and time-to-solution. Inference services require sustained baseline allocations with rapid elastic scale-out to absorb request spikes under strict tail-latency SLOs.
+Infrastructure as code addresses how to provision resources reproducibly, but operators must still decide when and how much capacity to allocate. ML workloads break the assumptions of conventional web provisioning. Training jobs demand high-concurrency bursts across distributed accelerator topologies, creating friction between cluster utilization efficiency and time-to-solution. Inference services require sustained baseline allocations with rapid elastic scale-out to absorb request spikes under strict tail-latency SLOs. The utilization targets in @sec-ml-operations-hardware-utilization-patterns-5c10 turn these competing demands into measurable provisioning goals.
 
 ### Validating the serving artifact {#sec-ml-operations-model-format-optimization-c9d6}
 
@@ -1600,14 +1624,6 @@ The artifact that reaches the serving fleet is rarely the checkpoint that passed
 That proof must target the failure modes that conversion introduces silently\index{Model Optimization!conversion validation}. Consider a team that deploys an INT8-quantized model after verifying only throughput improvement: classification accuracy drops on rare but high-value edge cases, and the degradation goes undetected for weeks because aggregate metrics remain within SLO bounds. The first validation layer is numerical equivalence, comparing optimized outputs against the original model on a representative test set with application-specific divergence thresholds. That check is necessary but insufficient, because a static calibration slice is not live traffic: rare inputs, out-of-distribution examples, and subgroup-specific cases can expose quantization artifacts that aggregate test metrics hide, so the comparison must be disaggregated by the same cohorts that production monitoring tracks (@sec-ml-operations-production-monitoring-5e1b).
 
 The second layer is operational validation. Memory footprint must be measured at peak runtime utilization, including dynamic allocations during inference, since some optimizations trade increased runtime memory for computational speed. Warm-up behavior varies by runtime: Accelerated Linear Algebra (XLA)\index{XLA!warm-up compilation} may JIT-compile kernels during initial execution, whereas TensorRT\index{TensorRT!model optimization} selects tactics and builds an engine before deployment; loading that engine can still add startup latency. Runtime version compatibility then closes the loop. Deployment configurations need explicit version pinning\index{Version pinning!inference runtime}, because even a minor runtime upgrade can change kernel selection, and with it both latency and numerical results, in an artifact whose weights never changed. An unpinned runtime is an untracked input to @eq-model-reproducibility.
-
-::: {#chk-ml-ops-release-evidence .callout-checkpoint title="Evidence for a release"}
-
-- [ ] **Promotion evidence**: A shadow model has acceptable latency and similar output distributions, but outcome labels have not arrived. What has been established, and what quality evidence is still missing?
-- [ ] **Recovery state**: A canary changes an embedding dimension. Which artifacts and cached state must a tested rollback restore together?
-- [ ] **Converted artifact**: Explain why passing aggregate accuracy before quantization does not replace numerical, slice-level, and runtime checks after conversion.
-
-:::
 
 ### Model deployment {#sec-ml-operations-model-deployment-b9b9}
 
@@ -1780,7 +1796,7 @@ Interim evaluation demands equal rigor. Variance-reduction techniques such as CU
 
 An A/B decision only matters if the release machinery can promote, hold, or roll back the exact artifact that was tested. Model registries\index{Model registry!centralized artifact management}, such as Vertex AI's model registry [@vertex_ai_model_registry], act as centralized repositories for storing and managing trained models and versions. Model catalogs serve a distinct role: while registries manage internal, versioned deployment artifacts, catalogs such as Vertex AI Model Garden [@vertexAiModelGarden] index external and foundation model families (such as Llama 2 [@touvron2023llama2]) for evaluation, fine-tuning, and initial selection.
 
-Inference endpoints expose the validated model to live traffic. While lightweight services often use REST APIs over HTTP/1.1 for real-time scoring, high-throughput systems adopt binary RPC protocols such as gRPC over HTTP/2 to eliminate JSON serialization bottlenecks and reduce CPU parsing overhead. Depending on performance requirements, serving systems configure dedicated accelerator instances (such as GPUs or Tensor Processing Units (TPUs)) or leverage serverless inference[^fn-serverless-ml-tradeoff] that scales compute capacity to zero when idle.
+Inference endpoints expose the validated model to live traffic. While lightweight services often use REST APIs over HTTP/1.1 for real-time scoring, high-throughput systems adopt binary RPC protocols such as gRPC over HTTP/2 to eliminate JSON serialization bottlenecks and reduce CPU parsing overhead. Depending on performance requirements, serving systems configure dedicated accelerator instances (such as GPUs or TPUs) or leverage serverless inference[^fn-serverless-ml-tradeoff] that scales compute capacity to zero when idle.
 
 [^fn-serverless-ml-tradeoff]: **Serverless ML inference**\index{Inference!serverless trade-off}: The cost-efficiency of this option stems from provisioning compute only upon request and scaling to zero when idle, eliminating the cost of a persistent endpoint. This creates a direct tension with performance targets, as the first request after an idle period incurs a "cold start" latency penalty while the model is loaded into memory. For large models, that delay can be long enough to violate real-time latency budgets unless the service keeps warm capacity or uses a runtime designed for fast loading.
 
@@ -1789,6 +1805,14 @@ To maintain lineage and auditability, teams track model artifacts, including scr
 [^fn-mlflow-model-registry]: **MLflow**\index{MLflow!experiment tracking}: An open-source MLOps framework that couples artifact storage (S3/GCS) with metadata DBs (PostgreSQL) to record hyperparameter runs, model binary hashes, and deployment stage transitions. The systems trade-off is centralizing lineage tracking vs. incurring database connection bottlenecks during massive parallel hyperparameter sweeps.
 
 [^fn-ray-distributed-ml]: **Ray**\index{Ray!distributed ML}: A distributed computing framework from UC Berkeley [@moritz2018ray] that provides a unified task and actor interface, backed by a distributed scheduler and fault-tolerant store. The broader MLOps lesson is that fragmented infrastructure creates translation points where preprocessing logic, normalization constants, tokenizer versions, or artifact formats can diverge silently. Shared execution abstractions can reduce that fragmentation, but training-serving skew still requires explicit consistency checks across data, features, and serving code.
+
+::: {#chk-ml-ops-release-evidence .callout-checkpoint title="Evidence for a release"}
+
+- [ ] **Promotion evidence**: A shadow model has acceptable latency and similar output distributions, but outcome labels have not arrived. What has been established, and what quality evidence is still missing?
+- [ ] **Recovery state**: A canary changes an embedding dimension. Which artifacts and cached state must a tested rollback restore together?
+- [ ] **Converted artifact**: Explain why passing aggregate accuracy before quantization does not replace numerical, slice-level, and runtime checks after conversion.
+
+:::
 
 ### Inference serving {#sec-ml-operations-inference-serving-3f9a}
 
@@ -1818,19 +1842,11 @@ These constraints shape a natural deployment hierarchy across three tiers. Senso
 
 Two deployment contexts deserve specific attention. TinyML\index{TinyML!operational constraints} targets microcontroller-based inference under tight memory and milliwatt-class power constraints, requiring specialized engines such as TensorFlow Lite Micro and CMSIS-NN [@david2021tensorflow; @lai2018cmsis]. Model architectures must be co-designed with hardware constraints, favoring compact operators, quantization, and pruning strategies whose aggressiveness depends on the device and accuracy target. Mobile AI extends edge deployment to smartphones with moderate compute, using neural processing units (NPUs) and GPU compute shaders to meet interactive latency and battery-life constraints through power-aware scheduling.
 
-Updates and monitoring complete the edge operational picture. Over-the-air (OTA) model updates\index{Over-the-air update!model distribution} enable maintenance for physically inaccessible systems. OTA pipelines need secure model distribution, artifact verification, and rollback mechanisms; delta or differential updates can reduce transfer volume when devices need not receive a complete model artifact. Update scheduling must account for device connectivity patterns, power availability, and operational criticality.
+Updates and monitoring complete the edge operational picture. Over-the-air (OTA) model updates\index{Over-the-air update!model distribution} enable maintenance for physically inaccessible systems. OTA pipelines need secure model distribution, artifact verification, and rollback mechanisms; delta or differential updates can reduce transfer volume when devices need not receive a complete model artifact. One fail-safe OTA design on microcontroller and embedded targets uses dual-bank flash memory: the device keeps running from Bank A while it writes the candidate model and runtime to Bank B. After switching to Bank B, a hardware watchdog timer and a post-update self-test supervise the first inferences; if the new model triggers memory faults, hangs, or violates latency budgets, the bootloader automatically reverts execution to Bank A, preventing physically inaccessible devices from being bricked. Update scheduling must account for device connectivity patterns, power availability, and operational criticality.
 
 Monitoring requires adaptation to resource-constrained environments: lightweight telemetry systems capture essential metrics (inference latency, power consumption, accuracy indicators) while minimizing overhead. Health monitoring tracks device-level conditions (thermal status, battery levels, connectivity quality) to predict maintenance needs. Edge-cloud coordination patterns enable adaptive offloading between tiers based on current load, network conditions, and latency requirements. Feature caching at edge gateways reduces redundant computation, while federated learning lets edge devices contribute model updates rather than raw training records. Parameter updates can still expose training information. Secure aggregation limits visibility into individual client updates, while differential privacy bounds information leakage under a specified privacy budget; the protections address different threats and require an explicit threat model.
 
 Graceful degradation is the defining operational pattern for edge AI. When thermal limits or battery depletion constrain hardware capacity, edge runtimes must dynamically shed load—downsampling input sample rates, bypassing speculative execution branches, or falling back to shallow heuristic models—within a fallback policy validated for the application's safety and quality requirements.
-
-::: {#psp-ml-ops-zombie-feature .callout-perspective title="Zombie features"}
-
-Long-lived production models often accumulate features whose original owners, semantics, or intended use have faded. A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns. Removing such a feature is therefore no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
-
-Features in ML systems do not disappear just because code owners stop thinking about them. Unused feature payload volume $\DataVolume$ inflates serialization overhead and consumes memory bandwidth $\Bandwidth$ without improving accuracy. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that degrades $\DataVolume/\Bandwidth$ and complicates debugging [@sculley2015hidden].
-
-:::
 
 Getting models into production is only half the operational challenge. A successfully deployed model can still degrade through distribution shift or corrupted upstream features without raising runtime errors. Robust monitoring, incident response, and on-call practices close this loop.
 
@@ -1838,9 +1854,9 @@ Getting models into production is only half the operational challenge. A success
 
 *A deployed model needs continuing evidence of quality.* Conventional software and ML services can both suffer silent semantic failures; ML adds dependence on the relationship between current data and learned parameters. As live inputs change (the system entropy of @sec-ml-systems-system-entropy-9c4e), predictive quality may decline even while HTTP response codes and tail latency (p99) remain healthy. Monitoring is where the third critical interface, production-monitoring, makes that risk observable. Pairing staged rollout with input and outcome monitoring helps teams investigate failing versions and limit their impact, subject to the time needed to collect evidence and act.
 
-### Infrastructure telemetry and hardware utilization {#sec-ml-operations-infra-telemetry}
+### Infrastructure telemetry and hardware utilization {#sec-ml-operations-quantifying-drift-physics-psi-8c11}
 
-Distribution divergence can accompany accuracy decay, but determining degradation's direction and magnitude requires ground-truth labels that often arrive with substantial delay. In production, serving failures span two fundamentally different physical regimes: immediate hardware execution bottlenecks and gradual distributional drift. Disentangling them requires two distinct telemetry layers: infrastructure metrics that reveal whether the serving system itself is compute-, memory-, or I/O-bound, and distribution and outcome metrics that connect data movement to model performance.
+Confirming whether predictive quality has changed, and by how much, requires ground-truth labels that often arrive with substantial delay, so monitoring cannot wait for outcomes alone. In production, serving failures span two fundamentally different physical regimes: immediate hardware execution bottlenecks and gradual distributional drift. Disentangling them requires two distinct telemetry layers: infrastructure metrics that reveal whether the serving system itself is compute-, memory-, or I/O-bound, and distribution and outcome metrics that connect data movement to model performance.
 
 The first layer is infrastructure-level monitoring, which tracks indicators such as CPU and GPU utilization, memory bandwidth, disk consumption, network latency, and service availability. Measuring GPU utilization alone is incomplete; an accelerator reporting high execution time may still be stalled waiting for DRAM or PCIe transfers, while low utilization often signals host-side preprocessing bottlenecks. Correlating kernel execution times with memory bandwidth utilization and input pipeline queue depths distinguishes compute-, memory-, and I/O-bound behavior.
 
@@ -1945,7 +1961,7 @@ Alerting mechanisms convert these operational signals into proactive interventio
 
 Provisioning accelerator resources is only the first half of the problem; using them efficiently requires interpreting hardware metrics correctly rather than taking them at face value. Standard administrative GPU utilization metrics\index{GPU!utilization monitoring} can mislead operators because reported percentages measure time with a kernel executing rather than the fraction of peak arithmetic throughput achieved.
 
-Standard administrative tools such as `nvidia-smi` report the fraction of the sample interval with at least one kernel executing. Because kernels can stall while waiting for off-chip memory transactions, a high utilization reading remains possible even when arithmetic units are completely idle. The operations dashboard may display a reassuring green gauge while the underlying silicon is severely starved for data, making these metrics dangerously deceptive if interpreted as compute efficiency.
+Standard administrative tools such as `nvidia-smi` report the fraction of the sample interval with at least one kernel executing. Off-chip high-bandwidth memory (HBM) sits several hundred clock cycles away from the compute units, so a kernel with poor memory locality or low arithmetic intensity (gathering non-contiguous embedding vectors, or executing unfused elementwise operations) can leave every resident warp stalled on memory transactions. A high utilization reading therefore remains possible while the arithmetic units spend much of the interval idle. The operations dashboard may display a reassuring green gauge while the underlying silicon is severely starved for data, making these metrics dangerously deceptive if interpreted as compute efficiency.
 
 ::: {.column-margin .margin-pointer}
 ↩ The analytical model separating compute-bound execution from memory-bandwidth saturation across arithmetic intensities is established in @sec-hardware-acceleration-roofline-model-42ff.
@@ -2003,7 +2019,7 @@ Utilization and memory telemetry also feed the number the business sees. Cost pe
 
 ### Statistical monitoring and drift detection {#sec-ml-operations-model-infrastructure-monitoring-3988}
 
-Infrastructure management provisions resources; monitoring\index{Model monitoring!performance tracking}\index{Model monitoring!drift detection} observes their behavior. Unit tests can verify deterministic components but cannot by themselves establish population-level predictive performance, which must be estimated statistically. Monitoring implements observable degradation (@sec-ml-operations-foundational-principles-44e6), transforming this theoretical limitation into operational practice. Once monitoring surfaces a symptom—a latency SLO miss, throughput below target, or memory creep—@sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps that symptom to its dominant D·A·M term and tells the operator which optimizations will move the binding constraint and which will be wasted on serving infrastructure. Without continuous monitoring and the deeper **observability**\index{Observability!system state inference} it enables (the ability to infer internal state from outputs), teams lack the evidence needed to distinguish a healthy model from an unobserved regression.
+Infrastructure telemetry shows how the serving hardware behaves; statistical monitoring\index{Model monitoring!performance tracking}\index{Model monitoring!drift detection} shows whether the model's predictions remain correct. Unit tests can verify deterministic components but cannot by themselves establish population-level predictive performance, which must be estimated statistically. Monitoring implements observable degradation (@sec-ml-operations-foundational-principles-44e6), transforming this theoretical limitation into operational practice. Once monitoring surfaces a symptom—a latency SLO miss, throughput below target, or memory creep—@sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps that symptom to its dominant D·A·M term and tells the operator which optimizations will move the binding constraint and which will be wasted on serving infrastructure. Without continuous monitoring and the deeper **observability**\index{Observability!system state inference} it enables (the ability to infer internal state from outputs), teams lack the evidence needed to distinguish a healthy model from an unobserved regression.
 
 Effective monitoring spans both infrastructure health and statistical model behavior. On the infrastructure side, metrics track hardware saturation, memory allocation, and latency distributions. On the model side, teams track evaluation metrics such as accuracy, precision, recall, and confusion matrix shifts [@scikit_learn_confusion_matrix] across live prediction streams.
 
@@ -2408,7 +2424,7 @@ class PSIAgeExample:
 \endgroup
 ```
 
-Summing the six bin contributions yields a total PSI of `{python} PSIAgeExample.total_psi_str`, below the illustrative warning threshold. The training and serving columns are shown as percentages, while the difference column is expressed in proportion units, so a 3 percentage-point shift appears as $\pm 0.03$. Even though specific bins shifted by 3 percentage points, the aggregate drift is well below the `{python} PSIAgeExample.warning_threshold_str` warning threshold. Operational action depends on a calibrated threshold, sample size, and business cost.
+Summing the six bin contributions yields a total PSI of `{python} PSIAgeExample.total_psi_str`. The training and serving columns are shown as percentages, while the difference column is expressed in proportion units, so a 3 percentage-point shift appears as $\pm 0.03$. Even though specific bins shifted by 3 percentage points, the aggregate drift is well below the `{python} PSIAgeExample.warning_threshold_str` warning threshold. Operational action depends on a calibrated threshold, sample size, and business cost.
 
 ::: {.column-margin .margin-pointer}
 ↪ KL divergence, its asymmetry, and a worked drift example that computes both KL divergence and PSI are developed in @sec-appdx-data-foundations-measuring-drift-divergence-a6dd.
@@ -2800,7 +2816,15 @@ The attribution plot identifies features the model relied on within the failing 
 ↪ Post-hoc feature attribution methods, Shapley value computational costs, and model interpretability boundaries are developed in @sec-responsible-engineering-explainability-requirements-0b67.
 :::
 
-Feature attribution can reveal what a model should no longer depend on. For individual mispredictions, counterfactual analysis adds the complementary view: the minimal change that would flip a single decision.
+::: {#psp-ml-ops-zombie-feature .callout-perspective title="Zombie features"}
+
+Long-lived production models often accumulate features whose original owners, semantics, or intended use have faded. A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns. Removing such a feature is therefore no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
+
+Features in ML systems do not disappear just because code owners stop thinking about them. Unused feature payload volume $\DataVolume$ inflates serialization overhead and consumes memory bandwidth $\Bandwidth$ without improving accuracy. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that degrades $\DataVolume/\Bandwidth$ and complicates debugging [@sculley2015hidden].
+
+:::
+
+Zombie features show that attribution can reveal what a model should no longer depend on. Counterfactual analysis asks the complementary question about one decision at a time.
 
 ##### Counterfactual analysis {#sec-ml-operations-counterfactual-analysis-39da}
 
@@ -2812,12 +2836,12 @@ These techniques (the debugging decision tree, slice analysis, feature attributi
 
 The diagnostic lenses identify places to investigate; a six-phase checklist\index{Debugging checklist!runbook steps} organizes how to test a suspected cause. The ordering is deliberate because each phase narrows the search space for the next:
 
-- **Reproduce**: An ML failure that cannot be reproduced on held-out data is often data-dependent, an insight that redirects investigation toward the D·A·M taxonomy's data layer.
-- **Isolate**: Once reproduced, identifying the minimal input set that triggers the failure transforms a diffuse "the model is wrong" complaint into a specific, testable condition.
-- **Bisect**: If the failure correlates with a recent deployment, comparing model versions pinpoints which change introduced the regression.
-- **Attribute**: Feature attribution applies interpretability techniques to identify which input factors drive the erroneous behavior.
-- **Validate**: Confirming that the hypothesized root cause, when corrected, actually resolves the failure distinguishes genuine fixes from coincidental improvements.
-- **Prevent**: Converting each resolved incident into a monitoring rule or validation check systematically closes the gap between detection and recurrence. This cumulative hardening reduces repeated failure modes over time because each incident strengthens the observability infrastructure.
+1. **Reproduce**: An ML failure that cannot be reproduced on held-out data is often data-dependent, an insight that redirects investigation toward the D·A·M taxonomy's data layer.
+2. **Isolate**: Once reproduced, identifying the minimal input set that triggers the failure transforms a diffuse "the model is wrong" complaint into a specific, testable condition.
+3. **Bisect**: If the failure correlates with a recent deployment, comparing model versions pinpoints which change introduced the regression.
+4. **Attribute**: Feature attribution applies interpretability techniques to identify which input factors drive the erroneous behavior.
+5. **Validate**: Confirming that the hypothesized root cause, when corrected, actually resolves the failure distinguishes genuine fixes from coincidental improvements.
+6. **Prevent**: Converting each resolved incident into a monitoring rule or validation check systematically closes the gap between detection and recurrence. This cumulative hardening can reduce repeated failure modes over time because each incident strengthens the observability infrastructure.
 
 Debugging ML systems requires both systematic methodology and domain expertise. The most effective debugging often comes from engineers who understand both the model architecture and the business context of the predictions.
 
@@ -3164,8 +3188,6 @@ Similarly, bulkhead patterns\index{Bulkhead pattern!resource isolation}[^fn-bulk
 
 Consensus algorithms establish agreement among nodes; they cannot determine whether a model prediction is correct when ground truth is delayed or unavailable. Replicating a model across multiple nodes or voting across ensemble members provides redundancy against crash faults, but it cannot resolve silent semantic errors when all replicas share the same inductive biases or training distribution blind spots. These reliability patterns nevertheless help distinguish robust MLOps implementations from fragile ones when their guarantees are applied within scope.
 
-## Case Studies {#sec-ml-operations-case-studies-641d}
-
 ### Contextualizing MLOps {#sec-ml-operations-contextualizing-mlops-194a}
 
 Standard operational patterns must adapt to physical and organizational constraints. Every ML system operates within a specific context that shapes implementation: physical constraints (edge compute, power budgets), regulatory requirements (healthcare, finance), or organizational scale (team size, skill distribution). A standard CI/CD pipeline may be infeasible without direct host access; monitoring may require indirect signals or on-device anomaly detection; data collection may be limited by privacy regulations. These adaptations are expressions of maturity under constraint, not departures from foundational principles.
@@ -3271,6 +3293,8 @@ The economic trade-offs become concrete in two architectural studies in @sec-ml-
 
 :::
 
+## Case Studies {#sec-ml-operations-case-studies-641d}
+
 Operational constraints in machine learning systems are governed by the physical envelope of the serving hardware and the failure consequences of the application. A battery-powered wearable operates under milliwatt power budgets, constrained on-device SRAM, and narrow telemetry bandwidth over Bluetooth Low Energy. In contrast, regulated AI-enabled medical devices require evidence and change controls appropriate to their intended use. FDA guidance for predetermined change control plans describes planned modifications, validation methods, and impact assessment [@fda2025pccp]. These disparate environments dictate how engineering teams manage data pipelines, model artifacts, and hardware execution across the lifecycle. Edge architectures spend their engineering budgets bridging the hardware asymmetry between high-throughput cloud training clusters and microcontrollers, whereas clinical systems spend that budget on provenance tracking, cohort monitoring, and human-in-the-loop validation gates.
 
 The Oura-inspired case study in @sec-ml-operations-oura-ring-case-study-2444 models these edge constraints using published offline evaluation data, serving as an architectural study rather than an audit of proprietary production over-the-air pipelines. In this edge workflow, reference sleep labels derive from polysomnography (PSG)—laboratory-grade multi-channel physiological recordings. Despite their contrasting operating regimes, both edge and clinical deployments must satisfy the same core MLOps disciplines. @Tbl-ml-ops-principle-mapping maps these foundational principles across the two environments, demonstrating how physical hardware limits and regulatory mandates alter implementation mechanisms without altering the underlying operational requirements.
@@ -3370,7 +3394,7 @@ The central objective was improving sleep-stage classification accuracy to align
 
 [^fn-psg-ground-truth]: **Polysomnography (PSG)**\index{Polysomnography!label uncertainty}: A multi-parameter sleep study that provides the clinical ground truth data for this classification task. This "truth" is inherently noisy; expert human scorers interpreting the same PSG recordings agree with each other at about `{python} OuraValidationGap.scorer_low_pct_str`–`{python} OuraValidationGap.scorer_high_pct_str` reliability [@altini2021promise]. Inter-scorer agreement indicates label uncertainty but does not impose an accuracy ceiling against a fixed or adjudicated reference.
 
-#### Model development and evaluation {#sec-ml-operations-oura-model-development}
+#### Model development and evaluation {#sec-ml-operations-oura-model-development-9791}
 
 Building this multi-sensor pipeline required grounding wearable telemetry in clinical standards through a study involving `{python} OuraValidationGap.participants_str` from three continents [@altini2021promise]. Each participant wore the Oura Ring while simultaneously undergoing laboratory PSG, yielding `{python} OuraValidationGap.recording_nights_str` of data and `{python} OuraValidationGap.recording_hr_str` of time-synchronized recordings that aligned raw wearable sensor streams with validated sleep annotations. The scale and demographic diversity of the collection captured physiological variation across age, sex, and baseline health, as well as behavioral differences essential for generalizing across a real-world user population.
 
@@ -3405,7 +3429,7 @@ class OuraModelAccuracy:
 
 Once synchronized clinical data was established, offline model exploration quantified the contribution of each additional sensing modality. Evaluating four feature configurations across `{python} OuraValidationGap.cross_validation_fold_count_str`-fold cross-validation confirmed that combining temperature, heart-rate variability, and circadian periodicity lifted four-stage classification accuracy to `{python} OuraModelAccuracy.enhanced_pct_str`, up from the `{python} OuraModelAccuracy.accel_only_pct_str` accelerometer-only baseline [@altini2021promise]. While these offline gains demonstrate the value of multi-sensor fusion, deploying them on an embedded device introduces operational requirements outside the original study: reproducible model quantization, numerical conversion validation, and strict runtime energy budgets.
 
-#### Key operational insights {#sec-ml-operations-oura-operational-insights}
+#### Key operational insights {#sec-ml-operations-oura-operational-insights-b335}
 
 Following offline validation, the primary systems challenge shifts from statistical accuracy to deployment safety and runtime efficiency. In the proposed edge architecture, execution is partitioned across hardware boundaries: lightweight filtering and movement classification run continuously in microcontroller SRAM, while heavier multi-stage sequence models execute during phone synchronization. To maintain pipeline integrity across thousands of physical devices, the MLOps toolchain requires automated quantization pipelines (such as converting float32 weights to int8 with calibrated scale factors), cryptographically signed model artifacts, and fault-tolerant OTA[^fn-ota-edge-deploy] delivery mechanisms.
 

@@ -437,7 +437,7 @@ Neural network training consists of repeated matrix operations and nonlinear tra
 
 #### Mathematical operations in neural networks {#sec-model-training-mathematical-operations-neural-networks-ddac}
 
-Forward propagation\index{Forward propagation!layer computation}, in its simplest case, involves two operations: matrix multiplication and activation function application. Matrix multiplication implements the linear transformation at each layer. At layer $\ell$, the computation can be described as (following the row-vector convention):
+Forward propagation\index{Forward propagation!layer computation}, in its simplest case, involves two operations: matrix multiplication and activation function application. Matrix multiplication implements the linear transformation at each layer. At layer $\ell$, the computation can be written in row-vector form, with one example per row:
 $$
 \mathbf{A}^{(\ell)} = f\left(\mathbf{A}^{(\ell-1)}\mathbf{W}^{(\ell)} + \mathbf{b}^{(\ell)}\right)
 $$
@@ -1153,10 +1153,6 @@ Parameter update rules define trajectories given gradient vectors, but assume th
 ### Backpropagation mechanics {#sec-model-training-backpropagation-mechanics-0b64}
 
 Backpropagation\index{Backpropagation!computational cost}\index{Backpropagation!memory requirements} evaluates parameter gradients by traversing the network's computational graph in reverse topological order\index{Automatic differentiation!computational graph}. In forward inference, an activation buffer can be released after its final consumer. Training extends some of these lifetimes: computing the gradient with respect to a linear layer's parameters requires its forward input. The backward computation must obtain the values required by each derivative, either from saved state or by recomputation. Retaining those values in HBM can make activation storage the binding memory constraint of large-scale training.
-
-::: {.column-margin .margin-pointer}
-↩ The mathematical foundation of backpropagation via the chain rule is established in @sec-neural-computation-gradient-computation-backpropagation-dacf.
-:::
 
 @Sec-neural-computation-gradient-computation-backpropagation-dacf establishes the mathematical foundation: the chain rule\index{Chain rule!backpropagation foundation} decomposes gradient evaluation into layer-by-layer vector-Jacobian products, pulling error signals backward from the scalar loss to input parameters. At systems scale, the central question is not what backpropagation computes, but what it costs in memory capacity and arithmetic throughput. The layer operations from @sec-model-training-mathematical-operations-neural-networks-ddac produce forward values needed by the backward pass. Computing $\frac{\partial \LossFunction}{\partial \mathbf{W}^{(\LayerIndex)}}$ requires the corresponding forward inputs, whose retention creates the training memory equation\index{Training!memory equation} that gradient checkpointing\index{Gradient checkpointing!memory reduction} later exploits.
 
@@ -3149,12 +3145,6 @@ class LlamaTraining:
         f" \\approx {_time_mantissa} \\times 10^{{{_time_exp}}}"
     )
 
-# Backward compatibility aliases
-LlamaTraining.flops_mantissa = LlamaTraining._flops_mantissa
-LlamaTraining.flops_exp = LlamaTraining._flops_exp
-LlamaTraining.time_mantissa = LlamaTraining._time_mantissa
-LlamaTraining.time_exp = LlamaTraining._time_exp
-
 # Note: Use LlamaTraining.ub_rental_usd_str directly.
 ```
 
@@ -4556,7 +4546,7 @@ class FlashAttentionCalc:
 
 For $\SequenceLength = 4096$, $\AttentionHeadDimension = 64$, one materialized FP32 score matrix occupies $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` per head. The three FP32 input tensors occupy $(3 \times 4096{\times}64) \times 4$ bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` per head, a component-size ratio of `{python} FlashAttentionCalc.fa_reduction_mult_str`. This compares a score matrix with the inputs, not the total memory of the two algorithms: both need inputs and outputs, and the tiled implementation also retains normalization statistics.
 
-The IO pattern changes for the same reason. Standard attention reads $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from HBM, writes score, probability, and output matrices during the forward pass, then rereads those stored matrices during the backward pass before writing the gradients $\HiddenDimension\mathbf{Q}$, $\HiddenDimension\mathbf{K}$, and $\HiddenDimension\mathbf{V}$ (shorthand for $\partial \LossFunction/\partial \mathbf{Q}$ and its counterparts). The resulting HBM traffic includes the same $\mathcal{O}(\SequenceLength^2)$ term that made the activation footprint large. FlashAttention forms score and probability blocks in SRAM and never writes the full $\SequenceLength \times \SequenceLength$ tensors to HBM. In the backward pass, it recomputes the needed blocks rather than reading stored full matrices. The exact HBM IO complexity depends on tile size and available SRAM because key and value blocks are streamed repeatedly across query blocks, so the bound is not simply $\mathcal{O}(\SequenceLength \cdot \HiddenDimension)$.
+The IO pattern changes for the same reason. Standard attention reads $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from HBM, writes score, probability, and output matrices during the forward pass, then rereads those stored matrices during the backward pass before writing the gradients $d\mathbf{Q}$, $d\mathbf{K}$, and $d\mathbf{V}$ (shorthand for $\partial \LossFunction/\partial \mathbf{Q}$ and its counterparts). The resulting HBM traffic includes the same $\mathcal{O}(\SequenceLength^2)$ term that made the activation footprint large. FlashAttention forms score and probability blocks in SRAM and never writes the full $\SequenceLength \times \SequenceLength$ tensors to HBM. In the backward pass, it recomputes the needed blocks rather than reading stored full matrices. The exact HBM IO complexity depends on tile size and available SRAM because key and value blocks are streamed repeatedly across query blocks, so the bound is not simply $\mathcal{O}(\SequenceLength \cdot \HiddenDimension)$.
 
 For large sequence lengths, FlashAttention reduces HBM traffic by avoiding writes and rereads of the $\SequenceLength \times \SequenceLength$ score and probability matrices. With $\SequenceLength = 4096$ and $\AttentionHeadDimension = 64$, avoiding the stored attention matrices removes the quadratic component of the activation footprint, while the precise bandwidth reduction depends on hardware and kernel tiling.
 
