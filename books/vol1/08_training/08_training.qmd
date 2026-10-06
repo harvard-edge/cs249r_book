@@ -513,285 +513,6 @@ Forward-pass matrix multiplications dominate floating-point operations, while ac
 ↩ The memory bandwidth bottleneck of elementwise activation kernels is governed by the memory wall established in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8.
 :::
 
-### Optimization algorithms {#sec-model-training-optimization-algorithms-c6a9}
-
-Optimization algorithms translate error gradients into parameter updates that steer the model toward convergence. While mathematically formulated as steps across an abstract loss surface, every optimizer step introduces concrete physical constraints on accelerator execution: persistent state tensors that consume High Bandwidth Memory (HBM), memory-bandwidth-bound elementwise updates, and synchronization barriers. In the D·A·M taxonomy, the choice of optimization algorithm couples the mathematical trajectory (Algorithm) directly to the working-set footprint and memory traffic (Machine).
-
-#### Gradient-based optimization methods {#sec-model-training-gradientbased-optimization-methods-9798}
-
-Modern deep learning optimization is dominated by first-order gradient methods. Rather than dwelling on the calculus of SGD, Momentum, and Adam, our systems focus is on their memory footprint. Each algorithm maintains different state tensors per parameter, which dictates the memory capacity required during training as summarized in @tbl-optimizer-properties.
-
-```{python}
-#| echo: false
-#| label: adam-memory-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ADAM MEMORY CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Adam optimization section—memory overhead discussion
-# │
-# │ Goal: Quantify the memory overhead of second-order optimization.
-# │ Show: That Adam's state vectors (m_t, v_t) triple the parameter memory footprint.
-# │ How: Calculate total bytes for weight, momentum, and variance vectors.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt_memory, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class AdamMemory:
-    """
-    Namespace for Adam Memory Overhead Calculation.
-    Scenario: Memory cost for a generic 100M parameter model.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params = 100 * Mparam  # scenario assumption
-    vectors = 2  # m_t, v_t
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Overhead = params * 2 vectors * 4 bytes
-    overhead = memory_from_params(params, vectors * BYTES_FP32 / param)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(overhead.to(MB).magnitude) == 800, f"Adam overhead mismatch: {overhead}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    adam_overhead_mb_str = fmt_memory(overhead, unit=MB, precision=0, commas=False)
-
-# Note: Use AdamMemory.adam_overhead_mb_str directly.
-```
-
-```{python}
-#| echo: false
-#| label: optimizer-scenarios-calc
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Goal: SGD iteration ranges and Adam memory for a 7B-parameter model.
-from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt, check, fmt_count_range, fmt_memory, fmt_params
-
-class OptimizerScenarios:
-    sgd_iters_min = 50_000
-    sgd_iters_max = 500_000
-    adam_7b_params = 7 * Bparam
-
-    adam_7b_weights = memory_from_params(adam_7b_params, BYTES_FP16 / param)
-    adam_7b_gradients = adam_7b_weights
-    adam_7b_master_weights = memory_from_params(adam_7b_params, BYTES_FP32 / param)
-    adam_7b_moments = memory_from_params(adam_7b_params, BYTES_ADAM_STATE / param)
-    adam_7b_state = adam_7b_weights + adam_7b_gradients + adam_7b_master_weights + adam_7b_moments
-
-    adam_7b_state_value = adam_7b_state.to(GB).magnitude
-    check(adam_7b_state_value == 112, f"7-billion-parameter mixed-precision Adam state should be 112 GB, got {adam_7b_state_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    adam_7b_params_str = fmt_params(adam_7b_params, precision=0)
-    adam_7b_state_gb_str = fmt_memory(adam_7b_state, unit=GB, precision=0, commas=False)
-```
-
-#### Optimization algorithm system implications {#sec-model-training-optimization-algorithm-system-implications-f9f2}
-
-Auxiliary state memory increases progressively from SGD (zero auxiliary state) through Momentum and RMSprop (one state vector per parameter) to Adam (two state vectors per parameter), as quantified in @tbl-optimizer-properties. These memory footprints establish a fundamental trade-off against convergence rates:[^fn-convergence-rate-bounds] while Adam often achieves target loss in fewer optimization steps, its static memory footprint restricts the batch size that fits in accelerator HBM and increases memory-bus traffic on every update. At GPT-2 scale, this overhead becomes a first-order memory constraint.
-
-[^fn-convergence-rate-bounds]: **Convergence**\index{Convergence!time-memory trade-off}: A run reaches its stopping criterion when the selected training or validation metric no longer improves enough to justify additional work. The required steps depend on the model, data, optimizer, schedule, batch size, and target quality. Fewer steps can reduce wall-clock time and cost, but adaptive optimizers add state whose memory and traffic must be included in the system budget.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25}
-```
-
-| **Property**                    |         **SGD**          |     **Momentum**     |         **RMSprop**         |                 **Adam**                |
-|:--------------------------------|:------------------------:|:--------------------:|:---------------------------:|:---------------------------------------:|
-| **Memory Overhead**             |           None           |    Velocity terms    |      Squared gradients      |   Both velocity and squared gradients   |
-| **Parameter + optimizer state** |        1$\times$         |      2$\times$       |          2$\times$          |                3$\times$                |
-| **Dense State Access**          | Parameters and gradients |    Adds velocity     | Adds squared-gradient state |   Adds first- and second-moment state   |
-| **Update Work**                 |  Lowest auxiliary work   | Adds momentum update |    Adds adaptive scaling    | Adds moment updates and bias correction |
-| **Hardware Efficiency**         |          Varies          |        Varies        |            Varies           |                  Varies                 |
-| **Convergence Behavior**        |          Varies          |        Varies        |            Varies           |                  Varies                 |
-
-: **Optimizer Memory Footprint**: Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. These trade-offs govern resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[26,10,13,17,34]"}
-
-```{=latex}
-\endgroup
-```
-
-The costs quantified in @tbl-optimizer-properties create a design tension. Adam's two moment buffers may improve optimization for a given workload, but their memory can reduce the model size or batch size that fits on an accelerator. AdamW\index{AdamW!decoupled weight decay}[^fn-adamw-decoupled-decay] [@loshchilov2019adamw] decouples weight decay from Adam's adaptive gradient update without adding another per-parameter state tensor.
-
-[^fn-adamw-decoupled-decay]: **AdamW (Adam with decoupled weight decay)**\index{AdamW!decoupled weight decay}: Standard $\ell_2$ regularization enters the gradient and is therefore rescaled by Adam's adaptive update. AdamW applies weight decay as a separate parameter update, restoring the intended distinction between adaptive gradient scaling and decay [@loshchilov2019adamw]. It uses the same moment-buffer structure as Adam, though its effect on model quality remains workload dependent.
-
-```{python}
-#| echo: false
-#| label: gpt2-optimizer-memory-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-2 OPTIMIZER MEMORY CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: GPT-2 Optimizer Memory Requirements callout—FP32 vs AMP memory
-# │
-# │ Goal: Quantify the dominance of optimizer state in the memory budget.
-# │ Show: That mixed-precision Adam requires more memory than pure FP32 SGD.
-# │ How: Compare weight, gradient, and state bytes for GPT-2.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
-from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_params
-
-# ┌── LEGO ───────────────────────────────────────────────
-class GPT2Optimizer:
-    """
-    Namespace for GPT-2 Optimizer Memory.
-    Scenario: FP32 vs Mixed Precision (AMP) baselines.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model = Models.Language.GPT2
-    v100_mem = Hardware.Cloud.V100.memory.capacity
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    model_params = model.parameters
-
-    # Per-parameter byte widths (FP32 master copy; Adam keeps two FP32 states)
-    bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
-    adam_bytes = int((2 * BYTES_FP32).to(byte).magnitude)
-
-    # FP32 Baseline
-    param_fp32 = model.size_in_bytes(BYTES_FP32)
-    grad_fp32 = model.size_in_bytes(BYTES_FP32)
-    adam_m_fp32 = model.size_in_bytes(BYTES_FP32)
-    adam_v_fp32 = model.size_in_bytes(BYTES_FP32)
-    total_static_fp32 = param_fp32 + grad_fp32 + adam_m_fp32 + adam_v_fp32
-
-    # AMP (FP16)
-    param_fp16 = model.size_in_bytes(BYTES_FP16)
-    grad_fp16 = model.size_in_bytes(BYTES_FP16)
-    master_fp32 = model.size_in_bytes(BYTES_FP32)
-    # Optimizer remains FP32
-    total_static_amp = param_fp16 + grad_fp16 + master_fp32 + adam_m_fp32 + adam_v_fp32
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(total_static_fp32.to(GB).magnitude) == 24, f"Total static FP32 memory mismatch: {total_static_fp32}")
-    check(round(total_static_amp.to(GB).magnitude) == 24, f"Total static AMP memory mismatch: {total_static_amp}")
-    check(round(param_fp32.to(GB).magnitude) == 6, f"FP32 param memory mismatch: {param_fp32}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_params_b_str = fmt_params(model_params)
-    bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
-    adam_bytes_value_str = fmt(adam_bytes, precision=0, commas=False)
-    param_fp32_gb_str = fmt_memory(param_fp32, unit=GB, precision=0, commas=False)
-    grad_fp32_gb_str = fmt_memory(grad_fp32, unit=GB, precision=0, commas=False)
-    adam_state_gb_str = fmt_memory(adam_m_fp32 + adam_v_fp32, unit=GB, precision=0, commas=False)
-    total_static_fp32_gb_str = fmt_memory(total_static_fp32, unit=GB, precision=0, commas=False)
-    total_static_amp_gb_str = fmt_memory(total_static_amp, unit=GB, precision=0, commas=False)
-    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
-
-# Note: Use GPT2Optimizer.param_fp32_gb_str directly.
-```
-
-::: {#nbk-gpt2-optimizer .callout-notebook title="GPT-2 optimizer memory requirements"}
-
-A representative GPT-2 XL training configuration uses the Adam optimizer\index{Adam optimizer!memory overhead} with five hyperparameters:
-
-- $\beta_1 = 0.9$ (momentum decay)
-- $\beta_2 = 0.999$ (second moment decay)
-- Learning rate: Warmed up from 0 to 2.5e-4 over first 500 steps, then cosine decay
-- Weight decay: 0.01
-- Gradient clipping: Global norm clipping at 1.0
-
-**Math**:
-
-For GPT-2's `{python} GPT2Optimizer.model_params_b_str` parameters in FP32 (`{python} GPT2Optimizer.bytes_fp32_value_str` bytes each), the memory breaks down across four components:
-
-- Parameters: `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.bytes_fp32_value_str` bytes = `{python} GPT2Optimizer.param_fp32_gb_str`
-- Gradients: `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.bytes_fp32_value_str` bytes = `{python} GPT2Optimizer.grad_fp32_gb_str`
-- Adam State ($m_t$, $v_t$): `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.adam_bytes_value_str` bytes = `{python} GPT2Optimizer.adam_state_gb_str`
-- Total static memory: `{python} GPT2Optimizer.total_static_fp32_gb_str`
-
-This explains why GPT-2's `{python} GPT2Optimizer.total_static_fp32_gb_str` static training state alone approaches the `{python} GPT2Optimizer.v100_mem_capacity_gb_str` capacity of a V100 before activation storage is counted.
-
-**System Decisions Driven by Optimizer**
-
-1. Mixed precision training (FP16) reduces operation precision but requires keeping FP32 master weights, maintaining the static memory footprint at ~`{python} GPT2Optimizer.total_static_amp_gb_str`.
-2. Gradient accumulation (splitting effective batches into smaller micro-batches) allows effective batch size $B=512$ despite memory limits.
-
-**Systems insight**: This illustrative configuration shows how Adam's moment buffers constrain capacity. Any convergence benefit relative to SGD or momentum must be measured under a matched model, data, schedule, batch size, and stopping criterion.
-
-:::
-
-#### Framework optimizer interface and scheduling {#sec-model-training-framework-optimizer-interface-82ff}
-
-After optimizer memory is quantified, the framework interface matters because it fixes when that state is read, written, cleared, and preserved across steps. A training loop separates gradient computation from parameter updates so that the system can accumulate gradients, synchronize them, or defer updates without changing the optimizer equations. @Lst-adam-training demonstrates where Adam optimization\index{Adam optimization|see{Adam optimizer}} enters that cycle.
-
-::: {#lst-adam-training lst-cap="**Adam Training Loop**: Standard four-step optimization cycle with gradient clearing, forward pass, backward pass, and parameter update."}
-
-```{.python}
-import torch
-import torch.nn as nn
-import torch.optim as optim
-
-# Initialize Adam optimizer with model parameters and learning rate
-optimizer = optim.Adam(
-    model.parameters(), lr=0.001, betas=(0.9, 0.999)
-)
-loss_function = nn.CrossEntropyLoss()
-
-# Standard training loop implementing the four-step optimization cycle
-for epoch in range(num_epochs):
-    for batch_idx, (data, targets) in enumerate(dataloader):
-        # Step 1: Clear accumulated gradients from previous iteration
-        optimizer.zero_grad()
-
-        # Step 2: Forward pass - compute model predictions
-        predictions = model(data)
-        loss = loss_function(predictions, targets)
-
-        # Step 3: Backward pass - compute gradients via autodiff
-        loss.backward()
-
-        # Step 4: Parameter update - apply Adam optimization equations
-        optimizer.step()
-```
-
-:::
-
-The `optimizer.zero_grad()` call marks the boundary between one update and the next. Gradients accumulate\index{Gradient accumulation!framework behavior} across calls to `backward()`, so clearing them explicitly prevents stale gradients from contaminating the next batch. The same accumulation behavior later becomes useful for large effective batch sizes, but only when the training loop manages the boundary deliberately.
-
-The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Algo-adam-update makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
-
-::: {.column-margin}
-![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A simplified stacked memory bar split into parameters, gradients, and Adam moment state in a 1 to 1 to 2 ratio. Activations, workspace, and any master-weight copy are excluded."}
-
-*In this simplified static-state view, Adam's two moment buffers occupy twice the parameter storage.*
-:::
-
-```pseudocode
-#| label: algo-adam-update
-#| pdf-line-number: true
-#| pdf-right-comment: false
-#| html-comment-delimiter: "▷"
-\begin{algorithm}
-\caption{Adam parameter update (one optimizer step)}
-\begin{algorithmic}
-\Require gradient $\Gradient_t = \nabla\LossFunction(\ModelParameters_t)$; step $t$; rate $\LearningRate$; decays $\beta_1,\beta_2$; constant $\SmallConstant$
-\Ensure updated parameter $\theta_{t+1}$; moment buffers $m_t, v_t$ carried to the next step
-\State $m_t \gets \beta_1 m_{t-1} + (1-\beta_1)\, \Gradient_t$ \Comment{first moment (momentum)}
-\State $v_t \gets \beta_2 v_{t-1} + (1-\beta_2)\, \Gradient_t^2$ \Comment{uncentered second moment}
-\State $\hat{m}_t \gets m_t / (1-\beta_1^{t})$; $\hat{v}_t \gets v_t / (1-\beta_2^{t})$ \Comment{bias correction}
-\State $\ModelParameters_{t+1} \gets \ModelParameters_t - \LearningRate\, \hat{m}_t / (\sqrt{\hat{v}_t} + \SmallConstant)$ \Comment{parameter update}
-\end{algorithmic}
-\end{algorithm}
-```
-
-Steps 1 and 2 keep two persistent moment buffers per parameter, so parameters plus optimizer state reach roughly 3$\times$ the parameter memory before gradients, activations, and FP32 master weights are counted. Beyond capacity, the optimizer step imposes a severe memory-bandwidth bottleneck. Mathematically, the update consists of elementwise operations with an arithmetic intensity below $1\text{ FLOP/byte}$: in FP32, updating each parameter requires reading four tensors ($\Gradient_t, \ModelParameters_t, m_{t-1}, v_{t-1}$) and writing three ($m_t, v_t, \ModelParameters_{t+1}$), streaming 28 bytes across the memory bus for roughly a dozen arithmetic operations. Because matrix execution units (such as Tensor Cores) sit idle during this memory-bound phase, high-performance training systems use fused optimizer kernels to combine moment updates, bias correction, and weight writes into a single kernel launch per parameter group, minimizing round-trips through device memory.
-
-#### Learning rate scheduling integration {#sec-model-training-learning-rate-scheduling-integration-451b}
-
-The framework's learning rate scheduling\index{Learning rate scheduling!definition}\index{Learning rate!scheduling}\index{Learning rate!warmup}\index{Learning rate!cosine decay} hook changes the optimizer's trajectory without adding per-parameter state. It adjusts the learning rate $\LearningRate$ during training, letting the system shape convergence behavior while leaving the underlying optimizer equations intact.
-
-Schedules such as cosine annealing\index{Cosine annealing!learning rate schedule}, exponential decay, or step-wise reductions implement that trajectory by changing the step size over time. A scheduler tracks lightweight scalar state (current step, epoch, warmup phase) that must be serialized into checkpoints alongside optimizer states to resume the schedule. Reproducing the training trajectory also requires the relevant random-number and data-position state and compatible execution settings. This separation lets the systems engineer combine base optimization algorithms (SGD, Adam) with scheduling strategies (cosine annealing, linear warmup) without modifying the underlying tensor update rules.
-
-Parameter update rules define trajectories given gradient vectors, but assume those gradients are already materialized. For billion-parameter networks, gradient evaluation constitutes the dominant computational and memory burden of the training loop. The mechanics of gradient generation—rather than the optimizer step itself—dictate training memory budgets and runtime.
-
-
 ### Arithmetic intensity {#sec-model-training-arithmetic-intensity-training-bottlenecks-4446}
 
 Arithmetic intensity\index{Arithmetic intensity!training operations}\index{Roofline model!training bottlenecks} captures this distinction---the ratio of computation to data movement that reveals whether an operation is limited by compute throughput or memory bandwidth:
@@ -1227,7 +948,7 @@ class GPT2LighthouseSpecs:
     dlrm_params_max_t_str = fmt_params(dlrm_params_max, precision=0)
 ```
 
-### Running example: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
+## Case Study: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
 
 In inference, GPT-2\index{GPT-2!training lighthouse} serves as the Bandwidth Hog lighthouse. Here it recurs as the chapter's stable workload for testing each training cost and optimization.
 
@@ -2750,6 +2471,283 @@ Capacity is only one of two physical constraints imposed by memory; the other is
 
 Forward propagation, gradient computation, and parameter updates define *what* training systems must compute. An operation's name alone, however, does not reveal *where* the system stalls. Matrix shape, operator fusion, numerical precision, and the memory hierarchy determine whether arithmetic throughput or data movement binds execution. Arithmetic intensity provides the analytical tool to quantify that balance.
 
+### Optimization algorithms {#sec-model-training-optimization-algorithms-c6a9}
+
+Optimization algorithms translate error gradients into parameter updates that steer the model toward convergence. While mathematically formulated as steps across an abstract loss surface, every optimizer step introduces concrete physical constraints on accelerator execution: persistent state tensors that consume High Bandwidth Memory (HBM), memory-bandwidth-bound elementwise updates, and synchronization barriers. In the D·A·M taxonomy, the choice of optimization algorithm couples the mathematical trajectory (Algorithm) directly to the working-set footprint and memory traffic (Machine).
+
+#### Gradient-based optimization methods {#sec-model-training-gradientbased-optimization-methods-9798}
+
+Modern deep learning optimization is dominated by first-order gradient methods. Rather than dwelling on the calculus of SGD, Momentum, and Adam, our systems focus is on their memory footprint. Each algorithm maintains different state tensors per parameter, which dictates the memory capacity required during training as summarized in @tbl-optimizer-properties.
+
+```{python}
+#| echo: false
+#| label: adam-memory-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ADAM MEMORY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Adam optimization section—memory overhead discussion
+# │
+# │ Goal: Quantify the memory overhead of second-order optimization.
+# │ Show: That Adam's state vectors (m_t, v_t) triple the parameter memory footprint.
+# │ How: Calculate total bytes for weight, momentum, and variance vectors.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import memory_from_params
+from mlsysim.fmt import fmt_memory, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AdamMemory:
+    """
+    Namespace for Adam Memory Overhead Calculation.
+    Scenario: Memory cost for a generic 100M parameter model.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    params = 100 * Mparam  # scenario assumption
+    vectors = 2  # m_t, v_t
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Overhead = params * 2 vectors * 4 bytes
+    overhead = memory_from_params(params, vectors * BYTES_FP32 / param)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(overhead.to(MB).magnitude) == 800, f"Adam overhead mismatch: {overhead}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    adam_overhead_mb_str = fmt_memory(overhead, unit=MB, precision=0, commas=False)
+
+# Note: Use AdamMemory.adam_overhead_mb_str directly.
+```
+
+```{python}
+#| echo: false
+#| label: optimizer-scenarios-calc
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Goal: SGD iteration ranges and Adam memory for a 7B-parameter model.
+from mlsysim.physics import memory_from_params
+from mlsysim.fmt import fmt, check, fmt_count_range, fmt_memory, fmt_params
+
+class OptimizerScenarios:
+    sgd_iters_min = 50_000
+    sgd_iters_max = 500_000
+    adam_7b_params = 7 * Bparam
+
+    adam_7b_weights = memory_from_params(adam_7b_params, BYTES_FP16 / param)
+    adam_7b_gradients = adam_7b_weights
+    adam_7b_master_weights = memory_from_params(adam_7b_params, BYTES_FP32 / param)
+    adam_7b_moments = memory_from_params(adam_7b_params, BYTES_ADAM_STATE / param)
+    adam_7b_state = adam_7b_weights + adam_7b_gradients + adam_7b_master_weights + adam_7b_moments
+
+    adam_7b_state_value = adam_7b_state.to(GB).magnitude
+    check(adam_7b_state_value == 112, f"7-billion-parameter mixed-precision Adam state should be 112 GB, got {adam_7b_state_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    adam_7b_params_str = fmt_params(adam_7b_params, precision=0)
+    adam_7b_state_gb_str = fmt_memory(adam_7b_state, unit=GB, precision=0, commas=False)
+```
+
+#### Optimization algorithm system implications {#sec-model-training-optimization-algorithm-system-implications-f9f2}
+
+Auxiliary state memory increases progressively from SGD (zero auxiliary state) through Momentum and RMSprop (one state vector per parameter) to Adam (two state vectors per parameter), as quantified in @tbl-optimizer-properties. These memory footprints establish a fundamental trade-off against convergence rates:[^fn-convergence-rate-bounds] while Adam often achieves target loss in fewer optimization steps, its static memory footprint restricts the batch size that fits in accelerator HBM and increases memory-bus traffic on every update. At GPT-2 scale, this overhead becomes a first-order memory constraint.
+
+[^fn-convergence-rate-bounds]: **Convergence**\index{Convergence!time-memory trade-off}: A run reaches its stopping criterion when the selected training or validation metric no longer improves enough to justify additional work. The required steps depend on the model, data, optimizer, schedule, batch size, and target quality. Fewer steps can reduce wall-clock time and cost, but adaptive optimizers add state whose memory and traffic must be included in the system budget.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
+
+| **Property**                    |         **SGD**          |     **Momentum**     |         **RMSprop**         |                 **Adam**                |
+|:--------------------------------|:------------------------:|:--------------------:|:---------------------------:|:---------------------------------------:|
+| **Memory Overhead**             |           None           |    Velocity terms    |      Squared gradients      |   Both velocity and squared gradients   |
+| **Parameter + optimizer state** |        1$\times$         |      2$\times$       |          2$\times$          |                3$\times$                |
+| **Dense State Access**          | Parameters and gradients |    Adds velocity     | Adds squared-gradient state |   Adds first- and second-moment state   |
+| **Update Work**                 |  Lowest auxiliary work   | Adds momentum update |    Adds adaptive scaling    | Adds moment updates and bias correction |
+| **Hardware Efficiency**         |          Varies          |        Varies        |            Varies           |                  Varies                 |
+| **Convergence Behavior**        |          Varies          |        Varies        |            Varies           |                  Varies                 |
+
+: **Optimizer Memory Footprint**: Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. These trade-offs govern resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[26,10,13,17,34]"}
+
+```{=latex}
+\endgroup
+```
+
+The costs quantified in @tbl-optimizer-properties create a design tension. Adam's two moment buffers may improve optimization for a given workload, but their memory can reduce the model size or batch size that fits on an accelerator. AdamW\index{AdamW!decoupled weight decay}[^fn-adamw-decoupled-decay] [@loshchilov2019adamw] decouples weight decay from Adam's adaptive gradient update without adding another per-parameter state tensor.
+
+[^fn-adamw-decoupled-decay]: **AdamW (Adam with decoupled weight decay)**\index{AdamW!decoupled weight decay}: Standard $\ell_2$ regularization enters the gradient and is therefore rescaled by Adam's adaptive update. AdamW applies weight decay as a separate parameter update, restoring the intended distinction between adaptive gradient scaling and decay [@loshchilov2019adamw]. It uses the same moment-buffer structure as Adam, though its effect on model quality remains workload dependent.
+
+```{python}
+#| echo: false
+#| label: gpt2-optimizer-memory-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 OPTIMIZER MEMORY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 Optimizer Memory Requirements callout—FP32 vs AMP memory
+# │
+# │ Goal: Quantify the dominance of optimizer state in the memory budget.
+# │ Show: That mixed-precision Adam requires more memory than pure FP32 SGD.
+# │ How: Compare weight, gradient, and state bytes for GPT-2.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Models
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_params
+
+# ┌── LEGO ───────────────────────────────────────────────
+class GPT2Optimizer:
+    """
+    Namespace for GPT-2 Optimizer Memory.
+    Scenario: FP32 vs Mixed Precision (AMP) baselines.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    model = Models.Language.GPT2
+    v100_mem = Hardware.Cloud.V100.memory.capacity
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    model_params = model.parameters
+
+    # Per-parameter byte widths (FP32 master copy; Adam keeps two FP32 states)
+    bytes_fp32 = int(BYTES_FP32.to(byte).magnitude)
+    adam_bytes = int((2 * BYTES_FP32).to(byte).magnitude)
+
+    # FP32 Baseline
+    param_fp32 = model.size_in_bytes(BYTES_FP32)
+    grad_fp32 = model.size_in_bytes(BYTES_FP32)
+    adam_m_fp32 = model.size_in_bytes(BYTES_FP32)
+    adam_v_fp32 = model.size_in_bytes(BYTES_FP32)
+    total_static_fp32 = param_fp32 + grad_fp32 + adam_m_fp32 + adam_v_fp32
+
+    # AMP (FP16)
+    param_fp16 = model.size_in_bytes(BYTES_FP16)
+    grad_fp16 = model.size_in_bytes(BYTES_FP16)
+    master_fp32 = model.size_in_bytes(BYTES_FP32)
+    # Optimizer remains FP32
+    total_static_amp = param_fp16 + grad_fp16 + master_fp32 + adam_m_fp32 + adam_v_fp32
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(total_static_fp32.to(GB).magnitude) == 24, f"Total static FP32 memory mismatch: {total_static_fp32}")
+    check(round(total_static_amp.to(GB).magnitude) == 24, f"Total static AMP memory mismatch: {total_static_amp}")
+    check(round(param_fp32.to(GB).magnitude) == 6, f"FP32 param memory mismatch: {param_fp32}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    model_params_b_str = fmt_params(model_params)
+    bytes_fp32_value_str = fmt(bytes_fp32, precision=0, commas=False)
+    adam_bytes_value_str = fmt(adam_bytes, precision=0, commas=False)
+    param_fp32_gb_str = fmt_memory(param_fp32, unit=GB, precision=0, commas=False)
+    grad_fp32_gb_str = fmt_memory(grad_fp32, unit=GB, precision=0, commas=False)
+    adam_state_gb_str = fmt_memory(adam_m_fp32 + adam_v_fp32, unit=GB, precision=0, commas=False)
+    total_static_fp32_gb_str = fmt_memory(total_static_fp32, unit=GB, precision=0, commas=False)
+    total_static_amp_gb_str = fmt_memory(total_static_amp, unit=GB, precision=0, commas=False)
+    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
+
+# Note: Use GPT2Optimizer.param_fp32_gb_str directly.
+```
+
+::: {#nbk-gpt2-optimizer .callout-notebook title="GPT-2 optimizer memory requirements"}
+
+A representative GPT-2 XL training configuration uses the Adam optimizer\index{Adam optimizer!memory overhead} with five hyperparameters:
+
+- $\beta_1 = 0.9$ (momentum decay)
+- $\beta_2 = 0.999$ (second moment decay)
+- Learning rate: Warmed up from 0 to 2.5e-4 over first 500 steps, then cosine decay
+- Weight decay: 0.01
+- Gradient clipping: Global norm clipping at 1.0
+
+**Math**:
+
+For GPT-2's `{python} GPT2Optimizer.model_params_b_str` parameters in FP32 (`{python} GPT2Optimizer.bytes_fp32_value_str` bytes each), the memory breaks down across four components:
+
+- Parameters: `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.bytes_fp32_value_str` bytes = `{python} GPT2Optimizer.param_fp32_gb_str`
+- Gradients: `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.bytes_fp32_value_str` bytes = `{python} GPT2Optimizer.grad_fp32_gb_str`
+- Adam State ($m_t$, $v_t$): `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.adam_bytes_value_str` bytes = `{python} GPT2Optimizer.adam_state_gb_str`
+- Total static memory: `{python} GPT2Optimizer.total_static_fp32_gb_str`
+
+This explains why GPT-2's `{python} GPT2Optimizer.total_static_fp32_gb_str` static training state alone approaches the `{python} GPT2Optimizer.v100_mem_capacity_gb_str` capacity of a V100 before activation storage is counted.
+
+**System Decisions Driven by Optimizer**
+
+1. Mixed precision training (FP16) reduces operation precision but requires keeping FP32 master weights, maintaining the static memory footprint at ~`{python} GPT2Optimizer.total_static_amp_gb_str`.
+2. Gradient accumulation (splitting effective batches into smaller micro-batches) allows effective batch size $B=512$ despite memory limits.
+
+**Systems insight**: This illustrative configuration shows how Adam's moment buffers constrain capacity. Any convergence benefit relative to SGD or momentum must be measured under a matched model, data, schedule, batch size, and stopping criterion.
+
+:::
+
+#### Framework optimizer interface and scheduling {#sec-model-training-framework-optimizer-interface-82ff}
+
+After optimizer memory is quantified, the framework interface matters because it fixes when that state is read, written, cleared, and preserved across steps. A training loop separates gradient computation from parameter updates so that the system can accumulate gradients, synchronize them, or defer updates without changing the optimizer equations. @Lst-adam-training demonstrates where Adam optimization\index{Adam optimization|see{Adam optimizer}} enters that cycle.
+
+::: {#lst-adam-training lst-cap="**Adam Training Loop**: Standard four-step optimization cycle with gradient clearing, forward pass, backward pass, and parameter update."}
+
+```{.python}
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+# Initialize Adam optimizer with model parameters and learning rate
+optimizer = optim.Adam(
+    model.parameters(), lr=0.001, betas=(0.9, 0.999)
+)
+loss_function = nn.CrossEntropyLoss()
+
+# Standard training loop implementing the four-step optimization cycle
+for epoch in range(num_epochs):
+    for batch_idx, (data, targets) in enumerate(dataloader):
+        # Step 1: Clear accumulated gradients from previous iteration
+        optimizer.zero_grad()
+
+        # Step 2: Forward pass - compute model predictions
+        predictions = model(data)
+        loss = loss_function(predictions, targets)
+
+        # Step 3: Backward pass - compute gradients via autodiff
+        loss.backward()
+
+        # Step 4: Parameter update - apply Adam optimization equations
+        optimizer.step()
+```
+
+:::
+
+The `optimizer.zero_grad()` call marks the boundary between one update and the next. Gradients accumulate\index{Gradient accumulation!framework behavior} across calls to `backward()`, so clearing them explicitly prevents stale gradients from contaminating the next batch. The same accumulation behavior later becomes useful for large effective batch sizes, but only when the training loop manages the boundary deliberately.
+
+The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Algo-adam-update makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
+
+::: {.column-margin}
+![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A simplified stacked memory bar split into parameters, gradients, and Adam moment state in a 1 to 1 to 2 ratio. Activations, workspace, and any master-weight copy are excluded."}
+
+*In this simplified static-state view, Adam's two moment buffers occupy twice the parameter storage.*
+:::
+
+```pseudocode
+#| label: algo-adam-update
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Adam parameter update (one optimizer step)}
+\begin{algorithmic}
+\Require gradient $\Gradient_t = \nabla\LossFunction(\ModelParameters_t)$; step $t$; rate $\LearningRate$; decays $\beta_1,\beta_2$; constant $\SmallConstant$
+\Ensure updated parameter $\theta_{t+1}$; moment buffers $m_t, v_t$ carried to the next step
+\State $m_t \gets \beta_1 m_{t-1} + (1-\beta_1)\, \Gradient_t$ \Comment{first moment (momentum)}
+\State $v_t \gets \beta_2 v_{t-1} + (1-\beta_2)\, \Gradient_t^2$ \Comment{uncentered second moment}
+\State $\hat{m}_t \gets m_t / (1-\beta_1^{t})$; $\hat{v}_t \gets v_t / (1-\beta_2^{t})$ \Comment{bias correction}
+\State $\ModelParameters_{t+1} \gets \ModelParameters_t - \LearningRate\, \hat{m}_t / (\sqrt{\hat{v}_t} + \SmallConstant)$ \Comment{parameter update}
+\end{algorithmic}
+\end{algorithm}
+```
+
+Steps 1 and 2 keep two persistent moment buffers per parameter, so parameters plus optimizer state reach roughly 3$\times$ the parameter memory before gradients, activations, and FP32 master weights are counted. Beyond capacity, the optimizer step imposes a severe memory-bandwidth bottleneck. Mathematically, the update consists of elementwise operations with an arithmetic intensity below $1\text{ FLOP/byte}$: in FP32, updating each parameter requires reading four tensors ($\Gradient_t, \ModelParameters_t, m_{t-1}, v_{t-1}$) and writing three ($m_t, v_t, \ModelParameters_{t+1}$), streaming 28 bytes across the memory bus for roughly a dozen arithmetic operations. Because matrix execution units (such as Tensor Cores) sit idle during this memory-bound phase, high-performance training systems use fused optimizer kernels to combine moment updates, bias correction, and weight writes into a single kernel launch per parameter group, minimizing round-trips through device memory.
+
+#### Learning rate scheduling integration {#sec-model-training-learning-rate-scheduling-integration-451b}
+
+The framework's learning rate scheduling\index{Learning rate scheduling!definition}\index{Learning rate!scheduling}\index{Learning rate!warmup}\index{Learning rate!cosine decay} hook changes the optimizer's trajectory without adding per-parameter state. It adjusts the learning rate $\LearningRate$ during training, letting the system shape convergence behavior while leaving the underlying optimizer equations intact.
+
+Schedules such as cosine annealing\index{Cosine annealing!learning rate schedule}, exponential decay, or step-wise reductions implement that trajectory by changing the step size over time. A scheduler tracks lightweight scalar state (current step, epoch, warmup phase) that must be serialized into checkpoints alongside optimizer states to resume the schedule. Reproducing the training trajectory also requires the relevant random-number and data-position state and compatible execution settings. This separation lets the systems engineer combine base optimization algorithms (SGD, Adam) with scheduling strategies (cosine annealing, linear warmup) without modifying the underlying tensor update rules.
+
+Parameter update rules define trajectories given gradient vectors, but assume those gradients are already materialized. For billion-parameter networks, gradient evaluation constitutes the dominant computational and memory burden of the training loop. The mechanics of gradient generation—rather than the optimizer step itself—dictate training memory budgets and runtime.
 
 ### Parameter updates and optimizers {#sec-model-training-parameter-updates-optimizers-b1a4}
 
@@ -6302,75 +6300,6 @@ Partitioning computation across a cluster ultimately transforms training from a 
 
 [^fn-allreduce-ring-synchronization]: **AllReduce**\index{AllReduce!ring topology}: A collective communication primitive that sums data across all devices and distributes the result back to each device. Ring AllReduce is one common implementation: devices pass gradient shards around a logical ring so each participant sends and receives bounded chunks rather than a full copy of every gradient tensor at once. This is the communication primitive that makes large data-parallel training practical, but its detailed cost model belongs with distributed training.
 
-### The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
-
-The parallelism strategies in @sec-model-training-singlenode-multigpu-training-c87f and @sec-model-training-scaling-beyond-single-node-a671 represent the convergence of high-performance scientific computing and warehouse-scale infrastructure that produced today's AI hardware fabrics.
-
-::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sf,node distance=0pt,xscale=2]
-\tikzset{
-  Box/.style={inner xsep=2pt, draw=black!80, line width=0.75pt,
-    fill=black!10, anchor=south, rounded corners=2pt,
-    font=\sf\footnotesize, align=center, minimum height=5mm},
-}
-\definecolor{col1}{RGB}{240,240,255}
-\definecolor{col2}{RGB}{255, 255, 205}
-\def\du{199mm}
-\def\vi{15mm}
-\node[fill=green!10,draw=none,minimum width=\du,
-name path=G4,anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
-\node[right=2mm of B1.west,anchor=west,align=left]{AI Hypercomputing\\ Era};
-\node[fill=col2,draw=none,minimum width=\du,
-name path=G3,anchor=south west, minimum height=\vi](Z)at(B1.north west){};
-\node[right=2mm of Z.west,anchor=west,align=left]{Warehouse Scale\\ Computing};
-\node[fill=red!10,draw=none,minimum width=\du,
-anchor=south west, minimum height=\vi](B2)at (Z.north west){};
-\node[right=2mm of B2.west,anchor=west,align=left]{High-Performance\\ Computing};
-\node[fill=col1,draw=none,minimum width=\du,
-name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
-\node[right=2mm of V.west,anchor=west,align=left]{Mainframe};
-\def\hi{6.75}
-\draw[thick,name path=V1](0mm,0)node[below]{1950}--++(90:\hi);
-\draw[thick,name path=V2](10mm,0)node[below]{1960}--++(90:\hi);
-\draw[thick,name path=V3](20mm,0)node[below]{1970}--++(90:\hi);
-\draw[thick,name path=V4](30mm,0)node[below]{1980}--++(90:\hi);
-\draw[thick,name path=V5](40mm,0)node[below]{1990}--++(90:\hi);
-\draw[thick,name path=V6](50mm,0)node[below]{2000}--++(90:\hi);
-\draw[thick,name path=V7](60mm,0)node[below]{2010}--++(90:\hi);
-\draw[thick,name path=V8](70mm,0)node[below]{2020}--++(90:\hi);
-\def\fa{2}
-\path [name intersections={of=V1 and G1,by={A,B}}];
-\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]B){ENIAC};
-\path [name intersections={of=V3 and G1,by={C,D}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]C){IBM\\ System/360};
-\node[Box, minimum width=40mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]D){CDC 6600};
-\path [name intersections={of=V4 and G3,by={E,F}}];
-\node[Box, minimum width=30mm, anchor=south west, xshift=-\fa*4mm]at([yshift=1pt]E){Cray-1};
-\path [name intersections={of=V6 and G3,by={G,H}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=0mm]at([yshift=-1pt]G){Google Data\\ Centers};
-\path [name intersections={of=V7 and G3,by={I,J}}];
-\node[Box, minimum width=22mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]J){AWS};
-\path [name intersections={of=V8 and G4,by={K,L}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*5mm]at([yshift=-1pt]K){NVIDIA GPU};
-\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]L){Google TPUs};
-\end{tikzpicture}
-```
-
-:::
-
-This transition to AI hypercomputing reflects a structural divergence in memory access patterns and synchronization semantics. Scientific HPC simulations typically traverse regular spatial grids with modest working state per degree of freedom, while warehouse-scale services process independent, loosely coupled requests over commodity Ethernet. In contrast, neural network training confronts a massive state footprint: an accelerator must hold model weights, gradients, optimizer states (such as momentum and variance buffers), and intermediate activations retained for the backward pass. When this aggregate state exceeds single-device High Bandwidth Memory (HBM) capacity, the model must be partitioned across multiple accelerators, trading local memory pressure for inter-device communication overhead. @Tbl-computing-eras contrasts the workload requirements, memory hierarchies, and execution models across these four architectural eras.
-
-| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         |
-|:----------------------|:----------------------------|:------------------------------|:-----------------------------|
-| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    |
-| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        |
-| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   |
-| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed |
-
-: **Computing Era Characteristics**: Each computing era optimized for different workload patterns, and modern training systems inherit requirements from multiple predecessors. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale distributed processing, while adding specialized support for the gradient-based optimization and massive parameter state management central to neural network training. {#tbl-computing-eras}
-
 ### When to scale: The physical ceiling {#sec-model-training-scale-physical-ceiling-e06c}
 
 Knowing how to partition computation across devices is distinct from knowing *when* distributed execution is warranted\index{Training!scaling threshold}\index{Training!memory exhaustion threshold}. Distributing state introduces communication overhead, synchronization barriers, and operational failure modes. Exhausting single-node optimizations first isolates whether the bottleneck is fundamentally algorithmic or capacity-driven. Profile-guided tuning should evaluate lower-precision execution paths (@sec-model-training-mixedprecision-training-9218) when numerical stability permits, gradient accumulation (@sec-model-training-gradient-accumulation-checkpointing-0c47) to synthesize target batch sizes without activation blowup, activation checkpointing (@sec-model-training-gradient-accumulation-checkpointing-mechanics-fb09) to trade redundant forward compute for memory headroom, and overlapped data prefetching (@sec-model-training-data-prefetching-pipeline-overlapping-e984) when host ingestion limits the critical path.
@@ -6671,6 +6600,75 @@ class FallaciesPitfallsSetup:
 
 # Export for prose
 ```
+
+### The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
+
+The parallelism strategies in @sec-model-training-singlenode-multigpu-training-c87f and @sec-model-training-scaling-beyond-single-node-a671 represent the convergence of high-performance scientific computing and warehouse-scale infrastructure that produced today's AI hardware fabrics.
+
+::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sf,node distance=0pt,xscale=2]
+\tikzset{
+  Box/.style={inner xsep=2pt, draw=black!80, line width=0.75pt,
+    fill=black!10, anchor=south, rounded corners=2pt,
+    font=\sf\footnotesize, align=center, minimum height=5mm},
+}
+\definecolor{col1}{RGB}{240,240,255}
+\definecolor{col2}{RGB}{255, 255, 205}
+\def\du{199mm}
+\def\vi{15mm}
+\node[fill=green!10,draw=none,minimum width=\du,
+name path=G4,anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
+\node[right=2mm of B1.west,anchor=west,align=left]{AI Hypercomputing\\ Era};
+\node[fill=col2,draw=none,minimum width=\du,
+name path=G3,anchor=south west, minimum height=\vi](Z)at(B1.north west){};
+\node[right=2mm of Z.west,anchor=west,align=left]{Warehouse Scale\\ Computing};
+\node[fill=red!10,draw=none,minimum width=\du,
+anchor=south west, minimum height=\vi](B2)at (Z.north west){};
+\node[right=2mm of B2.west,anchor=west,align=left]{High-Performance\\ Computing};
+\node[fill=col1,draw=none,minimum width=\du,
+name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
+\node[right=2mm of V.west,anchor=west,align=left]{Mainframe};
+\def\hi{6.75}
+\draw[thick,name path=V1](0mm,0)node[below]{1950}--++(90:\hi);
+\draw[thick,name path=V2](10mm,0)node[below]{1960}--++(90:\hi);
+\draw[thick,name path=V3](20mm,0)node[below]{1970}--++(90:\hi);
+\draw[thick,name path=V4](30mm,0)node[below]{1980}--++(90:\hi);
+\draw[thick,name path=V5](40mm,0)node[below]{1990}--++(90:\hi);
+\draw[thick,name path=V6](50mm,0)node[below]{2000}--++(90:\hi);
+\draw[thick,name path=V7](60mm,0)node[below]{2010}--++(90:\hi);
+\draw[thick,name path=V8](70mm,0)node[below]{2020}--++(90:\hi);
+\def\fa{2}
+\path [name intersections={of=V1 and G1,by={A,B}}];
+\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]B){ENIAC};
+\path [name intersections={of=V3 and G1,by={C,D}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]C){IBM\\ System/360};
+\node[Box, minimum width=40mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]D){CDC 6600};
+\path [name intersections={of=V4 and G3,by={E,F}}];
+\node[Box, minimum width=30mm, anchor=south west, xshift=-\fa*4mm]at([yshift=1pt]E){Cray-1};
+\path [name intersections={of=V6 and G3,by={G,H}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=0mm]at([yshift=-1pt]G){Google Data\\ Centers};
+\path [name intersections={of=V7 and G3,by={I,J}}];
+\node[Box, minimum width=22mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]J){AWS};
+\path [name intersections={of=V8 and G4,by={K,L}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*5mm]at([yshift=-1pt]K){NVIDIA GPU};
+\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]L){Google TPUs};
+\end{tikzpicture}
+```
+
+:::
+
+This transition to AI hypercomputing reflects a structural divergence in memory access patterns and synchronization semantics. Scientific HPC simulations typically traverse regular spatial grids with modest working state per degree of freedom, while warehouse-scale services process independent, loosely coupled requests over commodity Ethernet. In contrast, neural network training confronts a massive state footprint: an accelerator must hold model weights, gradients, optimizer states (such as momentum and variance buffers), and intermediate activations retained for the backward pass. When this aggregate state exceeds single-device High Bandwidth Memory (HBM) capacity, the model must be partitioned across multiple accelerators, trading local memory pressure for inter-device communication overhead. @Tbl-computing-eras contrasts the workload requirements, memory hierarchies, and execution models across these four architectural eras.
+
+| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         |
+|:----------------------|:----------------------------|:------------------------------|:-----------------------------|
+| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    |
+| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        |
+| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   |
+| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed |
+
+: **Computing Era Characteristics**: Each computing era optimized for different workload patterns, and modern training systems inherit requirements from multiple predecessors. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale distributed processing, while adding specialized support for the gradient-based optimization and massive parameter state management central to neural network training. {#tbl-computing-eras}
 
 ## Fallacies and Pitfalls {#sec-model-training-fallacies-pitfalls-cf7d}
 

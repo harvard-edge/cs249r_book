@@ -1474,11 +1474,12 @@ class MemoryWallH100Specs:
 
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
+    h100_fp8_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops[\"fp8\"], unit=TFLOP / second, precision=0, commas=False)
 ```
 
 #### Quantifying the compute-memory performance gap {#sec-hardware-acceleration-quantifying-computememory-performance-gap-1526}
 
-The physical energy disparity across storage tiers mapped in @fig-energy-hierarchy grows more severe with each hardware generation. Over the past two decades, peak computational capabilities have grown substantially faster than DRAM bandwidth\index{Memory Bandwidth!scaling trends} [@gholami2024]. This divergence stems from physical scaling constraints: while transistor scaling and dense systolic arrays multiply arithmetic throughput, memory bandwidth remains bounded by pin counts, package-substrate routing density, and interface signaling power. Representative high-end accelerators can deliver on the order of $10^3$ TFLOP/s of peak tensor throughput (for example, NVIDIA H100 delivering `{python} MemoryWallH100Specs.h100_fp16_tflop_per_s_str` in FP16 or `{python} AcceleratorEconomics.h100_fp8_tflop_per_s_str` in dense FP8) while providing approximately `{python} MemoryWallH100Specs.h100_bw_tb_per_s_str` of memory bandwidth [@choquette2023]. This implies that on the order of $10^2$ FLOP of work per byte moved is required to fully use the compute, which can exceed the arithmetic intensity of many practical neural network workloads.
+The physical energy disparity across storage tiers mapped in @fig-energy-hierarchy grows more severe with each hardware generation. Over the past two decades, peak computational capabilities have grown substantially faster than DRAM bandwidth\index{Memory Bandwidth!scaling trends} [@gholami2024]. This divergence stems from physical scaling constraints: while transistor scaling and dense systolic arrays multiply arithmetic throughput, memory bandwidth remains bounded by pin counts, package-substrate routing density, and interface signaling power. Representative high-end accelerators can deliver on the order of $10^3$ TFLOP/s of peak tensor throughput (for example, NVIDIA H100 delivering `{python} MemoryWallH100Specs.h100_fp16_tflop_per_s_str` in FP16 or `{python} MemoryWallH100Specs.h100_fp8_tflop_per_s_str` in dense FP8) while providing approximately `{python} MemoryWallH100Specs.h100_bw_tb_per_s_str` of memory bandwidth [@choquette2023]. This implies that on the order of $10^2$ FLOP of work per byte moved is required to fully use the compute, which can exceed the arithmetic intensity of many practical neural network workloads.
 
 When a workload's arithmetic intensity falls below this threshold, data transfer ($\frac{\DataVolume}{\Bandwidth}$) sets the larger of the two modeled time bounds. Accelerators attempt to tolerate memory latency—typically hundreds of clock cycles for off-chip DRAM—by maintaining thousands of concurrent execution threads and switching between active warps while memory requests remain in flight. However, when memory bandwidth saturates or when register pressure limits occupancy, the scheduler runs out of independent instructions to issue. Compute pipelines then stall, leaving high-throughput tensor cores idle while waiting for operands. Simultaneously, driving wide off-chip memory buses across capacitive printed circuit board traces and PHY interfaces consumes a substantial fraction of the chip's TDP, directly constraining the energy budget available for arithmetic logic [@horowitz2014; @sze2017].
 
@@ -2221,6 +2222,7 @@ class RooflineGap:
     a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
+    h100_fp8_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops[\"fp8\"], unit=TFLOP / second, precision=0, commas=False)
 
     v100_year_str = fmt(h_v100.release_year, precision=0, commas=False)
     a100_year_str = fmt(h_a100.release_year, precision=0, commas=False)
@@ -2562,489 +2564,6 @@ Production machine learning workloads combine regular dense matrix kernels with 
 ```{=latex}
 \endgroup
 ```
-
-Within a single neural network, memory access behavior varies sharply across layer types. Convolutional layers exhibit high spatial locality and register reuse as small weight kernels slide across input feature maps. Fully connected layers and dense attention execute regular matrix multiplications, but their large parameter matrices or key-value caches can exceed on-chip SRAM capacity and become bandwidth bound when operational reuse is low. Variable sequence lengths complicate memory buffer allocation, but the attention operations within each sequence remain regular, contiguous matrix multiplies.
-
-True memory irregularity arises from three distinct architectural patterns: unstructured sparsity,[^fn-sparsity-memory-access] embedding lookups, and dynamic token routing. In unstructured sparsity, nonzero weights or activations are stored in compressed formats (such as CSR or COO) that require pointer indirection to decode operand coordinates. In embedding tables, sparse categorical IDs select arbitrary rows from tables spanning tens of gigabytes in DRAM, transforming sequential memory transfers into uncoalesced, scattered reads. In Mixture-of-Experts (MoE)\index{MoE!dynamic computation paths} models, routing gates direct tokens to different expert networks based on input context; while deterministic for a given input, token assignments vary across batches, disrupting prefetch pipelines and unbalancing execution queues across parallel cores.
-
-[^fn-sparsity-memory-access]: [offset=-17mm] **Sparsity and memory irregularity**\index{Sparsity!memory access irregularity}: Unstructured sparse formats commonly gather nonzero elements through indirect addressing, which can weaken sequential access and make metadata overhead significant. Structured sparsity preserves hardware-friendly blocks, so its access behavior differs from arbitrary pruning. Without suitable kernels or hardware support, an unstructured sparse model can run slower than its dense counterpart despite performing fewer arithmetic operations.
-
-Irregularity degrades performance through distinct mechanisms, and treating them as one memory problem can point to the wrong optimization. Scattered addresses may turn one logical access into several memory transactions, so each fetched cache line carries few useful payload bytes. Indirection can also serialize address generation: the system must fetch an index or pointer before it knows which payload to request, limiting memory-level parallelism even when aggregate bandwidth remains available. Input-dependent routing creates a third failure mode when some processing elements receive longer queues than others; completion time follows the slowest queue while neighboring units idle. Variable-sized allocations may fragment capacity, but fragmentation is neither necessary nor sufficient for irregular access. A sequential stream can saturate bandwidth without being irregular, whereas a dependent lookup chain can stall far below peak bandwidth.
-
-Diagnosis should therefore begin with the mechanism that prevents forward progress. A low ratio of useful payload bytes to transferred bytes indicates poor spatial utilization or coalescing. Long memory stalls alongside unused bandwidth indicate dependent misses or too few concurrent requests to hide latency. Uneven queue depths or per-route work reveal load imbalance rather than a cache-capacity problem. Cache hit rate alone cannot distinguish these cases because a miss can waste bandwidth, expose latency, or both. Each diagnosis implies a different remedy: packing or blocking improves spatial utilization, reordering and prefetching expose concurrent requests, structured sparse formats reduce indexing overhead, and routing or partitioning balances work. The memory hierarchy determines the cost of the remaining accesses, while dataflow and tensor-layout choices determine how much irregularity software can remove before execution reaches the hardware.
-
-The optimization order follows that diagnosis. Representation comes first when the format is under system control because a block-structured sparse format or grouped routing can remove indirection before a kernel executes. Request organization comes next: accesses issued together should target adjacent addresses, and enough independent requests must remain in flight to hide unavoidable latency. Additional cache capacity or bandwidth helps only when profiling shows that the regularized request stream still exhausts that resource. More bandwidth cannot resolve a serial pointer dependency, and more capacity cannot rebalance skewed work. The objective is to expose as much regular structure as possible while confining unavoidable irregularity to the smallest portion of execution.
-
-Software can mitigate irregular access by regularizing tensor layouts, enforcing structured sparsity, and sorting dynamic routes into uniform batches. Yet software restructuring cannot eliminate the physical penalty of data movement: whether a memory request is contiguous or scattered, every transferred byte must cross physical wires governed by finite bandwidth, propagation latency, and energy dissipation. Bounding these physical costs requires organizing storage into cascading hardware tiers. Rather than treating memory as a uniform pool, accelerator architectures deploy multilevel memory hierarchies that trade off capacity against latency and energy at every tier.
-
-### Memory hierarchy {#sec-hardware-acceleration-memory-hierarchy-1839}
-
-No single storage technology can simultaneously satisfy the multi-terabyte-per-second bandwidth required by dense execution units and the tens of gigabytes of capacity required to hold modern model parameters. Accelerators resolve this tension through multilevel memory hierarchies\index{Memory hierarchy!speed-capacity trade-off}. Rather than treating memory as a monolithic address space, the machine organizes storage into distinct physical tiers, each optimized for a specific balance of capacity, access latency, bandwidth, and energy dissipation.
-
-At the apex of the hierarchy, register files\index{Register!fastest memory} and on-chip SRAM caches supply operands to arithmetic units with sub-nanosecond latency and single-digit picojoule energy costs, but their capacity is strictly limited by silicon die area. At the base, nonvolatile flash storage holds hundreds of gigabytes of model checkpoints and training datasets, but requires milliseconds or microseconds to access. Between these boundaries, software-managed scratchpads stage active tensor tiles, while device-local DRAM (such as HBM or GDDR) provides the primary working memory for parameters and activations.
-
-This organization establishes an inverse relationship across tiers: as storage capacity expands and physical distance from arithmetic units grows, bandwidth falls, latency lengthens by orders of magnitude, and energy consumption per bit escalates. @Tbl-memory-hierarchy compares these tiers across latency, bandwidth, capacity, and functional roles in deep learning workloads.
-
-| Memory Level                                              | **Relative latency**\index{Relative latency!definition} |      Bandwidth      | **Relative capacity**\index{Relative capacity!definition} | **Example Use in Deep Learning**                                 |
-|:----------------------------------------------------------|:--------------------------------------------------------|:-------------------:|:----------------------------------------------------------|:-----------------------------------------------------------------|
-| Registers                                                 | Lowest                                                  |       Highest       | Tiny                                                      | Storing operands for immediate computation                       |
-| **L1/L2 Cache (SRAM)**\index{SRAM!on-chip cache}          | Very low                                                |         High        | Small                                                     | Caching frequently accessed activations and small weight blocks  |
-| **Scratchpad memory**\index{Scratchpad memory!definition} | Very low                                                |         High        | Small to medium                                           | Software-managed storage for intermediate computations           |
-| **Device DRAM (HBM, GDDR, or LPDDR)**                     | High                                                    | Moderate--Very High | Large                                                     | Storing model parameters and activations that do not fit on-chip |
-| **Host DRAM (typically DDR)**                             | High locally; transfer adds latency                     |       Moderate      | Large to very large                                       | Staging or offloading data outside accelerator memory            |
-| **Flash Storage (SSD/NVMe)**                              | Very high                                               |         Low         | Very large                                                | Storing pretrained models and checkpoints for later loading      |
-
-: **Memory Hierarchy Trade-Offs**: AI accelerators use a multilevel memory hierarchy to balance performance and capacity. Each level provides distinct latency, bandwidth, and capacity characteristics that dictate how neural network components (weights, activations, and intermediate results) should be allocated to minimize bottlenecks and maximize throughput. Relative labels describe the typical ordering; exact values depend on architecture. @Sec-appdx-machine-foundations-latencies-every-programmer-know-e89f supplies registry-backed reference latencies. {#tbl-memory-hierarchy tbl-colwidths="[22,17,14,12,35]"}
-
-A recurring systems question is why accelerators cannot bypass on-chip SRAM entirely and stream all operands directly from high-capacity off-chip DRAM. The binding constraint is the latency of the DRAM access path itself; wire distance on the die turns out to matter far less.
-
-```{python}
-#| echo: false
-from mlsysim import Hardware
-from mlsysim.core.units import ureg
-from mlsysim.fmt import check, fmt_area
-
-# ┌── LEGO ───────────────────────────────────────────────
-class SpeedOfLightLimitCalc:
-    """Chip-area reference for the signal-propagation callout."""
-
-    h100_die_area = Hardware.Cloud.H100.die_area
-
-    check(h100_die_area is not None, "H100 registry entry should expose die_area.")
-    check(800 <= h100_die_area.to(ureg.millimeter**2).magnitude <= 830, "H100 die area should stay near 814 mm^2.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_die_area_mm2_str = fmt_area(h100_die_area, unit=ureg.millimeter**2, commas=False)
-```
-
-::: {#nbk-hw-acceleration-speed-light-limit .callout-notebook title="Why HBM cannot feed the array directly"}
-
-**Problem**: Why is on-chip SRAM necessary instead of fetching all data from HBM?
-
-**Math**:
-
-1.  **Clock cycle**: At 2 GHz, $1/(2\text{ GHz}) = 500\text{ ps}$.
-2.  **DRAM access**: Off-chip HBM sits millimeters away on the package, but row activation, DRAM-array latency, serialization, protocol traversal, and queuing add up to 100+ cycles per access.
-3.  **Distance, for comparison**: On an H100-class `{python} SpeedOfLightLimitCalc.h100_die_area_mm2_str` die, signals travel ~20 mm; at $\approx 0.5c$, $20\text{ mm}/(0.5c) \approx 130\text{ ps}$, less than one cycle.
-
-**Systems insight**: The speed of light is not the limit here; a signal crosses the whole die in under one clock cycle. The 100-plus-cycle cost comes from how DRAM is accessed, not from how far away it sits. Local registers and SRAM are therefore required to feed compute units at 2 GHz. For transformer models, this complete access path is why weights must be staged in SRAM in tiles rather than read on demand from HBM, and why repeatedly streaming an entire KV cache can collapse inference throughput when its memory traffic cannot be hidden behind arithmetic.
-
-:::
-
-#### On-chip memory {#sec-hardware-acceleration-onchip-memory-72d1}
-
-The **on-chip memory**\index{On-chip memory!definition} subsystem integrates registers, Static Random-Access Memory (SRAM) caches\index{SRAM!on-chip fast memory}, and software-managed scratchpads directly on the accelerator die. Register files provide the immediate operand and accumulator storage needed by execution pipelines. Modern accelerators provision substantial register capacity in aggregate across the chip, but partition this pool dynamically among concurrent threads or warps. Increasing per-thread register allocation allows individual threads to retain larger matrix tiles, but limits the total number of concurrently scheduled warps, reducing the hardware's ability to hide memory latency. Conversely, underallocating registers forces the compiler to spill values to off-chip memory, converting single-cycle register accesses into multi-cycle stalls. Efficient kernel design balances register allocation to maintain maximum occupancy while keeping hot operands resident.
-
-Hardware-managed L1 and L2 caches provide fast buffering for frequently referenced data using automatic tag checking and hardware eviction policies. However, automatic caches are poorly suited for streaming multi-gigabyte tensor operations: scanning through large activation tensors can evict reusable weight tiles before arithmetic units can reuse them. Furthermore, specialized execution pipelines impose strict layout and data-type constraints that general caches cannot satisfy automatically. As illustrated in example \ref{exmp-hw-acceleration-tensor-core-contract}, hardware matrix engines require specific alignments and memory contracts; a mismatch may require padding, conversion, or a different kernel whose efficiency must be checked.
-
-::: {#exmp-hw-acceleration-tensor-core-contract .callout-example title="The Tensor Core contract"}
-
-**Scenario**: An engineering team migrates a transformer workload to NVIDIA A100 GPUs expecting automatic Tensor Core acceleration, but profiling reveals Tensor Cores remain idle [@NVIDIA2020].
-
-**Diagnosis**: The workload used shapes and data types that selected less efficient kernels rather than the intended Tensor Core path.
-
-**Systems lesson**: Specialized paths have operator, precision, layout, and shape requirements. Libraries can often handle nonaligned dimensions through padding or alternative kernels, but reaching high utilization requires verifying which path was actually selected.
-
-:::
-
-To avoid the eviction overhead and unpredictability of automatic caches, AI accelerators incorporate scratchpad memory\index{Scratchpad Memory!software-managed storage}. Unlike hardware caches, scratchpads are software-managed SRAM structures mapped directly into the core's address space without tag directories or hardware replacement logic. The compiler or programmer explicitly controls when tensor tiles are loaded from external DRAM, how long they reside on-chip, and when updated values are written back. In convolutional models, scratchpads retain input feature maps and weight kernels across sliding receptive windows, eliminating redundant DRAM reads [@chen2017]. On NVIDIA GPUs, scratchpad memory is exposed as *shared memory*: a fast, programmer-controlled SRAM bank shared across all threads within a thread block. Custom kernels written in CUDA or Triton manage shared memory explicitly. FlashAttention demonstrates the power of this mechanism: rather than materializing the full $S{\times}S$ attention score matrix in off-chip HBM, the kernel tiles queries, keys, and values through shared memory and updates softmax statistics online [@dao2022]. The speedup stems entirely from eliminating high-latency HBM round trips rather than reducing arithmetic operations; in fact, the algorithm recomputes intermediate attention values during the backward pass to avoid storing them to off-chip memory.
-
-::: {.column-margin .margin-pointer}
-↩ FlashAttention as an IO-aware attention kernel for training is established in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
-:::
-
-#### Off-chip memory {#sec-hardware-acceleration-offchip-memory-ecdb}
-
-When tensor working sets exceed on-chip SRAM capacity, operands and parameters reside in device-local DRAM. Rather than sequential hierarchy levels, HBM\index{HBM!3D die stacking}, Graphics DDR (GDDR)\index{GDDR!off-chip DRAM variant}, and Low-Power DDR (LPDDR)\index{LPDDR!low-power DRAM variant} represent alternative memory architectures engineered for distinct cost, bandwidth, and power envelopes. High-performance accelerators use HBM, which stacks DRAM dies vertically using through-silicon vias (TSVs) and interfaces with the accelerator die across a wide silicon interposer (e.g., 1,024 to 8,192 bits). This wide bus delivers multi-terabyte-per-second bandwidth at lower clock frequencies and lower energy per bit than conventional DRAM, but requires complex 2.5D packaging. Where silicon interposers are cost-prohibitive, accelerators adopt GDDR, which uses narrower buses (e.g., 256 to 384 bits) driven at high pin speeds across standard circuit boards. Mobile and embedded accelerators utilize LPDDR, trading raw bandwidth for low operating voltage and reduced standby power.
-
-When parameter and activation footprints exceed device-local DRAM capacity, the system must offload state to host DRAM (typically standard DDR). Accessing host memory requires crossing an I/O interconnect such as PCIe or a coherent fabric like NVLink or Compute Express Link (CXL). Because PCIe bandwidth (tens of gigabytes per second) is one to two orders of magnitude lower than accelerator DRAM bandwidth, unmanaged offloading stalls arithmetic execution. Efficient runtimes mitigate this penalty by overlapping asynchronous direct memory access (DMA) copies with kernel execution, prefetching upcoming layer parameters while current layers compute.
-
-At the base of the hierarchy, nonvolatile flash storage and solid-state drives (SSDs) provide persistent, multi-terabyte capacity for datasets and training checkpoints [@narayanan2021]. With read latencies measured in tens of microseconds and bus bandwidths capped at single-digit gigabytes per second, flash devices cannot participate directly in kernel execution. Checkpointing and data-loading pipelines treat flash storage as an asynchronous streaming source, staging batches through host DRAM into accelerator memory before computation begins.
-
-The physical tiers of the memory hierarchy establish the latency floors and capacity ceilings of the accelerator. How closely an application approaches hardware peak depends on whether software can sustain high utilization across each tier: advertised memory bandwidth represents only a theoretical limit, while achievable throughput is determined by access regularity, tensor layout, and reuse locality.
-
-### Memory bandwidth and architectural trade-offs {#sec-hardware-acceleration-memory-bandwidth-architectural-tradeoffs-435c}
-
-Advertised memory bandwidth is only a ceiling; achievable bandwidth depends on access pattern, batching, locality, and the host interface that feeds the accelerator.\index{Memory Bandwidth!architectural trade-offs} Representative data center accelerators provide memory bandwidth on the order of a few TB/s, paired with tens of GB of high-bandwidth memory. Peak figures assume continuous, stride-1 coalesced access across all memory channels. Real neural network workloads deviate substantially from this ideal: transformer attention, convolution, and fully connected layers realize distinct fractions of peak bandwidth because their memory access strides, tiling dimensions, and operational reuse differ. A sufficiently large, coalesced weight stream can approach peak bandwidth even at small batch size. Batching instead reuses each loaded weight across more samples, raising arithmetic intensity as analyzed under the roofline model in @sec-hardware-acceleration-roofline-model-42ff. Small or irregular kernels may lack enough concurrent accesses to approach the bandwidth ceiling, making memory latency and available parallelism part of the diagnosis.
-
-Bandwidth also carries a steep thermal penalty: the reference DRAM access costs substantially more energy than the reference SRAM access of the same width (@fig-energy-hierarchy), with the ratio depending on storage tier and implementation. When off-chip accesses are frequent, driving those interfaces can dominate movement energy, motivating accelerators to structure their pipelines around spatial data reuse rather than repeatedly round-tripping tensors through external DRAM. Which operand an array keeps local (weights, inputs, or partial sums) is the stationarity choice that @sec-hardware-acceleration-data-movement-patterns-3b06 develops.
-
-Physical constraints at the silicon and packaging boundaries govern how memory bandwidth scales across accelerator classes. HBM achieves multi-terabyte-per-second throughput by stacking DRAM dies vertically using through-silicon vias and interfacing with the processor over a silicon interposer. This packaging provides wide parallel interfaces—reaching on the order of 1 TB/s in mainstream products and a few TB/s in high-end systems—at substantially higher packaging cost and thermal density. TPU-class designs pair high-bandwidth memory with large on-chip buffers and 2D systolic arrays, trading general-purpose memory flexibility for tight spatial reuse on dense matrix multiplications. At the opposite extreme, mobile SoC designs operate within a few-watt power envelope and cannot accommodate the cost or thermal dissipation of interposer-based stacks. These edge processors rely on unified commodity LPDDR architectures, delivering on the order of hundreds of GB/s of shared bandwidth that must be strictly scheduled across CPU, GPU, and neural accelerator cores to prevent memory bus contention and thermal throttling.
-
-Bandwidth limitations extend beyond the accelerator package to the host-device interface. When an input must cross a 64 GB/s PCIe link before using an accelerator with 2 TB/s of HBM bandwidth, the interface has roughly 30$\times$ less bandwidth and can dominate small, frequent transfers [@NVIDIA2020; @NVIDIA2020nvlink]. For low-latency inference queries or fine-grained kernel offloading, transfer serialization across the host bus can easily outlast kernel computation. Mitigating this interface bottleneck requires keeping model parameters and intermediate activation states resident in accelerator memory across execution steps, or bypassing the host link entirely through direct peer-to-peer storage and network data paths.
-
-### Host-accelerator communication {#sec-hardware-acceleration-hostaccelerator-communication-bb7a}
-
-In discrete accelerator systems, the host CPU and the accelerator operate as separate computational domains joined by a peripheral bus. The host manages storage I/O, network streams, and runtime orchestration, while the accelerator executes dense mathematical kernels over high-bandwidth device memory. Because CPU memory (system DRAM) and accelerator memory (HBM or GDDR) occupy distinct physical address spaces, computation cannot begin until tensors traverse the host-accelerator interconnect. Host-accelerator data movement\index{Host-Accelerator Communication!transfer bottleneck} therefore establishes an operational boundary: if transfers over the peripheral bus cannot feed the accelerator's compute cores at line rate, the device idles regardless of its raw FLOP/s capacity.
-
-@Fig-host-accelerator-data-movement sequences the four-stage execution trace across host and device lifelines: copying input data across PCIe to device memory via DMA[^fn-dma-memory-overlap] (step 1), dispatching kernel instructions from the CPU (step 2), executing parallel core compute with local writeback (step 3), and copying results back to host memory (step 4). In a naive synchronous execution model, every transfer step sits directly on the critical path, stalling either the host or the accelerator until each memory transaction finishes.
-
-::: {#fig-host-accelerator-data-movement fig-env="figure" fig-pos="htb" fig-cap="**Host-Accelerator Data Transfer Sequence**: Four-step execution flow between CPU host and GPU device: (1) copying input data over PCIe, (2) issuing kernel instructions, (3) GPU compute, and (4) transferring results back to host memory. Low PCIe bandwidth and host dispatch latencies can easily dominate runtime unless kernel compute time exceeds data transfer overhead." fig-alt="Four-step data flow diagram: (1) copy data from main memory to GPU memory, (2) CPU instructs GPU, (3) GPU executes in parallel, (4) results copy back to main memory."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\sffamily\small]
-\tikzset{%
-    Line/.style={line width=1.0pt,black!50}
-}
-\tikzset{
-  Box/.style={inner xsep=2pt,
-    draw=GreenLine,
-    line width=0.75pt,
-    node distance=1.5,
-    fill=GreenL!70,
-    align=flush center,
-    text width=26mm,
-    minimum width=26mm,
-    minimum height=10mm
-  },
-}
-
-\begin{scope}
-\node[Box](B1){Main Memory};
-\node[Box,right=of B1](B2){CPU};
-\node[Box,right=of B2](B3){Memory for GPU};
-\node[Box,right=of B3](B4){GPU};
-\end{scope}
-%
-\begin{scope}[shift={(0,-6)}]
-\colorlet{GreenL}{OrangeL}
-\colorlet{GreenLine}{OrangeLine}
-\node[Box](2B1){Main Memory};
-\node[Box,right=of 2B1](2B2){CPU};
-\node[Box,right=of 2B2](2B3){Memory for GPU};
-\node[Box,right=of 2B3](2B4){GPU};
-%
-\end{scope}
-%
-\foreach \x in {1,2,3,4} {
- \draw[Line] (B\x) -- (2B\x);
-}
-%
-\draw[Line,-latex]($(B1)!0.2!(2B1)$)--
-node[above,text=black,pos=0.26]{Copy processing data (1)}
-($(B3)!0.2!(2B3)$);
-\draw[Line,-latex]($(B2)!0.37!(2B2)$)--
-node[above,text=black,pos=0.26]{Instruct the processing (2)}
-($(B4)!0.37!(2B4)$);
-%
-\draw[Line,-latex]($(B4)!0.75!(2B4)$)--
-node[above,text=black,pos=0.5]{Store results}
-($(B3)!0.75!(2B3)$);
-\draw[Line,-latex]($(B3)!0.85!(2B3)$)--
-node[above,text=black,pos=0.25]{Copy the result (4)}
-($(B1)!0.85!(2B1)$);
-%
-\draw[Line,-latex]($(B4)!0.57!(2B4)$)
-to [out=10,in=350,distance=42]
-node[above,text=black,pos=0.1,fill=white]{Execute parallel in each core (3)}
-($(B4)!0.62!(2B4)$);
-\end{tikzpicture}
-
-```
-
-:::
-
-[^fn-dma-memory-overlap]: **DMA (direct memory access)**\index{DMA!computation overlap}: A dedicated hardware unit that manages the data copy (step 1) without direct CPU management, freeing the CPU to immediately issue computation commands (step 2). This concurrency is critical: without it, the accelerator can idle between compute batches, especially when host-to-device movement is on the critical path.
-
-The end-to-end latency of a kernel launch decomposes into transfer time, queue dispatch overhead, and arithmetic execution time. When tensor transfers are small or frequent, the fixed overhead of driver submission and bus round trips dominates runtime. When transfers are large, the low bandwidth of PCIe relative to on-package HBM creates a sustained I/O bottleneck. In D·A·M terms, the Machine boundary between host and accelerator forces the Algorithm to maximize arithmetic reuse on the device once tensors arrive.
-
-#### Node-level interconnect topology {#sec-hardware-acceleration-nodelevel-interconnect-topology-b45b}
-
-Within a single machine, how bits move between GPUs and the CPU sets the next ceiling. In the 1–8 GPU regime, scaling is achieved through high-speed intra-node interconnects such as NVLink\index{NVLink!intra-node scaling} and host-to-device PCIe\index{PCIe!host-to-device transfers} transfers that mitigate the memory wall. These links form a **bandwidth taper**\index{Bandwidth taper!interconnect hierarchy}: data-movement speed falls at each step away from the compute units, from on-package HBM through the GPU-to-GPU NVLink bridge down to the host PCIe link. The PCIe step is much slower than the accelerator-local memory and inter-GPU fabric, so any data path that touches the CPU can become a performance hazard, the "PCIe Wall"\index{NVLink!PCIe wall} that NVLink exists to avoid [@NVIDIA2020nvlink]. A typical AI server is therefore not a flat mesh of connected devices, and optimizing data movement starts from its physical topology.
-
-```{python}
-#| echo: false
-#| label: interconnect-bandwidth
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ INTERCONNECT BANDWIDTH SPECS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Node-Level Interconnect Topology" prose
-# │
-# │ Goal: Demonstrate the bandwidth hierarchy across system interconnects.
-# │ Show: The 30-100× slowdown when data moves from local NVLink to PCIe or Network.
-# │ How: List bandwidth constants for NVLink, PCIe, and InfiniBand.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_bandwidth
-
-# ┌── LEGO ───────────────────────────────────────────────
-class InterconnectHierarchy:
-    """
-    Namespace for Interconnect Bandwidth Hierarchy.
-    Scenario: The bandwidth taper from Chip -> Node -> Cluster.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Device
-    hbm_bw = Hardware.Cloud.A100.memory.bandwidth
-
-    # Chip-to-Chip
-    nvlink_a100 = Hardware.Cloud.A100.nvlink.bandwidth
-    nvlink_h100 = Hardware.Cloud.H100.nvlink.bandwidth
-
-    # Host-to-Device
-    pcie_gen4 = Hardware.Cloud.A100.interconnect.bandwidth
-
-    # Node-to-Node (Network)
-    ib_hdr_gbps = Systems.Fabrics.InfiniBand_HDR.bandwidth.to(Gbps).magnitude
-    ib_hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
-
-    ib_ndr_gbps = Systems.Fabrics.InfiniBand_NDR.bandwidth.to(Gbps).magnitude
-
-    # Bandwidth-taper equation constants (H100-class)
-    taper_hbm = Hardware.Cloud.H100.memory.bandwidth
-    taper_nvlink = nvlink_h100
-    taper_pcie = Hardware.Cloud.H100.interconnect.bandwidth
-    taper_net = Systems.Fabrics.InfiniBand_NDR.bandwidth
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    # The "bandwidth taper" must hold: HBM > NVLink > PCIe > Network
-    check(hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_bw, "Bandwidth hierarchy violated. HBM > NVLink > PCIe > Network")
-    check(taper_hbm > taper_nvlink > taper_pcie > taper_net, "bandwidth taper HBM > NVLink > PCIe > Network must hold")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_a100_gb_per_s_str = fmt_bandwidth(nvlink_a100, unit=GB / second, precision=0, commas=False)
-    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
-    ib_hdr_gbit_per_s_str = fmt_bandwidth(ib_hdr_bw, unit=Gbps, precision=0, commas=False)
-    ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
-
-    # Bandwidth-taper equation — one consistent chip (H100-class) so HBM, NVLink,
-    # PCIe (Gen5), and the NDR network link cannot mix incompatible generations.
-    taper_eq_math = fmt_display_math(
-        rf"\begin{{aligned}} \text{{HBM ({taper_hbm.to(GB/second).magnitude:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink.to(GB/second).magnitude:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie.to(GB/second).magnitude:.0f} GB/s)}} \gg \text{{Network ({taper_net.to(GB/second).magnitude:.0f} GB/s)}} \end{{aligned}}"
-    )
-```
-
-::: {#margin-bandwidth-taper .column-margin}
-![](images/svg/vol1_hw_acceleration_margin_002.svg){width="100%" fig-alt="Vertical log-scale ladder of violet bandwidth bars, widest at top: HBM, then NVLink, then PCIe, down to a narrow network bar at the bottom."}
-
-*Bandwidth tapers steeply as data moves farther from the accelerator.*
-:::
-
-Within a multi-accelerator server node, three interconnect tiers define this bandwidth taper (see [bandwidth taper diagram](#margin-bandwidth-taper)):
-
-1. **Device-device interconnect (NVLink/Infinity Fabric)**: Modern multi-GPU nodes use specialized high-speed bridges like NVLink[^fn-nvlink-interconnect-bandwidth]\index{NVLink!GPU interconnect}\index{GPU Interconnect!switching fabric}\index{Infinity Fabric!AMD interconnect} to connect accelerators directly, bypassing the host CPU. Bandwidth ranges from `{python} InterconnectHierarchy.nvlink_a100_gb_per_s_str` to `{python} InterconnectHierarchy.nvlink_h100_gb_per_s_str` per GPU [@NVIDIA2020nvlink; @choquette2023]. This link matters whenever tensors must move between accelerators within one server, including model partitioning, activation exchange, and gradient synchronization during training.[^fn-allreduce-gradient-sync] The architectural principle is the boundary: traffic that stays on the accelerator fabric is far cheaper than traffic that falls back through the host.
-2. **Host-device interconnect (PCIe)**: The link between the CPU and the accelerator. Bandwidth ranges from 32 to 64 GB/s (PCIe Gen4/Gen5)\index{PCIe!host-device interconnect}\index{PCIe!bandwidth generations}. Host-staged training data can bottleneck here, although resident data, direct storage or network I/O, and coherent accelerator links can use other paths. Multi-GPU servers may also provide multiple PCIe links rather than a single shared 64 GB/s path.
-3. **Network interface card**: The link from the host to the outside world, connecting to other nodes. Bandwidth ranges from 25 to 50 GB/s (`{python} InterconnectHierarchy.ib_hdr_gbit_per_s_str` to `{python} InterconnectHierarchy.ib_ndr_gbit_per_s_str` Ethernet/InfiniBand[^fn-infiniband-rdma-interconnect])\index{Network interface card!node interconnect}\index{InfiniBand!bandwidth tiers}. This interconnect is the first step from single-node hardware reasoning into the next frontier: scale. Traversing the network moves traffic onto the narrowest, highest-latency path in the system.
-
-[^fn-nvlink-interconnect-bandwidth]: **NVLink (NVIDIA Link)**\index{NVLink!definition}: This direct GPU-to-GPU interconnect exists to keep accelerator-to-accelerator traffic off PCIe when tensors must move inside a server. Its 600--900 GB/s aggregate bidirectional bandwidth is roughly 300--450 GB/s per direction under balanced full-duplex traffic, several times the directional bandwidth of a standard PCIe link, so workloads with frequent cross-device tensor movement can remain in the fast part of the bandwidth taper [@NVIDIA2020nvlink; @choquette2023]. The training algorithms that determine how much tensor traffic must cross this link are developed later; the hardware fact needed here is the bandwidth gap. \index{NVLink!training scaling}
-
-[^fn-allreduce-gradient-sync]: **AllReduce**\index{AllReduce!definition}: A collective operation from MPI that aggregates values across processes (the "reduce") and distributes the result back to every process (the "all"). Here, the term identifies why accelerator-to-accelerator bandwidth matters for distributed training workloads. At scale, algorithms, topology choices, and runtime protocols determine how costly this synchronization becomes. \index{AllReduce!gradient synchronization cost}
-
-[^fn-infiniband-rdma-interconnect]: **InfiniBand**\index{InfiniBand!RDMA for ML training}: Its key feature for multi-node scaling is RDMA (Remote Direct Memory Access)\index{RDMA!multi-node scaling}. With a GPU-aware path such as GPUDirect RDMA and registered GPU memory, a network adapter can transfer data directly between GPUs across nodes without staging it through host memory. This reduces host involvement and protocol overhead, so scaling is more often constrained by physical bandwidth, topology, and collective implementation rather than CPU-managed packet processing.
-
-These three levels produce a characteristic bandwidth taper:
-
-`{python} InterconnectHierarchy.taper_eq_math`
-
-System efficiency depends on keeping tensors on the highest-bandwidth links available. Because PCIe and network links offer orders of magnitude less bandwidth and higher latency than on-package memory, placement and scheduling must minimize crossings across these boundaries.
-
-#### Transfer optimization {#sec-hardware-acceleration-transfer-optimization-85a8}
-
-Two complementary strategies mitigate transfer overheads across the host-accelerator interface: asynchronous data movement and unified memory abstraction.
-
-In an asynchronous pipeline, software allocates pinned (page-locked) host memory and enqueues non-blocking memory copies onto dedicated DMA engines. Because copy engines operate independently of compute units, the next input batch can transfer across PCIe concurrently while the accelerator processes the current batch in local memory. This double buffering conceals transfer latency behind arithmetic runtime whenever computation time exceeds transfer time ($\IronlawTermTimesCompute \ge T_{\text{transfer}}$). When compute duration is too short to amortize the transfer, execution remains bus-bound and compute units inevitably stall.
-
-::: {.column-margin .margin-pointer}
-↩ The feeding problem, in which data delivery fails to keep pace with compute throughput, is established in @sec-data-engineering-feeding-problem.
-:::
-
-Unified Memory\index{Unified Memory!single address space} provides an alternative abstraction by presenting a single virtual address space spanning host DRAM and device HBM. Rather than requiring manual buffer allocation and explicit staging copies, the runtime driver migrates memory pages on demand via hardware page faults when either processor touches an address. While this eliminates boilerplate staging code, on-demand migration introduces severe performance unpredictability. Page faults trigger driver interrupts that stall execution pipelines, and scattered access patterns can cause page thrashing across the PCIe bus. Consequently, high-throughput production workloads rely on explicit, pipelined DMA transfers for deterministic performance, reserving Unified Memory for rapid prototyping or applications where programmer productivity outweighs sustained hardware utilization.
-
-These interconnect and memory bounds dictate how neural network architectures map to physical silicon. Convolution exposes high spatial reuse that amortizes transfer costs through on-chip register and SRAM tiling. Dense self-attention exhibits regular matrix structure, yet quadratic sequence-length scaling creates intense pressure on package memory capacity and bandwidth. Sparse embeddings, mixture-of-experts routing, and autoregressive key-value caches present still other memory access patterns—shifting the binding constraint from arithmetic throughput to memory capacity, bus latency, or interconnect bandwidth.
-
-### Model memory pressure {#sec-hardware-acceleration-model-memory-pressure-f95e}
-
-Model architecture determines which memory term binds\index{Model Memory Pressure!architecture-specific}. Multilayer perceptrons (MLPs), CNNs, and transformers exhibit fundamentally different dataflow profiles: some are bound by weight capacity, others by intermediate activation footprint, device memory bandwidth, or host interconnect throughput. Consequently, each workload demands a distinct accelerator memory hierarchy and execution strategy.
-
-The lighthouse models introduced in @tbl-lighthouse-examples ground this analysis: ResNet-50 represents CNN workloads with high spatial reuse and heavy activation footprint, GPT-2 and Llama exemplify transformer memory pressure spanning both parameter capacity and intermediate attention states, DLRM illustrates sparse embedding lookups that stress random-access memory bandwidth rather than dense compute, and MobileNetV2 demonstrates efficiency-optimized architectures where depthwise convolutions trade arithmetic intensity for lower parameter footprint. Their memory characteristics reveal how computational graph structure dictates physical hardware utilization.
-
-#### Multilayer perceptrons {#sec-hardware-acceleration-multilayer-perceptrons-0bbc}
-
-An MLP layer is a dense matrix multiplication followed by optional bias, activation, and normalization. Its operational intensity depends directly on the batch size: at batch size $B = 1$, each parameter loaded from off-chip memory serves only a single multiply-accumulate operation, yielding low arithmetic intensity (often $\le 1\text{ FLOP/byte}$) that starves ALUs and leaves execution memory-bandwidth bound. Increasing the batch size reuses each loaded weight matrix across $B$ independent input vectors, scaling arithmetic intensity until the matrix multiplication reaches the accelerator's compute-bound roofline ceiling.
-
-Dense weight matrices regularly exceed the tens of megabytes available in on-chip SRAM, requiring parameters to reside in device-local DRAM (HBM or GDDR). The host interconnect (such as PCIe) enters the critical path only when streaming dynamic inputs or when parameters and activations exceed device memory capacity and require host offloading.
-
-Because MLP memory access patterns are regular and predictable, accelerators tile matrix operations into blocks that fit within on-chip SRAM and register files. Hardware double-buffering prefetches subsequent weight and activation tiles from DRAM into SRAM concurrently with arithmetic execution on current tiles. Delivered throughput therefore depends on whether the batch size provides sufficient arithmetic intensity and whether matrix dimensions align cleanly with hardware tile boundaries [@chen2017].
-
-#### Convolutional neural networks {#sec-hardware-acceleration-convolutional-neural-networks-3085}
-
-A convolutional layer processes input feature maps using small filter kernels that slide across spatial dimensions\index{CNN!spatial data reuse}. This localized sliding-window structure yields high arithmetic intensity through three distinct forms of data reuse: convolutional reuse (neighboring spatial windows share input activations), filter reuse (the same kernel weights evaluate across every spatial position), and channel reuse (input channels are evaluated across multiple output filters). Unlike MLPs, where weight matrices dominate memory footprint, early CNN layers feature compact parameter tensors but produce massive intermediate activation maps.
-
-Because intermediate activation tensors frequently exceed on-chip SRAM capacity, unoptimized layer-by-layer execution would continuously spill feature maps to device DRAM, bottlenecking the pipeline on memory bandwidth. Accelerators prevent these round-trips through spatial tiling: dividing activations and filters into tiles dimensioned to fit within on-chip SRAM buffers [@chen2017]. Staging overlapping boundary pixels directly in local memory allows adjacent convolutions to consume activations without refetching them across the device DRAM bus.
-
-Specialized CNN accelerators configure their hardware dataflow around these reuse patterns. The Eyeriss architecture introduced a row-stationary dataflow\index{Eyeriss!row-stationary dataflow} that maps one-dimensional rows of filter weights and activations to processing engine registers, keeping filter rows and accumulating partial sums stationary in local storage to minimize energy-intensive interconnect traffic [@chen2016eyeriss]. In the broader taxonomy of @sec-hardware-acceleration-dataflow-optimization-strategies-ce52, this design exemplifies a hybrid dataflow that exploits multidimensional convolutional reuse across registers, SRAM buffers, and execution units.
-
-#### Transformer networks {#sec-hardware-acceleration-transformer-networks-638c}
-
-The transformer architecture replaces local sliding windows with global self-attention[^fn-attention-memory-pressure] and dense feed-forward blocks, creating dual memory bottlenecks: quadratic intermediate attention matrices and massive parameter footprints.
-
-::: {.column-margin .margin-pointer}
-↩ The transformer architecture, which pairs self-attention with feed-forward blocks and drops recurrence, is established in @sec-network-architectures-transformers-attentiononly-architecture-1b56.
-:::
-
-[^fn-attention-memory-pressure]: **Attention mechanism**\index{Attention mechanism!memory pressure}: Bahdanau, Cho, and Bengio introduced attention for sequence-to-sequence models; Transformer self-attention later allowed each token to attend to every token in the sequence [@bahdanau2015neural; @vaswani2017]; materializing full attention scores for a sequence of length $S$ requires an $S{\times}S$ matrix, producing quadratic intermediate storage. FlashAttention tiles the computation to avoid materializing that full matrix in HBM [@dao2022]. The inference KV cache is separate: its capacity grows linearly with sequence length per layer, although each decode step reads an increasing cache.
-
-Global token interaction\index{Attention Mechanism!global token interaction} produces distinct memory challenges during training and inference. In standard multi-head attention, computing pairwise token affinity generates an $S \times S$ score matrix for sequence length $S$. Materializing this intermediate matrix in HBM repeatedly reads and writes $\mathcal{O}(S^2)$ data across the memory bus, saturating bandwidth even though matrix multiplication arithmetic units remain underutilized. Tiled attention algorithms, such as FlashAttention [@dao2022], resolve this bottleneck by staging query, key, and value blocks in on-chip SRAM, computing online softmax reductions locally, and streaming outputs directly to HBM without materializing the quadratic intermediate matrix in device DRAM.
-
-In autoregressive inference, memory pressure shifts to the key-value (KV) cache. Generating each subsequent token requires reading the accumulated historical KV states from HBM for a single vector-matrix operation, operating at very low arithmetic intensity and binding generation speed directly to memory bandwidth.
-
-::: {.column-margin .margin-pointer}
-↪ The KV cache's growth with sequence length and its claim on accelerator memory are developed in @sec-model-serving-memory-kv-cache-d1ea.
-:::
-
-When a large language model's weights and runtime state exceed the chosen accelerator's HBM capacity [@brown2020language], capacity becomes a placement constraint. Distributing these models across multiple accelerators requires partitioning weights and activations across GPUs. Within a server node, high-bandwidth interconnects like NVLink provide the interconnect throughput necessary to sustain all-reduce and all-gather collectives during tensor and sequence parallelism, where standard PCIe links would throttle execution. System runtimes schedule asynchronous transfers to overlap these cross-accelerator communication phases with local matrix multiplication arithmetic [@narayanan2021].
-
-### Accelerator design implications {#sec-hardware-acceleration-ml-accelerators-implications-c962}
-
-Workload-specific accelerator design is dictated by the memory and data-flow requirements of target neural network architectures\index{Accelerator!design, workload-specific memory}. Within the D·A·M taxonomy, the algorithmic formulation directly shapes data movement patterns across the physical memory hierarchy, making a single rigid hardware architecture inefficient across different model classes. @tbl-model-mem-compare compares the resulting tensor dimensions, reuse profiles, access regularities, and potential memory pressures across foundational model families under the stated workload conditions.
-
-| **Model type**\index{Model type!definition} | **Weight size**\index{Weight size!definition}       | **Activation reuse**\index{Activation reuse!definition} | **Memory access pattern**\index{Memory access pattern!definition} | Potential Memory Pressure   |
-|:--------------------------------------------|:----------------------------------------------------|:--------------------------------------------------------|:------------------------------------------------------------------|:----------------------------|
-| **MLP (Dense)**                             | Large, dense                                        | Low                                                     | Regular, sequential (streamed)                                    | Bandwidth at low batch      |
-| CNN                                         | Small, reused                                       | High                                                    | Spatial locality                                                  | Feature map movement        |
-| Transformer                                 | Large, usually dense; sparse in MoE/pruned variants | Low-to-medium                                           | Mostly regular GEMM plus KV-cache/attention traffic               | Memory capacity + bandwidth |
-
-: **ML Model Memory Access**: Representative memory pressures vary with weight size, activation reuse, execution phase, batch size, and data movement; these rows are starting hypotheses rather than fixed bottleneck classifications. Standard dense transformers demand high bandwidth and capacity because large weights, KV caches, and attention traffic dominate memory pressure; sparse MoE or pruned variants add further routing and sparsity considerations. CNNs benefit from spatial locality and high activation reuse, reducing memory pressure. {#tbl-model-mem-compare tbl-colwidths="[16,25,16,25,18]"}
-
-Each model architecture listed in @tbl-model-mem-compare exercises the memory subsystem differently. In CNNs, small filter kernels slide over large spatial feature maps, offering extraordinarily high activation and weight reuse. Accelerators capitalize on this spatial locality by staging feature tiles in on-chip SRAM, keeping the arithmetic pipelines fed while minimizing off-chip traffic. By contrast, large MLPs and the dense feed-forward layers of standard transformers often face a bandwidth ceiling, particularly at low batch sizes where weight tensors are streamed from HBM with minimal reuse. MoE transformers fundamentally alter this pressure: they expand total weight capacity significantly but activate only a sparse subset of experts per token. This sparsity creates irregular, data-dependent memory access patterns. An accelerator running an MoE model might have ample compute capacity, but its memory controller will struggle with the irregular pointer-chasing and routing logic that defeats the regular, predictable streaming access enjoyed by dense models. Finally, all transformer architectures face the unique capacity and bandwidth demands of the dynamic Key-Value (KV) cache during autoregressive generation.
-
-Hardware architects address these divergent demands with multi-tier memory hierarchies. On-chip SRAM (caches and scratchpad memories) provides tens of terabytes per second of bandwidth at low latency, capturing high-reuse activations and tiled matrix blocks. HBM provides the capacity and throughput required to stage massive weight tensors and dynamic sequence states. When model scale exceeds the physical memory capacity of an individual accelerator, high-speed interconnects such as NVLink supply peer-to-peer inter-accelerator bandwidth for distributed tensor and pipeline parallelism, avoiding the narrower host PCIe bus.
-
-Because a reference off-chip DRAM access costs far more energy per event than arithmetic (@fig-energy-hierarchy), reducing repeated external accesses can improve hardware efficiency. The workload's access and operation counts determine the total energy saving. Determining whether a given kernel execution is constrained by compute throughput or memory bandwidth requires an analytical boundary. The roofline model establishes this relationship by comparing operational intensity against hardware performance limits, narrowing the candidate bottlenecks that profiling must test.
-
-## Roofline Model {#sec-hardware-acceleration-roofline-model-42ff}
-
-::: {#margin-roofline-elbow .column-margin}
-![](images/svg/hw_acceleration_roofline_elbow.svg){width="100%" fig-alt="Roofline elbow: a blue memory-bound slope rises left to right to a short orange compute-bound ceiling, with a dashed vertical ridge line at the bend and one workload dot sitting low on the blue slope, far below the ridge in the memory-bound region."}
-
-*Low arithmetic intensity places the modeled throughput ceiling on the bandwidth slope.*
-:::
-
-Peak FLOP/s indicates what execution units can deliver when operands are already on chip, but sustained accelerator throughput is ultimately bounded by the rate at which the memory hierarchy delivers data. The Roofline Model[^fn-roofline-performance-model]\index{Roofline Model!efficiency measurement} [@williams2009] (whose core concept is sketched in [roofline elbow diagram](#margin-roofline-elbow)), the same model that sorted training kernels in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446, formalizes this relationship by plotting attainable performance against arithmetic intensity, distinguishing a compute-bound\index{Compute-Bound!roofline classification} ceiling from a memory-bound\index{Memory-Bound!roofline classification} ceiling before profiling establishes what limits actual execution. Rather than evaluating compute capacity in isolation, the model intersects hardware arithmetic throughput with memory bandwidth, revealing which physical ceiling binds execution before an engineer commits optimization effort.
-
-[^fn-roofline-performance-model]: **Roofline model**\index{Roofline model!optimization diagnostic}: Introduced by @williams2009 at UC Berkeley, building on earlier I/O complexity work from the 1980s. Their specific contribution was making the compute vs. bandwidth trade-off visual and actionable: the characteristic roofline plot immediately reveals whether a kernel is compute bound (hitting the flat ceiling) or memory bound (hitting the sloped bandwidth line) and quantifies the gap to hardware limits. A kernel operating at only 50 percent of its ceiling has 2$\times$ theoretical headroom, but instruction mix, latency, and occupancy may prevent it from closing that gap.
-
-```{python}
-#| echo: false
-#| label: roofline-utilization-gap-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ROOFLINE UTILIZATION GAP CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Utilization Gap" callout in §Roofline Model
-# │
-# │ Goal: Demonstrate why newer accelerators are harder to saturate each generation.
-# │ Show: Ridge points ~139 FLOP/byte (V100), ~153 (A100), ~296 (H100); rising gap.
-# │ How: ridge_point() = peak_flops/memory_bw via Hardware Digital Twin; both in
-# │      SI-compatible pint units so .to(flop/byte).magnitude extracts dimensionless ratio.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
-from mlsysim import Hardware
-
-# ┌── LEGO ───────────────────────────────────────────────
-class RooflineGap:
-    """
-    Namespace for Roofline Utilization Gap.
-    Scenario: Comparing Ridge Points across generations (V100 -> H100).
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Thresholds
-    legacy_ai = 200.0
-    relu_ai = 0.125
-    dense_matmul_dim = 1024
-    dense_matmul_bytes_per_val = 2
-
-    # Hardware Twins
-    h_v100 = Hardware.Cloud.V100
-    h_a100 = Hardware.Cloud.A100
-    h_h100 = Hardware.Cloud.H100
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Ridge Points (FLOP/byte) directly from Twins
-    v100_ridge = h_v100.ridge_point().to(flop / byte).magnitude
-    a100_ridge = h_a100.ridge_point().to(flop / byte).magnitude
-    h100_ridge = h_h100.ridge_point().to(flop / byte).magnitude
-
-    # Step 2: FP32 Ridge for A100
-    a100_ridge_fp32 = (h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth).to(flop / byte).magnitude
-
-    # Step 3: Display specs used by the nearby ridge-point prose
-    v100_flops = h_v100.compute.peak_flops
-    v100_bandwidth = h_v100.memory.bandwidth
-    a100_fp16_flops = h_a100.compute.peak_flops
-    a100_bandwidth = h_a100.memory.bandwidth
-    h100_fp16_flops = h_h100.compute.peak_flops
-    h100_bandwidth = h_h100.memory.bandwidth
-
-    # Step 4: Comparisons
-    bw_growth = (h_h100.memory.bandwidth / h_a100.memory.bandwidth).to_base_units().magnitude
-    flops_growth = (h_h100.compute.peak_flops / h_a100.compute.peak_flops).to_base_units().magnitude
-    relu_gap = h100_ridge / relu_ai
-    dense_matmul_flops = 2 * dense_matmul_dim**3
-    dense_matmul_bytes = 3 * dense_matmul_dim**2 * dense_matmul_bytes_per_val
-    dense_matmul_ai = dense_matmul_flops / dense_matmul_bytes
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    # Ridge points must climb: H100 > A100 > V100
-    check(h100_ridge > a100_ridge > v100_ridge, f"Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
-    check(relu_gap >= 1000, f"ReLU gap ({relu_gap:.0f}x) is too small.")
-    check(dense_matmul_ai > h100_ridge, f"Large matmul should clear the H100 ridge, got AI={dense_matmul_ai:.0f}.")
-    check(
-        300 <= a100_fp16_flops.to(TFLOP / second).magnitude <= 320,
-        f"A100 FP16 peak should be near 312 TFLOP/s, got {a100_fp16_flops.to(TFLOP/second).magnitude:.0f}.",
-    )
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_tflop_per_s_str = fmt_flop_rate(v100_flops, unit=TFLOP / second, precision=0, commas=False)
-    v100_bw_tb_per_s_str = fmt_bandwidth(v100_bandwidth, unit=TB / second, precision=1, commas=False)
-    a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
-    a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
-    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
-    h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
-
-    v100_year_str = fmt(h_v100.release_year, precision=0, commas=False)
-    a100_year_str = fmt(h_a100.release_year, precision=0, commas=False)
-    h100_year_str = fmt(h_h100.release_year, precision=0, commas=False)
-
-    v100_ridge_str = fmt_arithmetic_intensity(h_v100.ridge_point(), unit=flop / byte, commas=False)
-    a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, commas=False)
-    h100_ridge_str = fmt_arithmetic_intensity(h_h100.ridge_point(), unit=flop / byte, commas=False)
-    a100_ridge_fp32_str = fmt_arithmetic_intensity(
-        h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth, unit=flop / byte, precision=1, commas=False
-    )
-
-    legacy_ai_str = fmt(legacy_ai, precision=0, commas=False)
-    relu_ai_str = fmt(relu_ai, precision=3, commas=False)
-    dense_matmul_dim_str = fmt(dense_matmul_dim, precision=0, commas=False)
-    dense_matmul_ai_str = fmt(dense_matmul_ai, precision=1, commas=False)
-    bandwidth_ratio_mult_str = fmt_multiple(bw_growth, precision=1, commas=False)
-    flops_ratio_mult_str = fmt_multiple(flops_growth, precision=1, commas=False)
-    full_util_pct_str = fmt_percent(1.0, precision=0, commas=False, style='prose')
-```
-
-Performance is bounded by two ceilings, as @eq-roofline formalizes; it writes the bound of the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) as an idealized equality that ignores launch and synchronization overheads. Here, attainable performance $\AttainableComputeRate$ and peak compute $\PeakRate$ are in FLOP/s (often reported as TFLOP/s), peak bandwidth $\Bandwidth$ is in bytes/s (often TB/s), and arithmetic intensity $I$ is in FLOP/byte:
-$$\AttainableComputeRate = \min(\PeakRate, \Bandwidth \times I)$$ {#eq-roofline}
-
-::: {#dfn-hw-acceleration-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
-
-***Arithmetic intensity***\index{Arithmetic intensity!definition} is the ratio of operations to bytes transferred across the memory interface being modeled ($\text{FLOP}/\text{byte}$). Together with that level's bandwidth and the relevant compute peak, it determines which idealized roofline ceiling is lower.
-
-1.  **Significance**: The threshold between the two ceilings is the ridge point $\PeakRate / \Bandwidth$. For an A100 (`{python} RooflineGap.a100_fp16_tflop_per_s_str` FP16/BF16, `{python} RooflineGap.a100_bw_tb_per_s_str`), it is roughly `{python} RooflineGap.a100_ridge_str`. Under the stated traffic models, a large well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, while standalone ReLU is about `{python} RooflineGap.relu_ai_str` FLOP/byte. They therefore meet different ceilings on the same hardware.
-2.  **Distinction**: Unlike total FLOPs (a count of operations), arithmetic intensity is a ratio that characterizes the shape of a workload's hardware demand. Two kernels with identical FLOPs but different memory access patterns can have different arithmetic intensities and face different modeled ceilings on the same hardware.
-3.  **Common pitfall**: A frequent misconception is that arithmetic intensity is a fixed property of an operation. In practice, it depends on implementation details: a naive matrix multiplication that reloads operands from DRAM for each output element has low arithmetic intensity; a blocked (tiled) implementation that reuses data from fast SRAM achieves high arithmetic intensity—the same mathematical operation, orders of magnitude apart in hardware efficiency.
-
-:::
-
-With $O$ as the operation count and $\DataVolume$ as data volume in bytes, @eq-arithmetic-intensity makes the definition operational.
-$$\ArithmeticIntensity = \frac{O}{\DataVolume}$$ {#eq-arithmetic-intensity}
-
-The roofline visualization shows performance (TFLOP/s) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, the upper bound increases linearly along the memory bandwidth slope ($\Bandwidth \times \ArithmeticIntensity$). Above the ridge point, the upper bound is peak compute ($\PeakRate$). Actual performance can lie below both limits. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps each regime to the optimizations that pay off and the ones that waste effort, so that modeled placement suggests candidate investments whose benefits must be tested against measured execution.
-
-::: {.column-margin .margin-pointer}
-↪ The optimizations that pay off in each regime, and the ones that waste effort, are operationalized in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
-:::
 
 ### Hardware balance: The paradigm partition {#sec-hardware-acceleration-hardware-balance}
 
@@ -4289,240 +3808,6 @@ Across these designs, the binding physical constraint is compute density versus 
 
 That same dependence on locality governs which algorithmic optimizations the hardware can actually exploit. A regular grid of processing elements accelerates sparsity only when the surviving nonzero values preserve the predictable access patterns the grid depends on, which is precisely the constraint that N:M structured sparsity is designed to satisfy.
 
-### N:M structured sparsity mechanics {#sec-hardware-acceleration-nm-structured-sparsity-mechanics-9a71}
-
-While unstructured pruning reduces model parameter counts, it rarely translates to hardware speedup\index{Sparsity!hardware speedup requirement} because arbitrary nonzero placements destroy memory locality. Hardware accelerators resolve this with N:M structured sparsity\index{Sparsity!N:M structured pattern},[^fn-sparsity-nm-regularity] a pruning constraint that bounds sparsity to a deterministic, fine-grained pattern. The label "N:M" specifies that exactly $n$ of every $m$ contiguous values along the reduction dimension must be nonzero. Restricting nonzeros to fixed local intervals guarantees uniform memory access and predictable indexing across parallel execution units.
-
-::: {.column-margin .margin-pointer}
-↩ The N:M and 2:4 structured sparsity patterns and their compressed storage are established in @sec-model-compression-structured-pruning-9692.
-:::
-
-[^fn-sparsity-nm-regularity]: **N:M structured sparsity**\index{Structured sparsity!N:M pattern}: The 2:4 ratio (50 percent density) used by NVIDIA's Ampere Sparse Tensor Cores is a hardware-friendly compromise: every contiguous four-value group retains two nonzero values, preserving regular indexing while halving the dense value payload [@NVIDIA2020]. At 2:4, the metadata overhead is compact enough to store alongside the weights without overwhelming the memory-traffic savings, which is the constraint that makes the advertised 2$\times$ tensor-math throughput path plausible when kernels and model weights satisfy the pattern.
-
-Parallel architectures require structural regularity because of how sparse matrices must be encoded in memory. Classical formats such as Compressed Sparse Row (CSR) and Block Compressed Sparse Row (BSR)—treated formally in @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0—rely on auxiliary index arrays to locate nonzero entries. Compressed formats pack retained values and indices, but the corresponding activation gathers can touch scattered addresses, reducing useful bytes per memory transaction. Varying numbers of nonzeros across rows can also create load imbalance and divergent execution. Coarse block sparsity groups retained values into larger dense tiles to improve regularity, at the cost of a more restrictive pruning pattern whose quality must be evaluated. @Fig-sparse-formats contrasts these four occupancy patterns—dense, CSR, block-sparse, and BSR—diagramming how the auxiliary nonzero block indices (blocks 1 and 3 of the block-sparse matrix, block 2 of the BSR matrix) route hardware memory fetches directly to populated $3\times 3$ tiles while bypassing unallocated blocks.
-
-::: {.column-margin .margin-pointer}
-↪ The CSR storage format is developed in @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0.
-:::
-
-::: {#fig-sparse-formats fig-env="figure" fig-pos="htb" fig-cap="**Sparse Matrix Layouts**: The four panels compare dense, CSR, block-sparse, and BSR matrix occupancy patterns. The separate nonzero-block-index column represents the metadata required to locate retained blocks in the block-sparse cases. Regular block structure keeps this metadata predictable and compact so hardware can skip zero blocks and fetch retained blocks efficiently." fig-alt="Four 3-by-9 cell grids labeled Dense Matrix, Sparse Matrix (CSR), Block Sparse Matrix, and Block Sparse (BSR). Blue cells mark retained values or blocks against gray cells. Nonzero block indices 1 and 3 connect by arrows to the two retained blocks of the block-sparse grid, and index 2 connects to the one retained block of the BSR grid."}
-
-```{.tikz}
-\begin{tikzpicture}[ x=5mm,y=5mm,line join=round,font=\sffamily\small]
-\tikzset{%
-  cell/.style={draw=white, line width=0.6pt},
-  gridline/.style={draw=black!70, line width=1.5pt},
-  Arr/.style={->,>=Latex,line width=0.75pt},
-}
-  % dimensions
-  \def\Rows{3}
-  \def\Cols{9}
-
-\definecolor{blue1}{RGB}{23,68,150}
-\definecolor{blue2}{RGB}{84,131,217}
-\definecolor{blue3}{RGB}{145,177,237}
-  %—2) Macro: paint cell (r,c) with color ---
-  \newcommand{\ColorCell}[3]{% #1=row, #2=col, #3=color
-    \pgfmathtruncatemacro{\yy}{\Rows-#1}
-    \fill[#3] (#2-1,\yy) rectangle ++(1,1);
-    \draw[cell] (#2-1,\yy) rectangle ++(1,1);
-  }
-%Grid 9x3
-\newcommand{\Gridd}{%
-\foreach \r in {1,...,\Rows}{
-  \foreach \c in {1,...,\Cols}{
-    \pgfmathtruncatemacro{\yy}{\Rows-\r}
-
-    % draw cell
-    \fill[gray!25] (\c-1,\yy) rectangle ++(1,1);
-    \draw[cell]    (\c-1,\yy) rectangle ++(1,1);
-
-    % corners
-    \coordinate (\br-cell-\r-\c-sw) at (\c-1,\yy);
-    \coordinate (\br-cell-\r-\c-se) at (\c,\yy);
-    \coordinate (\br-cell-\r-\c-nw) at (\c-1,\yy+1);
-    \coordinate (\br-cell-\r-\c-ne) at (\c,\yy+1);
-    \coordinate (\br-cell-\r-\c-n) at (\c-0.5,\yy+1);
-    % center
-    \coordinate (cell-\r-\c) at (\c-0.5,\yy+0.5);
-  }
-}
-}
-%%%%%%%%%%%%%
-%Dense Matrix
-%%%%%%%%%%%%%
-\begin{scope}[local bounding box=BLOCK-A,shift={(0.0,0.0)}]
-%—1) Base + all cell coordinates ---
-\def\br{A}
-\Gridd
-
-  \ColorCell{1}{1}{blue2}
-  \ColorCell{1}{2}{blue3}
-  \ColorCell{1}{3}{blue2}
-  \ColorCell{2}{1}{blue2}
-  \ColorCell{2}{2}{blue1}
-  \ColorCell{2}{3}{blue2}
-  \ColorCell{3}{1}{blue2}
-  \ColorCell{3}{2}{blue2}
-  \ColorCell{3}{3}{blue2}
-%Center
-  \ColorCell{1}{4}{blue1}
-  \ColorCell{1}{5}{blue2}
-  \ColorCell{1}{6}{blue2}
-  \ColorCell{2}{4}{blue3}
-  \ColorCell{2}{5}{blue2}
-  \ColorCell{2}{6}{blue1}
-  \ColorCell{3}{4}{blue2}
-  \ColorCell{3}{5}{blue1}
-  \ColorCell{3}{6}{blue2}
-%Right
-  \ColorCell{1}{7}{blue2}
-  \ColorCell{1}{8}{blue2}
-  \ColorCell{1}{9}{blue1}
-  \ColorCell{2}{7}{blue1}
-  \ColorCell{2}{8}{blue3}
-  \ColorCell{2}{9}{blue2}
-  \ColorCell{3}{7}{blue2}
-  \ColorCell{3}{8}{blue2}
-  \ColorCell{3}{9}{blue3}
-%—4) Thick frame around the entire 9x3 grid ---
-  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
-
-% (optional) thick vertical division after 3 and after 6 columns (as in the picture)
-  \draw[gridline] (3,0) -- (3,\Rows);
-  \draw[gridline] (6,0) -- (6,\Rows);
-\end{scope}
-%%%%%%%%%%%%%
-%Sparse Matrix (CSR)
-%%%%%%%%%%%%%
-\begin{scope}[local bounding box=BLOCK-B,shift={(0.0,-6.7)}]
-%—1) Base + all cell coordinates ---
-\def\br{B}
-\Gridd
-
-  \ColorCell{1}{2}{blue2}
-  \ColorCell{1}{8}{blue1}
-  \ColorCell{2}{5}{blue2}
-  \ColorCell{3}{1}{blue1}
-  \ColorCell{3}{6}{blue3}
-
-%—4) Thick frame around the entire 9x3 grid ---
-  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
-
-% (optional) thick vertical division after 3 and after 6 columns (as in the picture)
-  \draw[gridline] (3,0) -- (3,\Rows);
-  \draw[gridline] (6,0) -- (6,\Rows);
-\end{scope}
-%%%%%%%%%%%%%
-%Block Sparse Matrix
-%%%%%%%%%%%%%
-\begin{scope}[local bounding box=BLOCK-C,shift={(12,0,0)}]
-%—1) Base + all cell coordinates ---
-\def\br{C}
-\Gridd
-%LEFT
-  \ColorCell{1}{1}{blue2}
-  \ColorCell{1}{2}{blue3}
-  \ColorCell{1}{3}{blue2}
-  \ColorCell{2}{1}{blue2}
-  \ColorCell{2}{2}{blue1}
-  \ColorCell{2}{3}{blue2}
-  \ColorCell{3}{1}{blue2}
-  \ColorCell{3}{2}{blue2}
-  \ColorCell{3}{3}{blue2}
-%RIGHT
-  \ColorCell{1}{7}{blue1}
-  \ColorCell{1}{8}{blue2}
-  \ColorCell{1}{9}{blue2}
-  \ColorCell{2}{7}{blue3}
-  \ColorCell{2}{8}{blue2}
-  \ColorCell{2}{9}{blue1}
-  \ColorCell{3}{7}{blue2}
-  \ColorCell{3}{8}{blue1}
-  \ColorCell{3}{9}{blue2}
-%
-
-  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
-  \draw[gridline] (3,0) -- (3,\Rows);
-  \draw[gridline] (6,0) -- (6,\Rows);
-\end{scope}
-%%%%%%%%%%%%%
-%Block Sparse (BSR)
-%%%%%%%%%%%%%
-\begin{scope}[local bounding box=BLOCK-D,shift={(12,-6.7)}]
-%—1) Base + all cell coordinates ---
-\def\br{D}
-\Gridd
-  \ColorCell{1}{4}{blue1}
-  \ColorCell{1}{5}{blue2}
-  \ColorCell{1}{6}{blue2}
-  \ColorCell{2}{4}{blue3}
-  \ColorCell{2}{5}{blue2}
-  \ColorCell{2}{6}{blue1}
-  \ColorCell{3}{4}{blue2}
-  \ColorCell{3}{5}{blue1}
-  \ColorCell{3}{6}{blue2}
-
-  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
- \draw[gridline] (3,0) -- (3,\Rows);
- \draw[gridline] (6,0) -- (6,\Rows);
-\end{scope}
-% =========================
-% MINI GRID: 1-by-6
-% =========================
-\begin{scope}[local bounding box=MINI-G,shift={(27,2.1)},node distance=-0.95pt,
-mCell/.style={draw=black!60,rectangle,minimum width=7.5mm,
-minimum height=7.5mm,line width=0.75pt, fill=orange!15}]
-\node[mCell](R1){1};
-\node[mCell,below =of R1](R2){3};
-\node[mCell](R3)at(0,-7.3){2};
-\draw[black!70, line width=1pt] (R1.north west) rectangle (R2.south east);
-\draw[black!70, line width=1pt] (R3.north west) rectangle (R3.south east);
-\end{scope}
-%%%%%%
-\node[below=1pt of BLOCK-A]{Dense Matrix};
-\node[below=1pt of BLOCK-B]{Sparse Matrix (CSR)};
-\node[below=1pt of BLOCK-C]{Block Sparse Matrix};
-\node[below=1pt of BLOCK-D](BSS){Block Sparse  (BSR)};
-\path[red](BSS)-|coordinate(SR1)(MINI-G);
-\node[align=center]at(SR1){Non-zero Block Indices};
-%
-%—Above   (R1,R2 -> retained blocks 1 and 3 of BLOCK-C) ---
-\coordinate (busC) at ([xshift=-7mm]R1.west);
-%
-\coordinate (tapC1) at (busC |- R1.west);
-\coordinate (tapC2) at (busC |- R2.west);
-\coordinate (tapCm) at ($(tapC1)!0.5!(tapC2)$);
-% Arrows:
-\draw[] (R1.west) -- (tapC1) ;
-\draw[] (R2.west) -- (tapC2);
-%
-\draw[Arr] (tapCm)--++(-1.2,0)--++(0,2.75)-| (C-cell-1-2-n);
-\draw[Arr] (tapCm)--++(-1.2,0)--++(0,2.75)-| (C-cell-1-8-n);
-\draw[black!60,line width=4.0pt]
-  ([yshift= 4mm]busC |- R1.west) -- ([yshift=-3mm]busC |- R2.west);
-\fill[black!70] ($(tapCm)+(-3pt,0)$) circle (1.75pt);
-
-% ---Below (R3 -> retained block 2 of BLOCK-D) ---
-\coordinate (busD) at ([xshift=-7mm]R3.west);
-\coordinate (tapD3) at (busD |- R3.west);
-\draw[] (R3.west) -- (tapD3);
-  %
-\draw[Arr] (tapD3)--++(-1.2,0)--++(0,2.5)-| (D-cell-1-5-n);
-\draw[black!60,line width=4.0pt]
-  ([yshift= 4mm]busD |- R3.west) -- ([yshift=-4mm]busD |- R3.west);
-  \fill[black!70] ($(tapD3)+(-3pt,0)$) circle (1.75pt);
-\end{tikzpicture}
-```
-
-:::
-
-NVIDIA's Sparse Tensor Cores\index{Sparse Tensor Core!2:4 constraint} implement a concrete instance of fine-grained structured sparsity: the 2:4 constraint\index{Sparsity!structured, 2:4 hardware support}, which requires that exactly two of every contiguous block of four values along the reduction dimension be nonzero [@NVIDIA2020; @nvidia_cusparse_block]. In memory, the weight matrix is stored in compressed form: only the two nonzero values are retained, accompanied by a 4-bit metadata tag per block (2 bits per value) indicating each nonzero element's original position within the four-element vector. During execution, the memory hierarchy transfers only the compressed weights and their metadata, halving the weight-value payload while adding metadata traffic; total transferred bytes therefore fall by less than half before other overheads. Inside the Sparse Tensor Core datapath, the 4-bit metadata steers an internal multiplexer network that selects the matching two values from an uncompressed four-element activation vector. These selected activations and the two nonzero weights are then routed into a half-sized dot-product multiplier tree. Because the hardware computes only on the nonzeros while streaming compressed weights, this design doubles the peak arithmetic instruction throughput—yielding an advertised 2$\times$ tensor-math speedup over dense operations when weights are fine-tuned to satisfy the pattern.
-
-The 2:4 pattern reinforces the central reality of the memory wall: hardware accelerators gain efficiency not by computing on zeros faster, but by eliminating their transfer entirely. The reduced weight payload can lower traffic across HBM and on-chip SRAM. A roofline comparison must use consistent accounting: useful dense-equivalent operations can stay fixed while bytes decrease, whereas the count of physically executed sparse operations also decreases. Metadata and activation traffic remain in either traffic budget.
-
-While Sparse Tensor Cores accelerate matrix multiplication by filtering operands through multiplexers within a SIMT datapath, alternative architectures reduce pressure on memory bandwidth by altering how data moves through space. Rather than repeatedly cycling activations between execution units and centralized register files, systolic arrays forward intermediate values directly between neighboring processing elements across a physical grid.
-
 ### Systolic arrays {#sec-hardware-acceleration-systolic-arrays-6fa8}
 
 While Tensor Cores package matrix operations into small, specialized instruction tiles, systolic arrays structure processing elements into large two-dimensional grids optimized for continuous data flow and operand reuse. By pulsing inputs horizontally and partial sums vertically through the array, systolic architectures minimize expensive DRAM fetches, enabling low-precision, quantized weights to achieve maximum compute density. The core motivation for systolic architectures stems from the same energy constraint that drives accelerator design: minimizing memory access penalties through physical operand reuse. A simple energy comparison through the array reveals why this architecture has become central to modern AI accelerators.
@@ -4793,6 +4078,240 @@ class TilingPrinciple:
     tile_product_count_str = fmt_int(tile_products)
     reuse_factor_mult_str = fmt_multiple(reuse_factor, precision=0, commas=False)
 ```
+
+### N:M structured sparsity mechanics {#sec-hardware-acceleration-nm-structured-sparsity-mechanics-9a71}
+
+While unstructured pruning reduces model parameter counts, it rarely translates to hardware speedup\index{Sparsity!hardware speedup requirement} because arbitrary nonzero placements destroy memory locality. Hardware accelerators resolve this with N:M structured sparsity\index{Sparsity!N:M structured pattern},[^fn-sparsity-nm-regularity] a pruning constraint that bounds sparsity to a deterministic, fine-grained pattern. The label "N:M" specifies that exactly $n$ of every $m$ contiguous values along the reduction dimension must be nonzero. Restricting nonzeros to fixed local intervals guarantees uniform memory access and predictable indexing across parallel execution units.
+
+::: {.column-margin .margin-pointer}
+↩ The N:M and 2:4 structured sparsity patterns and their compressed storage are established in @sec-model-compression-structured-pruning-9692.
+:::
+
+[^fn-sparsity-nm-regularity]: **N:M structured sparsity**\index{Structured sparsity!N:M pattern}: The 2:4 ratio (50 percent density) used by NVIDIA's Ampere Sparse Tensor Cores is a hardware-friendly compromise: every contiguous four-value group retains two nonzero values, preserving regular indexing while halving the dense value payload [@NVIDIA2020]. At 2:4, the metadata overhead is compact enough to store alongside the weights without overwhelming the memory-traffic savings, which is the constraint that makes the advertised 2$\times$ tensor-math throughput path plausible when kernels and model weights satisfy the pattern.
+
+Parallel architectures require structural regularity because of how sparse matrices must be encoded in memory. Classical formats such as Compressed Sparse Row (CSR) and Block Compressed Sparse Row (BSR)—treated formally in @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0—rely on auxiliary index arrays to locate nonzero entries. Compressed formats pack retained values and indices, but the corresponding activation gathers can touch scattered addresses, reducing useful bytes per memory transaction. Varying numbers of nonzeros across rows can also create load imbalance and divergent execution. Coarse block sparsity groups retained values into larger dense tiles to improve regularity, at the cost of a more restrictive pruning pattern whose quality must be evaluated. @Fig-sparse-formats contrasts these four occupancy patterns—dense, CSR, block-sparse, and BSR—diagramming how the auxiliary nonzero block indices (blocks 1 and 3 of the block-sparse matrix, block 2 of the BSR matrix) route hardware memory fetches directly to populated $3\times 3$ tiles while bypassing unallocated blocks.
+
+::: {.column-margin .margin-pointer}
+↪ The CSR storage format is developed in @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0.
+:::
+
+::: {#fig-sparse-formats fig-env="figure" fig-pos="htb" fig-cap="**Sparse Matrix Layouts**: The four panels compare dense, CSR, block-sparse, and BSR matrix occupancy patterns. The separate nonzero-block-index column represents the metadata required to locate retained blocks in the block-sparse cases. Regular block structure keeps this metadata predictable and compact so hardware can skip zero blocks and fetch retained blocks efficiently." fig-alt="Four 3-by-9 cell grids labeled Dense Matrix, Sparse Matrix (CSR), Block Sparse Matrix, and Block Sparse (BSR). Blue cells mark retained values or blocks against gray cells. Nonzero block indices 1 and 3 connect by arrows to the two retained blocks of the block-sparse grid, and index 2 connects to the one retained block of the BSR grid."}
+
+```{.tikz}
+\begin{tikzpicture}[ x=5mm,y=5mm,line join=round,font=\sffamily\small]
+\tikzset{%
+  cell/.style={draw=white, line width=0.6pt},
+  gridline/.style={draw=black!70, line width=1.5pt},
+  Arr/.style={->,>=Latex,line width=0.75pt},
+}
+  % dimensions
+  \def\Rows{3}
+  \def\Cols{9}
+
+\definecolor{blue1}{RGB}{23,68,150}
+\definecolor{blue2}{RGB}{84,131,217}
+\definecolor{blue3}{RGB}{145,177,237}
+  %—2) Macro: paint cell (r,c) with color ---
+  \newcommand{\ColorCell}[3]{% #1=row, #2=col, #3=color
+    \pgfmathtruncatemacro{\yy}{\Rows-#1}
+    \fill[#3] (#2-1,\yy) rectangle ++(1,1);
+    \draw[cell] (#2-1,\yy) rectangle ++(1,1);
+  }
+%Grid 9x3
+\newcommand{\Gridd}{%
+\foreach \r in {1,...,\Rows}{
+  \foreach \c in {1,...,\Cols}{
+    \pgfmathtruncatemacro{\yy}{\Rows-\r}
+
+    % draw cell
+    \fill[gray!25] (\c-1,\yy) rectangle ++(1,1);
+    \draw[cell]    (\c-1,\yy) rectangle ++(1,1);
+
+    % corners
+    \coordinate (\br-cell-\r-\c-sw) at (\c-1,\yy);
+    \coordinate (\br-cell-\r-\c-se) at (\c,\yy);
+    \coordinate (\br-cell-\r-\c-nw) at (\c-1,\yy+1);
+    \coordinate (\br-cell-\r-\c-ne) at (\c,\yy+1);
+    \coordinate (\br-cell-\r-\c-n) at (\c-0.5,\yy+1);
+    % center
+    \coordinate (cell-\r-\c) at (\c-0.5,\yy+0.5);
+  }
+}
+}
+%%%%%%%%%%%%%
+%Dense Matrix
+%%%%%%%%%%%%%
+\begin{scope}[local bounding box=BLOCK-A,shift={(0.0,0.0)}]
+%—1) Base + all cell coordinates ---
+\def\br{A}
+\Gridd
+
+  \ColorCell{1}{1}{blue2}
+  \ColorCell{1}{2}{blue3}
+  \ColorCell{1}{3}{blue2}
+  \ColorCell{2}{1}{blue2}
+  \ColorCell{2}{2}{blue1}
+  \ColorCell{2}{3}{blue2}
+  \ColorCell{3}{1}{blue2}
+  \ColorCell{3}{2}{blue2}
+  \ColorCell{3}{3}{blue2}
+%Center
+  \ColorCell{1}{4}{blue1}
+  \ColorCell{1}{5}{blue2}
+  \ColorCell{1}{6}{blue2}
+  \ColorCell{2}{4}{blue3}
+  \ColorCell{2}{5}{blue2}
+  \ColorCell{2}{6}{blue1}
+  \ColorCell{3}{4}{blue2}
+  \ColorCell{3}{5}{blue1}
+  \ColorCell{3}{6}{blue2}
+%Right
+  \ColorCell{1}{7}{blue2}
+  \ColorCell{1}{8}{blue2}
+  \ColorCell{1}{9}{blue1}
+  \ColorCell{2}{7}{blue1}
+  \ColorCell{2}{8}{blue3}
+  \ColorCell{2}{9}{blue2}
+  \ColorCell{3}{7}{blue2}
+  \ColorCell{3}{8}{blue2}
+  \ColorCell{3}{9}{blue3}
+%—4) Thick frame around the entire 9x3 grid ---
+  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
+
+% (optional) thick vertical division after 3 and after 6 columns (as in the picture)
+  \draw[gridline] (3,0) -- (3,\Rows);
+  \draw[gridline] (6,0) -- (6,\Rows);
+\end{scope}
+%%%%%%%%%%%%%
+%Sparse Matrix (CSR)
+%%%%%%%%%%%%%
+\begin{scope}[local bounding box=BLOCK-B,shift={(0.0,-6.7)}]
+%—1) Base + all cell coordinates ---
+\def\br{B}
+\Gridd
+
+  \ColorCell{1}{2}{blue2}
+  \ColorCell{1}{8}{blue1}
+  \ColorCell{2}{5}{blue2}
+  \ColorCell{3}{1}{blue1}
+  \ColorCell{3}{6}{blue3}
+
+%—4) Thick frame around the entire 9x3 grid ---
+  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
+
+% (optional) thick vertical division after 3 and after 6 columns (as in the picture)
+  \draw[gridline] (3,0) -- (3,\Rows);
+  \draw[gridline] (6,0) -- (6,\Rows);
+\end{scope}
+%%%%%%%%%%%%%
+%Block Sparse Matrix
+%%%%%%%%%%%%%
+\begin{scope}[local bounding box=BLOCK-C,shift={(12,0,0)}]
+%—1) Base + all cell coordinates ---
+\def\br{C}
+\Gridd
+%LEFT
+  \ColorCell{1}{1}{blue2}
+  \ColorCell{1}{2}{blue3}
+  \ColorCell{1}{3}{blue2}
+  \ColorCell{2}{1}{blue2}
+  \ColorCell{2}{2}{blue1}
+  \ColorCell{2}{3}{blue2}
+  \ColorCell{3}{1}{blue2}
+  \ColorCell{3}{2}{blue2}
+  \ColorCell{3}{3}{blue2}
+%RIGHT
+  \ColorCell{1}{7}{blue1}
+  \ColorCell{1}{8}{blue2}
+  \ColorCell{1}{9}{blue2}
+  \ColorCell{2}{7}{blue3}
+  \ColorCell{2}{8}{blue2}
+  \ColorCell{2}{9}{blue1}
+  \ColorCell{3}{7}{blue2}
+  \ColorCell{3}{8}{blue1}
+  \ColorCell{3}{9}{blue2}
+%
+
+  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
+  \draw[gridline] (3,0) -- (3,\Rows);
+  \draw[gridline] (6,0) -- (6,\Rows);
+\end{scope}
+%%%%%%%%%%%%%
+%Block Sparse (BSR)
+%%%%%%%%%%%%%
+\begin{scope}[local bounding box=BLOCK-D,shift={(12,-6.7)}]
+%—1) Base + all cell coordinates ---
+\def\br{D}
+\Gridd
+  \ColorCell{1}{4}{blue1}
+  \ColorCell{1}{5}{blue2}
+  \ColorCell{1}{6}{blue2}
+  \ColorCell{2}{4}{blue3}
+  \ColorCell{2}{5}{blue2}
+  \ColorCell{2}{6}{blue1}
+  \ColorCell{3}{4}{blue2}
+  \ColorCell{3}{5}{blue1}
+  \ColorCell{3}{6}{blue2}
+
+  \draw[gridline] (0,0) rectangle (\Cols,\Rows);
+ \draw[gridline] (3,0) -- (3,\Rows);
+ \draw[gridline] (6,0) -- (6,\Rows);
+\end{scope}
+% =========================
+% MINI GRID: 1-by-6
+% =========================
+\begin{scope}[local bounding box=MINI-G,shift={(27,2.1)},node distance=-0.95pt,
+mCell/.style={draw=black!60,rectangle,minimum width=7.5mm,
+minimum height=7.5mm,line width=0.75pt, fill=orange!15}]
+\node[mCell](R1){1};
+\node[mCell,below =of R1](R2){3};
+\node[mCell](R3)at(0,-7.3){2};
+\draw[black!70, line width=1pt] (R1.north west) rectangle (R2.south east);
+\draw[black!70, line width=1pt] (R3.north west) rectangle (R3.south east);
+\end{scope}
+%%%%%%
+\node[below=1pt of BLOCK-A]{Dense Matrix};
+\node[below=1pt of BLOCK-B]{Sparse Matrix (CSR)};
+\node[below=1pt of BLOCK-C]{Block Sparse Matrix};
+\node[below=1pt of BLOCK-D](BSS){Block Sparse  (BSR)};
+\path[red](BSS)-|coordinate(SR1)(MINI-G);
+\node[align=center]at(SR1){Non-zero Block Indices};
+%
+%—Above   (R1,R2 -> retained blocks 1 and 3 of BLOCK-C) ---
+\coordinate (busC) at ([xshift=-7mm]R1.west);
+%
+\coordinate (tapC1) at (busC |- R1.west);
+\coordinate (tapC2) at (busC |- R2.west);
+\coordinate (tapCm) at ($(tapC1)!0.5!(tapC2)$);
+% Arrows:
+\draw[] (R1.west) -- (tapC1) ;
+\draw[] (R2.west) -- (tapC2);
+%
+\draw[Arr] (tapCm)--++(-1.2,0)--++(0,2.75)-| (C-cell-1-2-n);
+\draw[Arr] (tapCm)--++(-1.2,0)--++(0,2.75)-| (C-cell-1-8-n);
+\draw[black!60,line width=4.0pt]
+  ([yshift= 4mm]busC |- R1.west) -- ([yshift=-3mm]busC |- R2.west);
+\fill[black!70] ($(tapCm)+(-3pt,0)$) circle (1.75pt);
+
+% ---Below (R3 -> retained block 2 of BLOCK-D) ---
+\coordinate (busD) at ([xshift=-7mm]R3.west);
+\coordinate (tapD3) at (busD |- R3.west);
+\draw[] (R3.west) -- (tapD3);
+  %
+\draw[Arr] (tapD3)--++(-1.2,0)--++(0,2.5)-| (D-cell-1-5-n);
+\draw[black!60,line width=4.0pt]
+  ([yshift= 4mm]busD |- R3.west) -- ([yshift=-4mm]busD |- R3.west);
+  \fill[black!70] ($(tapD3)+(-3pt,0)$) circle (1.75pt);
+\end{tikzpicture}
+```
+
+:::
+
+NVIDIA's Sparse Tensor Cores\index{Sparse Tensor Core!2:4 constraint} implement a concrete instance of fine-grained structured sparsity: the 2:4 constraint\index{Sparsity!structured, 2:4 hardware support}, which requires that exactly two of every contiguous block of four values along the reduction dimension be nonzero [@NVIDIA2020; @nvidia_cusparse_block]. In memory, the weight matrix is stored in compressed form: only the two nonzero values are retained, accompanied by a 4-bit metadata tag per block (2 bits per value) indicating each nonzero element's original position within the four-element vector. During execution, the memory hierarchy transfers only the compressed weights and their metadata, halving the weight-value payload while adding metadata traffic; total transferred bytes therefore fall by less than half before other overheads. Inside the Sparse Tensor Core datapath, the 4-bit metadata steers an internal multiplexer network that selects the matching two values from an uncompressed four-element activation vector. These selected activations and the two nonzero weights are then routed into a half-sized dot-product multiplier tree. Because the hardware computes only on the nonzeros while streaming compressed weights, this design doubles the peak arithmetic instruction throughput—yielding an advertised 2$\times$ tensor-math speedup over dense operations when weights are fine-tuned to satisfy the pattern.
+
+The 2:4 pattern reinforces the central reality of the memory wall: hardware accelerators gain efficiency not by computing on zeros faster, but by eliminating their transfer entirely. The reduced weight payload can lower traffic across HBM and on-chip SRAM. A roofline comparison must use consistent accounting: useful dense-equivalent operations can stay fixed while bytes decrease, whereas the count of physically executed sparse operations also decreases. Metadata and activation traffic remain in either traffic budget.
+
+While Sparse Tensor Cores accelerate matrix multiplication by filtering operands through multiplexers within a SIMT datapath, alternative architectures reduce pressure on memory bandwidth by altering how data moves through space. Rather than repeatedly cycling activations between execution units and centralized register files, systolic arrays forward intermediate values directly between neighboring processing elements across a physical grid.
 
 ### The tiling principle: Bridging graph and silicon {#sec-hardware-acceleration-tiling-principle}
 

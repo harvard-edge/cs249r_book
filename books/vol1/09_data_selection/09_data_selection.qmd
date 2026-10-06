@@ -1482,6 +1482,52 @@ class QualityMultiplier:
 
 :::
 
+### Data deduplication {#sec-data-selection-data-deduplication-6c20}
+
+While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets duplicate samples that add compute without adding learning signal. Deduplication\index{Deduplication!data selection optimization} can provide immediate efficiency gains, especially for exact and near-duplicates, and requires no model training. This makes it one of the most accessible optimizations in data selection, but near-duplicate thresholds must be validated so the pipeline does not remove useful distributional signal.
+
+The simplest form of deduplication\index{Deduplication!hash-based, exact matching} uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
+
+::: {.column-margin .margin-pointer}
+↩ Deduplication as a deterministic data-cleaning step that keeps training and serving pipelines consistent is established in @sec-data-engineering-ensuring-trainingserving-consistency-c683.
+:::
+
+Near-duplicate detection addresses content that differs at the byte level while retaining substantial token- or character-shingle overlap. For text, MinHash\index{MinHash!near-duplicate detection}[^fn-minhash-jaccard-dedup] with Locality-Sensitive Hashing\index{Locality-sensitive hashing!near-duplicate detection}[^fn-lsh-hashing-dedup] (LSH) approximates Jaccard similarity[^fn-jaccard-similarity-dedup] efficiently. In practice, the pipeline converts each document into a set of overlapping character or word $k$-shingles, compresses these sets into fixed-length MinHash signatures where the probability of hash collision equals Jaccard similarity, and partitions the signatures into $b$ bands of $r$ rows using LSH. Documents matching across all rows in any single band collide in the same bucket, restricting expensive similarity verification to likely candidates and avoiding an impossible $\mathcal{O}(\DatasetSize^2)$ all-pairs comparison across a corpus of $\DatasetSize$ web documents numbering in the billions. It can detect lightly edited content with high overlap, but it does not establish semantic paraphrase equivalence.
+
+[^fn-jaccard-similarity-dedup]: **Jaccard similarity**\index{Jaccard similarity!deduplication}: Defined as $|\mathcal{A} \cap \mathcal{B}| / |\mathcal{A} \cup \mathcal{B}|$ for two sets $\mathcal{A}$ and $\mathcal{B}$, ranging from 0 (disjoint) to 1 (identical). For deduplication, the metric compares sets of shingles across documents of different lengths. The threshold must be calibrated for the shingle definition, corpus, and downstream quality because no universal cutoff separates duplicates from legitimately related documents.
+
+[^fn-lsh-hashing-dedup]: **Locality-sensitive hashing (LSH)**\index{Locality-sensitive hashing!probabilistic bucketing}: LSH hashes MinHash signatures into buckets so that similar signatures are more likely to collide. Candidate generation avoids an exhaustive all-pairs comparison, while runtime and memory depend on signature width, banding, bucket sizes, and the number of candidates that require verification.
+
+[^fn-minhash-jaccard-dedup]: **MinHash**\index{MinHash!signature compression}: Invented by @broder1997resemblance to detect duplicate web pages for AltaVista, the algorithm creates compact signatures using random hash functions such that similar documents produce similar signatures with high probability. Each signature compresses a document to a fixed-size sketch, enabling pairwise similarity estimation in $\mathcal{O}(s)$ time for sketch size $s$.
+
+For images, perceptual hashing\index{Perceptual hashing!image deduplication} produces signatures robust to minor transformations like resizing and compression, identifying visually similar candidates stored in different formats. Embedding-based similarity\index{Deduplication!embedding-based} can retrieve semantic near-neighbor candidates by computing dense representations (CLIP[^fn-clip-embedding-dedup] [@radford2021learning] for images, sentence transformers for text), though proximity does not itself prove duplication and the approach incurs higher computational overhead.
+
+[^fn-clip-embedding-dedup]: **CLIP (Contrastive Language-Image Pretraining)**\index{Contrastive Language-Image Pretraining!semantic deduplication}\index{CLIP|see{Contrastive Language-Image Pretraining}}: Pretrained on 400 million image-text pairs, CLIP maps semantically related images and text into a shared embedding space [@radford2021learning]. Embeddings can retrieve candidates for review, but semantic proximity is not proof that two samples are duplicates. Generating embeddings also costs substantially more than computing perceptual hashes, with the ratio depending on model and hardware.
+
+Deduplication can reduce repeated-content memorization and avoid spending FLOPs on exact or near duplicates. It can also alter the corpus's intentional empirical weighting, so thresholds and downstream quality must be validated rather than assuming that every duplicate is harmful.
+
+The systems impact of deduplication shifts when input examples index persistent model state rather than streaming through stateless compute layers.
+
+::: {#lhs-data-selection-dlrm-embedding-deduplication .callout-lighthouse title="DLRM and embedding deduplication"}
+
+The DLRM lighthouse model is memory capacity-bound, and at production scale its embedding tables reach terabytes of storage for billions of user/item IDs. Much of this capacity is wasted on *cold embeddings*, IDs that appear rarely in training data.
+
+Data selection for DLRM can include interaction deduplication\index{Interaction deduplication} and embedding pruning\index{Embedding pruning} for cold IDs. Removing repeated interactions reduces training examples but shrinks an embedding table only when IDs disappear or the allocation, hashing, or sharing policy changes.
+
+:::
+
+### Data pruning by quality {#sec-data-selection-data-pruning-quality-3d69}
+
+Deduplication removes redundant samples, but a third category of problematic data remains: samples that actively harm learning. Quality-based pruning\index{Pruning!quality, label error detection} eliminates samples that either contribute no meaningful signal or introduce contradictory information that confuses the optimization process.
+
+Label error detection can be a high-impact form of quality pruning. Tools like Cleanlab\index{Cleanlab!label error detection} identify samples where the assigned label may be incorrect based on model confidence patterns across training. A sample that the model consistently predicts as class A but is labeled class B may be a hard boundary case, a distribution shift, a model blind spot, or an annotation mistake. The score should trigger review rather than automatic deletion; confirmed errors can then be corrected or removed.
+
+Outlier removal\index{Pruning!outlier removal} addresses a different pathology: samples far from any cluster center in feature space. Such points can indicate noise, annotation errors, or corruption, but they can also be the rare edge cases that define deployment risk. The key is distinguishing informative outliers from invalid samples, with conservative thresholds and slice-level review before removal.
+
+Low-information filtering\index{Pruning!low-information filtering} applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this often means removing high-perplexity\index{Perplexity!filtering, low-information text removal} garbled text (perplexity is a language model's measure of how surprising a text is, so high values can flag incoherent strings but also valid specialist or rare-language text) and, in some pipelines, low-perplexity boilerplate or repetitive text. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
+
+Beyond heuristics and perplexity, industrial pretraining pipelines rely heavily on *classifier-based filtering*: training a lightweight, high-throughput linear classifier (such as fastText) using curated, high-quality reference text (e.g., Wikipedia, books, and scientific papers) as positive examples and uncurated web dumps as negative examples. This classifier assigns each scraped document a continuous quality score, allowing pipelines to filter out millions of low-quality web pages at gigabyte-per-second ingestion speeds without the heavy computational burden of evaluating a full neural language model.
+
 ### Coreset selection algorithms {#sec-data-selection-coreset-selection-algorithms-2c74}
 
 Identifying which samples to retain requires systematic selection criteria. **Coreset selection**\index{Coreset!definition}\index{Static pruning!coreset selection}[^fn-coreset-geometry-selection] turns the static pruning decision into a coverage problem: keep the smallest subset that preserves the statistical properties of the entire dataset.
@@ -1691,53 +1737,7 @@ train_full_model(model, coreset)
 
 :::
 
-### Data deduplication {#sec-data-selection-data-deduplication-6c20}
-
-While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets duplicate samples that add compute without adding learning signal. Deduplication\index{Deduplication!data selection optimization} can provide immediate efficiency gains, especially for exact and near-duplicates, and requires no model training. This makes it one of the most accessible optimizations in data selection, but near-duplicate thresholds must be validated so the pipeline does not remove useful distributional signal.
-
-The simplest form of deduplication\index{Deduplication!hash-based, exact matching} uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
-
-::: {.column-margin .margin-pointer}
-↩ Deduplication as a deterministic data-cleaning step that keeps training and serving pipelines consistent is established in @sec-data-engineering-ensuring-trainingserving-consistency-c683.
-:::
-
-Near-duplicate detection addresses content that differs at the byte level while retaining substantial token- or character-shingle overlap. For text, MinHash\index{MinHash!near-duplicate detection}[^fn-minhash-jaccard-dedup] with Locality-Sensitive Hashing\index{Locality-sensitive hashing!near-duplicate detection}[^fn-lsh-hashing-dedup] (LSH) approximates Jaccard similarity[^fn-jaccard-similarity-dedup] efficiently. In practice, the pipeline converts each document into a set of overlapping character or word $k$-shingles, compresses these sets into fixed-length MinHash signatures where the probability of hash collision equals Jaccard similarity, and partitions the signatures into $b$ bands of $r$ rows using LSH. Documents matching across all rows in any single band collide in the same bucket, restricting expensive similarity verification to likely candidates and avoiding an impossible $\mathcal{O}(\DatasetSize^2)$ all-pairs comparison across a corpus of $\DatasetSize$ web documents numbering in the billions. It can detect lightly edited content with high overlap, but it does not establish semantic paraphrase equivalence.
-
-[^fn-jaccard-similarity-dedup]: **Jaccard similarity**\index{Jaccard similarity!deduplication}: Defined as $|\mathcal{A} \cap \mathcal{B}| / |\mathcal{A} \cup \mathcal{B}|$ for two sets $\mathcal{A}$ and $\mathcal{B}$, ranging from 0 (disjoint) to 1 (identical). For deduplication, the metric compares sets of shingles across documents of different lengths. The threshold must be calibrated for the shingle definition, corpus, and downstream quality because no universal cutoff separates duplicates from legitimately related documents.
-
-[^fn-lsh-hashing-dedup]: **Locality-sensitive hashing (LSH)**\index{Locality-sensitive hashing!probabilistic bucketing}: LSH hashes MinHash signatures into buckets so that similar signatures are more likely to collide. Candidate generation avoids an exhaustive all-pairs comparison, while runtime and memory depend on signature width, banding, bucket sizes, and the number of candidates that require verification.
-
-[^fn-minhash-jaccard-dedup]: **MinHash**\index{MinHash!signature compression}: Invented by @broder1997resemblance to detect duplicate web pages for AltaVista, the algorithm creates compact signatures using random hash functions such that similar documents produce similar signatures with high probability. Each signature compresses a document to a fixed-size sketch, enabling pairwise similarity estimation in $\mathcal{O}(s)$ time for sketch size $s$.
-
-For images, perceptual hashing\index{Perceptual hashing!image deduplication} produces signatures robust to minor transformations like resizing and compression, identifying visually similar candidates stored in different formats. Embedding-based similarity\index{Deduplication!embedding-based} can retrieve semantic near-neighbor candidates by computing dense representations (CLIP[^fn-clip-embedding-dedup] [@radford2021learning] for images, sentence transformers for text), though proximity does not itself prove duplication and the approach incurs higher computational overhead.
-
-[^fn-clip-embedding-dedup]: **CLIP (Contrastive Language-Image Pretraining)**\index{Contrastive Language-Image Pretraining!semantic deduplication}\index{CLIP|see{Contrastive Language-Image Pretraining}}: Pretrained on 400 million image-text pairs, CLIP maps semantically related images and text into a shared embedding space [@radford2021learning]. Embeddings can retrieve candidates for review, but semantic proximity is not proof that two samples are duplicates. Generating embeddings also costs substantially more than computing perceptual hashes, with the ratio depending on model and hardware.
-
-Deduplication can reduce repeated-content memorization and avoid spending FLOPs on exact or near duplicates. It can also alter the corpus's intentional empirical weighting, so thresholds and downstream quality must be validated rather than assuming that every duplicate is harmful.
-
-The systems impact of deduplication shifts when input examples index persistent model state rather than streaming through stateless compute layers.
-
-::: {#lhs-data-selection-dlrm-embedding-deduplication .callout-lighthouse title="DLRM and embedding deduplication"}
-
-The DLRM lighthouse model is memory capacity-bound, and at production scale its embedding tables reach terabytes of storage for billions of user/item IDs. Much of this capacity is wasted on *cold embeddings*, IDs that appear rarely in training data.
-
-Data selection for DLRM can include interaction deduplication\index{Interaction deduplication} and embedding pruning\index{Embedding pruning} for cold IDs. Removing repeated interactions reduces training examples but shrinks an embedding table only when IDs disappear or the allocation, hashing, or sharing policy changes.
-
-:::
-
-### Data pruning by quality {#sec-data-selection-data-pruning-quality-3d69}
-
-Deduplication removes redundant samples, but a third category of problematic data remains: samples that actively harm learning. Quality-based pruning\index{Pruning!quality, label error detection} eliminates samples that either contribute no meaningful signal or introduce contradictory information that confuses the optimization process.
-
-Label error detection can be a high-impact form of quality pruning. Tools like Cleanlab\index{Cleanlab!label error detection} identify samples where the assigned label may be incorrect based on model confidence patterns across training. A sample that the model consistently predicts as class A but is labeled class B may be a hard boundary case, a distribution shift, a model blind spot, or an annotation mistake. The score should trigger review rather than automatic deletion; confirmed errors can then be corrected or removed.
-
-Outlier removal\index{Pruning!outlier removal} addresses a different pathology: samples far from any cluster center in feature space. Such points can indicate noise, annotation errors, or corruption, but they can also be the rare edge cases that define deployment risk. The key is distinguishing informative outliers from invalid samples, with conservative thresholds and slice-level review before removal.
-
-Low-information filtering\index{Pruning!low-information filtering} applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this often means removing high-perplexity\index{Perplexity!filtering, low-information text removal} garbled text (perplexity is a language model's measure of how surprising a text is, so high values can flag incoherent strings but also valid specialist or rare-language text) and, in some pipelines, low-perplexity boilerplate or repetitive text. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
-
-Beyond heuristics and perplexity, industrial pretraining pipelines rely heavily on *classifier-based filtering*: training a lightweight, high-throughput linear classifier (such as fastText) using curated, high-quality reference text (e.g., Wikipedia, books, and scientific papers) as positive examples and uncurated web dumps as negative examples. This classifier assigns each scraped document a continuous quality score, allowing pipelines to filter out millions of low-quality web pages at gigabyte-per-second ingestion speeds without the heavy computational burden of evaluating a full neural language model.
-
-Together, these three static pruning techniques (coreset selection, deduplication, and quality filtering) shrink $O$ before training begins, subject to the same fixed-schedule caveat as before. A schedule that adds compensating epochs or steps gives back part of the saving.
+Together, these three static pruning techniques (deduplication, quality filtering, and coreset selection) shrink $O$ before training begins, subject to the same fixed-schedule caveat as before. A schedule that adds compensating epochs or steps gives back part of the saving.
 
 Static pruning answers a question about *what* to keep, but it treats the answer as fixed. Once the pruned dataset is set, every epoch trains on the same subset. A sample's usefulness, however, can change as the model learns: examples that challenge an undertrained model may become easy after sufficient gradient updates. Dynamic selection techniques address this limitation by adapting the training data at each stage based on what the model has already mastered.
 
@@ -1847,6 +1847,8 @@ class CurriculumBenchmarks:
 : **Illustrative Curriculum Epoch Reductions**: The table applies one target-accuracy rule to hypothetical baseline and curriculum epoch counts. It demonstrates the arithmetic but does not establish a ranking among scenarios or methods. {#tbl-curriculum-benchmarks .striped .hover tbl-colwidths="[20,20,20,20,20]"}
 
 The scenario illustrates that useful curriculum gains must be measured at a fixed target metric. The ordering is task-dependent: *anti-curriculum*\index{Anti-curriculum!hard examples first} presents hard examples first, while *self-paced learning*\index{Self-paced learning!adaptive difficulty} adjusts difficulty using the model's current loss. Neither ordering is universally superior.
+
+## Handling Label Scarcity {#sec-data-selection-label-scarcity-cdef}
 
 ### Active learning: Human-in-the-loop {#sec-data-selection-active-learning-humanintheloop-6932}
 
@@ -3579,7 +3581,6 @@ The balance between investment and savings varies across selection strategies. @
 ```
 The profiles in @tbl-roi-profiles demonstrate that data savings never come for free. Deduplication requires an upfront investment in hashing or embedding infrastructure, but reliably pays off across many epochs by eliminating redundant storage and compute. Coreset selection demands training a proxy model to score the dataset; it only breaks even if the compute saved by dropping samples exceeds the cost of that proxy training. Active learning shifts the cost from human labelers to machine inference, generating high ROI when human time is expensive, though it introduces human-in-the-loop latency that can stall automated pipelines. Finally, data augmentation requires zero new data acquisition but shifts the burden to the CPU or GPU, trading compute cycles for effective dataset expansion. In all cases, a technique earns its place only when its specific benefit clearly outweighs its structural investment.
 
-
 ### Break-even analysis {#sec-data-selection-breakeven-analysis-9a38}
 
 Selection algorithms expend compute and pipeline latency to reduce downstream labeling or training work. The **break-even point**\index{Break-even point!data selection ROI} marks the operating boundary where the financial savings from omitted samples exactly equal the computational and operational overhead of selecting them. If candidate scoring is computationally intensive or candidate pools are massive, a selection policy can easily consume more resources than it recovers.
@@ -3750,7 +3751,6 @@ Deduplication achieves high investment leverage because eliminating redundant se
 
 Standard cost models assume a centralized data pipeline where a single host process evaluates importance metrics across a unified dataset. Scaling to high-throughput multi-accelerator training shards datasets across independent storage volumes and distributed worker ranks, erecting communication and synchronization bottlenecks that can dismantle these idealized single-node economics.
 
-
 #### Amortization across tasks: Foundation models {.unnumbered}
 
 The centrality of self-supervised learning to foundation-model workflows stems directly from cost amortization\index{Cost amortization!self-supervised pretraining}. A foundation model is a broadly pretrained reusable base model adapted to downstream tasks through fine-tuning. This architecture divides costs into two phases: an expensive upfront pretraining investment executed once on unlabeled data, and lightweight task-specific adaptations reused across many applications (@tbl-cost-amortization).
@@ -3920,19 +3920,19 @@ When labeling budget, redundancy, rare classes, privacy, and convergence speed c
 |:-------------------------|:-----------------|:------------------------------------------------------|:-----------------------------------------------------|
 | **Static pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   | 30–50% dataset reduction                             |
 | **Dynamic selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised | 10–30% faster curricula; 2--100$\times$ fewer labels |
-| **Synthetic generation** | On-demand        | Augmentation, Generative Models         | 2--10$\times$ effective data expansion               |
+| **Synthetic generation** | On-demand        | Augmentation, Generative Models                       | 2--10$\times$ effective data expansion               |
 
 : **Three-Stage Data Selection Pipeline**: The ranges illustrate possible outcomes rather than portable expectations. Actual gains depend on the dataset, model, selection method, and target metric. {#tbl-data-selection .striped .hover tbl-colwidths="[23,21,28,28]"}
 
 Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why.
 
-| **Constraint**                  | **Candidate Technique**   | **Why**                                              |
-|:--------------------------------|:--------------------------|:-----------------------------------------------------|
-| **Limited labeling budget**     | Active Learning           | Maximizes label ROI by selecting informative samples |
-| **High redundancy in data**     | Deduplication + Coreset   | Removes waste before training begins                 |
-| **Rare classes or edge cases**  | Synthetic Generation      | Creates samples that do not exist in raw data        |
-| **Slow convergence**            | Curriculum Learning       | Improves gradient quality in early training          |
-| **Privacy requirements**        | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
+| **Constraint**                 | **Candidate Technique**   | **Why**                                              |
+|:-------------------------------|:--------------------------|:-----------------------------------------------------|
+| **Limited labeling budget**    | Active Learning           | Maximizes label ROI by selecting informative samples |
+| **High redundancy in data**    | Deduplication + Coreset   | Removes waste before training begins                 |
+| **Rare classes or edge cases** | Synthetic Generation      | Creates samples that do not exist in raw data        |
+| **Slow convergence**           | Curriculum Learning       | Improves gradient quality in early training          |
+| **Privacy requirements**       | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
 
 : **Technique Selection Guide by Primary Constraint**: Candidate data-selection techniques mapped to the dominant resource constraint in the ML pipeline. The table begins the diagnosis; prerequisites and measured ROI determine the final choice. {#tbl-technique-selection .striped .hover}
 
@@ -4463,7 +4463,6 @@ drawcolor=black,filllcolor=cyan!10!, Linewidth=0.75pt,filllcirclecolor=red}};
 :::
 
 Tracing artifacts through the pipeline in @fig-optimization-stack reveals why data selection occupies an asymmetric position at the head of the optimization stack: pruning raw inputs reduces upstream training FLOPs, but does not automatically shrink parameter footprint, improve quantization headroom, or relax serving latency constraints in the downstream compression and hardware stages. Each downstream tier inherits both the computational savings and any representational deficits created upstream; an aggressive filter that discards rare but critical edge cases can force downstream engineers to train longer or abandon aggressive quantization to preserve task accuracy.
-
 
 ## Fallacies and Pitfalls {#sec-data-selection-fallacies-pitfalls-f4d0}
 

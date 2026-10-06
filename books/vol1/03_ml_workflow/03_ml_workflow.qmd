@@ -449,6 +449,36 @@ ML systems are not traditional software with a model attached. Check the differe
 
 :::
 
+### Constraint propagation principle {#sec-ml-workflow-decisions-cascade-system-98f4}
+
+::: {.column-margin}
+![](images/svg/ml_workflow_constraint_cost_escalation.svg){width="100%" fig-alt="Rising correction-cost curve across six lifecycle stages, from define at 1x to monitor at 32x. The curve steepens as constraints are discovered later in the lifecycle."}
+
+*An illustrative doubling scenario visualizes late-discovery sensitivity.*
+:::
+
+In the DR scenario, an intermittent 2 Mbps clinic uplink ruled out cloud inference, requiring edge deployment. The edge target's memory and power budgets then constrained model architecture, favoring lightweight factorized convolutions over large ensembles and requiring automated image-quality checks at capture time. Each downstream constraint narrowed the design space for upstream stages, coupling hardware limits directly to data collection and model design.
+
+::: {#dfn-ml-workflow-constraint-propagation-principle .callout-definition title="The constraint propagation principle"}
+
+***The constraint propagation principle***\index{Constraint propagation principle!definition} states that a constraint discovered late in the ML lifecycle can force rework across affected upstream stages. While Boehm's classical software cost curve suggests exponential escalation, in ML systems the $2^{i-1}$ relation, where $i$ is the lifecycle stage index (1 = problem definition), serves as an illustrative order-of-magnitude sensitivity model rather than an empirical accounting formula: actual rework costs depend on which specific data, training, and validation artifacts must be rebuilt.
+
+1.  **Significance**: A 100 ms latency target discovered at deployment (stage 5) may propagate backward to constrain model size (stage 3: operation count $\Operations$), dataset requirements (stage 2: dataset size $\DatasetSize$), and problem definition (stage 1: what accuracy is achievable). Rework depends on which earlier decisions relied on the missing constraint. Within the iron law, a deployment constraint on $\Latency$ or $\PeakRate$ can redefine the feasible region for $O$, $\DataVolume$, and $\EfficiencyHw$.
+2.  **Distinction**: Unlike modular decomposition (which encourages independent optimization of each component), this principle mandates end-to-end reasoning: optimizing accuracy in isolation may produce a model that is infeasible to deploy, so an accuracy optimum reached in isolation can be an infeasible system.
+3.  **Common pitfall**: A frequent misconception is that deployment is "the last step." The deployment environment is the day-one constraint: its latency budget, memory capacity, and power envelope define the boundaries of every upstream decision.
+
+:::
+
+Propagation operates bidirectionally, creating dynamic constraint networks rather than linear dependencies. When rural clinic deployment reveals tight bandwidth limitations, teams may redesign the pipeline to transmit compact outputs after local inference. If the system instead compresses model inputs to traverse the uplink, the lossy compression artifacts degrade input quality; the training dataset must then incorporate matching distortion augmentations to prevent training-serving skew. Conversely, shifting inference entirely to the edge to transmit only diagnosis scalars relieves uplink bandwidth but tightens the edge device's DRAM capacity and thermal envelope. Upstream data choices and downstream machine boundaries remain physically coupled.
+
+Decisions made without accounting for downstream execution boundaries accumulate technical debt\index{Technical debt!ML systems}.[^fn-ml-debt-entanglement] The stage interface specification (@tbl-stage-interface) operationalizes this principle by making constraints explicit at each stage boundary. Those contracts enable earlier detection of constraints. When propagation occurs specifically through data quality failures, the resulting pattern is known as a **data cascade**\index{Data cascade!definition}: a chain of downstream failures triggered by bad data [@sambasivan2021].
+
+[^fn-ml-debt-entanglement]: **ML technical debt**\index{Technical debt!ML entanglement}: @sculley2015hidden identify ML-specific debt mechanisms such as *entanglement* (changing one feature affects all others because the model learned joint distributions), *hidden feedback loops* (predictions influence future training data), and *undeclared consumers* (downstream systems depending on outputs without contracts). Since ML code is often only a small part of a production system, the surrounding configuration, pipelines, and infrastructure can allow this debt to accumulate silently.
+
+::: {.column-margin .margin-pointer}
+↪ Shared contracts and deployment paths that reject incompatible changes before they reach production are enforced in @sec-ml-operations-development-infrastructure-automation-de41.
+:::
+
 ## Lifecycle Stages {#sec-ml-workflow-six-core-lifecycle-stages-00b0}
 
 The rural-clinic failure shows why ML projects need an explicit six-stage framework: deployment constraints surfaced only after data, model, and evaluation decisions had hardened around the wrong target. Conventional and ML lifecycles both use iteration, while ML systems add feedback from deployment into data, training, and evaluation. The six-stage framework captures this loop.
@@ -1542,19 +1572,6 @@ filllcolor=myblue, drawcolor=myblue,Linewidth=0.7pt}};
 
 These feedback pathways reinforce a central point: data collection does not end when training begins. The quality, volume, and diversity of the data flowing through these pipelines now become the raw material for the next stage—turning curated datasets into trained models.
 
-### Data locality at scale {#sec-ml-workflow-erosion-determinism}
-
-The data contract must reconcile the statistical order of training examples with the physical cost of delivering them. Training often shuffles examples across epochs to reduce dependence on their stored order. While this randomization benefits statistical learning, it fundamentally conflicts with how storage infrastructure operates at scale: physical systems are designed to stream contiguous data blocks, not to fetch millions of scattered, randomized records.
-
-When randomized sampling forces storage systems and networks into scattered physical reads, data delivery grinds to a halt. The penalty is not merely inefficiency; it is starvation. If the data pipeline cannot feed examples as fast as the model's consumption rate, the expensive accelerators training the model will sit idle waiting for I/O. This tension makes data storage and delivery a first-class lifecycle concern.
-
-The workflow must therefore treat the required sample order and the required delivery rate as an explicit contract between data engineering and model training. When building at scale, resolving this tension often requires layout-aware batching, intelligent sharding, or explicit prefetching to restore the physical efficiency that randomization removes. Testing this delivery pipeline against the model's ingestion speed is a mandatory step before treating the data handoff as complete.
-
-::: {.column-margin .margin-pointer}
-↩ I/O stalls and storage throughput bottlenecks limit pipelined training progress under the bottleneck principle established in @sec-ml-systems-bottleneck-principle-3514.
-:::
-
-
 ## Model Development {#sec-ml-workflow-model-development-training-stage-d901}
 
 ```{python}
@@ -2145,36 +2162,6 @@ Proactive maintenance closes the lifecycle loop: operational signals identify po
 
 The diabetic retinopathy scenario demonstrated how lifecycle stages interact as a coupled system: physical constraints at the point of care directly governed model capacity, training data curation, and preprocessing logic. Three structural mechanisms explain these coupled interactions: backward constraint propagation, multi-scale feedback loops, and emergent system trade-offs. Managing these mechanisms distinguishes proactive, constraint-driven system design from reactive post-deployment debugging.
 
-### Constraint propagation principle {#sec-ml-workflow-decisions-cascade-system-98f4}
-
-::: {.column-margin}
-![](images/svg/ml_workflow_constraint_cost_escalation.svg){width="100%" fig-alt="Rising correction-cost curve across six lifecycle stages, from define at 1x to monitor at 32x. The curve steepens as constraints are discovered later in the lifecycle."}
-
-*An illustrative doubling scenario visualizes late-discovery sensitivity.*
-:::
-
-In the DR scenario, an intermittent 2 Mbps clinic uplink ruled out cloud inference, requiring edge deployment. The edge target's memory and power budgets then constrained model architecture, favoring lightweight factorized convolutions over large ensembles and requiring automated image-quality checks at capture time. Each downstream constraint narrowed the design space for upstream stages, coupling hardware limits directly to data collection and model design.
-
-::: {#dfn-ml-workflow-constraint-propagation-principle .callout-definition title="The constraint propagation principle"}
-
-***The constraint propagation principle***\index{Constraint propagation principle!definition} states that a constraint discovered late in the ML lifecycle can force rework across affected upstream stages. While Boehm's classical software cost curve suggests exponential escalation, in ML systems the $2^{i-1}$ relation, where $i$ is the lifecycle stage index (1 = problem definition), serves as an illustrative order-of-magnitude sensitivity model rather than an empirical accounting formula: actual rework costs depend on which specific data, training, and validation artifacts must be rebuilt.
-
-1.  **Significance**: A 100 ms latency target discovered at deployment (stage 5) may propagate backward to constrain model size (stage 3: operation count $\Operations$), dataset requirements (stage 2: dataset size $\DatasetSize$), and problem definition (stage 1: what accuracy is achievable). Rework depends on which earlier decisions relied on the missing constraint. Within the iron law, a deployment constraint on $\Latency$ or $\PeakRate$ can redefine the feasible region for $O$, $\DataVolume$, and $\EfficiencyHw$.
-2.  **Distinction**: Unlike modular decomposition (which encourages independent optimization of each component), this principle mandates end-to-end reasoning: optimizing accuracy in isolation may produce a model that is infeasible to deploy, so an accuracy optimum reached in isolation can be an infeasible system.
-3.  **Common pitfall**: A frequent misconception is that deployment is "the last step." The deployment environment is the day-one constraint: its latency budget, memory capacity, and power envelope define the boundaries of every upstream decision.
-
-:::
-
-Propagation operates bidirectionally, creating dynamic constraint networks rather than linear dependencies. When rural clinic deployment reveals tight bandwidth limitations, teams may redesign the pipeline to transmit compact outputs after local inference. If the system instead compresses model inputs to traverse the uplink, the lossy compression artifacts degrade input quality; the training dataset must then incorporate matching distortion augmentations to prevent training-serving skew. Conversely, shifting inference entirely to the edge to transmit only diagnosis scalars relieves uplink bandwidth but tightens the edge device's DRAM capacity and thermal envelope. Upstream data choices and downstream machine boundaries remain physically coupled.
-
-Decisions made without accounting for downstream execution boundaries accumulate technical debt\index{Technical debt!ML systems}.[^fn-ml-debt-entanglement] The stage interface specification (@tbl-stage-interface) operationalizes this principle by making constraints explicit at each stage boundary. Those contracts enable earlier detection of constraints. When propagation occurs specifically through data quality failures, the resulting pattern is known as a **data cascade**\index{Data cascade!definition}: a chain of downstream failures triggered by bad data [@sambasivan2021].
-
-[^fn-ml-debt-entanglement]: **ML technical debt**\index{Technical debt!ML entanglement}: @sculley2015hidden identify ML-specific debt mechanisms such as *entanglement* (changing one feature affects all others because the model learned joint distributions), *hidden feedback loops* (predictions influence future training data), and *undeclared consumers* (downstream systems depending on outputs without contracts). Since ML code is often only a small part of a production system, the surrounding configuration, pipelines, and infrastructure can allow this debt to accumulate silently.
-
-::: {.column-margin .margin-pointer}
-↪ Shared contracts and deployment paths that reject incompatible changes before they reach production are enforced in @sec-ml-operations-development-infrastructure-automation-de41.
-:::
-
 ### Multi-scale feedback {#sec-ml-workflow-orchestrating-feedback-across-multiple-timescales-4e0b}
 
 ML systems succeed by orchestrating feedback loops\index{Feedback Loop!multi-scale temporal structure} across multiple timescales, each serving a different purpose. One illustrative operating plan for the DR scenario uses minute-level checks to catch a misconfigured camera before it produces a shift's worth of unusable images; daily reviews for proxy shifts such as referral-rate, confidence, rejection-rate, or site-specific camera changes; weekly aggregation of labeled accuracy statistics and drift tests when ground truth is available; monthly analysis of population coverage; and quarterly review of whether the architecture still meets clinical needs. Actual cadences depend on label delay, product risk, traffic, and the cost of acting on each signal.
@@ -2206,6 +2193,18 @@ A team discovers during monitoring (Stage 6) that their DR model fails for patie
 Resource optimization introduces multi-dimensional trade-offs that also arise in conventional software, while ML adds learned statistical behavior to them. An accuracy improvement might require increasing model parameter count, forcing deployment onto more capable hardware; multiplied across hundreds of clinics, that marginal accuracy increment dictates cluster capital expenditure. These trade-offs are the physical constraints of deployment at work: edge deployment eliminates WAN latency but bounds model complexity by local SRAM and DRAM capacity and the device's power envelope; cloud deployment relaxes accelerator memory bounds but introduces network latency that can violate point-of-care clinical workflows. Every architectural choice reallocates pressure across the D·A·M triad.
 
 These three structural patterns—constraint propagation across stage boundaries, multi-scale feedback timing, and emergent system trade-offs—demonstrate that ML systems cannot be engineered through modular decomposition alone. Optimizing data pipelines, model topologies, and execution targets without checking their dependencies can introduce runtime bottlenecks or silent failures. When engineering teams apply conventional software assumptions to these coupled dynamics, predictable antipatterns emerge. The fallacies and pitfalls in @sec-ml-workflow-fallacies-pitfalls-4d91 examine where these mental models break down across production lifecycles.
+
+### Data locality at scale {#sec-ml-workflow-erosion-determinism}
+
+The data contract must reconcile the statistical order of training examples with the physical cost of delivering them. Training often shuffles examples across epochs to reduce dependence on their stored order. While this randomization benefits statistical learning, it fundamentally conflicts with how storage infrastructure operates at scale: physical systems are designed to stream contiguous data blocks, not to fetch millions of scattered, randomized records.
+
+When randomized sampling forces storage systems and networks into scattered physical reads, data delivery grinds to a halt. The penalty is not merely inefficiency; it is starvation. If the data pipeline cannot feed examples as fast as the model's consumption rate, the expensive accelerators training the model will sit idle waiting for I/O. This tension makes data storage and delivery a first-class lifecycle concern.
+
+The workflow must therefore treat the required sample order and the required delivery rate as an explicit contract between data engineering and model training. When building at scale, resolving this tension often requires layout-aware batching, intelligent sharding, or explicit prefetching to restore the physical efficiency that randomization removes. Testing this delivery pipeline against the model's ingestion speed is a mandatory step before treating the data handoff as complete.
+
+::: {.column-margin .margin-pointer}
+↩ I/O stalls and storage throughput bottlenecks limit pipelined training progress under the bottleneck principle established in @sec-ml-systems-bottleneck-principle-3514.
+:::
 
 ## Fallacies and Pitfalls {#sec-ml-workflow-fallacies-pitfalls-4d91}
 

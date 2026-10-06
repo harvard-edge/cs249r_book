@@ -393,6 +393,50 @@ To avoid measuring hardware artifacts instead of kernel performance, follow the 
 
 A profiler translates these measurement rules into physical diagnostics by decomposing kernel execution time into the three governing terms of the iron law: data movement, compute throughput, and latency overhead.
 
+```{python}
+#| echo: false
+#| label: precision-energy-summary-anchor
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRECISION ENERGY SUMMARY ANCHOR
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Summary takeaway on precision as an energy lever.
+# │
+# │ Goal: Keep the MobileNet FP32-to-INT8 total energy ratio local to the summary.
+# │ Show: Combined memory-load and compute-energy savings for MobileNetV2.
+# │ How: Recompute the same FP32 and INT8 totals from model and energy constants.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, Hardware
+from mlsysim.fmt import fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class PrecisionEnergySummary:
+    """Local summary ratio for MobileNetV2 FP32 vs. INT8 inference energy."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
+    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
+    dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
+    fp32_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
+    int8_pj = ENERGY_OP_INT8_PJ.to(pJ / flop).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    e_fp32_load = (m_params * MILLION * 4 * dram_pj) / MILLION
+    e_fp32_compute = (m_ops * MILLION * fp32_pj) / MILLION
+    e_int8_load = (m_params * MILLION * 1 * dram_pj) / MILLION
+    e_int8_compute = (m_ops * MILLION * int8_pj) / MILLION
+    s_total = (e_fp32_load + e_fp32_compute) / (e_int8_load + e_int8_compute)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(6 < s_total < 7, f"Expected MobileNetV2 INT8 total-energy ratio near 6.6x, got {s_total:.1f}x.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    total_savings_factor_mult_str = fmt_multiple(s_total, precision=1, commas=False)
+```
+
 ::: {#psp-benchmarking-measuring-iron-law-terms .callout-perspective title="Measuring the iron law terms"}
 
 Moving from theory to trace means mapping the iron law equation onto a profiler timeline (like Nsight Systems or PyTorch Profiler).
@@ -1080,7 +1124,6 @@ Standardization transforms these empirical lessons into a shared engineering met
 
 : **Benchmark Evolution**: Evolution of computing benchmarks from synthetic operations to ML-specific evaluation. Each generation addressed limitations of its predecessors, culminating in MLPerf's synthesis of representative workloads, multi-objective metrics, and integrated system measurement. {#tbl-benchmark-evolution tbl-colwidths="[12,9,23,20,36]"}
 
-
 #### Compression benchmarks
 
 Two benchmark categories recur often enough across the optimization pipeline to warrant specialized checklists: compression benchmarks, which a pruned or quantized model must pass before deployment, and mobile and edge benchmarks, which power and thermal boundaries strictly constrain. Each composes the task, data, model, metrics, harness, and run rules while enforcing domain-specific limits. Compression validation requires a multi-metric protocol that balances size reduction against accuracy and latency (@sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4), while edge deployment requires sustained-power measurement under realistic thermal and duty-cycle constraints (@sec-benchmarking-power-measurement-techniques-bcc2).
@@ -1202,7 +1245,9 @@ When edge devices offload computation to remote servers over 5G or Wi-Fi network
 
 Across both cloud data centers and edge devices, benchmarking methodology divides along a fundamental operational boundary: whether the system is executing training or inference. Training executes forward and backward passes, saving or recomputing activations to calculate gradients and updating model weights, with communication when training is distributed. Inference omits the backward pass and can release an activation after its last forward consumer, while retaining state such as KV caches when needed. Both phases can use fusion and reduced precision, but their memory access patterns, arithmetic intensities, and dependencies differ enough to require distinct benchmark objectives.
 
-## System Benchmarking Suites {#sec-benchmarking-system-benchmarking-suites-e946}
+## System Benchmarking {#sec-benchmarking-system-benchmarking-umbrella}
+
+### System Benchmarking Suites {#sec-benchmarking-system-benchmarking-suites-e946}
 
 A team evaluating edge deployment hardware must compare five different system-on-chip (SoC) designs for a smart camera product. Vendor A reports 8 TOPS at INT8; Vendor B reports 15 TOPS at INT4; Vendor C reports inference latency on a proprietary model; Vendor D cites MLPerf scores from two generations ago; Vendor E provides only peak throughput at maximum batch size. None of these figures can be directly compared. The team cannot make an informed procurement decision because each vendor isolates a favorable metric under idiosyncratic conditions, obscuring true operating trade-offs. Benchmarking suites resolve this fragmentation by enforcing uniform measurement harnesses and standardized evaluation rules.
 
@@ -2349,7 +2394,7 @@ Applying this matrix organizes hypotheses when system telemetry diverges from th
 Validation under controlled laboratory conditions differs from validation in production. A laboratory protocol may fix data, simplify arrivals, or isolate execution to answer a controlled question; other protocols deliberately vary those conditions. In production, all three assumptions can break simultaneously: data drifts, traffic spikes unpredictably, and concurrent workloads compete for shared hardware resources. The final dimension of benchmarking asks whether laboratory results hold under operational conditions.
 
 
-## Training vs. Inference {#sec-benchmarking-training-vs-inference-evaluation-a3be}
+### Training vs. Inference {#sec-benchmarking-training-vs-inference-evaluation-a3be}
 
 The same accelerator can fail in opposite operational regimes: a training run can stall when inter-accelerator gradient synchronization saturates the interconnect, while a serving deployment can violate its SLO when request bursts create queueing delays. Training and inference impose evaluation requirements so divergent that separate benchmarking suites exist for each: MLPerf Training and MLPerf Inference [@mattson2020mlperf; @reddi2020]. Theoretical peak TFLOP/s provides little insight into either workload. Training iteratively refines parameters over billions of samples, demanding sustained high-power compute, large memory capacity for optimizer states, and efficient collective communication across accelerators. Inference evaluates fixed parameters against incoming queries under bounded response times, demanding bounded tail latency, minimal cold-start initialization latency, and high energy efficiency.
 
@@ -2406,7 +2451,7 @@ Energy consumption follows contrasting accounting regimes across the two phases.
 
 These divergent physical requirements shape benchmark methodology through the D·A·M lens. Training benchmarks evaluate whether algorithmic updates converge efficiently when scaled across distributed accelerator interconnects under continuous data ingestion, where the primary figure of merit is wall-clock time to a target accuracy. Inference benchmarks evaluate whether a fixed algorithmic artifact satisfies latency percentiles (such as p95 and p99 response times) and throughput targets under bursty query traffic on provisioned hardware. The following sections first examine time-to-quality during training, then characterize the fixed model artifact under serving requirements. Deployments using pretrained models can begin with the latter.
 
-## Training Benchmarks {#sec-benchmarking-training-benchmarks-96da}
+### Training Benchmarks {#sec-benchmarking-training-benchmarks-96da}
 
 In an illustrative procurement failure, a team purchases a larger GPU cluster expecting proportional training-speed gains, only to discover that communication overhead and memory bottlenecks limit the actual speedup. Training benchmarks\index{ML training benchmark!convergence throughput scalability} exist to catch this kind of gap before procurement. Training benchmarks span six dimensions (@tbl-training-metrics), anchored by three: convergence metrics that measure learning progress, throughput metrics that measure computational efficiency, and scalability metrics that measure distributed performance.
 
@@ -2904,7 +2949,7 @@ Reproducibility poses another threat. Results must reproduce across stacks: a Te
 
 Avoiding these pitfalls requires evaluating throughput in relation to accuracy convergence, assessing scaling efficiency holistically, and accounting for real-world failures rather than assuming idealized conditions. A model trained efficiently, however, still requires validation of its deployment performance, which shifts the evaluation framework entirely.
 
-## Inference Benchmarks {#sec-benchmarking-inference-benchmarks-2c1f}
+### Inference Benchmarks {#sec-benchmarking-inference-benchmarks-2c1f}
 
 An autonomous vehicle perception pipeline must classify roadway obstacles within a strict 33-millisecond deadline to sustain a 30-frame-per-second control loop. If an unbenchmarked garbage collection pause, dynamic batching timeout, or kernel launch hiccup stretches the 99th-percentile (p99) latency to 120 milliseconds, the vehicle travels several meters without updated object tracks—rendering a high average throughput metric completely irrelevant to production safety. Training benchmarks measure how quickly a system learns; inference benchmarks measure how reliably it serves under real-world operational constraints. This shift changes nearly every aspect of evaluation: training tolerates variable iteration times as long as gradient descent converges, but inference enforces strict, non-negotiable service-level objectives where every delayed prediction directly compromises safety or user experience.
 
@@ -3465,7 +3510,7 @@ The scenarios explain why the same hardware can report dramatically different be
 
 Training benchmarks measure learning speed; inference benchmarks measure serving speed. Yet both measures share a critical blind spot: they say nothing about *how much energy* the system consumes to achieve that speed. A system that sets throughput records while consuming kilowatts of power may be economically unsustainable or physically impossible to deploy at the edge. Completing the evaluation picture requires power measurement\index{Power measurement!evaluation triad completion}: measuring the energy cost of performance.
 
-## Power Measurement Techniques {#sec-benchmarking-power-measurement-techniques-bcc2}
+### Power Measurement Techniques {#sec-benchmarking-power-measurement-techniques-bcc2}
 
 ```{python}
 #| echo: false
@@ -3931,11 +3976,6 @@ Statistical insignificance arises when evaluations rely on too few trials to dis
 
 Reproducibility\index{Reproducibility!cross-platform challenge} poses a persistent systems hurdle across differing software environments. Benchmark measurements fluctuate significantly with minor revisions to compilers, numerical runtimes, or mathematical libraries. For example, replacing a vendor Basic Linear Algebra Subprograms (BLAS) library with an autotuned kernel compiler alters thread-block tile dimensions, register allocations, and shared-memory bank conflicts. Furthermore, the non-associativity of floating-point arithmetic causes parallel reductions across thread blocks to produce divergent bitwise outputs depending on thread scheduling. MLPerf addresses reproducibility by providing reference implementations, fixed random seeds, and audited submission rules. Even under strict rules, tracking performance across diverse accelerator architectures requires pinning library dependencies, compiler flags, and execution runtimes to prevent silent configuration drift.
 
-### Laboratory-to-deployment performance gaps {#sec-benchmarking-laboratorytodeployment-performance-gaps-16c8}
-
-Statistical rigor ensures that benchmark measurements are precise, but precise measurements of the wrong operational regime still lead to production failures. Benchmark suites must align with the physical constraints of deployment.
-
-Misalignment with real-world goals\index{Laboratory-to-deployment gap!performance misalignment} arises when benchmarks isolate single scalar metrics while production environments require navigating multi-objective Pareto frontiers. An Offline inference result measures throughput with inputs supplied upfront, whereas production servers operate as open queuing systems whose arrival rates and correlations may vary. Server-scenario benchmarks exercise open-loop arrivals, but their specified traffic distribution still requires comparison with production traces. As accelerator utilization approaches saturation, queuing delay escalates non-linearly, causing tail latencies (p99 and p99.9) to violate strict service-level agreements even while average latency appears acceptable. Furthermore, offline benchmarks evaluate isolated models with dedicated access to accelerator HBM. In production, multi-tenant serving engines, dynamic key-value (KV) cache allocations for autoregressive decoding, and host-device data transfers over PCIe contend for the same memory capacity and bus bandwidth, degrading operational throughput below lab predictions.
 
 ### System design challenges {#sec-benchmarking-system-design-challenges-9ed2}
 
@@ -4298,6 +4338,12 @@ Even the most rigorous system benchmarks validate only one dimension of deployme
 
 ## Production Considerations {#sec-benchmarking-production-considerations-084b}
 
+### Laboratory-to-deployment performance gaps {#sec-benchmarking-laboratorytodeployment-performance-gaps-16c8}
+
+Statistical rigor ensures that benchmark measurements are precise, but precise measurements of the wrong operational regime still lead to production failures. Benchmark suites must align with the physical constraints of deployment.
+
+Misalignment with real-world goals\index{Laboratory-to-deployment gap!performance misalignment} arises when benchmarks isolate single scalar metrics while production environments require navigating multi-objective Pareto frontiers. An Offline inference result measures throughput with inputs supplied upfront, whereas production servers operate as open queuing systems whose arrival rates and correlations may vary. Server-scenario benchmarks exercise open-loop arrivals, but their specified traffic distribution still requires comparison with production traces. As accelerator utilization approaches saturation, queuing delay escalates non-linearly, causing tail latencies (p99 and p99.9) to violate strict service-level agreements even while average latency appears acceptable. Furthermore, offline benchmarks evaluate isolated models with dedicated access to accelerator HBM. In production, multi-tenant serving engines, dynamic key-value (KV) cache allocations for autoregressive decoding, and host-device data transfers over PCIe contend for the same memory capacity and bus bandwidth, degrading operational throughput below lab predictions.
+
 A system that passes all three benchmark categories can still fail in production. The three-dimensional framework validated hardware performance, model quality, and data representativeness under controlled conditions, but operational deployments violate those conditions continuously. Validating an ML system requires measuring its behavior under dynamic workloads, evolving data distributions, and hardware resource contention.
 
 ### From laboratory to production {#sec-benchmarking-laboratory-production-d22a}
@@ -4564,49 +4610,6 @@ Teams sometimes promote a model because it passes the research benchmark, then d
 
 Benchmarking completes Part III's optimization pipeline by validating whether the efficiency gains from data selection, model compression, and hardware acceleration deliver in practice. The three benchmark lenses examine system execution, model behavior, and data representativeness separately, then test whether their assumptions survive when the complete system runs under deployment conditions.
 
-```{python}
-#| echo: false
-#| label: precision-energy-summary-anchor
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PRECISION ENERGY SUMMARY ANCHOR
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Summary takeaway on precision as an energy lever.
-# │
-# │ Goal: Keep the MobileNet FP32-to-INT8 total energy ratio local to the summary.
-# │ Show: Combined memory-load and compute-energy savings for MobileNetV2.
-# │ How: Recompute the same FP32 and INT8 totals from model and energy constants.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware
-from mlsysim.fmt import fmt, check
-
-# ┌── LEGO ───────────────────────────────────────────────
-class PrecisionEnergySummary:
-    """Local summary ratio for MobileNetV2 FP32 vs. INT8 inference energy."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m_params = Models.Vision.MobileNetV2.parameters.to(Mparam).magnitude
-    m_ops = Models.Vision.MobileNetV2.inference_flops.to(MFLOPs).magnitude
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    dram_pj = ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude
-    fp32_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
-    int8_pj = ENERGY_OP_INT8_PJ.to(pJ / flop).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    e_fp32_load = (m_params * MILLION * 4 * dram_pj) / MILLION
-    e_fp32_compute = (m_ops * MILLION * fp32_pj) / MILLION
-    e_int8_load = (m_params * MILLION * 1 * dram_pj) / MILLION
-    e_int8_compute = (m_ops * MILLION * int8_pj) / MILLION
-    s_total = (e_fp32_load + e_fp32_compute) / (e_int8_load + e_int8_compute)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(6 < s_total < 7, f"Expected MobileNetV2 INT8 total-energy ratio near 6.6x, got {s_total:.1f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    total_savings_factor_mult_str = fmt_multiple(s_total, precision=1, commas=False)
-```
 
 The lenses reveal different failure modes. System benchmarks expose underdelivered throughput, tail latency, and thermal behavior. Model benchmarks test accuracy, calibration, robustness, and other properties that an optimization may alter. Data benchmarks examine coverage, label quality, leakage, and alignment with deployment. Standardized suites such as MLPerf Training and Inference provide comparable system evidence; model and data protocols supply the quality and representativeness evidence that a hardware result cannot establish.
 
