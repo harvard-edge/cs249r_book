@@ -826,6 +826,129 @@ Batching can amortize weight traffic across requests, and supported quantization
 
 The two traces use different principles, but they share one discipline: name the binding term, measure it, and budget for it. That discipline is the engineering answer to the bitter lesson. Scale works, but only a system that can afford it and can still be trusted continues to scale. The remaining question is where these constraints bind next, as ML systems spread across heterogeneous deployment targets, confront adversarial conditions, and grow into compositions of many components.
 
+## Fallacies and Pitfalls {#sec-fallacies-pitfalls-12ef}
+
+Fallacies and pitfalls in ML systems arise from a common source: treating the system as decomposable into independent parts. Each fallacy assumes that optimizing one dimension, one metric, or one stage suffices; each pitfall shows the consequence when that assumption meets production reality.
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Systems engineering complexity disappears with better tools and abstractions.*
+
+Tools abstract complexity; they do not eliminate physical constraints. A high-level framework that hides memory management still consumes memory. An AutoML system that tunes hyperparameters still faces the Pareto frontier. Simplifying one interface may shift burden to another, although good design can also remove accidental complexity. The engineer who believes tools eliminate fundamental constraints will be surprised when those constraints resurface at scale, often in forms harder to diagnose than the original problem.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Optimizing one metric without tracing displaced costs.*
+
+When an optimization reduces latency by 50 percent, ask what changed elsewhere. Quantization may add validation burden. Caching may trade memory capacity for serving speed. Some simplifications remove accidental complexity; others displace cost. Engineers who celebrate gains in one metric without tracing those effects can build systems that fail in unexpected ways. Measurement decides which occurred.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *Mastering individual components equals mastering the system.*
+
+Component expertise is necessary but insufficient. An engineer who understands data pipelines, training, serving, and operations as isolated domains will still struggle with systems where a data schema change cascades through training, breaks quantization assumptions, and triggers silent accuracy degradation in production. Integration can create more complexity than the components reveal in isolation because interfaces multiply failure modes. Systems thinking means understanding how components interact, not just how they work individually.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Scaling data collection without measuring marginal information value.*
+
+The assumption that more data uniformly improves model quality breaks down in practice. As demonstrated in @sec-data-selection-icr-frontier, within a fitted scaling regime, additional data can yield diminishing improvements while storage, preprocessing, and labeling costs continue to grow. Coverage, data quality, model capacity, and distribution determine whether that fit remains useful for the next collection increment. The data-gravity principle (\ref{pri-data-gravity}) mandates measuring downstream operational costs, including whether repeatedly moving or scanning a larger dataset exceeds the cost of moving compute toward it. Scaling data volume without quantifying the marginal information value per sample optimizes an expensive proxy.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *A single accuracy metric captures model quality.*
+
+A model evaluated solely on top-line accuracy ignores operational reality. Pareto analysis (principle \ref{pri-pareto-frontier}) requires evaluating latency, throughput, memory footprint, energy, fairness, and serving cost simultaneously. Under a 100 ms tail-latency SLO, a 95 percent-accurate model executing in 500 ms is infeasible, whereas a 93 percent-accurate model with a measured 50 ms tail meets that latency requirement. It is a feasible deployment only if its accuracy, subgroup behavior, resource costs, and other acceptance criteria also pass. Furthermore, aggregate accuracy routinely conceals severe error disparities across subgroup cohorts (@sec-responsible-engineering). Comprehensive evaluation spans the multi-dimensional Pareto surface rather than a single scalar.
+
+:::
+
+::: {.column-margin .margin-pointer}
+↩ Disaggregated evaluation, which tests each relevant subgroup separately as a release gate, is established in @sec-responsible-engineering-testing-across-populations-9f20.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Treating every drift alarm as an automated rollback trigger.*
+
+Statistical drift detection should trigger a diagnosed response rather than an unconditional automated rollback. Rollback is appropriate when a regression is traced to a flawed binary or pipeline deployment. External covariate drift, however, is not repaired by redeploying an older, equally stale checkpoint. Safe operational responses include canary traffic shedding, fallback heuristics, prediction quarantine, or scheduled retraining once ground-truth labels confirm degradation. Operational monitoring must couple anomaly detection to cause-specific remediation, intervening according to the verified failure mechanism rather than a raw statistical divergence alarm.
+
+:::
+
+```{python}
+#| echo: false
+#| label: conclusion-amdahl-pitfall
+#| output: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL'S LAW PITFALL CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Fallacies and Pitfalls paragraph immediately following the
+# │          "Optimizing a single pipeline stage" pitfall in the conclusion.
+# │
+# │ Goal:    Quantify how Amdahl's Law caps end-to-end speedup when only a
+# │          small fraction of the pipeline is being optimized.
+# │ Show:    Local speedup factor, serial-fraction percent, and resulting
+# │          system-level speedup for the worked pitfall example.
+# │ How:     Apply calc_amdahls_speedup with optimized_fraction=0.10 and a
+# │          10x local speedup, then format each value for prose inlining.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import calc_amdahls_speedup
+from mlsysim.fmt import fmt, check
+
+class AmdahlPitfallMath:
+    # LOAD
+    optimized_fraction = 0.10
+    serial_fraction = 1 - optimized_fraction
+    local_speedup = 10.0
+
+    # EXECUTE
+    system_speedup = calc_amdahls_speedup(optimized_fraction, local_speedup)
+
+    # GUARD
+    check(system_speedup < 1.2, "Amdahl example should remain bottlenecked by preprocessing.")
+
+    # OUTPUT
+    local_speedup_mult_str = fmt_multiple(local_speedup, precision=0, commas=False)
+    serial_pct_str = fmt_percent(serial_fraction, precision=0, commas=False, style='prose')
+    system_speedup_mult_str = fmt_multiple(system_speedup, precision=1, commas=False)
+```
+
+::: {.fallacy-pitfall}
+
+**Fallacy**: *A single optimized pipeline stage makes the system fast.*
+
+Amdahl's Law (principle \ref{pri-amdahl}) applies directly to end-to-end ML pipelines. Optimizing accelerator inference latency by `{python} AmdahlPitfallMath.local_speedup_mult_str` yields only `{python} AmdahlPitfallMath.system_speedup_mult_str` system speedup if CPU-bound preprocessing accounts for `{python} AmdahlPitfallMath.serial_pct_str` of end-to-end latency—serial fractions that can arise from host-side image augmentation, synchronous feature-store lookups, or tokenization that remains host bound in some implementations. The iron law of ML systems (principle \ref{pri-iron-law}) decomposes execution time into data movement, computation, and latency terms precisely so that engineers can identify the dominant term before investing optimization effort. Rigorous profiling isolates where execution time actually elapses. Optimizing without profiling amounts to guesswork, and Amdahl's Law strictly bounds speedup when interventions target non-dominant stages.
+
+:::
+
+::: {.column-margin .margin-pointer}
+↩ The gap between component latency and end-to-end latency, which makes model-only optimizations yield diminishing returns, is established in @sec-benchmarking-endtoend-vs-component-latency-9952.
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Profiling only the stage that looks easiest to optimize.*
+
+Teams often profile the model kernel because it is visible, instrumented, and owned by the ML team, while the surrounding data path is split across storage, preprocessing, networking, and application code. That local view can make a 10$\times$ kernel improvement look urgent even when it changes little about the user-visible path. End-to-end profiling keeps the optimization target honest: the stage to improve is the one that limits the system, not the one with the cleanest benchmark harness.
+
+:::
+
+These fallacies and pitfalls share a common root: attempting to isolate components from the system that executes them. Whether optimizing a single metric, accelerating an isolated stage, or evaluating accuracy without latency constraints, local optimization fails when it ignores system coupling. Reasoning across physical and operational boundaries remains the central discipline of ML systems engineering.
+
+::: {.column-margin .margin-pointer}
+↪ A diagnostic matrix that maps common production symptoms to candidate D·A·M axes and the measurements that confirm them is operationalized in @sec-appdx-dam-taxonomy-production-troubleshooting-02fb.
+:::
+
+This discipline rewards engineers who use bounds to guide benchmarks and measurements to test the assumptions behind those bounds. The same habit governs the last question this book raises, which is what the engineer owes the people a system affects.
+
 ## Future Directions {#sec-future-directions-01df}
 
 An autonomous vehicle navigating an unfamiliar intersection cannot wait for a cloud round-trip, and its sensor streams compete with the model for the same local bus; nor can a clinical assistant afford an uncalibrated diagnostic response under distribution shift. The framework is most useful when it forecasts where such physical and statistical constraints bind next. Three areas put the same physics under increasing pressure: deployment across diverse contexts, robustness under adversarial conditions [@goodfellow2015explaining], and societal applications whose failures carry public consequences. A fourth horizon, systems that compose multiple models, tools, and verifiers or grow beyond one machine, extends the same lens rather than replacing it.
@@ -995,129 +1118,6 @@ When workloads exceed a single node, the resource boundary moves outward, but bo
 :::
 
 Systems engineering demands continuous skepticism: optimizing components in isolation routinely introduces systemic failure modes, creating the architectural pitfalls encountered when translating benchmark wins into production. Recognizing these failure patterns prevents costly redeployments.
-
-## Fallacies and Pitfalls {#sec-fallacies-pitfalls-12ef}
-
-Fallacies and pitfalls in ML systems arise from a common source: treating the system as decomposable into independent parts. Each fallacy assumes that optimizing one dimension, one metric, or one stage suffices; each pitfall shows the consequence when that assumption meets production reality.
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Systems engineering complexity disappears with better tools and abstractions.*
-
-Tools abstract complexity; they do not eliminate physical constraints. A high-level framework that hides memory management still consumes memory. An AutoML system that tunes hyperparameters still faces the Pareto frontier. Simplifying one interface may shift burden to another, although good design can also remove accidental complexity. The engineer who believes tools eliminate fundamental constraints will be surprised when those constraints resurface at scale, often in forms harder to diagnose than the original problem.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Optimizing one metric without tracing displaced costs.*
-
-When an optimization reduces latency by 50 percent, ask what changed elsewhere. Quantization may add validation burden. Caching may trade memory capacity for serving speed. Some simplifications remove accidental complexity; others displace cost. Engineers who celebrate gains in one metric without tracing those effects can build systems that fail in unexpected ways. Measurement decides which occurred.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Mastering individual components equals mastering the system.*
-
-Component expertise is necessary but insufficient. An engineer who understands data pipelines, training, serving, and operations as isolated domains will still struggle with systems where a data schema change cascades through training, breaks quantization assumptions, and triggers silent accuracy degradation in production. Integration can create more complexity than the components reveal in isolation because interfaces multiply failure modes. Systems thinking means understanding how components interact, not just how they work individually.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Scaling data collection without measuring marginal information value.*
-
-The assumption that more data uniformly improves model quality breaks down in practice. As demonstrated in @sec-data-selection-icr-frontier, within a fitted scaling regime, additional data can yield diminishing improvements while storage, preprocessing, and labeling costs continue to grow. Coverage, data quality, model capacity, and distribution determine whether that fit remains useful for the next collection increment. The data-gravity principle (\ref{pri-data-gravity}) mandates measuring downstream operational costs, including whether repeatedly moving or scanning a larger dataset exceeds the cost of moving compute toward it. Scaling data volume without quantifying the marginal information value per sample optimizes an expensive proxy.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *A single accuracy metric captures model quality.*
-
-A model evaluated solely on top-line accuracy ignores operational reality. Pareto analysis (principle \ref{pri-pareto-frontier}) requires evaluating latency, throughput, memory footprint, energy, fairness, and serving cost simultaneously. Under a 100 ms tail-latency SLO, a 95 percent-accurate model executing in 500 ms is infeasible, whereas a 93 percent-accurate model with a measured 50 ms tail meets that latency requirement. It is a feasible deployment only if its accuracy, subgroup behavior, resource costs, and other acceptance criteria also pass. Furthermore, aggregate accuracy routinely conceals severe error disparities across subgroup cohorts (@sec-responsible-engineering). Comprehensive evaluation spans the multi-dimensional Pareto surface rather than a single scalar.
-
-:::
-
-::: {.column-margin .margin-pointer}
-↩ Disaggregated evaluation, which tests each relevant subgroup separately as a release gate, is established in @sec-responsible-engineering-testing-across-populations-9f20.
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Treating every drift alarm as an automated rollback trigger.*
-
-Statistical drift detection should trigger a diagnosed response rather than an unconditional automated rollback. Rollback is appropriate when a regression is traced to a flawed binary or pipeline deployment. External covariate drift, however, is not repaired by redeploying an older, equally stale checkpoint. Safe operational responses include canary traffic shedding, fallback heuristics, prediction quarantine, or scheduled retraining once ground-truth labels confirm degradation. Operational monitoring must couple anomaly detection to cause-specific remediation, intervening according to the verified failure mechanism rather than a raw statistical divergence alarm.
-
-:::
-
-```{python}
-#| echo: false
-#| label: conclusion-amdahl-pitfall
-#| output: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ AMDAHL'S LAW PITFALL CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Fallacies and Pitfalls paragraph immediately following the
-# │          "Optimizing a single pipeline stage" pitfall in the conclusion.
-# │
-# │ Goal:    Quantify how Amdahl's Law caps end-to-end speedup when only a
-# │          small fraction of the pipeline is being optimized.
-# │ Show:    Local speedup factor, serial-fraction percent, and resulting
-# │          system-level speedup for the worked pitfall example.
-# │ How:     Apply calc_amdahls_speedup with optimized_fraction=0.10 and a
-# │          10x local speedup, then format each value for prose inlining.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_amdahls_speedup
-from mlsysim.fmt import fmt, check
-
-class AmdahlPitfallMath:
-    # LOAD
-    optimized_fraction = 0.10
-    serial_fraction = 1 - optimized_fraction
-    local_speedup = 10.0
-
-    # EXECUTE
-    system_speedup = calc_amdahls_speedup(optimized_fraction, local_speedup)
-
-    # GUARD
-    check(system_speedup < 1.2, "Amdahl example should remain bottlenecked by preprocessing.")
-
-    # OUTPUT
-    local_speedup_mult_str = fmt_multiple(local_speedup, precision=0, commas=False)
-    serial_pct_str = fmt_percent(serial_fraction, precision=0, commas=False, style='prose')
-    system_speedup_mult_str = fmt_multiple(system_speedup, precision=1, commas=False)
-```
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *A single optimized pipeline stage makes the system fast.*
-
-Amdahl's Law (principle \ref{pri-amdahl}) applies directly to end-to-end ML pipelines. Optimizing accelerator inference latency by `{python} AmdahlPitfallMath.local_speedup_mult_str` yields only `{python} AmdahlPitfallMath.system_speedup_mult_str` system speedup if CPU-bound preprocessing accounts for `{python} AmdahlPitfallMath.serial_pct_str` of end-to-end latency—serial fractions that can arise from host-side image augmentation, synchronous feature-store lookups, or tokenization that remains host bound in some implementations. The iron law of ML systems (principle \ref{pri-iron-law}) decomposes execution time into data movement, computation, and latency terms precisely so that engineers can identify the dominant term before investing optimization effort. Rigorous profiling isolates where execution time actually elapses. Optimizing without profiling amounts to guesswork, and Amdahl's Law strictly bounds speedup when interventions target non-dominant stages.
-
-:::
-
-::: {.column-margin .margin-pointer}
-↩ The gap between component latency and end-to-end latency, which makes model-only optimizations yield diminishing returns, is established in @sec-benchmarking-endtoend-vs-component-latency-9952.
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Profiling only the stage that looks easiest to optimize.*
-
-Teams often profile the model kernel because it is visible, instrumented, and owned by the ML team, while the surrounding data path is split across storage, preprocessing, networking, and application code. That local view can make a 10$\times$ kernel improvement look urgent even when it changes little about the user-visible path. End-to-end profiling keeps the optimization target honest: the stage to improve is the one that limits the system, not the one with the cleanest benchmark harness.
-
-:::
-
-These fallacies and pitfalls share a common root: attempting to isolate components from the system that executes them. Whether optimizing a single metric, accelerating an isolated stage, or evaluating accuracy without latency constraints, local optimization fails when it ignores system coupling. Reasoning across physical and operational boundaries remains the central discipline of ML systems engineering.
-
-::: {.column-margin .margin-pointer}
-↪ A diagnostic matrix that maps common production symptoms to candidate D·A·M axes and the measurements that confirm them is operationalized in @sec-appdx-dam-taxonomy-production-troubleshooting-02fb.
-:::
-
-This discipline rewards engineers who use bounds to guide benchmarks and measurements to test the assumptions behind those bounds. The same habit governs the last question this book raises, which is what the engineer owes the people a system affects.
 
 ## Journey Forward {#sec-journey-forward-6453}
 
