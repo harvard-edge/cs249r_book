@@ -1202,6 +1202,225 @@ Serving optimizes tail latency under load. Use this checkpoint to separate queue
 
 Tracing an isolated request reveals the intrinsic execution time of each pipeline phase. In production, however, multiple requests arrive concurrently and contend for shared accelerators, CPU cores, and memory buses, introducing queuing delays that dwarf raw computation time.
 
+## Model Lifecycle Management {#sec-model-serving-model-lifecycle-management-ff2e}
+
+Steady-state queuing optimizations offer little protection when a serving cluster fails to initialize properly or emits degraded predictions. In a representative deployment, a newly provisioned replica stalls for 35 seconds compiling a TensorRT engine, while a subtle PIL-to-OpenCV preprocessing discrepancy silently bleeds five percentage points of classification accuracy. Mitigating these lifecycle failures requires systematic control across two operational phases: training-serving parity and cold-start initialization.
+
+### Training-serving skew {#sec-model-serving-trainingserving-skew-7b99}
+
+A model that performed well during validation may silently degrade when deployed. This phenomenon, training-serving skew\index{Training-serving skew!silent accuracy degradation}, represents one of the most subtle failure modes in production ML because it is invisible to latency monitoring and exception tracking [@sculley2015hidden; @baylor2017]. The consistency requirement belongs to the data pipeline; serving is where a violation surfaces. Because the divergence is measurable on identical inputs without labels (principle \ref{pri-training-serving-skew}), it is also one of the most preventable.
+
+::: {.column-margin .margin-pointer}
+↩ The consistency imperative, which requires equivalent transformation behavior and state in training and serving, is established in @sec-data-engineering-ensuring-trainingserving-consistency-c683.
+:::
+
+::: {#dfn-model-serving-training-serving-skew .callout-definition title="Training-serving skew"}
+
+***Training-serving skew***\index{Training-serving skew!definition} is the distributional divergence between the training and inference environments caused by inconsistent logic or state.
+
+1.  **Significance**: It violates the consistency imperative and can cause silent accuracy degradation when the transformation functions differ $(f_{\text{train}}(x) \neq f_{\text{serve}}(x))$.
+2.  **Distinction**: Unlike data drift (which is an external shift in the environment), training-serving skew is an internal failure of the engineering stack.
+3.  **Common pitfall**: A frequent misconception is that skew is "found" by looking for errors. In reality, it is invisible to exceptions: the system runs perfectly and the latency is low, but the predictions are statistically wrong.
+
+:::
+
+@Sec-ml-operations-trainingserving-skew-diagnosis-prevention-9dc1 catalogs the skew categories and the method that detects each. The serving-specific manifestation of skew is **preprocessing divergence**\index{Preprocessing!divergence, training vs. serving}: the real-time inference pipeline processes raw data differently than the batch training pipeline, a common failure mode when training uses Python/Pandas while serving uses C++/Java or optimized inference servers. Unlike data drift, this divergence is internally introduced and often preventable through shared transformations, parity tests, and careful engineering.
+
+::: {#exmp-model-serving-resnet-50-image-preprocessing-skew .callout-example title="ResNet-50: Image preprocessing skew"}
+
+**Scenario**: ResNet-50 vision serving models experience silent prediction accuracy degradation between offline training and online serving pipelines.
+
+**Diagnosis**: The serving pipeline implemented C++/OpenCV preprocessing (`cv2.INTER_LINEAR`, BGR order) while training used Python/PIL (`PIL.BILINEAR`, RGB order, different normalization constants).
+
+**Systems lesson**: Preprocessing divergence causes silent training-serving skew without raising runtime exceptions. Standardizing data transformation pipelines across training and serving environments prevents input distribution corruption.
+
+:::
+
+### Cold start and initialization dynamics {#sec-model-serving-model-loading-initialization-cc5a}
+
+Even with mathematical parity guaranteed between training and serving pipelines, a newly provisioned serving instance cannot process queries until its state is instantiated across hardware memory hierarchies [@romero2021infaas]. This initialization latency, known as cold start\index{Cold start!scaling events}, dictates system responsiveness during deployments, autoscaling events, and failure recovery.
+
+::: {#dfn-model-serving-cold-start .callout-definition title="Cold start"}
+
+***Cold start***\index{Cold start!definition} is the initialization latency incurred when instantiating a new model replica.
+
+1.  **Significance**: It represents the fixed cost of state hydration (loading weights, compiling graphs), which can take seconds or minutes, effectively blocking the system's ability to scale elastically in response to traffic bursts.
+2.  **Distinction**: Unlike inference latency $(L_{\text{lat,infer}})$, which is a per-request cost, cold start is an initialization cost paid when a replica or model instance is created, including deployment, scale-out, recovery, and on-demand model loading.
+3.  **Common pitfall**: A frequent misconception is that cold start is "just loading weights." In reality, it includes graph compilation and memory allocation, which can often take longer than the bandwidth-limited data transfer itself $(\DataVolume/\Bandwidth)$.
+
+:::
+
+Total cold-start latency compounds across distinct physical operations along the critical initialization path\index{Cold start!anatomy}. First, weight loading\index{Weight loading!cold start} transfers serialized parameters from persistent storage across the network or host I/O subsystem into host memory, and ultimately across the PCIe bus into GPU HBM. Graph compilation\index{Graph Compilation!JIT overhead} lowers the framework computational graph into device-specific machine code, executing operator fusion and auto-tuning matrix multiplication kernels for the specific accelerator architecture. Memory allocation reserves device memory arenas for activation scratchpads and intermediate buffers. Finally, warmup\index{Warmup!cache population}[^fn-warmup-cold-start] execution issues synthetic inferences to populate kernel caches, prime framework memory allocators, and force lazy initialization before live traffic arrives.
+
+[^fn-warmup-cold-start]: **Warmup**\index{Warmup!cold start mitigation}: Borrowed from just-in-time (JIT) compilation, where initial executions compile hot paths into optimized machine code; for ML serving, warmup inferences trigger CUDA kernel compilation, cuDNN algorithm auto-tuning, and memory pool allocation that frameworks defer until first use. Without warmup, the first live request absorbs all of this setup and can be orders of magnitude slower than steady state. During autoscaling events, this means new replicas can violate SLOs for their first several seconds of traffic.
+
+Establishing a CUDA context[^fn-cuda-context-serving]\index{CUDA!context, initialization overhead} represents the first fixed cost on the device initialization timeline. Before launching any GPU kernel or allocating device memory, the runtime must instantiate a driver-level context: an internal control structure that manages virtual address spaces, loaded kernel binaries, and hardware event queues. Creating this context requires synchronous communication with the kernel-mode driver and allocates tens to hundreds of megabytes of device memory for bookkeeping. The 0.3–0.5 s range in @tbl-model-serving-resnet-coldstart reflects a typical data center environment; while CUDA lazy loading defers kernel module loading to shorten this initial pause, it merely defers that latency penalty to the first executed inference [@nvidiaCudaLazyLoading].
+
+In multi-process serving deployments where multiple worker processes share a single accelerator, replicating individual CUDA contexts wastes both memory capacity and initialization time. CUDA Multi-Process Service (MPS)[^fn-cuda-mps-serving]\index{CUDA MPS!context sharing} coordinates concurrent work from multiple client processes, reducing scheduling overhead when individual processes underuse the device [@nvidiaCudaMps]. Its isolation behavior depends on the architecture. Pre-Volta clients shared a GPU address space; Volta clients retain separate GPU address spaces and contexts while their kernels can execute concurrently. Separate address spaces do not provide hard fault containment: a fatal GPU fault can affect other clients sharing the affected GPU, so the serving design must budget for correlated replica failures.
+
+[^fn-cuda-context-serving]: **CUDA (compute unified device architecture)**\index{CUDA!serving cold starts}: NVIDIA's parallel computing platform [@nickolls2008], named for its goal of unifying diverse GPU shader models into a single general-purpose architecture. Before CUDA, GPU programming required disguising computations as graphics operations. The CUDA context---the data structure tracking memory allocations, loaded kernels, and device state---is the runtime's per-process gateway to GPU resources; in serverless or rapidly scaling serving systems, context creation and lazy module loading can become visible parts of cold start latency [@nvidiaCudaLazyLoading].
+
+[^fn-cuda-mps-serving]: **CUDA MPS (multi-process service)**\index{CUDA MPS!multi-model serving}: MPS creates a control daemon that allows CUDA work from different processes to overlap on the GPU, which can improve utilization and reduce context-switching overhead when processes individually underuse the accelerator [@nvidiaCudaMps]. For multi-model serving, MPS can help replicas share GPU streaming multiprocessors efficiently. The trade-off is fault isolation: clients share MPS-managed GPU state, so hardware partitioning with Multi-Instance GPU (MIG) provides stronger isolation at the cost of fixed partition granularity.
+
+```{python}
+#| echo: false
+#| label: cold-start-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COLD START TIMELINE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "ResNet-50: Cold Start Timeline"
+# │
+# │ Goal: Decompose the cold start latency of serverless inference.
+# │ Show: That precompiling models reduces cold start from ~35 s to ~1.5 s.
+# │ How: Sum phase durations for data transfer, CUDA initialization, and model loading.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_time, fmt_time_range, check
+
+class ColdStartCalc:
+    """Decomposes cold start latency showing precompiled TensorRT reduces startup from ~35 s to ~1.5 s."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cs_ssd_value = 0.5 * second  # scenario assumption: weight loading from SSD
+    cs_s3_value = 4.0 * second  # scenario assumption: weight loading from S3
+    cs_cuda_value = 0.4 * second  # scenario assumption: CUDA context initialization
+    cs_compile_value = 30.0 * second  # scenario assumption: TensorRT compilation
+    cs_warmup_value = 0.2 * second  # scenario assumption: warmup inferences
+    cs_runtime_overhead_value = 0.4 * second  # scenario assumption: runtime overhead
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cs_local_total_value = cs_ssd_value + cs_cuda_value + cs_warmup_value + cs_runtime_overhead_value
+    cs_cloud_total_value = cs_s3_value + cs_cuda_value + cs_compile_value + cs_warmup_value + cs_runtime_overhead_value
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(cs_local_total_value == 1.5 * second, f"Expected 1.5s local cold start, got {cs_local_total_value}")
+    check(cs_cloud_total_value == 35.0 * second, f"Expected 35.0s cloud cold start, got {cs_cloud_total_value}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    cs_local_s_str = fmt_time(cs_local_total_value, 'second', precision=1, commas=False, approx=True)
+    cs_cloud_s_str = fmt_time(cs_cloud_total_value, 'second', precision=0, commas=False, approx=True)
+    cs_ssd_s_str = fmt_time(cs_ssd_value, 'second', precision=1, commas=False)
+    cs_s3_str = fmt_time_range(3 * second, 5 * second, "second", precision=0, commas=False)
+    cs_cuda_str = fmt_time_range(0.3 * second, 0.5 * second, "second", precision=1, commas=False)
+    cs_compile_str = fmt_time_range(15 * second, 30 * second, "second", precision=0, commas=False)
+    cs_warmup_s_str = fmt_time(cs_warmup_value, 'second', precision=1, commas=False)
+    cs_runtime_overhead_s_str = fmt_time(cs_runtime_overhead_value, 'second', precision=1, commas=False)
+```
+
+::: {#exmp-model-serving-resnet-50-cold-start-timeline .callout-example title="ResNet-50: Cold start timeline"}
+
+@Tbl-model-serving-resnet-coldstart traces the per-phase duration of a ResNet-50 cold start:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.4}
+```
+
+| **Phase**                       |                    **Duration**                    | **Notes**                                           |
+|:--------------------------------|:--------------------------------------------------:|:----------------------------------------------------|
+| **Weight loading (SSD)**        |       `{python} ColdStartCalc.cs_ssd_s_str`        | 98 MB FP32 weights from local storage               |
+| **Weight loading (S3)**         |         `{python} ColdStartCalc.cs_s3_str`         | Network latency dominates for cloud storage         |
+| **CUDA context**                |        `{python} ColdStartCalc.cs_cuda_str`        | GPU driver initialization and memory setup          |
+| **TensorRT compilation**        |      `{python} ColdStartCalc.cs_compile_str`       | Converts PyTorch model to optimized engine          |
+| **Warmup (10 inferences)**      |      `{python} ColdStartCalc.cs_warmup_s_str`      | Triggers remaining lazy initialization              |
+| **Runtime overhead**            | `{python} ColdStartCalc.cs_runtime_overhead_s_str` | Process startup, framework hooks, and runtime setup |
+| **Total (local, optimized)**    |    **`{python} ColdStartCalc.cs_local_s_str`**     | With precompiled TensorRT engine, warm container    |
+| **Total (cloud, first deploy)** |    **`{python} ColdStartCalc.cs_cloud_s_str`**     | Including compilation from cold state               |
+
+: **ResNet-50 cold start timeline**: Illustrative per-phase durations for weight loading, CUDA context creation, TensorRT compilation, and warmup, with totals for the optimized local case and the first-deploy cloud case showing where the dominant cost lives. {#tbl-model-serving-resnet-coldstart tbl-colwidths="[30,20,50]"}
+
+```{=latex}
+\endgroup
+\vspace{-1.5ex}
+```
+**Systems insight**: Precompiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments.
+
+:::
+
+Without warmup, the first live request absorbs deferred JIT compilation, driver memory allocation, and kernel launch overhead. A request with a steady-state execution time of 5 ms can stall for 500 ms during an unmitigated cold start, violating strict SLOs. Controlling this initialization overhead requires systematic selection among storage, memory, and runtime loading strategies.
+
+### Loading strategies {#sec-model-serving-loading-strategies-eb38}
+
+Different loading strategies trade off cold start duration against serving performance and memory efficiency. The simplest approach, full loading\index{Model loading!full loading}, reads the entire model into memory before serving begins. This maximizes inference speed since all weights are immediately available, but extends cold start duration and limits model size to available memory. The approach is appropriate when cold start latency is acceptable and models comfortably fit in memory.
+
+Memory mapping\index{Memory mapping!on-demand model loading}\index{mmap!model loading} offers an alternative by mapping model files into the process address space and faulting pages in on access. It can reduce eager copying and shorten apparent startup, but a dense model will eventually touch nearly all of its weights, so deferred page faults can move loading latency into early requests. Selective benefit is greater for sparsely accessed components or model repositories that load subsets on demand; latency-sensitive services still prefault or warm the pages needed on the request path.
+
+A third strategy, lazy initialization\index{Initialization!lazy, deferred compilation}, defers compilation and allocation until first use. This minimizes startup time but shifts latency to the first request. Production systems often combine lazy initialization with synthetic warmup requests to trigger initialization before real traffic arrives.
+
+### Model caching infrastructure {#sec-model-serving-model-caching-infrastructure-4f1a}
+
+Production systems cache model weights at the infrastructure level to reduce cold start for common deployment scenarios. One approach, container image embedding\index{Model caching!container embedding}, bundles model weights directly in the container image. This produces a single deployment artifact and eliminates network fetches at startup, but creates large images (often 10–50 GB) that slow container pulls and consume registry storage. This approach works best for models that rarely update.
+
+For organizations with many models and frequent updates, a shared filesystem (EFS, GCS FUSE) containing versioned model weights provides a more flexible alternative. Multiple replicas can read the same artifacts without baking each version into a container. Updates still require an explicit, atomic version switch and rollout; allowing files to change underneath live replicas would undermine reproducibility. The trade-off is that network latency affects cold start and filesystem availability becomes a critical dependency.
+
+When cold start latency is critical for high-traffic models, node-local SSD caching\index{SSD cache!model loading} prepopulates local SSDs on inference nodes with frequently-used models. This approach provides fast loading from Non-Volatile Memory Express (NVMe) drives at several GB/s without network dependency, but requires cache management to handle model updates and capacity limits. Infrequent updates favor container embedding, frequent updates favor shared filesystems, and performance-critical deployments benefit from local caching with background refresh.
+
+### Multi-model serving {#sec-model-serving-multimodel-serving-a9c1}
+
+Production systems often serve multiple models from a single machine\index{Multi-model serving!GPU memory management}, whether different model versions for A/B testing, ensemble components, or entirely different models sharing infrastructure. GPU memory becomes the limiting resource, requiring careful management strategies.
+
+Three strategies address multi-model memory management. Time-multiplexing\index{Time-multiplexing!model swapping} loads one model at a time and swaps based on request routing: this approach is simple but introduces swap latency. Memory sharing\index{Memory!sharing, GPU multi-model} partitions GPU memory among models, limiting concurrent execution count but enabling more models to remain resident. Model virtualization\index{Model virtualization!lifecycle management}, as implemented by frameworks like Triton, separates model lifecycle from application code through model repository and control APIs for loading, unloading, and versioning models [@nvidia_triton; @nvidiaTritonModelRepository; @nvidiaTritonModelManagement]. The choice depends on request patterns: if models receive traffic evenly, concurrent loading works; if traffic is bursty and model-specific, time-multiplexing with explicit preloading reduces average latency while maximizing GPU utilization.
+
+#### Multi-stream execution {#sec-model-serving-multistream-execution-1b1f}
+
+When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU[^fn-mig-gpu-partitioning]\index{MIG!hardware isolation} technology enables hardware-level isolation, dividing an A100\index{A100!MIG partitioning} into up to seven independent GPU instances, each with dedicated memory and compute resources [@nvidiaMigUserGuide]. MIG is available on A100, A30 (up to four instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling permits overlapping or time-multiplexed work without hardware partitioning. The choice depends on whether consistent latency with MIG or maximum utilization with shared streams is the priority.
+
+[^fn-mig-gpu-partitioning]: **MIG (multi-instance GPU)**\index{MIG!multi-model serving}: Introduced with NVIDIA's A100 [@NVIDIA2020] and documented across supported data-center GPUs [@nvidiaMigUserGuide], MIG partitions a single physical GPU into independent instances, each with dedicated compute and memory resources; unlike software sharing (MPS or time-slicing), MIG provides hardware-level isolation between partitions. The trade-off is granularity---partitions must follow fixed profiles, so resources cannot be divided arbitrarily. For multi-model serving, MIG reduces noisy-neighbor risk on shared hardware, while per-model SLO guarantees still depend on scheduler policy, load, and the selected partition profile.
+
+#### Model swapping and host memory {#sec-model-serving-model-swapping-host-memory-c54f}
+
+When the aggregate size of all models exceeds GPU memory capacity, the serving system must swap models between host dynamic random-access memory (DRAM) and device memory (VRAM)\index{VRAM!device memory} on demand. This introduces a new latency component determined by the PCIe bus bandwidth\index{Bandwidth!PCIe, model swapping}.
+
+```{python}
+#| echo: false
+#| label: model-swap-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MODEL SWAP TIME
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Model swapping and host memory discussion
+# │
+# │ Goal: Quantify the latency cost of model swapping.
+# │ Show: That a reference model swap over PCIe takes hundreds of milliseconds.
+# │ How: Load the reusable model-loading scenario and PCIe Gen4 bandwidth,
+# │      then calculate transfer duration.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import check
+
+class ModelSwapCalc:
+    """Quantifies the latency cost of swapping a reference model over PCIe Gen4."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    loading_scenario = ReferenceStats.ModelLoading
+    model_size = loading_scenario.PcieSwapReferenceModelSize
+    pcie_bw = Hardware.Cloud.A100.interconnect.bandwidth  # PCIe Gen4 x16 bandwidth
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    model_swap = transfer_time(model_size, pcie_bw)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(model_swap.to(ms).magnitude, 1) == 312.5, f"Expected 312.5 ms model swap time, got {model_swap}")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
+    pcie_bw_gb_per_s_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
+    model_swap_ms_str = fmt_time(model_swap, 'millisecond', precision=1, commas=False)
+```
+
+For a `{python} ModelSwapCalc.model_size_gb_str` model on PCIe Gen4 x16 (`{python} ModelSwapCalc.pcie_bw_gb_per_s_str` theoretical bandwidth), loading takes at least `{python} ModelSwapCalc.model_swap_ms_str` before deserialization, graph setup, or warmup. As visualized in the margin, this raw transfer latency dwarfs tight service-level objectives—such as a 50 ms deadline—by more than $6\times$, rendering on-demand model swapping unviable on the interactive request path.
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_001.svg){width="100%" fig-alt="Horizontal millisecond scale with a dashed 50 ms SLO marker far left of a red model-load marker around 312 ms."}
+
+*Model loading lands far outside a tight serving SLO.*
+:::
+
+To accelerate this transfer path, systems use pinned memory\index{Pinned memory!DMA transfer} (page-locked host RAM). The GPU's DMA copy engines require physical memory pages to remain fixed at invariant physical addresses throughout a transfer. Standard host memory allocated via standard heap allocators is pageable: the operating system virtual memory manager may relocate physical pages or swap them to backing storage at any time. Consequently, transferring data from a pageable buffer forces the CUDA driver to perform a two-stage copy: the CPU first synchronously copies the data into an intermediate pinned staging buffer, and the DMA engine then transfers the staging buffer across PCIe to GPU memory. Allocating model weights directly in page-locked host memory via `cudaHostAlloc` eliminates this CPU staging copy, allowing direct DMA transfers without that staging copy. Achieved bandwidth still depends on transfer size, memory locality, and contention. The physical trade-off is host memory exhaustion: pinned memory cannot be paged out or reclaimed by the OS under memory pressure, keeping that physical RAM resident until the allocation is released or unpinned. High-throughput serving systems therefore pin active model weights and I/O ring buffers while leaving standby model checkpoints in pageable memory.
+
+Once a model is loaded, warmed up, and producing predictions consistent with training, request grouping becomes the next optimization lever. Dynamic batching directly governs the balance between hardware efficiency and tail latency in queuing formulations.
+
 ## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
 
 When arrival streams fluctuate, queuing theory\index{Queuing theory!serving systems} formalizes how contention for shared physical resources—accelerator execution queues, host-to-device PCIe transfers, and memory buses—degrades latency distributions. Its governing laws explain why seemingly well-provisioned inference services experience sharp, nonlinear latency explosions as utilization approaches capacity.
@@ -1227,7 +1446,7 @@ Capacity planning begins by determining system concurrency\index{SLO!capacity pl
 # │ How: Apply Little's Law to throughput and mean time in system.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
+from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CapacityPlanningAnchor:
@@ -1280,7 +1499,7 @@ Little's law holds regardless of the arrival distribution, service-time distribu
 # │ How: Apply Little's Law to throughput and mean time in system.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time
+from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CapacityPlanning:
@@ -2655,225 +2874,6 @@ Beyond scheduled processes, asynchronous hardware interrupts introduce another s
 Isolating physical cores, locking host memory, and shielding interrupt lines reduce specific sources of operating system noise. The resulting service-time distribution still needs measurement under the intended load. Even a predictable single-node execution path leaves a scheduling challenge: processing requests sequentially can underuse accelerator resources when each request exposes little parallel work. To achieve high throughput within latency deadlines, the internal software architecture of the serving engine must coordinate irregular, asynchronous request streams into structured, hardware-saturating batches.
 
 
-## Model Lifecycle Management {#sec-model-serving-model-lifecycle-management-ff2e}
-
-Steady-state queuing optimizations offer little protection when a serving cluster fails to initialize properly or emits degraded predictions. In a representative deployment, a newly provisioned replica stalls for 35 seconds compiling a TensorRT engine, while a subtle PIL-to-OpenCV preprocessing discrepancy silently bleeds five percentage points of classification accuracy. Mitigating these lifecycle failures requires systematic control across two operational phases: training-serving parity and cold-start initialization.
-
-### Training-serving skew {#sec-model-serving-trainingserving-skew-7b99}
-
-A model that performed well during validation may silently degrade when deployed. This phenomenon, training-serving skew\index{Training-serving skew!silent accuracy degradation}, represents one of the most subtle failure modes in production ML because it is invisible to latency monitoring and exception tracking [@sculley2015hidden; @baylor2017]. The consistency requirement belongs to the data pipeline; serving is where a violation surfaces. Because the divergence is measurable on identical inputs without labels (principle \ref{pri-training-serving-skew}), it is also one of the most preventable.
-
-::: {.column-margin .margin-pointer}
-↩ The consistency imperative, which requires equivalent transformation behavior and state in training and serving, is established in @sec-data-engineering-ensuring-trainingserving-consistency-c683.
-:::
-
-::: {#dfn-model-serving-training-serving-skew .callout-definition title="Training-serving skew"}
-
-***Training-serving skew***\index{Training-serving skew!definition} is the distributional divergence between the training and inference environments caused by inconsistent logic or state.
-
-1.  **Significance**: It violates the consistency imperative and can cause silent accuracy degradation when the transformation functions differ $(f_{\text{train}}(x) \neq f_{\text{serve}}(x))$.
-2.  **Distinction**: Unlike data drift (which is an external shift in the environment), training-serving skew is an internal failure of the engineering stack.
-3.  **Common pitfall**: A frequent misconception is that skew is "found" by looking for errors. In reality, it is invisible to exceptions: the system runs perfectly and the latency is low, but the predictions are statistically wrong.
-
-:::
-
-@Sec-ml-operations-trainingserving-skew-diagnosis-prevention-9dc1 catalogs the skew categories and the method that detects each. The serving-specific manifestation of skew is **preprocessing divergence**\index{Preprocessing!divergence, training vs. serving}: the real-time inference pipeline processes raw data differently than the batch training pipeline, a common failure mode when training uses Python/Pandas while serving uses C++/Java or optimized inference servers. Unlike data drift, this divergence is internally introduced and often preventable through shared transformations, parity tests, and careful engineering.
-
-::: {#exmp-model-serving-resnet-50-image-preprocessing-skew .callout-example title="ResNet-50: Image preprocessing skew"}
-
-**Scenario**: ResNet-50 vision serving models experience silent prediction accuracy degradation between offline training and online serving pipelines.
-
-**Diagnosis**: The serving pipeline implemented C++/OpenCV preprocessing (`cv2.INTER_LINEAR`, BGR order) while training used Python/PIL (`PIL.BILINEAR`, RGB order, different normalization constants).
-
-**Systems lesson**: Preprocessing divergence causes silent training-serving skew without raising runtime exceptions. Standardizing data transformation pipelines across training and serving environments prevents input distribution corruption.
-
-:::
-
-### Cold start and initialization dynamics {#sec-model-serving-model-loading-initialization-cc5a}
-
-Even with mathematical parity guaranteed between training and serving pipelines, a newly provisioned serving instance cannot process queries until its state is instantiated across hardware memory hierarchies [@romero2021infaas]. This initialization latency, known as cold start\index{Cold start!scaling events}, dictates system responsiveness during deployments, autoscaling events, and failure recovery.
-
-::: {#dfn-model-serving-cold-start .callout-definition title="Cold start"}
-
-***Cold start***\index{Cold start!definition} is the initialization latency incurred when instantiating a new model replica.
-
-1.  **Significance**: It represents the fixed cost of state hydration (loading weights, compiling graphs), which can take seconds or minutes, effectively blocking the system's ability to scale elastically in response to traffic bursts.
-2.  **Distinction**: Unlike inference latency $(L_{\text{lat,infer}})$, which is a per-request cost, cold start is an initialization cost paid when a replica or model instance is created, including deployment, scale-out, recovery, and on-demand model loading.
-3.  **Common pitfall**: A frequent misconception is that cold start is "just loading weights." In reality, it includes graph compilation and memory allocation, which can often take longer than the bandwidth-limited data transfer itself $(\DataVolume/\Bandwidth)$.
-
-:::
-
-Total cold-start latency compounds across distinct physical operations along the critical initialization path\index{Cold start!anatomy}. First, weight loading\index{Weight loading!cold start} transfers serialized parameters from persistent storage across the network or host I/O subsystem into host memory, and ultimately across the PCIe bus into GPU HBM. Graph compilation\index{Graph Compilation!JIT overhead} lowers the framework computational graph into device-specific machine code, executing operator fusion and auto-tuning matrix multiplication kernels for the specific accelerator architecture. Memory allocation reserves device memory arenas for activation scratchpads and intermediate buffers. Finally, warmup\index{Warmup!cache population}[^fn-warmup-cold-start] execution issues synthetic inferences to populate kernel caches, prime framework memory allocators, and force lazy initialization before live traffic arrives.
-
-[^fn-warmup-cold-start]: **Warmup**\index{Warmup!cold start mitigation}: Borrowed from just-in-time (JIT) compilation, where initial executions compile hot paths into optimized machine code; for ML serving, warmup inferences trigger CUDA kernel compilation, cuDNN algorithm auto-tuning, and memory pool allocation that frameworks defer until first use. Without warmup, the first live request absorbs all of this setup and can be orders of magnitude slower than steady state. During autoscaling events, this means new replicas can violate SLOs for their first several seconds of traffic.
-
-Establishing a CUDA context[^fn-cuda-context-serving]\index{CUDA!context, initialization overhead} represents the first fixed cost on the device initialization timeline. Before launching any GPU kernel or allocating device memory, the runtime must instantiate a driver-level context: an internal control structure that manages virtual address spaces, loaded kernel binaries, and hardware event queues. Creating this context requires synchronous communication with the kernel-mode driver and allocates tens to hundreds of megabytes of device memory for bookkeeping. The 0.3–0.5 s range in @tbl-model-serving-resnet-coldstart reflects a typical data center environment; while CUDA lazy loading defers kernel module loading to shorten this initial pause, it merely defers that latency penalty to the first executed inference [@nvidiaCudaLazyLoading].
-
-In multi-process serving deployments where multiple worker processes share a single accelerator, replicating individual CUDA contexts wastes both memory capacity and initialization time. CUDA Multi-Process Service (MPS)[^fn-cuda-mps-serving]\index{CUDA MPS!context sharing} coordinates concurrent work from multiple client processes, reducing scheduling overhead when individual processes underuse the device [@nvidiaCudaMps]. Its isolation behavior depends on the architecture. Pre-Volta clients shared a GPU address space; Volta clients retain separate GPU address spaces and contexts while their kernels can execute concurrently. Separate address spaces do not provide hard fault containment: a fatal GPU fault can affect other clients sharing the affected GPU, so the serving design must budget for correlated replica failures.
-
-[^fn-cuda-context-serving]: **CUDA (compute unified device architecture)**\index{CUDA!serving cold starts}: NVIDIA's parallel computing platform [@nickolls2008], named for its goal of unifying diverse GPU shader models into a single general-purpose architecture. Before CUDA, GPU programming required disguising computations as graphics operations. The CUDA context---the data structure tracking memory allocations, loaded kernels, and device state---is the runtime's per-process gateway to GPU resources; in serverless or rapidly scaling serving systems, context creation and lazy module loading can become visible parts of cold start latency [@nvidiaCudaLazyLoading].
-
-[^fn-cuda-mps-serving]: **CUDA MPS (multi-process service)**\index{CUDA MPS!multi-model serving}: MPS creates a control daemon that allows CUDA work from different processes to overlap on the GPU, which can improve utilization and reduce context-switching overhead when processes individually underuse the accelerator [@nvidiaCudaMps]. For multi-model serving, MPS can help replicas share GPU streaming multiprocessors efficiently. The trade-off is fault isolation: clients share MPS-managed GPU state, so hardware partitioning with Multi-Instance GPU (MIG) provides stronger isolation at the cost of fixed partition granularity.
-
-```{python}
-#| echo: false
-#| label: cold-start-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COLD START TIMELINE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "ResNet-50: Cold Start Timeline"
-# │
-# │ Goal: Decompose the cold start latency of serverless inference.
-# │ Show: That precompiling models reduces cold start from ~35 s to ~1.5 s.
-# │ How: Sum phase durations for data transfer, CUDA initialization, and model loading.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import fmt_time, fmt_time_range, check
-
-class ColdStartCalc:
-    """Decomposes cold start latency showing precompiled TensorRT reduces startup from ~35 s to ~1.5 s."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cs_ssd_value = 0.5 * second  # scenario assumption: weight loading from SSD
-    cs_s3_value = 4.0 * second  # scenario assumption: weight loading from S3
-    cs_cuda_value = 0.4 * second  # scenario assumption: CUDA context initialization
-    cs_compile_value = 30.0 * second  # scenario assumption: TensorRT compilation
-    cs_warmup_value = 0.2 * second  # scenario assumption: warmup inferences
-    cs_runtime_overhead_value = 0.4 * second  # scenario assumption: runtime overhead
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cs_local_total_value = cs_ssd_value + cs_cuda_value + cs_warmup_value + cs_runtime_overhead_value
-    cs_cloud_total_value = cs_s3_value + cs_cuda_value + cs_compile_value + cs_warmup_value + cs_runtime_overhead_value
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(cs_local_total_value == 1.5 * second, f"Expected 1.5s local cold start, got {cs_local_total_value}")
-    check(cs_cloud_total_value == 35.0 * second, f"Expected 35.0s cloud cold start, got {cs_cloud_total_value}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cs_local_s_str = fmt_time(cs_local_total_value, 'second', precision=1, commas=False, approx=True)
-    cs_cloud_s_str = fmt_time(cs_cloud_total_value, 'second', precision=0, commas=False, approx=True)
-    cs_ssd_s_str = fmt_time(cs_ssd_value, 'second', precision=1, commas=False)
-    cs_s3_str = fmt_time_range(3 * second, 5 * second, "second", precision=0, commas=False)
-    cs_cuda_str = fmt_time_range(0.3 * second, 0.5 * second, "second", precision=1, commas=False)
-    cs_compile_str = fmt_time_range(15 * second, 30 * second, "second", precision=0, commas=False)
-    cs_warmup_s_str = fmt_time(cs_warmup_value, 'second', precision=1, commas=False)
-    cs_runtime_overhead_s_str = fmt_time(cs_runtime_overhead_value, 'second', precision=1, commas=False)
-```
-
-::: {#exmp-model-serving-resnet-50-cold-start-timeline .callout-example title="ResNet-50: Cold start timeline"}
-
-@Tbl-model-serving-resnet-coldstart traces the per-phase duration of a ResNet-50 cold start:
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.4}
-```
-
-| **Phase**                       |                    **Duration**                    | **Notes**                                           |
-|:--------------------------------|:--------------------------------------------------:|:----------------------------------------------------|
-| **Weight loading (SSD)**        |       `{python} ColdStartCalc.cs_ssd_s_str`        | 98 MB FP32 weights from local storage               |
-| **Weight loading (S3)**         |         `{python} ColdStartCalc.cs_s3_str`         | Network latency dominates for cloud storage         |
-| **CUDA context**                |        `{python} ColdStartCalc.cs_cuda_str`        | GPU driver initialization and memory setup          |
-| **TensorRT compilation**        |      `{python} ColdStartCalc.cs_compile_str`       | Converts PyTorch model to optimized engine          |
-| **Warmup (10 inferences)**      |      `{python} ColdStartCalc.cs_warmup_s_str`      | Triggers remaining lazy initialization              |
-| **Runtime overhead**            | `{python} ColdStartCalc.cs_runtime_overhead_s_str` | Process startup, framework hooks, and runtime setup |
-| **Total (local, optimized)**    |    **`{python} ColdStartCalc.cs_local_s_str`**     | With precompiled TensorRT engine, warm container    |
-| **Total (cloud, first deploy)** |    **`{python} ColdStartCalc.cs_cloud_s_str`**     | Including compilation from cold state               |
-
-: **ResNet-50 cold start timeline**: Illustrative per-phase durations for weight loading, CUDA context creation, TensorRT compilation, and warmup, with totals for the optimized local case and the first-deploy cloud case showing where the dominant cost lives. {#tbl-model-serving-resnet-coldstart tbl-colwidths="[30,20,50]"}
-
-```{=latex}
-\endgroup
-\vspace{-1.5ex}
-```
-**Systems insight**: Precompiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments.
-
-:::
-
-Without warmup, the first live request absorbs deferred JIT compilation, driver memory allocation, and kernel launch overhead. A request with a steady-state execution time of 5 ms can stall for 500 ms during an unmitigated cold start, violating strict SLOs. Controlling this initialization overhead requires systematic selection among storage, memory, and runtime loading strategies.
-
-### Loading strategies {#sec-model-serving-loading-strategies-eb38}
-
-Different loading strategies trade off cold start duration against serving performance and memory efficiency. The simplest approach, full loading\index{Model loading!full loading}, reads the entire model into memory before serving begins. This maximizes inference speed since all weights are immediately available, but extends cold start duration and limits model size to available memory. The approach is appropriate when cold start latency is acceptable and models comfortably fit in memory.
-
-Memory mapping\index{Memory mapping!on-demand model loading}\index{mmap!model loading} offers an alternative by mapping model files into the process address space and faulting pages in on access. It can reduce eager copying and shorten apparent startup, but a dense model will eventually touch nearly all of its weights, so deferred page faults can move loading latency into early requests. Selective benefit is greater for sparsely accessed components or model repositories that load subsets on demand; latency-sensitive services still prefault or warm the pages needed on the request path.
-
-A third strategy, lazy initialization\index{Initialization!lazy, deferred compilation}, defers compilation and allocation until first use. This minimizes startup time but shifts latency to the first request. Production systems often combine lazy initialization with synthetic warmup requests to trigger initialization before real traffic arrives.
-
-### Model caching infrastructure {#sec-model-serving-model-caching-infrastructure-4f1a}
-
-Production systems cache model weights at the infrastructure level to reduce cold start for common deployment scenarios. One approach, container image embedding\index{Model caching!container embedding}, bundles model weights directly in the container image. This produces a single deployment artifact and eliminates network fetches at startup, but creates large images (often 10–50 GB) that slow container pulls and consume registry storage. This approach works best for models that rarely update.
-
-For organizations with many models and frequent updates, a shared filesystem (EFS, GCS FUSE) containing versioned model weights provides a more flexible alternative. Multiple replicas can read the same artifacts without baking each version into a container. Updates still require an explicit, atomic version switch and rollout; allowing files to change underneath live replicas would undermine reproducibility. The trade-off is that network latency affects cold start and filesystem availability becomes a critical dependency.
-
-When cold start latency is critical for high-traffic models, node-local SSD caching\index{SSD cache!model loading} prepopulates local SSDs on inference nodes with frequently-used models. This approach provides fast loading from Non-Volatile Memory Express (NVMe) drives at several GB/s without network dependency, but requires cache management to handle model updates and capacity limits. Infrequent updates favor container embedding, frequent updates favor shared filesystems, and performance-critical deployments benefit from local caching with background refresh.
-
-### Multi-model serving {#sec-model-serving-multimodel-serving-a9c1}
-
-Production systems often serve multiple models from a single machine\index{Multi-model serving!GPU memory management}, whether different model versions for A/B testing, ensemble components, or entirely different models sharing infrastructure. GPU memory becomes the limiting resource, requiring careful management strategies.
-
-Three strategies address multi-model memory management. Time-multiplexing\index{Time-multiplexing!model swapping} loads one model at a time and swaps based on request routing: this approach is simple but introduces swap latency. Memory sharing\index{Memory!sharing, GPU multi-model} partitions GPU memory among models, limiting concurrent execution count but enabling more models to remain resident. Model virtualization\index{Model virtualization!lifecycle management}, as implemented by frameworks like Triton, separates model lifecycle from application code through model repository and control APIs for loading, unloading, and versioning models [@nvidia_triton; @nvidiaTritonModelRepository; @nvidiaTritonModelManagement]. The choice depends on request patterns: if models receive traffic evenly, concurrent loading works; if traffic is bursty and model-specific, time-multiplexing with explicit preloading reduces average latency while maximizing GPU utilization.
-
-#### Multi-stream execution {#sec-model-serving-multistream-execution-1b1f}
-
-When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU[^fn-mig-gpu-partitioning]\index{MIG!hardware isolation} technology enables hardware-level isolation, dividing an A100\index{A100!MIG partitioning} into up to seven independent GPU instances, each with dedicated memory and compute resources [@nvidiaMigUserGuide]. MIG is available on A100, A30 (up to four instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling permits overlapping or time-multiplexed work without hardware partitioning. The choice depends on whether consistent latency with MIG or maximum utilization with shared streams is the priority.
-
-[^fn-mig-gpu-partitioning]: **MIG (multi-instance GPU)**\index{MIG!multi-model serving}: Introduced with NVIDIA's A100 [@NVIDIA2020] and documented across supported data-center GPUs [@nvidiaMigUserGuide], MIG partitions a single physical GPU into independent instances, each with dedicated compute and memory resources; unlike software sharing (MPS or time-slicing), MIG provides hardware-level isolation between partitions. The trade-off is granularity---partitions must follow fixed profiles, so resources cannot be divided arbitrarily. For multi-model serving, MIG reduces noisy-neighbor risk on shared hardware, while per-model SLO guarantees still depend on scheduler policy, load, and the selected partition profile.
-
-#### Model swapping and host memory {#sec-model-serving-model-swapping-host-memory-c54f}
-
-When the aggregate size of all models exceeds GPU memory capacity, the serving system must swap models between host dynamic random-access memory (DRAM) and device memory (VRAM)\index{VRAM!device memory} on demand. This introduces a new latency component determined by the PCIe bus bandwidth\index{Bandwidth!PCIe, model swapping}.
-
-```{python}
-#| echo: false
-#| label: model-swap-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MODEL SWAP TIME
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Model swapping and host memory discussion
-# │
-# │ Goal: Quantify the latency cost of model swapping.
-# │ Show: That a reference model swap over PCIe takes hundreds of milliseconds.
-# │ How: Load the reusable model-loading scenario and PCIe Gen4 bandwidth,
-# │      then calculate transfer duration.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.fmt import check
-
-class ModelSwapCalc:
-    """Quantifies the latency cost of swapping a reference model over PCIe Gen4."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    loading_scenario = ReferenceStats.ModelLoading
-    model_size = loading_scenario.PcieSwapReferenceModelSize
-    pcie_bw = Hardware.Cloud.A100.interconnect.bandwidth  # PCIe Gen4 x16 bandwidth
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    model_swap = transfer_time(model_size, pcie_bw)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(model_swap.to(ms).magnitude, 1) == 312.5, f"Expected 312.5 ms model swap time, got {model_swap}")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
-    pcie_bw_gb_per_s_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
-    model_swap_ms_str = fmt_time(model_swap, 'millisecond', precision=1, commas=False)
-```
-
-For a `{python} ModelSwapCalc.model_size_gb_str` model on PCIe Gen4 x16 (`{python} ModelSwapCalc.pcie_bw_gb_per_s_str` theoretical bandwidth), loading takes at least `{python} ModelSwapCalc.model_swap_ms_str` before deserialization, graph setup, or warmup. As visualized in the margin, this raw transfer latency dwarfs tight service-level objectives—such as a 50 ms deadline—by more than $6\times$, rendering on-demand model swapping unviable on the interactive request path.
-
-::: {.column-margin}
-![](images/svg/vol1_model_serving_margin_001.svg){width="100%" fig-alt="Horizontal millisecond scale with a dashed 50 ms SLO marker far left of a red model-load marker around 312 ms."}
-
-*Model loading lands far outside a tight serving SLO.*
-:::
-
-To accelerate this transfer path, systems use pinned memory\index{Pinned memory!DMA transfer} (page-locked host RAM). The GPU's DMA copy engines require physical memory pages to remain fixed at invariant physical addresses throughout a transfer. Standard host memory allocated via standard heap allocators is pageable: the operating system virtual memory manager may relocate physical pages or swap them to backing storage at any time. Consequently, transferring data from a pageable buffer forces the CUDA driver to perform a two-stage copy: the CPU first synchronously copies the data into an intermediate pinned staging buffer, and the DMA engine then transfers the staging buffer across PCIe to GPU memory. Allocating model weights directly in page-locked host memory via `cudaHostAlloc` eliminates this CPU staging copy, allowing direct DMA transfers without that staging copy. Achieved bandwidth still depends on transfer size, memory locality, and contention. The physical trade-off is host memory exhaustion: pinned memory cannot be paged out or reclaimed by the OS under memory pressure, keeping that physical RAM resident until the allocation is released or unpinned. High-throughput serving systems therefore pin active model weights and I/O ring buffers while leaving standby model checkpoints in pageable memory.
-
-Once a model is loaded, warmed up, and producing predictions consistent with training, request grouping becomes the next optimization lever. Dynamic batching directly governs the balance between hardware efficiency and tail latency in queuing formulations.
-
 ## Throughput Optimization {#sec-model-serving-throughput-optimization-18d1}
 
 Consider a representative ResNet-50 classifier on a V100\index{V100!batching throughput} GPU\index{GPU!batching utilization} operating at batch size one. At small batches, limited weight reuse and repeated kernel launches can restrict throughput; their relative contribution requires a measured execution trace. The GPU achieves only 15 percent hardware utilization and 200 images per second. Processing 32 images at once reaches 95 percent utilization and 1,280 images per second—a 6.4$\times$ throughput improvement on identical hardware—because the loaded weights are reused across inputs in on-chip memory, amortizing both memory bandwidth demands and kernel launch overheads. **Batching**\index{Batching!training vs. serving}[^fn-batch-serving-tradeoff] is the primary lever for improving serving economics, but its operational constraints differ sharply between training and serving [@crankshaw2017clipper]. *Training* batches maximize throughput by grouping hundreds or thousands of samples together with no constraint on individual sample latency. *Serving* batches must balance accelerator saturation against individual request deadlines, ensuring that no early-arriving input waits excessively for a batch to form. An inference server resolves this tension through **dynamic batching**\index{Dynamic batching!definition}, adjusting batch size at runtime to match incoming request arrivals.
@@ -3711,56 +3711,6 @@ For an illustrative ResNet-50 serving system with a 50 ms SLO and 500 QPS traffi
 \endgroup
 ```
 
-### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
-
-Autoregressive models\index{Autoregressive model!token generation}, such as large language models, generate outputs token by token. Because each new token depends on the accumulated sequence history, generation proceeds sequentially. Standard dynamic batching assumes uniform output lengths and commits to a fixed batch for an entire generation cycle. When sequence lengths vary, this static commitment degrades accelerator efficiency. If one sequence in a batch of eight finishes after ten tokens while others require 100 tokens, 90 percent of the compute and memory bandwidth allocated to that sequence slot is wasted on padding tokens or masked dummy operations while awaiting the slowest sequence\index{Sequence length variability!batch waste} [@yu2022orca].
-
-**Continuous batching**\index{Continuous batching!LLM serving}[^fn-continuous-batching-llm] (also called iteration-level batching) eliminates this idle-slot tax by rescheduling batch composition at each decoding iteration [@yu2022orca; @kwon2023]. Rather than committing to a static batch that persists across hundreds of forward passes, the serving engine re-evaluates batch membership at every token-generation step. When a sequence emits its end-of-sequence token, the scheduler immediately reclaims that execution slot, admitting an arriving request into the batch for the subsequent forward pass. Active sequences continue decoding without interruption, maintaining high accelerator utilization across variable-length workloads.
-
-[^fn-continuous-batching-llm]: **Continuous batching**\index{Continuous batching!scheduling granularity}: Also called "iteration-level batching" [@yu2022orca] and, in NVIDIA TensorRT-LLM, "in-flight batching" [@nvidiaTensorRtLlm]; the distinction is scheduling granularity. Traditional batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching reschedules at every token-generation step—analogous to preemptive OS process scheduling vs. run-to-completion. This finer granularity reduces the waste from variable-length sequences, where a batch slot occupied by a completed sequence sits idle until all other sequences finish.
-
-Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine executes a prefill in the same iteration as active decodes, the ongoing decode streams stall, causing severe spikes in inter-token latency (ITL). Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes; measured iteration times determine the resulting token cadence.
-
-[^fn-vllm-page-table]: **vLLM (virtual large language model (LLM))**\index{vLLM!virtual memory analogy}: An open-source serving system that enables continuous batching via its PagedAttention algorithm [@kwon2023]. Inspired by OS virtual memory, this technique reduces the severe KV-cache fragmentation and reservation waste that constrains static batching. By keeping KV-cache waste low, vLLM can serve larger effective batches on the same hardware.
-
-Continuous batching shifts the primary serving bottleneck to memory management. Because transformer generation appends attention states at every step, the key-value (KV) cache for each active request grows dynamically in accelerator HBM. When sequences of varying lengths share memory, contiguous allocation produces severe external fragmentation. If a completed 100-token sequence releases its cache, an arriving 150-token request cannot occupy that freed memory because it requires a larger contiguous address range. Over time, physical memory fractures into small, noncontiguous gaps, preventing new sequences from launching even when total unallocated capacity appears sufficient. Together with the over-reservation of contiguous allocators, this memory fragmentation\index{Memory fragmentation!KV cache} can waste 60 to 80 percent of KV-cache memory in naive implementations [@kwon2023], severely limiting the concurrent batch size that determines serving throughput.
-
-#### PagedAttention {#sec-model-serving-pagedattention-b8d4}
-
-::: {.column-margin}
-![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
-
-*PagedAttention recovers the KV-cache waste of contiguous allocation.*
-:::
-
-**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023].
-
-[^fn-paged-attention-memory]: **PagedAttention**\index{PagedAttention!memory efficiency}: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same class of allocation problem—programs needed more memory than physically available, and contiguous allocation wasted space [@kilburn1962onelevel]. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU KV-cache memory: the evaluated earlier serving systems wasted 60 to 80 percent of KV-cache memory due to fragmentation and over-reservation. In that evaluation, PagedAttention reduced waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware [@kwon2023].
-
-PagedAttention recovers physical memory capacity, but serving autoregressive models at scale exposes additional bottlenecks across token verification latency and memory-bandwidth-bound weight streaming.
-
-::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
-
-The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques such as speculative decoding\index{Speculative decoding!latency reduction}\index{Speculative decoding!draft model verification} use small draft models to propose multiple tokens that the target model verifies in parallel; evaluated T5-XXL workloads achieved roughly 2--3$\times$ speedups [@leviathan2023speculative], but gains vary. Weight-only quantization (such as INT4 weights with FP16 activations) is especially relevant for memory-bandwidth-bound LLM inference [@lin2023awq].
-
-These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
-
-:::
-
-Although continuous batching maximizes throughput for multi-tenant language model serving, batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack ragged tensor or paged memory support, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
-
-### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
-
-Session affinity—routing successive requests from a client to the same physical replica—arises when serving state resides in local accelerator memory rather than being reconstructed on every invocation. In conversational models, this resident state is dominated by the key-value (KV) cache\index{KV cache!session reuse}\index{KV cache!multi-turn conversations}. When turn $k$ executes on a replica, that replica's HBM retains the projected keys and values across all prior prompt and generation tokens. Routing turn $k+1$ to a different replica discards that local memory footprint, forcing the new node to recompute the entire prefix sequence from scratch. This redundant prefill consumes memory bandwidth and tensor-core cycles that would otherwise advance active decode iterations, directly inflating time-to-first-token.
-
-A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}: small per-user adapters, each a pair of low-rank matrices whose product is added to a frozen base weight matrix. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines—such as tokenizer vocabularies and per-session normalization state—impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
-
-::: {.column-margin .margin-pointer}
-↩ Products of two low-rank matrices, and the storage and memory traffic they save relative to a full matrix, are established in @sec-model-compression-lowrank-factorization-955e.
-:::
-
-Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($I \propto B$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches—collapsing arithmetic intensity back into the memory-bandwidth-bound regime—or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
-
 ### Traffic patterns and batching strategy {#sec-model-serving-traffic-patterns-batching-strategy-2e6b}
 
 The batching strategy depends critically on how requests arrive. Different deployment contexts exhibit different arrival patterns, and the MLPerf inference benchmark\index{MLPerf Inference!serving scenarios} supplies four standardized scenarios that approximate several common cases.
@@ -4049,9 +3999,59 @@ Batching is the primary lever for serving economics, but the optimal strategy de
 
 ## LLM Serving {#sec-model-serving-llm-serving-b8bf}
 
-Large language models\index{LLM serving!token generation} make three properties far more prominent than in fixed-output serving: *autoregressive generation*[^fn-autoregressive-decoding-serving] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, complicating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure). The preceding section established iteration-level scheduling and cache paging; the next step is to evaluate their consequences for request metrics, cached state, and token cost. The p50, p95, and p99 metrics used for classification serving still matter, but they apply to different phases of the request—the initial prompt processing and the subsequent token generation. The same principles of queuing theory, batching trade-offs, and latency budgets remain applicable; LLM serving adds domain-specific techniques atop them.
+Large language models\index{LLM serving!token generation} make three properties far more prominent than in fixed-output serving: *autoregressive generation*[^fn-autoregressive-decoding-serving] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, complicating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure). This section introduces iteration-level scheduling and cache paging, and then evaluates their consequences for request metrics, cached state, and token cost. The p50, p95, and p99 metrics used for classification serving still matter, but they apply to different phases of the request—the initial prompt processing and the subsequent token generation. The same principles of queuing theory, batching trade-offs, and latency budgets remain applicable; LLM serving adds domain-specific techniques atop them.
 
 [^fn-autoregressive-decoding-serving]: **Autoregressive**\index{Autoregressive model!autoregressive, serial bottleneck}: From Greek *auto-* (self) and Latin *regressus* (a going back)—the output "regresses" on itself; George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. Decode is often weight-bandwidth-bound at small batches; larger batches amortize the weight stream and can shift the bottleneck toward compute or KV-cache traffic [@pope2023efficiently].
+
+### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
+
+Autoregressive models\index{Autoregressive model!token generation}, such as large language models, generate outputs token by token. Because each new token depends on the accumulated sequence history, generation proceeds sequentially. Standard dynamic batching assumes uniform output lengths and commits to a fixed batch for an entire generation cycle. When sequence lengths vary, this static commitment degrades accelerator efficiency. If one sequence in a batch of eight finishes after ten tokens while others require 100 tokens, 90 percent of the compute and memory bandwidth allocated to that sequence slot is wasted on padding tokens or masked dummy operations while awaiting the slowest sequence\index{Sequence length variability!batch waste} [@yu2022orca].
+
+**Continuous batching**\index{Continuous batching!LLM serving}[^fn-continuous-batching-llm] (also called iteration-level batching) eliminates this idle-slot tax by rescheduling batch composition at each decoding iteration [@yu2022orca; @kwon2023]. Rather than committing to a static batch that persists across hundreds of forward passes, the serving engine re-evaluates batch membership at every token-generation step. When a sequence emits its end-of-sequence token, the scheduler immediately reclaims that execution slot, admitting an arriving request into the batch for the subsequent forward pass. Active sequences continue decoding without interruption, maintaining high accelerator utilization across variable-length workloads.
+
+[^fn-continuous-batching-llm]: **Continuous batching**\index{Continuous batching!scheduling granularity}: Also called "iteration-level batching" [@yu2022orca] and, in NVIDIA TensorRT-LLM, "in-flight batching" [@nvidiaTensorRtLlm]; the distinction is scheduling granularity. Traditional batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching reschedules at every token-generation step—analogous to preemptive OS process scheduling vs. run-to-completion. This finer granularity reduces the waste from variable-length sequences, where a batch slot occupied by a completed sequence sits idle until all other sequences finish.
+
+Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine executes a prefill in the same iteration as active decodes, the ongoing decode streams stall, causing severe spikes in inter-token latency (ITL). Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes; measured iteration times determine the resulting token cadence.
+
+[^fn-vllm-page-table]: **vLLM (virtual large language model (LLM))**\index{vLLM!virtual memory analogy}: An open-source serving system that enables continuous batching via its PagedAttention algorithm [@kwon2023]. Inspired by OS virtual memory, this technique reduces the severe KV-cache fragmentation and reservation waste that constrains static batching. By keeping KV-cache waste low, vLLM can serve larger effective batches on the same hardware.
+
+Continuous batching shifts the primary serving bottleneck to memory management. Because transformer generation appends attention states at every step, the key-value (KV) cache for each active request grows dynamically in accelerator HBM. When sequences of varying lengths share memory, contiguous allocation produces severe external fragmentation. If a completed 100-token sequence releases its cache, an arriving 150-token request cannot occupy that freed memory because it requires a larger contiguous address range. Over time, physical memory fractures into small, noncontiguous gaps, preventing new sequences from launching even when total unallocated capacity appears sufficient. Together with the over-reservation of contiguous allocators, this memory fragmentation\index{Memory fragmentation!KV cache} can waste 60 to 80 percent of KV-cache memory in naive implementations [@kwon2023], severely limiting the concurrent batch size that determines serving throughput.
+
+#### PagedAttention {#sec-model-serving-pagedattention-b8d4}
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
+
+*PagedAttention recovers the KV-cache waste of contiguous allocation.*
+:::
+
+**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023].
+
+[^fn-paged-attention-memory]: **PagedAttention**\index{PagedAttention!memory efficiency}: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same class of allocation problem—programs needed more memory than physically available, and contiguous allocation wasted space [@kilburn1962onelevel]. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU KV-cache memory: the evaluated earlier serving systems wasted 60 to 80 percent of KV-cache memory due to fragmentation and over-reservation. In that evaluation, PagedAttention reduced waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware [@kwon2023].
+
+PagedAttention recovers physical memory capacity, but serving autoregressive models at scale exposes additional bottlenecks across token verification latency and memory-bandwidth-bound weight streaming.
+
+::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
+
+The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques such as speculative decoding\index{Speculative decoding!latency reduction}\index{Speculative decoding!draft model verification} use small draft models to propose multiple tokens that the target model verifies in parallel; evaluated T5-XXL workloads achieved roughly 2--3$\times$ speedups [@leviathan2023speculative], but gains vary. Weight-only quantization (such as INT4 weights with FP16 activations) is especially relevant for memory-bandwidth-bound LLM inference [@lin2023awq].
+
+These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
+
+:::
+
+Although continuous batching maximizes throughput for multi-tenant language model serving, batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack ragged tensor or paged memory support, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
+
+### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
+
+Session affinity—routing successive requests from a client to the same physical replica—arises when serving state resides in local accelerator memory rather than being reconstructed on every invocation. In conversational models, this resident state is dominated by the key-value (KV) cache\index{KV cache!session reuse}\index{KV cache!multi-turn conversations}. When turn $k$ executes on a replica, that replica's HBM retains the projected keys and values across all prior prompt and generation tokens. Routing turn $k+1$ to a different replica discards that local memory footprint, forcing the new node to recompute the entire prefix sequence from scratch. This redundant prefill consumes memory bandwidth and tensor-core cycles that would otherwise advance active decode iterations, directly inflating time-to-first-token.
+
+A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}: small per-user adapters, each a pair of low-rank matrices whose product is added to a frozen base weight matrix. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines—such as tokenizer vocabularies and per-session normalization state—impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
+
+::: {.column-margin .margin-pointer}
+↩ Products of two low-rank matrices, and the storage and memory traffic they save relative to a full matrix, are established in @sec-model-compression-lowrank-factorization-955e.
+:::
+
+Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($I \propto B$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches—collapsing arithmetic intensity back into the memory-bandwidth-bound regime—or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
 
 ### Performance metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
 
