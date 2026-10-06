@@ -2658,6 +2658,1598 @@ Surviving operations must still execute within physical memory bandwidth and reg
 
 Quantization is often an attractive first deployment experiment because it leaves the architecture intact and can be applied post-training. Its leverage is greatest when weight or activation traffic binds and the target provides efficient low-precision kernels; otherwise, it may shrink the artifact without accelerating the request.
 
+### Adaptive computation methods {#sec-model-compression-adaptive-computation-methods-d164}
+
+Static structural optimizations---such as pruning, distillation, and architecture search---optimize a fixed execution graph, ensuring that absent input-dependent control, every input follows an identical scheduled path. On static graphs, the **Algorithm** imposes an invariant computational workload on the **Machine**: a 24-layer transformer executes identical MAC operations and streams its full parameter footprint from HBM or off-chip DRAM for an obvious, easily classified sample as it does for an ambiguous one. **Adaptive inference**\index{Adaptive inference!definition} replaces this open-loop pipeline with an input-dependent control loop: intermediate representations or runtime budgets inform dynamic decisions that terminate execution or route activations through specialized subnetworks. While dynamic paths can reduce average arithmetic operations and memory traffic, they introduce runtime overheads in routing logic, batch management, confidence calibration, and latency variance.
+
+#### Dynamic schemes {#sec-model-compression-dynamic-schemes-e9ff}
+
+Because input data exhibit non-uniform semantic complexity, allocating an invariant computational budget wastes memory bandwidth and execution cycles on simple samples. Dynamic schemes modulate execution paths to lower amortized computation while preserving the deep network for worst-case inputs. This architectural flexibility spans four primary control variables: network depth (early exit), structural routing (conditional layer skipping), expert subnetworks (mixture-of-experts), and continuous computational allocation.
+
+To control execution depth, **early exit**\index{Adaptive computation!early exit} architectures attach auxiliary classification heads to intermediate layers, terminating execution when intermediate representations yield sufficient prediction confidence [@teerapittayanon2016]. BranchyNet implements this mechanism across convolutional backbones using shallow exit branches, whereas multi-exit vision transformers attach linear probes and entropy estimators between transformer blocks [@xin2021]. When an input satisfies an exit criterion—such as softmax prediction entropy dropping below a pre-tuned threshold—the runtime halts evaluation and returns the intermediate prediction. The net operational benefit requires that the arithmetic operations and memory transfers avoided in subsequent layers exceed the computational overhead of evaluating the intermediate classifiers and gating thresholds.
+
+The systems trade-off diverges sharply across hardware deployment targets. On single-sample edge processors (batch size $B=1$, typical of microcontrollers and mobile NPUs), early exit immediately terminates the execution thread [@hu2020triple]. Skipping remaining layers eliminates both the arithmetic operations and the off-chip DRAM transactions required to load subsequent layer weights into on-chip SRAM cache. Conversely, on parallel throughput accelerators (GPUs and TPUs) processing batched workloads ($B > 1$), early exit introduces severe batch fragmentation [@chen2024eellm]. If only a subset of samples in a batch reaches the exit threshold, the remaining samples must still traverse deeper layers. Unless the runtime executes dynamic batch compaction—gathering unresolved activation tensors into a contiguous memory buffer via memory copies and kernel synchronizations—inactive samples remain allocated in memory, or the accelerator must mask inactive SIMD or single instruction, multiple threads (SIMT) lanes. Consequently, tail latency for the batch remains dictated by the deepest traversing sample. @Fig-early-exit-transformers traces this branching topology along the backbone: each transformer block taps intermediate representations into an auxiliary classifier and confidence estimator (LTE) to trigger an early exit, while unresolved tokens traverse horizontal connections to deeper layers.
+
+::: {.column-margin .margin-pointer}
+↪ The latency-throughput trade-offs of batching under production request streams, including service-level objective (SLO) violations, are developed in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
+:::
+
+::: {#fig-early-exit-transformers fig-env="figure" fig-pos="htb" fig-cap="**Early Exit Architecture**: Transformer layers dynamically adjust computation by classifying each layer's output and enabling early termination if sufficient confidence is reached, reducing average latency and power when many inputs can exit before the final layer. Source: [@xin2021]." fig-alt="Flowchart with input feeding transformer layers 1 through N sub L in sequence. Each layer connects to a classifier, confidence estimator, and exit point. Arrows show continue paths for low confidence."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner xsep=2pt,
+    node distance=1.7,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL,
+    text width=25mm,align=flush center,
+    minimum width=25mm, minimum height=8mm
+  },
+}
+
+\node[Box, ellipse,text width=14mm,minimum width=12mm,inner ysep=-1pt,
+             minimum height=10mm, fill=RedL,draw=RedLine](B1){Input};
+\node[Box,right=of B1](B2){Transformer 1};
+\node[Box,right=of B2](B3){Transformer 2};
+\node[Box, node distance=2.5,right=of B3](B4){Transformer $N_L$};
+\node[font=\tiny\sffamily](B0)at($(B3)!0.5!(B4)$){$\bullet$ $\bullet$ $\bullet$};
+%
+\def\di{0.45}
+\node[Box,node distance=\di,below=of B2,fill=VioletL2,draw=VioletLine](C1){Classifier 1};
+\node[Box,node distance=\di,below=of C1,fill=BlueL,draw=BlueLine](C2){Confidence/LTE};
+\node[Box,node distance=\di,below=of C2,ellipse,text width=14mm,minimum width=12mm,
+             minimum height=10mm, fill=RedL,draw=RedLine](C3){Exit};
+%
+\node[Box,node distance=\di,below=of B3,fill=VioletL2,draw=VioletLine](2C1){Classifier 2};
+\node[Box,node distance=\di,below=of 2C1,fill=BlueL,draw=BlueLine](2C2){Confidence/LTE};
+\node[Box,node distance=\di,below=of 2C2,ellipse,text width=14mm,minimum width=12mm,
+             minimum height=10mm, fill=RedL,draw=RedLine](2C3){Exit};
+%
+\node[Box,node distance=\di,below=of B4,fill=VioletL2,draw=VioletLine](3C1){Classifier $N_L$};
+\node[Box,node distance=\di,below=of 3C1,fill=BlueL,draw=BlueLine](3C2){Confidence/LTE};
+\node[Box,node distance=\di,below=of 3C2,ellipse,text width=14mm,minimum width=12mm,
+             minimum height=10mm, fill=RedL,draw=RedLine](3C3){Exit};
+%
+\node[font=\tiny\sffamily](2B0)at($(2C1)!0.5!(3C1)$){$\bullet$ $\bullet$ $\bullet$};
+\node[font=\tiny\sffamily](3B0)at($(2C2)!0.5!(3C2)$){$\bullet$ $\bullet$ $\bullet$};
+\draw[Line,-latex](B1)--(B2);
+\draw[Line,-latex](B2)--(B3);
+\draw[Line,-latex](B3)--(B0);
+\draw[Line,-latex](B0)--(B4);
+%
+\draw[Line,-latex](B2)--(C1);
+\draw[Line,-latex](C1)--(C2);
+\draw[Line,-latex](C2)--(C3);
+%
+\draw[Line,-latex](B3)--(2C1);
+\draw[Line,-latex](2C1)--(2C2);
+\draw[Line,-latex](2C2)--(2C3);
+%
+\draw[Line,-latex](B4)--(3C1);
+\draw[Line,-latex](3C1)--(3C2);
+\draw[Line,-latex](3C2)--(3C3);
+%
+\draw[Line,-latex](C2)-|node[left=6pt,pos=0.8,rotate=90]{Continue}($(B2)!0.5!(B3)$);
+\draw[Line,-latex](2C2.east)-|node[right=9pt,pos=0.35,rotate=90]{Continue}($(B3)!0.68!(B0)$);
+\end{tikzpicture}
+```
+
+:::
+
+Beyond truncating execution depth along a single linear pipeline, **conditional computation**\index{Conditional computation!definition} dynamically modulates the topological routing of activations through the network graph [@bengio2015conditional]. Instead of executing every block in a predefined sequence, gating functions evaluate activation tensors to bypass residual layers, alter operator kernels, or select specialized functional blocks. This converts a static directed acyclic graph (DAG) into an input-dependent dynamic graph.
+
+Architectural implementations target distinct structural granularities. SkipNet uses lightweight recurrent or feedforward gating controllers to conditionally bypass residual blocks in convolutional networks, preserving full network depth only for computationally difficult inputs [@wang2018skipnet]. Dynamic Filter Networks generate sample-specific convolutional filter weights dynamically from the input, modifying feature extraction patterns directly rather than skipping static weights [@jia2016dynamic]. Capsule Networks utilize iterative routing-by-agreement to direct low-level feature vectors to compatible high-level capsules [@sabour2017dynamic]. From a hardware systems perspective, conditional routing achieves wall-clock speedups only when the cycles saved by bypassing operators surpass the latency of evaluating the gating network, executing host-device control synchronization, and managing uncoalesced memory accesses.
+
+Scaling dense transformer models couples parameter capacity directly to per-token floating-point operations: increasing model capacity forces every token to compute against every parameter weight matrix, driving up both arithmetic demand and memory bandwidth requirements. The **mixture-of-experts (MoE)**\index{MoE!definition} architecture decouples parameter capacity from per-token compute by replacing dense feedforward network (FFN) layers with a bank of parallel expert subnetworks coordinated by a parameterized router [@shazeer2017outrageously]. Google's Switch Transformer[^fn-switch-transformer-scaling] scales this sparse routing principle by steering each token to a single expert ($k=1$), dramatically reducing communication overhead compared to top-$k$ routing [@fedus2022switch].
+
+[^fn-switch-transformer-scaling]: **Switch Transformer**\index{Switch Transformer!scaling trade-off}: @fedus2022switch scales to roughly 1.6 trillion total parameters while routing each token to one expert; in a compute-matched experiment, Switch-Base with 64 experts reached the T5-Base quality target in about one-seventh the training time; the trillion-parameter comparison reported roughly 4$\times$ speedup over T5-XXL. Routing each token to one expert reduces communication relative to top-$k$ routing, but load imbalance requires auxiliary losses and capacity factors. This trade-off—massive parameter capacity at low per-token compute cost, but with complex systems engineering for load balancing—defines the MoE design space.
+
+This sparse activation creates a fundamental memory-bandwidth and capacity trade-off on accelerator hardware. While a token routed to one of $N_{\text{experts}}$ experts executes arithmetic against only $1/N_{\text{experts}}$ of the total expert parameters, an all-resident deployment keeps all $N_{\text{experts}}$ expert matrices in device memory (HBM or SRAM). Offloading changes this capacity requirement by adding transfers to the execution path. At low operational batch sizes—such as single-stream autoregressive generation—routing divergent tokens to different experts fragments matrix-matrix multiplications (GEMM) into low-arithmetic-intensity matrix-vector operations (GEMV), which can make execution bandwidth-limited. Furthermore, uneven token distribution causes computational hotspots where overloaded experts drop tokens exceeding their capacity factor, while under-allocated experts leave tensor core pipelines idle.
+
+Sparse Mixture-of-Experts architectures replace monolithic feedforward networks (FFNs) with dynamically routed subnetworks. @Fig-switch-transformer diagrams this conditional execution pathway: the left block embeds a Switching FFN layer within the standard transformer stack, while the expanded right panel details the gating router dispatching individual tokens ("More" with $p=0.65$, "Parameters" with $p=0.8$) to distinct expert sub-blocks (FFN 2 and FFN 1) while leaving unselected experts idle.
+
+::: {#fig-switch-transformer fig-env="figure" fig-pos="htb" fig-cap="**Switch Transformer Architecture**: Replacing dense feedforward layers with a Switching FFN layer (left) enables sparse conditional routing. A gating network routes each token to a single expert (right) out of a large pool, decoupling total model capacity (parameters) from per-token compute cost (FLOPs). Source: [@fedus2022switch]." fig-alt="Two-part diagram. Left shows switch transformer block with self-attention, add-normalize, switching FFN layer, and add-normalize. Right shows expanded view with router selecting one of four FFN experts per token based on probability."}
+
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\small\sffamily]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner xsep=2pt,
+    node distance=0.8,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL,
+    text width=75mm,align=flush center,
+    minimum width=75mm, minimum height=8mm
+  },
+Box2/.style={inner xsep=2pt,
+    node distance=0.15,
+    draw=VioletLine,
+    line width=0.75pt,
+    fill=VioletL2,
+    text width=10mm,align=flush center,
+    minimum width=10mm, minimum height=7mm
+  },
+Box3/.style={inner xsep=2pt,
+    node distance=0.8,
+    draw=VioletLine,
+    line width=0.75pt,
+    fill=VioletL2,
+    text width=33mm,align=flush center,
+    minimum width=33mm, minimum height=8mm
+  },
+do path picture/.style={%
+    path picture={%
+      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
+        {\pgfpointanchor{path picture bounding box}{north east}}%
+      \pgfgetlastxy\x\y%
+      \tikzset{x=\x/2,y=\y/2}%
+      #1
+    }
+  },
+  cross/.style={do path picture={
+    \draw [line cap=round] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
+  }},
+plus/.style={do path picture={
+    \draw [line cap=round] (-3/4,0) -- (3/4,0) (0,-3/4) -- (0,3/4);
+  }}
+}
+
+\node[Box,fill=RedL,draw=RedLine](P1){Self-Attention};
+\node[Box,above=0.4 of P1,fill=BrownL,draw=BrownLine](P2){Add + Normalize};
+\node[Box,node distance=6.5,above=of P2,fill=BrownL,draw=BrownLine](P3){Add + Normalize};
+\draw[Line,-latex](P2.172)coordinate(DPR1)--++(90:1)coordinate(PR1);
+\draw[Line,-latex](P2.8)coordinate(DPR2)--++(90:1)coordinate(PR2);
+\draw[Line,-latex](P3.172)coordinate(DAN1)--++(90:0.5)coordinate(AN1);
+\draw[Line,-latex](P3.8)coordinate(DAN2)--++(90:0.5)coordinate(AN2);
+\draw[Line,-latex](P1.172)--(P1.172|-P2.south);
+\draw[Line,-latex](P1.8)--(P1.8|-P2.south);
+%%%Router-1
+\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR1)+(-0.4,0.2)$)}]
+\newcommand{\Depth}{1.3}
+\newcommand{\Height}{0.7}
+\newcommand{\Width}{0.4}
+\coordinate (O2) at (0,0,0);
+\coordinate (A2) at (0,\Width,0);
+\coordinate (B2) at (0,\Width,\Height);
+\coordinate (C2) at (0,0,\Height);
+\coordinate (D2) at (\Depth,0,0);
+\coordinate (E2) at (\Depth,\Width,0);
+\coordinate (F2) at (\Depth,\Width,\Height);
+\coordinate (G2) at (\Depth,0,\Height);
+
+\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
+\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
+\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
+%
+\node[]at($(B2)!0.5!(G2)$){Router};
+
+\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
+\def\dx{0.25}
+\def\dy{0.5}
+\def\dz{0.2}
+% bottom-left corner coordinate (bar origin)
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+
+% boje
+%\filldraw[fill=blue!30, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z) -- cycle; % leva strana
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+%\filldraw[fill=blue!20, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y,\z) -- cycle; % donja strana
+%\filldraw[fill=blue!40, draw=black] (\x,\y,\z) -- (\x+\dx,\y,\z) -- (\x+\dx,\y+\dy,\z) -- (\x,\y+\dy,\z) -- cycle; % zadnja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+
+\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
+\def\dx{0.25}
+\def\dy{1.0}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z)coordinate(NB1) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
+\def\dx{0.25}
+\def\dy{0.2}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
+\def\dx{0.25}
+\def\dy{0.6}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\end{scope}
+%%%%%%%%%%%%%%%%%%
+%%%Router-2
+\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR2)+(-0.4,0.2)$)}]
+\newcommand{\Depth}{1.3}
+\newcommand{\Height}{0.7}
+\newcommand{\Width}{0.4}
+\coordinate (O2) at (0,0,0);
+\coordinate (A2) at (0,\Width,0);
+\coordinate (B2) at (0,\Width,\Height);
+\coordinate (C2) at (0,0,\Height);
+\coordinate (D2) at (\Depth,0,0);
+\coordinate (E2) at (\Depth,\Width,0);
+\coordinate (F2) at (\Depth,\Width,\Height);
+\coordinate (G2) at (\Depth,0,\Height);
+
+\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
+\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
+\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
+%
+\node[]at($(B2)!0.5!(G2)$){Router};
+
+\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
+\def\dx{0.25}
+\def\dy{1.1}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) coordinate(NB2)-- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+
+\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
+\def\dx{0.25}
+\def\dy{0.6}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
+\def\dx{0.25}
+\def\dy{0.3}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
+\def\dx{0.25}
+\def\dy{0.15}
+\def\dz{0.2}
+%
+\def\x{0}
+\def\y{0.21}
+\def\z{0}
+%
+\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+\end{scope}
+%%%%%%%%%%%%%%%%%
+%FFN left
+\begin{scope}[local bounding box=SFFN1,line width=0.5pt,shift={($(NB1)+(-1.85,1.55)$)}]
+\node[Box2](FFN1){FFN1};
+\node[Box2,right=of FFN1,line width=1.5pt](FFN2){FFN2};
+\node[Box2,right=of FFN2](FFN3){FFN3};
+\node[Box2,right=of FFN3](FFN4){FFN4};
+\end{scope}
+%FFN right
+\begin{scope}[local bounding box=SFFN2,line width=0.5pt,shift={($(SFFN1)+(3.9,0)$)}]
+\node[Box2,line width=1.5pt](2FFN1){FFN1};
+\node[Box2,right=of 2FFN1](2FFN2){FFN2};
+\node[Box2,right=of 2FFN2](2FFN3){FFN3};
+\node[Box2,right=of 2FFN3](2FFN4){FFN4};
+\end{scope}
+\node[draw,circle,line width=0.75pt, above=1.2 of $(FFN2)!0.5!(FFN3)$,cross,minimum width=6mm](CI1){};
+\node[draw,circle,line width=0.75pt, above=1.2 of $(2FFN2)!0.5!(2FFN3)$,cross,minimum width=6mm](CI2){};
+%
+\draw[Line,-latex](NB1)--++(90:0.5)-|(FFN2);
+\draw[Line,-latex](NB2)--++(90:0.5)-|(2FFN1);
+\draw[Line,-latex,dashed,rounded corners=8pt](NB1)--
+node[below,pos=0.5]{$p = 0.65$}++(180:2.7)|-(CI1.west);
+\draw[Line,-latex,dashed,rounded corners=8pt](NB2)--
+node[below,pos=0.5]{$p = 0.8$}++(0:3.2)|-(CI2.east);
+\draw[Line,-latex](CI1)--(CI1|-P3.south);
+\draw[Line,-latex](CI2)--(CI2|-P3.south);
+\draw[Line,-latex](FFN2)--++(90:0.7)-|(CI1);
+\draw[Line,-latex](2FFN1)--++(90:0.7)-|(CI2);
+%%%
+%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=7mm,inner ysep=3mm,
+yshift=0mm,fill=BackColor!70,fit=(FFN1)(2FFN4)(CI2)(R1),line width=0.75pt](GBB2){};
+%%below Router to Add +Normalize
+\draw[Line,-latex]($(DPR1)!0.25!(PR1)$)--++(180:3.8)|-(P3);
+\draw[Line,-latex]($(DPR2)!0.25!(PR2)$)--++(0:3.8)|-(P3);
+%%%Above Add + Normalize
+\begin{scope}[local bounding box=Y1,line width=0.5pt,shift={($(AN1)+(-1.2,0)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of Y1]{$y_1$};
+\begin{scope}[local bounding box=Y2,line width=0.5pt,shift={($(AN2)+(-1.2,0)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of Y2]{$y_2$};
+%%below Self-Attention
+\draw[Line,latex-](P1.188)coordinate(GSA1)--++(270:0.7)coordinate(SA1);
+\node[draw,circle,line width=0.75pt, below=0 of SA1,cross,minimum width=6mm](CI3){};
+\draw[Line,latex-](P1.352)coordinate(GSA2)--++(270:0.7)coordinate(SA2);
+\node[draw,circle,line width=0.75pt, below=0 of SA2,cross,minimum width=6mm](CI4){};
+\draw[Line,latex-](CI3.south)coordinate(GDCI3)--++(270:0.7)coordinate(DCI3);
+\draw[Line,latex-](CI4.south)coordinate(GDCI4)--++(270:0.7)coordinate(DCI4);%
+%
+\node[left=2pt of CI3,align=center]{Positional\\ embedding};
+\node[left=2pt of CI4,align=center]{Positional\\ embedding};
+%
+\begin{scope}[local bounding box=X1,line width=0.5pt,shift={($(DCI3)+(-1.2,-0.14)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of X1]{$x_1$};
+\node[below=2pt of X1]{More};
+\begin{scope}[local bounding box=X2,line width=0.5pt,shift={($(DCI4)+(-1.2,-0.14)$)}]
+\def\side{0.4}
+\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
+    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
+}
+\end{scope}
+\node[left=2pt of X2]{$x_2$};
+\node[below=2pt of X2]{Parameters};
+%
+\draw[Line,-latex]($(GSA1)!0.5!(SA1)$)--++(180:3.8)|-(P2);
+\draw[Line,-latex]($(GSA2)!0.5!(SA2)$)--++(0:3.8)|-(P2);
+%%%%%%%%%%%%
+%left diagram
+\begin{scope}[local bounding box=LD,line width=0.5pt,shift={(-13,1.8)}]
+\node[Box3,fill=RedL,draw=RedLine](2P1){Self-Attention};
+\node[Box3,above=of 2P1,fill=BrownL,draw=BrownLine](2P2){Add + Normalize};
+\node[Box3,above=of 2P2,fill=BackColor,draw=BackLine](2P3){Switching FFN Layer};
+\node[Box3,above=of 2P3,fill=BrownL,draw=BrownLine](2P4){Add + Normalize};
+%
+\draw[Line,-latex](2P1)--(2P2);
+\draw[Line,-latex](2P2)--(2P3);
+\draw[Line,-latex](2P3)--(2P4);
+\draw[Line,-latex](2P4)--++(90:1)node[above]{$y$};
+\draw[Line,latex-](2P1)--++(270:1)node[below]{$x$};
+\draw[blue,dashed,thick]($(2P1.south east)+(0.2,-0.2)$)--++(310:5);
+\draw[blue,dashed,thick]($(2P4.north east)+(0.2,-0.2)$)--++(40:5);
+\end{scope}
+\end{tikzpicture}
+```
+
+:::
+
+Because the router lies on the critical execution path, the accelerator runtime must dynamically dispatch and gather activations across expert blocks without triggering host-device synchronization stalls. On data-parallel accelerators such as GPUs and TPUs, executing sparse expert layers efficiently requires token permutation: tokens assigned to the same expert are gathered into contiguous memory tiles to sustain high Tensor Core utilization during subsequent matrix multiplications [@lepikhin2021gshard]. If the routing distribution is highly skewed, token buffers for popular experts overflow their fixed capacity allocations, forcing the system to either truncate tokens (causing representation degradation) or trigger ragged kernel launches that leave parallel vector lanes idle.
+
+::: {.column-margin .margin-pointer}
+↪ How runtimes execute tensors whose shapes vary, by matching precompiled shape profiles, padding, splitting the batch, or falling back to a general kernel, is developed in @sec-hardware-acceleration-dynamic-kernel-execution-33fc.
+:::
+
+While early exit and MoE routing make discrete branch selections, adaptive inference can also operate continuously by progressively modulating depth or iteration counts based on real-time task difficulty [@yang2020]. Dynamic routing architectures such as BlockDrop dynamically adjust the number of active layers according to runtime policy networks [@wu2018blockdrop], while dynamic layer scaling allocates computation incrementally until output uncertainty drops below a calibrated threshold. Consider an embedded vision system processing sensor streams: high-contrast frames with clear road geometry resolve through a minimal prefix of feature-extraction layers, whereas degraded frames containing occluded obstacles trigger deeper recurrent processing blocks. The physical systems gain materializes only if the control evaluation remains computationally lightweight and the runtime schedules frames with matched execution depths concurrently to maintain high hardware utilization.
+
+#### Implementation challenges {#sec-model-compression-implementation-challenges-1184}
+
+Realizing the efficiency gains of adaptive computation requires overcoming critical challenges across model training, runtime orchestration, and hardware alignment. During training, discrete routing decisions (such as non-differentiable $\mathrm{argmax}$ selections) break standard backpropagation. Practitioners must employ continuous relaxations such as the Gumbel-Softmax estimator, reinforcement learning policy gradients, or auxiliary load-balancing losses to prevent routing collapse where the router over-allocates inputs to a single expert or exit [@shazeer2017outrageously].
+
+At runtime, control-flow branching fundamentally conflicts with the bulk-synchronous parallel execution model of modern accelerators. When parallel threads within a GPU warp encounter divergent execution branches, the hardware may serialize branch execution and mask inactive threads, reducing the value of theoretical FLOP savings. Gating also introduces control dependencies that can limit fusion, require token-permutation buffers, or trigger host-device synchronization, depending on the runtime. If these dispatch overheads exceed the compute time saved by skipping layers, the dynamic model exhibits higher end-to-end latency than a dense baseline. @Sec-hardware-acceleration-dynamic-kernel-execution-33fc examines hardware-aware runtime strategies, including ragged batching and dynamic kernel launch queues, designed to manage these execution patterns.
+
+Beyond systems efficiency, dynamic control introduces severe quality and security failure modes. Because gating policies route inputs based on statistical heuristics, poorly calibrated gates systematically underallocate computation to rare distribution tails, degrading prediction accuracy precisely on safety-critical edge cases. Furthermore, input-dependent computation exposes an attack surface: adversarial perturbations can intentionally manipulate routing gates to trigger denial-of-quality attacks (forcing inputs into truncated early exits that fail) or denial-of-service attacks (forcing all inputs into maximally deep or imbalanced paths to saturate accelerator queues). Consequently, evaluating adaptive models cannot rely on average FLOP counts alone. Rigorous system profiling must report path distribution histograms, tail latency (p99), accuracy stratified by input difficulty, and throughput stability under dynamic batching. Where dynamic computation decides whether to perform certain operations, sparsity exploitation addresses a complementary question: how to accelerate computation when many operands are zero.
+
+### Sparsity exploitation {#sec-model-compression-sparsity-exploitation-48a6}
+
+Recall that pruning (from @sec-model-compression-pruning-d1cb) introduces zeros into weight matrices. Sparsity exploitation asks how to accelerate computation when those zeros are present. Pruning creates zeros or removes structure; sparse formats can reduce storage, and matching kernels can reduce computation. **Sparsity**\index{Sparsity!definition}[^fn-sparsity-hardware-gap] in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero.
+
+[^fn-sparsity-hardware-gap]: **Sparsity**\index{Sparsity!hardware gap}: From Latin *sparsus* (scattered), past participle of *spargere* (to scatter); in ML, $\ell_1$ regularization such as the lasso can induce exact zeros rather than merely small values [@tibshirani1996regression]. Software can represent arbitrary sparsity patterns, while efficient hardware execution generally requires a supported format or structured pattern (for example, NVIDIA's 2:4 sparsity). The gap between representable and executable sparsity separates theoretical compression from realized speedup.
+
+More formally, for a sparse weight matrix $\mathbf{W}_{\text{sparse}} \in \mathbb{R}^{m \times n}$, the sparsity ratio $\rho_{\text{sparse}}$ can be expressed as:
+$$
+\rho_{\text{sparse}} = \frac{\Vert \mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}} \Vert_0}{m \times n}
+$$
+where $\mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}}$ is an indicator function that yields one if entry $(i,j)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ represents the $\ell_0$ norm, which counts the number of nonzero elements. Exact zero is representable in floating point, but thresholded definitions also group small-magnitude values when the pruning method treats them as removable. The thresholded sparsity ratio becomes:
+$$
+\rho_{\text{sparse},\delta} = \frac{\Vert \mathbf{1}_{\{|(\mathbf{W}_{\text{sparse}})_{ij}| \le \delta_{\text{prune}}\}} \Vert_0}{m \times n}
+$$
+where $\delta_{\text{prune}}$ is the same small magnitude threshold that defines the pruning mask.
+
+Exact sparsity can emerge during training through regularization or be introduced deliberately through pruning, which forces selected elements to zero. It yields memory, compute, or energy savings only when the storage format and execution path skip those zeros with less overhead than dense execution. That qualification is especially important on resource-constrained devices, where index metadata and irregular accesses consume the same scarce bandwidth and power.
+
+#### Sparsity types {#sec-model-compression-sparsity-types-793d}
+
+The hardware decision begins with the pattern of zeros. Sparsity in neural networks falls into two broad categories: unstructured sparsity and structured sparsity.
+
+Unstructured sparsity occurs when individual weights are set to zero without any specific pattern, typically through magnitude-based pruning. While highly flexible, unstructured sparsity is less efficient on hardware because it lacks a predictable structure.[^fn-sparsity-vectorization-penalty] Exploiting it requires specialized hardware or software optimizations.
+
+[^fn-sparsity-vectorization-penalty]: **Unstructured sparsity and SIMD waste**\index{Sparsity!SIMD vectorization}: Modern CPUs and GPUs process data in vector or tensorized groups; a dense masked tensor still loads and processes zeros. A compact sparse format instead stores nonzero values and metadata, avoiding those zero loads but introducing index traffic, irregular activation accesses, and possible lane imbalance. This is why structured sparsity can deliver speedups at lower sparsity levels than arbitrary unstructured sparsity, while unstructured sparsity often needs very high zero fractions and specialized kernels before arithmetic savings overcome indexing and lane-utilization overheads [@hoefler2021sparsity].
+
+Structured sparsity removes regular groups such as filters, neurons, channels, blocks, or fixed within-group patterns. Regularity makes storage and execution more predictable, but acceleration still depends on whether the target supports that structure and whether the resulting shapes use its compute units efficiently. It is therefore a candidate, not an automatic preference, when deployment requires predictable resource use.
+
+#### Sparsity utilization methods {#sec-model-compression-sparsity-utilization-methods-04c3}
+
+A sparse model with 90 percent of weights zeroed may still run at nearly full computational cost on hardware not designed for irregular memory access. The critical question is how to translate theoretical zeros into actual speedup. A dense kernel *cannot* infer skipped work from a pruning mask it does not use. A sparse kernel can locate nonzeros from metadata without loading every zero, but decoding that metadata and gathering operands adds overhead. Bridging this gap requires specialized utilization methods and hardware support that can efficiently skip zero-valued computations [@hoefler2021sparsity]. Han et al.'s pruning work [-@han2015deep] is a canonical example of turning dense networks into sparse ones by removing unimportant connections, but accelerator speedups depend on whether the resulting sparsity pattern matches hardware-supported formats.
+
+The simplest utilization method is a sparse matrix operation, which stores nonzero values and uses their indices to skip arithmetic on zeros. Consider the difference: multiplying a dense $4{\times}4$ matrix with a vector typically requires 16 multiplications, while a sparse-aware implementation computes the six nonzero products in addition to processing the sparse metadata:
+$$
+\begin{bmatrix}
+2 & 0 & 0 & 1 \\
+0 & 3 & 0 & 0 \\
+4 & 0 & 5 & 0 \\
+0 & 0 & 0 & 6
+\end{bmatrix}
+\begin{bmatrix} x_1 \\ x_2 \\ x_3 \\ x_4 \end{bmatrix}
+=
+\begin{bmatrix} 2x_1 + x_4 \\ 3x_2 \\ 4x_1 + 5x_3 \\ 6x_4 \end{bmatrix}
+$$
+
+The deployment choice is therefore not a generic desire for fewer parameters; it is a choice between representations the runtime can execute efficiently. Low-rank approximation, covered earlier in @sec-model-compression-lowrank-factorization-955e, replaces a dense matrix with smaller dense factors, while sparsity exploitation skips literal zero-valued weights. Sparsity-aware training and sparse gradient descent can help models learn or maintain zero patterns, but runtime speedup appears only when the deployed representation uses formats and kernels that skip zeros. That is why the next design question is not merely how sparse the matrix is, but what structure the zeros have.
+
+#### Structured patterns {#sec-model-compression-structured-patterns-c3f4}
+
+Achieving actual speedups from sparsity requires hardware that can efficiently skip zero-valued computations. Different processor architectures handle sparse patterns with varying effectiveness—for example, Ampere Sparse Tensor Cores exploit fine-grained 2:4 structured patterns while systolic arrays require dense block structures. Software libraries such as cuSPARSE can help bridge this gap by reformulating sparse computations into patterns that current hardware handles efficiently. For example, MegaBlocks [@gale2022megablocksefficientsparsetraining] reformulates sparse Mixture of Experts training into block-sparse operations, grouping routed expert-token work into dense tiles so specialized kernels can maintain high accelerator utilization despite irregular sparsity patterns.
+
+A sparse pattern earns hardware speedup only when it is regular enough for kernels to predict. Two prominent formats make that regularity explicit: block sparse matrices and N:M sparsity patterns. Block sparse matrices isolate blocks of zero and nonzero dense submatrices so that operations on the large sparse matrix can be re-expressed as a smaller number of dense operations on submatrices. This structure supports more efficient storage of dense submatrices while maintaining shape compatibility for matrix or vector products. @Fig-block-sparse-gemm diagrams how NVIDIA's cuSPARSE [@nvidia_cusparse_block] format clusters nonzero weights into uniform $3\times 3$ dense sub-blocks indexed by an auxiliary coordinate array, allowing regular sub-block GEMM kernels to bypass empty gray tiles while maintaining aligned memory transactions. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have built on this block-sparsity approach to strike an improved balance between matrix expressivity and compute/memory efficiency.
+
+::: {#fig-block-sparse-gemm fig-env="figure" fig-pos="htb" fig-cap="**Block Sparse Representation**: Grouping non-zero weights into dense sub-blocks ($3\times3$ tiles) and storing an auxiliary index array allows sparse matrices to be computed via regular sub-block GEMM kernels, restoring high GPU memory alignment and Tensor Core utilization. Adapted from NVIDIA cuSPARSE documentation [@nvidia_cusparse_block]." fig-alt="Grid of 3×3 matrix blocks with varying shades indicating dense submatrices. Adjacent index array shows non zero block positions. Gray blocks represent zeros, colored blocks represent dense submatrices stored separately."}
+
+```{.tikz}
+\scalebox{0.6}{\begin{tikzpicture}[line join=round,font=\sffamily]
+\tikzset{%
+helvetica/.style={align=flush center,font=\small\sffamily},
+Line/.style={line width=1.0pt,black!50,text=black},
+}
+\definecolor{Blue1}{RGB}{23,68,150}
+\definecolor{Blue2}{RGB}{84,131,217}
+\definecolor{Blue3}{RGB}{145,177,237}
+\def\columns{3}
+\def\rows{3}
+\def\cellsize{5mm}
+\def\cellheight{5mm}
+
+\begin{scope}[local bounding box=BL1]
+\begin{scope}[local bounding box=matrica1]
+\def\rowone{Blue2,Blue3,Blue2}
+\def\rowtwo{Blue2,Blue1,Blue2}
+\def\rowthree{Blue2,Blue2,Blue2}
+\def\br{A}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(1.5,0)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue3,Blue2,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{B}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(3.0,0)}]
+\def\br{C}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%%%
+%second row
+\begin{scope}[shift={(0,-1.5)}]
+\def\rowone{Blue1,Blue3,Blue3}
+\def\rowtwo{Blue1,Blue2,Blue2}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{D}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(1.5,-1.5)}]
+\def\br{E}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(3,-1.5)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue2,Blue1,Blue2}
+\def\rowthree{Blue2,Blue2,Blue1}
+\def\br{E}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%third row
+\begin{scope}[shift={(0,-3)}]
+\def\br{H}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(1.5,-3)}]
+\def\rowone{Blue2,Blue1,Blue3}
+\def\rowtwo{Blue2,Blue2,Blue1}
+\def\rowthree{Blue1,Blue2,Blue2}
+\def\br{E}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(3,-3)}]
+\def\rowone{Blue2,Blue3,Blue2}
+\def\rowtwo{Blue3,Blue1,Blue1}
+\def\rowthree{Blue2,Blue3,Blue2}
+\def\br{E}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\end{scope}
+\node[below=0.2 of BL1,align=center]{Block sparse\\ weights};
+\newcommand{\zeroentry}{%
+    \tikz[baseline=0.8ex]{
+\node[draw=black, line width=1.2pt,fill=black!10, minimum width=0.8*\cellsize,
+                    minimum height=0.8*\cellheight] (cell-G)  {};
+}}
+\node[above=0.2 of BL1,align=center]{\zeroentry ~~= zero entry};
+
+%%%%%%%%%%%%
+%%right matrix
+\begin{scope}[local bounding box=BL2,shift={(6,0)}]
+\begin{scope}
+\def\rowone{Blue2,Blue3,Blue2}
+\def\rowtwo{Blue2,Blue1,Blue2}
+\def\rowthree{Blue2,Blue2,Blue2}
+\def\br{A2}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+\begin{scope}[shift={(1.5,0)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue3,Blue2,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{B2}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%%%%%
+%second row
+\begin{scope}[shift={(0,-1.5)}]
+\def\rowone{Blue1,Blue3,Blue3}
+\def\rowtwo{Blue1,Blue2,Blue2}
+\def\rowthree{Blue2,Blue1,Blue2}
+\def\br{C2}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(1.5,-1.5)}]
+\def\rowone{Blue1,Blue2,Blue2}
+\def\rowtwo{Blue2,Blue1,Blue2}
+\def\rowthree{Blue2,Blue2,Blue1}
+\def\br{D2}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+%%third row
+\begin{scope}[shift={(0,-3)}]
+\def\rowone{Blue2,Blue1,Blue3}
+\def\rowtwo{Blue2,Blue2,Blue1}
+\def\rowthree{Blue1,Blue2,Blue2}
+\def\br{E2}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(1.5,-3)}]
+\def\rowone{Blue2,Blue3,Blue2}
+\def\rowtwo{Blue3,Blue1,Blue1}
+\def\rowthree{Blue2,Blue3,Blue2}
+\def\br{F2}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\end{scope}
+
+%%%%%%%%%%%
+%%third matrix-other color
+\begin{scope}[local bounding box=BL3,shift={(9.5,0.5)}]
+\def\columns{2}
+\def\rows{1}
+\def\cellsize{5mm}
+\def\cellheight{15mm}
+\begin{scope}
+\def\rowone{OrangeL,OrangeL}
+\def\br{A3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=white, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(0,-1.5)}]
+\def\rowone{OrangeL,OrangeL}
+\def\br{B3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=white, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\begin{scope}[shift={(0,-3)}]
+\def\rowone{OrangeL,OrangeL}
+\def\br{C3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=white, line width=1pt,fill=white, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+%countur line
+\draw[line width=2pt,black!80]
+    (0.5*\cellsize,-0.5*\cellheight) rectangle
+    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
+\end{scope}
+\end{scope}
+\node[below=0.2 of BL2,align=center](NZ){Non-zero\\ data values};
+\node[below=0.2 of BL3,align=center](BI){Block\\ indices};
+\scoped[on background layer]
+\node[draw=none,inner xsep=0mm,inner ysep=0mm,
+yshift=0mm,fill=none,fit=(NZ)(BI),line width=0.75pt](BB1){};
+\node[below=2pt of BB1](IR){Internal representation};
+
+\coordinate(XA)at($(cell-1-1A2.north west)+(0.5,0.5)$);
+\coordinate(XA1)at($(cell-1-3E2.south west)+(0.5,-1.5)$);
+\coordinate(XB)at($(cell-1-1A3.north east)+(0,0.5)$);
+\coordinate(XB1)at($(cell-1-1C3.south east)+(0.5,-1.5)$);
+%\fill[red](cell-1-1A2.north west)circle(2pt);
+\draw[line width=3.5pt,violet!30,rounded corners=20pt](XA)--++(180:1.3)|-(XA1);
+\draw[line width=3.5pt,violet!30,rounded corners=20pt](XB)--++(0:1.3)|-(XB1);
+%
+\coordinate(T1)at($(cell-1-1A2.north west)+(-0.2,0.2)$);
+\coordinate(T2)at($(cell-2-1A3.north east)+(0.2,0.2)$);
+\coordinate(T3)at($(cell-2-1A3.south east)+(0.2,-0.2)$);
+\coordinate(T4)at($(cell-1-1A3.south west)+(-0.2,-0.2)$);
+\coordinate(T5)at($(cell-1-1A2.south west)+(-0.2,-0.2)$);
+\draw[line width=3.5pt,red](T1)-|(T3)--(T4)|-(T5)--(T1);
+%\fill[blue](T5)circle(2pt);
+
+%%%%%%%%%%%
+%%third matrix-other color
+\begin{scope}[local bounding box=BL4,shift={(13,0)}]
+\def\columns{4}
+\def\rows{9}
+\begin{scope}
+\def\br{A4}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[line width=2pt,draw=black!80, fill=GreenL, minimum width=\cellsize,
+                    minimum height=\cellheight] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+\end{scope}
+%%%%%%%%%%%
+%%above matrix
+\begin{scope}[local bounding box=BL5,shift={(13,6)}]
+\def\columns{4}
+\def\rows{9}
+\begin{scope}
+\def\br{A5}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[line width=2pt,draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+\end{scope}
+\node[below=0.2 of BL4,align=center](OA){Output\\ activations};
+
+\node[draw=red,inner xsep=1.5mm,inner ysep=1.5mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1A4),line width=3.5pt](BB2){};
+\draw[red,line width=1.5pt](BB2)--++(135:2)node[above left]{Dot Product};
+\node[draw=red,inner xsep=1.5mm,inner ysep=1.5mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1A5)(cell-1-9A5),line width=3.5pt](BB3){};
+%
+\node[single arrow, draw=black,thick, fill=VioletL,
+      minimum width = 20pt, single arrow head extend=3pt,
+      minimum height=10mm]at($(BL3)!0.52!(BL4)$) {};
+\node[single arrow, draw=black,thick, fill=VioletL,
+      minimum width = 20pt, single arrow head extend=3pt,
+      minimum height=9mm,rotate=270]at($(BL5)!0.5!(BL4)$) {};
+\node[left=2mm of BB3,align=center,red]{Input\\activations};
+\end{tikzpicture}}
+```
+
+:::
+
+Similarly, N:M sparsity retains at most $n$ nonzeros in each group of $m$ consecutive elements; hardware-oriented pruning often enforces exactly $n$ retained values so every group has the same representation [@zhou2021learningnmfinegrainedstructured]. The deterministic format lets a supported kernel predict the value and metadata layout while retaining more capacity than removing whole channels or blocks. That regularity creates an executable compromise between arbitrary masks and dense computation, but only for targets with the matching path. As the 2:4 example in @sec-model-compression-structured-pruning-9692 showed, each stored value then needs only a 2-bit index ($00_2$ through $11_2$) to record its position within its block of four. This compact metadata imposes only a 16-bit overhead per 16-element row segment—far below the multi-byte pointer arrays required by general CSR or COO formats—allowing Tensor Cores to stream compressed operands without memory bandwidth bloat. @Fig-2-4-gemm contrasts the execution mechanics between standard dense GEMM and 2:4 sparse processing: on the right, 2-bit coordinate indices steer hardware multiplexers to pull matching activation elements into the dot-product engine alongside the two retained weights per 4-element block, halving arithmetic cycles relative to the 8-element dense baseline on the left. In parallel, STEP examines learning more general N:M masks for inference [@lu2023steplearningnmstructured].
+
+At accelerator level, the same pattern-specific rule holds: hardware support is a contract between the sparse format and the execution path.
+
+::: {#fig-2-4-gemm fig-env="figure" fig-pos="htb" fig-cap="**2:4 Structured Sparsity GEMM**: Left: standard dense matrix multiplication on Tensor Cores using full 8-element rows. Right: 2:4 sparse multiplication retains two nonzeros in every group of four and uses compact indices to select matching elements from the dense right-hand matrix. A supported sparse inner loop can halve the multiplied values, although metadata handling and the rest of the execution path determine end-to-end speedup. Source: PyTorch blog [@pytorch_sparsity_blog]." fig-alt="Side-by-side comparison of dense and 2:4 sparse GEMM on Tensor Cores. Left shows an 8-element dense row multiplication. Right shows a sparse row with two retained values per group of four and compact indices selecting matching elements from the dense right-hand matrix."}
+
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\sffamily]
+\tikzset{%
+ mysnake/.style={postaction={draw,decorate,decoration={snake,amplitude=3pt,segment length=19pt}}},
+helvetica/.style={align=flush center,font=\small\sffamily},
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner sep=5pt,
+    node distance=0.8,
+    draw=VioletLine,
+    line width=0.75pt,
+    fill=VioletL2,
+    text width=43mm,align=flush center,
+    minimum width=43mm, minimum height=7mm
+  },
+do path picture/.style={%
+    path picture={%
+      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
+        {\pgfpointanchor{path picture bounding box}{north east}}%
+      \pgfgetlastxy\x\y%
+      \tikzset{x=\x/2,y=\y/2}%
+      #1
+    }
+  },
+  cross/.style={do path picture={
+    \draw [line cap=round] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
+  }},
+}
+\definecolor{Blue1}{RGB}{23,68,150}
+\definecolor{Blue2}{RGB}{84,131,217}
+\definecolor{Blue3}{RGB}{145,177,237}
+\def\columns{3}
+\def\rows{3}
+\def\cellsize{5mm}
+\def\cellheight{5mm}
+
+\begin{scope}[local bounding box=LEFT]
+\node[draw,circle,line width=0.75pt,cross,minimum width=6mm](CI1){};
+\node[draw=black, line width=1.2pt,fill=GreenL, minimum width=0.9*\cellsize,
+                    minimum height=0.9*\cellheight,below=0.5 of CI1](AR) {};
+\node[right=1mm of AR](AR1){Accumulator (result)};
+
+\begin{scope}[local bounding box=M3,shift={(-0.2,1.5)}]
+\def\columns{8}
+\def\rows{1}
+\def\br{M3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+\begin{scope}[local bounding box=M1,shift={(-4.5,1.5)}]
+\def\columns{8}
+\def\rows{1}
+\def\br{M1}
+\def\rowone{Blue1,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\end{scope}
+
+\draw[Line,-latex](CI1)--(AR);
+\draw[Line,-latex](M3)|-(CI1);
+\draw[Line,-latex](M1)|-(CI1);
+%%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=3mm,inner ysep=11mm,
+yshift=8mm,fill=BackColor!50,fit=(AR1)(M1)(M3),line width=0.75pt](BB1){};
+\node[anchor=north west,align=center]at(BB1.north west){Dense operation\\ on Tensor Core};
+
+%%below matrix Blue
+\begin{scope}[local bounding box=DM1,shift={(0.2,-2.5)}]
+\def\columns{8}
+\def\rows{8}
+\def\br{DM1}
+\def\rowone{Blue1,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
+\def\rowtwo{Blue3,Blue2,Blue3,Blue2,Blue3,Blue3,Blue1,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2,Blue3,Blue3,Blue2,Blue2,Blue1}
+\def\rowfour{Blue2,Blue3,Blue2,Blue3,Blue1,Blue2,Blue3,Blue3}
+\def\rowfive{Blue2,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
+\def\rowsix{Blue2,Blue3,Blue1,Blue3,Blue1,Blue3,Blue2,Blue2}
+\def\rowseven{Blue3,Blue3,Blue2,Blue1,Blue2,Blue2,Blue3,Blue3}
+\def\rowosam{Blue3,Blue2,Blue3,Blue2,Blue3,Blue1,Blue2,Blue1}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+\foreach \color [count=\x] in \rowfour {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-4\br) {};
+}
+\foreach \color [count=\x] in \rowfive {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-5\br) {};
+}
+\foreach \color [count=\x] in \rowsix {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-6\br) {};
+}
+\foreach \color [count=\x] in \rowseven {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-7\br) {};
+}
+\foreach \color [count=\x] in \rowosam {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-8\br) {};
+}
+\end{scope}
+
+%
+\draw[|-|,thick]([yshift=-5.5]cell-1-8DM1.south west)--node[below=0pt,
+                       font=\sffamily\small]{K}([yshift=-5.5]cell-8-8DM1.south east);
+\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Dense)};
+\draw[|-|,thick]([xshift=7.5]cell-8-8DM1.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=7.5]cell-8-1DM1.north east);
+%
+
+\node[below=22pt of DM1](SP){\textbf{Dense $M\times N\times K$ GEMM}};
+%%%last matrix Green
+\begin{scope}[local bounding box=DM3,shift={(6,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM3}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=GreenL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+%
+\node[below=0.35 of DM3,align=center](CM){C matrix\\ (Dense)};
+\draw[|-|,thick]([yshift=9.5]cell-1-1DM3.north west)--node[above=0pt,
+                       font=\sffamily\small]{N}([yshift=9.5]cell-4-1DM3.north east);
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM3.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=7.5]cell-4-1DM3.north east);
+%
+
+%
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM1)(cell-8-1DM1),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+%%%last upper matrix brown
+\begin{scope}[local bounding box=DM4,shift={(6,3.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM4}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+\node[above=0.2 of DM4,align=center](BM){Right-hand matrix\\ (Dense)};
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM4.south east)--node[right=0pt,
+                       font=\sffamily\small]{K}([xshift=7.5]cell-4-1DM4.north east);
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM4)(cell-1-8DM4),line width=3.5pt](BB4){};
+\draw[red,line width=1.5pt](BB4)--(BB1.east);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+\end{scope}
+%%%%%%%%%%
+%right part
+%%%%%%%%%%%%
+\begin{scope}[local bounding box=RIGHT,shift={(15.15,0)}]
+\node[draw,circle,line width=0.75pt,cross,minimum width=6mm](CI1){};
+\node[draw=black, line width=1.2pt,fill=GreenL, minimum width=0.9*\cellsize,
+                    minimum height=0.9*\cellheight,below=0.5 of CI1](AR) {};
+\node[right=1mm of AR](AR1){Accumulator (result)};
+
+\begin{scope}[local bounding box=M3,shift={(1,1.5)}]
+\def\columns{4}
+\def\rows{1}
+\def\br{M3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+
+\begin{scope}[local bounding box=M2,shift={(-1.3,1.5)}]
+\def\columns{4}
+\def\rows{1}
+\def\br{M2}
+\def\cellsize{2.5mm}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=OrangeL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+\begin{scope}[local bounding box=M1,shift={(-3.8,1.5)}]
+\def\columns{4}
+\def\rows{1}
+\def\br{M1}
+\def\rowone{Blue2,Blue3,Blue1,Blue3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\end{scope}
+\node[Box,above=of M3)](CM){Choose matching K/2 elements out of K elements};
+%%
+\begin{scope}[local bounding box=M4,shift={($(CM.north)+(-2.3,1.5)$)}]
+\def\columns{8}
+\def\rows{1}
+\def\br{M4}
+\def\rowone{BrownL,BrownL!20,BrownL!20,BrownL,BrownL!20,BrownL,BrownL,BrownL!20}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\end{scope}
+%\fill[red](cell-8-1M4)circle(2pt);
+\foreach \x in{1,...,8}{
+\draw[Line,-latex](cell-\x-1M4)--(cell-\x-1M4|-CM.north);
+}
+\foreach \x in{1,...,4}{
+\draw[Line,latex-](cell-\x-1M3)--(cell-\x-1M3|-CM.south);
+}
+\draw[Line,-latex](CI1)--(AR);
+\draw[Line,-latex](M3)|-(CI1);
+\draw[Line,-latex](M1)|-(CI1);
+\draw[Line,-latex](M2)|-node[left,pos=0.3]{Select}(CM);
+%%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=3mm,inner ysep=3mm,
+yshift=0mm,fill=BackColor!50,fit=(AR1)(M1)(M4)(CM),line width=0.75pt](BB1){};
+\node[anchor=north west,align=center]at(BB1.north west){Sparse operation\\ on Tensor Core};
+
+%%below matrix Blue
+\begin{scope}[local bounding box=DM1,shift={(0.2,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM1}
+\def\rowone{Blue2,Blue3,Blue1,Blue3}
+\def\rowtwo{Blue2,Blue3,Blue1,Blue2}
+\def\rowthree{Blue2,Blue1,Blue3,Blue2}
+\def\rowfour{Blue2,Blue3,Blue1,Blue3}
+\def\rowfive{Blue3,Blue1,Blue1,Blue2}
+\def\rowsix{Blue2,Blue2,Blue1,Blue3}
+\def\rowseven{Blue3,Blue1,Blue2,Blue3}
+\def\rowosam{Blue3,Blue2,Blue1,Blue2}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+\foreach \color [count=\x] in \rowfour {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-4\br) {};
+}
+\foreach \color [count=\x] in \rowfive {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-5\br) {};
+}
+\foreach \color [count=\x] in \rowsix {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-6\br) {};
+}
+\foreach \color [count=\x] in \rowseven {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-7\br) {};
+}
+\foreach \color [count=\x] in \rowosam {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-8\br) {};
+}
+\end{scope}
+\node[below=0.7 of DM1,align=center](NZ){Non-zero data\\ values};
+\draw[|-|,thick]([yshift=-5.5]cell-1-8DM1.south west)--node[below=0pt,
+                       font=\sffamily\small]{K/2}([yshift=-5.5]cell-4-8DM1.south east);
+\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Sparse)};
+\begin{scope}[local bounding box=DM2,shift={(3.4,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM2}
+\def\cellsize{2.5mm}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=OrangeL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+\node[below=0.7 of DM2,align=center](2B){2-bits\\ indices};
+\draw[|-|,thick]([yshift=-5.5]cell-1-8DM2.south west)--node[below=0pt,
+                       font=\sffamily\small]{K/2}([yshift=-5.5]cell-4-8DM2.south east);
+\draw[|-|,thick]([xshift=9.5]cell-4-8DM2.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=9.5]cell-4-1DM2.north east);
+%
+\node[draw=none,inner xsep=0mm,inner ysep=0mm,
+yshift=0mm,fill=none,fit=(NZ)(2B),line width=0.75pt](BB2){};
+\node[below=2pt of BB2](SP){\textbf{Sparse $M\times N\times K$ GEMM}};
+%%%last matrix Green
+\begin{scope}[local bounding box=DM3,shift={(6,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM3}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=GreenL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+%
+\node[below=0.7 of DM3,align=center](CM){C matrix\\ (Dense)};
+\draw[|-|,thick]([yshift=9.5]cell-1-1DM3.north west)--node[above=0pt,
+                       font=\sffamily\small]{N}([yshift=9.5]cell-4-1DM3.north east);
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM3.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=7.5]cell-4-1DM3.north east);
+%
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM1)(cell-4-1DM2),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+%%%last upper matrix brown
+\begin{scope}[local bounding box=DM4,shift={(6,3.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM4}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+\node[above=0.2 of DM4,align=center](BM){Right-hand matrix\\ (Dense)};
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM4.south east)--node[right=0pt,
+                       font=\sffamily\small]{K}([xshift=7.5]cell-4-1DM4.north east);
+\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Sparse)};
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM4)(cell-1-8DM4),line width=3.5pt](BB4){};
+\draw[red,line width=1.5pt](BB4)--(BB1.east);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+\end{scope}
+\path[]($(RIGHT)!0.5!(LEFT)$)--++(90:6)coordinate(GO);
+\path[]($(RIGHT)!0.5!(LEFT)$)--++(270:6)coordinate(DO);
+\path[VioletLine!60,mysnake,line width=1pt](GO)--(DO);
+\end{tikzpicture}
+```
+
+:::
+
+Supported Sparse Tensor Core paths on NVIDIA Ampere and later can accelerate 2:4 sparsity by skipping prescribed zeros and carrying compact metadata, with an ideal sparse arithmetic-rate improvement of up to $2\times$ [@NVIDIA2020]. Conversely, **unstructured pruning**\index{Unstructured pruning!hardware limitations} zeroes arbitrary individual weights. Those irregular locations can disrupt memory coalescing and lane utilization, while Compressed Sparse Row (CSR) or Coordinate (COO) metadata adds storage and non-unit-stride accesses. An unstructured sparse model can therefore run slower than its dense counterpart when metadata and underutilization outweigh skipped arithmetic. TPUs are useful contrast cases for dense systolic-array acceleration [@jouppi2021], but sparse acceleration still depends on a specific hardware and software path rather than accepting arbitrary masks. Field-programmable gate arrays can implement application-specific sparse formats, yet their efficiency depends on the chosen dataflow and resource budget; programmability is not a universal sparse-speedup guarantee.
+
+Across all platforms, sparse operations can reduce memory bandwidth requirements and energy consumption when the sparse representation and kernels actually skip data movement rather than only arithmetic. This benefit compounds with quantization: a sparse INT8 model can require less memory traffic than either technique alone when the format overhead is small enough [@hoefler2021sparsity; @gale2020].
+
+#### Challenges and limitations {#sec-model-compression-challenges-limitations-975f}
+
+The same format-hardware contract explains why sparsity often disappoints in practice.
+
+::: {.column-margin}
+![](images/svg/vol1_model_compression_margin_003.svg){width="100%" fig-alt="A speedup curve stays nearly flat before climbing through a shaded range labeled kernel-dependent break-even; no universal sparsity percentage is marked."}
+
+*Unstructured sparsity pays off only after crossing a hardware- and kernel-specific break-even point.*
+:::
+
+ The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that common dense accelerator paths cannot exploit; skipping those zeros requires a sparse representation and a compatible kernel. Pruning itself adds training or analysis cost because identifying removable weights can require sophisticated importance estimation on large models. Even after sparsity is achieved, storage formats add indices whose overhead can offset saved values and arithmetic. The performance break-even point varies with tensor shape, sparse format, kernel, batch size, and hardware; there is no universal sparsity threshold.
+
+The accuracy-efficiency trade-off requires measurement across candidate sparsity levels. A model may tolerate one level with little measured impact and then degrade sharply after a comparatively small additional pruning step. The operating point is the highest useful sparsity whose task quality and deployed performance both satisfy their thresholds.
+
+Energy efficiency is not guaranteed. While sparse operations reduce arithmetic operations, the overhead of sparse indexing and irregular memory access can increase power consumption on hardware not optimized for sparse patterns. On edge devices with tight power budgets, these overheads may outweigh the benefits.
+
+Finally, sparsity benefits vary by layer, model, and execution target. A workload whose useful tensors remain dense, or a target without a matching sparse path, may see no improvement and can regress after metadata and irregular-access costs are included.
+
+#### Combined optimizations {#sec-model-compression-combined-optimizations-99fd}
+
+Pruning, quantization, operator fusion, dynamic computation, and sparse execution share weights, representations, and physical resources. A deployment may combine them when one technique cannot satisfy every constraint, but the combined result is not guaranteed to exceed the best individual technique. Each transformation can alter the accuracy, shapes, distributions, and bottlenecks assumed by the next, so combinations require joint quality and performance measurement rather than a promised compression ratio [@hoefler2021sparsity].
+
+The interaction between sparsity and pruning is the most direct: pruning creates sparsity, but the pattern determines hardware efficiency. Removing entire filters or layers can produce smaller dense shapes, while fixed within-group patterns can map to supported sparse kernels. Unstructured pruning creates irregular patterns that require specialized formats and kernels to realize speedups [@elsen2020; @gale2019state].
+
+Combining sparsity with quantization can multiply raw value-payload reductions, but the deployed representation carries both sparse and quantization metadata. GPUs with dedicated sparse tensor cores can accelerate supported structured patterns, while CPU outcomes depend on the chosen format, low-precision sparse kernel, tensor shape, and indexing overhead [@NVIDIA2020; @hoefler2021sparsity; @gale2020].
+
+The recurring theme across all combinations is hardware alignment. Efficient model designs such as depthwise separable convolutions [@howard2017mobilenets], dynamic computation, and sparsity help only when the target hardware supports the resulting operation patterns [@hoefler2021sparsity].
+
+The coordination challenges inherent in combining sparsity with other techniques point to a broader principle: optimization techniques rarely succeed in isolation, and their effectiveness depends on sequencing decisions and hardware alignment.
+
+::: {#psp-model-compression-optimization-composition-problem .callout-perspective title="The optimization composition problem"}
+
+Optimization techniques interact through shared representations and physical resources rather than composing as independent functions. Pruning changes the surviving value distribution, tensor shapes, or sparse format; quantization adds scales and changes the available kernels; fusion changes which intermediates are materialized and can alter the profile that justified earlier choices. Effective optimization therefore treats the model-runtime-hardware combination as a coupled system, measures it after every transformation, and revisits the sequence when a new bottleneck appears. This makes compression a systems engineering problem as well as a machine learning problem.
+
+:::
+
+Because optimization techniques interact so heavily through shared execution mechanics, selecting an appropriate compression strategy cannot rely on single-technique benchmarks. Practical deployment requires a systematic selection workflow that maps target hardware bottlenecks directly to compatible compression pipelines.
+
 ## Quantization and Precision {#sec-model-compression-quantization-precision-cd46}
 
 ```{python}
@@ -5025,7 +6617,7 @@ The gap arises from several architectural and runtime mismatches. Sparse matrice
 
 Hardware implementation starts from the execution trace. Profiling reveals where theoretical speedups vanish in practice: sparse tensors continue to move through dense kernels, reduced-precision operators trigger un-fused type conversions that flood the memory bus, and small layers spend more time launching kernels and moving intermediates than doing arithmetic. The model has become smaller on paper, but the execution trace still asks the machine to perform an inefficient sequence of memory accesses and operations.
 
-Where representation optimization determines *what* computations to perform and precision optimization determines *how precisely* to compute them, hardware implementation determines *how* those computations fit the machine. Measured bottlenecks determine which architectural response is useful. Hardware-aware design changes the model before training so its layers match the deployment envelope. Sparsity exploitation makes removed weights visible to kernels that can skip them. Dynamic computation lets easy inputs leave early instead of paying for the worst case. Operator fusion reduces memory traffic when adjacent operations would otherwise write and reread the same tensors.
+Where representation optimization determines *what* computations to perform and precision optimization determines *how precisely* to compute them, hardware implementation determines *how* those computations fit the machine. Measured bottlenecks determine which architectural response is useful. Hardware-aware design changes the model before training so its layers match the deployment envelope. Sparsity exploitation makes removed weights visible to kernels that can skip them. Operator fusion reduces memory traffic when adjacent operations would otherwise write and reread the same tensors.
 
 ### Hardware-aware design {#sec-model-compression-hardwareaware-design-c561}
 
@@ -5332,1598 +6924,6 @@ Fusion implementation spans the software stack, from framework-level pattern mat
 :::
 
 While operator fusion minimizes data movement between static pipeline stages, adaptive computation challenges the assumption that every input requires the full depth or width of the computational graph. By modulating active subnetworks based on input difficulty or runtime budgets, systems trade deterministic execution schedules for lower amortized latency and energy.
-
-### Adaptive computation methods {#sec-model-compression-adaptive-computation-methods-d164}
-
-Hardware-aware architecture design and operator fusion optimize a fixed execution graph, ensuring that absent input-dependent control, every input follows an identical scheduled path. On static graphs, the **Algorithm** imposes an invariant computational workload on the **Machine**: a 24-layer transformer executes identical MAC operations and streams its full parameter footprint from HBM or off-chip DRAM for an obvious, easily classified sample as it does for an ambiguous one. **Adaptive inference**\index{Adaptive inference!definition} replaces this open-loop pipeline with an input-dependent control loop: intermediate representations or runtime budgets inform dynamic decisions that terminate execution or route activations through specialized subnetworks. While dynamic paths can reduce average arithmetic operations and memory traffic, they introduce runtime overheads in routing logic, batch management, confidence calibration, and latency variance.
-
-#### Dynamic schemes {#sec-model-compression-dynamic-schemes-e9ff}
-
-Because input data exhibit non-uniform semantic complexity, allocating an invariant computational budget wastes memory bandwidth and execution cycles on simple samples. Dynamic schemes modulate execution paths to lower amortized computation while preserving the deep network for worst-case inputs. This architectural flexibility spans four primary control variables: network depth (early exit), structural routing (conditional layer skipping), expert subnetworks (mixture-of-experts), and continuous computational allocation.
-
-To control execution depth, **early exit**\index{Adaptive computation!early exit} architectures attach auxiliary classification heads to intermediate layers, terminating execution when intermediate representations yield sufficient prediction confidence [@teerapittayanon2016]. BranchyNet implements this mechanism across convolutional backbones using shallow exit branches, whereas multi-exit vision transformers attach linear probes and entropy estimators between transformer blocks [@xin2021]. When an input satisfies an exit criterion—such as softmax prediction entropy dropping below a pre-tuned threshold—the runtime halts evaluation and returns the intermediate prediction. The net operational benefit requires that the arithmetic operations and memory transfers avoided in subsequent layers exceed the computational overhead of evaluating the intermediate classifiers and gating thresholds.
-
-The systems trade-off diverges sharply across hardware deployment targets. On single-sample edge processors (batch size $B=1$, typical of microcontrollers and mobile NPUs), early exit immediately terminates the execution thread [@hu2020triple]. Skipping remaining layers eliminates both the arithmetic operations and the off-chip DRAM transactions required to load subsequent layer weights into on-chip SRAM cache. Conversely, on parallel throughput accelerators (GPUs and TPUs) processing batched workloads ($B > 1$), early exit introduces severe batch fragmentation [@chen2024eellm]. If only a subset of samples in a batch reaches the exit threshold, the remaining samples must still traverse deeper layers. Unless the runtime executes dynamic batch compaction—gathering unresolved activation tensors into a contiguous memory buffer via memory copies and kernel synchronizations—inactive samples remain allocated in memory, or the accelerator must mask inactive SIMD or single instruction, multiple threads (SIMT) lanes. Consequently, tail latency for the batch remains dictated by the deepest traversing sample. @Fig-early-exit-transformers traces this branching topology along the backbone: each transformer block taps intermediate representations into an auxiliary classifier and confidence estimator (LTE) to trigger an early exit, while unresolved tokens traverse horizontal connections to deeper layers.
-
-::: {.column-margin .margin-pointer}
-↪ The latency-throughput trade-offs of batching under production request streams, including service-level objective (SLO) violations, are developed in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
-:::
-
-::: {#fig-early-exit-transformers fig-env="figure" fig-pos="htb" fig-cap="**Early Exit Architecture**: Transformer layers dynamically adjust computation by classifying each layer's output and enabling early termination if sufficient confidence is reached, reducing average latency and power when many inputs can exit before the final layer. Source: [@xin2021]." fig-alt="Flowchart with input feeding transformer layers 1 through N sub L in sequence. Each layer connects to a classifier, confidence estimator, and exit point. Arrows show continue paths for low confidence."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=1.7,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    text width=25mm,align=flush center,
-    minimum width=25mm, minimum height=8mm
-  },
-}
-
-\node[Box, ellipse,text width=14mm,minimum width=12mm,inner ysep=-1pt,
-             minimum height=10mm, fill=RedL,draw=RedLine](B1){Input};
-\node[Box,right=of B1](B2){Transformer 1};
-\node[Box,right=of B2](B3){Transformer 2};
-\node[Box, node distance=2.5,right=of B3](B4){Transformer $N_L$};
-\node[font=\tiny\sffamily](B0)at($(B3)!0.5!(B4)$){$\bullet$ $\bullet$ $\bullet$};
-%
-\def\di{0.45}
-\node[Box,node distance=\di,below=of B2,fill=VioletL2,draw=VioletLine](C1){Classifier 1};
-\node[Box,node distance=\di,below=of C1,fill=BlueL,draw=BlueLine](C2){Confidence/LTE};
-\node[Box,node distance=\di,below=of C2,ellipse,text width=14mm,minimum width=12mm,
-             minimum height=10mm, fill=RedL,draw=RedLine](C3){Exit};
-%
-\node[Box,node distance=\di,below=of B3,fill=VioletL2,draw=VioletLine](2C1){Classifier 2};
-\node[Box,node distance=\di,below=of 2C1,fill=BlueL,draw=BlueLine](2C2){Confidence/LTE};
-\node[Box,node distance=\di,below=of 2C2,ellipse,text width=14mm,minimum width=12mm,
-             minimum height=10mm, fill=RedL,draw=RedLine](2C3){Exit};
-%
-\node[Box,node distance=\di,below=of B4,fill=VioletL2,draw=VioletLine](3C1){Classifier $N_L$};
-\node[Box,node distance=\di,below=of 3C1,fill=BlueL,draw=BlueLine](3C2){Confidence/LTE};
-\node[Box,node distance=\di,below=of 3C2,ellipse,text width=14mm,minimum width=12mm,
-             minimum height=10mm, fill=RedL,draw=RedLine](3C3){Exit};
-%
-\node[font=\tiny\sffamily](2B0)at($(2C1)!0.5!(3C1)$){$\bullet$ $\bullet$ $\bullet$};
-\node[font=\tiny\sffamily](3B0)at($(2C2)!0.5!(3C2)$){$\bullet$ $\bullet$ $\bullet$};
-\draw[Line,-latex](B1)--(B2);
-\draw[Line,-latex](B2)--(B3);
-\draw[Line,-latex](B3)--(B0);
-\draw[Line,-latex](B0)--(B4);
-%
-\draw[Line,-latex](B2)--(C1);
-\draw[Line,-latex](C1)--(C2);
-\draw[Line,-latex](C2)--(C3);
-%
-\draw[Line,-latex](B3)--(2C1);
-\draw[Line,-latex](2C1)--(2C2);
-\draw[Line,-latex](2C2)--(2C3);
-%
-\draw[Line,-latex](B4)--(3C1);
-\draw[Line,-latex](3C1)--(3C2);
-\draw[Line,-latex](3C2)--(3C3);
-%
-\draw[Line,-latex](C2)-|node[left=6pt,pos=0.8,rotate=90]{Continue}($(B2)!0.5!(B3)$);
-\draw[Line,-latex](2C2.east)-|node[right=9pt,pos=0.35,rotate=90]{Continue}($(B3)!0.68!(B0)$);
-\end{tikzpicture}
-```
-
-:::
-
-Beyond truncating execution depth along a single linear pipeline, **conditional computation**\index{Conditional computation!definition} dynamically modulates the topological routing of activations through the network graph [@bengio2015conditional]. Instead of executing every block in a predefined sequence, gating functions evaluate activation tensors to bypass residual layers, alter operator kernels, or select specialized functional blocks. This converts a static directed acyclic graph (DAG) into an input-dependent dynamic graph.
-
-Architectural implementations target distinct structural granularities. SkipNet uses lightweight recurrent or feedforward gating controllers to conditionally bypass residual blocks in convolutional networks, preserving full network depth only for computationally difficult inputs [@wang2018skipnet]. Dynamic Filter Networks generate sample-specific convolutional filter weights dynamically from the input, modifying feature extraction patterns directly rather than skipping static weights [@jia2016dynamic]. Capsule Networks utilize iterative routing-by-agreement to direct low-level feature vectors to compatible high-level capsules [@sabour2017dynamic]. From a hardware systems perspective, conditional routing achieves wall-clock speedups only when the cycles saved by bypassing operators surpass the latency of evaluating the gating network, executing host-device control synchronization, and managing uncoalesced memory accesses.
-
-Scaling dense transformer models couples parameter capacity directly to per-token floating-point operations: increasing model capacity forces every token to compute against every parameter weight matrix, driving up both arithmetic demand and memory bandwidth requirements. The **mixture-of-experts (MoE)**\index{MoE!definition} architecture decouples parameter capacity from per-token compute by replacing dense feedforward network (FFN) layers with a bank of parallel expert subnetworks coordinated by a parameterized router [@shazeer2017outrageously]. Google's Switch Transformer[^fn-switch-transformer-scaling] scales this sparse routing principle by steering each token to a single expert ($k=1$), dramatically reducing communication overhead compared to top-$k$ routing [@fedus2022switch].
-
-[^fn-switch-transformer-scaling]: **Switch Transformer**\index{Switch Transformer!scaling trade-off}: @fedus2022switch scales to roughly 1.6 trillion total parameters while routing each token to one expert; in a compute-matched experiment, Switch-Base with 64 experts reached the T5-Base quality target in about one-seventh the training time; the trillion-parameter comparison reported roughly 4$\times$ speedup over T5-XXL. Routing each token to one expert reduces communication relative to top-$k$ routing, but load imbalance requires auxiliary losses and capacity factors. This trade-off—massive parameter capacity at low per-token compute cost, but with complex systems engineering for load balancing—defines the MoE design space.
-
-This sparse activation creates a fundamental memory-bandwidth and capacity trade-off on accelerator hardware. While a token routed to one of $N_{\text{experts}}$ experts executes arithmetic against only $1/N_{\text{experts}}$ of the total expert parameters, an all-resident deployment keeps all $N_{\text{experts}}$ expert matrices in device memory (HBM or SRAM). Offloading changes this capacity requirement by adding transfers to the execution path. At low operational batch sizes—such as single-stream autoregressive generation—routing divergent tokens to different experts fragments matrix-matrix multiplications (GEMM) into low-arithmetic-intensity matrix-vector operations (GEMV), which can make execution bandwidth-limited. Furthermore, uneven token distribution causes computational hotspots where overloaded experts drop tokens exceeding their capacity factor, while under-allocated experts leave tensor core pipelines idle.
-
-Sparse Mixture-of-Experts architectures replace monolithic feedforward networks (FFNs) with dynamically routed subnetworks. @Fig-switch-transformer diagrams this conditional execution pathway: the left block embeds a Switching FFN layer within the standard transformer stack, while the expanded right panel details the gating router dispatching individual tokens ("More" with $p=0.65$, "Parameters" with $p=0.8$) to distinct expert sub-blocks (FFN 2 and FFN 1) while leaving unselected experts idle.
-
-::: {#fig-switch-transformer fig-env="figure" fig-pos="htb" fig-cap="**Switch Transformer Architecture**: Replacing dense feedforward layers with a Switching FFN layer (left) enables sparse conditional routing. A gating network routes each token to a single expert (right) out of a large pool, decoupling total model capacity (parameters) from per-token compute cost (FLOPs). Source: [@fedus2022switch]." fig-alt="Two-part diagram. Left shows switch transformer block with self-attention, add-normalize, switching FFN layer, and add-normalize. Right shows expanded view with router selecting one of four FFN experts per token based on probability."}
-
-```{.tikz}
-\begin{tikzpicture}[line join=round,font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=0.8,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL,
-    text width=75mm,align=flush center,
-    minimum width=75mm, minimum height=8mm
-  },
-Box2/.style={inner xsep=2pt,
-    node distance=0.15,
-    draw=VioletLine,
-    line width=0.75pt,
-    fill=VioletL2,
-    text width=10mm,align=flush center,
-    minimum width=10mm, minimum height=7mm
-  },
-Box3/.style={inner xsep=2pt,
-    node distance=0.8,
-    draw=VioletLine,
-    line width=0.75pt,
-    fill=VioletL2,
-    text width=33mm,align=flush center,
-    minimum width=33mm, minimum height=8mm
-  },
-do path picture/.style={%
-    path picture={%
-      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
-        {\pgfpointanchor{path picture bounding box}{north east}}%
-      \pgfgetlastxy\x\y%
-      \tikzset{x=\x/2,y=\y/2}%
-      #1
-    }
-  },
-  cross/.style={do path picture={
-    \draw [line cap=round] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
-  }},
-plus/.style={do path picture={
-    \draw [line cap=round] (-3/4,0) -- (3/4,0) (0,-3/4) -- (0,3/4);
-  }}
-}
-
-\node[Box,fill=RedL,draw=RedLine](P1){Self-Attention};
-\node[Box,above=0.4 of P1,fill=BrownL,draw=BrownLine](P2){Add + Normalize};
-\node[Box,node distance=6.5,above=of P2,fill=BrownL,draw=BrownLine](P3){Add + Normalize};
-\draw[Line,-latex](P2.172)coordinate(DPR1)--++(90:1)coordinate(PR1);
-\draw[Line,-latex](P2.8)coordinate(DPR2)--++(90:1)coordinate(PR2);
-\draw[Line,-latex](P3.172)coordinate(DAN1)--++(90:0.5)coordinate(AN1);
-\draw[Line,-latex](P3.8)coordinate(DAN2)--++(90:0.5)coordinate(AN2);
-\draw[Line,-latex](P1.172)--(P1.172|-P2.south);
-\draw[Line,-latex](P1.8)--(P1.8|-P2.south);
-%%%Router-1
-\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR1)+(-0.4,0.2)$)}]
-\newcommand{\Depth}{1.3}
-\newcommand{\Height}{0.7}
-\newcommand{\Width}{0.4}
-\coordinate (O2) at (0,0,0);
-\coordinate (A2) at (0,\Width,0);
-\coordinate (B2) at (0,\Width,\Height);
-\coordinate (C2) at (0,0,\Height);
-\coordinate (D2) at (\Depth,0,0);
-\coordinate (E2) at (\Depth,\Width,0);
-\coordinate (F2) at (\Depth,\Width,\Height);
-\coordinate (G2) at (\Depth,0,\Height);
-
-\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
-\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
-\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
-%
-\node[]at($(B2)!0.5!(G2)$){Router};
-
-\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
-\def\dx{0.25}
-\def\dy{0.5}
-\def\dz{0.2}
-% bottom-left corner coordinate (bar origin)
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-
-% boje
-%\filldraw[fill=blue!30, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z) -- cycle; % leva strana
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-%\filldraw[fill=blue!20, draw=black] (\x,\y,\z) -- (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y,\z) -- cycle; % donja strana
-%\filldraw[fill=blue!40, draw=black] (\x,\y,\z) -- (\x+\dx,\y,\z) -- (\x+\dx,\y+\dy,\z) -- (\x,\y+\dy,\z) -- cycle; % zadnja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-
-\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
-\def\dx{0.25}
-\def\dy{1.0}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z)coordinate(NB1) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
-\def\dx{0.25}
-\def\dy{0.2}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
-\def\dx{0.25}
-\def\dy{0.6}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\end{scope}
-%%%%%%%%%%%%%%%%%%
-%%%Router-2
-\begin{scope}[local bounding box=R1,line width=0.5pt,shift={($(PR2)+(-0.4,0.2)$)}]
-\newcommand{\Depth}{1.3}
-\newcommand{\Height}{0.7}
-\newcommand{\Width}{0.4}
-\coordinate (O2) at (0,0,0);
-\coordinate (A2) at (0,\Width,0);
-\coordinate (B2) at (0,\Width,\Height);
-\coordinate (C2) at (0,0,\Height);
-\coordinate (D2) at (\Depth,0,0);
-\coordinate (E2) at (\Depth,\Width,0);
-\coordinate (F2) at (\Depth,\Width,\Height);
-\coordinate (G2) at (\Depth,0,\Height);
-
-\draw[fill=GreenL] (D2) -- (E2) -- (F2) -- (G2) -- cycle;% Right Face
-\draw[fill=GreenL] (C2) -- (B2) -- (F2) -- (G2) -- (C2);% Front Face
-\draw[fill=GreenL] (A2) -- (B2) -- (F2) -- (E2) -- cycle;% Top Face
-%
-\node[]at($(B2)!0.5!(G2)$){Router};
-
-\begin{scope}[local bounding box=BB1,line width=0.5pt,inner sep=3.6pt]
-\def\dx{0.25}
-\def\dy{1.1}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) coordinate(NB2)-- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-
-\begin{scope}[local bounding box=BB1,shift={(0.25,0)}]
-\def\dx{0.25}
-\def\dy{0.6}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.5,0)}]
-\def\dx{0.25}
-\def\dy{0.3}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\begin{scope}[local bounding box=BB1,shift={(0.75,0)}]
-\def\dx{0.25}
-\def\dy{0.15}
-\def\dz{0.2}
-%
-\def\x{0}
-\def\y{0.21}
-\def\z{0}
-%
-\filldraw[fill=red!10, draw=black] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
-\filldraw[fill=red!50, draw=black] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
-\filldraw[fill=red!60, draw=black] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
-\end{scope}
-\end{scope}
-%%%%%%%%%%%%%%%%%
-%FFN left
-\begin{scope}[local bounding box=SFFN1,line width=0.5pt,shift={($(NB1)+(-1.85,1.55)$)}]
-\node[Box2](FFN1){FFN1};
-\node[Box2,right=of FFN1,line width=1.5pt](FFN2){FFN2};
-\node[Box2,right=of FFN2](FFN3){FFN3};
-\node[Box2,right=of FFN3](FFN4){FFN4};
-\end{scope}
-%FFN right
-\begin{scope}[local bounding box=SFFN2,line width=0.5pt,shift={($(SFFN1)+(3.9,0)$)}]
-\node[Box2,line width=1.5pt](2FFN1){FFN1};
-\node[Box2,right=of 2FFN1](2FFN2){FFN2};
-\node[Box2,right=of 2FFN2](2FFN3){FFN3};
-\node[Box2,right=of 2FFN3](2FFN4){FFN4};
-\end{scope}
-\node[draw,circle,line width=0.75pt, above=1.2 of $(FFN2)!0.5!(FFN3)$,cross,minimum width=6mm](CI1){};
-\node[draw,circle,line width=0.75pt, above=1.2 of $(2FFN2)!0.5!(2FFN3)$,cross,minimum width=6mm](CI2){};
-%
-\draw[Line,-latex](NB1)--++(90:0.5)-|(FFN2);
-\draw[Line,-latex](NB2)--++(90:0.5)-|(2FFN1);
-\draw[Line,-latex,dashed,rounded corners=8pt](NB1)--
-node[below,pos=0.5]{$p = 0.65$}++(180:2.7)|-(CI1.west);
-\draw[Line,-latex,dashed,rounded corners=8pt](NB2)--
-node[below,pos=0.5]{$p = 0.8$}++(0:3.2)|-(CI2.east);
-\draw[Line,-latex](CI1)--(CI1|-P3.south);
-\draw[Line,-latex](CI2)--(CI2|-P3.south);
-\draw[Line,-latex](FFN2)--++(90:0.7)-|(CI1);
-\draw[Line,-latex](2FFN1)--++(90:0.7)-|(CI2);
-%%%
-%fitting
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=7mm,inner ysep=3mm,
-yshift=0mm,fill=BackColor!70,fit=(FFN1)(2FFN4)(CI2)(R1),line width=0.75pt](GBB2){};
-%%below Router to Add +Normalize
-\draw[Line,-latex]($(DPR1)!0.25!(PR1)$)--++(180:3.8)|-(P3);
-\draw[Line,-latex]($(DPR2)!0.25!(PR2)$)--++(0:3.8)|-(P3);
-%%%Above Add + Normalize
-\begin{scope}[local bounding box=Y1,line width=0.5pt,shift={($(AN1)+(-1.2,0)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of Y1]{$y_1$};
-\begin{scope}[local bounding box=Y2,line width=0.5pt,shift={($(AN2)+(-1.2,0)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of Y2]{$y_2$};
-%%below Self-Attention
-\draw[Line,latex-](P1.188)coordinate(GSA1)--++(270:0.7)coordinate(SA1);
-\node[draw,circle,line width=0.75pt, below=0 of SA1,cross,minimum width=6mm](CI3){};
-\draw[Line,latex-](P1.352)coordinate(GSA2)--++(270:0.7)coordinate(SA2);
-\node[draw,circle,line width=0.75pt, below=0 of SA2,cross,minimum width=6mm](CI4){};
-\draw[Line,latex-](CI3.south)coordinate(GDCI3)--++(270:0.7)coordinate(DCI3);
-\draw[Line,latex-](CI4.south)coordinate(GDCI4)--++(270:0.7)coordinate(DCI4);%
-%
-\node[left=2pt of CI3,align=center]{Positional\\ embedding};
-\node[left=2pt of CI4,align=center]{Positional\\ embedding};
-%
-\begin{scope}[local bounding box=X1,line width=0.5pt,shift={($(DCI3)+(-1.2,-0.14)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of X1]{$x_1$};
-\node[below=2pt of X1]{More};
-\begin{scope}[local bounding box=X2,line width=0.5pt,shift={($(DCI4)+(-1.2,-0.14)$)}]
-\def\side{0.4}
-\foreach \i/\col in {0/white,1/green!40,2/white,3/green!40,4/white,5/green!40}{
-    \draw[fill=\col,thick] (\i*\side,0) rectangle ++(\side,\side);
-}
-\end{scope}
-\node[left=2pt of X2]{$x_2$};
-\node[below=2pt of X2]{Parameters};
-%
-\draw[Line,-latex]($(GSA1)!0.5!(SA1)$)--++(180:3.8)|-(P2);
-\draw[Line,-latex]($(GSA2)!0.5!(SA2)$)--++(0:3.8)|-(P2);
-%%%%%%%%%%%%
-%left diagram
-\begin{scope}[local bounding box=LD,line width=0.5pt,shift={(-13,1.8)}]
-\node[Box3,fill=RedL,draw=RedLine](2P1){Self-Attention};
-\node[Box3,above=of 2P1,fill=BrownL,draw=BrownLine](2P2){Add + Normalize};
-\node[Box3,above=of 2P2,fill=BackColor,draw=BackLine](2P3){Switching FFN Layer};
-\node[Box3,above=of 2P3,fill=BrownL,draw=BrownLine](2P4){Add + Normalize};
-%
-\draw[Line,-latex](2P1)--(2P2);
-\draw[Line,-latex](2P2)--(2P3);
-\draw[Line,-latex](2P3)--(2P4);
-\draw[Line,-latex](2P4)--++(90:1)node[above]{$y$};
-\draw[Line,latex-](2P1)--++(270:1)node[below]{$x$};
-\draw[blue,dashed,thick]($(2P1.south east)+(0.2,-0.2)$)--++(310:5);
-\draw[blue,dashed,thick]($(2P4.north east)+(0.2,-0.2)$)--++(40:5);
-\end{scope}
-\end{tikzpicture}
-```
-
-:::
-
-Because the router lies on the critical execution path, the accelerator runtime must dynamically dispatch and gather activations across expert blocks without triggering host-device synchronization stalls. On data-parallel accelerators such as GPUs and TPUs, executing sparse expert layers efficiently requires token permutation: tokens assigned to the same expert are gathered into contiguous memory tiles to sustain high Tensor Core utilization during subsequent matrix multiplications [@lepikhin2021gshard]. If the routing distribution is highly skewed, token buffers for popular experts overflow their fixed capacity allocations, forcing the system to either truncate tokens (causing representation degradation) or trigger ragged kernel launches that leave parallel vector lanes idle.
-
-::: {.column-margin .margin-pointer}
-↪ How runtimes execute tensors whose shapes vary, by matching precompiled shape profiles, padding, splitting the batch, or falling back to a general kernel, is developed in @sec-hardware-acceleration-dynamic-kernel-execution-33fc.
-:::
-
-While early exit and MoE routing make discrete branch selections, adaptive inference can also operate continuously by progressively modulating depth or iteration counts based on real-time task difficulty [@yang2020]. Dynamic routing architectures such as BlockDrop dynamically adjust the number of active layers according to runtime policy networks [@wu2018blockdrop], while dynamic layer scaling allocates computation incrementally until output uncertainty drops below a calibrated threshold. Consider an embedded vision system processing sensor streams: high-contrast frames with clear road geometry resolve through a minimal prefix of feature-extraction layers, whereas degraded frames containing occluded obstacles trigger deeper recurrent processing blocks. The physical systems gain materializes only if the control evaluation remains computationally lightweight and the runtime schedules frames with matched execution depths concurrently to maintain high hardware utilization.
-
-#### Implementation challenges {#sec-model-compression-implementation-challenges-1184}
-
-Realizing the efficiency gains of adaptive computation requires overcoming critical challenges across model training, runtime orchestration, and hardware alignment. During training, discrete routing decisions (such as non-differentiable $\mathrm{argmax}$ selections) break standard backpropagation. Practitioners must employ continuous relaxations such as the Gumbel-Softmax estimator, reinforcement learning policy gradients, or auxiliary load-balancing losses to prevent routing collapse where the router over-allocates inputs to a single expert or exit [@shazeer2017outrageously].
-
-At runtime, control-flow branching fundamentally conflicts with the bulk-synchronous parallel execution model of modern accelerators. When parallel threads within a GPU warp encounter divergent execution branches, the hardware may serialize branch execution and mask inactive threads, reducing the value of theoretical FLOP savings. Gating also introduces control dependencies that can limit fusion, require token-permutation buffers, or trigger host-device synchronization, depending on the runtime. If these dispatch overheads exceed the compute time saved by skipping layers, the dynamic model exhibits higher end-to-end latency than a dense baseline. @Sec-hardware-acceleration-dynamic-kernel-execution-33fc examines hardware-aware runtime strategies, including ragged batching and dynamic kernel launch queues, designed to manage these execution patterns.
-
-Beyond systems efficiency, dynamic control introduces severe quality and security failure modes. Because gating policies route inputs based on statistical heuristics, poorly calibrated gates systematically underallocate computation to rare distribution tails, degrading prediction accuracy precisely on safety-critical edge cases. Furthermore, input-dependent computation exposes an attack surface: adversarial perturbations can intentionally manipulate routing gates to trigger denial-of-quality attacks (forcing inputs into truncated early exits that fail) or denial-of-service attacks (forcing all inputs into maximally deep or imbalanced paths to saturate accelerator queues). Consequently, evaluating adaptive models cannot rely on average FLOP counts alone. Rigorous system profiling must report path distribution histograms, tail latency (p99), accuracy stratified by input difficulty, and throughput stability under dynamic batching. Where dynamic computation decides whether to perform certain operations, sparsity exploitation addresses a complementary question: how to accelerate computation when many operands are zero.
-
-### Sparsity exploitation {#sec-model-compression-sparsity-exploitation-48a6}
-
-Recall that pruning (from @sec-model-compression-pruning-d1cb) introduces zeros into weight matrices. Sparsity exploitation asks how to accelerate computation when those zeros are present. Pruning creates zeros or removes structure; sparse formats can reduce storage, and matching kernels can reduce computation. **Sparsity**\index{Sparsity!definition}[^fn-sparsity-hardware-gap] in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero.
-
-[^fn-sparsity-hardware-gap]: **Sparsity**\index{Sparsity!hardware gap}: From Latin *sparsus* (scattered), past participle of *spargere* (to scatter); in ML, $\ell_1$ regularization such as the lasso can induce exact zeros rather than merely small values [@tibshirani1996regression]. Software can represent arbitrary sparsity patterns, while efficient hardware execution generally requires a supported format or structured pattern (for example, NVIDIA's 2:4 sparsity). The gap between representable and executable sparsity separates theoretical compression from realized speedup.
-
-More formally, for a sparse weight matrix $\mathbf{W}_{\text{sparse}} \in \mathbb{R}^{m \times n}$, the sparsity ratio $\rho_{\text{sparse}}$ can be expressed as:
-$$
-\rho_{\text{sparse}} = \frac{\Vert \mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}} \Vert_0}{m \times n}
-$$
-where $\mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}}$ is an indicator function that yields one if entry $(i,j)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ represents the $\ell_0$ norm, which counts the number of nonzero elements. Exact zero is representable in floating point, but thresholded definitions also group small-magnitude values when the pruning method treats them as removable. The thresholded sparsity ratio becomes:
-$$
-\rho_{\text{sparse},\delta} = \frac{\Vert \mathbf{1}_{\{|(\mathbf{W}_{\text{sparse}})_{ij}| \le \delta_{\text{prune}}\}} \Vert_0}{m \times n}
-$$
-where $\delta_{\text{prune}}$ is the same small magnitude threshold that defines the pruning mask.
-
-Exact sparsity can emerge during training through regularization or be introduced deliberately through pruning, which forces selected elements to zero. It yields memory, compute, or energy savings only when the storage format and execution path skip those zeros with less overhead than dense execution. That qualification is especially important on resource-constrained devices, where index metadata and irregular accesses consume the same scarce bandwidth and power.
-
-#### Sparsity types {#sec-model-compression-sparsity-types-793d}
-
-The hardware decision begins with the pattern of zeros. Sparsity in neural networks falls into two broad categories: unstructured sparsity and structured sparsity.
-
-Unstructured sparsity occurs when individual weights are set to zero without any specific pattern, typically through magnitude-based pruning. While highly flexible, unstructured sparsity is less efficient on hardware because it lacks a predictable structure.[^fn-sparsity-vectorization-penalty] Exploiting it requires specialized hardware or software optimizations.
-
-[^fn-sparsity-vectorization-penalty]: **Unstructured sparsity and SIMD waste**\index{Sparsity!SIMD vectorization}: Modern CPUs and GPUs process data in vector or tensorized groups; a dense masked tensor still loads and processes zeros. A compact sparse format instead stores nonzero values and metadata, avoiding those zero loads but introducing index traffic, irregular activation accesses, and possible lane imbalance. This is why structured sparsity can deliver speedups at lower sparsity levels than arbitrary unstructured sparsity, while unstructured sparsity often needs very high zero fractions and specialized kernels before arithmetic savings overcome indexing and lane-utilization overheads [@hoefler2021sparsity].
-
-Structured sparsity removes regular groups such as filters, neurons, channels, blocks, or fixed within-group patterns. Regularity makes storage and execution more predictable, but acceleration still depends on whether the target supports that structure and whether the resulting shapes use its compute units efficiently. It is therefore a candidate, not an automatic preference, when deployment requires predictable resource use.
-
-#### Sparsity utilization methods {#sec-model-compression-sparsity-utilization-methods-04c3}
-
-A sparse model with 90 percent of weights zeroed may still run at nearly full computational cost on hardware not designed for irregular memory access. The critical question is how to translate theoretical zeros into actual speedup. A dense kernel *cannot* infer skipped work from a pruning mask it does not use. A sparse kernel can locate nonzeros from metadata without loading every zero, but decoding that metadata and gathering operands adds overhead. Bridging this gap requires specialized utilization methods and hardware support that can efficiently skip zero-valued computations [@hoefler2021sparsity]. Han et al.'s pruning work [-@han2015deep] is a canonical example of turning dense networks into sparse ones by removing unimportant connections, but accelerator speedups depend on whether the resulting sparsity pattern matches hardware-supported formats.
-
-The simplest utilization method is a sparse matrix operation, which stores nonzero values and uses their indices to skip arithmetic on zeros. Consider the difference: multiplying a dense $4{\times}4$ matrix with a vector typically requires 16 multiplications, while a sparse-aware implementation computes the six nonzero products in addition to processing the sparse metadata:
-$$
-\begin{bmatrix}
-2 & 0 & 0 & 1 \\
-0 & 3 & 0 & 0 \\
-4 & 0 & 5 & 0 \\
-0 & 0 & 0 & 6
-\end{bmatrix}
-\begin{bmatrix} x_1 \\ x_2 \\ x_3 \\ x_4 \end{bmatrix}
-=
-\begin{bmatrix} 2x_1 + x_4 \\ 3x_2 \\ 4x_1 + 5x_3 \\ 6x_4 \end{bmatrix}
-$$
-
-The deployment choice is therefore not a generic desire for fewer parameters; it is a choice between representations the runtime can execute efficiently. Low-rank approximation, covered earlier in @sec-model-compression-lowrank-factorization-955e, replaces a dense matrix with smaller dense factors, while sparsity exploitation skips literal zero-valued weights. Sparsity-aware training and sparse gradient descent can help models learn or maintain zero patterns, but runtime speedup appears only when the deployed representation uses formats and kernels that skip zeros. That is why the next design question is not merely how sparse the matrix is, but what structure the zeros have.
-
-#### Structured patterns {#sec-model-compression-structured-patterns-c3f4}
-
-Achieving actual speedups from sparsity requires hardware that can efficiently skip zero-valued computations. Different processor architectures handle sparse patterns with varying effectiveness—for example, Ampere Sparse Tensor Cores exploit fine-grained 2:4 structured patterns while systolic arrays require dense block structures. Software libraries such as cuSPARSE can help bridge this gap by reformulating sparse computations into patterns that current hardware handles efficiently. For example, MegaBlocks [@gale2022megablocksefficientsparsetraining] reformulates sparse Mixture of Experts training into block-sparse operations, grouping routed expert-token work into dense tiles so specialized kernels can maintain high accelerator utilization despite irregular sparsity patterns.
-
-A sparse pattern earns hardware speedup only when it is regular enough for kernels to predict. Two prominent formats make that regularity explicit: block sparse matrices and N:M sparsity patterns. Block sparse matrices isolate blocks of zero and nonzero dense submatrices so that operations on the large sparse matrix can be re-expressed as a smaller number of dense operations on submatrices. This structure supports more efficient storage of dense submatrices while maintaining shape compatibility for matrix or vector products. @Fig-block-sparse-gemm diagrams how NVIDIA's cuSPARSE [@nvidia_cusparse_block] format clusters nonzero weights into uniform $3\times 3$ dense sub-blocks indexed by an auxiliary coordinate array, allowing regular sub-block GEMM kernels to bypass empty gray tiles while maintaining aligned memory transactions. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have built on this block-sparsity approach to strike an improved balance between matrix expressivity and compute/memory efficiency.
-
-::: {#fig-block-sparse-gemm fig-env="figure" fig-pos="htb" fig-cap="**Block Sparse Representation**: Grouping non-zero weights into dense sub-blocks ($3\times3$ tiles) and storing an auxiliary index array allows sparse matrices to be computed via regular sub-block GEMM kernels, restoring high GPU memory alignment and Tensor Core utilization. Adapted from NVIDIA cuSPARSE documentation [@nvidia_cusparse_block]." fig-alt="Grid of 3×3 matrix blocks with varying shades indicating dense submatrices. Adjacent index array shows non zero block positions. Gray blocks represent zeros, colored blocks represent dense submatrices stored separately."}
-
-```{.tikz}
-\scalebox{0.6}{\begin{tikzpicture}[line join=round,font=\sffamily]
-\tikzset{%
-helvetica/.style={align=flush center,font=\small\sffamily},
-Line/.style={line width=1.0pt,black!50,text=black},
-}
-\definecolor{Blue1}{RGB}{23,68,150}
-\definecolor{Blue2}{RGB}{84,131,217}
-\definecolor{Blue3}{RGB}{145,177,237}
-\def\columns{3}
-\def\rows{3}
-\def\cellsize{5mm}
-\def\cellheight{5mm}
-
-\begin{scope}[local bounding box=BL1]
-\begin{scope}[local bounding box=matrica1]
-\def\rowone{Blue2,Blue3,Blue2}
-\def\rowtwo{Blue2,Blue1,Blue2}
-\def\rowthree{Blue2,Blue2,Blue2}
-\def\br{A}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-%%%%%%
-\begin{scope}[shift={(1.5,0)}]
-\def\rowone{Blue1,Blue2,Blue2}
-\def\rowtwo{Blue3,Blue2,Blue1}
-\def\rowthree{Blue2,Blue1,Blue2}
-\def\br{B}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-%%%%%%
-\begin{scope}[shift={(3.0,0)}]
-\def\br{C}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-%%%%%%%%
-%second row
-\begin{scope}[shift={(0,-1.5)}]
-\def\rowone{Blue1,Blue3,Blue3}
-\def\rowtwo{Blue1,Blue2,Blue2}
-\def\rowthree{Blue2,Blue1,Blue2}
-\def\br{D}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(1.5,-1.5)}]
-\def\br{E}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(3,-1.5)}]
-\def\rowone{Blue1,Blue2,Blue2}
-\def\rowtwo{Blue2,Blue1,Blue2}
-\def\rowthree{Blue2,Blue2,Blue1}
-\def\br{E}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-%%third row
-\begin{scope}[shift={(0,-3)}]
-\def\br{H}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(1.5,-3)}]
-\def\rowone{Blue2,Blue1,Blue3}
-\def\rowtwo{Blue2,Blue2,Blue1}
-\def\rowthree{Blue1,Blue2,Blue2}
-\def\br{E}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(3,-3)}]
-\def\rowone{Blue2,Blue3,Blue2}
-\def\rowtwo{Blue3,Blue1,Blue1}
-\def\rowthree{Blue2,Blue3,Blue2}
-\def\br{E}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\end{scope}
-\node[below=0.2 of BL1,align=center]{Block sparse\\ weights};
-\newcommand{\zeroentry}{%
-    \tikz[baseline=0.8ex]{
-\node[draw=black, line width=1.2pt,fill=black!10, minimum width=0.8*\cellsize,
-                    minimum height=0.8*\cellheight] (cell-G)  {};
-}}
-\node[above=0.2 of BL1,align=center]{\zeroentry ~~= zero entry};
-
-%%%%%%%%%%%%
-%%right matrix
-\begin{scope}[local bounding box=BL2,shift={(6,0)}]
-\begin{scope}
-\def\rowone{Blue2,Blue3,Blue2}
-\def\rowtwo{Blue2,Blue1,Blue2}
-\def\rowthree{Blue2,Blue2,Blue2}
-\def\br{A2}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-%%%%%%
-\begin{scope}[shift={(1.5,0)}]
-\def\rowone{Blue1,Blue2,Blue2}
-\def\rowtwo{Blue3,Blue2,Blue1}
-\def\rowthree{Blue2,Blue1,Blue2}
-\def\br{B2}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-%%%%%%
-%second row
-\begin{scope}[shift={(0,-1.5)}]
-\def\rowone{Blue1,Blue3,Blue3}
-\def\rowtwo{Blue1,Blue2,Blue2}
-\def\rowthree{Blue2,Blue1,Blue2}
-\def\br{C2}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(1.5,-1.5)}]
-\def\rowone{Blue1,Blue2,Blue2}
-\def\rowtwo{Blue2,Blue1,Blue2}
-\def\rowthree{Blue2,Blue2,Blue1}
-\def\br{D2}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-%%third row
-\begin{scope}[shift={(0,-3)}]
-\def\rowone{Blue2,Blue1,Blue3}
-\def\rowtwo{Blue2,Blue2,Blue1}
-\def\rowthree{Blue1,Blue2,Blue2}
-\def\br{E2}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(1.5,-3)}]
-\def\rowone{Blue2,Blue3,Blue2}
-\def\rowtwo{Blue3,Blue1,Blue1}
-\def\rowthree{Blue2,Blue3,Blue2}
-\def\br{F2}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=black!10, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=white,line width=1pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\end{scope}
-
-%%%%%%%%%%%
-%%third matrix-other color
-\begin{scope}[local bounding box=BL3,shift={(9.5,0.5)}]
-\def\columns{2}
-\def\rows{1}
-\def\cellsize{5mm}
-\def\cellheight{15mm}
-\begin{scope}
-\def\rowone{OrangeL,OrangeL}
-\def\br{A3}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=white, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(0,-1.5)}]
-\def\rowone{OrangeL,OrangeL}
-\def\br{B3}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=white, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\begin{scope}[shift={(0,-3)}]
-\def\rowone{OrangeL,OrangeL}
-\def\br{C3}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=white, line width=1pt,fill=white, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=0.5pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-%countur line
-\draw[line width=2pt,black!80]
-    (0.5*\cellsize,-0.5*\cellheight) rectangle
-    (\columns*\cellsize+0.5*\cellsize,-\rows*\cellheight-0.5*\cellheight);
-\end{scope}
-\end{scope}
-\node[below=0.2 of BL2,align=center](NZ){Non-zero\\ data values};
-\node[below=0.2 of BL3,align=center](BI){Block\\ indices};
-\scoped[on background layer]
-\node[draw=none,inner xsep=0mm,inner ysep=0mm,
-yshift=0mm,fill=none,fit=(NZ)(BI),line width=0.75pt](BB1){};
-\node[below=2pt of BB1](IR){Internal representation};
-
-\coordinate(XA)at($(cell-1-1A2.north west)+(0.5,0.5)$);
-\coordinate(XA1)at($(cell-1-3E2.south west)+(0.5,-1.5)$);
-\coordinate(XB)at($(cell-1-1A3.north east)+(0,0.5)$);
-\coordinate(XB1)at($(cell-1-1C3.south east)+(0.5,-1.5)$);
-%\fill[red](cell-1-1A2.north west)circle(2pt);
-\draw[line width=3.5pt,violet!30,rounded corners=20pt](XA)--++(180:1.3)|-(XA1);
-\draw[line width=3.5pt,violet!30,rounded corners=20pt](XB)--++(0:1.3)|-(XB1);
-%
-\coordinate(T1)at($(cell-1-1A2.north west)+(-0.2,0.2)$);
-\coordinate(T2)at($(cell-2-1A3.north east)+(0.2,0.2)$);
-\coordinate(T3)at($(cell-2-1A3.south east)+(0.2,-0.2)$);
-\coordinate(T4)at($(cell-1-1A3.south west)+(-0.2,-0.2)$);
-\coordinate(T5)at($(cell-1-1A2.south west)+(-0.2,-0.2)$);
-\draw[line width=3.5pt,red](T1)-|(T3)--(T4)|-(T5)--(T1);
-%\fill[blue](T5)circle(2pt);
-
-%%%%%%%%%%%
-%%third matrix-other color
-\begin{scope}[local bounding box=BL4,shift={(13,0)}]
-\def\columns{4}
-\def\rows{9}
-\begin{scope}
-\def\br{A4}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[line width=2pt,draw=black!80, fill=GreenL, minimum width=\cellsize,
-                    minimum height=\cellheight] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-\end{scope}
-%%%%%%%%%%%
-%%above matrix
-\begin{scope}[local bounding box=BL5,shift={(13,6)}]
-\def\columns{4}
-\def\rows{9}
-\begin{scope}
-\def\br{A5}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[line width=2pt,draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-\end{scope}
-\node[below=0.2 of BL4,align=center](OA){Output\\ activations};
-
-\node[draw=red,inner xsep=1.5mm,inner ysep=1.5mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1A4),line width=3.5pt](BB2){};
-\draw[red,line width=1.5pt](BB2)--++(135:2)node[above left]{Dot Product};
-\node[draw=red,inner xsep=1.5mm,inner ysep=1.5mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1A5)(cell-1-9A5),line width=3.5pt](BB3){};
-%
-\node[single arrow, draw=black,thick, fill=VioletL,
-      minimum width = 20pt, single arrow head extend=3pt,
-      minimum height=10mm]at($(BL3)!0.52!(BL4)$) {};
-\node[single arrow, draw=black,thick, fill=VioletL,
-      minimum width = 20pt, single arrow head extend=3pt,
-      minimum height=9mm,rotate=270]at($(BL5)!0.5!(BL4)$) {};
-\node[left=2mm of BB3,align=center,red]{Input\\activations};
-\end{tikzpicture}}
-```
-
-:::
-
-Similarly, N:M sparsity retains at most $n$ nonzeros in each group of $m$ consecutive elements; hardware-oriented pruning often enforces exactly $n$ retained values so every group has the same representation [@zhou2021learningnmfinegrainedstructured]. The deterministic format lets a supported kernel predict the value and metadata layout while retaining more capacity than removing whole channels or blocks. That regularity creates an executable compromise between arbitrary masks and dense computation, but only for targets with the matching path. As the 2:4 example in @sec-model-compression-structured-pruning-9692 showed, each stored value then needs only a 2-bit index ($00_2$ through $11_2$) to record its position within its block of four. This compact metadata imposes only a 16-bit overhead per 16-element row segment—far below the multi-byte pointer arrays required by general CSR or COO formats—allowing Tensor Cores to stream compressed operands without memory bandwidth bloat. @Fig-2-4-gemm contrasts the execution mechanics between standard dense GEMM and 2:4 sparse processing: on the right, 2-bit coordinate indices steer hardware multiplexers to pull matching activation elements into the dot-product engine alongside the two retained weights per 4-element block, halving arithmetic cycles relative to the 8-element dense baseline on the left. In parallel, STEP examines learning more general N:M masks for inference [@lu2023steplearningnmstructured].
-
-At accelerator level, the same pattern-specific rule holds: hardware support is a contract between the sparse format and the execution path.
-
-::: {#fig-2-4-gemm fig-env="figure" fig-pos="htb" fig-cap="**2:4 Structured Sparsity GEMM**: Left: standard dense matrix multiplication on Tensor Cores using full 8-element rows. Right: 2:4 sparse multiplication retains two nonzeros in every group of four and uses compact indices to select matching elements from the dense right-hand matrix. A supported sparse inner loop can halve the multiplied values, although metadata handling and the rest of the execution path determine end-to-end speedup. Source: PyTorch blog [@pytorch_sparsity_blog]." fig-alt="Side-by-side comparison of dense and 2:4 sparse GEMM on Tensor Cores. Left shows an 8-element dense row multiplication. Right shows a sparse row with two retained values per group of four and compact indices selecting matching elements from the dense right-hand matrix."}
-
-```{.tikz}
-\begin{tikzpicture}[line join=round,font=\sffamily]
-\tikzset{%
- mysnake/.style={postaction={draw,decorate,decoration={snake,amplitude=3pt,segment length=19pt}}},
-helvetica/.style={align=flush center,font=\small\sffamily},
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner sep=5pt,
-    node distance=0.8,
-    draw=VioletLine,
-    line width=0.75pt,
-    fill=VioletL2,
-    text width=43mm,align=flush center,
-    minimum width=43mm, minimum height=7mm
-  },
-do path picture/.style={%
-    path picture={%
-      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
-        {\pgfpointanchor{path picture bounding box}{north east}}%
-      \pgfgetlastxy\x\y%
-      \tikzset{x=\x/2,y=\y/2}%
-      #1
-    }
-  },
-  cross/.style={do path picture={
-    \draw [line cap=round] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
-  }},
-}
-\definecolor{Blue1}{RGB}{23,68,150}
-\definecolor{Blue2}{RGB}{84,131,217}
-\definecolor{Blue3}{RGB}{145,177,237}
-\def\columns{3}
-\def\rows{3}
-\def\cellsize{5mm}
-\def\cellheight{5mm}
-
-\begin{scope}[local bounding box=LEFT]
-\node[draw,circle,line width=0.75pt,cross,minimum width=6mm](CI1){};
-\node[draw=black, line width=1.2pt,fill=GreenL, minimum width=0.9*\cellsize,
-                    minimum height=0.9*\cellheight,below=0.5 of CI1](AR) {};
-\node[right=1mm of AR](AR1){Accumulator (result)};
-
-\begin{scope}[local bounding box=M3,shift={(-0.2,1.5)}]
-\def\columns{8}
-\def\rows{1}
-\def\br{M3}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-\begin{scope}[local bounding box=M1,shift={(-4.5,1.5)}]
-\def\columns{8}
-\def\rows{1}
-\def\br{M1}
-\def\rowone{Blue1,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\end{scope}
-
-\draw[Line,-latex](CI1)--(AR);
-\draw[Line,-latex](M3)|-(CI1);
-\draw[Line,-latex](M1)|-(CI1);
-%%fitting
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=3mm,inner ysep=11mm,
-yshift=8mm,fill=BackColor!50,fit=(AR1)(M1)(M3),line width=0.75pt](BB1){};
-\node[anchor=north west,align=center]at(BB1.north west){Dense operation\\ on Tensor Core};
-
-%%below matrix Blue
-\begin{scope}[local bounding box=DM1,shift={(0.2,-2.5)}]
-\def\columns{8}
-\def\rows{8}
-\def\br{DM1}
-\def\rowone{Blue1,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
-\def\rowtwo{Blue3,Blue2,Blue3,Blue2,Blue3,Blue3,Blue1,Blue1}
-\def\rowthree{Blue2,Blue1,Blue2,Blue3,Blue3,Blue2,Blue2,Blue1}
-\def\rowfour{Blue2,Blue3,Blue2,Blue3,Blue1,Blue2,Blue3,Blue3}
-\def\rowfive{Blue2,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
-\def\rowsix{Blue2,Blue3,Blue1,Blue3,Blue1,Blue3,Blue2,Blue2}
-\def\rowseven{Blue3,Blue3,Blue2,Blue1,Blue2,Blue2,Blue3,Blue3}
-\def\rowosam{Blue3,Blue2,Blue3,Blue2,Blue3,Blue1,Blue2,Blue1}
-
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-\foreach \color [count=\x] in \rowfour {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-4\br) {};
-}
-\foreach \color [count=\x] in \rowfive {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-5\br) {};
-}
-\foreach \color [count=\x] in \rowsix {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-6\br) {};
-}
-\foreach \color [count=\x] in \rowseven {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-7\br) {};
-}
-\foreach \color [count=\x] in \rowosam {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-8\br) {};
-}
-\end{scope}
-
-%
-\draw[|-|,thick]([yshift=-5.5]cell-1-8DM1.south west)--node[below=0pt,
-                       font=\sffamily\small]{K}([yshift=-5.5]cell-8-8DM1.south east);
-\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Dense)};
-\draw[|-|,thick]([xshift=7.5]cell-8-8DM1.south east)--node[right=0pt,
-                       font=\sffamily\small]{M}([xshift=7.5]cell-8-1DM1.north east);
-%
-
-\node[below=22pt of DM1](SP){\textbf{Dense $M\times N\times K$ GEMM}};
-%%%last matrix Green
-\begin{scope}[local bounding box=DM3,shift={(6,-2.5)}]
-\def\columns{4}
-\def\rows{8}
-\def\br{DM3}
-
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=GreenL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-%
-%
-\node[below=0.35 of DM3,align=center](CM){C matrix\\ (Dense)};
-\draw[|-|,thick]([yshift=9.5]cell-1-1DM3.north west)--node[above=0pt,
-                       font=\sffamily\small]{N}([yshift=9.5]cell-4-1DM3.north east);
-\draw[|-|,thick]([xshift=7.5]cell-4-8DM3.south east)--node[right=0pt,
-                       font=\sffamily\small]{M}([xshift=7.5]cell-4-1DM3.north east);
-%
-
-%
-%fitting
-\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM1)(cell-8-1DM1),line width=3.5pt](BB3){};
-\draw[red,line width=1.5pt](BB3)--(BB1.south);
-\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
-\draw[red,line width=1.5pt](BB3)--(BB1.south east);
-%%%last upper matrix brown
-\begin{scope}[local bounding box=DM4,shift={(6,3.5)}]
-\def\columns{4}
-\def\rows{8}
-\def\br{DM4}
-
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-%
-\node[above=0.2 of DM4,align=center](BM){Right-hand matrix\\ (Dense)};
-\draw[|-|,thick]([xshift=7.5]cell-4-8DM4.south east)--node[right=0pt,
-                       font=\sffamily\small]{K}([xshift=7.5]cell-4-1DM4.north east);
-%fitting
-\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM4)(cell-1-8DM4),line width=3.5pt](BB4){};
-\draw[red,line width=1.5pt](BB4)--(BB1.east);
-\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
-\draw[red,line width=1.5pt](BB3)--(BB1.south east);
-\end{scope}
-%%%%%%%%%%
-%right part
-%%%%%%%%%%%%
-\begin{scope}[local bounding box=RIGHT,shift={(15.15,0)}]
-\node[draw,circle,line width=0.75pt,cross,minimum width=6mm](CI1){};
-\node[draw=black, line width=1.2pt,fill=GreenL, minimum width=0.9*\cellsize,
-                    minimum height=0.9*\cellheight,below=0.5 of CI1](AR) {};
-\node[right=1mm of AR](AR1){Accumulator (result)};
-
-\begin{scope}[local bounding box=M3,shift={(1,1.5)}]
-\def\columns{4}
-\def\rows{1}
-\def\br{M3}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-
-\begin{scope}[local bounding box=M2,shift={(-1.3,1.5)}]
-\def\columns{4}
-\def\rows{1}
-\def\br{M2}
-\def\cellsize{2.5mm}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=OrangeL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-\begin{scope}[local bounding box=M1,shift={(-3.8,1.5)}]
-\def\columns{4}
-\def\rows{1}
-\def\br{M1}
-\def\rowone{Blue2,Blue3,Blue1,Blue3}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\end{scope}
-\node[Box,above=of M3)](CM){Choose matching K/2 elements out of K elements};
-%%
-\begin{scope}[local bounding box=M4,shift={($(CM.north)+(-2.3,1.5)$)}]
-\def\columns{8}
-\def\rows{1}
-\def\br{M4}
-\def\rowone{BrownL,BrownL!20,BrownL!20,BrownL,BrownL!20,BrownL,BrownL,BrownL!20}
-%
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\end{scope}
-%\fill[red](cell-8-1M4)circle(2pt);
-\foreach \x in{1,...,8}{
-\draw[Line,-latex](cell-\x-1M4)--(cell-\x-1M4|-CM.north);
-}
-\foreach \x in{1,...,4}{
-\draw[Line,latex-](cell-\x-1M3)--(cell-\x-1M3|-CM.south);
-}
-\draw[Line,-latex](CI1)--(AR);
-\draw[Line,-latex](M3)|-(CI1);
-\draw[Line,-latex](M1)|-(CI1);
-\draw[Line,-latex](M2)|-node[left,pos=0.3]{Select}(CM);
-%%fitting
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=3mm,inner ysep=3mm,
-yshift=0mm,fill=BackColor!50,fit=(AR1)(M1)(M4)(CM),line width=0.75pt](BB1){};
-\node[anchor=north west,align=center]at(BB1.north west){Sparse operation\\ on Tensor Core};
-
-%%below matrix Blue
-\begin{scope}[local bounding box=DM1,shift={(0.2,-2.5)}]
-\def\columns{4}
-\def\rows{8}
-\def\br{DM1}
-\def\rowone{Blue2,Blue3,Blue1,Blue3}
-\def\rowtwo{Blue2,Blue3,Blue1,Blue2}
-\def\rowthree{Blue2,Blue1,Blue3,Blue2}
-\def\rowfour{Blue2,Blue3,Blue1,Blue3}
-\def\rowfive{Blue3,Blue1,Blue1,Blue2}
-\def\rowsix{Blue2,Blue2,Blue1,Blue3}
-\def\rowseven{Blue3,Blue1,Blue2,Blue3}
-\def\rowosam{Blue3,Blue2,Blue1,Blue2}
-
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-
-%
-\foreach \color [count=\x] in \rowone {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-    minimum height=\cellheight] at (cell-\x-1\br) {};
-}
-\foreach \color [count=\x] in \rowtwo {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-2\br) {};
-}
-\foreach \color [count=\x] in \rowthree {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-3\br) {};
-}
-\foreach \color [count=\x] in \rowfour {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-4\br) {};
-}
-\foreach \color [count=\x] in \rowfive {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-5\br) {};
-}
-\foreach \color [count=\x] in \rowsix {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-6\br) {};
-}
-\foreach \color [count=\x] in \rowseven {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-7\br) {};
-}
-\foreach \color [count=\x] in \rowosam {
-    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
-               minimum height=\cellheight] at (cell-\x-8\br) {};
-}
-\end{scope}
-\node[below=0.7 of DM1,align=center](NZ){Non-zero data\\ values};
-\draw[|-|,thick]([yshift=-5.5]cell-1-8DM1.south west)--node[below=0pt,
-                       font=\sffamily\small]{K/2}([yshift=-5.5]cell-4-8DM1.south east);
-\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Sparse)};
-\begin{scope}[local bounding box=DM2,shift={(3.4,-2.5)}]
-\def\columns{4}
-\def\rows{8}
-\def\br{DM2}
-\def\cellsize{2.5mm}
-
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=OrangeL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-%
-\node[below=0.7 of DM2,align=center](2B){2-bits\\ indices};
-\draw[|-|,thick]([yshift=-5.5]cell-1-8DM2.south west)--node[below=0pt,
-                       font=\sffamily\small]{K/2}([yshift=-5.5]cell-4-8DM2.south east);
-\draw[|-|,thick]([xshift=9.5]cell-4-8DM2.south east)--node[right=0pt,
-                       font=\sffamily\small]{M}([xshift=9.5]cell-4-1DM2.north east);
-%
-\node[draw=none,inner xsep=0mm,inner ysep=0mm,
-yshift=0mm,fill=none,fit=(NZ)(2B),line width=0.75pt](BB2){};
-\node[below=2pt of BB2](SP){\textbf{Sparse $M\times N\times K$ GEMM}};
-%%%last matrix Green
-\begin{scope}[local bounding box=DM3,shift={(6,-2.5)}]
-\def\columns{4}
-\def\rows{8}
-\def\br{DM3}
-
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=GreenL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-%
-%
-\node[below=0.7 of DM3,align=center](CM){C matrix\\ (Dense)};
-\draw[|-|,thick]([yshift=9.5]cell-1-1DM3.north west)--node[above=0pt,
-                       font=\sffamily\small]{N}([yshift=9.5]cell-4-1DM3.north east);
-\draw[|-|,thick]([xshift=7.5]cell-4-8DM3.south east)--node[right=0pt,
-                       font=\sffamily\small]{M}([xshift=7.5]cell-4-1DM3.north east);
-%
-%fitting
-\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM1)(cell-4-1DM2),line width=3.5pt](BB3){};
-\draw[red,line width=1.5pt](BB3)--(BB1.south);
-\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
-\draw[red,line width=1.5pt](BB3)--(BB1.south east);
-%%%last upper matrix brown
-\begin{scope}[local bounding box=DM4,shift={(6,3.5)}]
-\def\columns{4}
-\def\rows{8}
-\def\br{DM4}
-
-\foreach \x in {1,...,\columns}{
-    \foreach \y in {1,...,\rows}{
-        %
-        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
-                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
-    }
-}
-\end{scope}
-%
-\node[above=0.2 of DM4,align=center](BM){Right-hand matrix\\ (Dense)};
-\draw[|-|,thick]([xshift=7.5]cell-4-8DM4.south east)--node[right=0pt,
-                       font=\sffamily\small]{K}([xshift=7.5]cell-4-1DM4.north east);
-\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Sparse)};
-%fitting
-\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM4)(cell-1-8DM4),line width=3.5pt](BB4){};
-\draw[red,line width=1.5pt](BB4)--(BB1.east);
-\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
-yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
-\draw[red,line width=1.5pt](BB3)--(BB1.south east);
-\end{scope}
-\path[]($(RIGHT)!0.5!(LEFT)$)--++(90:6)coordinate(GO);
-\path[]($(RIGHT)!0.5!(LEFT)$)--++(270:6)coordinate(DO);
-\path[VioletLine!60,mysnake,line width=1pt](GO)--(DO);
-\end{tikzpicture}
-```
-
-:::
-
-Supported Sparse Tensor Core paths on NVIDIA Ampere and later can accelerate 2:4 sparsity by skipping prescribed zeros and carrying compact metadata, with an ideal sparse arithmetic-rate improvement of up to $2\times$ [@NVIDIA2020]. Conversely, **unstructured pruning**\index{Unstructured pruning!hardware limitations} zeroes arbitrary individual weights. Those irregular locations can disrupt memory coalescing and lane utilization, while Compressed Sparse Row (CSR) or Coordinate (COO) metadata adds storage and non-unit-stride accesses. An unstructured sparse model can therefore run slower than its dense counterpart when metadata and underutilization outweigh skipped arithmetic. TPUs are useful contrast cases for dense systolic-array acceleration [@jouppi2021], but sparse acceleration still depends on a specific hardware and software path rather than accepting arbitrary masks. Field-programmable gate arrays can implement application-specific sparse formats, yet their efficiency depends on the chosen dataflow and resource budget; programmability is not a universal sparse-speedup guarantee.
-
-Across all platforms, sparse operations can reduce memory bandwidth requirements and energy consumption when the sparse representation and kernels actually skip data movement rather than only arithmetic. This benefit compounds with quantization: a sparse INT8 model can require less memory traffic than either technique alone when the format overhead is small enough [@hoefler2021sparsity; @gale2020].
-
-#### Challenges and limitations {#sec-model-compression-challenges-limitations-975f}
-
-The same format-hardware contract explains why sparsity often disappoints in practice.
-
-::: {.column-margin}
-![](images/svg/vol1_model_compression_margin_003.svg){width="100%" fig-alt="A speedup curve stays nearly flat before climbing through a shaded range labeled kernel-dependent break-even; no universal sparsity percentage is marked."}
-
-*Unstructured sparsity pays off only after crossing a hardware- and kernel-specific break-even point.*
-:::
-
- The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that common dense accelerator paths cannot exploit; skipping those zeros requires a sparse representation and a compatible kernel. Pruning itself adds training or analysis cost because identifying removable weights can require sophisticated importance estimation on large models. Even after sparsity is achieved, storage formats add indices whose overhead can offset saved values and arithmetic. The performance break-even point varies with tensor shape, sparse format, kernel, batch size, and hardware; there is no universal sparsity threshold.
-
-The accuracy-efficiency trade-off requires measurement across candidate sparsity levels. A model may tolerate one level with little measured impact and then degrade sharply after a comparatively small additional pruning step. The operating point is the highest useful sparsity whose task quality and deployed performance both satisfy their thresholds.
-
-Energy efficiency is not guaranteed. While sparse operations reduce arithmetic operations, the overhead of sparse indexing and irregular memory access can increase power consumption on hardware not optimized for sparse patterns. On edge devices with tight power budgets, these overheads may outweigh the benefits.
-
-Finally, sparsity benefits vary by layer, model, and execution target. A workload whose useful tensors remain dense, or a target without a matching sparse path, may see no improvement and can regress after metadata and irregular-access costs are included.
-
-#### Combined optimizations {#sec-model-compression-combined-optimizations-99fd}
-
-Pruning, quantization, operator fusion, dynamic computation, and sparse execution share weights, representations, and physical resources. A deployment may combine them when one technique cannot satisfy every constraint, but the combined result is not guaranteed to exceed the best individual technique. Each transformation can alter the accuracy, shapes, distributions, and bottlenecks assumed by the next, so combinations require joint quality and performance measurement rather than a promised compression ratio [@hoefler2021sparsity].
-
-The interaction between sparsity and pruning is the most direct: pruning creates sparsity, but the pattern determines hardware efficiency. Removing entire filters or layers can produce smaller dense shapes, while fixed within-group patterns can map to supported sparse kernels. Unstructured pruning creates irregular patterns that require specialized formats and kernels to realize speedups [@elsen2020; @gale2019state].
-
-Combining sparsity with quantization can multiply raw value-payload reductions, but the deployed representation carries both sparse and quantization metadata. GPUs with dedicated sparse tensor cores can accelerate supported structured patterns, while CPU outcomes depend on the chosen format, low-precision sparse kernel, tensor shape, and indexing overhead [@NVIDIA2020; @hoefler2021sparsity; @gale2020].
-
-The recurring theme across all combinations is hardware alignment. Efficient model designs such as depthwise separable convolutions [@howard2017mobilenets], dynamic computation, and sparsity help only when the target hardware supports the resulting operation patterns [@hoefler2021sparsity].
-
-The coordination challenges inherent in combining sparsity with other techniques point to a broader principle: optimization techniques rarely succeed in isolation, and their effectiveness depends on sequencing decisions and hardware alignment.
-
-::: {#psp-model-compression-optimization-composition-problem .callout-perspective title="The optimization composition problem"}
-
-Optimization techniques interact through shared representations and physical resources rather than composing as independent functions. Pruning changes the surviving value distribution, tensor shapes, or sparse format; quantization adds scales and changes the available kernels; fusion changes which intermediates are materialized and can alter the profile that justified earlier choices. Effective optimization therefore treats the model-runtime-hardware combination as a coupled system, measures it after every transformation, and revisits the sequence when a new bottleneck appears. This makes compression a systems engineering problem as well as a machine learning problem.
-
-:::
-
-Because optimization techniques interact so heavily through shared execution mechanics, selecting an appropriate compression strategy cannot rely on single-technique benchmarks. Practical deployment requires a systematic selection workflow that maps target hardware bottlenecks directly to compatible compression pipelines.
 
 ## Technique Selection {#sec-model-compression-technique-selection-ba16}
 
