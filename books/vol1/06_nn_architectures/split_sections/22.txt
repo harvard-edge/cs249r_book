@@ -1,0 +1,63 @@
+## Attention: Dynamic Processing {#sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df}
+
+Recurrent networks serialize execution along the sequence dimension and compress all historical context into a fixed-capacity hidden state vector (@sec-network-architectures-system-implications-18c3). In a sentence such as "The cat, which was sitting by the window overlooking the garden, was sleeping," the subject "cat" and predicate "sleeping" are separated by ten intervening words, yet they form the core syntactic and semantic relationship. An RNN must process all intervening tokens sequentially, risking information loss across intermediate recurrent transitions while preventing hardware from parallelizing across time steps. This constraint motivates an alternative computational pattern: an operation that directly computes relevance between any two positions regardless of distance.
+
+Attention mechanisms[^fn-bahdanau-dynamic-attention] address this limitation [@bahdanau2015neural] by introducing dynamic connectivity patterns that adapt to input content. Rather than forcing all context through a single fixed-capacity state vector, encoder-decoder attention computes similarity scores between each decoder state and all encoder input positions, routing information dynamically across the sequence.
+
+[^fn-bahdanau-dynamic-attention]: **Bahdanau attention**\index{Attention mechanism!Bahdanau}: This approach broke the "fixed-length vector" bottleneck of prior sequence-to-sequence models by allowing a decoder to dynamically query all input elements at each output step, creating the adaptive connectivity described. This replaced the structural constraint of a fixed-capacity channel with a learned, content-based weighting system. The core trade-off was accepting a linear, $\mathcal{O}(\SequenceLength)$ memory cost to store all input states in exchange for overcoming the information loss inherent in a single vector\index{Attention mechanism!information bottleneck}.
+
+```{python}
+#| echo: false
+#| label: attention-definition-costs
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ATTENTION DEFINITION COSTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Attention definition quantitative significance
+# │
+# │ Goal: Anchor the per-head memory cost of a 4096-token attention matrix.
+# │ Show: quadratic score storage in FP16.
+# │ How: Calculate S x S x bytes_per_score.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AttentionDefinitionCosts:
+    """Per-head attention-score memory for the definition callout."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    seq_len = 4096
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    score_count = seq_len * seq_len
+    score_memory = score_count * BYTES_FP16
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(
+        33 * MB <= score_memory <= 34 * MB, f"4096^2 FP16 attention scores should be about 34 MB per head, got {score_memory.to(MB).magnitude:.1f}."
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    seq_len_str = fmt(seq_len, precision=0, commas=True)
+    score_count_str = fmt_count(score_count, scale="M", precision=1, commas=False)
+    score_mb_str = fmt_memory(score_memory, unit=MB, precision=1, commas=False)
+```
+
+::: {#dfn-nn-architectures-attention-mechanisms .callout-definition title="Attention mechanisms"}
+
+***Attention mechanisms***\index{Attention mechanism!definition} are neural network operations that compute a weighted sum of value vectors, where the weights are derived from learned similarity scores between a query vector and a set of key vectors, enabling dynamic, content-dependent information routing between any two positions in a sequence.
+
+1.  **Significance**: Attention connects any two tokens in $\mathcal{O}(1)$ depth but computes $S^2$ score interactions. If those scores are materialized, a `{python} AttentionDefinitionCosts.seq_len_str`-token sequence with 16-bit scores consumes `{python} AttentionDefinitionCosts.score_mb_str` per layer per head (about `{python} AttentionDefinitionCosts.score_count_str` scores at 2 bytes each), directly increasing the iron law's $\DataVolume$ term.
+2.  **Distinction**: Unlike RNNs, which compress all prior context into a single fixed-size state vector, attention mechanisms retain token representations and compute relevance scores directly. During training or full-sequence prefill, the initial pass that processes the whole prompt, score interactions grow quadratically with sequence length; during autoregressive serving, the stored KV cache, the saved key and value vectors from prior tokens, grows as $\mathcal{O}(S d)$. Keys and values are kept because each new token's query must attend over every earlier key and value; earlier queries are discarded because past tokens never attend forward.
+3.  **Common pitfall**: A frequent misconception is that attention is a general-purpose weighting scheme that can be applied freely. Quadratic score computation is a hard scaling constraint: doubling the context quadruples score interactions. Naive implementations also quadruple score storage; tiled exact algorithms such as FlashAttention avoid the full matrix, while sparse variants reduce the scores computed.
+
+:::
+
+While attention mechanisms were initially used as components within recurrent architectures, their ability to connect any position to any other made the recurrent structure unnecessary for many sequence tasks. The transformer[^fn-transformer-parallel-attention] architecture [@vaswani2017] combined attention with feed-forward layers, residual connections, normalization, and positional information without recurrence. This architectural shift traded the RNN's $\mathcal{O}(\SequenceLength)$ sequential path for constant path length between positions within one attention layer, enabling parallelization across sequence positions on high-throughput accelerators.
+
+[^fn-transformer-parallel-attention]: **Transformer**\index{Transformer!etymology}\index{Transformer!architectural shift}: The founding paper, "Attention Is All You Need," made the explicit systems claim that a parallel attention mechanism could fully replace sequential recurrent processing. This architectural trade eliminates an RNN's $\mathcal{O}(\SequenceLength)$ path length constraint on parallelism but introduces $\mathcal{O}(S^2)$ dense score computation, a quadratic cost that continues to shape context-window engineering.
+
+The transformer architecture (@sec-network-architectures-transformers-attentiononly-architecture-1b56) inherits its core systems properties from attention: content-dependent routing, parallel sequence execution, and quadratic score scaling. Analyzing the systems implications of this architectural class begins with the underlying pattern-processing problem attention solves.
+

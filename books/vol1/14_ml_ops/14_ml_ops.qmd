@@ -1589,7 +1589,6 @@ Infrastructure in MLOps is not limited to the cloud. Many deployments span on-pr
 
 Infrastructure as code addresses how to provision resources reproducibly, but operators must still decide when and how much capacity to allocate. ML workloads break the assumptions of conventional web provisioning. Training jobs demand high-concurrency bursts across distributed accelerator topologies, creating friction between cluster utilization efficiency and time-to-solution. Inference services require sustained baseline allocations with rapid elastic scale-out to absorb request spikes under strict tail-latency SLOs.
 
-
 ### Validating the serving artifact {#sec-ml-operations-model-format-optimization-c9d6}
 
 The artifact that reaches the serving fleet is rarely the checkpoint that passed evaluation. Before deployment, the model is usually compiled from eager framework code into a static graph for a specific runtime and often lowered in precision. Each conversion buys speed with portability, and each can change what the model computes, so the operational obligation is to prove that the converted artifact still behaves like the model that was validated.
@@ -1824,6 +1823,14 @@ Updates and monitoring complete the edge operational picture. Over-the-air (OTA)
 Monitoring requires adaptation to resource-constrained environments: lightweight telemetry systems capture essential metrics (inference latency, power consumption, accuracy indicators) while minimizing overhead. Health monitoring tracks device-level conditions (thermal status, battery levels, connectivity quality) to predict maintenance needs. Edge-cloud coordination patterns enable adaptive offloading between tiers based on current load, network conditions, and latency requirements. Feature caching at edge gateways reduces redundant computation, while federated learning lets edge devices contribute model updates rather than raw training records. Parameter updates can still expose training information. Secure aggregation limits visibility into individual client updates, while differential privacy bounds information leakage under a specified privacy budget; the protections address different threats and require an explicit threat model.
 
 Graceful degradation is the defining operational pattern for edge AI. When thermal limits or battery depletion constrain hardware capacity, edge runtimes must dynamically shed load—downsampling input sample rates, bypassing speculative execution branches, or falling back to shallow heuristic models—within a fallback policy validated for the application's safety and quality requirements.
+
+::: {#psp-ml-ops-zombie-feature .callout-perspective title="Zombie features"}
+
+Long-lived production models often accumulate features whose original owners, semantics, or intended use have faded. A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns. Removing such a feature is therefore no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
+
+Features in ML systems do not disappear just because code owners stop thinking about them. Unused feature payload volume $\DataVolume$ inflates serialization overhead and consumes memory bandwidth $\Bandwidth$ without improving accuracy. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that degrades $\DataVolume/\Bandwidth$ and complicates debugging [@sculley2015hidden].
+
+:::
 
 Getting models into production is only half the operational challenge. A successfully deployed model can still degrade through distribution shift or corrupted upstream features without raising runtime errors. Robust monitoring, incident response, and on-call practices close this loop.
 
@@ -2793,15 +2800,7 @@ The attribution plot identifies features the model relied on within the failing 
 ↪ Post-hoc feature attribution methods, Shapley value computational costs, and model interpretability boundaries are developed in @sec-responsible-engineering-explainability-requirements-0b67.
 :::
 
-::: {#psp-ml-ops-zombie-feature .callout-perspective title="Zombie features"}
-
-Long-lived production models often accumulate features whose original owners, semantics, or intended use have faded. A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns. Removing such a feature is therefore no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
-
-Features in ML systems do not disappear just because code owners stop thinking about them. Unused feature payload volume $\DataVolume$ inflates serialization overhead and consumes memory bandwidth $\Bandwidth$ without improving accuracy. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that degrades $\DataVolume/\Bandwidth$ and complicates debugging [@sculley2015hidden].
-
-:::
-
-Zombie features show that attribution can reveal what a model should no longer depend on. For individual mispredictions, counterfactual analysis adds the complementary view: the minimal change that would flip a single decision.
+Feature attribution can reveal what a model should no longer depend on. For individual mispredictions, counterfactual analysis adds the complementary view: the minimal change that would flip a single decision.
 
 ##### Counterfactual analysis {#sec-ml-operations-counterfactual-analysis-39da}
 
@@ -2811,11 +2810,14 @@ These techniques (the debugging decision tree, slice analysis, feature attributi
 
 ##### Debugging checklist {#sec-ml-operations-debugging-checklist-8fbd}
 
-The diagnostic lenses identify places to investigate; a six-phase checklist\index{Debugging checklist!runbook steps} organizes how to test a suspected cause: reproduce, isolate, bisect, attribute, validate, and prevent. The ordering is deliberate because each phase narrows the search space for the next. Reproduction comes first because an ML failure that cannot be reproduced on held-out data is often data-dependent, an insight that redirects investigation toward the D·A·M taxonomy's data layer. Once reproduced, isolation identifies the minimal input set that triggers the failure, transforming a diffuse "the model is wrong" complaint into a specific, testable condition.
+The diagnostic lenses identify places to investigate; a six-phase checklist\index{Debugging checklist!runbook steps} organizes how to test a suspected cause. The ordering is deliberate because each phase narrows the search space for the next:
 
-Bisection then exploits version history: if the failure correlates with a recent deployment, comparing model versions pinpoints which change introduced the regression. Feature attribution applies these interpretability techniques to identify which input factors drive the erroneous behavior. Validation closes the causal loop by confirming that the hypothesized root cause, when corrected, actually resolves the failure, distinguishing genuine fixes from coincidental improvements.
-
-The final phase, prevention, converts each resolved incident into a monitoring rule or validation check, systematically closing the gap between detection and recurrence. This cumulative hardening can reduce repeated failure modes over time because each incident strengthens the observability infrastructure.
+- **Reproduce**: An ML failure that cannot be reproduced on held-out data is often data-dependent, an insight that redirects investigation toward the D·A·M taxonomy's data layer.
+- **Isolate**: Once reproduced, identifying the minimal input set that triggers the failure transforms a diffuse "the model is wrong" complaint into a specific, testable condition.
+- **Bisect**: If the failure correlates with a recent deployment, comparing model versions pinpoints which change introduced the regression.
+- **Attribute**: Feature attribution applies interpretability techniques to identify which input factors drive the erroneous behavior.
+- **Validate**: Confirming that the hypothesized root cause, when corrected, actually resolves the failure distinguishes genuine fixes from coincidental improvements.
+- **Prevent**: Converting each resolved incident into a monitoring rule or validation check systematically closes the gap between detection and recurrence. This cumulative hardening reduces repeated failure modes over time because each incident strengthens the observability infrastructure.
 
 Debugging ML systems requires both systematic methodology and domain expertise. The most effective debugging often comes from engineers who understand both the model architecture and the business context of the predictions.
 
@@ -3018,7 +3020,6 @@ Framing model improvements around financial impact, latency budgets, and compute
 
 {{< margin-video "https://www.youtube.com/watch?v=UyEtTyeahus&list=PLkDaE6sCZn6GMoA0wbpJLi3t34Gd8l0aK&index=5" "Deployment Challenges" "DeepLearningAI" >}}
 
-
 ::: {#chk-ml-ops-response-readiness .callout-checkpoint title="From alert to accountable action"}
 
 - [ ] **Diagnosis**: A cohort's accuracy drops while its feature distribution shifts. What additional evidence would distinguish a feature-pipeline defect from a changed predictive relationship?
@@ -3165,8 +3166,6 @@ Consensus algorithms establish agreement among nodes; they cannot determine whet
 
 ## Case Studies {#sec-ml-operations-case-studies-641d}
 
-
-
 ### Contextualizing MLOps {#sec-ml-operations-contextualizing-mlops-194a}
 
 Standard operational patterns must adapt to physical and organizational constraints. Every ML system operates within a specific context that shapes implementation: physical constraints (edge compute, power budgets), regulatory requirements (healthcare, finance), or organizational scale (team size, skill distribution). A standard CI/CD pipeline may be infeasible without direct host access; monitoring may require indirect signals or on-device anomaly detection; data collection may be limited by privacy regulations. These adaptations are expressions of maturity under constraint, not departures from foundational principles.
@@ -3271,7 +3270,6 @@ The economic trade-offs become concrete in two architectural studies in @sec-ml-
 - [ ] **Priority**: For a single model with unowned alerts and a tested deployment pipeline, justify the next operational investment before selecting additional tools.
 
 :::
-
 
 Operational constraints in machine learning systems are governed by the physical envelope of the serving hardware and the failure consequences of the application. A battery-powered wearable operates under milliwatt power budgets, constrained on-device SRAM, and narrow telemetry bandwidth over Bluetooth Low Energy. In contrast, regulated AI-enabled medical devices require evidence and change controls appropriate to their intended use. FDA guidance for predetermined change control plans describes planned modifications, validation methods, and impact assessment [@fda2025pccp]. These disparate environments dictate how engineering teams manage data pipelines, model artifacts, and hardware execution across the lifecycle. Edge architectures spend their engineering budgets bridging the hardware asymmetry between high-throughput cloud training clusters and microcontrollers, whereas clinical systems spend that budget on provenance tracking, cohort monitoring, and human-in-the-loop validation gates.
 

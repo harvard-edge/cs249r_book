@@ -2058,7 +2058,7 @@ Pruning modifies an existing parameterization, while distillation transfers beha
 
 ### Structured approximations {#sec-model-compression-structured-approximations-4798}
 
-Structured approximation addresses a distinct deployment constraint compared to pruning or distillation: when a layer's weight tensor exhibits mathematical redundancy, representing that redundancy directly requires less storage capacity and memory bandwidth than fetching the dense tensor from DRAM. Rather than eliminating individual weights or transferring behavior to a separate architecture, structured methods decompose large weight matrices and tensors into compact, lower-dimensional factors. Low-rank matrix factorization and tensor decomposition provide complementary algebraic strategies for implementing this compression.
+Real-world neural network parameters often occupy a much lower-dimensional space than their raw shape suggests. Exposing this underlying mathematical structure provides a powerful way to reduce the memory bandwidth bottleneck in edge deployment. Structured approximation addresses a distinct deployment constraint compared to pruning or distillation: when a layer's weight tensor exhibits mathematical redundancy, representing that redundancy directly requires less storage capacity and memory bandwidth than fetching the dense tensor from DRAM. This shifts the optimization strategy from destroying individual weights (as in unstructured pruning) to gracefully reshaping the entire matrix so that hardware can execute it more efficiently. Rather than abruptly eliminating weights or transferring behavior to a separate architecture, structured methods decompose large weight matrices and tensors into compact, lower-dimensional factors. Low-rank matrix factorization and tensor decomposition provide complementary algebraic strategies for implementing this compression.
 
 ```{python}
 #| echo: false
@@ -2528,7 +2528,7 @@ Beyond minimizing stored tensor volume, substantial execution efficiency emerges
 
 ### Hardware-aware NAS as a structural deployment tool {#sec-model-compression-hardware-aware-nas}
 
-Pruning, distillation, and factorization assume an existing topology engineered by human intuition. Selecting a competitive configuration can require extensive experimentation, and manual exploration risks leaving efficient architectural candidates undiscovered [@elsken2019]. **Hardware-aware neural architecture search (NAS)**\index{NAS!definition} automates part of this process by exploring a specified space of architectures and optimizing directly for execution metrics on target silicon, rather than theoretical FLOP counts.
+Where pruning removes structural excess from an existing network and distillation transfers it to a manually designed student, neural architecture search poses a different question: what if we could design a fundamentally efficient architecture from scratch? Pruning, distillation, and factorization all assume an existing topology engineered by human intuition. Selecting a competitive configuration can require extensive experimentation, and manual exploration risks leaving efficient architectural candidates undiscovered [@elsken2019]. **Hardware-aware neural architecture search (NAS)**\index{NAS!definition} automates part of this process by exploring a specified space of architectures and optimizing directly for execution metrics on target silicon, rather than theoretical FLOP counts.
 
 ```{=latex}
 \Needspace{25\baselineskip}
@@ -3174,6 +3174,8 @@ class QuantizationMemoryAnchor:
     smartphone_ram_gb_str = fmt_memory_capacity(smartphone_ram, unit=GiB, precision=0, commas=False)
 ```
 
+While structural optimization and pruning physically remove parameters to streamline the model graph, these techniques leave the fundamental mathematical representation untouched: the remaining weights still demand floating-point precision. However, modern accelerators and edge devices can perform integer arithmetic much faster, with a fraction of the energy. This brings us to the next layer of the optimization stack: reducing the numerical precision of the data itself.
+
 The physical gap governing compression is dictated by memory constraints: a `{python} QuantizationMemoryAnchor.llm_7b_str`-billion parameter language model in FP16 requires `{python} QuantizationMemoryAnchor.llm_7b_mem_gb_str` solely for weights, while the smartphone target offers only `{python} QuantizationMemoryAnchor.smartphone_ram_gb_str` of shared RAM. Structured pruning can remove layers or heads, but unstructured zeros do not shrink a densely stored deployment artifact without specialized format overhead [@han2016deep]. A complementary lever reduces the bit width representing each parameter: determining how far precision can drop before accuracy collapses establishes the practical envelope of quantization.
 
 ::: {#dfn-model-compression-quantization .callout-definition title="Quantization"}
@@ -3521,8 +3523,6 @@ class EnergyDividend:
     dram_read_bits_value_str = fmt(dram_read_bits, precision=0, commas=False)
     dram_read_vs_int8_mac_mult_str = fmt_multiple(dram_read_vs_int8_mac, precision=1, commas=True)
 ```
-
-
 
 Memory reduction is often the first motivation for quantization, but lower-precision arithmetic can also provide an **energy dividend**\index{Energy dividend!quantization efficiency}. Moving from FP32 to INT8 reduces raw value payload by exactly 4$\times$; the operation-level energy ratio can be larger, while end-to-end energy remains workload- and device-dependent.
 
@@ -4877,14 +4877,21 @@ Affine quantization establishes a linear mapping $x \approx s(x_q - z)$, where $
 \vspace*{-2ex}
 ```
 **Scenario**:
-Suppose the activations range from `{python} QuantizationMathCalc.alpha_math` to `{python} QuantizationMathCalc.beta_math`, and the target precision is UINT8 $(b=8)$.
+Suppose we want to quantize a $2 \times 2$ activation matrix with values ranging from `{python} QuantizationMathCalc.alpha_math` to `{python} QuantizationMathCalc.beta_math`, and the target precision is UINT8 $(b=8)$:
+$$
+\mathbf{X} = \begin{pmatrix} -1.0 & 2.0 \\ 0.0 & 3.0 \end{pmatrix}
+$$
 
-* **Range**: `{python} QuantizationMathCalc.range_math`.
 * **Steps**: `{python} QuantizationMathCalc.steps_math` = `{python} QuantizationMathCalc.steps_str`.
 * **Scale**: `{python} QuantizationMathCalc.scale_math`.
 * **Zero-point**: `{python} QuantizationMathCalc.zero_point_math`.
 
-**Systems insight**: The real value $0.0$ is represented by the integer `{python} QuantizationMathCalc.zero_point_str`, which ensures that zero-padding (common in CNNs) is represented exactly, preventing "quantization drift" where padding introduces nonzero noise.
+Applying the mapping $x_q = \text{clamp}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 255\right)$ element-wise, we pack the floating-point distribution into integer bins:
+$$
+\mathbf{X}_q = \begin{pmatrix} 0 & 191 \\ 64 & 255 \end{pmatrix}
+$$
+
+**Systems insight**: The real value $0.0$ is represented exactly by the integer `{python} QuantizationMathCalc.zero_point_str`. This is critical because it ensures that zero-padding (common in CNNs) is represented exactly, preventing "quantization drift" where padding introduces nonzero noise.
 
 :::
 
@@ -5351,6 +5358,8 @@ Integrating quantization effects during training lets the model adapt its weight
 
 ##### Fake quantization nodes and implementation {#sec-model-compression-fake-quantization-nodes-implementation-e822}
 
+Why rely on fake quantization? If precision drops from FP32 to INT8 only after training, the model can suffer an abrupt "quantization shock" where subtle activation patterns are irrevocably destroyed. Fake quantization forces the network to experience this precision loss *during* training, treating hardware constraints as just another source of noise. This allows the weights to naturally migrate to values that are robust to integer representation.
+
 QAT implementation relies on fake quantization operations that simulate quantization during forward propagation while maintaining full precision for gradient computation. These operations insert quantize-dequantize pairs into the computational graph, creating a training-time simulation of inference-time behavior.
 
 A fake quantization node must preserve the same errors the inference runtime will see, so its three operations model the deployment path during training:
@@ -5409,9 +5418,13 @@ $$
 0 & \text{otherwise}
 \end{cases}
 $$
-Within the clipping range $[\alpha, \beta]$, the estimator treats quantization as an identity mapping, passing the upstream gradient $\frac{\partial \mathcal{L}}{\partial x_{\text{fake}}}$ unchanged to master weight $x$. Beyond clipping boundaries, the derivative evaluates to zero, blocking gradients from saturated outliers that would otherwise destabilize optimizer updates.
+This estimator manages the gradient flow and operator graph through several distinct mechanisms:
 
-In practice, frameworks like PyTorch and TensorFlow implement fake quantization as custom autograd operators whose forward pass performs the quantize-dequantize round trip while the backward pass applies an STE. Scale handling depends on the method: observers may track distributions and later freeze, or scales may be learned. Batch normalization also requires deployment-consistent handling: workflows fold batch normalization into preceding convolution weights ($\mathbf{W}_{\text{fused}} = \frac{\gamma}{\sigma} \mathbf{W}$) where $\sigma$ is the square root of the sum of running variance and the numerical stabilizer. Folding also adjusts the convolution bias using the running mean and the batch-normalization shift. Freezing running statistics before export allows fake-quantization scales to match the static fused parameters executed during inference.
+* **Identity mapping within bounds**: Within the clipping range $[\alpha, \beta]$, the STE treats quantization as an identity function, passing the upstream gradient $\frac{\partial \mathcal{L}}{\partial x_{\text{fake}}}$ unchanged to the master weight $x$.
+* **Gradient clipping for outliers**: Beyond the clipping boundaries, the derivative evaluates to zero. This blocks gradients from saturated outliers that would otherwise destabilize optimizer updates.
+* **Custom autograd operators**: In practice, frameworks like PyTorch and TensorFlow implement fake quantization as custom operators where the forward pass performs the quantize-dequantize round trip and the backward pass applies the STE.
+* **Scale and range handling**: Depending on the specific QAT method, observers may track distributions and freeze scales later, or the scales themselves may be learned directly during backpropagation.
+* **Batch normalization folding**: To match deployment conditions, QAT workflows fold batch normalization into preceding convolution weights ($\mathbf{W}_{\text{fused}} = \frac{\gamma}{\sigma} \mathbf{W}$) where $\sigma$ is the square root of the sum of running variance and the numerical stabilizer. Folding also adjusts the convolution bias using the running mean and the batch-normalization shift. Freezing running statistics before export allows fake-quantization scales to match the static fused parameters executed during inference.
 
 ##### QAT trade-offs {#sec-model-compression-qat-tradeoffs-e8ef}
 

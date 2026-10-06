@@ -1,0 +1,151 @@
+### Computational mapping {#sec-network-architectures-computational-mapping-aea3}
+
+Expanding sequence length $S$ challenges accelerator memory hierarchies because full-sequence self-attention scales quadratically with context length. @Fig-context-explosion charts this scaling trajectory on a logarithmic axis, showing context windows growing from 2K tokens to beyond 128K and into the 1M-token range [@openai2023devday; @anthropic2023claude21; @google2024gemini15]. These product milestones matter less than the principle they illustrate. Longer context windows shift complexity from external retrieval and document chunking pipelines into accelerator memory capacity and bandwidth budgets. Exact tiling changes how much attention state is stored while retaining dense quadratic arithmetic; sparse attention instead reduces the interactions computed (@sec-network-architectures-memory-requirements-72c3).
+
+::: {#fig-context-explosion fig-env="figure" fig-pos="htb" fig-cap="**Context Window Explosion**: Model context capacity (tokens, log scale) from early models (512 to 2K tokens) to modern long-context architectures (128K to 1M tokens). As context scales $1{,}000\times$, naive attention memory grows $1{,}000{,}000\times$ ($\mathcal{O}(S^2)$), driving the development of FlashAttention, sparse attention, and linear attention mechanisms." fig-alt="Line chart from 2018 to 2024 with context-window tokens on a logarithmic vertical axis. Labeled points run from BERT at 512 tokens through GPT-2, GPT-3, LLaMA, Mistral-7B, GPT-4 Turbo, and Claude 2.1 to Gemini 1.5 at 1 million tokens."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTEXT WINDOW EXPLOSION (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-context-explosion—context window scaling from BERT to Gemini
+# │
+# │ Goal: Plot log-scale context capacity over time; show exponential rise
+# │       and annotate key systems milestones (FlashAttention, RingAttention).
+# │ Show: Log10 scale (512 to 1M); point markers with labels; annotation callouts.
+# │ How: matplotlib scatter + annotate; book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
+
+# ┌── 2. DATA ──────────────────────────────────────────────────────────────────
+models = [
+    (2018.8, 512, "BERT", "below"),
+    (2019.1, 1024, "GPT-2", "above"),
+    (2020.4, 2048, "GPT-3", "above"),
+    (2023.15, 2048, "LLaMA", "right"),
+    (2023.74, 32768, "Mistral-7B", "right"),
+    (2023.8, 128000, "GPT-4 Turbo", "right"),
+    (2023.9, 200000, "Claude 2.1", "above"),
+    (2024.1, 1000000, "Gemini 1.5", "right"),
+]
+
+years = [m[0] for m in models]
+tokens = [m[1] for m in models]
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(
+    years,
+    tokens,
+    'o-',
+    color=COLORS['BlueLine'],
+    linewidth=2.5,
+    markersize=7,
+    markerfacecolor='white',
+    markeredgewidth=2,
+    markeredgecolor=COLORS['BlueLine'],
+)
+
+# Shaded background regions for context eras
+ax.axhspan(100, 2048, alpha=0.3, color=COLORS['grid'], label='Standard Era (512–2K)')
+ax.axhspan(2048, 32768, alpha=0.3, color=COLORS['BlueL'], label='Extended Era (2K–32K)')
+ax.axhspan(32768, 2000000, alpha=0.3, color=COLORS['VioletL'], label='Long-Context Era (32K–1M+)')
+
+# ┌── 4. ANNOTATIONS ───────────────────────────────────────────────────────────
+LABEL_PLACEMENT = {
+    "above": ((0, 10), "bottom", "center"),
+    "below": ((0, -14), "top", "center"),
+    "right": ((12, 0), "center", "left"),
+}
+
+for yr, tok, name, pos in models:
+    offset, va, ha = LABEL_PLACEMENT[pos]
+
+    # Format token count nicely
+    if tok >= 1000000:
+        tok_lbl = f"{tok/1000000:.0f}M"
+    elif tok >= 1000:
+        tok_lbl = f"{tok//1024}K" if tok & (tok - 1) == 0 else f"{tok/1000:.0f}K"  # powers of two use binary K (32768 -> 32K)
+    else:
+        tok_lbl = str(tok)
+
+    ax.annotate(
+        f"{name} ({tok_lbl})",
+        (yr, tok),
+        xytext=offset,
+        textcoords="offset points",
+        ha=ha,
+        va=va,
+        fontsize=7.5,
+        fontweight="bold",
+        color=COLORS.get("text", "black"),
+        bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.85),
+    )
+
+# Key systems milestones (vertical dashed lines)
+ax.axvline(2022.4, color=COLORS['RedLine'], linestyle=':', alpha=0.7, linewidth=1.5)
+ax.text(2022.45, 800, "FlashAttention\n(IO-aware)", fontsize=7, color=COLORS['RedLine'], fontweight='bold', va='bottom')
+
+ax.axvline(2023.8, color=COLORS['VioletLine'], linestyle=':', alpha=0.7, linewidth=1.5)
+ax.text(2023.85, 800, "RingAttention /\nLinear Attention", fontsize=7, color=COLORS['VioletLine'], fontweight='bold', va='bottom')
+
+# ┌── 5. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_yscale('log')
+ax.set_xlabel('Year')
+ax.set_ylabel('Context Window (Tokens, log scale)')
+ax.set_xlim(2018.3, 2024.9)
+ax.set_ylim(200, 3000000)
+
+ax.set_yticks([512, 2048, 8192, 32768, 128000, 1000000])
+ax.set_yticklabels(['512', '2K', '8K', '32K', '128K', '1M'])
+
+ax.legend(loc='upper left', fontsize=7.5, frameon=True, facecolor='white', framealpha=0.9)
+
+plt.show()
+plt.close()
+```
+
+:::
+
+@Lst-self_attention_layer presents a typical implementation, showing how self-attention derives queries, keys, and values from the same input sequence.
+
+::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from the same input $\mathbf{X}$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $\NumberOfAttentionHeads$ parallel attention heads with dimension $\AttentionHeadDimension = d/\NumberOfAttentionHeads$, then concatenates and projects. For GPT-2 (768-dim, 12 heads), each head operates on 64 dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
+
+```{.python}
+def self_attention_layer(X, W_Q, W_K, W_V, d_head):
+    # X: input tensor (batch_size × seq_len × d_model)
+    # W_Q, W_K, W_V: weight matrices (d_model × d_head)
+
+    Q = matmul(X, W_Q)
+    K = matmul(X, W_K)
+    V = matmul(X, W_V)
+
+    scores = matmul(Q, K.transpose(-2, -1)) / sqrt(d_head)
+    attention_weights = softmax(scores, dim=-1)
+    output = matmul(attention_weights, V)
+
+    return output
+
+def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_head):
+    outputs = []
+    for i in range(num_heads):
+        head_output = self_attention_layer(
+            X, W_Q[i], W_K[i], W_V[i], d_head
+        )
+        outputs.append(head_output)
+
+    concat_output = torch.cat(outputs, dim=-1)
+    final_output = matmul(concat_output, W_O)
+
+    return final_output
+```
+
+:::
+
+Parallel sequence processing shifts fundamentally during autoregressive inference: generating output tokens step-by-step reintroduces sequential serialization and converts compute-bound matrix multiplications into memory-bandwidth-bound matrix-vector operations, as quantified in @sec-network-architectures-system-implications-77ac via the GPT-2 XL lighthouse.
+

@@ -145,7 +145,7 @@ Arithmetic without branches is not arithmetic without risk. When intermediate va
 
 **Response**: The inquiry recommended limiting software to functions required during flight, reviewing range assumptions, and designing exception handling so a single conversion failure could not disable redundant units [@esa1996ariane501].
 
-**Systems lesson**: Numerical ranges, exception handling, and reuse assumptions are part of the systems contract. A computation can be syntactically correct and still be invalid for the physical regime in which it runs. ML systems hit this whenever a numerical format's representable range fails to match the magnitudes flowing through it: a low-precision multiplication that overflows produces an Inf or NaN that propagates silently through the rest of the computation, making numerical regimes as important to debugging as control flow.
+**Systems lesson**: Numerical ranges, exception handling, and reuse assumptions are part of the systems contract. A computation can be syntactically correct and still be invalid for the physical regime in which it runs. ML systems hit this when thousands of dot products in a matrix multiplication accumulate values beyond the limits of low-precision formats like FP16. When one of these operations overflows, it produces an `Inf` or `NaN` that propagates silently through subsequent layers, poisoning the entire model state and making numerical regimes as important to debugging as control flow.
 
 :::
 
@@ -321,23 +321,7 @@ Such deterministic rules work well for well-defined structured data, but hand-au
 
 The failures of rule-based systems suggested an alternative: rather than encoding human knowledge as explicit rules, let the system discover patterns from data. Machine learning offered this direction—instead of writing rules for every situation, researchers wrote programs that identified patterns in examples. The success of these methods, however, still depended heavily on human insight to define which patterns to look for, a process known as feature engineering\index{Feature engineering!classical ML}\index{Classical machine learning!feature engineering}.
 
-Feature engineering transformed raw data into representations that expose patterns to learning algorithms. The histogram of oriented gradients (HOG)[^fn-hog-feature-descriptor] [@dalal2005hog] exemplifies this approach. The feature-extraction pipeline in @fig-hog partitions an image into spatial cells, quantizes local pixel gradient directions across an eight-way orientation star, and compiles them into localized histogram bins. This transforms raw pixels into shape descriptors robust to lighting variations and small positional changes.
-
-::: {#fig-hog fig-env="figure" fig-pos="htb" fig-cap="**HOG Method**: A local image patch is divided into cells, gradient orientations are accumulated into a histogram, and the resulting descriptor summarizes local shape while reducing sensitivity to illumination. Diagram reproduced from Figure 5 of @bakheet2021hog, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)." fig-alt="Diagram of HOG extraction: an input image grid with one cell highlighted, a magnified cell containing gradient-direction arrows, an orientation guide, and an eight-bin histogram labeled HOG feature."}
-
-![](images/png/hog.png)
-
-:::
-
-[^fn-hog-feature-descriptor]: **Histogram of oriented gradients (HOG)**\index{HOG!fixed vs. learned features}: An influential handcrafted descriptor for pedestrian detection before deep learning [@dalal2005hog]. One common configuration computes gradient orientations in $8{\times}8$ pixel cells, with cell size and other choices tuned for the task. HOG's fixed computation graph can run efficiently on CPUs with predictable latency, while learned features can reduce descriptor redesign but do not automatically transfer across domains and often benefit from accelerators only as model and batch scale grow.
-
-Complementary methods like scale-invariant feature transform (SIFT)[^fn-sift-feature-descriptor] [@lowe1999] and Gabor filters[^fn-gabor-filter-bank] captured different visual patterns. SIFT detected keypoints stable across scale and orientation changes, while Gabor filters identified textures and frequencies. Each encoded domain expertise about visual pattern recognition.
-
-[^fn-sift-feature-descriptor]: **Scale-invariant feature transform (SIFT)**\index{SIFT!variable output size}: SIFT encodes this domain expertise in a four-stage algorithm that identifies keypoints stable across scale and rotation. The number of detected keypoints varies by image, which complicates fixed-shape batching. Systems can regularize the representation through caps, padding, pooling, or fixed encodings, but each choice adds computation or discards information.
-
-[^fn-gabor-filter-bank]: **Gabor filters**\index{Gabor filters!learned equivalents}: Originally developed for localized time-frequency analysis [@gabor1946], these filters detect edges and textures at specific orientations and frequencies. A typical bank contains many hand-designed filters across orientations and frequencies. Deep convolutional layers instead learn small kernels from data; early convolutional neural network (CNN) filters often become edge-, color-, and texture-sensitive detectors, shifting feature design from manual filter banks to data-driven optimization [@krizhevsky2012imagenet; @lecun2015].
-
-These engineering efforts enabled advances in computer vision during the 2000s. Systems could now recognize objects with some robustness to real-world variations, leading to applications in face detection, pedestrian detection, and object recognition. Despite these successes, the approach had limitations. Experts needed to carefully design feature extractors for each new problem, and the resulting features might miss important patterns that were not anticipated in their design. The bottleneck remained: human expertise could not scale to the complexity and diversity of real-world visual patterns.
+Feature engineering transformed raw data into representations that expose patterns to learning algorithms. Methods like the histogram of oriented gradients (HOG) [@dalal2005hog] or scale-invariant feature transform (SIFT) [@lowe1999] codified domain expertise into fixed extraction pipelines. While these engineering efforts enabled advances in computer vision, experts needed to carefully design feature extractors for each new problem. The bottleneck remained: human expertise could not scale to the complexity and diversity of real-world visual patterns.
 
 Return to the same 28 by 28 digit. In this illustrative implementation, HOG divides the image into a `{python} ParadigmSystemsCost.hog_grid_str` by `{python} ParadigmSystemsCost.hog_grid_str` grid of 4 by 4 cells, computes gradient magnitudes and orientations, bins them into `{python} ParadigmSystemsCost.hog_bins_str` orientation histograms per cell, and produces a `{python} ParadigmSystemsCost.hog_features_str`-element feature vector. A linear Support Vector Machine (SVM) classifier then performs ten dot products over that vector. The result is roughly `{python} ParadigmSystemsCost.hog_ops_approx_str` and about `{python} ParadigmSystemsCost.hog_mem_kb_str` of working memory—about `{python} ParadigmSystemsCost.hog_ops_ratio_mult_str` the work of the toy rule-based baseline, but still structured and well served by CPU vector units using **single instruction, multiple data (SIMD)**\index{SIMD!definition}. Descriptor size, class count, and implementation all change this cost.
 
@@ -2052,7 +2036,6 @@ Modern architectures balance depth against width. A network with ten layers of 1
 
 :::
 
-
 ## Learning Process {#sec-neural-computation-learning-process-0b83}
 
 The MNIST network currently holds `{python} MnistTrainingIntroRecap.total_params_str` initialized randomly—numbers that encode no knowledge at all. The transformation of these random values into a digit classifier achieving over 95 percent accuracy relies on four operations repeated millions of times: forward propagation computes a prediction, a loss function measures the error, backpropagation computes each parameter's loss gradient, and an optimizer uses those gradients to update the parameters.
@@ -2750,21 +2733,21 @@ Computing gradients involves calculating several partial derivatives\index{Parti
 For a hidden layer $\LayerIndex$ with an element-wise activation, backpropagation first transforms the incoming signal, then computes weight, bias, and input gradients:
 
 First, the incoming error signal $\frac{\partial \LossFunction}{\partial \mathbf{A}^{(\LayerIndex)}}$ is transformed into the preactivation gradient $\frac{\partial \LossFunction}{\partial \mathbf{Z}^{(\LayerIndex)}}$ by multiplying element-wise ($\odot$) with the local activation function derivative (@eq-preactivation-gradient):
-$$ \frac{\partial \LossFunction}{\partial \mathbf{Z}^{(\LayerIndex)}} = \frac{\partial \LossFunction}{\partial \mathbf{A}^{(\LayerIndex)}} \odot f'(\mathbf{Z}^{(\LayerIndex)}) $$ {#eq-preactivation-gradient}
+$$ \underbrace{\frac{\partial \LossFunction}{\partial \mathbf{Z}^{(\LayerIndex)}}}_{B \times n_\LayerIndex} = \underbrace{\frac{\partial \LossFunction}{\partial \mathbf{A}^{(\LayerIndex)}}}_{B \times n_\LayerIndex} \odot \underbrace{f'(\mathbf{Z}^{(\LayerIndex)})}_{B \times n_\LayerIndex} $$ {#eq-preactivation-gradient}
 For ReLU activations, $f'(\mathbf{Z}^{(\LayerIndex)})$ acts as a binary mask, passing gradients through active neurons ($z > 0$) and zeroing out inactive ones. The classifier's softmax output couples coordinates, so it does not use this element-wise rule. Instead, its backward pass begins with the combined softmax/cross-entropy logit gradient derived above. For mean batch loss, each example's predicted-minus-target signal is divided by $\BatchSize$ at that starting point. The weight, bias, and input products below then propagate the already-normalized signal, applying the batch mean only once.
 
 Weight gradients\index{Gradient!weight gradients} measure the local sensitivity of the final loss to each weight. With a batch size of $\BatchSize$, layer input dimension $n_{\LayerIndex-1}$, and layer output dimension $n_\LayerIndex$, the incoming activation matrix has shape $\mathbf{A}^{(\LayerIndex-1)} \in \mathbb{R}^{B \times n_{\LayerIndex-1}}$ and the sensitivity matrix has shape $\frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}} \in \mathbb{R}^{B \times n_\LayerIndex}$. The optimizer uses these gradients to determine parameter updates (@eq-weight-gradient):
-$$ \frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(\LayerIndex)}} = {\mathbf{A}^{(\LayerIndex-1)}}^T \frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}} $$ {#eq-weight-gradient}
+$$ \underbrace{\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(\LayerIndex)}}}_{n_{\LayerIndex-1} \times n_\LayerIndex} = \underbrace{{\mathbf{A}^{(\LayerIndex-1)}}^T}_{n_{\LayerIndex-1} \times B} \underbrace{\frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}}}_{B \times n_\LayerIndex} $$ {#eq-weight-gradient}
 
 The matrix product $(n_{\LayerIndex-1} \times \BatchSize) \times (\BatchSize \times n_\ell) \to (n_{\LayerIndex-1} \times n_\ell)$ contracts over the batch dimension $\BatchSize$, summing the outer products of activations and sensitivities across all examples in the mini-batch. With the mean-loss normalization already present in the sensitivity matrix, this product needs no further factor of $1/\BatchSize$.
 
 Bias gradients\index{Gradient!bias gradients} measure how changing each bias term affects the loss. Since biases shift the activation threshold of neurons, these gradients indicate whether neurons should become more or less easily activated, as expressed in @eq-bias-gradient:
-$$ \frac{\partial \mathcal{L}}{\partial \mathbf{b}^{(\LayerIndex)}} = \mathbf{1}^T \frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}} $$ {#eq-bias-gradient}
+$$ \underbrace{\frac{\partial \mathcal{L}}{\partial \mathbf{b}^{(\LayerIndex)}}}_{1 \times n_\LayerIndex} = \underbrace{\mathbf{1}^T}_{1 \times B} \underbrace{\frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}}}_{B \times n_\LayerIndex} $$ {#eq-bias-gradient}
 
 Here, $\mathbf{1}\in\mathbb{R}^{B}$ is an all-ones vector, so left multiplication sums the per-example bias gradients across the batch.
 
 Input gradients propagate the error signal backward to the previous layer. Rather than directly updating parameters, these gradients serve as the "adjustment signals" that allow earlier layers to learn from the final prediction error (@eq-activation-gradient):
-$$ \frac{\partial \mathcal{L}}{\partial \mathbf{A}^{(\LayerIndex-1)}} = \frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}} {\mathbf{W}^{(\LayerIndex)}}^T $$ {#eq-activation-gradient}
+$$ \underbrace{\frac{\partial \mathcal{L}}{\partial \mathbf{A}^{(\LayerIndex-1)}}}_{B \times n_{\LayerIndex-1}} = \underbrace{\frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}}}_{B \times n_\LayerIndex} \underbrace{{\mathbf{W}^{(\LayerIndex)}}^T}_{n_\LayerIndex \times n_{\LayerIndex-1}} $$ {#eq-activation-gradient}
 
 Here, the product $(\BatchSize \times n_\LayerIndex) \times (n_\LayerIndex \times n_{\LayerIndex-1}) \to (\BatchSize \times n_{\LayerIndex-1})$ contracts over the output dimension $n_\LayerIndex$, preserving the per-example activation shape for preceding layers.
 
@@ -5335,7 +5318,6 @@ Neural network performance follows empirical scaling relationships with direct s
 :::
 
 Neither relationship makes model size a decision rule. Double descent describes measured generalization under a particular data and training regime, while historical scaling describes resource investment across selected systems. Choosing a model still requires comparing candidates on representative deployment data and on the complete cost of training, serving, monitoring, and maintenance. The useful question is not whether additional scale can help, but whether its measured gain earns those system costs. That comparison should also include uncertainty in both gains and costs.
-
 
 ## Summary {#sec-neural-computation-summary-f263}
 

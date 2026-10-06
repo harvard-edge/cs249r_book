@@ -1,0 +1,253 @@
+### Five families on one machine {#sec-network-architectures-machine-demand-profile}
+
+@Tbl-nn-architectures-machine-demands collects that profile. Each row is a family in a representative execution regime; the transformer takes two rows because prefill and decode reuse the same weights differently (@sec-network-architectures-inference-memory-bandwidth-wall-98d1). The compute-bound rows assume sufficient reuse to exceed the machine's balance, the bandwidth-bound rows assume streamed operands, and the capacity-bound row assumes oversized tables. The columns follow a request through the machine: persistent state, per-request state, arithmetic intensity, parallel axes, and the likely limiting term under those assumptions.
+
+| **Family**                | **Parameters**                                                                             | **Activations**                                                                                                                    | **Intensity**                                               | **Parallel Axis**                                    | **Binding Term**                                                                     | **Lighthouse**                 |
+|:--------------------------|:-------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------|:-----------------------------------------------------|:-------------------------------------------------------------------------------------|:-------------------------------|
+| **MLP**                   | $\mathcal{O}(\LayerInputWidth \LayerOutputWidth)$ per layer                                | $\mathcal{O}(\BatchSize\, \LayerOutputWidth)$                                                                                      | Low at batch one (GEMV); high when batched (GEMM)           | Batch                                                | $\DataVolume/\Bandwidth$ at small batch                                              | None (DLRM's dense MLPs)       |
+| **CNN**                   | $\mathcal{O}(K^2 C_{\text{in}} C_{\text{out}})$ per layer, independent of image size       | $\mathcal{O}(\BatchSize\, H_{\text{img}} W_{\text{img}} C_{\text{out}})$                                                           | High (filters reused across positions); lower for depthwise | Batch and spatial positions                          | $\Operations/(\PeakRate\,\EfficiencyHw)$                                             | ResNet-50; MobileNetV2 and KWS |
+| **RNN**                   | $\mathcal{O}(\HiddenDimension^2 + \HiddenDimension \LayerInputWidth)$, shared across steps | $\mathcal{O}(\BatchSize\, \HiddenDimension)$ state; $\mathcal{O}(\BatchSize \SequenceLength \HiddenDimension)$ in training         | Low at batch one; higher with batching                      | Batch and within-step work; recurrent time is serial | Serial step cost; dispatch adds $\Latency$ unless fused                              | None                           |
+| **Transformer (prefill)** | $\mathcal{O}(\HiddenDimension^2 + \HiddenDimension d_{\text{ff}})$ per block               | $\mathcal{O}(\BatchSize \SequenceLength \HiddenDimension)$; $\mathcal{O}(\BatchSize \SequenceLength^2)$ if scores are materialized | High (GEMM over all $\SequenceLength$ tokens)               | Batch and sequence positions                         | $\Operations/(\PeakRate\,\EfficiencyHw)$, with an $\SequenceLength^2$ attention term | GPT-2 (prompt)                 |
+| **Transformer (decode)**  | Same weights, reread for every token                                                       | KV cache, $\mathcal{O}(\BatchSize \SequenceLength \HiddenDimension)$ per layer                                                     | Low (GEMV per token at small batch)                         | Batch only; tokens are serial                        | $\DataVolume/\Bandwidth$ (weights and KV cache)                                      | GPT-2 (generation)             |
+| **DLRM**                  | Embedding tables, one row per category, dominate; dense MLPs are small                     | Pooled embedding vectors per feature                                                                                               | Very low (gathers with little arithmetic)                   | Batch; tables sharded across devices                 | Capacity first, then $\DataVolume/\Bandwidth$                                        | DLRM                           |
+
+: **Architecture Workload Profiles**: State, per-request activations, intensity regime, parallel axis, and binding iron-law term for each family in its common execution regime. Symbols follow the family sections: $B$ is batch size, $S$ sequence length, $d$ the hidden dimension, $\LayerInputWidth$ and $\LayerOutputWidth$ a layer's input and output widths, $d_{\text{ff}}$ the feed-forward width, $K$ kernel size, $C_{\text{in}}$ and $C_{\text{out}}$ input and output channels, and $H_{\text{img}} \times W_{\text{img}}$ the feature-map size. Intensity regimes are qualitative; @tbl-workload-signatures gives weight-only proxies for the lighthouses. The $\mathcal{O}(B S^2)$ prefill term assumes materialized attention scores (@sec-network-architectures-memory-requirements-72c3). {#tbl-nn-architectures-machine-demands tbl-colwidths="[12,17,17,16,13,15,10]"}
+
+The parameter and activation columns decide how data reaches the arithmetic units, and the pattern of access matters as much as the volume. Three patterns cover the table. Sequential access\index{Memory access!sequential}, the streaming of contiguous weight rows in an MLP layer or a transformer projection, lets DRAM deliver long bursts and lets hardware prefetchers run ahead, so it approaches the interface's peak bandwidth. Strided access\index{Memory access!strided}, which a native convolution produces as it steps across the rows of a feature map, fetches whole cache lines to use a fraction of each; im2col lowering (@sec-network-architectures-computational-mapping-824c) converts it into sequential access at the price of up to $K^2$-fold duplication. Random access\index{Memory access!random} is the DLRM row. Sparse IDs index arbitrary rows of multi-gigabyte tables, defeating prefetchers and wasting most of each burst, which is why caching the popular rows matters so much there. Attention is not random access despite its content-dependent weights, because its queries, keys, and values sit in contiguous tensors that tiled kernels stream through on-chip SRAM.
+
+Whether an access pays DRAM prices at all depends on the working set\index{Working set size}, the data the execution units need at once. Small layers, such as the $784{\times}100$ reference layer at `{python} MLPLayerStats.weight_kb_str` in FP32, fit in on-chip SRAM. Production-width layers of tens of megabytes do not, which is why unbatched MLP inference and transformer decode stream their weights from off-chip memory on every request. Accelerators answer both ends of the table with memory hierarchy rather than arithmetic. High Bandwidth Memory (**HBM**\index{HBM!definition}) stacks DRAM dies beside the processor to supply the streaming rows at more than an order of magnitude above standard DDR channels, and multi-megabyte on-chip SRAM, often an explicitly managed scratchpad\index{Scratchpad memory!explicit control}, lets compilers stage tiles so that reuse happens on chip. The intensity column measures how much a family can profit from that staging, and it doubles as an energy column.
+
+```{python}
+#| echo: false
+#| label: energy-consumption-analysis
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENERGY CONSUMPTION ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Energy perspective callout in the workload-profile subsection
+# │
+# │ Goal: Contrast the energy cost of compute vs. data movement.
+# │ Show: That DRAM access consumes over 100× more energy than an FP32 multiply.
+# │ How: Compare picojoules per FLOP vs. a 32-bit DRAM read.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, check, fmt_energy, fmt_energy_per_flop, fmt_multiple
+
+class EnergyConsumptionAnalysis:
+    """Contrast energy cost of compute vs. data movement using Horowitz-style anchors."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
+    multiply_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude  # pJ per FP32 multiply
+    dram_pj = ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude  # pJ per 32-bit access
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    dram_to_flop_ratio = dram_pj / multiply_pj
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(dram_to_flop_ratio > 100, "DRAM access should cost over 100x a reference FP32 FLOP.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    energy_multiply_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
+    energy_dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
+    energy_ratio_mult_str = fmt_multiple(round(dram_to_flop_ratio), precision=0, commas=True)
+```
+
+::: {.column-margin}
+![](images/svg/vol1_nn_architectures_margin_004.svg){width="100%" fig-alt="Two horizontal log-scale energy bars labeled DRAM 640 pJ and FP32 multiply 3.7 pJ, with the DRAM bar much longer."}
+
+*Moving a 32-bit value from DRAM costs far more energy than one FP32 multiply.*
+:::
+
+::: {#psp-nn-architectures-energy-cost-data-movement .callout-perspective title="The energy cost of data movement"}
+
+A core systems principle: *moving data costs more than computing on it*. In the reference model of @horowitz2014, an FP32 multiply costs about `{python} EnergyConsumptionAnalysis.energy_multiply_pj_str`, while fetching one 32-bit operand from off-chip DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str`, a gap of `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str`. Low-intensity rows are therefore energy-dominated by DRAM traffic. An unbatched MLP or a decode step loads each weight once per request and spends most of its energy moving it. A CNN amortizes each filter load over $H_{\text{img}} \times W_{\text{img}}$ applications, so the locality that makes it compute bound also makes it energy efficient, unless a fully materialized im2col buffer inflates temporary traffic by up to $K^2$. An RNN keeps its compact state in SRAM but idles execution units across serial steps, which raises energy per token. Tiled attention keeps score blocks on chip, so its energy tracks matrix multiplication rather than DRAM round-trips.
+
+Later optimizations exploit this principle directly. Quantization reduces the bits moved per value; pruning removes unnecessary movement; and tiling keeps working sets in faster, lower-energy memory.
+
+:::
+
+The parallel-axis column determines how data must move among processing elements once the work is spread out. @Fig-collective-comm schematizes the four fundamental data movement topologies—broadcast, scatter, gather, and reduction—that govern tensor routing across distributed ranks. Batch parallelism in MLPs, CNNs, and prefill broadcasts\index{Data movement!broadcast} stationary weight tiles to many units, each working on a different example or position, and compilers tile loops\index{Matrix tiling} to reuse each broadcast value as often as possible. Spatial and model partitioning scatter\index{Data movement!scatter} a tensor across tiles or devices; mixture-of-experts models, which route each token to a few of many feedforward subnetworks, make the scatter input-dependent, so a popular expert can overload one accelerator while others idle. DLRM gathers\index{Data movement!gather} embedding rows from wherever the sharded tables live, and each attention query gathers keys and values from every position in its sequence. Reductions\index{Data movement!reduction} combine values through sums or maxima (softmax denominators, normalization statistics, gradient synchronization across data-parallel workers), and tree-structured reduction hardware finishes a reduction over $n$ values in $\mathcal{O}(\log n)$ stages rather than $\mathcal{O}(n)$. The rows with a serial axis, RNNs and decode, are the rows these collectives cannot rescue, because no amount of broadcast or reduction bandwidth shortens a dependency chain.
+
+::: {#fig-collective-comm fig-env="figure" fig-pos="htb" fig-cap="**Data Movement Primitives**: Four fundamental patterns govern information flow in neural network computation. Broadcast (top-left) replicates a single value to all destinations, used when sharing weights across batch elements. Scatter (top-right) distributes distinct elements to different destinations, enabling work partitioning. Gather (bottom-left) collects distributed values to a single location, as in attention pooling. Reduction (bottom-right) combines multiple values through aggregation (sum, max), appearing in gradient synchronization and attention scoring. Because moving data costs more than computing on it, these patterns are primary optimization targets." fig-alt="Four diagrams with nodes and arrows. Broadcast: one red square to four nodes. Scatter: four colored squares to four nodes. Gather: four nodes with colored squares to one. Reduction: four colored nodes combine through aggregation to one."}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\sffamily,scale=0.8, every node/.append style={transform shape}]
+\definecolor{Ballcol}{RGB}{172,245,164}
+\colorlet{Ballcol}{gray!20}%brown!60!black!20}%magenta!20!magenta!20}%orange!30}%blue!30!cyan!80}
+\tikzset{%
+LineA/.style={line width=0.75pt,black,-latex},
+ALine/.style={line width=0.75pt,black,latex-}
+}
+
+\tikzset{
+  box/.pic={
+    \pgfkeys{/box/.cd, #1}
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=none, fill=\ffill, minimum width=\cellsize, inner sep=0pt,
+                    minimum height=\cellheight, line width=\llinewidth] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+      }
+     }
+   }
+ }
+
+\pgfkeys{
+  /box/.cd,
+  cellsize/.store in=\cellsize,
+  llinewidth/.store in=\llinewidth,
+  cellheight/.store in=\cellheight,
+  columns/.store in=\columns,
+  br/.store in=\br,
+  ffill/.store in=\ffill,
+  rows/.store in=\rows,
+  columns=1,
+  rows=3,
+  br=A,
+  ffill=red,
+  cellsize=2mm,
+  cellheight=5mm,
+  llinewidth=0pt
+}
+\def\radius{6mm}
+
+\begin{scope}[scale=1, every node/.append style={transform shape},
+local bounding box=B1,shift={($(0,0)+(0,0)$)}]
+\foreach \x in {1,2,3,4}{
+\pgfmathsetmacro{\xcord}{1.6*\x}
+\coordinate (1B-\x) at (\xcord,0);
+\filldraw[fill=Ballcol] (\xcord,0) circle (\radius);
+\pic[shift={(-0.20,0.5)}] at (1B-\x) {box={columns=1,rows=1,br=A,ffill=red}};
+}
+\pgfmathsetmacro{\xcenter}{(1.6*1 + 1.6*4)/2} %
+\coordinate (1CB) at (\xcenter,-2.5);
+\filldraw[fill=Ballcol]  (1CB) circle (\radius);
+\pic[shift={({-0.20,0.5})}] at (1CB) {box={columns=1,rows=1,br=A,ffill=red}};
+
+\foreach \x in {1}{
+  \foreach \y in {1,2,3,4}{
+    \edef\from{\x CB}
+    \edef\to{1B-\y}
+\path let
+    \p1 = (\from),
+    \p2 = (\to),
+    \n1 = {atan2(\y2-\y1,\x2-\x1)}
+  in
+    coordinate (from) at ($ (\from) + (\n1:\radius) $)
+    coordinate (to) at ($ (\to) + (\n1+180:\radius) $);
+  \draw[LineA] (from) -- node[inner sep=0pt](L\x){}(to);
+  }
+}
+\node[below=7mm of 1CB]{Broadcast};
+\end{scope}
+
+\begin{scope}[scale=1, every node/.append style={transform shape},
+local bounding box=B2,shift={($(0,0)+(11,0)$)}]
+
+\foreach \x/\col in {1/red,2/yellow,3/green,4/myblue}{
+\pgfmathsetmacro{\xcord}{1.6*\x}
+\coordinate (2B-\x) at (\xcord,0);
+\filldraw[fill=Ballcol]  (\xcord,0) circle (\radius);
+\pic[shift={(-0.20,0.5)}] at (2B-\x) {box={columns=1,rows=1,br=A,ffill=\col}};
+}
+\pgfmathsetmacro{\xcenter}{(1.6*1 + 1.6*4)/2} % Sredina između prve i četvrte lopte
+\coordinate (2CB) at (\xcenter,-2.5);
+\filldraw[fill=Ballcol]  (2CB) circle (\radius);
+
+\foreach \x/\col in {1/red,2/yellow,3/green,4/myblue}{
+\pgfmathsetmacro{\xcord}{0.2*\x}
+\pic[shift={({-0.70,0.5})}] at ($(2CB)+(\xcord,0)$) {box={columns=1,rows=1,br=A,ffill=\col}};
+}
+
+\foreach \x in {2}{
+  \foreach \y in {1,2,3,4}{
+    \edef\from{\x CB}
+    \edef\to{2B-\y}
+\path let
+    \p1 = (\from),
+    \p2 = (\to),
+    \n1 = {atan2(\y2-\y1,\x2-\x1)}
+  in
+    coordinate (from) at ($ (\from) + (\n1:\radius) $)
+    coordinate (to) at ($ (\to) + (\n1+180:\radius) $);
+  \draw[LineA] (from) -- node[inner sep=0pt](L\x){}(to);
+  }
+}
+\node[below=7mm of 2CB]{Scatter};
+\end{scope}
+%%%%%
+\begin{scope}[scale=1, every node/.append style={transform shape},
+local bounding box=B3,shift={($(0,0)+(0,-4.75)$)}]
+
+\foreach \x/\col in {1/red,2/yellow,3/green,4/myblue}{
+\pgfmathsetmacro{\xcord}{1.6*\x}
+\coordinate (3B-\x) at (\xcord,0);
+\filldraw[fill=Ballcol]  (\xcord,0) circle (\radius);
+\pic[shift={(-0.20,0.5)}] at (3B-\x) {box={columns=1,rows=1,br=A,ffill=\col}};
+}
+\pgfmathsetmacro{\xcenter}{(1.6*1 + 1.6*4)/2} % Sredina između prve i četvrte lopte
+\coordinate (3CB) at (\xcenter,-2.5);
+\filldraw[fill=Ballcol]  (3CB) circle (\radius);
+
+\foreach \x/\col in {1/myred,2/yellow,3/green,4/myblue}{
+\pgfmathsetmacro{\xcord}{0.2*\x}
+\pic[shift={({-0.70,0.5})}] at ($(3CB)+(\xcord,0)$) {box={columns=1,rows=1,br=A,ffill=\col}};
+}
+
+\foreach \x in {3}{
+  \foreach \y in {1,2,3,4}{
+    \edef\from{\x CB}
+    \edef\to{3B-\y}
+\path let
+    \p1 = (\from),
+    \p2 = (\to),
+    \n1 = {atan2(\y2-\y1,\x2-\x1)}
+  in
+    coordinate (from) at ($ (\from) + (\n1:\radius) $)
+    coordinate (to) at ($ (\to) + (\n1+180:\radius) $);
+  \draw[ALine] (from) -- node[inner sep=0pt](L\x){}(to);
+  }
+}
+\node[below=7mm of 3CB]{Gather};
+\end{scope}
+%%%%%%%
+\begin{scope}[scale=1, every node/.append style={transform shape},
+local bounding box=B4,shift={($(0,0)+(11,-4.75)$)}]
+
+\foreach \x/\col in {1/1,2/3,3/5,4/7}{
+\pgfmathsetmacro{\xcord}{1.6*\x}
+\coordinate (4B-\x) at (\xcord,0);
+\filldraw[fill=Ballcol]  (\xcord,0) circle (\radius);
+%\pic[shift={(-0.20,0.5)}] at (4B-\x) {box={columns=1,rows=1,br=A,ffill=\col}};
+\node[]at(4B-\x){\large\col};
+}
+\pgfmathsetmacro{\xcenter}{(1.6*1 + 1.6*4)/2}
+\coordinate (4CB) at (\xcenter,-2.5);
+\filldraw[fill=Ballcol]  (4CB) circle (\radius);
+\node[]at(4CB){\large 16};
+
+\foreach \x in {4}{
+  \foreach \y in {1,2,3,4}{
+    \edef\from{\x CB}
+    \edef\to{4B-\y}
+\path let
+    \p1 = (\from),
+    \p2 = (\to),
+    \n1 = {atan2(\y2-\y1,\x2-\x1)}
+  in
+    coordinate (from) at ($ (\from) + (\n1:\radius) $)
+    coordinate (to) at ($ (\to) + (\n1+180:\radius) $);
+  \draw[ALine] (from) -- node[inner sep=0pt](L\x){}(to);
+  }
+}
+\node[below=7mm of 4CB]{Reduction};
+\end{scope}
+\end{tikzpicture}
+```
+
+:::
+
+The last column applies the iron law under each row's execution assumptions. When effective intensity exceeds the machine's balance and parallel work is sufficient (batched CNNs, prefill), the compute term $\Operations/(\PeakRate\,\EfficiencyHw)$ binds. Below that balance (streamed small-batch MLPs, decode), the data term $\DataVolume/\Bandwidth$ binds, favoring fewer transferred bytes, more reuse, or higher bandwidth. RNNs add a serial chain of state updates: faster arithmetic, memory, and reduced launch overhead $(\Latency)$ can shorten each step without removing the dependency. DLRM adds a constraint that sits in front of the equation. Capacity decides where the tables live and thus which bandwidth the data term pays. ResNet-50, GPT-2, and DLRM isolate these representative regimes. MobileNetV2 and KWS share the CNN row, with depthwise layers pulling their intensity down, because latency and power are deployment budgets that constrain the entire execution. No lighthouse occupies the RNN row, whose serial chain the recurrent family section analyzes directly.
+

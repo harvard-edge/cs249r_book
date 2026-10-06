@@ -193,7 +193,7 @@ Each generation abstracted away details that consumed engineering effort in the 
 
 :::
 
-Resolving execution strategy comes first because runtime dispatch and graph capture determine what optimizations automatic differentiation and hardware mapping can subsequently exploit.
+Preventing these silent mismatches requires frameworks to either expose intermediate state for interactive debugging or strictly enforce contracts during compilation. This makes the **execution strategy** the first and most consequential framework design choice. Resolving execution strategy comes first because runtime dispatch and graph capture determine not only the debugging experience, but also what optimizations automatic differentiation and hardware mapping can subsequently exploit.
 
 ## Execution Problem {#sec-ml-frameworks-execution-problem-e1e1}
 
@@ -1153,48 +1153,15 @@ Static graphs\index{Static graph!optimization benefits} can achieve high perform
 
 The cost of this performance is reduced flexibility. Standard Python control flow (`if`, `for`) cannot depend on computed tensor values in static graphs. TensorFlow provides graph-level control flow primitives (`tf.cond` and `tf.while_loop`) that support data-dependent conditions, but these require special syntax that diverges from standard Python, making code harder to write and reason about. Debugging is difficult because stack traces point to graph construction code, not execution code. Error messages often reference symbolic node names rather than the actual operations that failed.
 
-#### Hybrid approaches: JIT compilation {#sec-ml-frameworks-hybrid-approaches-jit-compilation-8954}
+#### Modern compilation: Graph-capture JIT {#sec-ml-frameworks-modern-compilation-torchcompile-d025}
 
-**JIT compilation**\index{JIT compilation!fidelity vs. generality} pursues both eager debugging and graph optimization at once by capturing computation at runtime. The core trade-off is *fidelity vs. generality*. Tracing captures the execution path taken during a sample run, producing high fidelity to that path but missing branches not taken. Source-level compilation (scripting) analyzes supported program structure, preserving supported control flow but requiring a restricted language subset. Both approaches produce an intermediate representation (IR)[^fn-ir-intermediate-representation] that enables graph optimizations such as operator fusion, constant folding, dead code elimination, and buffer reuse.
+**JIT compilation**\index{JIT compilation!fidelity vs. generality} pursues both eager debugging and graph optimization at once by capturing computation at runtime. The core trade-off is *fidelity vs. generality*. Historically, approaches like PyTorch's deprecated TorchScript\index{TorchScript!tracing and scripting} forced developers to choose: either trace a single execution path (high fidelity to one run, but missing unexecuted branches) or script a restricted subset of Python (preserving branches, but rejecting dynamic language features) [@pytorchTorchScriptDocs]. Both approaches produced an intermediate representation (IR)[^fn-ir-intermediate-representation] to enable optimizations, but required significant manual intervention and suffered from silent correctness risks when tracing data-dependent control flow.
 
 [^fn-ir-intermediate-representation]: **Intermediate representation (IR)**\index{Intermediate representation!compiler pattern}: The "intermediate" captures this format's architectural role: a language-independent layer that decouples the frontend (Python capture) from the backend (hardware code generation), exactly as LLVM IR decouples C/Rust/Swift frontends from x86/ARM backends. ML frameworks adopted this compiler pattern because it reduces the $\mathcal{O}(M \times N)$ cost of supporting $M$ frontends and $N$ backends to $\mathcal{O}(M + N)$: a single graph capture mechanism (TorchDynamo, tf2xla) can target multiple hardware backends without rewriting the capture logic.
 
-The eager-vs.-compiled trade-off has a direct iron law consequence. JIT compilation amortizes the $\Latency$ (dispatch overhead) across the compiled region. Longer compiled regions mean more overhead amortized per operation, which explains why graph breaks\index{Graph break!causes and detection} are performance-critical: each break forces a return to eager dispatch, resetting the amortization.
+Modern JIT compilation narrows this trade-off by automatically capturing regions of eager code into optimized graphs\index{Graph compilation!eager-mode capture} with limited developer intervention. Graph-capture JIT systems follow a common architectural pattern. The first execution observes tensor operations, records a graph region guarded by explicit assumptions about shapes, dtypes, layouts, and control flow, lowers that region into an IR, applies fusion and layout optimizations, and caches executable code for later calls that satisfy the same guards.
 
-Historically, PyTorch's TorchScript\index{TorchScript!tracing and scripting} exemplified both strategies [@pytorchTorchScriptDocs]. TorchScript is now deprecated in favor of capture and export paths such as `torch.export` [@pytorchTorchScriptDocs; @pytorchExportDocs], but its two modes still make the fidelity-generality trade-off concrete. Tracing\index{JIT compilation!tracing} executed a function with example inputs and recorded the tensor operations observed on that path. Scripting\index{JIT compilation!scripting} instead compiled a restricted, type-annotated subset of Python source, preserving supported branches in the graph at the cost of rejecting unsupported Python objects, library calls, and metaprogramming. Both produced an IR with static types in static single-assignment (SSA)\index{Static single assignment!compiler IR} form, where each variable is assigned exactly once, so fusion, constant folding, and dead code elimination could run without the Python interpreter.
-
-The critical limitation of tracing is that a trace records operations from an observed path rather than preserving arbitrary Python control flow. @Lst-tracing-silent-failure illustrates the resulting correctness risk.
-
-::: {#lst-tracing-silent-failure lst-cap="**Tracing a Data-Dependent Branch**: Tracing records the path taken by the example input. PyTorch commonly emits a `TracerWarning` when a tensor value is converted to a Python condition because the resulting trace may not generalize."}
-
-```{.python}
-import torch
-
-
-def conditional_forward(x):
-    if x.sum() > 0:  # Data-dependent condition
-        return x * 2
-    else:
-        return x * 3
-
-
-traced = torch.jit.trace(conditional_forward, torch.tensor([1.0]))
-# Tracing captures ONLY the x.sum() > 0 branch
-# If input later has sum <= 0, traced version
-# still executes x * 2 branch
-```
-
-:::
-
-Tracing records the branch executed by the example input. In this example, converting the tensor condition to a Python Boolean commonly produces a `TracerWarning`; the resulting trace can still follow the captured branch for later inputs that require the other branch. Treating trace warnings as correctness failures is therefore essential when data-dependent Python control flow is present.
-
-The same hazard survives in modern graph-capture systems, which is why they guard each captured region with explicit assumptions about shapes and control flow.
-
-#### Modern compilation: Graph-capture JIT {#sec-ml-frameworks-modern-compilation-torchcompile-d025}
-
-The previous approaches force a choice between flexible eager execution and compiler-visible graphs. Modern JIT compilation narrows this trade-off by automatically capturing regions of eager code into optimized graphs\index{Graph compilation!eager-mode capture} with limited developer intervention.
-
-Graph-capture JIT systems follow the same architectural pattern across frameworks. The first execution observes tensor operations, records a graph region guarded by assumptions about shapes, dtypes, layouts, and control flow, lowers that region into an intermediate representation, applies fusion and layout optimizations, and caches executable code for later calls that satisfy the same guards. When eager fallback is enabled, unsupported Python code forms a graph boundary where execution returns to the eager runtime; a configuration requiring full-graph capture can instead report an error. PyTorch 2.0's `torch.compile` [@ansel2024] is a concrete instance of this pattern, but the systems idea is broader than the API: compilation pays only when captured regions are long enough and stable enough to amortize capture, lowering, code generation, and cache-management costs.
+When eager fallback is enabled, unsupported Python code forms a graph boundary where execution safely returns to the eager runtime. The eager-vs.-compiled trade-off therefore has a direct iron law consequence: JIT compilation amortizes the $\Latency$ (dispatch overhead) across the compiled region. Longer compiled regions mean more overhead amortized per operation, explaining why graph breaks\index{Graph break!causes and detection} are performance-critical. Each break forces a return to eager dispatch, resetting the amortization. PyTorch 2.0's `torch.compile` [@ansel2024] is a concrete instance of this pattern, but the systems idea is broader than the API: compilation pays only when captured regions are long enough and stable enough to amortize capture, lowering, code generation, and cache-management costs.
 
 Compilation therefore attacks the dispatch tax of @sec-ml-frameworks-eager-execution-dynamic-graphs-29c2 directly, and fusion adds a second saving in memory traffic. The physics of software overhead in notebook \ref{nbk-frameworks-physics-software-overhead} models both.
 
@@ -1856,7 +1823,6 @@ class Model7B:
 
 Resuming training requires restoring model weights and optimizer states (like momentum and variance) in lockstep. Frameworks expose internal state dictionaries via `state_dict()` for serialization to checkpoint files, which is necessary for fault tolerance but significantly increases storage and memory overhead.
 
-
 ::: {#chk-frameworks-execution-models .callout-checkpoint title="Execution models"}
 
 The choice of execution mode determines both developer velocity and model performance.
@@ -1960,9 +1926,17 @@ A single forward pass with a seeded tangent vector $\dot{\mathbf{x}}$ evaluates 
 
 Reverse-mode automatic differentiation\index{Automatic differentiation!reverse mode}\index{Automatic differentiation!reverse-mode backpropagation} inverts the traversal order to exploit the many-to-one geometry of neural network training\index{Backpropagation!computational asymmetry}. Instead of propagating tangents downstream from inputs, reverse mode propagates adjoints $\bar{v}_i = \partial \LossFunction / \partial v_i$ upstream from the scalar loss $\LossFunction$ to all parameters.
 
-Mathematically, while forward mode computes Jacobian-vector products ($\mathbf{J}\dot{\mathbf{x}}$), reverse mode evaluates vector-Jacobian products (VJPs):
-$$\mathbf{v}^T \mathbf{J} = \sum_{j=1}^M v_j \frac{\partial y_j}{\partial \mathbf{x}}$$
-Evaluating vector-Jacobian products avoids materializing the Jacobian matrix itself. Consider an intermediate layer mapping an input vector $\mathbf{x} \in \mathbb{R}^N$ to an output $\mathbf{y} \in \mathbb{R}^M$, where $N = M = 100{,}000$. The full Jacobian $\mathbf{J} \in \mathbb{R}^{M \times N}$ contains $10^{10}$ elements, requiring $40\text{ GB}$ of memory simply to store a single layer's derivatives in FP32. But backpropagation never needs this full matrix. Because training optimizes a single scalar loss $\LossFunction$, the backward pass only ever needs to propagate an upstream gradient vector $\mathbf{v} = \frac{\partial \LossFunction}{\partial \mathbf{y}} \in \mathbb{R}^{M}$. The runtime evaluates the product $\mathbf{v}^T \mathbf{J}$ directly, streaming vectors without ever materializing the massive $M \times N$ matrix in memory. Seeding the reverse sweep with $\bar{\LossFunction} = 1$ yields the complete parameter gradient vector $\nabla_{\theta}\mathcal{L}$ in a single backward pass, regardless of whether the model contains ten parameters or ten billion.
+Mathematically, while forward mode computes Jacobian-vector products ($\mathbf{J}\dot{\mathbf{x}}$), reverse mode evaluates vector-Jacobian products (VJPs). A VJP takes an upstream gradient vector and multiplies it by the local operation's Jacobian without ever materializing the full Jacobian matrix.
+
+Evaluating VJPs avoids explosive memory costs. Consider an intermediate layer mapping an input vector $\mathbf{x} \in \mathbb{R}^N$ to an output $\mathbf{y} \in \mathbb{R}^M$, where $N = M = 100{,}000$. The full Jacobian $\mathbf{J} \in \mathbb{R}^{M \times N}$ contains $10^{10}$ elements, requiring $40\text{ GB}$ of memory simply to store a single layer's derivatives in FP32. But backpropagation never needs this full matrix. Because training optimizes a single scalar loss $\LossFunction$, the backward pass only ever needs to propagate an upstream gradient vector $\mathbf{v} = \frac{\partial \LossFunction}{\partial \mathbf{y}} \in \mathbb{R}^{M}$.
+
+To see how VJPs sidestep the massive matrix, consider a simple element-wise operation like $\mathbf{y} = \text{ReLU}(\mathbf{x})$:
+
+1. **The inputs**: An input vector $\mathbf{x} = [-1.0, 2.0, 3.0]$ and an upstream gradient $\mathbf{v} = [0.5, 0.5, 0.5]$ flowing backward from the loss.
+2. **The local derivative**: The derivative of ReLU is $1$ if $x > 0$, else $0$. The local gradient is $\frac{\partial \mathbf{y}}{\partial \mathbf{x}} = [0, 1, 1]$.
+3. **The VJP**: Instead of building a $3 \times 3$ diagonal matrix and executing a matrix multiplication, the VJP simply computes an element-wise product: $\mathbf{v} \odot \frac{\partial \mathbf{y}}{\partial \mathbf{x}} = [0.0, 0.5, 0.5]$.
+
+By evaluating the product directly, the runtime streams vectors without ever materializing the massive $M \times N$ matrix in memory. Seeding the reverse sweep with $\bar{\LossFunction} = 1$ yields the complete parameter gradient vector $\nabla_{\theta}\mathcal{L}$ in a single backward pass, regardless of whether the model contains ten parameters or ten billion.
 
 Reverse mode operates on the same three-operation function $f(x) = x^2\sin(x)$ from @lst-auto_diff_intro, where $x$ reaches the output through two distinct computational paths: the square and the sine. @Algo-reverse-mode-ad-trace defines the reverse-mode traversal algorithm over a directed acyclic graph before tracing this concrete evaluation.
 
@@ -4020,7 +3994,6 @@ These micro-runtimes sacrifice dynamic flexibility to reduce footprint and make 
 
 The spectrum of execution strategies, from dynamic eager execution to static graph compilation and specialized micro-runtimes, requires developers to make deliberate trade-offs. The key execution-mode decisions summarize these architectural choices:
 
-
 The execution problem determines when computation happens and what optimizations are possible. Neural network training, however, requires a capability that no amount of clever scheduling can provide: the ability to compute gradients automatically.
 
 ## Framework Selection {#sec-ml-frameworks-selecting-framework-2949}
@@ -4117,7 +4090,6 @@ Framework viability over a multi-year production lifecycle depends on whether th
 A framework's operational cost often depends more on surrounding ecosystem infrastructure than on the core tensor API. Integration with model registries, serving systems, cluster orchestrators, and accelerator profiling tools accelerates deployment, but each layer introduces an upstream dependency. Custom C++ or CUDA kernel implementations, specialized serialization formats, and vendor-specific compilation passes make framework migration prohibitively expensive once an organization standardizes its pipeline. Preserving an architectural exit path requires deliberate decoupling: standardizing intermediate representations through open formats such as ONNX, isolating data ingestion pipelines from framework-specific tensor classes, and maintaining modular operator boundaries.
 
 The preceding sections evaluated execution, differentiation, and hardware abstraction as distinct architectural choices. In an executing model, however, these three systems operate simultaneously. A single training step is where they collide: eager dispatch or graph scheduling determines when work reaches silicon, reverse-mode automatic differentiation generates the backward pass while retaining intermediate activations, and hardware abstractions coordinate tensor layouts and kernel launches. Tracing one complete training step from input batch to parameter update reveals how these mechanisms integrate under physical machine constraints.
-
 
 ## Anatomy of a Training Step {#sec-ml-frameworks-putting-together-anatomy-training-step-c7f1}
 
@@ -4448,7 +4420,6 @@ Resolving the friction among these dimensions requires matching operator granula
 :::
 
 Balancing execution models, differentiation overhead, and hardware abstractions creates a high-performance execution engine when applied correctly. Yet because these mechanisms interact below the surface of standard Python APIs, engineers frequently rely on simplistic assumptions carried over from general-purpose programming. Examining where these assumptions break down reveals the subtle traps that derail real-world framework deployments.
-
 
 ## Fallacies and Pitfalls {#sec-ml-frameworks-fallacies-pitfalls-61ef}
 

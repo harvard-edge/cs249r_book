@@ -1,0 +1,265 @@
+### Algorithmic structure {#sec-network-architectures-algorithmic-structure-deb9}
+
+The Residual Network (ResNet) addressed the degradation problem in very deep plain networks: adding layers could increase training error despite sufficient capacity. By introducing "skip connections"\index{Skip connection!gradient flow} that improve optimization and gradient flow, it enabled networks of 50, 100, or even 1000 layers. The ResNet architecture won the ImageNet 2015 competition (with very deep 152-layer models), and ResNet-50 has become a widely used backbone and benchmark workload for computer vision.
+
+To understand the four-dimensional convolution tensor, build it up in two distinct physical stages: spatial filtering followed by channel accumulation. Imagine processing a single RGB image with three input channels ($C_{\text{in}} = 3$). A single output feature (such as an edge detector) requires its own dedicated $K \times K$ spatial filter for the Red channel, another for Green, and a third for Blue:
+
+1.  **Spatial filtering**: Slide each 2D filter slice across its corresponding color channel, computing 2D multiply-accumulate dot products across local spatial windows just like a classic image filter.
+2.  **Channel accumulation**: At each spatial coordinate $(i, j)$, sum the dot-product outputs across all three input channels into a single scalar value.
+
+This two-step process produces exactly one 2D output feature map\index{Feature map}. If the layer demands $C_{\text{out}} = 64$ distinct features, the system repeats this procedure 64 times using 64 independent filter volumes. Thus, the weight tensor naturally requires four physical dimensions: $\mathbf{W} \in \mathbb{R}^{K \times K \times C_{\text{in}} \times C_{\text{out}}}$ (Kernel Height $\times$ Kernel Width $\times$ Input Channels $\times$ Output Channels).
+
+In formal terms, @eq-convolution evaluates this forward pass by computing local, channel-wise dot products across every spatial coordinate:
+$$
+H^{(\ell)}_{i,j,k} = f\left(\sum_{m}\sum_{n}\sum_{c} W^{(\ell)}_{m,n,c,k}H^{(\ell-1)}_{i+m,j+n,c} + b^{(\ell)}_k\right)
+$$ {#eq-convolution}
+
+Here, $H^{(\ell)}_{i,j,k}$ denotes the activation at spatial position $(i,j)$ in output channel $k$ of layer $\ell$. The triple summation iterates across the filter dimensions: spatial offsets $(m,n)$ span the local kernel window (defining the layer's local receptive field),[^fn-receptive-field-growth] while $c$ ranges over all input channels. The entries $W^{(\ell)}_{m,n,c,k}$ of the weight tensor store the kernel weights connecting channel $c$ to channel $k$, and $b^{(\ell)}_k$ is the per-channel bias. Because the kernel weights $\mathbf{W}^{(\LayerIndex)}$ do not depend on the spatial coordinates $(i,j)$, the same filter parameters are reused at every coordinate.
+
+[^fn-receptive-field-growth]: **Receptive field**\index{Receptive field}: The input region influencing a particular output neuron. With $3{\times}3$ filters, receptive fields grow by 2 pixels per layer, so a neuron at layer 3 "sees" a $7{\times}7$ region. This growth rate constrains architecture depth: detecting objects spanning 100+ pixels in a $224{\times}224$ image requires either deep stacks of small filters (more layers, more memory for activations) or larger kernels (more parameters per layer), a fundamental depth-vs.-width trade-off in CNN design. \index{Receptive field!depth trade-off}
+
+Convolutional layers typically use small spatial kernels ($3{\times}3$ or $5{\times}5$) to maintain compact parameter footprints while stacking layers to widen the effective receptive field. @Fig-cnn diagrams this spatial mapping: blue projection rays connect an orange $3{\times}3$ receptive field within the dashed $7{\times}7$ input grid to a single target activation in the upper $5{\times}5$ output feature map. The interactive CNN Explainer tool [@wang2021] visualizes how these stacked sliding windows extract per-channel activation patterns across layers.
+
+::: {#fig-cnn fig-env="figure" fig-pos="htb" fig-cap="**Convolution Operation**: A $3{\times}3$ orange receptive field in a dashed $7{\times}7$ input maps to one cell of the violet $5{\times}5$ valid-convolution output. Applying a $3{\times}3$ filter to that receptive field requires 9 multiply-accumulate operations per input channel for each output value. Sharing the filter across positions encodes translation equivariance: the same edge detector works at any image location." fig-alt="A dashed 7-by-7 input grid contains one orange 3-by-3 receptive field. Blue lines connect that receptive field to one highlighted cell in a separate violet 5-by-5 output grid, as produced by valid stride-1 convolution."}
+
+```{.tikz}
+\scalebox{0.7}{%
+\begin{tikzpicture}[x={(-1,-0.4)}, y={(0.8,0.8)}, line join=round,font=\sffamily]
+\makeatletter
+\newif\ifboxdashed
+\boxdashedfalse % default: not dashed
+
+\tikzset{
+  box/.pic={
+    \pgfkeys{/box/.cd,#1}
+    \coordinate (origin) at (0,0);
+    % intersection points
+    \foreach \x in {0,...,\columns}{
+      \foreach \y in {0,...,\rows}{
+        \coordinate (pt-\x-\y\br) at ($ (origin) + \x*\cellsize*(1,0) + \y*\cellheight*(0,1) $);
+      }
+    }
+    % Drawing cells
+    \foreach \x in {0,...,\numexpr\columns-1}{
+      \foreach \y in {0,...,\numexpr\rows-1}{
+        \draw[fill=\ffill, line width=\linewidth, \ifboxdashed dashed\fi]
+          (pt-\x-\y\br) --
+          (pt-\the\numexpr\x+1\relax-\y\br) --
+          (pt-\the\numexpr\x+1\relax-\the\numexpr\y+1\relax\br) --
+          (pt-\x-\the\numexpr\y+1\relax\br) -- cycle;
+      }
+    }
+  }
+}
+
+\pgfkeys{
+  /box/.cd,
+  cellsize/.store in=\cellsize,
+  linewidth/.store in=\linewidth,
+  cellheight/.store in=\cellheight,
+  columns/.store in=\columns,
+  rows/.store in=\rows,
+  br/.store in=\br,
+  ffill/.store in=\ffill,
+  dashed/.code={\boxdashedtrue},
+  columns=1,
+  rows=3,
+  br=A,
+  ffill=red,
+  cellsize=0.5pt,
+  cellheight=0.5pt,
+  linewidth=0.5pt
+}
+\makeatother
+
+\pic at (0,0.66) {box={columns=5,rows=5,br=A,ffill=violet!20,cellsize=0.3pt,cellheight=0.3pt,linewidth=0.5pt}};
+\pic at (0.3,0.96) {box={columns=1,rows=1,br=B,ffill=violet!50,cellsize=0.3pt,cellheight=0.3pt,linewidth=0.5pt}};
+
+\pic at (1,-4) {box={columns=7,rows=7,br=C,ffill=none,linewidth=0.5pt,dashed}};
+\pic at (2,-3) {box={columns=3,rows=3,br=E,ffill=orange,linewidth=0.35pt}};
+ \draw[blue](pt-0-0B)--(pt-0-0E);
+\draw[blue](pt-0-1B)--(pt-0-3E);
+\draw[blue](pt-1-1B)--(pt-3-3E);
+\draw[blue](pt-1-0B)--(pt-3-0E);
+\pic at (0,0.66) {box={columns=5,rows=5,br=A,ffill=violet!20,cellsize=0.3pt,cellheight=0.3pt,linewidth=0.35pt}};
+\pic at (0.3,0.96) {box={columns=1,rows=1,br=B,ffill=violet!70,cellsize=0.3pt,cellheight=0.3pt,linewidth=0.35pt}};
+\end{tikzpicture}}
+```
+
+:::
+
+Applying a CNN to $28{\times}28$ MNIST images demonstrates the difference in state representation. Rather than flattening the image into a 784-element vector that destroys spatial adjacency, each convolutional layer applies a bank of filters\index{Convolution!kernel} (for example, 32 filters of size $3{\times}3$) directly to the 2D grid. With unit stride and padding to preserve border dimensions, the layer outputs a $28{\times}28{\times}32$ activation tensor preserving the spatial grid. Each coordinate holds 32 distinct feature measurements extracted from its immediate neighborhood.
+
+Preserving spatial topology changes how execution units access memory. Instead of loading an unshared weight matrix once per sample as in an MLP, a convolutional layer streams input feature maps through hardware registers while keeping compact filter weights pinned in fast on-chip SRAM or register files. This arithmetic pattern drives the memory-hierarchy optimizations of AI accelerators, where loop tiling and parallel channel reduction relieve high-bandwidth memory (HBM) traffic.
+
+This data reuse pattern is guaranteed by translation equivariance: translating the input produces an identical spatial translation in the output feature map. For systems engineering, equivariance ensures that the computational schedule and memory access geometry remain invariant across spatial coordinates.
+
+Equivariance and invariance govern how an architecture responds to spatial transformations. An operator $f$ is *equivariant* to a transformation $\mathcal{T}$ if transforming the input transforms the output by the same operator (@eq-equivariance):
+$$
+f(\mathcal{T}(\mathbf{x})) = \mathcal{T}(f(\mathbf{x}))
+$$ {#eq-equivariance}
+
+For a stride-1 convolutional layer without boundary padding effects, translating the input by vector $\mathbf{v} = (v_1, v_2)$ shifts the resulting feature maps by exactly $\mathbf{v}$. Spatial coordinate information propagates deterministically through the layer. By contrast, an operator is *invariant* to $\mathcal{T}$ if transforming the input leaves the output unchanged (@eq-invariance):
+$$
+f(\mathcal{T}(\mathbf{x})) = f(\mathbf{x})
+$$ {#eq-invariance}
+
+A global average pooling layer\index{Pooling!global average} over an entire feature map exhibits translation invariance: shifting the input alters the spatial locations of activations, but averaging across all spatial positions collapses coordinates into a scalar that is identical regardless of where the features appeared.
+
+This mathematical distinction dictates where equivariance must be maintained and where invariance should be introduced across the network hierarchy. Tasks such as object detection and semantic segmentation require equivariance through the final layer: bounding-box coordinates and per-pixel masks must track object coordinates precisely. Classification tasks, by contrast, require equivariance in intermediate feature extractors to preserve relative spatial relations ("eyes above nose"), while the final layers introduce translation invariance via pooling to collapse spatial coordinates into a class probability vector.
+
+Re-indexing the convolution sum under a shift confirms that stride-1 convolution is translation equivariant up to boundary conditions. An equivariant\index{Equivariance!translation} convolutional layer preserves coordinate information, whereas an invariant pooling layer discards spatial coordinates entirely. Example \ref{exmp-nn-architectures-equivariance-feature-detection} verifies this tracking through explicit matrix operations.
+
+::: {#exmp-nn-architectures-equivariance-feature-detection .callout-example title="Equivariance: Feature detection"}
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.2}
+```
+**Setup**: Consider a $7{\times}7$ image with a vertical edge at column 3:
+$$
+\mathbf{x} = \begin{bmatrix}
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 & 0 & 0
+\end{bmatrix}
+$$
+
+Vertical edge detector filter:
+$$
+\mathbf{W} = \begin{bmatrix}
+-1 & 0 & 1 \\
+-1 & 0 & 1 \\
+-1 & 0 & 1
+\end{bmatrix}
+$$
+
+**Convolving original image**:
+
+```{=latex}
+\renewcommand{\arraystretch}{1.15}
+```
+
+Output feature map shows positive activation where the filter transitions from dark to bright (left side of edge) and negative activation where it transitions from bright to dark (right side):
+$$
+f(\mathbf{x}) = \begin{bmatrix}
+3 & 0 & -3 & 0 & 0 \\
+3 & 0 & -3 & 0 & 0 \\
+3 & 0 & -3 & 0 & 0 \\
+3 & 0 & -3 & 0 & 0 \\
+3 & 0 & -3 & 0 & 0
+\end{bmatrix}
+$$
+
+**Shifted input** (edge moved to column 5):
+$$
+\mathcal{T}_2 \mathbf{x} = \begin{bmatrix}
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 0 & 1 & 0 & 0
+\end{bmatrix}
+$$
+
+**Convolving shifted image**:
+$$
+f(\mathcal{T}_2 \mathbf{x}) = \begin{bmatrix}
+0 & 0 & 3 & 0 & -3 \\
+0 & 0 & 3 & 0 & -3 \\
+0 & 0 & 3 & 0 & -3 \\
+0 & 0 & 3 & 0 & -3 \\
+0 & 0 & 3 & 0 & -3
+\end{bmatrix} = \mathcal{T}_2(f(\mathbf{x}))
+$$
+
+**Systems insight**: The feature activation shifts by the same amount as the input, demonstrating equivariance. The network knows the edge is at column 5 in the shifted image, not just that an edge exists somewhere.
+
+```{=latex}
+\endgroup
+```
+
+:::
+
+```{python}
+#| echo: false
+#| label: cnn-parameter-sharing
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CNN PARAMETER SHARING COMPARISON
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Parameter sharing prose and equivariance section
+# │
+# │ Goal: Quantify the massive efficiency gain of weight sharing.
+# │ Show: The 5,000× parameter reduction of 3 × 3 convolution vs. dense connections.
+# │ How: Compare weights per neuron for ImageNet-sized inputs.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, fmt_count, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class CNNSharing:
+    """
+    Namespace for CNN Parameter Sharing Comparison.
+    Scenario: MLP vs CNN params for 224 × 224 × 3 input.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # ImageNet input dimensions
+    img_dim = 224
+    img_channels = 3  # RGB
+
+    # CNN: 3x3 filter
+    cnn_k = 3
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # MLP: fully connected to all pixels
+    mlp_img_params = img_dim * img_dim * img_channels
+
+    # CNN: 3x3 filter across all input channels
+    cnn_filter_params = cnn_k * cnn_k * img_channels
+
+    # Parameter reduction
+    reduction = mlp_img_params / cnn_filter_params
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(round(reduction) == 5575, f"Parameter reduction mismatch: {reduction}")
+    check(reduction > 5000, f"Narrative claim: ~5000x parameter reduction, got {reduction:.1f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    mlp_input_pixels_str = fmt_count(mlp_img_params, label="input pixel")
+    cnn_filter_params_str = fmt_count(cnn_filter_params, label="parameter", commas=False)
+    cnn_param_reduction_mult_str = fmt_multiple(reduction, precision=1, commas=True)
+```
+
+Parameter efficiency is the most immediate systems consequence of translation equivariance. Enforcing weight sharing decouples parameter capacity from the input resolution. For example, processing a $224{\times}224$ RGB image with an MLP requires each hidden neuron to connect to all `{python} CNNSharing.mlp_input_pixels_str`. A CNN with a $3{\times}3$ filter requires only `{python} CNNSharing.cnn_filter_params_str` per filter, reused across all $224{\times}224$ spatial positions. This represents approximately `{python} CNNSharing.cnn_param_reduction_mult_str` fewer parameters per feature detector. Compacting the parameter footprint keeps model weights resident in accelerator SRAM or L2 cache, enabling larger batch sizes without spilling to external DRAM.
+
+The computational regularity enforced by equivariance directly benefits hardware execution. Because the identical sliding window operation executes across every spatial coordinate, the compute pattern maps cleanly onto SIMD vector units and systolic arrays. Modern GPUs and TPUs exploit this uniform structure: execution pipelines issue identical instructions across spatial tiles without control-flow divergence. Overlapping receptive fields mean that neighboring output coordinates share input activations, creating opportunities for shared-memory caching and algorithmic data restructuring (such as the im2col transformation) that saturate hardware execution units.
+
+Equivariance also increases sample efficiency, reducing training pipeline overhead. When a network updates a filter to recognize a feature at one coordinate, parameter sharing ensures that the feature is recognized across all spatial coordinates simultaneously. The model does not require separate training examples to learn the same feature at different pixel offsets, functioning as structural data augmentation. This sample efficiency reduces the total training iterations, dataset storage, and host-to-device I/O bandwidth required to reach target accuracy.
+
+Convolution's translation equivariance is one instance of a general principle: data symmetries can be embedded as equivariances in the architecture. Group-equivariant CNNs\index{Group-equivariant CNN} [@cohen2016group] extend the construction to rotations and reflections for satellite and medical imagery, where orientation does not determine meaning. For systems engineering, stronger symmetry constraints often produce smaller models, but specialized equivariances may require custom operations, such as rotation convolutions, that need either hardware support or efficient software implementations.
+
+In practice, perfect equivariance is often compromised by implementation constraints. Asymmetric padding\index{Convolution!padding} at boundaries introduces edge artifacts that break strict translational symmetry. Strided downsampling\index{Convolution!stride} introduces spatial aliasing, where a one-pixel shift in the input causes sub-sampling phase shifts in the output feature map. Batch normalization layers also perturb spatial equivariance if activation statistics are computed or applied across spatial locations inconsistently. Modern production networks accept these deviations because the computational savings of striding and the training stability of normalization outweigh the loss of exact mathematical equivariance.
+
+::: {#chk-nn-architectures-spatial-inductive-bias .callout-checkpoint title="Spatial inductive bias"}
+
+CNNs succeed because they match the structure of image data. Verify you understand how:
+
+- [ ] **Parameter sharing**: how does using the same filter across the image reduce parameter count by orders of magnitude compared to MLPs?
+- [ ] **Translation equivariance**: why does shifting the input image result in a corresponding shift in the feature map?
+- [ ] **Compute-bound convolution**: how does filter reuse raise arithmetic intensity, and how would comparing that intensity with the target machine's roofline balance establish whether the layer is compute bound?
+
+:::
+
+These structural properties instantiate the spatial inductive bias introduced in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e: by restricting connectivity to local neighborhoods and sharing parameters across all coordinates, CNNs enforce the prior that visual primitives are localized and shift-equivariant. Reusing identical kernel weights across the entire feature map reduces parameter storage by orders of magnitude relative to dense layers, restricting the hypothesis space to functions that preserve geometric structure.
+
+This layered structure naturally implements hierarchical representation learning [@bengio2013]. Early layers detect low-level features\index{Feature extraction!hierarchical} (edges and color gradients) across small receptive fields, while successive layers compose these primitives into intermediate textures, object parts, and semantic categories. Stacking convolutional layers expands the effective receptive field: with fixed $K{\times}K$ kernels and unit stride, receptive-field side length grows by $K-1$ pixels per layer, while receptive-field area scales quadratically until it spans the entire input dimension. How efficiently accelerators execute this expanding hierarchy depends on how sliding-window stencils map onto parallel execution pipelines.
+

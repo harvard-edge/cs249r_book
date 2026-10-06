@@ -32,6 +32,8 @@ engine: jupyter
 
 _Why does serving change the optimization priorities that made training successful?_
 
+Think of training as a cargo ship and serving as a fleet of delivery drones. A cargo ship is optimized to move massive tonnage over long periods; it is highly efficient in aggregate but useless for delivering a single pizza. A drone is built to drop off one pizza in twenty minutes. They both move goods, but their engineering constraints are completely different.
+
 Training and serving emphasize different operating objectives. Training usually maximizes throughput across large batches and long runs, while serving must answer individual requests within latency targets. Training amortizes hardware costs across many examples; serving pays a tax on each request, where small inefficiencies compound into operational debt. A system answering a billion requests a day turns one millisecond saved per request into more than ten days of compute saved every day. This shift is why models that train efficiently may still serve poorly. The live system has an end-to-end latency budget, so queuing, preprocessing, network transit, and postprocessing can erase an optimization confined to the model. Batch-heavy architectures and memory-intensive optimizations designed to saturate accelerators may not suit bursty, latency-critical, cost-sensitive production traffic. A response that arrives after the user has given up has no value, however accurate it is. Serving, however, is more than a latency problem. A serving system must handle traffic that varies between peak and trough, reserve headroom for failures, shed load or degrade gracefully under overload, and remain predictable as request mix and demand change over time. Capacity sized for average load fails at the peak, and capacity sized for the peak sits idle and paid for the rest of the day. Models that proved their value during training and survived compression and benchmarking eventually arrive at the serving layer. The question shifts from whether a model works to whether it works reliably at scale under production conditions. Serving infrastructure is where ML systems meet users, and sustaining that interaction requires different engineering from creating the model. It is also where the trained algorithm meets live data within the machine's latency budget, bringing all three D·A·M constraints together on each request.
 
 ::: {.content-visible when-format="pdf"}
@@ -82,7 +84,7 @@ Dynamic inference\index{Dynamic inference!real-time prediction} (also called onl
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Infrastructure
-from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_usd, fmt_time, fmt_rate
 
 class CostLatencyCalc:
     """Quantifies the economic trade-off between latency and hardware cost per million queries."""
@@ -151,7 +153,7 @@ Scenario B (high throughput): Batch size 8.
 # │ How: Compare total batch time to per-request latency for photo classification.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_count, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_count, fmt_time, check
 
 class StaticBatchCalc:
     """Contrasts static vs. dynamic inference economics for photo classification."""
@@ -187,7 +189,6 @@ Traditional serving optimizes for minimizing latency ($\EndToEndRequestLatency \
 :::
 
 Whether a system executes a single deterministic forward pass or an extended reasoning trajectory, deciding when predictions are computed resolves only the temporal dimension of serving. Equally binding is the spatial dimension—where the model physically executes—because physical placement dictates memory hierarchy limits, network boundaries, and the hardware budget available to the serving stack.
-
 
 Model **serving**\index{Serving!production deployment}\index{Model serving!paradigm shift} must sustain the operating targets that benchmarking evaluates under specified conditions. Live traffic tests that operating envelope continuously, so measurement remains part of the service's lifecycle. In offline training, systems maximize aggregate throughput by packing large batches to amortize weight transfers from high-bandwidth memory (HBM) and saturate matrix arithmetic units. In online serving, requests arrive stochastically from independent clients and must return within strict service-level objectives (SLOs). The primary engineering priority therefore inverts from long-run throughput to per-request latency. This **serving inversion**\index{Serving inversion!throughput-to-latency shift} restructures the balance of terms in the iron law of ML systems ($\Time = \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency$). When an application cannot delay requests to assemble large batches, it must process small batches or individual inputs ($\BatchSize=1$). For weight-dominated operations, small batches reduce arithmetic intensity and can shift execution from compute-bound matrix multiplications toward memory-bandwidth-bound transfers ($\DataVolume/\Bandwidth$). Simultaneously, the latency term $\Latency$\index{Latency!serving constraint} expands beyond microsecond accelerator kernel launches to include network transit, request serialization, and host orchestration, often becoming the binding constraint on end-to-end response time.
 
@@ -267,7 +268,7 @@ The deployment tiers differ first in their operating envelopes. @Tbl-serving-spe
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
 from mlsysim import Systems
-from mlsysim.fmt import MarkdownStr, check, fmt, fmt_time, fmt_rate, fmt_memory, fmt_memory_capacity, fmt_energy
+from mlsysim.fmt import fmt_percent, fmt_multiple, MarkdownStr, check, fmt, fmt_time, fmt_rate, fmt_memory, fmt_memory_capacity, fmt_energy
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetServingSpectrum:
@@ -373,7 +374,6 @@ Applying those envelopes to one image-classification workload, @tbl-resnet-servi
 ```{=latex}
 \endgroup
 ```
-
 
 While host isolation reduces service-time variability, production serving confronts an impedance mismatch at the system boundary. User requests arrive stochastically—bursting milliseconds apart, followed by seconds of silence—whereas accelerator compute engines demand steady streams of uniform, dense batches to saturate memory bandwidth and functional units. Bridging this gap requires a specialized serving architecture that decouples network ingress from execution scheduling, absorbing arrival bursts and packing irregular inputs into dense batches without violating latency SLOs.
 
@@ -681,9 +681,9 @@ This architecture serves three core functions:
 
 First, concurrency management. Serving engines employ asynchronous event loops (such as `epoll` or `kqueue`) and worker thread pools to handle thousands of concurrent client TCP connections without blocking execution threads. Isolating client network I/O lets other ready requests advance while one client has a slow or stalled transfer.
 
-Second, request transformation\index{Request transformation!tensor formats}. The server decodes serialized network payloads into contiguous, aligned memory buffers matching the tensor layout required by the underlying execution engine. For example, 4D vision tensors may use NCHW[^fn-nchw-nhwc-serving]\index{Tensor memory layout!NCHW} or NHWC\index{Tensor memory layout!NHWC} format. On modern accelerators, matrix multiplication units (such as Tensor Cores) load 8- or 16-element channel vectors using coalesced memory transactions that favor channels-last (NHWC) layout. If the execution kernel requires a different physical layout, the server must materialize that layout. `torch.permute` alone creates a view with reordered strides; a contiguous copy or explicit transpose kernel moves the data when required. Such materialization performs little arithmetic ($I \approx 0$ FLOP/byte), so memory traffic or launch overhead can dominate its cost. A device-local conversion consumes device memory bandwidth; PCIe traffic enters only when data also crosses the host-device boundary.
+Second, request transformation\index{Request transformation!tensor formats}. The server decodes serialized network payloads into memory layouts the execution engine expects. For example, images are usually stored in 4D tensors: Batch (N), Channels (C), Height (H), and Width (W). The exact order matters for performance. Some models expect the channels grouped together at the beginning (NCHW)[^fn-nchw-nhwc-serving]\index{Tensor memory layout!NCHW}, while hardware like Tensor Cores runs fastest when the channels are packed at the end (NHWC)\index{Tensor memory layout!NHWC}. If the model and the hardware disagree, the server has to physically rearrange the data in memory before doing the math. This reshaping uses very little compute power, but moving the data takes time and memory bandwidth, which can become an unexpected bottleneck.
 
-[^fn-nchw-nhwc-serving]: **NCHW and NHWC (tensor memory layouts)**\index{Tensor layout!NCHW vs. NHWC}: These acronyms encode the dimension order of 4D image tensors: N (batch), C (channels), H (height), and W (width). In a contiguous NCHW tensor, each channel plane is contiguous; in NHWC, channels for one spatial position are adjacent. Optimized kernels may favor either layout, and a semantic mismatch can scramble values even when the element count is correct. Serving code should therefore make both dimension meaning and any physical-layout conversion explicit.
+[^fn-nchw-nhwc-serving]: **NCHW and NHWC (tensor memory layouts)**\index{Tensor layout!NCHW vs. NHWC}: NCHW stores all the red pixels, then all the green, then all the blue. NHWC stores the RGB values for the first pixel together, then the RGB for the second, and so on. Optimized code usually demands one specific layout. Mixing them up causes subtle errors, so serving code must explicitly convert the layout when needed.
 
 Third, model lifecycle management. The runtime establishes the CUDA context before allocating device memory (VRAM) and loading device-resident weights. It also pins host memory buffers for DMA and executes representative warmup passes to trigger deferred compilation and allocation before admitting live client traffic. While enterprise model registries, canary releases, and rollback policies belong to @sec-ml-operations, the serving engine governs local state: validating that active model instances are warmed, resident in accelerator memory, and ready for dispatch.
 
@@ -728,7 +728,7 @@ A concrete payload comparison quantifies how the serialization format alters wir
 # │ How: Calculate parsing overhead and wire size for a 1000-float payload.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory, fmt_percent, fmt_multiple, fmt_multiple
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory, fmt_percent, fmt_multiple, fmt_multiple
 from mlsysim.core.units import byte, KB, microsecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -811,7 +811,7 @@ For dynamic inference systems, the serving inversion established in @sec-model-s
 # │ How: Calculate the ratio between mean latency and the p99 threshold.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_multiple, check
 
 class TailLatencyRatioCalc:
     """Demonstrates why mean latency misleads by showing the p99-to-mean ratio."""
@@ -874,7 +874,7 @@ Understanding where latency accumulates requires instrumenting each stage along 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, MarkdownStr, fmt, fmt_percent, fmt_time, check
 
 class LatencyTableCalc:
     """Decomposes the ResNet-50 request lifecycle into processing phases with percentages."""
@@ -931,7 +931,7 @@ class LatencyTableCalc:
 # │ How: Compare phase durations before and after model acceleration.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_percent, fmt_time, check
 from mlsysim.physics import calc_amdahls_speedup
 
 class LatencyBudgetCalc:
@@ -1002,7 +1002,7 @@ In the ResNet-50 scenario, dense convolutional arithmetic dominates the model st
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DLRM SERVING LATENCY (IO-BOUND EXAMPLE)
@@ -1015,7 +1015,7 @@ from mlsysim.fmt import fmt_int
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import MarkdownStr, fmt, fmt_percent, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, MarkdownStr, fmt, fmt_percent, fmt_time, check
 
 class DlrmLatencyCalc:
     """Models DLRM serving latency to contrast I/O-bound vs. compute-bound bottlenecks."""
@@ -1088,7 +1088,7 @@ Together, @tbl-model-serving-resnet50-latency-budget and @tbl-model-serving-dlrm
 # │ How: Apply Amdahl's Law using the noninference latency share.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_percent, fmt_time, check
 
 class AmdahlServingCalc:
     """Applies Amdahl's Law to show that 10× model speedup yields only ~1.8× end-to-end improvement."""
@@ -1151,7 +1151,7 @@ Beyond model forward-pass execution, every request pays an infrastructure "tax" 
 # │ How: Sum lower/upper bounds and divide by the 5 ms budget.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_percent
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, check, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ServingTaxMicrosecondsCalc:
@@ -1233,7 +1233,7 @@ $$\frac{\text{Throughput}(r_2)}{\text{Throughput}(r_1)} = \left(\frac{r_1}{r_2}\
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Datasets
-from mlsysim.fmt import fmt, fmt_multiple, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_multiple, check
 
 class ResolutionScalingCalc:
     """Quantifies the quadratic relationship between input resolution and inference slowdown."""
@@ -1276,7 +1276,7 @@ Doubling resolution from `{python} ResolutionScalingCalc.r1_str` to `{python} Re
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
 from mlsysim.core.units import TFLOP, second, GB
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_memory, fmt_flop_rate, fmt_bandwidth
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_arithmetic_intensity, fmt_memory, fmt_flop_rate, fmt_bandwidth
 
 class ResolutionBottleneckCalc:
     """Shows that higher resolution raises arithmetic intensity: quadratic FLOPs amortize the fixed weight traffic."""
@@ -1367,7 +1367,7 @@ Different deployment contexts impose distinct resolution requirements shaped by 
 # │ How: List benchmark results for adaptive vs. static high resolution.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_count, fmt_percent
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_count, fmt_percent
 
 class AdaptiveResolutionCalc:
     """Demonstrates 1.4× throughput gain from content-aware resolution selection."""
@@ -1588,7 +1588,6 @@ A tensor-oriented format[^fn-safetensors-zerocopy-loading] bypasses interpreter-
 
 :::
 
-
 Even with mathematical parity guaranteed between training and serving pipelines, a newly provisioned serving instance cannot process queries until its state is instantiated across hardware memory hierarchies [@romero2021infaas]. This initialization latency, known as cold start\index{Cold start!scaling events}, dictates system responsiveness during deployments, autoscaling events, and failure recovery.
 
 ::: {#dfn-model-serving-cold-start .callout-definition title="Cold start"}
@@ -1627,7 +1626,7 @@ In multi-process serving deployments where multiple worker processes share a sin
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_time, fmt_time_range, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_time, fmt_time_range, check
 
 class ColdStartCalc:
     """Decomposes cold start latency showing precompiled TensorRT reduces startup from ~35 s to ~1.5 s."""
@@ -1738,7 +1737,7 @@ When the aggregate size of all models exceeds GPU memory capacity, the serving s
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.fmt import check
+from mlsysim.fmt import fmt_percent, fmt_multiple, check
 
 class ModelSwapCalc:
     """Quantifies the latency cost of swapping a reference model over PCIe Gen4."""
@@ -1774,6 +1773,8 @@ Once a model is loaded, warmed up, and producing predictions consistent with tra
 
 ## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
 
+Imagine a grocery store checkout line. If customers arrive faster than the cashier can scan their items, a line forms. Even if the cashier is fast on average, a sudden busload of customers will cause long waits for everyone at the back of the line. Queuing theory provides the mathematics to describe this everyday frustration in computing terms.
+
 When arrival streams fluctuate, queuing theory\index{Queuing theory!serving systems} formalizes how contention for shared physical resources—accelerator execution queues, host-to-device PCIe transfers, and memory buses—degrades latency distributions. Its governing laws explain why seemingly well-provisioned inference services experience sharp, nonlinear latency explosions as utilization approaches capacity.
 
 ### Little's Law {#sec-model-serving-littles-law-9352}
@@ -1797,7 +1798,7 @@ Capacity planning begins by determining system concurrency\index{SLO!capacity pl
 # │ How: Apply Little's Law to throughput and mean time in system.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_rate
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CapacityPlanningAnchor:
@@ -1850,7 +1851,7 @@ Little's law holds regardless of the arrival distribution, service-time distribu
 # │ How: Apply Little's Law to throughput and mean time in system.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_rate
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CapacityPlanning:
@@ -1901,7 +1902,7 @@ Because @eq-littles-law binds these three variables, constraining any two dictat
 # │ How: Calculate formation delay given arrival rate and batch size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_time
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, check, fmt, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BatchingTax:
@@ -1981,7 +1982,7 @@ The standard M/M/1 formulation assumes exponentially distributed service times. 
 # │ How: Latency multiple = 1/(1-rho); example latency = multiple x 5 ms service.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_percent, fmt_time, fmt_multiple, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_percent, fmt_time, fmt_multiple, check
 from mlsysim.core.units import ms
 
 class UtilizationLatency:
@@ -2035,7 +2036,6 @@ In single-machine capacity planning, the serving unit corresponds to the physica
 
 While load balancers distribute requests *across replicas*, achieving predictable latency also requires controlling what happens *within each machine*. The operating system environment introduces its own sources of variability.
 
-
 ### Multi-server considerations {#sec-model-serving-multiserver-considerations-00fc}
 
 A single serving node forms the fundamental building block of inference infrastructure. Single-node queuing dynamics govern resource saturation and establish the baseline performance characteristics that persist when horizontally replicated across a cluster.
@@ -2075,7 +2075,7 @@ Before exploring software mitigations like hedging, systems engineers must first
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import (
+from mlsysim.fmt import fmt_percent, fmt_multiple, (
     fmt_int,
     fmt,
     fmt_count,
@@ -2253,7 +2253,6 @@ Beyond scheduled processes, asynchronous hardware interrupts introduce another s
 
 Isolating physical cores, locking host memory, and shielding interrupt lines reduce specific sources of operating system noise. The resulting service-time distribution still needs measurement under the intended load. Even a predictable single-node execution path leaves a scheduling challenge: processing requests sequentially can underuse accelerator resources when each request exposes little parallel work. To achieve high throughput within latency deadlines, the internal software architecture of the serving engine must coordinate irregular, asynchronous request streams into structured, hardware-saturating batches.
 
-
 ## Throughput Optimization {#sec-model-serving-throughput-optimization-18d1}
 
 Consider a representative ResNet-50 classifier on a V100\index{V100!batching throughput} GPU\index{GPU!batching utilization} operating at batch size one. At small batches, limited weight reuse and repeated kernel launches can restrict throughput; their relative contribution requires a measured execution trace. The GPU achieves only 15 percent hardware utilization and 200 images per second. Processing 32 images at once reaches 95 percent utilization and 1,280 images per second—a 6.4$\times$ throughput improvement on identical hardware—because the loaded weights are reused across inputs in on-chip memory, amortizing both memory bandwidth demands and kernel launch overheads. **Batching**\index{Batching!training vs. serving}[^fn-batch-serving-tradeoff] is the primary lever for improving serving economics, but its operational constraints differ sharply between training and serving [@crankshaw2017clipper]. *Training* batches maximize throughput by grouping hundreds or thousands of samples together with no constraint on individual sample latency. *Serving* batches must balance accelerator saturation against individual request deadlines, ensuring that no early-arriving input waits excessively for a batch to form. An inference server resolves this tension through **dynamic batching**\index{Dynamic batching!definition}, adjusting batch size at runtime to match incoming request arrivals.
@@ -2287,7 +2286,7 @@ For workloads that underuse the device at small batches, increasing batch size c
 # │ How: Contrast batch-1 and batch-32 performance including window wait times.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_time, fmt_rate, fmt_percent, check
 
 class BatchThroughputCalc:
     """Quantifies the 6.4× throughput gain of batch-32 over batch-1 and its latency cost."""
@@ -2490,7 +2489,7 @@ $$\mathbb{E}[L_{\text{lat,wait}}] = \frac{T_{\text{window}}}{2}$$ {#eq-avg-wait}
 # │ How: Calculate average wait time assuming uniform request arrival.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_percent, fmt_time, check
 
 class BatchingBudgetCalc:
     """Shows that a 20 ms batching window consumes 20% of a 50 ms SLO before any computation."""
@@ -2537,7 +2536,7 @@ Here $k$ is a nonnegative integer count of arrivals in the window.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt, fmt_percent, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_percent, fmt_time, check
 from mlsysim.core.units import ms
 
 class BatchVariability:
@@ -2614,7 +2613,7 @@ For ResNet-50 on a V100 GPU, service time approximately scales as $\BatchService
 # │ How: Contrast throughput and latency while applying Iron Law efficiency terms.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_time, fmt_rate, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_int, fmt_percent, fmt_time, fmt_rate, check
 
 # Helper functions at module scope (used by class body and slo-violation-calc)
 def service_time_value(b, _fixed=5.0 * ms, _per_image=0.6 * ms):
@@ -2739,7 +2738,7 @@ $$B_{\text{SLO}} = \max\left\{\BatchSize : \frac{T_{\text{window}}}{2} + \BatchS
 # │ How: Contrast throughput and average wait for conservative vs. long windows.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_percent, fmt_time, fmt_rate
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, MarkdownStr, check, fmt, fmt_percent, fmt_time, fmt_rate
 
 # ┌── LEGO ───────────────────────────────────────────────
 class BatchingOptimization:
@@ -2826,7 +2825,7 @@ The aggressive configuration assumes `{python} BatchingOptimization.throughput_g
 # │ How: Model request arrival and batch assembly to compare mean vs. envelope.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_time, check
 
 class SloViolationCalc:
     """Compares mean latency with a conservative tail envelope under Poisson arrivals."""
@@ -2937,7 +2936,7 @@ The nondominated batching configurations form a Pareto frontier\index{Pareto fro
 # │      config (LOAD); the caption's throughput gain and p99 ratio are derived.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, fmt_multiple, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_time, fmt_rate, fmt_percent, fmt_multiple, check
 from mlsysim.core.units import ms
 
 class ParetoBatching:
@@ -3009,7 +3008,7 @@ The Pareto frontier in @tbl-pareto-batching illustrates why configuration must w
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt, check, fmt_time, fmt_rate
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, check, fmt_time, fmt_rate
 
 class PracticalConfigCalc:
     """Derives a production batching config: 30% SLO budget yields a 12 ms window for 500 QPS."""
@@ -3130,7 +3129,7 @@ where $L_{\text{lat,SLO}}$ is the latency SLO, $\BatchServiceTimeSvc$ is the ser
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt, check, fmt_time
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, check, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrafficAdaptiveBatchingCalc:
@@ -3237,7 +3236,7 @@ Streaming traffic correlates arrivals through sensor synchronization, making bat
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int
 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MOBILE SERVING LATENCY AND ENERGY
@@ -3250,7 +3249,7 @@ from mlsysim.fmt import fmt_int
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt, fmt_fps, fmt_int, fmt_time, fmt_memory, fmt_power, fmt_energy, fmt_count, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_fps, fmt_int, fmt_time, fmt_memory, fmt_power, fmt_energy, fmt_count, check
 
 class MobileServingCalc:
     """Mobile vision pipeline: JPEG decode dominates energy; NPU handles inference at 82% utilization."""
@@ -3396,7 +3395,7 @@ from mlsysim.core.units import *
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt, fmt_rate
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_rate
 
 class BlackFridayCalc:
     """Models the nonlinear failure mode of serving systems under a 10× traffic spike."""
@@ -4042,251 +4041,6 @@ pics/pencil/.style = {
 
 This pipeline turns serving into an orchestration problem: because every stage draws from the same latency budget, optimizing accelerator kernel execution yields diminishing returns if data transformation or queueing delays dominate. Before optimizing any individual stage, the system must decide whether predictions are computed ahead of time or on demand.
 
-## LLM Serving {#sec-model-serving-llm-serving-b8bf}
-
-Large language models\index{LLM serving!token generation} make three properties far more prominent than in fixed-output serving: *autoregressive generation*[^fn-autoregressive-decoding-serving] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, complicating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure). This section introduces iteration-level scheduling and cache paging, and then evaluates their consequences for request metrics, cached state, and token cost. The p50, p95, and p99 metrics used for classification serving still matter, but they apply to different phases of the request—the initial prompt processing and the subsequent token generation. The same principles of queuing theory, batching trade-offs, and latency budgets remain applicable; LLM serving adds domain-specific techniques atop them.
-
-[^fn-autoregressive-decoding-serving]: **Autoregressive**\index{Autoregressive model!autoregressive, serial bottleneck}: From Greek *auto-* (self) and Latin *regressus* (a going back)—the output "regresses" on itself; George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. Decode is often weight-bandwidth-bound at small batches; larger batches amortize the weight stream and can shift the bottleneck toward compute or KV-cache traffic [@pope2023efficiently].
-
-### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
-
-Session affinity—routing successive requests from a client to the same physical replica—arises when serving state resides in local accelerator memory rather than being reconstructed on every invocation. In conversational models, this resident state is dominated by the key-value (KV) cache\index{KV cache!session reuse}\index{KV cache!multi-turn conversations}. When turn $k$ executes on a replica, that replica's HBM retains the projected keys and values across all prior prompt and generation tokens. Routing turn $k+1$ to a different replica discards that local memory footprint, forcing the new node to recompute the entire prefix sequence from scratch. This redundant prefill consumes memory bandwidth and tensor-core cycles that would otherwise advance active decode iterations, directly inflating time-to-first-token.
-
-A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}: small per-user adapters, each a pair of low-rank matrices whose product is added to a frozen base weight matrix. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines—such as tokenizer vocabularies and per-session normalization state—impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
-
-::: {.column-margin .margin-pointer}
-↩ Products of two low-rank matrices, and the storage and memory traffic they save relative to a full matrix, are established in @sec-model-compression-lowrank-factorization-955e.
-:::
-
-Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($I \propto B$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches—collapsing arithmetic intensity back into the memory-bandwidth-bound regime—or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
-
-### Performance metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
-
-::: {.column-margin}
-![](images/svg/vol1_model_serving_margin_004.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge, then a flat orange compute-bound ceiling. A TTFT dot sits on the orange ceiling; a TPOT dot sits on the blue slope."}
-
-*Prefill and low-batch decode often face different resource limits.*
-:::
-
-Generative models produce a stream of tokens rather than a single output tensor. This streaming nature requires dedicated LLM performance metrics that reflect the transition from *prefill* (processing the prompt and populating its KV cache) to *decode* (generating output). Two key measures are **time to first token (TTFT)**\index{Time to first token!definition} and **time per output token (TPOT)**\index{Time per output token!definition}, which capture responsiveness and average generation pace. Per-gap **inter-token latency (ITL)** measures the distribution of pauses between individual streamed tokens; TPOT instead averages the post-first-token interval across an output.
-
-::: {#dfn-model-serving-llm-performance-metrics .callout-definition title="LLM performance metrics"}
-
-***LLM performance metrics***\index{LLM performance metrics!definition} separate initial responsiveness from the cadence of streaming autoregressive generation.
-
-1.  **Significance**: They decompose user-perceived latency into time to first token (TTFT)\index{Time to first token!prefill phase} (whose prefill work is often compute-bound) and time per output token (TPOT)\index{Time per output token!decode phase} (whose decode work is often bandwidth-bound at small batches).
-2.  **Distinction**: Unlike fixed-output metrics (for example, end-to-end latency), LLM metrics measure the fluidity of generation, acknowledging that the user experience depends on the rhythm of token arrival.
-3.  **Common pitfall**: A frequent misconception is that a low TTFT means a fast model. In reality, a model can have a fast TTFT but a sluggish TPOT (if the memory wall $(\Bandwidth)$ is the bottleneck), leading to a frustrating user experience where the answer starts quickly but "stutters" thereafter.
-
-:::
-
-These metrics capture distinct aspects of the user experience, so interactive services often set separate targets for TTFT, TPOT or ITL, and aggregate throughput.
-
-::: {#psp-model-serving-llm-serving-latency-targets .callout-perspective title="LLM serving latency targets"}
-
-Interactive LLM services usually need separate SLOs for responsiveness, generation fluidity, and fleet throughput. The following values are illustrative targets rather than universal requirements:
-
-- **TTFT**: $<$ 500 ms (for a 1000-token prompt)
-- **TPOT**: $<$ 50 ms (equivalent to ~20 tokens/s, faster than human reading speed)
-- **Throughput**: $>$ 1000 tokens/s aggregate across active serving replicas
-
-A single "latency" number therefore hides the prefill/decode split. TTFT is the blank-screen budget, TPOT is the reading-flow budget, and aggregate service throughput, measured as tokens/s summed across active serving replicas, determines whether those targets hold under shared load.
-
-:::
-
-### Decoding strategies {#sec-model-serving-decoding-strategies-afe8}
-
-Meeting these TPOT targets depends on more than memory bandwidth alone: the algorithm used to select each token also affects per-token latency and output quality. Generative models require decoding strategies that trade off quality, diversity, and latency. The choice of decoding strategy dramatically affects both output quality and computational cost.
-
-The simplest approach, greedy decoding\index{Greedy decoding!LLM generation}, selects the highest-probability token at each step at the cost of one model pass per token. It is fast but can produce repetitive outputs because it cannot recover from early choices. Beam search\index{Beam search!decoding strategy} maintains multiple candidate sequences and selects a high-scoring complete sequence, increasing decoder work and state relative to greedy decoding. Sampling\index{Sampling!temperature, top-k, top-p} with temperature, top-$k$\index{Top-k!sampling}, and top-$p$ (also called nucleus sampling\index{Nucleus sampling!top-p}) injects controlled randomness for diversity [@holtzman2020curious]. The serving cost of any strategy depends on its implementation and on the output-length distribution that continuous batching must absorb.
-
-Interactive LLM services commonly return tokens as they are produced rather than waiting for complete generation. This streaming response\index{Streaming response!LLM serving} transforms the user experience: a two-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for two seconds. Streaming requires infrastructure support for incremental responses and client-side rendering. The latency profile shifts accordingly: TTFT determines when output starts appearing (responsiveness), while TPOT determines the perceived generation speed (fluidity). Once generation is streamed token by token, the serving unit changes from one fixed-output prediction to a stateful sequence whose memory footprint grows on every step.
-
-### Memory and KV cache {#sec-model-serving-memory-kv-cache-d1ea}
-
-Generative inference requires managing the KV cache[^fn-kv-cache-serving]\index{KV cache!LLM memory}\index{KV cache!sequence length scaling}, a stateful memory structure that grows with sequence length. Prefill creates cache entries for prompt tokens, and each decoded token adds another entry. Across concurrent variable-length sequences, this dynamic state can dominate available accelerator memory and create allocation waste if it is not managed explicitly.
-
-[^fn-kv-cache-serving]: **KV cache (key-value cache)**\index{KV cache!memory scaling}: To avoid redundant work, the system caches the Key and Value vectors from previous tokens, which remain valid throughout generation. This design choice causes the dynamic memory growth described in the text, because the cache grows linearly with every generated token, making memory management a primary constraint. For a 70-billion-parameter-class model with grouped-query attention, the FP16 KV cache is about 0.33 MB per token per sequence; grouped-query attention (GQA), used in Llama-family models such as Llama 3, shares key/value heads across multiple query heads, reducing the cache relative to full multi-head attention [@dubey2024llama]. A batch of 32 requests at an 8,000-token context therefore requires roughly 80 GB just for KV cache, several times larger still without grouped-query or multi-query attention.
-
-#### Prefix caching and memory offloading {#sec-model-serving-prefix-caching-offloading}
-
-The continuous batching and PagedAttention techniques covered in @sec-model-serving-continuous-batching-8bb6 address request scheduling and cache paging; the remaining memory pressure can be further mitigated through architectural strategies that exploit request patterns. **Prefix caching**\index{Prefix caching!KV cache reuse} stores the KV states of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing independent requests to reuse the prefill result for an identical prefix. For $n_{\text{req}}$ requests sharing a prefix of $S_{\text{prefix}}$ tokens, the avoided prefill work is roughly $(n_{\text{req}}-1)S_{\text{prefix}}$ token steps, subject to cache hits, eviction, and implementation overhead. For multi-turn conversations, the same principle lets a subsequent turn process only the new suffix after reusing compatible prior state.
-
-```{python}
-#| echo: false
-#| label: carbon-cost-h100-tdp
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ H100 TDP FOR CARBON COST OF CHAT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Carbon Cost of a Chat" (~10 lines below)
-# │
-# │ Goal: Provide H100 TDP for the energy-per-token callout.
-# │ Show: The power envelope of the H100 GPU.
-# │ How: Retrieve TDP from Hardware Digital Twins.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware
-from mlsysim.core.units import watt
-from mlsysim.fmt import fmt_power
-
-class CarbonCostH100Tdp:
-    """H100 TDP anchor for the carbon-cost-of-chat callout."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h_h100 = Hardware.Cloud.H100
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    h100_tdp_w_str = fmt_power(h_h100.tdp, unit=watt, precision=0, commas=False)
-```
-
-```{python}
-#| echo: false
-#| label: carbon-cost-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CARBON COST OF CHAT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Carbon Cost of a Chat" - energy footprint of LLM serving
-# │
-# │ Goal: Quantify the energy cost per LLM token.
-# │ Show: That poor utilization causes about 6× higher energy consumption per token.
-# │ How: Calculate J per token based on TDP and concurrent request volume.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import ReferenceStats
-from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_percent, fmt_rate, fmt_power, fmt_energy, fmt_multiple
-
-class CarbonCostCalc:
-    """Energy cost per LLM token: poor utilization causes about 6× higher J/token."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Energy anchors sourced from the mlsysim registry (ReferenceStats.EnergyAnchors).
-    ENERGY_SMARTPHONE_CHARGE_J = ReferenceStats.EnergyAnchors.SmartphoneCharge
-    ENERGY_BOILING_WATER_J = ReferenceStats.EnergyAnchors.BoilingWater
-    cc_concurrent_requests_value = 114  # concurrent requests per H100
-    cc_tokens_per_sec_req_value = 8 * (count / second)  # scenario assumption: decode tokens/s per request
-    cc_host_overhead = 300 * watt  # scenario assumption: host server power overhead
-    cc_response_tokens_value = 500  # typical response length
-    cc_low_util_pct_value = 10  # poor utilization scenario (%)
-    cc_idle_power = 300 * watt  # scenario assumption: GPU idle power
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _h100_tdp = Hardware.Cloud.H100.tdp
-    cc_total_tokens_sec = cc_concurrent_requests_value * cc_tokens_per_sec_req_value
-    cc_total_power = _h100_tdp + cc_host_overhead
-    cc_joules_per_token = cc_total_power / cc_total_tokens_sec
-    cc_response_joules = cc_joules_per_token * cc_response_tokens_value * count
-    cc_low_util_tokens_sec = cc_total_tokens_sec * (cc_low_util_pct_value / 100)
-    cc_low_util_power = cc_idle_power + cc_host_overhead
-    cc_low_util_joules = cc_low_util_power / cc_low_util_tokens_sec
-    cc_low_util_ratio = (cc_low_util_joules / cc_joules_per_token).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(
-        cc_total_tokens_sec.to(count / second).magnitude == 912,
-        f"114 concurrent requests × 8 tokens/s should be 912 tokens/s, got {cc_total_tokens_sec.to(count / second).magnitude:.0f}",
-    )
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cc_concurrent_str = fmt(cc_concurrent_requests_value, precision=0, commas=False)
-    cc_tokens_req_tokens_per_s_str = fmt_rate(cc_tokens_per_sec_req_value, 'tokens/s', precision=0, commas=False)
-    cc_total_tokens_per_s_str = fmt_rate(round(cc_total_tokens_sec.to(count / second).magnitude), 'tokens/s', precision=0, commas=False)
-    cc_host_overhead_w_str = fmt_power(cc_host_overhead, unit=watt, precision=0, commas=False)
-    cc_total_power_w_str = fmt_power(cc_total_power, unit=watt, precision=0, commas=False)
-    cc_joules_token_j_str = fmt_energy(cc_joules_per_token, unit=joule, precision=4, commas=False, per='token')
-    cc_response_tokens_str = fmt_count(cc_response_tokens_value, label="token", commas=False)
-    cc_response_joules_j_str = fmt_energy(cc_response_joules, unit=joule, precision=1, commas=False)
-    cc_smartphone_j_str = fmt_energy(ENERGY_SMARTPHONE_CHARGE_J, unit=joule, precision=0)
-    cc_boiling_j_str = fmt_energy(ENERGY_BOILING_WATER_J, unit=joule, precision=0)
-    cc_low_util_pct_str = fmt_percent(cc_low_util_pct_value / 100, precision=0, commas=False, style='prose')
-    cc_idle_power_w_str = fmt_power(cc_idle_power, unit=watt, precision=0, commas=False)
-    cc_low_util_joules_j_str = fmt_energy(cc_low_util_joules, unit=joule, precision=1, commas=False, per='token')
-    cc_low_util_ratio_mult_str = fmt_multiple(round(cc_low_util_ratio), precision=0, commas=False)
-```
-
-::: {#nbk-carbon-chat .callout-notebook title="The energy cost of a chat"}
-
-**Problem**: How much energy does an H100-backed chat service spend per generated token and for a response with `{python} CarbonCostCalc.cc_response_tokens_str`?
-
-As LLMs scale, joules per token becomes a first-class operational metric alongside latency. Assuming the H100 draws its `{python} CarbonCostH100Tdp.h100_tdp_w_str` thermal design power (TDP), this scenario estimate follows from throughput and power [@choquette2023]:
-
-1.  **Throughput**: `{python} CarbonCostCalc.cc_concurrent_str` concurrent requests $\times$ `{python} CarbonCostCalc.cc_tokens_req_tokens_per_s_str` per request ≈ `{python} CarbonCostCalc.cc_total_tokens_per_s_str`.
-2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_w_str` (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
-3.  **Energy per token**:
-    `{python} CarbonCostCalc.cc_total_power_w_str` / `{python} CarbonCostCalc.cc_total_tokens_per_s_str` ≈ `{python} CarbonCostCalc.cc_joules_token_j_str`
-
-```{=latex}
-\vspace*{-1.2ex}
-```
-**Systems insight**: Under these assumptions, a response of `{python} CarbonCostCalc.cc_response_tokens_str` consumes ≈ `{python} CarbonCostCalc.cc_response_joules_j_str`.
-
-- For comparison, charging a smartphone consumes ≈ `{python} CarbonCostCalc.cc_smartphone_j_str`.
-- Boiling a cup of water consumes ≈ `{python} CarbonCostCalc.cc_boiling_j_str`.
-
-```{=latex}
-\vspace*{-0.7ex}
-```
-The primary way to reduce J/token is to increase hardware utilization and eliminate redundant compute. If the GPU sits at `{python} CarbonCostCalc.cc_low_util_pct_str` utilization due to poor batching, it still draws ~`{python} CarbonCostCalc.cc_idle_power_w_str` and the host adds `{python} CarbonCostCalc.cc_host_overhead_w_str`, causing energy per token to rise to `{python} CarbonCostCalc.cc_low_util_joules_j_str` (approximately `{python} CarbonCostCalc.cc_low_util_ratio_mult_str` the baseline). Architectural optimizations like prefix caching also skip the energy-intensive prefill phase for shared context, directly reducing the energy footprint of retrieval-augmented generation (RAG) and chat applications. The serving lesson is that efficiency is not only a latency or cost metric; it also determines how much energy each useful token consumes.
-
-:::
-
-When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV cache offloading**\index{KV cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents OOM failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly. Advanced techniques including speculative decoding[^fn-speculative-decoding-verification] and distributed parallelism, where one request is split across multiple devices or machines, are covered in specialized treatments of large-scale systems.
-
-[^fn-speculative-decoding-verification]: **Speculative decoding**\index{Speculative decoding!throughput}: A small "draft" model generates $k$ candidate tokens autoregressively; the large target model then verifies the proposed block in parallel [@leviathan2023speculative]. Parallel verification is possible because the draft model guesses all $k$ candidate tokens in advance. Rather than generating sequentially, the target model evaluates the entire $k$-token block in a single causal-attention forward pass—acting like a compute-bound mini-prefill—which replaces $k$ memory-bandwidth-bound matrix-vector operations with one parallel matrix-matrix evaluation. When the draft model's proposals are accepted at rate $\alpha$, effective throughput can scale with the number of accepted tokens per verification step. This breaks the serial autoregressive bottleneck at the runtime layer, not the architecture layer.
-
-::: {#chk-model-serving-llm-serving-fundamentals .callout-checkpoint title="LLM serving fundamentals"}
-
-LLM serving introduces constraints absent from traditional model serving.
-
-- [ ] **TTFT vs. TPOT**: Contrast the distinct user experiences captured by TTFT and TPOT, explain why long-prompt prefill often exposes more arithmetic intensity than low-batch decode, and convert a 50 ms TPOT target into its tokens-per-second equivalent.
-- [ ] **Memory wall**: Explain why adding compute units yields negligible latency improvement when token generation is bandwidth-bound, and identify how higher-bandwidth memory, model quantization, or batching alters the operating regime.
-- [ ] **Prefix caching and offloading**: Explain how caching key-value activations for shared prompt prefixes eliminates redundant prefill compute, and evaluate the latency trade-offs that govern offloading KV caches to host system memory.
-- [ ] **Continuous batching and PagedAttention**: Contrast static batching waste under variable sequence lengths against iteration-level scheduling, and explain how PagedAttention eliminates external fragmentation in the KV cache and bounds internal waste to a single partially filled block per sequence.
-- [ ] **Joules per token**: Explain why energy consumption scales with generated sequence length, and how low hardware utilization inflates the energy cost per useful token.
-
-:::
-
-The chat-energy calculation makes utilization part of the LLM serving budget: the cost of each generated token depends on how requests share the machine. Unlike fixed-output inference, LLM energy grows with response length. Each decode step streams weights once for the active batch, so batching amortizes that traffic across sequences. Carbon accounting additionally requires an emissions factor and a defined boundary.
-
-Energy efficiency depends on the same batching, memory, and prefix-cache mechanisms that govern LLM latency. However, algorithmic scheduling optimizations cannot overcome an inefficient execution engine; achieving optimal energy and latency boundaries ultimately requires selecting an inference runtime that compiles and schedules tensor kernels directly for target accelerator silicon.
-
-### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
-
-Autoregressive models\index{Autoregressive model!token generation}, such as large language models, generate outputs token by token. Because each new token depends on the accumulated sequence history, generation proceeds sequentially. Standard dynamic batching assumes uniform output lengths and commits to a fixed batch for an entire generation cycle. When sequence lengths vary, this static commitment degrades accelerator efficiency. If one sequence in a batch of eight finishes after ten tokens while others require 100 tokens, 90 percent of the compute and memory bandwidth allocated to that sequence slot is wasted on padding tokens or masked dummy operations while awaiting the slowest sequence\index{Sequence length variability!batch waste} [@yu2022orca].
-
-**Continuous batching**\index{Continuous batching!LLM serving}[^fn-continuous-batching-llm] (also called iteration-level batching) eliminates this idle-slot tax by rescheduling batch composition at each decoding iteration [@yu2022orca; @kwon2023]. Rather than committing to a static batch that persists across hundreds of forward passes, the serving engine re-evaluates batch membership at every token-generation step. When a sequence emits its end-of-sequence token, the scheduler immediately reclaims that execution slot, admitting an arriving request into the batch for the subsequent forward pass. Active sequences continue decoding without interruption, maintaining high accelerator utilization across variable-length workloads.
-
-[^fn-continuous-batching-llm]: **Continuous batching**\index{Continuous batching!scheduling granularity}: Also called "iteration-level batching" [@yu2022orca] and, in NVIDIA TensorRT-LLM, "in-flight batching" [@nvidiaTensorRtLlm]; the distinction is scheduling granularity. Traditional batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching reschedules at every token-generation step—analogous to preemptive OS process scheduling vs. run-to-completion. This finer granularity reduces the waste from variable-length sequences, where a batch slot occupied by a completed sequence sits idle until all other sequences finish.
-
-Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine executes a prefill in the same iteration as active decodes, the ongoing decode streams stall, causing severe spikes in inter-token latency (ITL). Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes; measured iteration times determine the resulting token cadence.
-
-[^fn-vllm-page-table]: **vLLM (virtual large language model (LLM))**\index{vLLM!virtual memory analogy}: An open-source serving system that enables continuous batching via its PagedAttention algorithm [@kwon2023]. Inspired by OS virtual memory, this technique reduces the severe KV-cache fragmentation and reservation waste that constrains static batching. By keeping KV-cache waste low, vLLM can serve larger effective batches on the same hardware.
-
-Continuous batching shifts the primary serving bottleneck to memory management. Because transformer generation appends attention states at every step, the key-value (KV) cache for each active request grows dynamically in accelerator HBM. When sequences of varying lengths share memory, contiguous allocation produces severe external fragmentation. If a completed 100-token sequence releases its cache, an arriving 150-token request cannot occupy that freed memory because it requires a larger contiguous address range. Over time, physical memory fractures into small, noncontiguous gaps, preventing new sequences from launching even when total unallocated capacity appears sufficient. Together with the over-reservation of contiguous allocators, this memory fragmentation\index{Memory fragmentation!KV cache} can waste 60 to 80 percent of KV-cache memory in naive implementations [@kwon2023], severely limiting the concurrent batch size that determines serving throughput.
-
-#### PagedAttention {#sec-model-serving-pagedattention-b8d4}
-
-::: {.column-margin}
-![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
-
-*PagedAttention recovers the KV-cache waste of contiguous allocation.*
-:::
-
-**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023].
-
-[^fn-paged-attention-memory]: **PagedAttention**\index{PagedAttention!memory efficiency}: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same class of allocation problem—programs needed more memory than physically available, and contiguous allocation wasted space [@kilburn1962onelevel]. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU KV-cache memory: the evaluated earlier serving systems wasted 60 to 80 percent of KV-cache memory due to fragmentation and over-reservation. In that evaluation, PagedAttention reduced waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware [@kwon2023].
-
-PagedAttention recovers physical memory capacity, but serving autoregressive models at scale exposes additional bottlenecks across token verification latency and memory-bandwidth-bound weight streaming.
-
-::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
-
-The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques such as speculative decoding\index{Speculative decoding!latency reduction}\index{Speculative decoding!draft model verification} use small draft models to propose multiple tokens that the target model verifies in parallel; evaluated T5-XXL workloads achieved roughly 2--3$\times$ speedups [@leviathan2023speculative], but gains vary. Weight-only quantization (such as INT4 weights with FP16 activations) is especially relevant for memory-bandwidth-bound LLM inference [@lin2023awq].
-
-These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
-
-:::
-
-Although continuous batching maximizes throughput for multi-tenant language model serving, batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack ragged tensor or paged memory support, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
-
 ## Inference Runtime Selection {#sec-model-serving-inference-runtime-selection-5eef}
 
 Dynamic batching and request scheduling dictate how inferences are grouped and queued, but an underlying execution engine must evaluate the resulting tensor operations on physical hardware. The token generation dynamics introduced in @sec-model-serving-llm-serving-b8bf and the latency budgets established in @sec-model-serving-latency-budget-ef40 are achievable only if the runtime maps operations efficiently to accelerator execution units and memory hierarchies. The **inference runtime**\index{Inference runtime!execution engine}, the software layer that orchestrates tensor operations and manages hardware resources, can materially change latency and throughput for an unchanged model architecture. Runtime engineering consists of two phases: selection chooses the execution engine, and configuration tunes that engine for the target model, hardware, input shapes, and latency distribution.
@@ -4335,7 +4089,7 @@ These optimizations produce substantial speedups over an untuned framework-nativ
 # │ How: Compare benchmarked latencies for JIT, ONNX, and TensorRT at multiple precisions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_time, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, fmt, fmt_time, check
 
 class RuntimeComparisonCalc:
     """ResNet-50 runtime comparison: TensorRT INT8 achieves up to 9× speedup over eager PyTorch."""
@@ -4443,7 +4197,7 @@ Actual speedup depends on the compute-to-memory ratio, operator mix, hardware in
 # │ How: Contrast ResNet-50 metrics across FP32, FP16, and INT8 precisions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_pp, fmt_time, fmt_memory
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_multiple, fmt_percent, fmt_pp, fmt_time, fmt_memory
 
 class PrecisionTradeoffCalc:
     """ResNet-50 precision tradeoffs: FP16 gives 2× free speedup; INT8 gives 3× with <0.4pp accuracy loss."""
@@ -4636,7 +4390,7 @@ The **cost per inference**\index{Cost per inference!serving economics} divides t
 # │ How: Calculate unit costs using AWS hourly rates and measured images-per-second.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_multiple, fmt_rate, fmt_usd
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_multiple, fmt_rate, fmt_usd
 
 class CostAnalysisCalc:
     """ResNet-50 cost analysis: T4 achieves lowest cost-per-image despite higher hourly rate than CPU."""
@@ -4720,7 +4474,7 @@ The GPU vs. CPU decision establishes the cost per inference, but determining how
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim.fmt import fmt, fmt_count, fmt_percent, fmt_rate, check
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt, fmt_count, fmt_percent, fmt_rate, check
 
 class CapacityPlanningRecap:
     """Local recap for the ResNet-50 capacity-planning worked example."""
@@ -4788,7 +4542,7 @@ Beyond resident weights, KV-cache memory represents the primary physical capacit
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.solvers import ServingModel
-from mlsysim.fmt import check, fmt, fmt_time, fmt_memory, fmt_memory_capacity, fmt_bandwidth
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_time, fmt_memory, fmt_memory_capacity, fmt_bandwidth
 from mlsysim.physics import transfer_time
 
 class LlmCaseStudyHwSpecs:
@@ -4844,7 +4598,7 @@ class LlmCaseStudyHwSpecs:
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
-from mlsysim.fmt import check, fmt_bandwidth
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt_bandwidth
 
 class LlmCaseStudyH100BwRecap:
     """Local H100 bandwidth recap for the 8B Llama 3 case study."""
@@ -5016,7 +4770,7 @@ The model generates 256 tokens sequentially. At batch one, this phase is memory-
 # │      tokens for 8-billion-parameter Llama 3 on H100.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, check, fmt, fmt_count, fmt_time, fmt_rate, fmt_memory, fmt_memory_capacity
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, fmt_usd, check, fmt, fmt_count, fmt_time, fmt_rate, fmt_memory, fmt_memory_capacity
 from mlsysim.physics import transfer_time
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5135,7 +4889,7 @@ Serving inverts training priorities in ways that violate intuitions from batch p
 # │ How: Model M/M/1 queuing wait times for 5 ms vs. 2 ms inference latencies.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_time
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_multiple, fmt_percent, fmt_time
 
 class FallacyLatencyCalc:
     """Shows system-level speedup far exceeds model-level speedup due to nonlinear queuing dynamics."""
@@ -5202,7 +4956,7 @@ This nonlinear interaction between inference speed and queuing behavior produces
 # │ How: Model M/M/1 wait times to identify the practical utilization ceiling.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent, fmt_time
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_int, fmt_multiple, fmt_percent, fmt_time
 
 class FallacyUtilizationCalc:
     """Moving from 70% to 90% utilization cuts costs 22% but triples average latency."""
@@ -5261,7 +5015,7 @@ Teams target `{python} FallacyUtilizationCalc.fu_util_high_pct_str` utilization\
 # │ How: Model validation vs. production accuracy for a mismatched vision pipeline.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_pp, fmt_range
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_percent, fmt_pp, fmt_range
 
 class FallacySkewCalc:
     """Training-serving skew: 95% validation accuracy drops to 90% from preprocessing mismatches."""
@@ -5308,7 +5062,7 @@ Engineers assume identical model weights preserve validation-set performance\ind
 # │ How: M/M/1 mean vs. p99 approximation at typical serving utilization.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_time
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_multiple, fmt_percent, fmt_time
 
 class TailLatencyCalc:
     """At 70% utilization, p99 latency is 4.6× the mean—invisible to average-based monitoring."""
@@ -5359,7 +5113,7 @@ Engineers monitor average latency\index{Latency!mean, monitoring pitfall} becaus
 # │ How: Compare throughput and inference time across two batch sizes.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_int, fmt, fmt_percent, fmt_time
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt_int, fmt, fmt_percent, fmt_time
 
 class FallacyBatchingCalc:
     """Batch-16 to batch-32 yields only ~12% more throughput while nearly doubling inference time."""
@@ -5413,7 +5167,7 @@ Engineers maximize batch size\index{Batching!fallacy of larger batches} assuming
 # │ How: Model validation vs. OOD accuracy for a calibration-mismatched system.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_percent, fmt_pp
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_percent, fmt_pp
 
 class FallacyCalibrationCalc:
     """INT8 model calibrated on ImageNet drops 3.2pp when serving out-of-distribution wildlife images."""
@@ -5456,7 +5210,7 @@ Teams may calibrate with a convenient sample\index{Calibration!production traffi
 # │ How: Calculate aggregate cold-start work, parallel warm time, and latency multiplier.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple, fmt_time
+from mlsysim.fmt import fmt_percent, fmt_multiple, check, fmt, fmt_count, fmt_multiple, fmt_time
 
 class FallacyColdstartCalc:
     """Cold starts compound: 10 new instances at 30 s compile time = 300 instance-seconds."""
@@ -5532,6 +5286,250 @@ A model that performed well during validation may silently degrade when deployed
 
 :::
 
+## Case Study: LLM Serving {#sec-model-serving-llm-serving-b8bf}
+
+Large language models\index{LLM serving!token generation} make three properties far more prominent than in fixed-output serving: *autoregressive generation*[^fn-autoregressive-decoding-serving] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, complicating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure). This section introduces iteration-level scheduling and cache paging, and then evaluates their consequences for request metrics, cached state, and token cost. The p50, p95, and p99 metrics used for classification serving still matter, but they apply to different phases of the request—the initial prompt processing and the subsequent token generation. The same principles of queuing theory, batching trade-offs, and latency budgets remain applicable; LLM serving adds domain-specific techniques atop them.
+
+[^fn-autoregressive-decoding-serving]: **Autoregressive**\index{Autoregressive model!autoregressive, serial bottleneck}: From Greek *auto-* (self) and Latin *regressus* (a going back)—the output "regresses" on itself; George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. Decode is often weight-bandwidth-bound at small batches; larger batches amortize the weight stream and can shift the bottleneck toward compute or KV-cache traffic [@pope2023efficiently].
+
+### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
+
+Session affinity—routing successive requests from a client to the same physical replica—arises when serving state resides in local accelerator memory rather than being reconstructed on every invocation. In conversational models, this resident state is dominated by the key-value (KV) cache\index{KV cache!session reuse}\index{KV cache!multi-turn conversations}. When turn $k$ executes on a replica, that replica's HBM retains the projected keys and values across all prior prompt and generation tokens. Routing turn $k+1$ to a different replica discards that local memory footprint, forcing the new node to recompute the entire prefix sequence from scratch. This redundant prefill consumes memory bandwidth and tensor-core cycles that would otherwise advance active decode iterations, directly inflating time-to-first-token.
+
+A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}: small per-user adapters, each a pair of low-rank matrices whose product is added to a frozen base weight matrix. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines—such as tokenizer vocabularies and per-session normalization state—impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
+
+::: {.column-margin .margin-pointer}
+↩ Products of two low-rank matrices, and the storage and memory traffic they save relative to a full matrix, are established in @sec-model-compression-lowrank-factorization-955e.
+:::
+
+Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($I \propto B$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches—collapsing arithmetic intensity back into the memory-bandwidth-bound regime—or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
+
+### Performance metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_004.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge, then a flat orange compute-bound ceiling. A TTFT dot sits on the orange ceiling; a TPOT dot sits on the blue slope."}
+
+*Prefill and low-batch decode often face different resource limits.*
+:::
+
+Generative models produce a stream of tokens rather than a single output tensor. This streaming nature requires dedicated LLM performance metrics that reflect the transition from *prefill* (processing the prompt and populating its KV cache) to *decode* (generating output). Two key measures are **time to first token (TTFT)**\index{Time to first token!definition} and **time per output token (TPOT)**\index{Time per output token!definition}, which capture responsiveness and average generation pace. Per-gap **inter-token latency (ITL)** measures the distribution of pauses between individual streamed tokens; TPOT instead averages the post-first-token interval across an output.
+
+::: {#dfn-model-serving-llm-performance-metrics .callout-definition title="LLM performance metrics"}
+
+***LLM performance metrics***\index{LLM performance metrics!definition} separate initial responsiveness from the cadence of streaming autoregressive generation.
+
+1.  **Significance**: They decompose user-perceived latency into time to first token (TTFT)\index{Time to first token!prefill phase} (whose prefill work is often compute-bound) and time per output token (TPOT)\index{Time per output token!decode phase} (whose decode work is often bandwidth-bound at small batches).
+2.  **Distinction**: Unlike fixed-output metrics (for example, end-to-end latency), LLM metrics measure the fluidity of generation, acknowledging that the user experience depends on the rhythm of token arrival.
+3.  **Common pitfall**: A frequent misconception is that a low TTFT means a fast model. In reality, a model can have a fast TTFT but a sluggish TPOT (if the memory wall $(\Bandwidth)$ is the bottleneck), leading to a frustrating user experience where the answer starts quickly but "stutters" thereafter.
+
+:::
+
+These metrics capture distinct aspects of the user experience, so interactive services often set separate targets for TTFT, TPOT or ITL, and aggregate throughput.
+
+::: {#psp-model-serving-llm-serving-latency-targets .callout-perspective title="LLM serving latency targets"}
+
+Interactive LLM services usually need separate SLOs for responsiveness, generation fluidity, and fleet throughput. The following values are illustrative targets rather than universal requirements:
+
+- **TTFT**: $<$ 500 ms (for a 1000-token prompt)
+- **TPOT**: $<$ 50 ms (equivalent to ~20 tokens/s, faster than human reading speed)
+- **Throughput**: $>$ 1000 tokens/s aggregate across active serving replicas
+
+A single "latency" number therefore hides the prefill/decode split. TTFT is the blank-screen budget, TPOT is the reading-flow budget, and aggregate service throughput, measured as tokens/s summed across active serving replicas, determines whether those targets hold under shared load.
+
+:::
+
+### Decoding strategies {#sec-model-serving-decoding-strategies-afe8}
+
+Meeting these TPOT targets depends on more than memory bandwidth alone: the algorithm used to select each token also affects per-token latency and output quality. Generative models require decoding strategies that trade off quality, diversity, and latency. The choice of decoding strategy dramatically affects both output quality and computational cost.
+
+The simplest approach, greedy decoding\index{Greedy decoding!LLM generation}, selects the highest-probability token at each step at the cost of one model pass per token. It is fast but can produce repetitive outputs because it cannot recover from early choices. Beam search\index{Beam search!decoding strategy} maintains multiple candidate sequences and selects a high-scoring complete sequence, increasing decoder work and state relative to greedy decoding. Sampling\index{Sampling!temperature, top-k, top-p} with temperature, top-$k$\index{Top-k!sampling}, and top-$p$ (also called nucleus sampling\index{Nucleus sampling!top-p}) injects controlled randomness for diversity [@holtzman2020curious]. The serving cost of any strategy depends on its implementation and on the output-length distribution that continuous batching must absorb.
+
+Interactive LLM services commonly return tokens as they are produced rather than waiting for complete generation. This streaming response\index{Streaming response!LLM serving} transforms the user experience: a two-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for two seconds. Streaming requires infrastructure support for incremental responses and client-side rendering. The latency profile shifts accordingly: TTFT determines when output starts appearing (responsiveness), while TPOT determines the perceived generation speed (fluidity). Once generation is streamed token by token, the serving unit changes from one fixed-output prediction to a stateful sequence whose memory footprint grows on every step.
+
+### Memory and KV cache {#sec-model-serving-memory-kv-cache-d1ea}
+
+Generative inference requires managing the KV cache[^fn-kv-cache-serving]\index{KV cache!LLM memory}\index{KV cache!sequence length scaling}, a stateful memory structure that grows with sequence length. Prefill creates cache entries for prompt tokens, and each decoded token adds another entry. Across concurrent variable-length sequences, this dynamic state can dominate available accelerator memory and create allocation waste if it is not managed explicitly.
+
+[^fn-kv-cache-serving]: **KV cache (key-value cache)**\index{KV cache!memory scaling}: To avoid redundant work, the system caches the Key and Value vectors from previous tokens, which remain valid throughout generation. This design choice causes the dynamic memory growth described in the text, because the cache grows linearly with every generated token, making memory management a primary constraint. For a 70-billion-parameter-class model with grouped-query attention, the FP16 KV cache is about 0.33 MB per token per sequence; grouped-query attention (GQA), used in Llama-family models such as Llama 3, shares key/value heads across multiple query heads, reducing the cache relative to full multi-head attention [@dubey2024llama]. A batch of 32 requests at an 8,000-token context therefore requires roughly 80 GB just for KV cache, several times larger still without grouped-query or multi-query attention.
+
+#### Prefix caching and memory offloading {#sec-model-serving-prefix-caching-offloading}
+
+The continuous batching and PagedAttention techniques covered in @sec-model-serving-continuous-batching-8bb6 address request scheduling and cache paging; the remaining memory pressure can be further mitigated through architectural strategies that exploit request patterns. **Prefix caching**\index{Prefix caching!KV cache reuse} stores the KV states of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing independent requests to reuse the prefill result for an identical prefix. For $n_{\text{req}}$ requests sharing a prefix of $S_{\text{prefix}}$ tokens, the avoided prefill work is roughly $(n_{\text{req}}-1)S_{\text{prefix}}$ token steps, subject to cache hits, eviction, and implementation overhead. For multi-turn conversations, the same principle lets a subsequent turn process only the new suffix after reusing compatible prior state.
+
+```{python}
+#| echo: false
+#| label: carbon-cost-h100-tdp
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ H100 TDP FOR CARBON COST OF CHAT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Carbon Cost of a Chat" (~10 lines below)
+# │
+# │ Goal: Provide H100 TDP for the energy-per-token callout.
+# │ Show: The power envelope of the H100 GPU.
+# │ How: Retrieve TDP from Hardware Digital Twins.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import watt
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_power
+
+class CarbonCostH100Tdp:
+    """H100 TDP anchor for the carbon-cost-of-chat callout."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    h_h100 = Hardware.Cloud.H100
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    h100_tdp_w_str = fmt_power(h_h100.tdp, unit=watt, precision=0, commas=False)
+```
+
+```{python}
+#| echo: false
+#| label: carbon-cost-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CARBON COST OF CHAT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Carbon Cost of a Chat" - energy footprint of LLM serving
+# │
+# │ Goal: Quantify the energy cost per LLM token.
+# │ Show: That poor utilization causes about 6× higher energy consumption per token.
+# │ How: Calculate J per token based on TDP and concurrent request volume.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import ReferenceStats
+from mlsysim.fmt import fmt_percent, fmt_multiple, fmt_int, fmt, fmt_count, check, fmt_percent, fmt_rate, fmt_power, fmt_energy, fmt_multiple
+
+class CarbonCostCalc:
+    """Energy cost per LLM token: poor utilization causes about 6× higher J/token."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Energy anchors sourced from the mlsysim registry (ReferenceStats.EnergyAnchors).
+    ENERGY_SMARTPHONE_CHARGE_J = ReferenceStats.EnergyAnchors.SmartphoneCharge
+    ENERGY_BOILING_WATER_J = ReferenceStats.EnergyAnchors.BoilingWater
+    cc_concurrent_requests_value = 114  # concurrent requests per H100
+    cc_tokens_per_sec_req_value = 8 * (count / second)  # scenario assumption: decode tokens/s per request
+    cc_host_overhead = 300 * watt  # scenario assumption: host server power overhead
+    cc_response_tokens_value = 500  # typical response length
+    cc_low_util_pct_value = 10  # poor utilization scenario (%)
+    cc_idle_power = 300 * watt  # scenario assumption: GPU idle power
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    _h100_tdp = Hardware.Cloud.H100.tdp
+    cc_total_tokens_sec = cc_concurrent_requests_value * cc_tokens_per_sec_req_value
+    cc_total_power = _h100_tdp + cc_host_overhead
+    cc_joules_per_token = cc_total_power / cc_total_tokens_sec
+    cc_response_joules = cc_joules_per_token * cc_response_tokens_value * count
+    cc_low_util_tokens_sec = cc_total_tokens_sec * (cc_low_util_pct_value / 100)
+    cc_low_util_power = cc_idle_power + cc_host_overhead
+    cc_low_util_joules = cc_low_util_power / cc_low_util_tokens_sec
+    cc_low_util_ratio = (cc_low_util_joules / cc_joules_per_token).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        cc_total_tokens_sec.to(count / second).magnitude == 912,
+        f"114 concurrent requests × 8 tokens/s should be 912 tokens/s, got {cc_total_tokens_sec.to(count / second).magnitude:.0f}",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    cc_concurrent_str = fmt(cc_concurrent_requests_value, precision=0, commas=False)
+    cc_tokens_req_tokens_per_s_str = fmt_rate(cc_tokens_per_sec_req_value, 'tokens/s', precision=0, commas=False)
+    cc_total_tokens_per_s_str = fmt_rate(round(cc_total_tokens_sec.to(count / second).magnitude), 'tokens/s', precision=0, commas=False)
+    cc_host_overhead_w_str = fmt_power(cc_host_overhead, unit=watt, precision=0, commas=False)
+    cc_total_power_w_str = fmt_power(cc_total_power, unit=watt, precision=0, commas=False)
+    cc_joules_token_j_str = fmt_energy(cc_joules_per_token, unit=joule, precision=4, commas=False, per='token')
+    cc_response_tokens_str = fmt_count(cc_response_tokens_value, label="token", commas=False)
+    cc_response_joules_j_str = fmt_energy(cc_response_joules, unit=joule, precision=1, commas=False)
+    cc_smartphone_j_str = fmt_energy(ENERGY_SMARTPHONE_CHARGE_J, unit=joule, precision=0)
+    cc_boiling_j_str = fmt_energy(ENERGY_BOILING_WATER_J, unit=joule, precision=0)
+    cc_low_util_pct_str = fmt_percent(cc_low_util_pct_value / 100, precision=0, commas=False, style='prose')
+    cc_idle_power_w_str = fmt_power(cc_idle_power, unit=watt, precision=0, commas=False)
+    cc_low_util_joules_j_str = fmt_energy(cc_low_util_joules, unit=joule, precision=1, commas=False, per='token')
+    cc_low_util_ratio_mult_str = fmt_multiple(round(cc_low_util_ratio), precision=0, commas=False)
+```
+
+::: {#nbk-carbon-chat .callout-notebook title="The energy cost of a chat"}
+
+**Problem**: How much energy does an H100-backed chat service spend per generated token and for a response with `{python} CarbonCostCalc.cc_response_tokens_str`?
+
+As LLMs scale, joules per token becomes a first-class operational metric alongside latency. Assuming the H100 draws its `{python} CarbonCostH100Tdp.h100_tdp_w_str` thermal design power (TDP), this scenario estimate follows from throughput and power [@choquette2023]:
+
+1.  **Throughput**: `{python} CarbonCostCalc.cc_concurrent_str` concurrent requests $\times$ `{python} CarbonCostCalc.cc_tokens_req_tokens_per_s_str` per request ≈ `{python} CarbonCostCalc.cc_total_tokens_per_s_str`.
+2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_w_str` (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
+3.  **Energy per token**:
+    `{python} CarbonCostCalc.cc_total_power_w_str` / `{python} CarbonCostCalc.cc_total_tokens_per_s_str` ≈ `{python} CarbonCostCalc.cc_joules_token_j_str`
+
+```{=latex}
+\vspace*{-1.2ex}
+```
+**Systems insight**: Under these assumptions, a response of `{python} CarbonCostCalc.cc_response_tokens_str` consumes ≈ `{python} CarbonCostCalc.cc_response_joules_j_str`.
+
+- For comparison, charging a smartphone consumes ≈ `{python} CarbonCostCalc.cc_smartphone_j_str`.
+- Boiling a cup of water consumes ≈ `{python} CarbonCostCalc.cc_boiling_j_str`.
+
+```{=latex}
+\vspace*{-0.7ex}
+```
+The primary way to reduce J/token is to increase hardware utilization and eliminate redundant compute. If the GPU sits at `{python} CarbonCostCalc.cc_low_util_pct_str` utilization due to poor batching, it still draws ~`{python} CarbonCostCalc.cc_idle_power_w_str` and the host adds `{python} CarbonCostCalc.cc_host_overhead_w_str`, causing energy per token to rise to `{python} CarbonCostCalc.cc_low_util_joules_j_str` (approximately `{python} CarbonCostCalc.cc_low_util_ratio_mult_str` the baseline). Architectural optimizations like prefix caching also skip the energy-intensive prefill phase for shared context, directly reducing the energy footprint of retrieval-augmented generation (RAG) and chat applications. The serving lesson is that efficiency is not only a latency or cost metric; it also determines how much energy each useful token consumes.
+
+:::
+
+When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV cache offloading**\index{KV cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents OOM failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly. Advanced techniques including speculative decoding[^fn-speculative-decoding-verification] and distributed parallelism, where one request is split across multiple devices or machines, are covered in specialized treatments of large-scale systems.
+
+[^fn-speculative-decoding-verification]: **Speculative decoding**\index{Speculative decoding!throughput}: A small "draft" model generates $k$ candidate tokens autoregressively; the large target model then verifies the proposed block in parallel [@leviathan2023speculative]. Parallel verification is possible because the draft model guesses all $k$ candidate tokens in advance. Rather than generating sequentially, the target model evaluates the entire $k$-token block in a single causal-attention forward pass—acting like a compute-bound mini-prefill—which replaces $k$ memory-bandwidth-bound matrix-vector operations with one parallel matrix-matrix evaluation. When the draft model's proposals are accepted at rate $\alpha$, effective throughput can scale with the number of accepted tokens per verification step. This breaks the serial autoregressive bottleneck at the runtime layer, not the architecture layer.
+
+::: {#chk-model-serving-llm-serving-fundamentals .callout-checkpoint title="LLM serving fundamentals"}
+
+LLM serving introduces constraints absent from traditional model serving.
+
+- [ ] **TTFT vs. TPOT**: Contrast the distinct user experiences captured by TTFT and TPOT, explain why long-prompt prefill often exposes more arithmetic intensity than low-batch decode, and convert a 50 ms TPOT target into its tokens-per-second equivalent.
+- [ ] **Memory wall**: Explain why adding compute units yields negligible latency improvement when token generation is bandwidth-bound, and identify how higher-bandwidth memory, model quantization, or batching alters the operating regime.
+- [ ] **Prefix caching and offloading**: Explain how caching key-value activations for shared prompt prefixes eliminates redundant prefill compute, and evaluate the latency trade-offs that govern offloading KV caches to host system memory.
+- [ ] **Continuous batching and PagedAttention**: Contrast static batching waste under variable sequence lengths against iteration-level scheduling, and explain how PagedAttention eliminates external fragmentation in the KV cache and bounds internal waste to a single partially filled block per sequence.
+- [ ] **Joules per token**: Explain why energy consumption scales with generated sequence length, and how low hardware utilization inflates the energy cost per useful token.
+
+:::
+
+The chat-energy calculation makes utilization part of the LLM serving budget: the cost of each generated token depends on how requests share the machine. Unlike fixed-output inference, LLM energy grows with response length. Each decode step streams weights once for the active batch, so batching amortizes that traffic across sequences. Carbon accounting additionally requires an emissions factor and a defined boundary.
+
+Energy efficiency depends on the same batching, memory, and prefix-cache mechanisms that govern LLM latency. However, algorithmic scheduling optimizations cannot overcome an inefficient execution engine; achieving optimal energy and latency boundaries ultimately requires selecting an inference runtime that compiles and schedules tensor kernels directly for target accelerator silicon.
+
+### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
+
+Autoregressive models\index{Autoregressive model!token generation}, such as large language models, generate outputs token by token. Because each new token depends on the accumulated sequence history, generation proceeds sequentially. Standard dynamic batching assumes uniform output lengths and commits to a fixed batch for an entire generation cycle. When sequence lengths vary, this static commitment degrades accelerator efficiency. If one sequence in a batch of eight finishes after ten tokens while others require 100 tokens, 90 percent of the compute and memory bandwidth allocated to that sequence slot is wasted on padding tokens or masked dummy operations while awaiting the slowest sequence\index{Sequence length variability!batch waste} [@yu2022orca].
+
+**Continuous batching**\index{Continuous batching!LLM serving}[^fn-continuous-batching-llm] (also called iteration-level batching) eliminates this idle-slot tax by rescheduling batch composition at each decoding iteration [@yu2022orca; @kwon2023]. Rather than committing to a static batch that persists across hundreds of forward passes, the serving engine re-evaluates batch membership at every token-generation step. When a sequence emits its end-of-sequence token, the scheduler immediately reclaims that execution slot, admitting an arriving request into the batch for the subsequent forward pass. Active sequences continue decoding without interruption, maintaining high accelerator utilization across variable-length workloads.
+
+[^fn-continuous-batching-llm]: **Continuous batching**\index{Continuous batching!scheduling granularity}: Also called "iteration-level batching" [@yu2022orca] and, in NVIDIA TensorRT-LLM, "in-flight batching" [@nvidiaTensorRtLlm]; the distinction is scheduling granularity. Traditional batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching reschedules at every token-generation step—analogous to preemptive OS process scheduling vs. run-to-completion. This finer granularity reduces the waste from variable-length sequences, where a batch slot occupied by a completed sequence sits idle until all other sequences finish.
+
+Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine executes a prefill in the same iteration as active decodes, the ongoing decode streams stall, causing severe spikes in inter-token latency (ITL). Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes; measured iteration times determine the resulting token cadence.
+
+[^fn-vllm-page-table]: **vLLM (virtual large language model (LLM))**\index{vLLM!virtual memory analogy}: An open-source serving system that enables continuous batching via its PagedAttention algorithm [@kwon2023]. Inspired by OS virtual memory, this technique reduces the severe KV-cache fragmentation and reservation waste that constrains static batching. By keeping KV-cache waste low, vLLM can serve larger effective batches on the same hardware.
+
+Continuous batching shifts the primary serving bottleneck to memory management. Because transformer generation appends attention states at every step, the key-value (KV) cache for each active request grows dynamically in accelerator HBM. When sequences of varying lengths share memory, contiguous allocation produces severe external fragmentation. If a completed 100-token sequence releases its cache, an arriving 150-token request cannot occupy that freed memory because it requires a larger contiguous address range. Over time, physical memory fractures into small, noncontiguous gaps, preventing new sequences from launching even when total unallocated capacity appears sufficient. Together with the over-reservation of contiguous allocators, this memory fragmentation\index{Memory fragmentation!KV cache} can waste 60 to 80 percent of KV-cache memory in naive implementations [@kwon2023], severely limiting the concurrent batch size that determines serving throughput.
+
+#### PagedAttention {#sec-model-serving-pagedattention-b8d4}
+
+::: {.column-margin}
+![](images/svg/vol1_model_serving_margin_002.svg){width="100%" fig-alt="Two horizontal bars: the contiguous-allocation bar carries a wide red wasted segment; the paged-allocation bar below shows only a thin red sliver, the rest used."}
+
+*PagedAttention recovers the KV-cache waste of contiguous allocation.*
+:::
+
+**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023].
+
+[^fn-paged-attention-memory]: **PagedAttention**\index{PagedAttention!memory efficiency}: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same class of allocation problem—programs needed more memory than physically available, and contiguous allocation wasted space [@kilburn1962onelevel]. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU KV-cache memory: the evaluated earlier serving systems wasted 60 to 80 percent of KV-cache memory due to fragmentation and over-reservation. In that evaluation, PagedAttention reduced waste to under 4 percent, enabling 2--4$\times$ higher throughput on the same hardware [@kwon2023].
+
+PagedAttention recovers physical memory capacity, but serving autoregressive models at scale exposes additional bottlenecks across token verification latency and memory-bandwidth-bound weight streaming.
+
+::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
+
+The key-value cache that stores attention context scales with sequence length and batch size, often exceeding the model weights themselves in memory consumption. Techniques such as speculative decoding\index{Speculative decoding!latency reduction}\index{Speculative decoding!draft model verification} use small draft models to propose multiple tokens that the target model verifies in parallel; evaluated T5-XXL workloads achieved roughly 2--3$\times$ speedups [@leviathan2023speculative], but gains vary. Weight-only quantization (such as INT4 weights with FP16 activations) is especially relevant for memory-bandwidth-bound LLM inference [@lin2023awq].
+
+These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
+
+:::
+
+Although continuous batching maximizes throughput for multi-tenant language model serving, batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack ragged tensor or paged memory support, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
 
 ## Summary {#sec-model-serving-summary-9635}
 

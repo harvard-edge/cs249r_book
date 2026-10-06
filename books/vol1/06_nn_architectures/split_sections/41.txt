@@ -1,0 +1,272 @@
+### Architecture selection in practice {#sec-network-architectures-putting-together-architecture-selection-practice-052f}
+
+Every selection must first pass a feasibility check: whether the target hardware can sustain the required frame rate at all. A server-class vision pipeline on a mid-range GPU shows the throughput ceiling\index{Throughput ceiling} calculation in its simplest form. The wildlife monitoring deployment that follows applies the same checks under a watt-scale budget where GPUs are ruled out, which is where data structure, model capacity, and hardware budgets interact.
+
+```{python}
+#| echo: false
+#| label: throughput-ceiling-calc
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE THROUGHPUT CEILING CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Architecture Selection in Practice -- real-time vision constraints
+# │
+# │ Goal: Evaluate feasibility of real-time vision on standard GPUs.
+# │ Show: That ResNet-50 at 30 FPS consumes negligible compute, leaving headroom.
+# │ How: Compare required throughput to mid-range GPU capabilities.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt, fmt_flop_rate, fmt_flops, fmt_multiple, fmt_fps, check
+
+class ThroughputCeilingCalc:
+    """Evaluate real-time vision feasibility: ResNet-50 at 30 FPS leaves ample headroom."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    fps = 30  # target frame rate
+    midrange_gpu_throughput = 10 * (TFLOP / second)  # reference mid-range GPU
+    objdet_gflops = 100  # object detection model
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    resnet_flops = Models.Vision.ResNet50.inference_flops.to(GFLOPs)
+    objdet_flops = objdet_gflops * GFLOPs
+    sustained_throughput = fps * resnet_flops / second
+    effective_throughput_low = midrange_gpu_throughput * 0.50  # 50% utilization
+    effective_throughput_high = midrange_gpu_throughput * 0.60  # 60% utilization
+    headroom = (effective_throughput_low / sustained_throughput).to("").magnitude
+
+    objdet_sustained_throughput = fps * objdet_flops / second
+    objdet_headroom = (effective_throughput_low / objdet_sustained_throughput).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(headroom > 1, "ResNet-50 at 30 FPS must leave compute headroom on a mid-range GPU.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    tc_fps_str = fmt_fps(fps)
+    tc_resnet_gflop_str = fmt_flops(resnet_flops, unit=GFLOPs, precision=1, commas=False)  # e.g. "8.2 GFLOP"
+    tc_sustained_gflop_per_s_str = fmt_flop_rate(round(sustained_throughput), unit=GFLOPs / second, precision=0, commas=False)  # e.g. "246"
+    tc_gpu_tflop_per_s_str = fmt_flop_rate(midrange_gpu_throughput, unit=TFLOP / second, precision=0, commas=False)
+    tc_effective_low_tflop_per_s_str = fmt_flop_rate(effective_throughput_low, unit=TFLOP / second, precision=0, commas=False)
+    tc_effective_high_tflop_per_s_str = fmt_flop_rate(effective_throughput_high, unit=TFLOP / second, precision=0, commas=False)
+    tc_headroom_factor_mult_str = fmt_multiple(headroom, precision=1, commas=False)  # e.g. "20"
+    tc_objdet_gflop_str = fmt_flops(objdet_flops, unit=GFLOPs, precision=0, commas=False)  # e.g. "100"
+    tc_objdet_sustained_tflop_per_s_str = fmt_flop_rate(round(objdet_sustained_throughput), unit=TFLOP / second, precision=0, commas=False)
+    tc_objdet_headroom_factor_mult_str = fmt_multiple(objdet_headroom, precision=1, commas=False)  # e.g. "2"
+```
+
+::: {#nbk-nn-architectures-throughput-ceiling .callout-notebook title="The throughput ceiling"}
+
+**Problem**: A real-time application must process `{python} ThroughputCeilingCalc.tc_fps_str` of video with ResNet-50. What sustained compute throughput is required?
+
+**Math**:
+
+1.  **Model cost**: ResNet-50 requires ~`{python} ThroughputCeilingCalc.tc_resnet_gflop_str` per $224{\times}224$ image.
+2.  **Frame rate**: `{python} ThroughputCeilingCalc.tc_fps_str` required.
+3.  **Sustained throughput**: `{python} ThroughputCeilingCalc.tc_fps_str` $\times$ `{python} ThroughputCeilingCalc.tc_resnet_gflop_str` = `{python} ThroughputCeilingCalc.tc_sustained_gflop_per_s_str`.
+4.  **Effective throughput**: `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` peak $\times$ 50--60 percent utilization = `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str`.
+5.  **ResNet-50 headroom**: `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str` $\div$ `{python} ThroughputCeilingCalc.tc_sustained_gflop_per_s_str` = `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str`.
+6.  **Detection-model check**: `{python} ThroughputCeilingCalc.tc_fps_str` $\times$ `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` = `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str`, leaving `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom at the lower effective-throughput estimate.
+
+**Systems insight**: A mid-range GPU delivering `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` theoretical peak achieves ~50--60 percent utilization in this planning scenario, yielding `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str` effective. For ResNet-50 at `{python} ThroughputCeilingCalc.tc_fps_str`, the system has `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str` headroom. Switching to an object detection model at `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` per frame, however, requires `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str` sustained, leaving only `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom. Batch size constraints or multi-stream processing quickly push the system toward the compute ceiling. ResNet-50 is compute-bound, but the margin depends on the accelerator and utilization achieved.
+
+:::
+
+The throughput ceiling converts an abstract compute requirement into a concrete hardware utilization percentage. A real-world deployment adds physical constraints the ceiling alone does not capture.
+
+#### Worked example: Real-time wildlife monitoring {#sec-network-architectures-worked-wildlife-monitoring}
+
+```{python}
+#| echo: false
+#| label: wildlife-model-sizing
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WILDLIFE MONITORING MODEL SIZING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Real-time wildlife monitoring case study, candidate evaluation
+# │
+# │ Goal: Select a vision model for constrained edge deployment.
+# │ Show: MobileNetV2 fits the memory and latency budget while KWS is too small.
+# │ How: Compare local candidate specs, runtime memory, compute, and energy.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim import Models, Datasets, TOPS, GOPS
+from mlsysim.core.units import param
+from mlsysim.fmt import (
+    fmt_int,
+    fmt,
+    check,
+    fmt_energy,
+    fmt_flops,
+    fmt_math,
+    fmt_memory,
+    fmt_magnitude,
+    fmt_ops_rate,
+    fmt_params,
+    fmt_power,
+    fmt_rate,
+    fmt_time,
+)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class WildlifeModelSizing:
+    """Candidate sizing for the edge wildlife monitoring case study."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    resnet = Models.Vision.ResNet50
+    mnv1_params_m = 4.2  # millions of params
+    mnv1_flops_mflops = 1_138  # 569 MMAC at 224x224, using 2 FLOPs/MAC
+    mnv2_params_m = 2.6  # millions of params for width multiplier 0.75
+    mnv2_flops_mflops = 418  # 209 MMAC at 224x224, using 2 FLOPs/MAC
+
+    inference_power_mw = 200  # milliwatts during inference
+    inferences_per_day = 100  # trigger-based
+    edge_ram_mb = 512
+    os_buffers_mb = 50
+    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
+    image_dim = IMAGE_DIM_RESNET
+    activation_channels = 64
+    activation_bytes = 4
+    target_latency_ms = 500
+    edge_int8_tops = 0.002  # effective INT8 throughput in TOPS
+    accuracy_target_pct = 90
+    species_count = 50
+    model_budget_mb = 100
+    width_mult = 0.75
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    resnet_params_m = resnet.parameters.to(Mparam).magnitude
+    resnet_gflops = resnet.inference_flops.to(GFLOPs)
+    resnet_fp32 = resnet.size_in_bytes(BYTES_FP32)
+
+    mnv1_fp32 = mnv1_params_m * MILLION * BYTES_FP32
+    mnv1_int8 = mnv1_params_m * MILLION * BYTES_INT8
+    mnv2_fp32 = mnv2_params_m * MILLION * BYTES_FP32
+    mnv2_int8 = mnv2_params_m * MILLION * BYTES_INT8
+
+    kws_example_params_k = Models.Tiny.DS_CNN.parameters.to(Kparam).magnitude
+    kws_example_flops_mflops = Models.Tiny.DS_CNN.inference_flops.to(MFLOPs).magnitude
+
+    activation_memory = image_dim * image_dim * activation_channels * activation_bytes * byte
+    os_buffers = os_buffers_mb * MB
+    edge_ram = edge_ram_mb * MB
+    model_budget = model_budget_mb * MB
+    inference_power = inference_power_mw * milliwatt
+    total_runtime = mnv2_int8 + activation_memory + os_buffers
+    compute_latency_ms = mnv2_flops_mflops / edge_int8_tops / THOUSAND
+    compute_latency = compute_latency_ms * millisecond
+    energy_per_inf = inference_power * compute_latency
+    energy_per_day = inferences_per_day * energy_per_inf
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(total_runtime < edge_ram, "MobileNetV2 runtime footprint must fit in 512 MB edge RAM.")
+    check(compute_latency_ms < target_latency_ms, "MobileNetV2 estimated latency must meet 500 ms target.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    resnet_params_str = fmt_params(resnet.parameters, scale="M", precision=1, commas=False)
+    resnet_gflop_str = fmt_flops(resnet_gflops, unit=GFLOPs, precision=1, commas=False)  # e.g. "8.2 GFLOP"
+    resnet_fp32_mb_str = fmt_memory(resnet_fp32, unit=MB, precision=1, commas=False)
+    mnv1_params_str = fmt_params(mnv1_params_m * MILLION * param, scale="M", precision=1, commas=False)
+    mnv1_mflop_str = fmt_flops(mnv1_flops_mflops * MFLOPs, unit=MFLOPs, precision=0, commas=False)  # e.g. "1138 MFLOP"
+    mnv1_fp32_mb_str = fmt_memory(mnv1_fp32, unit=MB, precision=1, commas=False)
+    mnv1_int8_mb_str = fmt_memory(mnv1_int8, unit=MB, precision=1, commas=False)
+    mnv2_params_str = fmt_params(mnv2_params_m * MILLION * param, scale="M", precision=1, commas=False)
+    mnv2_mflop_str = fmt_flops(mnv2_flops_mflops * MFLOPs, unit=MFLOPs, precision=0, commas=False)  # e.g. "418 MFLOP"
+    mnv2_mflop_value_str = fmt_magnitude(mnv2_flops_mflops * MFLOPs, unit=MFLOPs, precision=0, commas=False)
+    mnv2_fp32_mb_str = fmt_memory(mnv2_fp32, unit=MB, precision=1, commas=False)
+    mnv2_int8_mb_str = fmt_memory(mnv2_int8, unit=MB, precision=1, commas=False)
+    kws_example_params_str = fmt_params(Models.Tiny.DS_CNN.parameters, scale="K", precision=0, commas=False)
+    kws_example_mflop_str = fmt_flops(kws_example_flops_mflops * MFLOPs, unit=MFLOPs, precision=0, commas=False)  # e.g. "20 MFLOP"
+    activation_mb_str = fmt_memory(activation_memory, unit=MB, precision=1, commas=False)
+    os_buffers_mb_str = fmt_memory(os_buffers, unit=MB, precision=0, commas=False)
+    total_runtime_mb_str = fmt_memory(total_runtime, unit=MB, precision=1, commas=False)
+    edge_ram_mb_str = fmt_memory(edge_ram, unit=MB, precision=0, commas=False)
+    edge_int8_tops_value_str = fmt_magnitude(edge_int8_tops * TOPS, unit=TOPS, precision=3, commas=False)  # e.g. "0.002"
+    edge_int8_gops_str = fmt_ops_rate(edge_int8_tops * TOPS, unit=GOPS, precision=0, commas=False)  # 0.002 TOPS -> 2 GOPS
+    target_latency_ms_str = fmt_time(target_latency_ms, unit="millisecond", precision=0, commas=False)  # e.g. "500 ms"
+    compute_latency_ms_str = fmt_time(round(compute_latency_ms), unit="millisecond", precision=0, commas=False)  # e.g. "209 ms"
+    inference_power_mw_str = fmt_power(inference_power, unit=milliwatt, precision=0, commas=False)
+    inferences_per_day_str = fmt_rate(inferences_per_day, "inferences/day", precision=0, commas=False)
+    energy_mj_str = fmt_energy(energy_per_inf, unit=mJ, precision=1, commas=False)  # e.g. "41.8 mJ"
+    energy_j_str = fmt_energy(energy_per_day, unit=J, precision=1, commas=False)  # e.g. "4.2 J"
+    memory_check_math = fmt_math(
+        f"\\underbrace{{\\text{{{mnv2_int8_mb_str}}}}}_{{\\text{{Model}}}} + "
+        f"\\underbrace{{{image_dim} \\times {image_dim} \\times {activation_channels} \\times {activation_bytes} \\approx \\text{{{activation_mb_str}}}}}_{{\\text{{Activations}}}} + "
+        f"\\underbrace{{\\text{{{os_buffers_mb_str}}}}}_{{\\text{{OS/Buffers}}}} = "
+        f"\\text{{{total_runtime_mb_str}}} \\ll \\text{{{edge_ram_mb_str}}}~\\checkmark"
+    )
+    compute_check_math = fmt_math(
+        f"\\frac{{{mnv2_mflop_value_str} \\times 10^6 \\text{{ INT8 ops}}}}{{{edge_int8_tops_value_str} \\times 10^{{12}} \\text{{ INT8 ops/s}}}} = "
+        f"{compute_latency_ms_str} \\text{{ latency}} \\ll {target_latency_ms_str} \\text{{ target}}~\\checkmark"
+    )
+    accuracy_target_pct_str = fmt_percent(round(accuracy_target_pct) / 100, precision=0, commas=False, style='prose')
+    species_count_str = fmt(species_count, precision=0, commas=False)
+    model_budget_mb_str = fmt_memory(model_budget, unit=MB, precision=0, commas=False)
+    width_mult_str = fmt_multiple(width_mult, precision=2, commas=False)
+```
+
+The design task is an embedded ML system that classifies wildlife species from camera trap images in an isolated national park. The deployment must execute inference entirely on-device with zero network connectivity, operate on solar-recharged battery power for six months, and achieve `{python} WildlifeModelSizing.accuracy_target_pct_str` accuracy across `{python} WildlifeModelSizing.species_count_str` target animal species. A five-phase evaluation guides the selection process: data characterization, deployment constraint profiling, candidate architecture evaluation, hardware budget validation, and operational risk assessment.
+
+The input data consists of camera trap image frames ($1920{\times}1080$ raw sensor resolution, downsampled to $224{\times}224$ for inference). Three properties favor a CNN candidate: spatial locality (fur textures or ear shapes occupy bounded neighborhoods), label invariance to translation (moving an animal within the frame should preserve its species label), and hierarchical composition (edges combine into textures, anatomical parts, and organisms). Convolution provides equivariant intermediate features that follow the animal's location; pooling can then support an invariant classification. Local weight sharing supplies a compact feature detector for these images.
+
+Constraint analysis translates the deployment environment into hard hardware boundaries. @Tbl-nn-architectures-wildlife-constraints catalogs these physical constraints alongside the architectural requirements each imposes:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.35}
+```
+
+| **Constraint**   | **Requirement**                | **Implication**                                          |
+|:-----------------|:-------------------------------|:---------------------------------------------------------|
+| **Connectivity** | None (offline)                 | All inference must run on-device                         |
+| **Power**        | ~2 W average (solar + battery) | Rules out GPUs; needs a low-power SoC or edge NPU        |
+| **Latency**      | <500 ms per detection          | Allows batch size 1, no real-time streaming              |
+| **Memory**       | 512 MB RAM, 2 GB storage       | Model, activations, and runtime buffers must fit locally |
+| **Accuracy**     | 90%+ on 50 species             | Requires sufficient model capacity                       |
+
+: **Wildlife Monitoring Constraints**: Five deployment constraints and their implications for the camera-trap scenario. No connectivity rules out cloud-only inference, while the power, latency, memory, and accuracy requirements must be validated on the target device. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[16,33,51]"}
+
+```{=latex}
+\endgroup
+```
+
+With physical constraints established, candidate architectures are evaluated against reference model baselines. The planning scenario reserves `{python} WildlifeModelSizing.model_budget_mb_str` of the available RAM for model weights, leaving the rest for activations, system software, and runtime buffers:
+
+- **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` parameters, `{python} WildlifeModelSizing.resnet_gflop_str`): A costly starting point for the 2 W envelope. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` in FP32, weight storage alone exceeds that allocation before activation buffers or OS overhead are counted.
+- **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` parameters, `{python} WildlifeModelSizing.mnv1_mflop_str`): Viable arithmetic intensity and footprint. Storing weights in INT8 reduces model footprint to `{python} WildlifeModelSizing.mnv1_int8_mb_str` (`{python} WildlifeModelSizing.mnv1_fp32_mb_str` in FP32), and factorized depthwise separable convolutions drastically cut arithmetic operations.
+- **KWS DS-CNN** (`{python} WildlifeModelSizing.kws_example_params_str` parameters, `{python} WildlifeModelSizing.kws_example_mflop_str`): An unmatched baseline. This model targets audio keyword spotting, so its reported size and task results do not establish accuracy on visual species classification. An adapted compact vision model would require training and evaluation on the camera-trap task.
+
+While MobileNetV1 demonstrates the viability of depthwise separable convolutions, MobileNetV2 offers inverted residual blocks with linear bottlenecks as another compact candidate. Sizing the model with width multiplier `{python} WildlifeModelSizing.width_mult_str` yields ~`{python} WildlifeModelSizing.mnv2_params_str` parameters (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights) and costs ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$ input resolution. Its weight footprint fits the allocation; task evaluation must establish whether its capacity meets the accuracy target for the 50 species.
+
+Hardware sizing first checks the candidate against physical platform budgets. The estimated memory footprint fits within available device RAM:
+
+`{python} WildlifeModelSizing.memory_check_math`
+
+For the candidate system-on-chip (SoC), an ARM Cortex-A53 at 1.2 GHz with NEON SIMD, assume sustained throughput of ~`{python} WildlifeModelSizing.edge_int8_gops_str` INT8 for this planning calculation:
+`{python} WildlifeModelSizing.compute_check_math`
+
+Active power represents the final physical gate. At an estimated active inference draw of ~`{python} WildlifeModelSizing.inference_power_mw_str` over `{python} WildlifeModelSizing.compute_latency_ms_str`, each classification consumes `{python} WildlifeModelSizing.energy_mj_str`. For a trigger-based rate of `{python} WildlifeModelSizing.inferences_per_day_str`, model execution consumes `{python} WildlifeModelSizing.energy_j_str`/day. Full-system energy must also include image capture, sleep current, storage, and peripherals. Battery capacity, conversion losses, trigger frequency, and seasonal solar yield determine whether that daily budget supports six months of operation.
+
+The fifth step assesses operational risks in the field. @Tbl-nn-architectures-wildlife-risks pairs the primary accuracy, thermal, and coverage failure modes with corresponding systems engineering mitigations:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Risk**                             | **Mitigation**                                                                        |
+|:-------------------------------------|:--------------------------------------------------------------------------------------|
+| **90% accuracy not achieved**        | Train on augmented dataset; consider EfficientNet-Lite if MobileNet insufficient      |
+| **Thermal throttling in enclosure**  | Add passive heatsink; reduce inference frequency in high-temperature conditions       |
+| **New species added postdeployment** | Expand or retrain the output head; install the update during a physical service visit |
+
+: **Wildlife Camera Deployment Risks**: Top accuracy, thermal, and species-coverage risks for the MobileNetV2 deployment, paired with the engineering mitigation chosen for each. {#tbl-nn-architectures-wildlife-risks}
+
+```{=latex}
+\endgroup
+```
+
+The sizing exercise selects MobileNetV2 (`{python} WildlifeModelSizing.width_mult_str` width multiplier) quantized to INT8 as a candidate for an ARM Cortex-A53 SoC with `{python} WildlifeModelSizing.edge_ram_mb_str` RAM. Under the assumed sustained throughput, the arithmetic estimate is approximately `{python} WildlifeModelSizing.compute_latency_ms_str` per frame. Qualification now requires target-device measurements of end-to-end latency, peak memory, thermal behavior, and full-system energy, together with classification accuracy on representative camera distributions and seasonal battery tests.
+
+This case study translates abstract architectural principles into a concrete sizing decision. Yet production architecture selection frequently encounters counterintuitive trade-offs: models with fewer FLOPs can stall on bandwidth-limited hardware, expressive architectures can degrade on datasets lacking matched structure, and lab prototypes can fail against deployment memory hierarchies. Grounding these failure modes in hardware reality exposes the principal fallacies and pitfalls of systems design.
+

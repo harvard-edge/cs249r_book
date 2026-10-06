@@ -1,0 +1,86 @@
+### Workload signatures: The arithmetic intensity spectrum {#sec-network-architectures-understanding-arithmetic-intensity-ade5}
+
+ResNet-50 reuses convolutional weights across many spatial positions, while batch-one GPT-2/Llama decode streams large weight and KV-cache state (the stored attention keys and values of earlier tokens) for one token at a time. That contrast motivates arithmetic intensity\index{Arithmetic intensity!FLOP/byte ratio}, the FLOP/byte ratio used with a hardware roofline to assess whether a workload is likely to be compute or memory bound.
+
+::: {.column-margin .margin-pointer}
+↩ Arithmetic intensity and the system balance it is compared against are established in @sec-ml-systems-system-balance-hardware-96ab.
+:::
+
+```{python}
+#| echo: false
+#| label: workload-signatures-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WORKLOAD SIGNATURES: ARITHMETIC INTENSITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Workload Signatures" section
+# │
+# │ Goal: Quantify the Arithmetic Intensity (I) for Lighthouse Models.
+# │ Show: Why Transformers are memory-bound (I < 1) vs CNNs (I > 20).
+# │ How: Calculate FLOP/byte ratio from mlsysim model specs using FP32 sizes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.fmt import fmt_int, check, fmt_arithmetic_intensity
+
+# ┌── LEGO ───────────────────────────────────────────────
+class WorkloadSignatures:
+    """
+    Namespace for Workload Signature calculation.
+    Scenario: Comparing Arithmetic Intensity across architectures (FP32).
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # Values from the mlsysim model registry, using FP32 weight bytes.
+    resnet = Models.Vision.ResNet50
+    gpt2 = Models.Language.GPT2
+    mobilenet = Models.Vision.MobileNetV2
+
+    resnet_flops = resnet.inference_flops.to(flop).magnitude
+    resnet_bytes = resnet.size_in_bytes(BYTES_FP32).to(byte).magnitude
+    gpt2_flops_token = gpt2.inference_flops.to(flop).magnitude
+    gpt2_bytes = gpt2.size_in_bytes(BYTES_FP32).to(byte).magnitude
+    mobilenet_flops = mobilenet.inference_flops.to(flop).magnitude
+    mobilenet_bytes = mobilenet.size_in_bytes(BYTES_FP32).to(byte).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    resnet_i = resnet_flops / resnet_bytes
+    gpt2_i = gpt2_flops_token / gpt2_bytes
+    mobilenet_i = mobilenet_flops / mobilenet_bytes
+    resnet_to_gpt2_ratio = resnet_i / gpt2_i
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(resnet_i > gpt2_i * 50, f"ResNet intensity ({resnet_i:.1f}) should be >> GPT-2 ({gpt2_i:.1f}).")
+    check(150 <= resnet_to_gpt2_ratio <= 170, f"Expected roughly 160x ResNet/GPT-2 intensity gap, got {resnet_to_gpt2_ratio:.1f}x.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    resnet_intensity_str = fmt_arithmetic_intensity(resnet_i * flop / byte, unit=flop / byte, commas=False)
+    gpt2_intensity_str = fmt_arithmetic_intensity(gpt2_i * flop / byte, unit=flop / byte, precision=2, commas=False)
+    mobilenet_intensity_str = fmt_arithmetic_intensity(mobilenet_i * flop / byte, unit=flop / byte, commas=False)
+    resnet_to_gpt2_ratio_mult_str = fmt_multiple(resnet_to_gpt2_ratio, precision=1, commas=False)
+```
+
+::: {.column-margin}
+```{=latex}
+\vspace*{-47mm}
+```
+![](images/svg/nn_architectures_arithmetic_intensity.svg){width="100%" fig-alt="Three stacked horizontal bars on a log scale labeled ResNet 80, MobileNet 43, and GPT-2 0.5 FLOP per byte, the topmost bar far longer than the bottom one."}
+
+*A weight-only proxy gives ResNet ~160$\times$ GPT-2's batch-one intensity.*
+:::
+
+These bottlenecks reflect the underlying math, but the calculation here is a weight-only proxy rather than a complete measurement of main-memory traffic. It divides floating-point work by FP32 model-weight bytes, omitting activation, intermediate, and KV-cache traffic. Batching can amortize weight traffic across examples or tokens, while additional state movement can lower realized intensity. @Sec-appdx-algorithm-foundations-computational-complexity-cheat-sheet-0c6c gives the per-operation FLOP and parameter formulas used in the proxy. @Tbl-workload-signatures compares the three lighthouse scenarios and exposes a roughly `{python} WorkloadSignatures.resnet_to_gpt2_ratio_mult_str` gap under these assumptions.
+
+| **Model Family**     | **Lighthouse** |         **Intensity** $(\ArithmeticIntensity)$         | **Hardware Affinity**      |
+|:---------------------|:--------------:|:------------------------------------------------------:|:---------------------------|
+| **Dense CNN**        |   ResNet-50    |  ~`{python} WorkloadSignatures.resnet_intensity_str`   | Compute-Rich (GPUs/TPUs)   |
+| **Efficient Vision** |  MobileNetV2   | ~`{python} WorkloadSignatures.mobilenet_intensity_str` | Balanced (Mobile NPUs)     |
+| **Transformer**      |  GPT-2 (Inf)   |   ~`{python} WorkloadSignatures.gpt2_intensity_str`    | Bandwidth-rich accelerator |
+
+: **Lighthouse Workload Signatures**: Weight-only FP32 intensity proxies for three model scenarios. These values suggest different compute and bandwidth pressures but do not determine a fixed hardware affinity; realized bottlenecks depend on execution regime and hardware balance. {#tbl-workload-signatures tbl-colwidths="[20,20,20,40]"}
+
+This table provides one systems input to architecture selection. Task requirements determine which model families are viable, while batch size, precision, sequence length, implementation, cache behavior, and target hardware determine whether the proxy predicts the deployed bottleneck. MobileNet often suits constrained vision deployments, and batch-one transformer decoding often places heavy pressure on memory bandwidth, but both choices require measurement in the intended regime.
+
+Send three requests to the same accelerator, one at a time. A single ResNet-50 frame performs about `{python} LighthouseSpecs.resnet_gflop_str` of arithmetic against `{python} LighthouseSpecs.resnet_fp32_mb_str` of FP32 weights, and each convolutional filter is reused across its feature map, creating opportunities to keep arithmetic units busy. A single GPT-2 token at batch size one performs about `{python} LighthouseSpecs.gpt2_gflop_per_token_str` against `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of FP16 weights. Streaming those weights once gives a weight-only arithmetic intensity of roughly `{python} AutoregressiveInferenceCost.intensity_fp16_str`, making bandwidth a likely limit. A DLRM request gathers a handful of embedding rows from tables totaling `{python} LighthouseSpecs.dlrm_model_size_gb_str`, more than the accelerator's `{python} CapacityWall.a100_mem_gb_str` of memory, so before any question of speed arises the system must decide where those tables live.
+
+The silicon is identical in all three cases, but the demands differ. Convolutional reuse favors arithmetic throughput, streamed token projections stress bandwidth, and oversized embedding tables impose a capacity constraint that decides which bandwidth their lookups pay. The iron law (@sec-introduction-iron-law-ml-systems-c32a) turns these structural observations into predictions once execution conditions and machine balance are specified. The profiles below collect those conditions, shared building blocks explain costs that transfer between families, and deployment budgets screen the resulting candidates.
+

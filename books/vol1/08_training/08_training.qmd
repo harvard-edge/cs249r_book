@@ -250,7 +250,6 @@ class GPT2LighthouseSpecs:
     dlrm_params_max_t_str = fmt_params(dlrm_params_max, precision=0)
 ```
 
-
 ## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
 
 Running a model once and training it from scratch live on opposite sides of the systems cost curve. Frameworks provide the execution substrate: computational graphs schedule operations, automatic differentiation computes gradients, and hardware abstractions target diverse accelerators. Those mechanisms make a single training step possible; training systems make it repeatable at scale. The same forward/backward/update loop may run many thousands or millions of times while retaining activations, feeding accelerators, and staying within practical memory, time, and budget limits.
@@ -320,7 +319,7 @@ A training system is not a single loop; it is a **staged system pipeline**\index
 1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from Non-Volatile Memory Express (NVMe), decoding, and augmenting on CPU cores.
 2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the PCIe bus into GPU memory via direct memory access (DMA).
 3.  **Forward/Backward Pass** (Accelerator): Propagating activations and gradients through layers on the GPU.
-4.  **Parameter Synchronization** (Interconnect): Exchanging gradients between accelerators over the available fabric. NVLink provides up to `{python} TrainingScenarios.nvlink_h100_gb_per_s_str` in the H100 configuration used later, while other systems may use PCIe or a network interconnect.
+4.  **Parameter Synchronization** (Interconnect): Exchanging gradients between accelerators over the available fabric. NVLink (NVIDIA's proprietary high-speed GPU-to-GPU interconnect) provides up to `{python} TrainingScenarios.nvlink_h100_gb_per_s_str` in the H100 configuration used later, while other systems may use PCIe or a network interconnect.
 
 Any mismatch in the throughput of these stages creates **accelerator bubbles**\index{Accelerator!bubbles, pipeline idleness}, intervals in which some accelerator resources are idle or underutilized while waiting for another stage. A systems engineer reduces these bubbles through techniques such as asynchronous prefetching and pipeline overlap, aiming to make the next batch available before the current step needs it. @Sec-model-training-identifying-bottlenecks-f57f develops the quantitative tools for measuring and reducing these bubbles.
 
@@ -345,7 +344,6 @@ Computational intensity, memory pressure, and data dependencies compound in larg
 **Systems lesson**: Operational fault tolerance directly governs the utilization factor $\EfficiencyHw$ in the training-time law (@eq-training-iron-law). Automated loss-spike detection, checkpoint cadence, and batch skipping are core system mechanisms required to protect cluster compute efficiency.
 
 :::
-
 
 ## Case Study: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
 
@@ -410,7 +408,6 @@ The hardware-software boundary is central to training. Mixed-precision training 
 [^fn-transformer-compute-scaling]: **Transformer training interconnect sensitivity**\index{Training!transformer, interconnect sensitivity}: Self-attention's $\mathcal{O}(S^2)$ memory and compute scaling increases activation size with sequence length. In pipeline parallelism, activations cross devices at model-partition boundaries, while data parallelism synchronizes gradients whose volume scales with parameter count. The resulting communication cost depends on the parallelism strategy, topology, message size, and degree of overlap, making interconnect choice a first-order training-system decision.
 
 Every training bottleneck ultimately traces back to the execution cost of specific mathematical operations. Sufficiently large matrix multiplications with high operand reuse can be compute-bound and governed by peak arithmetic throughput [@goto2008], whereas standalone low-intensity activation and normalization operations often face a memory-bandwidth ceiling. Meanwhile, optimizer states inflate the resident memory footprint regardless of arithmetic activity. Designing systems to execute these operations efficiently begins with accounting for each cost category separately.
-
 
 ## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
 
@@ -636,7 +633,7 @@ class TrainingHardware:
 
 :::
 
-These FLOP counts are not academic bookkeeping. They are the compute term of the iron law made concrete, and they explain why training cost scales as a predictable function of model architecture and sequence length rather than as an unpredictable emergent property.
+All of this math translates abstract model shapes into the physical realities of time and budget. These FLOP counts are not academic bookkeeping. They are the compute term of the iron law made concrete, and they explain why training cost scales as a predictable function of model architecture and sequence length rather than as an unpredictable emergent property.
 
 #### Matrix-vector and batched operations {#sec-model-training-matrixvector-operations-dbd8}
 
@@ -1007,14 +1004,13 @@ Batch size\index{Batch size!arithmetic intensity effect} can influence arithmeti
 
 This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores and parallel execution matters more. The distinction is practical: the first case asks how to move fewer bytes, while the second asks how to keep more arithmetic units busy.
 
-The trajectory vector in @fig-training-roofline illustrates how FlashAttention[^fn-flashattention-tiling-sram] shifts the operational regime of transformer attention across the 153 FLOP/byte ridge line onto the compute ceiling. By never materializing the full $\SequenceLength{\times}\SequenceLength$ attention matrix in HBM and instead processing tiles that fit in fast SRAM, FlashAttention reduces auxiliary attention memory from $\mathcal{O}(\SequenceLength^2)$ to $\mathcal{O}(\SequenceLength)$ and sharply reduces HBM traffic. The original work reports up to 3$\times$ speedups on evaluated workloads [@dao2022], with gains depending on tensor shape, hardware, and baseline. The algorithm and the conditions under which it applies are examined in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
+The trajectory vector in @fig-training-roofline illustrates how FlashAttention[^fn-flashattention-tiling-sram] shifts the operational regime of transformer attention across the 153 FLOP/byte ridge line onto the compute ceiling. By never materializing the full $\SequenceLength{\times}\SequenceLength$ attention matrix in HBM (the large but slower off-chip device memory) and instead processing tiles that fit in fast SRAM, FlashAttention reduces auxiliary attention memory from $\mathcal{O}(\SequenceLength^2)$ to $\mathcal{O}(\SequenceLength)$ and sharply reduces HBM traffic. The original work reports up to 3$\times$ speedups on evaluated workloads [@dao2022], with gains depending on tensor shape, hardware, and baseline. The algorithm and the conditions under which it applies are examined in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
 [^fn-flashattention-tiling-sram]: **FlashAttention**\index{FlashAttention!I/O-aware design}: The core mechanism processes attention in small tiles that fit within the accelerator's fast on-chip SRAM, avoiding writes of the full intermediate $\SequenceLength{\times}\SequenceLength$ matrix to slower HBM. The exact HBM IO bound depends on tile size and SRAM capacity, but the practical effect is a large reduction in memory traffic and auxiliary activation storage. The original work reports workload-dependent speedups of up to 3$\times$.
 
 Arithmetic-intensity analysis is how the silicon contract (principle \ref{pri-silicon-contract}) is checked in training. The contract names the resource a workload wagers on; the analysis determines which physical resource actually constrains a particular implementation. Dense matrix multiplication reaches the compute-bound regime when tensor shapes provide sufficient data reuse, while standalone normalization and elementwise activation kernels remain memory bandwidth bound. FlashAttention exemplifies how tiling reduces off-chip data movement and raises effective arithmetic intensity, shifting memory-bound attention toward compute saturation.
 
 Optimizing individual operations is necessary but insufficient. A perfectly tuned matrix multiplication achieves nothing if the accelerator sits idle waiting for the next batch of data. Isolated operation costs—dense matrix multiplication FLOPs, memory-bound activations, and optimizer state allocations—compound within the execution loop. Sustained throughput requires orchestrating these discrete operations into a balanced pipeline where upstream data delivery and downstream parameter updates prevent accelerator starvation.
-
 
 ## Pipeline Architecture {#sec-model-training-pipeline-architecture-81c9}
 
@@ -1282,7 +1278,7 @@ font=\small\sffamily\bfseries, color=TextBlack] {Step 3: Update};
 
 While @sec-model-training-mathematical-foundations-d894 formalizes the numerical operators of this cycle, physical hardware execution is dictated by memory residency and data dependencies. During the forward pass, intermediate activation tensors must remain resident in accelerator HBM because the backward pass requires them to evaluate chain-rule derivatives. Once gradients are computed, the optimizer reads both the parameters and accumulated gradients to apply the update rule, producing new weights for the subsequent iteration. The memory capacity required to hold activations, weights, and optimizer states establishes the memory floor for the entire training step.
 
-This execution loop repeats across batches and epochs\index{Epoch!training cycle} until the optimization converges. Maximizing accelerator arithmetic efficiency requires overlapping these pipeline stages across the system hierarchy. Host CPU threads prefetch and stage batch $k+1$ into page-locked (*pinned*) host memory while the accelerator executes batch $k$, so the DMA engine can stream it across PCIe asynchronously (@sec-ml-frameworks-device-memory-management-9404 explains why pinning is required). This concurrent staging hides storage latency and bus transfer time behind matrix-multiplication compute kernels. When this concurrency breaks down—whether an I/O-bound data pipeline starves the device of input tensors or frequent evaluation stalls the update loop—the accelerator idles, degrading effective throughput.
+This execution loop repeats across batches and epochs\index{Epoch!training cycle} until the optimization converges. Maximizing accelerator arithmetic efficiency requires overlapping these pipeline stages across the system hierarchy. Host CPU threads prefetch and stage batch $k+1$ into page-locked (*pinned*) host memory while the accelerator executes batch $k$, so the DMA (direct memory access) engine can stream it across PCIe asynchronously (@sec-ml-frameworks-device-memory-management-9404 explains why pinning is required). This concurrent staging hides storage latency and bus transfer time behind matrix-multiplication compute kernels. When this concurrency breaks down—whether an I/O-bound data pipeline starves the device of input tensors or frequent evaluation stalls the update loop—the accelerator idles, degrading effective throughput.
 
 ### Data pipeline {#sec-model-training-data-pipeline-8e71}
 
@@ -1977,7 +1973,7 @@ On a large GPU such as the NVIDIA H100 with 132 Streaming Multiprocessors (SMs),
 
 :::
 
-Beyond dense matrix multiplication, distinct neural architectures introduce specialized computational patterns. Convolutional networks\index{Convolution!computational cost}, for instance, slide spatial filters across multichannel input tensors. Consider an input tensor of dimensions `{python} TrainingDimensions.conv_input_dims_math` (batch size $\times$ height $\times$ width $\times$ channels) processed by `{python} TrainingDimensions.conv_kernel_dims_math` kernels. Each position requires `{python} TrainingDimensions.conv_ops_per_pos_str`, and with `{python} TrainingDimensions.conv_filters_str` filters operating across `{python} TrainingDimensions.conv_spatial_dims_math` spatial dimensions, the arithmetic work scales into millions of multiply-accumulate operations per image. Accelerators execute these spatial convolutions by either lowering them into dense GEMMs through column unfolding (`im2col`) or applying Winograd minimal filtering, which reduces multiplications at the cost of extra additions and transform workspace.
+Beyond dense matrix multiplication, distinct neural architectures introduce specialized computational patterns. Convolutional networks\index{Convolution!computational cost}, for instance, slide spatial filters across multichannel input tensors. Consider an input tensor of dimensions `{python} TrainingDimensions.conv_input_dims_math` (batch size $\times$ height $\times$ width $\times$ channels) processed by `{python} TrainingDimensions.conv_kernel_dims_math` kernels. Each position requires `{python} TrainingDimensions.conv_ops_per_pos_str`, and with `{python} TrainingDimensions.conv_filters_str` filters operating across `{python} TrainingDimensions.conv_spatial_dims_math` spatial dimensions, the arithmetic work scales into millions of multiply-accumulate operations per image. Accelerators execute these spatial convolutions by either lowering them into dense GEMMs (General Matrix Multiplications) through column unfolding (`im2col`) or applying Winograd minimal filtering, which reduces multiplications at the cost of extra additions and transform workspace.
 
 Transformer architectures introduce attention mechanisms\index{Attention mechanism!similarity computation}, which compute similarity scores across sequences. Attention pairs batch matrix multiplications ($\mathbf{Q}\mathbf{K}^T$ and $\text{softmax}(\cdot)\mathbf{V}$) with row-wise reductions. Because intermediate attention score matrices scale quadratically with sequence length, materializing these activations in global memory creates a memory bandwidth bottleneck unless kernels fuse matrix multiplications and normalization within on-chip SRAM.
 
@@ -2816,8 +2812,7 @@ LlamaTraining.time_exp = LlamaTraining._time_exp
 
 :::
 
-Decomposing the training pipeline exposes the structural mechanics of data loading, forward execution, backpropagation, and parameter updates, while the mathematical foundations in @sec-model-training-mathematical-foundations-d894 quantify the FLOPs, memory footprint, and bandwidth demanded by each phase. Yet knowing how stages execute does not reveal where a specific training workload stalls. A pipeline is only as fast as its slowest stage. In an overlapped pipeline where data loading takes 120 ms and computation takes 100 ms, a 20 percent faster kernel saves nothing, because the step still takes 120 ms. Before applying optimization techniques, systems engineers must profile the execution timeline to determine whether compute, memory bandwidth, storage I/O, or network synchronization binds performance.
-
+That is a lot of arithmetic to digest, but the takeaway is straightforward: the math dictates the hardware budget, and the budget dictates the architecture. Decomposing the training pipeline exposes the structural mechanics of data loading, forward execution, backpropagation, and parameter updates, while the mathematical foundations in @sec-model-training-mathematical-foundations-d894 quantify the FLOPs, memory footprint, and bandwidth demanded by each phase. Yet knowing how stages execute does not reveal where a specific training workload stalls. A pipeline is only as fast as its slowest stage. In an overlapped pipeline where data loading takes 120 ms and computation takes 100 ms, a 20 percent faster kernel saves nothing, because the step still takes 120 ms. Before applying optimization techniques, systems engineers must profile the execution timeline to determine whether compute, memory bandwidth, storage I/O, or network synchronization binds performance.
 
 ## Identifying Bottlenecks {#sec-model-training-identifying-bottlenecks-f57f}
 

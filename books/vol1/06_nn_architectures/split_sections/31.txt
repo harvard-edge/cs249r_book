@@ -1,0 +1,163 @@
+### System implications {#sec-network-architectures-system-implications-77ac}
+
+The quadratic bottleneck analyzed in @sec-network-architectures-system-implications-05a3 manifests differently across execution regimes. Full-sequence training and prefill compute all token positions concurrently, whereas autoregressive decoding generates one token at a time. Consequently, the operational bottleneck shifts from compute-bound matrix multiplications to memory-bandwidth-bound weight and state retrieval, governed by sequence length, batch size, and memory hierarchy limits.
+
+#### Training: The quadratic compute wall {#sec-network-architectures-training-quadratic-compute-wall-de9d}
+
+During training and prompt prefill, all token positions are processed in parallel, allowing accelerator tensor cores to achieve high floating-point utilization, but dense attention's score computation grows as $\mathcal{O}(S^2)$ with sequence length $S$. At 32k tokens, a materialized score matrix would occupy gigabytes per layer across multiple heads, and writing it to HBM and reading it back for softmax would make the layer bandwidth bound. I/O-aware tiling such as FlashAttention [@dao2022] fuses the dot-product, softmax, and value-weighting steps into on-chip SRAM tiles (@sec-network-architectures-memory-requirements-72c3), which removes that round-trip and leaves quadratic compute as the wall that remains.
+
+#### Small-batch autoregressive decoding: The memory bandwidth wall {#sec-network-architectures-inference-memory-bandwidth-wall-98d1}
+
+Autoregressive decoding generates one token at a time and often becomes memory-bandwidth bound at batch one ($\BatchSize = 1$) or small batch sizes when weights exceed on-chip memory. During prompt prefill or training, weight reuse across many token positions produces dense GEMMs with much higher arithmetic intensity. A large request batch ($\BatchSize \gg 1$) supplies many such positions, but prefill can obtain this reuse even for a single request with a long prompt.
+
+During single-token generation ($\BatchSize = 1$), however, each projection layer collapses into a matrix-vector multiplication (GEMV). In the streamed-weight regime, the processor reads each projection weight from DRAM to multiply it by a single new token vector. As established in @sec-neural-computation-performance-enhancement-techniques-692f, reading a 2-byte weight in FP16 to execute one multiply-accumulate operation ($1\text{ MAC} = 2\text{ FLOPs}$) yields a weight-only arithmetic intensity of exactly:
+$$I_{\text{GEMV}} = \frac{2\text{ FLOPs}}{2\text{ bytes}} = 1.0\text{ FLOP/byte}$$
+
+::: {.column-margin .margin-pointer}
+↩ The 1.0 FLOP/byte intensity of batch-one GEMV in 16-bit precision, and 0.5 FLOP/byte in FP32, is established in @sec-neural-computation-performance-enhancement-techniques-692f.
+:::
+
+Because modern accelerators require tens to hundreds of FLOPs per byte to reach peak compute throughput, running at $1.0\text{ FLOP/byte}$ leaves compute cores idling for the vast majority of execution time, waiting for weights to arrive across the memory bus. To generate each token, the system performs three operations:
+
+1.  **Read model weights**: Stream every parameter from off-chip memory to registers (for example, a 70-billion-parameter model streams 140 GB of FP16 weights per token; GPT-2 XL makes the cost of that first step concrete).
+2.  **Perform matrix-vector operations**: Compute projections with arithmetic intensity capped at $1.0\text{ FLOP/byte}$.
+3.  **Read and update the KV cache**: Append new key and value vectors while streaming historical keys and values from memory.
+
+```{python}
+#| echo: false
+#| label: kv-cache-sizing
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV CACHE SIZING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Transformer inference KV-cache footnote and serving pitfall
+# │
+# │ Goal: Derive per-request and concurrent KV-cache memory for FP16 serving.
+# │ Show: 32 layers * 2 * 32 heads * 2048 tokens * 128 head dim * 2 bytes.
+# │ How: Direct byte calculation using BYTES_FP16.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim.fmt import fmt_int, fmt, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+class KVCacheSizing:
+    """FP16 KV-cache memory for a 32-layer, 32-head transformer serving request."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    layers = 32
+    kv_tensors = 2
+    heads = 32
+    seq_len = 2048
+    head_dim = 128
+    bytes_per_elem = BYTES_FP16.to(byte).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    from mlsysim.physics import calc_kv_cache_size
+
+    per_request_memory = calc_kv_cache_size(
+        n_layers=layers, n_heads=heads, head_dim=head_dim, seq_len=seq_len, batch_size=1, bytes_per_elem=BYTES_FP16
+    )
+    concurrent_2_memory = per_request_memory * 2
+    concurrent_4_memory = per_request_memory * 4
+    concurrent_8_memory = per_request_memory * 8
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(
+        abs(per_request_memory.to(GB).magnitude - 1.07) < 0.01,
+        f"Per-request KV cache should be about 1.07 GB, got {per_request_memory.to(GB).magnitude:.2f}.",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    layers_str = fmt(layers, precision=0, commas=False)
+    kv_tensors_str = fmt(kv_tensors, precision=0, commas=False)
+    bytes_per_elem_str = fmt(bytes_per_elem, precision=0, commas=False)
+    heads_str = fmt(heads, precision=0, commas=False)
+    seq_len_str = fmt(seq_len, precision=0, commas=True)
+    head_dim_str = fmt(head_dim, precision=0, commas=False)
+    per_request_gb_str = fmt_memory(per_request_memory, unit=GB, precision=2, commas=False)
+    concurrent_2_gb_str = fmt_memory(concurrent_2_memory, unit=GB, precision=2, commas=False)
+    concurrent_4_gb_str = fmt_memory(concurrent_4_memory, unit=GB, precision=2, commas=False)
+    concurrent_8_gb_str = fmt_memory(concurrent_8_memory, unit=GB, precision=1, commas=False)
+```
+
+The **KV cache**\index{KV cache!definition}\index{KV cache!linear growth}[^fn-kv-cache-depth] grows linearly with sequence length ($\mathcal{O}(\NumberOfLayers \times 2 \times \NumberOfAttentionHeads \times S \times \AttentionHeadDimension)$ per request, distinct from the $\mathcal{O}(S^2)$ attention score matrix during training), storing the key and value vectors for all previous tokens to avoid recomputing them [@pope2023efficiently; @kwon2023]. Keys and values from past tokens are retained because the newly generated token's query ($\mathbf{q}_{t}$) must attend across all historical context ($\mathbf{k}_1 \dots \mathbf{k}_{t-1}$ and $\mathbf{v}_1 \dots \mathbf{v}_{t-1}$) to compute its next representation. Prior queries ($\mathbf{q}_1 \dots \mathbf{q}_{t-1}$) are safely discarded because past tokens never attend forward to future tokens, while caching past keys and values avoids re-running the entire model forward pass over the full prompt at every generated token. For long contexts, this cache can become massive (for example, 100+ GB), and each decoding step reads prior keys and values. The resulting bandwidth pressure depends on context length, batching, attention architecture, cache layout, and hardware.
+
+[^fn-kv-cache-depth]: **KV cache memory scaling**\index{KV cache!memory scaling}: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB; a single request's cache requires `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions $\times$ `{python} KVCacheSizing.head_dim_str` dimensions $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes, or about `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, the cache is ~`{python} KVCacheSizing.concurrent_8_gb_str`, a substantial addition to the weights. Because the cache grows linearly with context and concurrency, scaling throughput forces choices such as grouped-query attention [@ainslie2023], shorter contexts, or KV paging and offloading [@kwon2023]. Paging and offloading preserve model outputs, whereas grouped-query attention changes the architecture and shorter contexts truncate historical context.
+
+```{python}
+#| echo: false
+#| label: gpt2-bandwidth-lighthouse-recap
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 BANDWIDTH LIGHTHOUSE RECAP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Local GPT-2 XL bandwidth lighthouse profile
+# │
+# │ Goal: Recompute the per-token weight traffic and arithmetic intensity.
+# │ Show: Autoregressive GPT-2 inference is memory-bandwidth bound.
+# │ How: Use mlsysim GPT-2 specs and FP32/FP16 weight bytes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsysim import Models
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_params, fmt_flops, check, fmt_arithmetic_intensity
+
+# ┌── LEGO ───────────────────────────────────────────────
+class GPT2BandwidthProfile:
+    """Local quantitative recap for GPT-2 autoregressive inference."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    gpt2 = Models.Language.GPT2
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    gpt2_params_b = gpt2.parameters.to(Bparam).magnitude
+    gpt2_flops_per_token = gpt2.inference_flops
+    gpt2_fp32 = gpt2.size_in_bytes(BYTES_FP32)
+    fp32_weight_bytes = gpt2_fp32.to(byte).magnitude
+    fp16_weight_bytes = gpt2.size_in_bytes(BYTES_FP16).to(byte).magnitude
+    flops_per_token = gpt2.inference_flops.to(flop).magnitude
+    intensity_fp32 = flops_per_token / fp32_weight_bytes
+    intensity_fp16 = flops_per_token / fp16_weight_bytes
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(0.4 <= intensity_fp32 <= 0.6, f"Expected about 0.5 FLOP/byte with FP32 weights, got {intensity_fp32:.2f}.")
+    check(0.8 <= intensity_fp16 <= 1.2, f"Expected about 1 FLOP/byte with FP16 weights, got {intensity_fp16:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpt2_params_b_str = fmt_params(gpt2.parameters, scale="B", precision=1, commas=False)
+    gpt2_fp32_gb_str = fmt_memory(gpt2_fp32, unit=GB, precision=0, commas=True)
+    gpt2_gflop_per_token_str = fmt_flops(gpt2_flops_per_token, unit=GFLOPs, precision=0, per="token")
+    intensity_fp32_str = fmt_arithmetic_intensity(intensity_fp32 * flop / byte, unit=flop / byte, precision=1, commas=False)
+    intensity_fp16_str = fmt_arithmetic_intensity(round(intensity_fp16) * flop / byte, unit=flop / byte, precision=0, commas=False)
+```
+
+::: {#lhs-nn-architectures-gpt-2-xl-bandwidth-lighthouse .callout-lighthouse title="GPT-2 XL (bandwidth lighthouse)"}
+
+**Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound**\index{Memory bandwidth!bound workload} batch-one decoding. In the weight-only model used here, each decoding step reads `{python} GPT2BandwidthProfile.gpt2_fp32_gb_str` of FP32 weights and performs matrix-vector operations. The resulting arithmetic intensity is about `{python} GPT2BandwidthProfile.intensity_fp32_str` with FP32 weights or `{python} GPT2BandwidthProfile.intensity_fp16_str` with FP16 weights. Batching can amortize this weight traffic, while KV-cache and activation traffic add to it. @Tbl-nn-architectures-gpt2-profile summarizes the bandwidth lighthouse's quantitative properties:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Property**   | **Value**                                                | **System Implication**                                               |
+|:---------------|:---------------------------------------------------------|:---------------------------------------------------------------------|
+| **Parameters** | `{python} GPT2BandwidthProfile.gpt2_params_b_str`        | Weight loading dominates inference latency.                          |
+| **Model Size** | `{python} GPT2BandwidthProfile.gpt2_fp32_gb_str` (FP32)  | Fits on one GPU but saturates HBM bandwidth.                         |
+| **Compute**    | `{python} GPT2BandwidthProfile.gpt2_gflop_per_token_str` | Low per-token compute; bottleneck is data movement, not math.        |
+| **Constraint** | Memory Bandwidth                                         | Weight-bound batch-one tokens/s depends strongly on HBM bandwidth.   |
+| **Profile**    | Bandwidth-Bound (small-batch decoding)                   | Larger batches can amortize weight traffic and shift the bottleneck. |
+
+: **GPT-2 XL Systems Profile**: Weight-only estimates for batch-one autoregressive decoding. Under these assumptions, each step reads the model weights at roughly 0.5--1 FLOP/byte, so HBM bandwidth strongly constrains generation throughput. {#tbl-nn-architectures-gpt2-profile tbl-colwidths="[12,30,58]"}
+
+```{=latex}
+\endgroup
+\vspace*{-2ex}
+```
+:::
+
+Across training and inference, transformers exhibit distinct operational signatures: unconstrained parallel execution across token positions during training, quadratic arithmetic complexity in context length, and bandwidth-bound weight streaming during autoregressive decoding.
+
+Yet dense, spatial, and sequence models do not cover the full spectrum of production workloads. Large-scale recommendation systems depart from standard arithmetic-dominated pipelines by coupling sparse embedding lookups—where memory capacity and irregular access distributions govern throughput—with downstream dense interaction layers. This hybrid matters at production scale: Meta reported that recommendation models accounted for most of its AI inference cycles [@gupta2020architectural], even though such workloads receive less academic attention than language or vision models. @Sec-network-architectures-sparse-architectures-recommendation-systems-5d19 examines recommendation as the chapter's final paradigm.
+
