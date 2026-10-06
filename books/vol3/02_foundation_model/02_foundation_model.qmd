@@ -59,7 +59,7 @@ Interactive chat interfaces rely on human operators to resolve operational ambig
 
 Eliminating these failure modes requires a formal call contract between the agent runtime and the model inference service. This contract governs both directions of the interface: the outbound request (specifying message history, advertised tool definitions, and token limits) and the inbound execution record (specifying payload structure, completion stop reasons, and token consumption). It also dictates the defensive validation pipeline the runtime applies before dispatching any proposed action, alongside accounting for the latency and input re-computation costs incurred by each invocation. Rather than assuming model reliability, the contract treats the inference service as an untrusted, probabilistic generator. By recording verified execution facts at each boundary, the contract ensures that the runtime—not the foundation model—retains deterministic control over control-flow decisions.
 
-Tracing this lifecycle through the systems stack follows a single invocation from initial request dispatch to its ultimate resource cost. @Sec-vol3-foundation-model-role establishes the division of responsibility among the foundation model, the inference service, and the agent runtime, tracing the repair agent's inspection request through to its resulting environment observation. At the token boundary, @sec-vol3-foundation-model-tokenization measures how prompt text maps into discrete context allocations, while @sec-vol3-foundation-model-autoregressive details how the inference engine decodes candidate tokens sequentially under varying sampling configurations. Because raw model outputs cannot be trusted implicitly, validating the returned candidate demands three complementary defense layers: structural checks verify syntactic soundness (@sec-vol3-foundation-model-continuations), service-level status records determine whether generation concluded cleanly or stalled against resource limits (@sec-vol3-foundation-model-contract), and grammar-constrained decoding enforces schema validity directly at the logits level during generation (@sec-vol3-foundation-model-grammar-constrained). Finally, sustainable agent systems require rigorous resource accounting: @sec-vol3-foundation-model-cost models the latency and financial cost across multi-turn trajectories with prompt caching, and @sec-vol3-foundation-model-interface-design compares competing tool representations under a matched operational budget.
+Tracing this lifecycle through the systems stack follows a single invocation from initial request dispatch to its ultimate resource cost. @Sec-vol3-foundation-model-role establishes the division of responsibility among the foundation model, the inference service, and the agent runtime, tracing the repair agent's inspection request through to its resulting environment observation. At the token boundary, @sec-vol3-foundation-model-tokenization measures how prompt text maps into discrete context allocations, while @sec-vol3-foundation-model-contract details how the inference engine decodes candidate tokens sequentially under varying sampling configurations. Because raw model outputs cannot be trusted implicitly, validating the returned candidate demands three complementary defense layers: structural checks verify syntactic soundness (@sec-vol3-foundation-model-continuations), service-level status records determine whether generation concluded cleanly or stalled against resource limits (@sec-vol3-foundation-model-contract), and grammar-constrained decoding enforces schema validity directly at the logits level during generation (@sec-vol3-foundation-model-grammar-constrained). Finally, sustainable agent systems require rigorous resource accounting: @sec-vol3-foundation-model-cost models the latency and financial cost across multi-turn trajectories with prompt caching, and @sec-vol3-foundation-model-interface-design compares competing tool representations under a matched operational budget.
 
 ## The Model Invocation Boundary {#sec-vol3-foundation-model-role}
 
@@ -255,6 +255,95 @@ The repair agent is about to add a source excerpt and a diagnostic image to its 
 
 Token accounting provides an indispensable gatekeeping mechanism: it establishes an upfront admission test for the complete request while reserving adequate operational headroom for the response. But context admission addresses only initial capacity. Once the model begins decoding, token-by-token autoregressive generation dictates how quickly that reserved headroom is consumed and whether the interaction terminates cleanly or truncates prematurely.
 
+## Autoregressive Generation {#sec-vol3-foundation-model-autoregressive}
+
+A client request specifies the conversation history and the catalog of available tool schemas, but the generated response remains open-ended and stochastic. In a software repair task, for example, the model might propose `read_file` on a specific configuration path, select an entirely different source directory, or emit an unstructured natural-language explanation instead. Systems engineers must understand how the engine generates this text to configure appropriate token budgets and sampling parameters. That understanding also clarifies why re-executing an API request against a live model produces a fresh distribution of behaviors, whereas replaying a recorded trace provides exact downstream determinism.
+
+### Conditional token selection {#sec-vol3-foundation-model-conditional-token-selection}
+
+Autoregressive language models generate text by decomposing the joint probability of a sequence into a product of conditional next-token distributions, a foundational framing introduced in early neural language modeling [@bengio2003neural]. Let $x_{1:\SequenceLength}$ denote the input tokens and $y_{1:\Top}$ an output sequence. Its conditional probability factors as
+
+$$\Pr(y_{1:\Top} \mid x_{1:\SequenceLength}) = \prod_{t=1}^{\Top} \Pr(y_t \mid x_{1:\SequenceLength}, y_{1:t-1})$$ {#eq-autoregressive-factorization}
+
+At output position $t$, the model with parameters $\ModelParameters$ produces one score, or **logit**\index{Logits!definition}, for each token in vocabulary $\Vocabulary$:
+
+$$\mathbf{z}_t = \mathbf{f}_\theta(x_{1:\SequenceLength}, y_{<t}) \in \mathbb{R}^{|\Vocabulary|}$$
+
+A decoding rule selects a token from these scores, and the chosen token is appended to the prefix for position $t+1$. Because every subsequent step conditions on all preceding tokens, early decisions cascade through the remainder of the trajectory. When a model emits a specific file path inside a `read_file` argument, for example, that string immediately conditions the emission of the closing syntax and subsequent reasoning tokens. The model generates this path purely from learned statistical associations without consulting the operating system to establish whether the file actually exists.
+
+In an inference serving engine, the decode loop processes the prompt, computes next-token logits, selects an output token, appends it to the prefix context, and repeats this cycle until triggering a termination condition. Generation can terminate normally when the model emits an explicit end-of-sequence token or matches a caller-configured stop sequence. Alternatively, an execution engine may halt generation prematurely when reaching an output token limit, or abort unexpectedly due to an infrastructure timeout or network disconnect. Serving interfaces must report these stop reasons explicitly: receiving an incomplete JSON object due to a hit token limit requires different recovery handling than receiving a cleanly terminated tool call. Crucially, a clean stop sequence merely signals that the model finished generating text; it provides no guarantee that the underlying task succeeded.
+
+Production Transformer implementations [@vaswani2017] eliminate redundant computation across decoding steps by maintaining a *key-value (KV) cache*:[^fn-kv-cache-derived] memory buffers that store intermediate attention keys and values derived from previously processed tokens. Reusing this state avoids recomputing projections for historical tokens at every step. For a fixed full-attention architecture and storage precision, retaining more tokens requires more cache capacity. This cache represents transient intermediate computational state rather than an authoritative audit log proving which tools executed or what their external effects were. Cache organization and capacity planning are developed in @sec-vol3-kv-cache; the direct operational consequence is that the prompt and generated output both contribute to a call's memory footprint and resource demand.
+
+[^fn-kv-cache-derived]: **Key-Value (KV) Cache**: In causal attention, key and value vectors at a given position depend solely on that token and its predecessors, so once computed they remain static throughout subsequent sequence expansion. Retaining them in device memory turns each new decode step from full-sequence recomputation into a single new row projection per layer alongside a read of stored rows. Consequently, cache capacity and memory bandwidth, rather than floating-point arithmetic, become the primary operational constraints as context windows expand. \index{KV cache!why reuse is exact}
+
+Because each generated token extends a dependent sequence, output length is the primary cost variable of a call, and the serving implementation sets its realized latency. Although the conditional dependence in @eq-autoregressive-factorization fixes the mathematical order of token choices, it does not mandate that hardware evaluate each token in an isolated forward pass. Techniques such as speculative decoding,[^fn-speculative-decoding-equivalence] for example, draft candidate token blocks with a small auxiliary model and score them in parallel with the target model, provably preserving the target output distribution [@leviathan2023fast; @chen2023accelerating].
+
+[^fn-speculative-decoding-equivalence]: **Speculative Decoding**: A small draft model proposes several candidate tokens, and the target model scores them all concurrently in a single forward pass; a modified rejection-sampling rule accepts each drafted token with a probability that guarantees the accepted sequence matches the exact distribution of the target model sampling independently [@leviathan2023fast; @chen2023accelerating]. This guarantee is distributional rather than bitwise: it reduces the number of accelerator passes per generated token without altering the underlying candidate space, maintaining the same reproducibility characteristics discussed later in this section. \index{Speculative decoding!distribution preservation}
+
+### Sampling controls {#sec-vol3-foundation-model-sampling-controls}
+
+The inference engine provides parameters to reshape the output distribution before selecting a token. **Temperature** ($\tau_{\text{temp}}$)\index{Temperature (sampling)!definition} scales the raw logits before they are converted into probabilities. Lowering temperature sharply concentrates probability mass on the highest-scoring tokens, reducing output variance, while raising it produces a flatter distribution that encourages diverse selections. **Greedy decoding**\index{Greedy decoding!definition} bypasses stochastic sampling entirely, deterministically selecting the maximum-scoring token at each step.
+
+Truncation filters restrict the pool of eligible tokens. **Top-$k$ sampling**\index{Top-k sampling!definition} limits selection to a fixed number of highest-scoring tokens, while **Top-$\HiddenDimensionFour$ sampling**\index{Top-p sampling!definition} (nucleus sampling) retains tokens until their cumulative probability reaches a defined threshold, allowing the candidate pool size to adapt to distribution entropy.
+
+Crucially, systems engineers should treat these mechanisms strictly as entropy modulators. High token likelihood does not verify that a completed response is logically sound or correct. A rare token may be essential to a correct identifier or software patch, while a highly probable continuation may confidently propose an incorrect file name. Modifying temperature or applying nucleus truncation governs the diversity of candidates exposed to downstream execution, but only rigorous external validation---such as syntactic checks or sandboxed execution---can determine if a proposed candidate actually satisfies the task requirements.
+
+### Repetition and replay {#sec-vol3-foundation-model-repetition-replay}
+
+Greedy decoding removes sampling variance from a fixed logit vector, but it does not guarantee end-to-end reproducibility across served API calls. In distributed production infrastructure, identical input requests frequently encounter different serving nodes, hardware accelerator revisions, or software runtime configurations. Subtle variations in floating-point reduction order[^fn-float-reduction-order] can shift closely contested logits in their least significant bits; flipping an argmax selection at position $t=1$ permanently alters all downstream conditioning. Similarly, configuring a fixed pseudorandom seed constrains the sampling generator without eliminating numerical non-determinism across backend kernels or cluster deployments. True reproducibility requires a strictly pinned execution environment and software contract, extending well beyond setting $\tau_{\text{temp}} = 0$. Real-world production incidents illustrate how infrastructure changes in the serving fleet can dramatically alter generation behavior while caller requests remain identical.
+
+[^fn-float-reduction-order]: **Floating-Point Reduction Order**: Floating-point addition lacks associativity because intermediate calculations undergo rounding at each operation [@goldberg1991]. Parallel attention and reduction kernels that accumulate dot products across differing thread block dimensions or dynamic batch sizes execute summation in varying orders, yielding minor discrepancies in the least significant bits of logit tensors. When two top candidates have nearly identical values, this numerical divergence suffices to invert a greedy selection, redirecting the subsequent autoregressive path. \index{Floating-point arithmetic!nondeterministic reduction}
+
+```{python}
+#| label: calc-vol3-fm-serving-postmortem
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERVING-PATH INCIDENT FIGURES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: ws-02-anthropic-serving-bugs-2025 and the replay fallacy in
+# │          @sec-vol3-foundation-model-fallacies.
+# │ Goal: Carry the incident's reported shares as named, sourced inputs.
+# │ Show: Worst-hour share of one model's requests misrouted; share of one
+# │       tool's users with at least one misrouted message.
+# │ How: Values as reported in anthropic2025postmortem; no computation.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_percent
+
+class ServingPostmortem:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    worst_hour_share = 0.16  # sourced: anthropic2025postmortem, worst hour, one model's requests misrouted
+    user_share = 0.30  # sourced: anthropic2025postmortem, approx. share of coding-tool users affected
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Reported values only.
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0 < worst_hour_share < user_share < 1, "Reported shares must be fractions in source order")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    worst_hour_pct_str = fmt_percent(worst_hour_share, precision=0, style="prose")
+    user_pct_str = fmt_percent(user_share, precision=0, style="prose")
+```
+
+::: {#ws-02-anthropic-serving-bugs-2025 .callout-war-story title="Three serving bugs behind unchanged requests (2025)"}
+
+**Context**: Between August and early September 2025, three separate infrastructure bugs intermittently degraded the responses of Anthropic's Claude models [@anthropic2025postmortem]. These defects stemmed entirely from the serving infrastructure rather than caller requests or model weights.
+
+**Mechanism**: A front-end routing defect directed standard traffic to server clusters configured for extended context windows, while session stickiness trapped follow-up requests on those misconfigured nodes. Concurrently, an improperly deployed kernel optimization on a specialized accelerator cluster occasionally assigned outsized probability to improbable tokens. Finally, an optimization in the token-selection pipeline triggered a compiler bug: an approximate top-$k$ routine with mixed-precision subroutines emitted incorrect tokens under specific dynamic batch sizes.
+
+**Impact**: During peak impact, the routing failure corrupted `{python} ServingPostmortem.worst_hour_pct_str` of requests to one production model, and approximately `{python} ServingPostmortem.user_pct_str` of active coding agent users encountered at least one misrouted interaction. Generated responses exhibited foreign-language script insertions within English prose and syntax anomalies in generated source code. Automated regression suites initially missed these failures because downstream models frequently masked isolated token corruptions, and intermittent runtime conditions meant an identical prompt could succeed on one invocation and fail catastrophically on the next.
+
+**Fix**: Engineers rolled back the offending kernel deployments, corrected cluster routing rules, and replaced the approximate top-$k$ kernel with an exact selection routine running in 32-bit floating-point precision, trading a minor throughput penalty for numerical stability. Anthropic subsequently deployed continuous canary evaluations across production fleets to catch subtle generational drift.
+
+**Systems lesson**: Output distributions reflect the concrete serving pipeline just as heavily as the model weights or input context. Corrupted tokens arrived packaged in well-formed HTTP payloads and cleanly closed generation blocks, illustrating the classic fail-plausible failure mode in machine learning systems. Robust agent architectures must log full call-level metadata—capturing runtime versions, routing tags, and sampling parameters—while subjecting every proposed action to external environment validation regardless of nominal generation success.
+
+:::
+
+Production failures of this nature define the baseline instrumentation required for agentic infrastructure. Comprehensive diagnostic logs must capture the exact prompt payload, model and tokenizer revision hashes, decoding hyperparameters, configured token limits, and any backend routing or seed metadata. Alongside input parameters, the system must record the raw response payload, the explicit finish reason, and token usage metrics. When diagnosing downstream agent failures, developers should distinguish between replaying a recorded trajectory and re-querying the model. Replaying a recorded trace isolates downstream execution logic from model nondeterminism, whereas issuing a repeated API call tests the resilience of the agent across sampling variations. Rigorous evaluation frameworks must measure and report this repeated-call variance rather than assuming consistent single-call execution.
+
+Ultimately, an agent runtime ingests candidate tokens produced under a specific decoding configuration and terminated by a specific boundary condition. Even an uncorrupted, high-probability `read_file` proposal might reference an absent path or violate sandbox directory restrictions. The autoregressive generation process determines how a candidate sequence is synthesized; downstream systems must establish the verification harnesses and guardrails required to evaluate whether that sequence can safely execute.
+
 ## The Invocation Contract {#sec-vol3-foundation-model-contract}
 
 Suppose a model begins generating a cleanup command targeting the path `/tmp/scratch/cache_dir`, but reaches its token limit immediately after emitting `/tmp/scratch`. Both strings form syntactically valid shell commands, yet they specify vastly different deletion boundaries. An execution engine inspecting only raw text cannot determine whether the shorter path represents an intended command or a dangerously truncated prefix. To prevent catastrophic side effects, the host runtime requires an explicit execution outcome alongside the payload.
@@ -399,95 +488,6 @@ class StreamCancel:
 The compute savings shown represent an upper bound that requires provider cooperation. If the serving engine processes the cancellation promptly, it skips up to $\OutputLimit - t_{\text{cut}} =$ `{python} StreamCancel.cancel_steps_str` autoregressive decode steps. At the baseline memory-bandwidth decode floor of `{python} StreamCancel.t_dec_ms_str` per generated token modeled in @sec-vol3-foundation-model-cost, avoiding these steps recovers up to `{python} StreamCancel.cancel_s_str` of GPU compute time, frees slots in the continuous batching scheduler, and releases the call's KV-cache allocations. If the remote service fails to honor the cancellation, the host runtime still quarantines the rejected payload locally, but the remote cluster consumes its entire token allowance.
 
 Nonstreaming invocations enforce the exact same candidate admission barrier at batch completion. Streaming shifts the observation boundary earlier in the call lifecycle, enabling rapid rejection and resource recovery without relaxing the rule that incomplete prefixes must never trigger external side effects. While constrained decoding and formal grammars can eliminate syntax errors during generation, the host runtime must always maintain the distinction between an acceptable partial prefix and a validated, completed candidate.
-
-## Autoregressive Generation {#sec-vol3-foundation-model-autoregressive}
-
-A client request specifies the conversation history and the catalog of available tool schemas, but the generated response remains open-ended and stochastic. In a software repair task, for example, the model might propose `read_file` on a specific configuration path, select an entirely different source directory, or emit an unstructured natural-language explanation instead. Systems engineers must understand how the engine generates this text to configure appropriate token budgets and sampling parameters. That understanding also clarifies why re-executing an API request against a live model produces a fresh distribution of behaviors, whereas replaying a recorded trace provides exact downstream determinism.
-
-### Conditional token selection {#sec-vol3-foundation-model-conditional-token-selection}
-
-Autoregressive language models generate text by decomposing the joint probability of a sequence into a product of conditional next-token distributions, a foundational framing introduced in early neural language modeling [@bengio2003neural]. Let $x_{1:\SequenceLength}$ denote the input tokens and $y_{1:\Top}$ an output sequence. Its conditional probability factors as
-
-$$\Pr(y_{1:\Top} \mid x_{1:\SequenceLength}) = \prod_{t=1}^{\Top} \Pr(y_t \mid x_{1:\SequenceLength}, y_{1:t-1})$$ {#eq-autoregressive-factorization}
-
-At output position $t$, the model with parameters $\ModelParameters$ produces one score, or **logit**\index{Logits!definition}, for each token in vocabulary $\Vocabulary$:
-
-$$\mathbf{z}_t = \mathbf{f}_\theta(x_{1:\SequenceLength}, y_{<t}) \in \mathbb{R}^{|\Vocabulary|}$$
-
-A decoding rule selects a token from these scores, and the chosen token is appended to the prefix for position $t+1$. Because every subsequent step conditions on all preceding tokens, early decisions cascade through the remainder of the trajectory. When a model emits a specific file path inside a `read_file` argument, for example, that string immediately conditions the emission of the closing syntax and subsequent reasoning tokens. The model generates this path purely from learned statistical associations without consulting the operating system to establish whether the file actually exists.
-
-In an inference serving engine, the decode loop processes the prompt, computes next-token logits, selects an output token, appends it to the prefix context, and repeats this cycle until triggering a termination condition. Generation can terminate normally when the model emits an explicit end-of-sequence token or matches a caller-configured stop sequence. Alternatively, an execution engine may halt generation prematurely when reaching an output token limit, or abort unexpectedly due to an infrastructure timeout or network disconnect. Serving interfaces must report these stop reasons explicitly: receiving an incomplete JSON object due to a hit token limit requires different recovery handling than receiving a cleanly terminated tool call. Crucially, a clean stop sequence merely signals that the model finished generating text; it provides no guarantee that the underlying task succeeded.
-
-Production Transformer implementations [@vaswani2017] eliminate redundant computation across decoding steps by maintaining a *key-value (KV) cache*:[^fn-kv-cache-derived] memory buffers that store intermediate attention keys and values derived from previously processed tokens. Reusing this state avoids recomputing projections for historical tokens at every step. For a fixed full-attention architecture and storage precision, retaining more tokens requires more cache capacity. This cache represents transient intermediate computational state rather than an authoritative audit log proving which tools executed or what their external effects were. Cache organization and capacity planning are developed in @sec-vol3-kv-cache; the direct operational consequence is that the prompt and generated output both contribute to a call's memory footprint and resource demand.
-
-[^fn-kv-cache-derived]: **Key-Value (KV) Cache**: In causal attention, key and value vectors at a given position depend solely on that token and its predecessors, so once computed they remain static throughout subsequent sequence expansion. Retaining them in device memory turns each new decode step from full-sequence recomputation into a single new row projection per layer alongside a read of stored rows. Consequently, cache capacity and memory bandwidth, rather than floating-point arithmetic, become the primary operational constraints as context windows expand. \index{KV cache!why reuse is exact}
-
-Because each generated token extends a dependent sequence, output length is the primary cost variable of a call, and the serving implementation sets its realized latency. Although the conditional dependence in @eq-autoregressive-factorization fixes the mathematical order of token choices, it does not mandate that hardware evaluate each token in an isolated forward pass. Techniques such as speculative decoding,[^fn-speculative-decoding-equivalence] for example, draft candidate token blocks with a small auxiliary model and score them in parallel with the target model, provably preserving the target output distribution [@leviathan2023fast; @chen2023accelerating].
-
-[^fn-speculative-decoding-equivalence]: **Speculative Decoding**: A small draft model proposes several candidate tokens, and the target model scores them all concurrently in a single forward pass; a modified rejection-sampling rule accepts each drafted token with a probability that guarantees the accepted sequence matches the exact distribution of the target model sampling independently [@leviathan2023fast; @chen2023accelerating]. This guarantee is distributional rather than bitwise: it reduces the number of accelerator passes per generated token without altering the underlying candidate space, maintaining the same reproducibility characteristics discussed later in this section. \index{Speculative decoding!distribution preservation}
-
-### Sampling controls {#sec-vol3-foundation-model-sampling-controls}
-
-The inference engine provides parameters to reshape the output distribution before selecting a token. **Temperature** ($\tau_{\text{temp}}$)\index{Temperature (sampling)!definition} scales the raw logits before they are converted into probabilities. Lowering temperature sharply concentrates probability mass on the highest-scoring tokens, reducing output variance, while raising it produces a flatter distribution that encourages diverse selections. **Greedy decoding**\index{Greedy decoding!definition} bypasses stochastic sampling entirely, deterministically selecting the maximum-scoring token at each step.
-
-Truncation filters restrict the pool of eligible tokens. **Top-$k$ sampling**\index{Top-k sampling!definition} limits selection to a fixed number of highest-scoring tokens, while **Top-$\HiddenDimensionFour$ sampling**\index{Top-p sampling!definition} (nucleus sampling) retains tokens until their cumulative probability reaches a defined threshold, allowing the candidate pool size to adapt to distribution entropy.
-
-Crucially, systems engineers should treat these mechanisms strictly as entropy modulators. High token likelihood does not verify that a completed response is logically sound or correct. A rare token may be essential to a correct identifier or software patch, while a highly probable continuation may confidently propose an incorrect file name. Modifying temperature or applying nucleus truncation governs the diversity of candidates exposed to downstream execution, but only rigorous external validation---such as syntactic checks or sandboxed execution---can determine if a proposed candidate actually satisfies the task requirements.
-
-### Repetition and replay {#sec-vol3-foundation-model-repetition-replay}
-
-Greedy decoding removes sampling variance from a fixed logit vector, but it does not guarantee end-to-end reproducibility across served API calls. In distributed production infrastructure, identical input requests frequently encounter different serving nodes, hardware accelerator revisions, or software runtime configurations. Subtle variations in floating-point reduction order[^fn-float-reduction-order] can shift closely contested logits in their least significant bits; flipping an argmax selection at position $t=1$ permanently alters all downstream conditioning. Similarly, configuring a fixed pseudorandom seed constrains the sampling generator without eliminating numerical non-determinism across backend kernels or cluster deployments. True reproducibility requires a strictly pinned execution environment and software contract, extending well beyond setting $\tau_{\text{temp}} = 0$. Real-world production incidents illustrate how infrastructure changes in the serving fleet can dramatically alter generation behavior while caller requests remain identical.
-
-[^fn-float-reduction-order]: **Floating-Point Reduction Order**: Floating-point addition lacks associativity because intermediate calculations undergo rounding at each operation [@goldberg1991]. Parallel attention and reduction kernels that accumulate dot products across differing thread block dimensions or dynamic batch sizes execute summation in varying orders, yielding minor discrepancies in the least significant bits of logit tensors. When two top candidates have nearly identical values, this numerical divergence suffices to invert a greedy selection, redirecting the subsequent autoregressive path. \index{Floating-point arithmetic!nondeterministic reduction}
-
-```{python}
-#| label: calc-vol3-fm-serving-postmortem
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SERVING-PATH INCIDENT FIGURES (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: ws-02-anthropic-serving-bugs-2025 and the replay fallacy in
-# │          @sec-vol3-foundation-model-fallacies.
-# │ Goal: Carry the incident's reported shares as named, sourced inputs.
-# │ Show: Worst-hour share of one model's requests misrouted; share of one
-# │       tool's users with at least one misrouted message.
-# │ How: Values as reported in anthropic2025postmortem; no computation.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_percent
-
-class ServingPostmortem:
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    worst_hour_share = 0.16  # sourced: anthropic2025postmortem, worst hour, one model's requests misrouted
-    user_share = 0.30  # sourced: anthropic2025postmortem, approx. share of coding-tool users affected
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    # Reported values only.
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(0 < worst_hour_share < user_share < 1, "Reported shares must be fractions in source order")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    worst_hour_pct_str = fmt_percent(worst_hour_share, precision=0, style="prose")
-    user_pct_str = fmt_percent(user_share, precision=0, style="prose")
-```
-
-::: {#ws-02-anthropic-serving-bugs-2025 .callout-war-story title="Three serving bugs behind unchanged requests (2025)"}
-
-**Context**: Between August and early September 2025, three separate infrastructure bugs intermittently degraded the responses of Anthropic's Claude models [@anthropic2025postmortem]. These defects stemmed entirely from the serving infrastructure rather than caller requests or model weights.
-
-**Mechanism**: A front-end routing defect directed standard traffic to server clusters configured for extended context windows, while session stickiness trapped follow-up requests on those misconfigured nodes. Concurrently, an improperly deployed kernel optimization on a specialized accelerator cluster occasionally assigned outsized probability to improbable tokens. Finally, an optimization in the token-selection pipeline triggered a compiler bug: an approximate top-$k$ routine with mixed-precision subroutines emitted incorrect tokens under specific dynamic batch sizes.
-
-**Impact**: During peak impact, the routing failure corrupted `{python} ServingPostmortem.worst_hour_pct_str` of requests to one production model, and approximately `{python} ServingPostmortem.user_pct_str` of active coding agent users encountered at least one misrouted interaction. Generated responses exhibited foreign-language script insertions within English prose and syntax anomalies in generated source code. Automated regression suites initially missed these failures because downstream models frequently masked isolated token corruptions, and intermittent runtime conditions meant an identical prompt could succeed on one invocation and fail catastrophically on the next.
-
-**Fix**: Engineers rolled back the offending kernel deployments, corrected cluster routing rules, and replaced the approximate top-$k$ kernel with an exact selection routine running in 32-bit floating-point precision, trading a minor throughput penalty for numerical stability. Anthropic subsequently deployed continuous canary evaluations across production fleets to catch subtle generational drift.
-
-**Systems lesson**: Output distributions reflect the concrete serving pipeline just as heavily as the model weights or input context. Corrupted tokens arrived packaged in well-formed HTTP payloads and cleanly closed generation blocks, illustrating the classic fail-plausible failure mode in machine learning systems. Robust agent architectures must log full call-level metadata—capturing runtime versions, routing tags, and sampling parameters—while subjecting every proposed action to external environment validation regardless of nominal generation success.
-
-:::
-
-Production failures of this nature define the baseline instrumentation required for agentic infrastructure. Comprehensive diagnostic logs must capture the exact prompt payload, model and tokenizer revision hashes, decoding hyperparameters, configured token limits, and any backend routing or seed metadata. Alongside input parameters, the system must record the raw response payload, the explicit finish reason, and token usage metrics. When diagnosing downstream agent failures, developers should distinguish between replaying a recorded trajectory and re-querying the model. Replaying a recorded trace isolates downstream execution logic from model nondeterminism, whereas issuing a repeated API call tests the resilience of the agent across sampling variations. Rigorous evaluation frameworks must measure and report this repeated-call variance rather than assuming consistent single-call execution.
-
-Ultimately, an agent runtime ingests candidate tokens produced under a specific decoding configuration and terminated by a specific boundary condition. Even an uncorrupted, high-probability `read_file` proposal might reference an absent path or violate sandbox directory restrictions. The autoregressive generation process determines how a candidate sequence is synthesized; downstream systems must establish the verification harnesses and guardrails required to evaluate whether that sequence can safely execute.
 
 ## Candidate Sequence Verification {#sec-vol3-foundation-model-continuations}
 

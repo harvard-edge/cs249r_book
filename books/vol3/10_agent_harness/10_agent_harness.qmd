@@ -59,7 +59,7 @@ The runtime components examined so far each address part of this operational env
 
 The agent harness provides this missing supervisory layer by taking ownership of the execution loop for an individual trajectory. Under this model, the agent proposes candidate actions, while the harness determines whether each step runs immediately, yields to waiting tasks, or halts entirely. Crucially, the harness enforces these transitions against an execution record that only the runtime can modify. Two systems principles govern this supervisory loop. First, every outbound model call or tool dispatch must pass an explicit admission check—evaluating active operator signals, capability grants, cluster capacity, and remaining budget—at the exact instant it would execute. Second, the runtime tracks in-flight operations with strict accountability: no pause signal, timeout, or cancellation serves as proof that running work has stopped or that its cost is settled. Outstanding operations retain a named owner and track unresolved side effects until concrete evidence settles their state.
 
-Tracing a single repair turn through the harness illustrates this division of labor between model proposal and supervisory control. From that baseline, the harness architecture develops in the order these operational decisions arise. Contrasting the unmanaged ReAct loop with a managed runtime loop (@sec-vol3-controlplane-need) establishes why the model cannot govern itself. The trajectory record (@sec-vol3-controlplane-acb) provides the runtime's authoritative account of execution, while guarded trajectory states (@sec-vol3-controlplane-statemachine) establish formal transition rules for that state. External control actions (@sec-vol3-controlplane-signals) allow operators to pause, cancel, or terminate an agent safely at deterministic boundaries. When an agent pauses for background processing or human review, supervised waiting (@sec-vol3-controlplane-yielding) and approval gates (@sec-vol3-controlplane-hitl) preserve supervision without leaking resources or losing execution state. At cluster scale, trajectory scheduling (@sec-vol3-controlplane-scheduling) arbitrates shared model service across competing tasks, while resource budgets (@sec-vol3-controlplane-accounting) enforce explicit bounds on cumulative consumption. Throughout this design, the supervisory record resides in host memory; ensuring that these guarantees survive host failure is the work of durable execution (@sec-vol3-durable-execution).
+Tracing a single repair turn through the harness illustrates this division of labor between model proposal and supervisory control. From that baseline, the harness architecture develops in the order these operational decisions arise. Contrasting the unmanaged ReAct loop with a managed runtime loop (@sec-vol3-controlplane-need) establishes why the model cannot govern itself. The trajectory record (@sec-vol3-controlplane-acb) provides the runtime's authoritative account of execution, while guarded trajectory states (@sec-vol3-controlplane-statemachine) establish formal transition rules for that state. External control actions (@sec-vol3-controlplane-signals) allow operators to pause, cancel, or terminate an agent safely at deterministic boundaries. When an agent pauses for background processing or human review, supervised waiting (@sec-vol3-controlplane-yielding) and approval gates (@sec-vol3-controlplane-hitl) preserve supervision without leaking resources or losing execution state. At cluster scale, trajectory scheduling (@sec-vol3-controlplane-scheduling) arbitrates shared model service across competing tasks, while resource budgets (later sections) enforce explicit bounds on cumulative consumption. Throughout this design, the supervisory record resides in host memory; ensuring that these guarantees survive host failure is the work of durable execution (@sec-vol3-durable-execution).
 
 ## The Loop and the Harness {#sec-vol3-controlplane-need}
 
@@ -222,7 +222,7 @@ Action approval introduces a controlled detour to this cycle. An approved action
 
 ### Transition guards and the admission check {#sec-vol3-agent-harness-transition-guards}
 
-Navigating a legal edge in the state machine is merely a necessary condition for progress, not an unconditional entitlement to execute. Before the runtime admits new work—whether invoking a model or dispatching a tool—it evaluates a comprehensive set of predicates known as the *admission check*. This check enforces several simultaneous invariants: no pending control holds may exist; the active context, credentials, and required action approvals must remain valid; upstream data dependencies must be resolved; and adequate deadline slack and downstream service capacity must be confirmed. Furthermore, the runtime must reserve the operation's bounded financial liability from the task budget without encroaching on the dedicated finalization reserve (@sec-vol3-controlplane-accounting). For tool calls, the admission check also verifies that arguments are structurally complete. Because system state evolves continuously, this evaluation holds only for the instant it executes. An approval granted seconds earlier or a scheduling decision made on a previous tick does not carry forward; if an unresolved prior operation blocks a dependent mutation, the trajectory cannot dispatch that mutation even if it remains in `READY` for independent work.
+Navigating a legal edge in the state machine is merely a necessary condition for progress, not an unconditional entitlement to execute. Before the runtime admits new work—whether invoking a model or dispatching a tool—it evaluates a comprehensive set of predicates known as the *admission check*. This check enforces several simultaneous invariants: no pending control holds may exist; the active context, credentials, and required action approvals must remain valid; upstream data dependencies must be resolved; and adequate deadline slack and downstream service capacity must be confirmed. Furthermore, the runtime must reserve the operation's bounded financial liability from the task budget without encroaching on the dedicated finalization reserve (later sections). For tool calls, the admission check also verifies that arguments are structurally complete. Because system state evolves continuously, this evaluation holds only for the instant it executes. An approval granted seconds earlier or a scheduling decision made on a previous tick does not carry forward; if an unresolved prior operation blocks a dependent mutation, the trajectory cannot dispatch that mutation even if it remains in `READY` for independent work.
 
 The admission check and its state updates execute as a single atomic transaction. Protected by the trajectory record lock,[^fn-record-lock-monitor] the harness evaluates the guard predicates, reserves the required liability, registers the outgoing invocation or attempt ID, marks the expected observation as eligible, and commits the state transition. Only after releasing the lock does the runtime transmit the request over the network. This design enforces the *register-before-send rule*. Registering state prior to dispatch ensures that ultra-low-latency responses never arrive before the local record exists to receive them. Conversely, transmitting requests strictly outside the critical section prevents slow network I/O, stalled inference endpoints, or lagging tool services from blocking concurrent control actions, scheduler ticks, or arriving results from other workers.
 
@@ -663,114 +663,6 @@ The internal-review submission for `r18` is held while the task approaches its d
 
 The approval gate now has a bounded lifetime and an explicit handoff from held proposal to admitted work. Human agreement is one condition in that handoff, alongside current authority, resource bounds, and action-time preconditions. Multiple trajectories can satisfy those conditions while competing for the same execution capacity, so the harness next needs a policy for sharing that capacity without bypassing their individual gates.
 
-## Scheduling Concurrent Trajectories {#sec-vol3-controlplane-scheduling}
-
-Consider an automated repair trajectory waiting for a targeted test suite to evaluate patch candidate `r18`. Concurrently, an interactive user session and a backlog of repository maintenance tasks are ready to query the model. When the test execution finishes, the repair trajectory rejoins that active competition. If the harness simply dispatches requests as soon as tasks generate them, aggressive retry loops will monopolize model capacity. If it unconditionally favors interactive requests, large maintenance jobs can wait indefinitely. Concurrency alone does not solve resource allocation; the harness requires an explicit scheduling policy to arbitrate among eligible calls.
-
-The fundamental unit of scheduling admission is a `READY` trajectory's **next model call**, rather than its entire multi-step task or the downstream tool execution that the reply may propose. Completing an asynchronous wait does not grant immediate dispatch; it makes a trajectory eligible only through a guarded transition into the `READY` state, where it queues for the scheduler's approval. Downstream, the inference serving engine manages batching, KV-cache allocation, and accelerator execution. That low-level engine scheduling remains strictly decoupled from the harness's control plane, which decides which high-level trajectory may submit work in the first place.
-
-### Fair sharing and the scheduling charge {#sec-vol3-agent-harness-scheduling-charge}
-
-Granting an equal number of model calls across classes does not deliver equal service. A single maintenance prompt containing extensive code diffs can easily consume 40,000 tokens, whereas a concise interactive query requires only 2,000 tokens. A scheduler must therefore define precisely what resource its allocations apportion. A robust policy bills each admitted request a declared **scheduling charge**\index{Scheduling charge!definition} equal to its full input-token count plus its maximum allowed output-token reservation. This conservative metric measures admitted token commitments rather than actual generated output, monetary cost, accelerator occupancy, or task utility. Cached prompt tokens remain part of this upfront charge because serving-engine cache hits cannot be guaranteed before dispatch. While a scheduler could alternatively account for post-execution measured service, doing so requires speculative token estimation upon admission followed by retroactive reconciliation once the model finishes generating.
-
-**Weighted deficit round-robin**\index{Deficit round-robin!definition} provides an effective, low-overhead mechanism for apportioning this declared token charge across diverse service classes. The scheduler maintains an independent FIFO queue and an associated credit counter for each class, along with an internal rotating pointer across the active trajectories within that class. At the beginning of each scheduling round, the system increments each class's credit counter by a quantum proportional to its assigned weight. The scheduler then steps through the classes, admitting calls as long as their token charges fit within the available credit and all downstream capacity gates pass. Each admission deducts the call's charge from the class balance. Crucially, unspent credit carries over into subsequent rounds, allowing a class with large requests to gradually accumulate enough deficit credit to admit a multi-thousand-token prompt. When a class exhausts its active work, the scheduler resets its credit counter to zero so it cannot hoard unearned allocations during idle periods. This design adapts the deficit carryover mechanism[^fn-fair-queueing-lineage] of deficit round-robin [@shreedhar1995efficient] from network packet scheduling to language model admission control.
-
-Credit belongs to the service class rather than to individual trajectories, so a tenant cannot monopolize the cluster by spawning hundreds of concurrent tasks; the class's aggregate resource share remains invariant. Rotation among trajectories within a class is equally critical. If the scheduler restarted its scan at the head of the trajectory queue on every pass, trajectories near the front would continuously consume fresh credit while starving trajectories near the tail. Practical implementations enforce three core invariants: assign a strictly positive weight to every class expected to make progress, preserve intra-class rotation positions across passes, and enforce an upper bound on request sizes. Furthermore, any ceiling placed on accumulated credit must accommodate the largest single request the policy permits. Capping credit below that maximum prevents large maintenance calls from ever running, leaving them stalled indefinitely despite repeated replenishment rounds.
-
-[^fn-fair-queueing-lineage]: **From Fair Queueing to Deficit Round-Robin**: Fair queueing for packet networks [@demers1989analysis] emulated a bit-by-bit round-robin across flows, ensuring that high-volume sources could not exceed their fair shares, but it required ordering packets by computed finish times. Deficit round-robin reached comparable fairness with constant work per packet by giving each queue a quantum and carrying unspent credit forward [@shreedhar1995efficient]. Because model-call charges span orders of magnitude, deficit carryover—rather than simple queue rotation—is what enforces proportional fairness here. \index{Fair queueing!model-call admission}
-
-Configuring class weights fixes how the declared token charge is shared, but that split does not equal the proportion of admitted calls. A concrete scenario demonstrates this divergence.
-
-```{python}
-#| label: calc-vol3-harness-drr
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DEFICIT ROUND-ROBIN: CHARGE SHARES VS. CALL SHARES (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-vol3-controlplane-scheduling, notebook nbk-10-drr-charge-vs-calls.
-# │ Goal: Show that class weights fix token-charge shares, not call rates.
-# │ Show: Calls per round per class, rounds per maintenance call, call ratio.
-# │ How:  Long-run DRR: calls/round = weight * quantum / charge per call.
-# │ Note: Weights, quantum, and request sizes are scenario inputs.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
-
-class DrrShares:
-    # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    q = 8_000  # scheduling-charge tokens per unit weight per round
-    w_int, w_mnt = 3, 1  # class weights: interactive, maintenance
-    in_int, out_int = 2_000, 500  # interactive call: input + output allowance
-    in_mnt, out_mnt = 40_000, 2_000  # maintenance call: input + output allowance
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    q_int, q_mnt = w_int * q, w_mnt * q
-    c_int, c_mnt = in_int + out_int, in_mnt + out_mnt
-    calls_int = q_int / c_int  # long-run calls per round
-    rounds_mnt = c_mnt / q_mnt  # rounds of credit per maintenance call
-    calls_mnt = 1 / rounds_mnt
-    call_ratio = calls_int / calls_mnt
-    share_int = q_int / (q_int + q_mnt)
-    rounds_mnt_half = (in_mnt / 2 + out_mnt) / q_mnt
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(c_mnt > q_mnt, "A maintenance call must need credit carried over several rounds")
-    check(call_ratio > 10 * (w_int / w_mnt), "Call ratio must far exceed the weight ratio")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    q_str = fmt_int(q)
-    w_int_str, w_mnt_str = fmt_int(w_int), fmt_int(w_mnt)
-    in_int_str, out_int_str = fmt_int(in_int), fmt_int(out_int)
-    in_mnt_str, out_mnt_str = fmt_int(in_mnt), fmt_int(out_mnt)
-    q_int_str, q_mnt_str = fmt_int(q_int), fmt_int(q_mnt)
-    c_int_str, c_mnt_str = fmt_int(c_int), fmt_int(c_mnt)
-    calls_int_str = fmt(calls_int, precision=1)
-    rounds_mnt_str = fmt(rounds_mnt, precision=2)
-    call_ratio_str = fmt_int(call_ratio)
-    share_int_str = fmt_percent(share_int, style="prose")
-    rounds_mnt_half_str = fmt(rounds_mnt_half, precision=1)
-    in_mnt_half_str = fmt_int(in_mnt / 2)
-```
-
-::: {#nbk-10-drr-charge-vs-calls .callout-notebook title="Charge shares vs. call shares"}
-
-**Problem**: An interactive class has weight `{python} DrrShares.w_int_str` and a maintenance class has weight `{python} DrrShares.w_mnt_str`, with a base quantum of `{python} DrrShares.q_str` charge tokens per unit weight per round. An interactive call carries `{python} DrrShares.in_int_str` input tokens and a `{python} DrrShares.out_int_str`-token output allowance; a maintenance call carries `{python} DrrShares.in_mnt_str` input tokens and a `{python} DrrShares.out_mnt_str`-token output allowance. Over many rounds, how many calls does each class receive?
-
-**Math**: Each round credits `{python} DrrShares.q_int_str` tokens to the interactive class and `{python} DrrShares.q_mnt_str` tokens to maintenance. Because interactive calls incur a scheduling charge of `{python} DrrShares.c_int_str` tokens each, the interactive class averages `{python} DrrShares.q_int_str` / `{python} DrrShares.c_int_str` = `{python} DrrShares.calls_int_str` calls per round. A maintenance call incurs a charge of `{python} DrrShares.c_mnt_str` tokens, so its class must carry forward credit for `{python} DrrShares.c_mnt_str` / `{python} DrrShares.q_mnt_str` = `{python} DrrShares.rounds_mnt_str` rounds per call.
-
-**Result**: The interactive class receives `{python} DrrShares.share_int_str` of the total token charge capacity, but it dispatches roughly `{python} DrrShares.call_ratio_str` times as many completed calls as the maintenance class.
-
-**Systems insight**: Class weights determine the long-term division of token charges, while admitted call rates depend directly on request size. A maintenance trajectory's turn latency is governed by its request size divided by its per-round quantum. Halving its input to `{python} DrrShares.in_mnt_half_str` tokens slashes its waiting time to approximately `{python} DrrShares.rounds_mnt_half_str` rounds per call without requiring any adjustment to class weights. Increasing a class weight shifts its aggregate token share; shrinking prompt sizes—for example, through prompt compaction or targeted context retrieval—accelerates its call dispatch rate. Finally, the scheduler's credit ceiling must accommodate at least one complete maintenance charge, or that class will never accumulate sufficient deficit credit to dispatch.
-
-:::
-
-::: {.column-margin}
-![](images/svg/vol3_harness_drr_margin.svg){width="100%" fig-alt="Two horizontal stacked bars. The upper bar, token charge, is 75 percent blue for the interactive class and 25 percent gray for maintenance. The lower bar, calls admitted, is 98 percent blue with a thin gray sliver for maintenance."}
-
-*Weights split the token charge; request size then sets a far larger split in calls.*
-:::
-
-While deficit round-robin guarantees proportional fairness across active service classes, it does not manufacture capacity. When an agent deployment faces sustained overload, scheduling weights merely redistribute queueing delay; they do not increase provider throughput. Managing latency under persistent saturation requires upstream admission limits on incoming tasks or explicit rejection policies, because prioritization can only reallocate existing capacity.
-
-### Quota and capacity gates {#sec-vol3-agent-harness-quota-capacity-gates}
-
-A model call selected by the fairness scheduler cannot dispatch immediately; it must also satisfy the provider's multidimensional quota contracts. Model providers enforce rate limits across distinct dimensions: requests per minute (RPM), tokens per minute (TPM), and concurrent in-flight requests. The provider's accounting contract determines exactly what must be reserved prior to transmission. For token limits, providers typically debit the full input count plus the declared maximum output allowance against the current time window until generation finishes. Crucially, pricing discounts do not relax rate limits: a provider that discounts cached prompt tokens on the billing invoice may still charge those tokens at full weight against the tenant's rolling TPM window. Furthermore, satisfying a token quota guarantees nothing about request concurrency, which is capped independently to protect serving infrastructure from connection pool exhaustion.
-
-Deploying a local rate limiter allows the harness to buffer pending calls gracefully rather than discovering provider saturation through HTTP 429 (Too Many Requests) rejections. The rate limiter must account for all traffic sharing the target provider allocation, including concurrent harness processes operating across separate machines. Token bucket algorithms—which permit short bursts up to a bounded depth and replenish at a sustained rate—operate effectively only when their refill parameters and burst ceilings closely match the provider's enforcement windows. When external traffic shares the account or the exact windowing algorithm is opaque, the harness must maintain conservative safety headroom and dynamically adjust its refill rates using feedback from response headers, such as reported remaining quota and suggested retry intervals.
-
-Beyond external provider quotas, local execution resources impose secondary admission gates. An agent tool call—such as compiling code, running an integration test, or analyzing a repository—demands a combination of sandbox slots, CPU cores, system memory, and storage bandwidth, even when model token quotas are abundant. Schedulers must track each bottleneck using the explicit physical dimensions of that resource. Bytes of durable disk storage represent a static space constraint; bytes per second of disk transfer represent dynamic channel bandwidth; and storage I/O operations per second (IOPS) bound transactional throughput. While tracking homogeneous sandbox slots suffices when every worker operates within an identical virtual machine envelope, raw slot counts fail to prevent out-of-memory crashes when heterogeneous jobs run side by side.
-
-Workspace lifecycles follow the workspace lease contracts. A repair trajectory, for example, may retain cloned repository files and compiled binaries in a persistent workspace across multiple conversational turns, even as it releases its active CPU and container execution slots between test runs. These retained files occupy storage capacity and lease quotas until explicitly reclaimed. To safeguard interactive user responsiveness, clusters frequently partition execution capacity, reserving dedicated slots for interactive agents to prevent batch maintenance workloads from monopolizing the pool. However, static capacity reservations trade off isolation against efficiency: reserved slots sit idle when interactive demand drops, and reservations protect only against execution slot starvation—they cannot eliminate contention on shared backend disks or preempt long-running tests already executing.
-
-Tool execution requires its own independent admission pipeline. When a model proposes a protected action that requires human or policy escrow, the action cannot immediately execute. If a suitable sandbox execution slot is unavailable when permission is granted, the action remains in `AWAITING_APPROVAL` alongside its recorded approval decision (@tbl-vol3-escrow-transitions) instead of cycling back to `READY` to issue another redundant model call. Decoupling tool execution into a dedicated dispatch queue allows the harness to apply fair-sharing policies tailored to computational and physical resource units rather than model token counts.
-
-### Selection and admission {#sec-vol3-agent-harness-selection-admission}
-
-In a distributed harness, queue selection is merely an optimistic nomination, not an irrevocable execution grant. In the interval between a scheduler picking a candidate from the ready queue and committing the dispatch, external state can change: an operator might pause the repair trajectory, an authorization grant might expire, or a parallel thread might deplete the tenant's remaining financial budget. The selected candidate must therefore clear an atomic admission check that verifies provider quotas, local capacity reservations, and trajectory state. Under the register-before-send rule, the harness writes all resource reservations durably to the control plane before dispatching network packets. Concurrently, an optimistic concurrency check against the trajectory's `record_version` guarantees that if two scheduler workers select the same candidate simultaneously, exactly one worker commits the admission and consumes the trajectory's allowance.
-
-Temporarily blocked admission—whether caused by insufficient deficit credit, exhausted provider rate limits, or saturated sandbox slots—leaves the candidate paused in the `READY` state. Queuing delay reflects backpressure, not task failure. Once a call is dispatched, network and server failures require outcome-aware reservation settlement. If a connection drops before bytes reach the provider, the harness can safely release its quota and financial reservations. However, under the settlement rule, an ambiguous network outcome—such as an HTTP timeout occurring after request transmission—must keep its reservation outstanding. The remote provider may have received, processed, and billed the request despite the client-side timeout; clearing reservations prematurely risks double-spending budgets and violating provider quotas.
-
-These three control layers operate in concert. Fair-sharing policies determine which eligible trajectory deserves service next. Provider quotas and capacity gates determine whether that work can execute immediately without overwhelming shared infrastructure. Yet neither mechanism restricts the total cumulative volume of work an agent can request across dozens of turns. An automated repair agent can receive its fair share of tokens in perpetuity without ever converging on a valid patch. Enforcing overall resource discipline requires global trajectory budgets and iteration limits, which supply the final boundary on agentic execution.
-
 ## Budgets and Ceilings {#sec-vol3-controlplane-accounting}
 
 Consider an agent attempting a software repair: its accumulated bill already approaches the allocated task budget, while an asynchronous test suite dispatched minutes earlier has yet to report its cloud execution charges. Proposing another model invocation introduces new, uncommitted liability. A fair scheduler determines when that candidate call should receive accelerator service, but scheduling alone cannot determine whether the trajectory has sufficient funds remaining to afford it. To prevent runaway spending, the harness must enforce an admission control rule that accounts for both inflight work and worst-case execution liabilities before dispatching another request.
@@ -941,6 +833,114 @@ Settlement replaces an estimated reservation with verified consumption once the 
 
 Prompt caching discounts demand identical accounting rigor. Before dispatching a request, the admission controller must reserve funds at the standard undiscounted input rate unless the service-level agreement contractually guarantees cache hits for specific prompt prefixes. Once the provider reports verified execution data, the harness settles the transaction according to the actual cached and uncached token counts. Similarly, while terminating an inflight model stream early can limit output charges, the admission gate cannot gamble on speculative cancellations when authorizing subsequent tasks. Enforcing an unyielding ceiling requires adherence to classic systems design: complete mediation across all requests [@saltzer1975], conservative worst-case reservation bounds, and authoritative settlement driven solely by verified execution records.
 
+## Scheduling Concurrent Trajectories {#sec-vol3-controlplane-scheduling}
+
+Consider an automated repair trajectory waiting for a targeted test suite to evaluate patch candidate `r18`. Concurrently, an interactive user session and a backlog of repository maintenance tasks are ready to query the model. When the test execution finishes, the repair trajectory rejoins that active competition. If the harness simply dispatches requests as soon as tasks generate them, aggressive retry loops will monopolize model capacity. If it unconditionally favors interactive requests, large maintenance jobs can wait indefinitely. Concurrency alone does not solve resource allocation; the harness requires an explicit scheduling policy to arbitrate among eligible calls.
+
+The fundamental unit of scheduling admission is a `READY` trajectory's **next model call**, rather than its entire multi-step task or the downstream tool execution that the reply may propose. Completing an asynchronous wait does not grant immediate dispatch; it makes a trajectory eligible only through a guarded transition into the `READY` state, where it queues for the scheduler's approval. Downstream, the inference serving engine manages batching, KV-cache allocation, and accelerator execution. That low-level engine scheduling remains strictly decoupled from the harness's control plane, which decides which high-level trajectory may submit work in the first place.
+
+### Fair sharing and the scheduling charge {#sec-vol3-agent-harness-scheduling-charge}
+
+Granting an equal number of model calls across classes does not deliver equal service. A single maintenance prompt containing extensive code diffs can easily consume 40,000 tokens, whereas a concise interactive query requires only 2,000 tokens. A scheduler must therefore define precisely what resource its allocations apportion. A robust policy bills each admitted request a declared **scheduling charge**\index{Scheduling charge!definition} equal to its full input-token count plus its maximum allowed output-token reservation. This conservative metric measures admitted token commitments rather than actual generated output, monetary cost, accelerator occupancy, or task utility. Cached prompt tokens remain part of this upfront charge because serving-engine cache hits cannot be guaranteed before dispatch. While a scheduler could alternatively account for post-execution measured service, doing so requires speculative token estimation upon admission followed by retroactive reconciliation once the model finishes generating.
+
+**Weighted deficit round-robin**\index{Deficit round-robin!definition} provides an effective, low-overhead mechanism for apportioning this declared token charge across diverse service classes. The scheduler maintains an independent FIFO queue and an associated credit counter for each class, along with an internal rotating pointer across the active trajectories within that class. At the beginning of each scheduling round, the system increments each class's credit counter by a quantum proportional to its assigned weight. The scheduler then steps through the classes, admitting calls as long as their token charges fit within the available credit and all downstream capacity gates pass. Each admission deducts the call's charge from the class balance. Crucially, unspent credit carries over into subsequent rounds, allowing a class with large requests to gradually accumulate enough deficit credit to admit a multi-thousand-token prompt. When a class exhausts its active work, the scheduler resets its credit counter to zero so it cannot hoard unearned allocations during idle periods. This design adapts the deficit carryover mechanism[^fn-fair-queueing-lineage] of deficit round-robin [@shreedhar1995efficient] from network packet scheduling to language model admission control.
+
+Credit belongs to the service class rather than to individual trajectories, so a tenant cannot monopolize the cluster by spawning hundreds of concurrent tasks; the class's aggregate resource share remains invariant. Rotation among trajectories within a class is equally critical. If the scheduler restarted its scan at the head of the trajectory queue on every pass, trajectories near the front would continuously consume fresh credit while starving trajectories near the tail. Practical implementations enforce three core invariants: assign a strictly positive weight to every class expected to make progress, preserve intra-class rotation positions across passes, and enforce an upper bound on request sizes. Furthermore, any ceiling placed on accumulated credit must accommodate the largest single request the policy permits. Capping credit below that maximum prevents large maintenance calls from ever running, leaving them stalled indefinitely despite repeated replenishment rounds.
+
+[^fn-fair-queueing-lineage]: **From Fair Queueing to Deficit Round-Robin**: Fair queueing for packet networks [@demers1989analysis] emulated a bit-by-bit round-robin across flows, ensuring that high-volume sources could not exceed their fair shares, but it required ordering packets by computed finish times. Deficit round-robin reached comparable fairness with constant work per packet by giving each queue a quantum and carrying unspent credit forward [@shreedhar1995efficient]. Because model-call charges span orders of magnitude, deficit carryover—rather than simple queue rotation—is what enforces proportional fairness here. \index{Fair queueing!model-call admission}
+
+Configuring class weights fixes how the declared token charge is shared, but that split does not equal the proportion of admitted calls. A concrete scenario demonstrates this divergence.
+
+```{python}
+#| label: calc-vol3-harness-drr
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEFICIT ROUND-ROBIN: CHARGE SHARES VS. CALL SHARES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-controlplane-scheduling, notebook nbk-10-drr-charge-vs-calls.
+# │ Goal: Show that class weights fix token-charge shares, not call rates.
+# │ Show: Calls per round per class, rounds per maintenance call, call ratio.
+# │ How:  Long-run DRR: calls/round = weight * quantum / charge per call.
+# │ Note: Weights, quantum, and request sizes are scenario inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
+
+class DrrShares:
+    # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
+    q = 8_000  # scheduling-charge tokens per unit weight per round
+    w_int, w_mnt = 3, 1  # class weights: interactive, maintenance
+    in_int, out_int = 2_000, 500  # interactive call: input + output allowance
+    in_mnt, out_mnt = 40_000, 2_000  # maintenance call: input + output allowance
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    q_int, q_mnt = w_int * q, w_mnt * q
+    c_int, c_mnt = in_int + out_int, in_mnt + out_mnt
+    calls_int = q_int / c_int  # long-run calls per round
+    rounds_mnt = c_mnt / q_mnt  # rounds of credit per maintenance call
+    calls_mnt = 1 / rounds_mnt
+    call_ratio = calls_int / calls_mnt
+    share_int = q_int / (q_int + q_mnt)
+    rounds_mnt_half = (in_mnt / 2 + out_mnt) / q_mnt
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(c_mnt > q_mnt, "A maintenance call must need credit carried over several rounds")
+    check(call_ratio > 10 * (w_int / w_mnt), "Call ratio must far exceed the weight ratio")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    q_str = fmt_int(q)
+    w_int_str, w_mnt_str = fmt_int(w_int), fmt_int(w_mnt)
+    in_int_str, out_int_str = fmt_int(in_int), fmt_int(out_int)
+    in_mnt_str, out_mnt_str = fmt_int(in_mnt), fmt_int(out_mnt)
+    q_int_str, q_mnt_str = fmt_int(q_int), fmt_int(q_mnt)
+    c_int_str, c_mnt_str = fmt_int(c_int), fmt_int(c_mnt)
+    calls_int_str = fmt(calls_int, precision=1)
+    rounds_mnt_str = fmt(rounds_mnt, precision=2)
+    call_ratio_str = fmt_int(call_ratio)
+    share_int_str = fmt_percent(share_int, style="prose")
+    rounds_mnt_half_str = fmt(rounds_mnt_half, precision=1)
+    in_mnt_half_str = fmt_int(in_mnt / 2)
+```
+
+::: {#nbk-10-drr-charge-vs-calls .callout-notebook title="Charge shares vs. call shares"}
+
+**Problem**: An interactive class has weight `{python} DrrShares.w_int_str` and a maintenance class has weight `{python} DrrShares.w_mnt_str`, with a base quantum of `{python} DrrShares.q_str` charge tokens per unit weight per round. An interactive call carries `{python} DrrShares.in_int_str` input tokens and a `{python} DrrShares.out_int_str`-token output allowance; a maintenance call carries `{python} DrrShares.in_mnt_str` input tokens and a `{python} DrrShares.out_mnt_str`-token output allowance. Over many rounds, how many calls does each class receive?
+
+**Math**: Each round credits `{python} DrrShares.q_int_str` tokens to the interactive class and `{python} DrrShares.q_mnt_str` tokens to maintenance. Because interactive calls incur a scheduling charge of `{python} DrrShares.c_int_str` tokens each, the interactive class averages `{python} DrrShares.q_int_str` / `{python} DrrShares.c_int_str` = `{python} DrrShares.calls_int_str` calls per round. A maintenance call incurs a charge of `{python} DrrShares.c_mnt_str` tokens, so its class must carry forward credit for `{python} DrrShares.c_mnt_str` / `{python} DrrShares.q_mnt_str` = `{python} DrrShares.rounds_mnt_str` rounds per call.
+
+**Result**: The interactive class receives `{python} DrrShares.share_int_str` of the total token charge capacity, but it dispatches roughly `{python} DrrShares.call_ratio_str` times as many completed calls as the maintenance class.
+
+**Systems insight**: Class weights determine the long-term division of token charges, while admitted call rates depend directly on request size. A maintenance trajectory's turn latency is governed by its request size divided by its per-round quantum. Halving its input to `{python} DrrShares.in_mnt_half_str` tokens slashes its waiting time to approximately `{python} DrrShares.rounds_mnt_half_str` rounds per call without requiring any adjustment to class weights. Increasing a class weight shifts its aggregate token share; shrinking prompt sizes—for example, through prompt compaction or targeted context retrieval—accelerates its call dispatch rate. Finally, the scheduler's credit ceiling must accommodate at least one complete maintenance charge, or that class will never accumulate sufficient deficit credit to dispatch.
+
+:::
+
+::: {.column-margin}
+![](images/svg/vol3_harness_drr_margin.svg){width="100%" fig-alt="Two horizontal stacked bars. The upper bar, token charge, is 75 percent blue for the interactive class and 25 percent gray for maintenance. The lower bar, calls admitted, is 98 percent blue with a thin gray sliver for maintenance."}
+
+*Weights split the token charge; request size then sets a far larger split in calls.*
+:::
+
+While deficit round-robin guarantees proportional fairness across active service classes, it does not manufacture capacity. When an agent deployment faces sustained overload, scheduling weights merely redistribute queueing delay; they do not increase provider throughput. Managing latency under persistent saturation requires upstream admission limits on incoming tasks or explicit rejection policies, because prioritization can only reallocate existing capacity.
+
+### Quota and capacity gates {#sec-vol3-agent-harness-quota-capacity-gates}
+
+A model call selected by the fairness scheduler cannot dispatch immediately; it must also satisfy the provider's multidimensional quota contracts. Model providers enforce rate limits across distinct dimensions: requests per minute (RPM), tokens per minute (TPM), and concurrent in-flight requests. The provider's accounting contract determines exactly what must be reserved prior to transmission. For token limits, providers typically debit the full input count plus the declared maximum output allowance against the current time window until generation finishes. Crucially, pricing discounts do not relax rate limits: a provider that discounts cached prompt tokens on the billing invoice may still charge those tokens at full weight against the tenant's rolling TPM window. Furthermore, satisfying a token quota guarantees nothing about request concurrency, which is capped independently to protect serving infrastructure from connection pool exhaustion.
+
+Deploying a local rate limiter allows the harness to buffer pending calls gracefully rather than discovering provider saturation through HTTP 429 (Too Many Requests) rejections. The rate limiter must account for all traffic sharing the target provider allocation, including concurrent harness processes operating across separate machines. Token bucket algorithms—which permit short bursts up to a bounded depth and replenish at a sustained rate—operate effectively only when their refill parameters and burst ceilings closely match the provider's enforcement windows. When external traffic shares the account or the exact windowing algorithm is opaque, the harness must maintain conservative safety headroom and dynamically adjust its refill rates using feedback from response headers, such as reported remaining quota and suggested retry intervals.
+
+Beyond external provider quotas, local execution resources impose secondary admission gates. An agent tool call—such as compiling code, running an integration test, or analyzing a repository—demands a combination of sandbox slots, CPU cores, system memory, and storage bandwidth, even when model token quotas are abundant. Schedulers must track each bottleneck using the explicit physical dimensions of that resource. Bytes of durable disk storage represent a static space constraint; bytes per second of disk transfer represent dynamic channel bandwidth; and storage I/O operations per second (IOPS) bound transactional throughput. While tracking homogeneous sandbox slots suffices when every worker operates within an identical virtual machine envelope, raw slot counts fail to prevent out-of-memory crashes when heterogeneous jobs run side by side.
+
+Workspace lifecycles follow the workspace lease contracts. A repair trajectory, for example, may retain cloned repository files and compiled binaries in a persistent workspace across multiple conversational turns, even as it releases its active CPU and container execution slots between test runs. These retained files occupy storage capacity and lease quotas until explicitly reclaimed. To safeguard interactive user responsiveness, clusters frequently partition execution capacity, reserving dedicated slots for interactive agents to prevent batch maintenance workloads from monopolizing the pool. However, static capacity reservations trade off isolation against efficiency: reserved slots sit idle when interactive demand drops, and reservations protect only against execution slot starvation—they cannot eliminate contention on shared backend disks or preempt long-running tests already executing.
+
+Tool execution requires its own independent admission pipeline. When a model proposes a protected action that requires human or policy escrow, the action cannot immediately execute. If a suitable sandbox execution slot is unavailable when permission is granted, the action remains in `AWAITING_APPROVAL` alongside its recorded approval decision (@tbl-vol3-escrow-transitions) instead of cycling back to `READY` to issue another redundant model call. Decoupling tool execution into a dedicated dispatch queue allows the harness to apply fair-sharing policies tailored to computational and physical resource units rather than model token counts.
+
+### Selection and admission {#sec-vol3-agent-harness-selection-admission}
+
+In a distributed harness, queue selection is merely an optimistic nomination, not an irrevocable execution grant. In the interval between a scheduler picking a candidate from the ready queue and committing the dispatch, external state can change: an operator might pause the repair trajectory, an authorization grant might expire, or a parallel thread might deplete the tenant's remaining financial budget. The selected candidate must therefore clear an atomic admission check that verifies provider quotas, local capacity reservations, and trajectory state. Under the register-before-send rule, the harness writes all resource reservations durably to the control plane before dispatching network packets. Concurrently, an optimistic concurrency check against the trajectory's `record_version` guarantees that if two scheduler workers select the same candidate simultaneously, exactly one worker commits the admission and consumes the trajectory's allowance.
+
+Temporarily blocked admission—whether caused by insufficient deficit credit, exhausted provider rate limits, or saturated sandbox slots—leaves the candidate paused in the `READY` state. Queuing delay reflects backpressure, not task failure. Once a call is dispatched, network and server failures require outcome-aware reservation settlement. If a connection drops before bytes reach the provider, the harness can safely release its quota and financial reservations. However, under the settlement rule, an ambiguous network outcome—such as an HTTP timeout occurring after request transmission—must keep its reservation outstanding. The remote provider may have received, processed, and billed the request despite the client-side timeout; clearing reservations prematurely risks double-spending budgets and violating provider quotas.
+
+These three control layers operate in concert. Fair-sharing policies determine which eligible trajectory deserves service next. Provider quotas and capacity gates determine whether that work can execute immediately without overwhelming shared infrastructure. Yet neither mechanism restricts the total cumulative volume of work an agent can request across dozens of turns. An automated repair agent can receive its fair share of tokens in perpetuity without ever converging on a valid patch. Enforcing overall resource discipline requires global trajectory budgets and iteration limits, which supply the final boundary on agentic execution.
+
 ## Fallacies and Pitfalls {#sec-vol3-agent-harness-fallacies}
 
 Architectural failures in agent systems rarely stem from exotic distributed bugs; they occur when engineers mistake a convenient implementation mechanism or an agreeable language model for an authoritative supervisory guarantee. The harness must enforce safety, resource bounds, and lifecycle invariants externally, regardless of how cooperative the model appears.
@@ -1027,7 +1027,7 @@ The synchronization cost of this discipline is modest: a brief critical section 
 |:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------|
 | $t_{\text{boundary}} \approx \OutputLimit \times \PertokenDecodeTime$                                                                                                                   | Worst-case control response latency when waiting for generation completion; streaming cancellation eliminates this dependence on $\OutputLimit$         | @sec-vol3-controlplane-signals       |
 | $\text{actual} + \text{reserved} + \text{proposed liability} + \text{finalization reserve} \leq \text{allowance}$                                                                       | Bounded-liability admission gate; permits dispatch only when all cumulative resource dimensions accommodate active work and final checks                | @eq-vol3-bounded-liability-admission |
-| $\text{liability} = \PertokenPricesIn\, n_{\text{in}} + \PertokenPricesOut\, \OutputLimit$                                                                                              | Worst-case reservation for an inflight model invocation, priced at undiscounted input rates and maximum output token allowance                          | @sec-vol3-controlplane-accounting    |
+| $\text{liability} = \PertokenPricesIn\, n_{\text{in}} + \PertokenPricesOut\, \OutputLimit$                                                                                              | Worst-case reservation for an inflight model invocation, priced at undiscounted input rates and maximum output token allowance                          | later sections    |
 | $C^{(t)} = C^{(t-1)} + \PertokenPricesIn n_{\text{in}}^{(t)} + \PertokenPricesCache n_{\text{cache}}^{(t)} + \PertokenPricesOut n_{\text{out}}^{(t)} + \sum_j c_{\text{tool}}(a_{t,j})$ | Settled cumulative expenditure through turn $t$ across disjoint billing categories, reconciling and replacing prior reservations                        | @sec-vol3-harness-metered-accounting |
 | $\TrajectoryBudget = \langle H_{\max}, N_{\max}, T_{\max}, \CostCeiling \rangle$, indicator $\max_i (\text{used}_i / \text{allowance}_i)$                                               | Multi-dimensional budget vector across turns, tokens, elapsed time, and cost; the bottleneck ratio steers staged intervention policies                  | @sec-vol3-harness-staged-escalation  |
 | $\text{calls per round} = w \times \text{quantum} / (n_{\text{in}} + \OutputLimit)$                                                                                                     | Deficit round-robin dispatch rate; class weights establish scheduling shares, while prompt and generation sizes dictate turn latency                    | @sec-vol3-controlplane-scheduling    |
