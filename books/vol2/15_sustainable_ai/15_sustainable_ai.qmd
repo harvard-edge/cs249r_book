@@ -3693,7 +3693,7 @@ The structural dataflow split diagrammed in @fig-prefill-decode-energy governs p
 
 Static power waste\index{Static Power!decode phase idleness}\index{Inference!static power waste} occurs when powered circuitry waits rather than producing useful outputs. Reducing that waiting can improve energy efficiency, but a comparison must meter the same hardware boundary and preserve output quality, context, latency, and serving load. Prompt processing and autoregressive generation perform different work; equal token counts alone do not establish a fair energy ratio.
 
-## Sustainable Edge Computing {#sec-sustainable-ai-edge-ai-impact-6694}
+### Edge inference as fleet offloading {#sec-sustainable-ai-edge-ai-impact-6694}
 
 Edge intelligence moves inference onto user devices or nearby computing nodes. Local execution can avoid transferring raw inputs to a data center, but it also adds or extends computation at the edge. The sustainability comparison must include both effects, together with any remaining cloud work and the hardware needed to serve the same task.
 
@@ -3707,7 +3707,7 @@ The same accounting applies to smartphones, wearables, and sensors. Aggregate op
 
 Local processing and duty cycling can reduce energy when they avoid enough communication and remote work to offset the device's added costs. The comparison must preserve task quality and service availability and include device manufacturing when deployment requires new hardware. These conditions lead directly to the power and energy budgets that constrain the edge design.
 
-### Edge and mobile power budgets {#sec-sustainable-ai-edge-mobile-power-budgets-b3b2-b3b2}
+#### Edge and mobile power budgets {#sec-sustainable-ai-edge-mobile-power-budgets-b3b2-b3b2}
 
 Edge devices operate within battery, thermal, and supply limits that differ from those of data center accelerators. These limits follow from the deployment rather than the processor's instruction set. The engineering choice is to match each inference workload to a device that meets latency and accuracy requirements within its sustained power and energy budgets.
 
@@ -3761,80 +3761,7 @@ Power budgets reflect the physical constraints of battery capacity, thermal diss
 
 : **Edge AI Power Budget Categories**: Edge platforms span five orders of magnitude in power consumption, from sub-milliwatt TinyML systems to automotive compute platforms approaching data center power levels. Sustainable deployment requires matching workload requirements to appropriate power tiers. {#tbl-edge-power-budgets}
 
-### TinyML power state dynamics {#sec-sustainable-ai-tinyml-power-state-dynamics-ceaf}
-
-TinyML devices are the smallest members of edge fleets, sitting below the `{python} EdgePowerTierAnchors.phone_range_str` phones of Archetype C (Federated MobileNet) in both memory and power. Their energy efficiency is a sustainability concern because billions of edge inference calls add up to a measurable carbon footprint at fleet scale. TinyML efficiency depends heavily on duty cycling, where devices alternate between deep sleep and active inference. The duty-cycle model of @eq-edge-duty-cycle applies directly, with $\delta_{\text{duty}} = t_{\text{inference}}/T_{\text{period}}$ and the deep-sleep draw in place of idle power.
-
-```{python}
-#| echo: false
-#| label: tinyml-duty-cycle-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TINYML DUTY CYCLE AND BATTERY LIFE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: keyword-spotting duty-cycle prose immediately below.
-# │
-# │ Goal: Keep the duty-cycle substitution and the coin-cell lifetime computed
-# │       rather than typed, using @eq-edge-duty-cycle.
-# │ Show: 15 mW × 2% + 33 µW × 98% ≈ 0.33 mW; 250 mAh × 3.0 V = 750 mWh →
-# │       ~2,260 hours ≈ 94 days.
-# │ How: P_avg = P_active·δ + P_sleep·(1 − δ); lifetime = E_battery / P_avg.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import A, V, hour, milliwatt, ms, second, uW
-from mlsysim.fmt import check, fmt, fmt_display_math, fmt_energy, fmt_int, fmt_power, fmt_time
-
-class TinymlDutyCycle:
-    """Keyword-spotting duty cycle on a microcontroller and its coin-cell lifetime."""
-
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    p_active = 15 * milliwatt  # scenario assumption: active inference power
-    t_inference = 20 * ms  # scenario assumption: inference window per cycle
-    t_period = 1 * second  # scenario assumption: detection period
-    i_sleep = 10e-6 * A  # scenario assumption: deep-sleep current
-    v_supply = 3.3 * V  # scenario assumption: supply voltage
-    battery_mah = 250  # scenario assumption: coin-cell capacity (mAh)
-    battery_v = 3.0 * V  # scenario assumption: coin-cell nominal voltage
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    p_sleep = (i_sleep * v_supply).to(uW)
-    duty = (t_inference / t_period).to("").magnitude
-    active_term = (p_active * duty).to(milliwatt)
-    sleep_term = (p_sleep * (1 - duty)).to(milliwatt)
-    p_average = active_term + sleep_term
-    battery_energy = (battery_mah * 1e-3 * A * hour * battery_v).to("mWh")
-    lifetime = (battery_energy / p_average).to(hour)
-    lifetime_days = lifetime.to("day").magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(0.3 < p_average.magnitude < 0.35, f"Average power drifted: {p_average}")
-    check(90 < lifetime_days < 100, f"Coin-cell lifetime drifted: {lifetime_days:.0f} days")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    p_active_str = fmt_power(p_active, unit=milliwatt, precision=0, commas=False)
-    t_inference_str = fmt_time(t_inference, unit=ms, precision=0, commas=False)
-    t_period_str = fmt_time(t_period, unit=second, precision=0, commas=False)
-    i_sleep_ua_str = fmt(i_sleep.to("microampere").magnitude, precision=0, commas=False)
-    v_supply_str = fmt(v_supply.to(V).magnitude, precision=1, commas=False)
-    p_sleep_str = fmt_power(p_sleep, unit=uW, precision=0, commas=False)
-    avg_power_math = fmt_display_math(
-        rf"P_{{\text{{avg}}}} = {p_active.to(milliwatt).magnitude:g}\text{{ mW}} \times {duty:.2f}"
-        rf" + {p_sleep.to(milliwatt).magnitude:.3f}\text{{ mW}} \times {1 - duty:.2f}"
-        rf" = {active_term.magnitude:.2f} + {sleep_term.magnitude:.3f} \approx {p_average.magnitude:.2f}\text{{ mW}}"
-    )
-    battery_mah_str = fmt(battery_mah, precision=0, commas=False)
-    battery_v_str = fmt(battery_v.to(V).magnitude, precision=0, commas=False)
-    battery_mwh_str = fmt_energy(battery_energy, unit="mWh", precision=0, commas=True)
-    lifetime_hours_str = fmt_int(round(lifetime.magnitude, -1), commas=True)  # prose says "approximately"
-    lifetime_days_str = fmt_int(lifetime_days, commas=False)  # prose says "about"
-```
-
-Consider a keyword-spotting model on a Cortex-M4 microcontroller, an extreme case that obeys the same battery arithmetic as the Archetype C phones. The device draws `{python} TinymlDutyCycle.p_active_str` of active inference power for `{python} TinymlDutyCycle.t_inference_str` in each detection cycle, falls to a deep-sleep draw of `{python} TinymlDutyCycle.i_sleep_ua_str` microamps at `{python} TinymlDutyCycle.v_supply_str` V (`{python} TinymlDutyCycle.p_sleep_str`) between evaluations, and repeats on a `{python} TinymlDutyCycle.t_period_str` detection period during continuous listening. Substituting these values into @eq-edge-duty-cycle yields the average power draw:
-
-`{python} TinymlDutyCycle.avg_power_math`
-
-A `{python} TinymlDutyCycle.battery_mah_str` mAh coin cell at `{python} TinymlDutyCycle.battery_v_str` V nominal stores `{python} TinymlDutyCycle.battery_mwh_str`, enough for approximately `{python} TinymlDutyCycle.lifetime_hours_str` hours, about `{python} TinymlDutyCycle.lifetime_days_str` days, under this idealized budget. The estimate covers compute only. Continuous listening also requires powered sensing and input buffering while the microcontroller sleeps, and their energy, regulator losses, and battery derating must enter any deployment estimate.
-
-### On-device learning and the battery wall {#sec-sustainable-ai-edge-learning-battery}
+#### On-device learning and the battery wall {#sec-sustainable-ai-edge-learning-battery}
 
 On-device learning can require more work and memory than inference alone. When personalization uses gradient-based fine-tuning, backpropagation adds backward computation to the forward pass; other adaptation methods have different costs. A dense training step may require roughly 2--3$\times$ the forward arithmetic, while activation, gradient, and optimizer-state memory must be budgeted separately.
 
@@ -4017,41 +3944,7 @@ Energy cost per operation (approximate):
 
 ::::
 
-### Energy harvesting for autonomous edge AI {#sec-sustainable-ai-energy-harvesting-autonomous-edge-ai-ac2b-autonomous-edge-ai-ac2b}
-
-TinyML can operate from harvested ambient energy when the available supply supports the full device workload. Sustained operation requires both an adequate long-term energy budget and a way to handle intervals when harvesting falls below demand, through storage, duty cycling, or suspended execution.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import check, fmt_area
-
-# ┌── LEGO ───────────────────────────────────────────────
-class EnergyHarvestingArea:
-    """Solar-harvesting area references for TinyML energy budgets."""
-
-    solar_cell_area = 1 * ureg.centimeter**2
-    kws_solar_area = 5 * ureg.centimeter**2
-
-    check(kws_solar_area == 5 * solar_cell_area, "Keyword-spotting solar area should be five 1 cm^2 cells.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    solar_cell_area_cm2_str = fmt_area(solar_cell_area, unit=ureg.centimeter**2, commas=False)
-    kws_solar_area_cm2_str = fmt_area(kws_solar_area, unit=ureg.centimeter**2, commas=False)
-```
-
-Consider the energy harvesting power budgets\index{Energy Harvesting!power budgets} in @tbl-energy-harvesting. A keyword spotting model optimized to 0.5 mW average power matches the nominal output of approximately `{python} EnergyHarvestingArea.kws_solar_area_cm2_str` of indoor solar harvesting only near the top of the listed illumination range, before conversion losses and other device loads. This average-power comparison does not establish uninterrupted operation. The design must cover sensing, storage losses, and periods of dim or absent light, or permit the workload to pause. Ambient supply removes the need for purchased operating electricity only when it covers that complete budget; manufacturing, storage, maintenance, and disposal still enter the lifecycle account.
-
-| **Harvesting Source**                                                       |  **Typical Power**   | **Viable TinyML Applications** |
-|:----------------------------------------------------------------------------|:--------------------:|:-------------------------------|
-| **Indoor solar (`{python} EnergyHarvestingArea.solar_cell_area_cm2_str`)**  |  10--100 microwatts  | Periodic sensor classification |
-| **Outdoor solar (`{python} EnergyHarvestingArea.solar_cell_area_cm2_str`)** |   1--10 milliwatts   | Continuous keyword spotting    |
-| **Thermoelectric (body heat)**                                              |  10--100 microwatts  | Wearable gesture recognition   |
-| **RF harvesting (Wi-Fi)**                                                   |   1--10 microwatts   | Ultra-low-duty sensor nodes    |
-| **Vibration piezoelectric**                                                 | 100 microwatts--1 mW | Industrial monitoring          |
-
-: **Energy Harvesting Power Budgets**: Ambient energy harvesting enables batteryless TinyML deployments when average power consumption remains within harvesting capacity. Solar harvesting provides the highest power density for most deployments. {#tbl-energy-harvesting}
-
-### Cascade inference architecture {#sec-sustainable-ai-cascade-inference-architecture-c710}
+#### Cascade inference architecture {#sec-sustainable-ai-cascade-inference-architecture-c710}
 
 Beyond individual device efficiency, architectural patterns determine total system energy consumption across edge-cloud boundaries. A cascade architecture deploys a task-appropriate small edge model to filter inputs before cloud inference. @Eq-cascade-energy expresses total energy as the sum of local processing plus probabilistically-triggered cloud costs:
 
@@ -4112,7 +4005,7 @@ Consider an illustrative visual inspection system where a lightweight edge model
 
 Compared to always-cloud inference at `{python} CascadeEnergy.e_cloud_only_str` mJ per image, this illustrative cascade reduces the modeled energy by `{python} CascadeEnergy.saving_str`. Quality requires a separate test of local decisions, missed escalations, and the cloud model; the energy calculation says nothing about accuracy.
 
-### Wake-word triggered systems {#sec-sustainable-ai-wakeword-triggered-systems-c878}
+#### Wake-word triggered systems {#sec-sustainable-ai-wakeword-triggered-systems-c878}
 
 ```{python}
 #| echo: false
@@ -4177,7 +4070,7 @@ For an illustrative speech-active fraction of `{python} WakeWordPower.speech_act
 
 The hierarchical approach achieves `{python} WakeWordPower.avg_power_uw_str` average power compared to `{python} WakeWordPower.full_model_power_str` for always-active full inference, a reduction of roughly `{python} WakeWordPower.reduction_mult_str` within this modeled boundary. Battery lifetime also requires battery capacity, conversion losses, sensors, and other device loads.
 
-### Federated learning energy analysis {#sec-sustainable-ai-federated-learning-energy-analysis-2c07}
+#### Federated learning energy analysis {#sec-sustainable-ai-federated-learning-energy-analysis-2c07}
 
 Training at the edge keeps raw data local but replaces its transfer with repeated model downloads and client-update uploads. This is the regime of Archetype C (Federated MobileNet), where phones train a shared model within a sustained power budget of a few watts. @Eq-federated-energy contrasts the energy trade-offs between federated and centralized approaches, where $R$ is the number of rounds, $N_{\text{clients}}$ is the number of participating clients per round, $E_{\text{upload}}$ is one client-update upload, $E_{\text{raw}}$ is one client's raw-data upload, and $E_{\text{cloud,train}}$ is the energy of one centralized cloud training run:
 
@@ -4187,6 +4080,8 @@ $$E_{\text{centralized}} = N_{\text{clients}} \times E_{\text{raw}} + E_{\text{c
 Federated learning becomes more energy-efficient only when repeated model communication, local training, and aggregation consume less energy than raw-data transfer and centralized training at comparable model quality. The comparison must cover the same client population and account for repeated participation across rounds. Data being larger than one model update is insufficient by itself because downloads and uploads recur. Privacy *and* energy benefits require separate evidence: keeping raw data local does not by itself prevent updates from revealing private information, and any protection mechanism adds its own costs to the energy account.
 
 Training, serving, and edge deployment all draw operational energy, and none of these accounts includes the hardware that performs the work. That physical supply chain, from fabrication through disposal, is the lifecycle term the next section examines.
+
+While offloading inference to the edge and optimizing the balance between training and serving can dramatically reduce the operational energy of a deployed fleet, the sustainability accounting does not end there. The physical hardware required to execute these workloads carries its own massive environmental cost---long before it is ever powered on and long after it is decommissioned. The analysis must therefore transition from the operational flow of electrons to the physical lifecycle of the servers, accelerators, and network switches that make up the fleet.
 
 ## Hardware Lifecycle and E-Waste {#sec-sustainable-ai-hardware-lifecycle-environmental-assessment-66ee}
 
