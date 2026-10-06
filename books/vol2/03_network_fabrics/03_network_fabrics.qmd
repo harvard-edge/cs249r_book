@@ -2295,6 +2295,60 @@ These mitigations spread the burst in time, space, and priority, but they do not
 
 ## Level 5 Cluster Design and Case Studies {#sec-network-fabrics-cluster}
 
+### The GPU-to-GPU "gradient bus" {#sec-network-fabrics-gradient-bus}
+
+```{python}
+#| echo: false
+#| label: calc-vol2-network-fabrics-cluster-recap
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Gradient bus — NVLink/IB cliff and SuperPOD specs.
+class NetworkFabricsClusterRecap:
+    ib_ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    nvlink = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s bidirectional aggregate (for display)
+    nvlink_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way for the cliff ratio
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    # Per-direction-vs-per-port cliff (honest 9x; 900-vs-50 would double-count to 18x)
+    nvlink_to_ib_ratio_mult_str = fmt_multiple(round((nvlink_perdir / ib_ndr).to_base_units().magnitude), precision=0, commas=False)
+    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
+    ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
+```
+
+```{python}
+#| echo: false
+#| label: calc-vol2-overlap-example
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMMUNICATION-COMPUTATION OVERLAP EXAMPLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: §The GPU-to-GPU gradient bus
+# │ Goal: Demonstrate ideal AllReduce latency hiding behind backward-pass compute.
+# │ Show: Backward time, AllReduce time, exposed overhead math.
+# │ How: max(0, allreduce - backward) with check() invariant.
+# └─────────────────────────────────────────────────────────────────────────────
+class OverlapExample:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    backward = 500 * millisecond  # scenario assumption: backward-pass compute per step
+    allreduce = 300 * millisecond  # scenario assumption: gradient AllReduce per step
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    exposed = max(0 * millisecond, allreduce - backward)
+    _b = int(backward.to(millisecond).magnitude)
+    _a = int(allreduce.to(millisecond).magnitude)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(exposed.magnitude == 0, "Ideal overlap should hide the whole AllReduce in this scenario")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    backward_ms_str = MarkdownStr(f"{_b} ms")
+    allreduce_ms_str = MarkdownStr(f"{_a} ms")
+    exposed_math = fmt_math(f"\\max(0, {_a} - {_b}) = {int(exposed.to(millisecond).magnitude)}")
+```
+
+In a well-designed cluster, the network fabric acts as a scheduler-aware extension of the system bus, not a passive pipe. The intra-node (NVLink) bandwidth is ~`{python} NetworkFabricsClusterRecap.nvlink_to_ib_ratio_mult_str` higher than inter-node (InfiniBand/RoCE) bandwidth, and the communication-computation overlap\index{Communication-computation overlap!latency hiding} introduced among the incast mitigations is the first mechanism for hiding this cliff. Because gradients for the final layers are computed first, the system can launch their AllReduce while the GPUs continue computing gradients for earlier layers. If the backward pass requires `{python} OverlapExample.backward_ms_str` of computation and the AllReduce takes `{python} OverlapExample.allreduce_ms_str`, ideal overlap could hide the communication cost behind computation, reducing the exposed overhead to `{python} OverlapExample.exposed_math`. In practice, dependency chains and resource contention limit overlap, leaving a **last-mile problem**\index{Last-mile problem!definition}: gradients computed near the end of backpropagation have little subsequent computation behind which to hide their transfer time.
+
+Placement determines which communication crosses each boundary. Tensor-parallel groups benefit from fast local paths because they exchange intermediate results frequently. Pipeline\index{Pipeline parallelism!network hierarchy} stages require paths that meet their activation-transfer budget; physical adjacency alone does not establish that property. Data-parallel\index{Data parallelism!network hierarchy} replicas can span the wider fabric when local computation, accumulation, and overlap leave sufficient time for gradient exchange. The production designs that follow show how complete configurations provide those paths.
+
+
+
 The final level of the stack is cluster design\index{Cluster design!gradient bus integration}, where wires, transport, topology, and congestion control combine into a coherent system. The goal of cluster design is to provide an end-to-end gradient bus that makes thousands of distributed GPUs feel like a single machine. At this level, the abstraction layers collapse into concrete engineering decisions: which cables to buy, how to wire the racks, which protocol to deploy, and how to validate that the resulting fabric delivers the bandwidth the training job expects. Two representative large-scale architectures, one built on InfiniBand and one on Ethernet, illuminate the trade-offs that define ML infrastructure [@nvidia2023dgxSuperpodH100; @meta2024genaiInfrastructure; @gangidi2024rdma].
 
 ### Network Virtualization {#sec-network-fabrics-virtualization}
@@ -2538,58 +2592,6 @@ Your `{python} NetworkRunningExampleCluster.params_str` model training job has b
 - [ ] **Collective impact**: estimate the impact on overall AllReduce time when the degraded link lies in the ring AllReduce path, then evaluate whether switching to a tree AllReduce algorithm helps.
 
 :::
-
-### The GPU-to-GPU "gradient bus" {#sec-network-fabrics-gradient-bus}
-
-```{python}
-#| echo: false
-#| label: calc-vol2-network-fabrics-cluster-recap
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Gradient bus — NVLink/IB cliff and SuperPOD specs.
-class NetworkFabricsClusterRecap:
-    ib_ndr = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    nvlink = Hardware.Cloud.H100.nvlink.bandwidth  # 900 GB/s bidirectional aggregate (for display)
-    nvlink_perdir = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # 450 GB/s one-way for the cliff ratio
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    # Per-direction-vs-per-port cliff (honest 9x; 900-vs-50 would double-count to 18x)
-    nvlink_to_ib_ratio_mult_str = fmt_multiple(round((nvlink_perdir / ib_ndr).to_base_units().magnitude), precision=0, commas=False)
-    nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
-    ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
-```
-
-```{python}
-#| echo: false
-#| label: calc-vol2-overlap-example
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMMUNICATION-COMPUTATION OVERLAP EXAMPLE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: §The GPU-to-GPU gradient bus
-# │ Goal: Demonstrate ideal AllReduce latency hiding behind backward-pass compute.
-# │ Show: Backward time, AllReduce time, exposed overhead math.
-# │ How: max(0, allreduce - backward) with check() invariant.
-# └─────────────────────────────────────────────────────────────────────────────
-class OverlapExample:
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    backward = 500 * millisecond  # scenario assumption: backward-pass compute per step
-    allreduce = 300 * millisecond  # scenario assumption: gradient AllReduce per step
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    exposed = max(0 * millisecond, allreduce - backward)
-    _b = int(backward.to(millisecond).magnitude)
-    _a = int(allreduce.to(millisecond).magnitude)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(exposed.magnitude == 0, "Ideal overlap should hide the whole AllReduce in this scenario")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    backward_ms_str = MarkdownStr(f"{_b} ms")
-    allreduce_ms_str = MarkdownStr(f"{_a} ms")
-    exposed_math = fmt_math(f"\\max(0, {_a} - {_b}) = {int(exposed.to(millisecond).magnitude)}")
-```
-
-In a well-designed cluster, the network fabric acts as a scheduler-aware extension of the system bus, not a passive pipe. The intra-node (NVLink) bandwidth is ~`{python} NetworkFabricsClusterRecap.nvlink_to_ib_ratio_mult_str` higher than inter-node (InfiniBand/RoCE) bandwidth, and the communication-computation overlap\index{Communication-computation overlap!latency hiding} introduced among the incast mitigations is the first mechanism for hiding this cliff. Because gradients for the final layers are computed first, the system can launch their AllReduce while the GPUs continue computing gradients for earlier layers. If the backward pass requires `{python} OverlapExample.backward_ms_str` of computation and the AllReduce takes `{python} OverlapExample.allreduce_ms_str`, ideal overlap could hide the communication cost behind computation, reducing the exposed overhead to `{python} OverlapExample.exposed_math`. In practice, dependency chains and resource contention limit overlap, leaving a **last-mile problem**\index{Last-mile problem!definition}: gradients computed near the end of backpropagation have little subsequent computation behind which to hide their transfer time.
-
-Placement determines which communication crosses each boundary. Tensor-parallel groups benefit from fast local paths because they exchange intermediate results frequently. Pipeline\index{Pipeline parallelism!network hierarchy} stages require paths that meet their activation-transfer budget; physical adjacency alone does not establish that property. Data-parallel\index{Data parallelism!network hierarchy} replicas can span the wider fabric when local computation, accumulation, and overlap leave sufficient time for gradient exchange. The production designs that follow show how complete configurations provide those paths.
 
 ### NVIDIA DGX SuperPOD architecture {#sec-network-fabrics-dgx-superpod}
 
