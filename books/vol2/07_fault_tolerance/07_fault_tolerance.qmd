@@ -717,7 +717,7 @@ plt.close()
 
 :::
 
-### Failure taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
+### Failure manifestation taxonomy: Transient vs. fail-stop {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
 
 The MTBF calculations in the reliability analysis quantify how often failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. Designing effective fault tolerance also requires understanding what kind of failures occur. Use the vocabulary carefully: a fault is the underlying defect or event, an error is the corrupted state it produces, and a failure is the externally visible behavior the training system must handle [@avizienis2004basic]. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely.
 
@@ -1186,7 +1186,7 @@ ML workloads raise the stakes of each fault. A training step performs trillions 
 
 Fleet scale turns these rare device events into routine operating conditions. Smaller geometries and lower operating voltages can reduce the charge needed to disturb a stored value [@baumann2005], and fleet studies at Google and Meta found that a small but persistent population of processors, on the order of a few per several thousand machines, computes wrong results without raising any error [@hochschild2021; @dixit2021silent]. Studies of accelerator training fleets reach the same conclusion: rare hardware faults appear often enough that software-level detection and recovery become part of the training system design [@he2023]. ML system architects must therefore treat hardware as an unreliable substrate\index{Hardware!unreliable substrate} and budget for end-to-end integrity checks, replayed computation on high-value paths, and periodic consistency checks as system requirements rather than high-performance computing specialties.
 
-### Fault persistence and the fleet response {#sec-ft-fault-persistence-response}
+### Hardware fault persistence: Transient, intermittent, and permanent {#sec-ft-fault-persistence-response}
 
 Each persistence class from the taxonomy maps to a different fleet action. A transient fault\index{Transient fault!fleet response} leaves no lasting defect from that event. A single-event upset, a voltage droop on an unstable power path [@reddi2013], a timing violation, or a soft error in combinational logic [@mukherjee2005] can corrupt a tensor, packet, or instruction. Detection and correction can prevent propagation; affected state may otherwise require rollback. During training, an undetected error in weights or gradients can compromise convergence and contaminate subsequent checkpoints [@he2023]. During stateless inference, an activation error can remain confined to one request [@mahmoud2020]. If that activation enters retained state such as a KV cache, later outputs can also depend on it.
 
@@ -2975,152 +2975,6 @@ Vision serving is usually closer to the stateless end of the spectrum because ea
 
 When redundancy cannot preserve full service, the remaining choice depends on the application contract. A validated reduced-capability response can preserve useful availability; if no such response is acceptable, the system must reject or defer the work. Graceful degradation makes the permitted reduction explicit before failure occurs.
 
-## Graceful Degradation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-9122}
-
-During a major regional network outage, an e-commerce site suddenly loses access to its heavy, GPU-accelerated recommendation cluster. Rather than showing users empty pages or crashing, the site instantly switches to serving precomputed, generic popular items. The serving fault tolerance mechanisms developed in @sec-fault-tolerance-reliability-reliability-serving-fault-tolerance-5375 aim to maintain full service, but graceful degradation dictates what happens when those defenses are overwhelmed.
-
-::: {#dfn-fault-tolerance-graceful-degradation .callout-definition title="Graceful degradation"}
-
-***Graceful degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality (falling back to a smaller model, serving cached results, or returning partial outputs) rather than failing completely, maintaining measurable availability at reduced capability.
-
-1.  **Significance**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system can fall back from a large ranker to a collaborative-filtering model on GPU failure, maintaining request availability with a quality penalty that must be measured for that workload. The engineering calculation includes both the requests served and the utility lost during fallback.
-2.  **Distinction**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy in which each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
-3.  **Common pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
-
-:::
-
-### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
-
-A degradation plan must name which service property will be sacrificed before an incident begins. @Tbl-graceful-degradation-dimensions summarizes the main levers. The table is a pre-incident design checklist, not an outage-time brainstorming aid: each sacrificed property needs a measured quality budget, an activation condition, and a recovery path before the failure occurs.
-
-| **Dimension**        | **What the System Sacrifices**    | **Typical Fallback**                                                                           |
-|:---------------------|:----------------------------------|:-----------------------------------------------------------------------------------------------|
-| Quality              | Model accuracy or ranking quality | Use a simpler model, such as a collaborative-filtering fallback for a multi-tower recommender. |
-| Latency              | Response speed                    | Batch more requests together to preserve throughput and model quality under high load.         |
-| Coverage             | Result completeness               | Return top-10 search results instead of top-100.                                               |
-| Freshness            | Recency of computed results       | Serve cached or stale candidates, such as hour-old news recommendations during an outage.      |
-| Feature completeness | Input richness                    | Use content features when user history or real-time context is unavailable.                    |
-
-: **Graceful Degradation Dimensions**: Degradation plans choose which service property can be reduced while still returning a useful answer. Naming the dimension in advance prevents the system from treating every failure as a binary serve-or-crash decision. {#tbl-graceful-degradation-dimensions}
-
-These dimensions are not interchangeable. A search product may sacrifice coverage by returning fewer results while keeping freshness intact; a recommender may sacrifice freshness by serving cached candidates while preserving latency; and an interactive assistant may sacrifice quality by using a smaller model while keeping the session alive. The correct fallback is therefore workload-specific. It follows the property whose temporary loss least harms the application and whose recovery path can be validated before the incident.
-
-### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
-
-The dimensions in @tbl-graceful-degradation-dimensions become operational only when the service binds each sacrificed property to a specific fallback mechanism. The strategy ladder starts with model fallback when the primary inference path is too expensive or unavailable, then moves to feature fallback when input quality degrades, and finally to load shedding when demand exceeds capacity and the system must preserve the highest-value requests first.
-
-#### Model fallback {#sec-fault-tolerance-reliability-reliability-model-fallback-bc6e}
-
-Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements. The primary model\index{Graceful degradation!primary model} provides full capability at the highest resource cost, a secondary model\index{Graceful degradation!secondary model} reduces capability and resource demand, a tertiary model\index{Graceful degradation!tertiary model} preserves minimal capability, and a static fallback\index{Graceful degradation!static fallback} serves precomputed defaults with no inference at all. When the primary path is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward after the primary path is healthy again.
-
-```{python}
-#| echo: false
-#| label: model-fallback-cascade
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MODEL FALLBACK CASCADE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fault-tolerance-reliability-reliability-model-fallback-bc6e prose below.
-# │
-# │ Goal: Pin the three named vision models' sizes and ImageNet top-1 accuracy.
-# │ Show: ViT-Large 307M / 88%; EfficientNet-B4 19M / 83%; MobileNetV3-Large 5.4M / 75%.
-# │ How:  Models.Vision.*.parameters; Literature.Benchmarks.*ImageNetTop1.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models
-from mlsysim.fmt import check, fmt, fmt_percent
-
-class ModelFallbackCascade:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    vit_params_m = Models.Vision.ViT_Large.parameters.to(param).magnitude / 1e6
-    effnet_params_m = Models.Vision.EfficientNetB4.parameters.to(param).magnitude / 1e6
-    mobilenet_params_m = Models.Vision.MobileNetV3_Large.parameters.to(param).magnitude / 1e6
-    vit_top1 = float(Literature.Benchmarks.ViTLargeImageNetTop1)
-    effnet_top1 = float(Literature.Benchmarks.EfficientNetB4ImageNetTop1)
-    mobilenet_top1 = float(Literature.Benchmarks.MobileNetV3LargeImageNetTop1)
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    # (no derived values; each rung is a named registry entity)
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(vit_params_m > effnet_params_m > mobilenet_params_m, "each fallback rung must be smaller")
-    check(vit_top1 > effnet_top1 > mobilenet_top1, "each fallback rung must trade accuracy for cost")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    vit_params_str = fmt(vit_params_m, precision=0)
-    effnet_params_str = fmt(effnet_params_m, precision=0)
-    mobilenet_params_str = fmt(mobilenet_params_m, precision=1)
-    vit_top1_str = fmt_percent(round(vit_top1 * 100) / 100, precision=0, style="prose")
-    effnet_top1_str = fmt_percent(round(effnet_top1 * 100) / 100, precision=0, style="prose")
-    mobilenet_top1_str = fmt_percent(round(mobilenet_top1 * 100) / 100, precision=0, style="prose")
-```
-
-An image classification cascade makes the trade-off concrete. The primary path might run a ViT-Large model with `{python} ModelFallbackCascade.vit_params_str` million parameters and `{python} ModelFallbackCascade.vit_top1_str` ImageNet top-1 accuracy, fall back to EfficientNet-B4 with `{python} ModelFallbackCascade.effnet_params_str` million parameters and `{python} ModelFallbackCascade.effnet_top1_str` accuracy under pressure, then fall back again to MobileNet-V3-Large with `{python} ModelFallbackCascade.mobilenet_params_str` million parameters and `{python} ModelFallbackCascade.mobilenet_top1_str` accuracy when only minimal classification remains affordable. If even that path cannot meet the SLO, the service can return cached labels, a coarse category, or "classification unavailable" rather than blocking the request indefinitely. For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
-
-Recommendation and ranking systems use the same pattern when a complex deep learning model falls back to a top-n popularity list, a linear ranker, or a cached response during primary serving failures. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover. Otherwise the product appears healthy while quality is silently traded for availability.
-
-#### Feature fallback {#sec-fault-tolerance-reliability-reliability-feature-fallback-0730}
-
-Feature fallback controls how much input quality the model may lose before the request must be blocked. When feature retrieval fails, validated population-level defaults or cached values can substitute for missing user or item features. The model must have been trained or evaluated with those missing-feature semantics; an average embedding or a vector from another encoder is not automatically a compatible input. Approximate features are useful only when their representation and measured prediction quality satisfy the fallback contract.
-
-The key design step is prioritizing features by their measured contribution to prediction quality. @Tbl-feature-degradation-tiers illustrates a four-level policy in which critical features block the request, important features use defaults, useful features use cached values, and optional features can be omitted. Its quality-loss ranges are example policy budgets, not transferable properties of those feature categories; deployment requires measurements showing that each permitted fallback meets its budget.
-
-| **Tier**      |      **Example Features**     | **Missing Action** |  **Quality Impact**  |
-|:--------------|:-----------------------------:|:------------------:|:--------------------:|
-| **Critical**  |        User ID, Item ID       |   Block request    |     Cannot serve     |
-| **Important** | User history, Item attributes |    Use defaults    | 5--10% quality loss  |
-| **Useful**    |       Real-time context       |     Use cached     |  2--5% quality loss  |
-| **Optional**  |       Secondary signals       |        Omit        | $< 2\%$ quality loss |
-
-: **Graceful Feature Degradation Tiers**: Features classified by importance to prediction quality, with the corresponding response when each tier is unavailable. Critical features block the request entirely; lower tiers allow the system to fall back to defaults, cached values, or omission with bounded quality impact. The tiers convert a binary "feature available or not" question into a four-step degradation ladder. {#tbl-feature-degradation-tiers}
-
-When feature degradation alone is insufficient to maintain system stability under extreme load, the serving infrastructure must begin actively dropping requests.
-
-#### Load shedding {#sec-fault-tolerance-reliability-reliability-load-shedding-8476}
-
-Load shedding protects the system by sacrificing selected requests before overload spreads to every request. Random shedding is the simplest policy: drop a fraction of incoming requests and preserve enough capacity for the rest. Its weakness is that it treats all requests as equally valuable. Priority-based shedding turns quality-of-service degradation into an explicit policy by serving premium users before free users, revenue-generating requests before analytics requests, and interactive traffic before background batch work. The system is still degrading, but it is degrading according to a predeclared service contract rather than whichever queue happens to fill first.
-
-Admission control\index{Graceful degradation!admission control} applies the same idea at system entry points. It rejects requests that would exceed capacity rather than accepting work that will degrade every request already in the system. Circuit breakers\index{Circuit breaker!serving resilience} extend the same protection to individual dependencies by failing fast when a model replica, feature store, or supporting service is unhealthy, so that one failing dependency cannot exhaust connection pools across the fleet; @sec-inference-scale-circuit-breakers-backpressure-e61c develops their states and the backpressure signals that accompany them.
-
-#### Graceful degradation implementation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-implementation-1aa5}
-
-Implementation begins by turning the degradation ladder into a control loop. Tail-latency percentiles reveal delayed responses, dependency-specific error rates locate failed calls, resource utilization exposes pressure, and growing queues indicate a mismatch between arrivals and completions. These signals support entry and exit conditions for each degradation level. A trigger can justify load shedding before diagnosis is complete, but the signal alone does not establish the underlying cause.
-
-Degradation triggers\index{Graceful degradation!triggers} define conditions that activate degradation. @Lst-degradation-triggers illustrates three common trigger conditions that progressively activate fallback mechanisms based on latency, error rate, and feature store health.
-
-::: {#lst-degradation-triggers lst-cap="**Progressive Degradation Triggers**: Conditions that activate graceful degradation based on tail latency, error rate, and feature store health. Each trigger activates a different fallback mechanism appropriate to the detected problem."}
-
-```{.python}
-# Monitor tail latency for user-facing impact
-if p99_latency > threshold:
-    activate_model_fallback()  # Switch to faster, simpler model
-
-# Track error rates to detect downstream failures
-if error_rate > threshold:
-    activate_circuit_breaker()  # Fail fast, prevent cascade
-
-# Feature store slowdowns degrade recommendation quality
-if feature_store_latency > threshold:
-    activate_feature_fallback()  # Use cached/default features
-```
-
-:::
-
-Degradation should increase progressively as conditions worsen rather than switch at one cliff. The system can raise the fallback percentage gradually as load increases, then require sustained improvement before traffic returns to higher-capability paths. Hysteresis prevents oscillation between primary and fallback modes when the service hovers near a threshold.
-
-### Degradation monitoring and alerting {#sec-fault-tolerance-reliability-reliability-degradation-monitoring-alerting-87c2}
-
-Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results. The monitoring surface must expose how much service quality has been traded away. @Tbl-degradation-monitoring-action-map turns that surface into an action map: fallback share reveals how often model quality was reduced, default-feature share reveals input-quality loss, drop rate reveals capacity protection, and the primary-vs-fallback quality gap reveals whether the degraded path remains acceptable. Its escalation thresholds illustrate one policy; the service's permitted degradation duration and quality loss must determine the deployed thresholds.
-
-| **Signal**                      | **Quality trade exposed**                       | **Escalation rule**                                                              | **Postincident question**                              |
-|:--------------------------------|:------------------------------------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------|
-| Fallback-model request share    | Model capability reduced to preserve serving    | Sustained activation beyond 5 minutes becomes a warning.                         | Did the fallback preserve enough user value?           |
-| Default-feature request share   | Input richness reduced because dependencies lag | Severe degradation affecting over 50% of requests becomes critical.              | Which feature dependency needs replication or caching? |
-| Load-shed request rate          | Coverage reduced to protect the service         | Any growth after the circuit breaker opens triggers capacity investigation.      | Was admission control early enough to prevent cascade? |
-| Primary-vs-fallback quality gap | Product quality lost during the incident        | Degradation beyond 1 hour escalates even when availability metrics look healthy. | Is the fallback path still a valid product experience? |
-
-: **Degradation Monitoring Action Map**: Graceful degradation is safe only when the quality trade is observable. Each signal ties a degraded serving mode to the escalation and postincident question that prevent silent quality loss. {#tbl-degradation-monitoring-action-map}
-
-After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence. Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
-
 ## Distributed Debugging and Observability {#sec-fault-tolerance-reliability-reliability-distributed-debugging-observability-1a7f}
 
 At 2:00 AM, latency on the flagship generative API spikes from 200 ms to 5 seconds, but CPU, memory, and network metrics all look perfectly normal. The latency breach can justify immediate mitigation under a predefined policy; choosing a targeted repair requires locating the stalled work across hundreds of microservices. Distributed debugging and observability provide the diagnostic capability required to locate these invisible bottlenecks.
@@ -3477,6 +3331,152 @@ Cascade failures are particularly insidious because the root cause is obscured b
 :::
 
 Correlating metrics, logs, and traces allows operators to isolate failures and trigger automated remediations before an entire cluster is compromised. How these observability pipelines and fault tolerance strategies operate in practice, however, is best understood through real deployments. Production clusters running frontier models and global services illustrate how organizations translate theoretical reliability models into operational systems.
+
+## Graceful Degradation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-9122}
+
+During a major regional network outage, an e-commerce site suddenly loses access to its heavy, GPU-accelerated recommendation cluster. Rather than showing users empty pages or crashing, the site instantly switches to serving precomputed, generic popular items. The serving fault tolerance mechanisms developed in @sec-fault-tolerance-reliability-reliability-serving-fault-tolerance-5375 aim to maintain full service, but graceful degradation dictates what happens when those defenses are overwhelmed.
+
+::: {#dfn-fault-tolerance-graceful-degradation .callout-definition title="Graceful degradation"}
+
+***Graceful degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality (falling back to a smaller model, serving cached results, or returning partial outputs) rather than failing completely, maintaining measurable availability at reduced capability.
+
+1.  **Significance**: Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system can fall back from a large ranker to a collaborative-filtering model on GPU failure, maintaining request availability with a quality penalty that must be measured for that workload. The engineering calculation includes both the requests served and the utility lost during fallback.
+2.  **Distinction**: Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy in which each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
+3.  **Common pitfall**: A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit preengineering: fallback models must be preloaded or precomputed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
+
+:::
+
+### Degradation dimensions {#sec-fault-tolerance-reliability-reliability-degradation-dimensions-4b25}
+
+A degradation plan must name which service property will be sacrificed before an incident begins. @Tbl-graceful-degradation-dimensions summarizes the main levers. The table is a pre-incident design checklist, not an outage-time brainstorming aid: each sacrificed property needs a measured quality budget, an activation condition, and a recovery path before the failure occurs.
+
+| **Dimension**        | **What the System Sacrifices**    | **Typical Fallback**                                                                           |
+|:---------------------|:----------------------------------|:-----------------------------------------------------------------------------------------------|
+| Quality              | Model accuracy or ranking quality | Use a simpler model, such as a collaborative-filtering fallback for a multi-tower recommender. |
+| Latency              | Response speed                    | Batch more requests together to preserve throughput and model quality under high load.         |
+| Coverage             | Result completeness               | Return top-10 search results instead of top-100.                                               |
+| Freshness            | Recency of computed results       | Serve cached or stale candidates, such as hour-old news recommendations during an outage.      |
+| Feature completeness | Input richness                    | Use content features when user history or real-time context is unavailable.                    |
+
+: **Graceful Degradation Dimensions**: Degradation plans choose which service property can be reduced while still returning a useful answer. Naming the dimension in advance prevents the system from treating every failure as a binary serve-or-crash decision. {#tbl-graceful-degradation-dimensions}
+
+These dimensions are not interchangeable. A search product may sacrifice coverage by returning fewer results while keeping freshness intact; a recommender may sacrifice freshness by serving cached candidates while preserving latency; and an interactive assistant may sacrifice quality by using a smaller model while keeping the session alive. The correct fallback is therefore workload-specific. It follows the property whose temporary loss least harms the application and whose recovery path can be validated before the incident.
+
+### Graceful degradation strategies {#sec-fault-tolerance-reliability-reliability-graceful-degradation-strategies-e85e}
+
+The dimensions in @tbl-graceful-degradation-dimensions become operational only when the service binds each sacrificed property to a specific fallback mechanism. The strategy ladder starts with model fallback when the primary inference path is too expensive or unavailable, then moves to feature fallback when input quality degrades, and finally to load shedding when demand exceeds capacity and the system must preserve the highest-value requests first.
+
+#### Model fallback {#sec-fault-tolerance-reliability-reliability-model-fallback-bc6e}
+
+Model fallback turns quality into an explicit availability lever by maintaining multiple model versions with different resource requirements. The primary model\index{Graceful degradation!primary model} provides full capability at the highest resource cost, a secondary model\index{Graceful degradation!secondary model} reduces capability and resource demand, a tertiary model\index{Graceful degradation!tertiary model} preserves minimal capability, and a static fallback\index{Graceful degradation!static fallback} serves precomputed defaults with no inference at all. When the primary path is unavailable or overloaded, the policy descends only as far as resource pressure requires, then returns upward after the primary path is healthy again.
+
+```{python}
+#| echo: false
+#| label: model-fallback-cascade
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MODEL FALLBACK CASCADE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-reliability-model-fallback-bc6e prose below.
+# │
+# │ Goal: Pin the three named vision models' sizes and ImageNet top-1 accuracy.
+# │ Show: ViT-Large 307M / 88%; EfficientNet-B4 19M / 83%; MobileNetV3-Large 5.4M / 75%.
+# │ How:  Models.Vision.*.parameters; Literature.Benchmarks.*ImageNetTop1.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, Models
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class ModelFallbackCascade:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    vit_params_m = Models.Vision.ViT_Large.parameters.to(param).magnitude / 1e6
+    effnet_params_m = Models.Vision.EfficientNetB4.parameters.to(param).magnitude / 1e6
+    mobilenet_params_m = Models.Vision.MobileNetV3_Large.parameters.to(param).magnitude / 1e6
+    vit_top1 = float(Literature.Benchmarks.ViTLargeImageNetTop1)
+    effnet_top1 = float(Literature.Benchmarks.EfficientNetB4ImageNetTop1)
+    mobilenet_top1 = float(Literature.Benchmarks.MobileNetV3LargeImageNetTop1)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    # (no derived values; each rung is a named registry entity)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(vit_params_m > effnet_params_m > mobilenet_params_m, "each fallback rung must be smaller")
+    check(vit_top1 > effnet_top1 > mobilenet_top1, "each fallback rung must trade accuracy for cost")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    vit_params_str = fmt(vit_params_m, precision=0)
+    effnet_params_str = fmt(effnet_params_m, precision=0)
+    mobilenet_params_str = fmt(mobilenet_params_m, precision=1)
+    vit_top1_str = fmt_percent(round(vit_top1 * 100) / 100, precision=0, style="prose")
+    effnet_top1_str = fmt_percent(round(effnet_top1 * 100) / 100, precision=0, style="prose")
+    mobilenet_top1_str = fmt_percent(round(mobilenet_top1 * 100) / 100, precision=0, style="prose")
+```
+
+An image classification cascade makes the trade-off concrete. The primary path might run a ViT-Large model with `{python} ModelFallbackCascade.vit_params_str` million parameters and `{python} ModelFallbackCascade.vit_top1_str` ImageNet top-1 accuracy, fall back to EfficientNet-B4 with `{python} ModelFallbackCascade.effnet_params_str` million parameters and `{python} ModelFallbackCascade.effnet_top1_str` accuracy under pressure, then fall back again to MobileNet-V3-Large with `{python} ModelFallbackCascade.mobilenet_params_str` million parameters and `{python} ModelFallbackCascade.mobilenet_top1_str` accuracy when only minimal classification remains affordable. If even that path cannot meet the SLO, the service can return cached labels, a coarse category, or "classification unavailable" rather than blocking the request indefinitely. For that ladder to be real rather than aspirational, the production system must keep multiple models deployed, route requests to the appropriate level, monitor fallback frequency, and measure the quality impact of each level.
+
+Recommendation and ranking systems use the same pattern when a complex deep learning model falls back to a top-n popularity list, a linear ranker, or a cached response during primary serving failures. Complex models often fight for the last mile of accuracy while simple heuristics provide the bulk of the utility, so the fallback path must be monitored as a first-class quality signal rather than treated as a silent failover. Otherwise the product appears healthy while quality is silently traded for availability.
+
+#### Feature fallback {#sec-fault-tolerance-reliability-reliability-feature-fallback-0730}
+
+Feature fallback controls how much input quality the model may lose before the request must be blocked. When feature retrieval fails, validated population-level defaults or cached values can substitute for missing user or item features. The model must have been trained or evaluated with those missing-feature semantics; an average embedding or a vector from another encoder is not automatically a compatible input. Approximate features are useful only when their representation and measured prediction quality satisfy the fallback contract.
+
+The key design step is prioritizing features by their measured contribution to prediction quality. @Tbl-feature-degradation-tiers illustrates a four-level policy in which critical features block the request, important features use defaults, useful features use cached values, and optional features can be omitted. Its quality-loss ranges are example policy budgets, not transferable properties of those feature categories; deployment requires measurements showing that each permitted fallback meets its budget.
+
+| **Tier**      |      **Example Features**     | **Missing Action** |  **Quality Impact**  |
+|:--------------|:-----------------------------:|:------------------:|:--------------------:|
+| **Critical**  |        User ID, Item ID       |   Block request    |     Cannot serve     |
+| **Important** | User history, Item attributes |    Use defaults    | 5--10% quality loss  |
+| **Useful**    |       Real-time context       |     Use cached     |  2--5% quality loss  |
+| **Optional**  |       Secondary signals       |        Omit        | $< 2\%$ quality loss |
+
+: **Graceful Feature Degradation Tiers**: Features classified by importance to prediction quality, with the corresponding response when each tier is unavailable. Critical features block the request entirely; lower tiers allow the system to fall back to defaults, cached values, or omission with bounded quality impact. The tiers convert a binary "feature available or not" question into a four-step degradation ladder. {#tbl-feature-degradation-tiers}
+
+When feature degradation alone is insufficient to maintain system stability under extreme load, the serving infrastructure must begin actively dropping requests.
+
+#### Load shedding {#sec-fault-tolerance-reliability-reliability-load-shedding-8476}
+
+Load shedding protects the system by sacrificing selected requests before overload spreads to every request. Random shedding is the simplest policy: drop a fraction of incoming requests and preserve enough capacity for the rest. Its weakness is that it treats all requests as equally valuable. Priority-based shedding turns quality-of-service degradation into an explicit policy by serving premium users before free users, revenue-generating requests before analytics requests, and interactive traffic before background batch work. The system is still degrading, but it is degrading according to a predeclared service contract rather than whichever queue happens to fill first.
+
+Admission control\index{Graceful degradation!admission control} applies the same idea at system entry points. It rejects requests that would exceed capacity rather than accepting work that will degrade every request already in the system. Circuit breakers\index{Circuit breaker!serving resilience} extend the same protection to individual dependencies by failing fast when a model replica, feature store, or supporting service is unhealthy, so that one failing dependency cannot exhaust connection pools across the fleet; @sec-inference-scale-circuit-breakers-backpressure-e61c develops their states and the backpressure signals that accompany them.
+
+#### Graceful degradation implementation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-implementation-1aa5}
+
+Implementation begins by turning the degradation ladder into a control loop. Tail-latency percentiles reveal delayed responses, dependency-specific error rates locate failed calls, resource utilization exposes pressure, and growing queues indicate a mismatch between arrivals and completions. These signals support entry and exit conditions for each degradation level. A trigger can justify load shedding before diagnosis is complete, but the signal alone does not establish the underlying cause.
+
+Degradation triggers\index{Graceful degradation!triggers} define conditions that activate degradation. @Lst-degradation-triggers illustrates three common trigger conditions that progressively activate fallback mechanisms based on latency, error rate, and feature store health.
+
+::: {#lst-degradation-triggers lst-cap="**Progressive Degradation Triggers**: Conditions that activate graceful degradation based on tail latency, error rate, and feature store health. Each trigger activates a different fallback mechanism appropriate to the detected problem."}
+
+```{.python}
+# Monitor tail latency for user-facing impact
+if p99_latency > threshold:
+    activate_model_fallback()  # Switch to faster, simpler model
+
+# Track error rates to detect downstream failures
+if error_rate > threshold:
+    activate_circuit_breaker()  # Fail fast, prevent cascade
+
+# Feature store slowdowns degrade recommendation quality
+if feature_store_latency > threshold:
+    activate_feature_fallback()  # Use cached/default features
+```
+
+:::
+
+Degradation should increase progressively as conditions worsen rather than switch at one cliff. The system can raise the fallback percentage gradually as load increases, then require sustained improvement before traffic returns to higher-capability paths. Hysteresis prevents oscillation between primary and fallback modes when the service hovers near a threshold.
+
+### Degradation monitoring and alerting {#sec-fault-tolerance-reliability-reliability-degradation-monitoring-alerting-87c2}
+
+Because graceful degradation trades quality for availability, monitoring must make that trade visible rather than letting the system appear healthy while serving lower-fidelity results. The monitoring surface must expose how much service quality has been traded away. @Tbl-degradation-monitoring-action-map turns that surface into an action map: fallback share reveals how often model quality was reduced, default-feature share reveals input-quality loss, drop rate reveals capacity protection, and the primary-vs-fallback quality gap reveals whether the degraded path remains acceptable. Its escalation thresholds illustrate one policy; the service's permitted degradation duration and quality loss must determine the deployed thresholds.
+
+| **Signal**                      | **Quality trade exposed**                       | **Escalation rule**                                                              | **Postincident question**                              |
+|:--------------------------------|:------------------------------------------------|:---------------------------------------------------------------------------------|:-------------------------------------------------------|
+| Fallback-model request share    | Model capability reduced to preserve serving    | Sustained activation beyond 5 minutes becomes a warning.                         | Did the fallback preserve enough user value?           |
+| Default-feature request share   | Input richness reduced because dependencies lag | Severe degradation affecting over 50% of requests becomes critical.              | Which feature dependency needs replication or caching? |
+| Load-shed request rate          | Coverage reduced to protect the service         | Any growth after the circuit breaker opens triggers capacity investigation.      | Was admission control early enough to prevent cascade? |
+| Primary-vs-fallback quality gap | Product quality lost during the incident        | Degradation beyond 1 hour escalates even when availability metrics look healthy. | Is the fallback path still a valid product experience? |
+
+: **Degradation Monitoring Action Map**: Graceful degradation is safe only when the quality trade is observable. Each signal ties a degraded serving mode to the escalation and postincident question that prevent silent quality loss. {#tbl-degradation-monitoring-action-map}
+
+After the event, postincident analysis should identify the root cause, evaluate fallback effectiveness, measure user and business impact, and define improvements that prevent recurrence. Implementing these fallback mechanisms safely requires deep visibility into the system's runtime state. When a complex recommendation pipeline begins degrading, operators must rapidly determine which microservice is failing, and that diagnosis depends on distributed debugging and observability.
 
 ## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
 
