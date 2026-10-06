@@ -540,208 +540,9 @@ When a system is memory bound\index{Compute-bound vs. memory-bound!memory-bound 
 *The machine axis sets the deployment envelope.*
 :::
 
-### Workload archetypes {#sec-ml-systems-workload-archetypes-fd10}
+### System Balance and Hardware {#sec-ml-systems-system-balance-hardware-96ab}
 
-The bottleneck principle reduces optimization to identifying the dominant constraint for a given workload. The answer depends on the tripartite D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!workload classification} diagrammed in @fig-ai-triad, which decomposes every ML system into its interdependent Data, Algorithm, and Machine axes. Different deployment environments create different bottlenecks along these axes, so the same model family can require different engineering when it moves from a cloud server with terabytes of memory to a microcontroller with kilobytes. The iron law turns that diagnostic into four **workload archetypes**\index{Workload archetype!definition}.[^fn-archetype-system-bottleneck] These are not model categories; they are recurring physical bottlenecks that determine which engineering moves can help.
-
-The first split separates arithmetic-bound systems from data-movement-bound systems. A **compute beast**\index{Arithmetic intensity!high intensity workloads}\index{Compute beast!definition} performs many calculations per byte loaded, so progress comes from higher arithmetic throughput, better utilization, and more parallel execution; large neural-network training is the canonical case. A **bandwidth hog**\index{Autoregressive generation!memory-bound}\index{Bandwidth hog!definition}, by contrast, waits on dense weight or activation movement, so wider memory buses and better data reuse matter more than additional peak FLOP/s; autoregressive text generation illustrates this regime.
-
-The second split covers workloads where the binding constraint is not dense arithmetic at all. **Sparse scatter**\index{Embedding table!memory capacity bound}\index{Sparse scatter!definition} workloads are dominated by irregular table lookups and poor cache locality, so memory capacity, access latency, and communication shape performance in recommendation systems with massive embedding tables. **Tiny constraint**\index{Tiny constraint!definition} workloads face the opposite envelope: energy per inference\index{Energy per inference!binding constraint} and memory footprint, not raw speed, determine whether always-on sensing\index{Always-on sensing!power constraints} can run at all.
-
-[^fn-archetype-system-bottleneck]: [offset=10mm] **Workload archetype**\index{Workload archetype!definition}: A classification of ML workloads by their dominant iron law bottleneck rather than their model family. The distinction matters because the optimization strategy differs fundamentally: a compute-bound workload benefits from faster arithmetic $(\PeakRate)$, while a bandwidth-bound workload benefits from wider memory buses or fewer bytes moved through reuse, fusion, compression, or lower precision. Misidentifying the archetype wastes optimization effort on the wrong term of the iron law, as when teams add accelerator FLOP/s to a memory-bound inference pipeline and observe zero speedup.
-
-[^fn-paradigm-deployment-tradeoff]: [offset=-12mm] **Deployment paradigm**\index{Deployment paradigm!definition}: A distinct operating regime defined by latency, power, memory, and connectivity constraints. The Cloud-to-TinyML spectrum changes which resources bind; optimizing within an infeasible regime cannot satisfy the application's deployment budget.
-
-[^fn-latency-system-tradeoff]: **Latency**\index{Latency!responsiveness constraint}\index{Latency!deployment constraint}: The time between issuing a request and receiving a result, corresponding to $T$ in the iron law, where propagation delay enters through the fixed-overhead term $\Latency$. The light barrier makes that propagation floor irreducible: the speed of light in fiber imposes a ~36 ms minimum round trip across the continental US, consuming the entire latency budget of a 10 ms safety-critical system before any computation begins. Every millisecond consumed by distance is a millisecond unavailable for model inference, which is why the light barrier forces paradigm selection rather than mere optimization.
-
-[^fn-bandwidth-memory-wall]: **Memory bandwidth (the memory wall)**\index{Memory bandwidth!memory wall}: The term "memory wall" was coined by Wulf and McKee in 1995, who predicted that the processor-memory performance gap would eventually dominate system performance—a prediction that proved prescient for ML workloads in which weight or activation movement can bind performance. In the iron law, bandwidth $(\Bandwidth)$ appears in the denominator of the data term $\DataVolume/\Bandwidth$, so doubling the bytes moved without a corresponding bandwidth increase raises the data-movement time. The resulting bottleneck depends on arithmetic intensity, batch size, data reuse, access pattern, and hardware balance rather than model size alone.
-
-::: {#lhs-ml-systems-five-reference-workloads .callout-lighthouse title="Five reference workloads"}
-
-@Sec-introduction-lighthouse-models-9b1c introduced five lighthouse models\index{Lighthouse model!reference workloads} by the system bottleneck each isolates (@tbl-lighthouse-examples); @tbl-ml-systems-lighthouse-archetypes pairs each with a representative workload archetype and deployment paradigm. The classifications describe operating regimes: batched image processing can emphasize arithmetic, single-request text generation can emphasize weight transfers, and a large recommendation table can exceed local memory capacity. Changing batch size, model size, or hardware can change the binding constraint. MobileNetV2 illustrates arithmetic designed for a smaller resource budget, but whether its latency and power fit a phone still depends on the implementation and workload. @Sec-network-architectures-lighthouse-roster-model-biographies-a763 provides full architectural details and model biographies.
-
-| **Lighthouse**             | **Archetype**             | **Deployment Paradigm**        |
-|:---------------------------|:--------------------------|:-------------------------------|
-| **ResNet-50**              | Compute Beast             | Cloud training, edge inference |
-| **GPT-2/Llama**            | Bandwidth Hog             | Cloud inference                |
-| **DLRM**                   | Sparse Scatter            | Cloud for large tables         |
-| **MobileNetV2**            | Compute Beast (efficient) | Mobile, edge                   |
-| **Keyword Spotting (KWS)** | Tiny Constraint           | TinyML, always-on              |
-
-: **Five Lighthouse Models**: Recurring workloads used throughout the book to ground the iron law in concrete practice. Each lighthouse pairs an archetype (Compute Beast, Bandwidth Hog, Sparse Scatter, Tiny Constraint) with the deployment paradigm where it predominantly runs, isolating a distinct systems bottleneck. {#tbl-ml-systems-lighthouse-archetypes}
-```{=latex}
-\vspace*{-2ex}
-```
-:::
-
-These archetypes map onto deployment paradigms. Large-scale compute beasts (training) and sparse scatter workloads gravitate to cloud data centers; efficient compute beasts such as MobileNetV2 can fit mobile and edge devices; bandwidth hogs run in the cloud unless a smaller model fits locally; and tiny constraint workloads belong on microcontrollers.
-
-```{python}
-#| echo: false
-#| label: lighthouse-setup
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LIGHTHOUSE MODEL SPECIFICATIONS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Workload archetype prose (five Lighthouse Model summaries)
-# │
-# │ Goal: Provide specs for the five Lighthouse Models (ResNet-50, GPT-2/Llama,
-# │       DLRM, MobileNetV2, KWS DS-CNN).
-# │ Show: Parameter count, FLOP profile, and memory footprint per workload.
-# │ How: Retrieve parameters and FLOPs from Models twin; derive sizes using
-# │       size_in_bytes() with 4-byte (FP32) precision, except KWS, which is
-# │       sized at 1-byte (INT8) precision as deployed on a microcontroller.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.fmt import check, fmt, fmt_count, fmt_count_range, fmt_flops, fmt_int, fmt_memory, fmt_multiple, fmt_qty_int, fmt_range
-from mlsysim.core.units import Mparam, Bparam, Kparam, MB, GB, KB, byte, GFLOPs, MFLOPs
-
-# ┌── LEGO ───────────────────────────────────────────────
-class LighthouseModels:
-    """Five reference workload specs for the archetype narrative."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m_resnet = Models.Vision.ResNet50
-    m_gpt2 = Models.Language.GPT2
-    m_llama_7b = Models.Language.Llama2_7B
-    m_llama_70b = Models.Language.Llama2_70B
-    m_dlrm = Models.Recommendation.DLRM
-    m_mobilenet = Models.Vision.MobileNetV2
-    m_kws = Models.Tiny.DS_CNN
-    mobile_tdp_min_w, mobile_tdp_max_w = [int(v) for v in Platforms.Mobile.tdp_range_w.split("-")]
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    resnet_fp32_size = m_resnet.size_in_bytes(4 * byte)
-    resnet_fp32_value = resnet_fp32_size.to(MB).magnitude
-    dlrm_embedding = m_dlrm.size_in_bytes()
-    mobilenet_flops_reduction = (m_resnet.inference_flops / m_mobilenet.inference_flops).to("count").magnitude
-    kws_size = m_kws.size_in_bytes(1 * byte)
-    kws_size_kb = kws_size.to(KB).magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(resnet_fp32_size >= 90 * MB, f"ResNet50 size should be ~98 MB, got {resnet_fp32_value:.0f} MB")
-    check(mobilenet_flops_reduction > 10, "MobileNet reduction should be >10x vs ResNet.")
-    check(180 <= kws_size_kb <= 220, f"KWS INT8 size should be about 200 KB, got {kws_size_kb:.0f} KB")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    resnet_gflop_str = fmt_flops(m_resnet.inference_flops, unit=GFLOPs, precision=1)
-    resnet_params_m_str = fmt_count(m_resnet.parameters, scale="million", precision=1, label="parameter")
-    resnet_fp32_mb_str = fmt_memory(resnet_fp32_size, unit=MB, precision=1)
-    gpt2_params_b_str = fmt_count(m_gpt2.parameters, scale="billion", precision=1, label="parameter")
-    llama_range_str = fmt_count_range(
-        m_llama_7b.parameters,
-        m_llama_70b.parameters,
-        scale="billion",
-        precision=0,
-        commas=False,
-        label="parameter",
-    )
-    dlrm_embedding_gb_str = fmt_qty_int(dlrm_embedding, GB)
-    mobilenet_flops_reduction_mult_str = fmt_multiple(mobilenet_flops_reduction, precision=1)
-    mobile_tdp_range_str = fmt_range(
-        mobile_tdp_min_w,
-        mobile_tdp_max_w,
-        precision=0,
-        commas=False,
-        unit="W",
-    )
-    kws_params_str = fmt_count(m_kws.parameters, scale="K", commas=False, label="parameter")
-    kws_mflop_str = fmt_flops(m_kws.inference_flops, unit=MFLOPs, precision=0)
-    kws_size_kb_str = fmt_qty_int(kws_size, KB)
-```
-
-The first lighthouse, **ResNet-50**\index{ResNet-50!systems characteristics}, classifies images into 1,000 categories, processing each image through approximately `{python} LighthouseModels.resnet_gflop_str` using `{python} LighthouseModels.resnet_params_m_str` (`{python} LighthouseModels.resnet_fp32_mb_str` at FP32) [@he2016]. Used in medical imaging diagnostics, autonomous vehicle perception pipelines, and as the backbone for content moderation systems, its regular, compute-dense structure makes it the canonical benchmark for hardware accelerator performance.
-
-The language models **GPT-2/Llama**\index{GPT-2!autoregressive bottleneck}\index{Llama!memory-bound inference} exemplify autoregressive text generation [@radford2019language; @touvron2023llama]. These models generate text one token at a time. Because multi-billion parameter models exceed on-chip cache, weights reside in external memory; generating text token-by-token for one request at a time forces the processor to stream the weights across the memory bus for each token with little reuse across inputs (`{python} LighthouseModels.gpt2_params_b_str` for GPT-2, `{python} LighthouseModels.llama_range_str` for Llama). This sequential access pattern creates an autoregressive bottleneck that shapes serving cost [@pope2023efficiently].
-
-::: {.column-margin .margin-pointer}
-↪ Continuous batching and KV-cache paging, the runtime mechanisms that serve token-by-token generation, are developed in @sec-model-serving-continuous-batching-8bb6.
-:::
-
-The recommendation lighthouse, **DLRM**\index{DLRM!memory capacity bound}\index{Recommendation system!DLRM}, represents the embedding-heavy recommendation workload behind large-scale "You might also like" systems [@naumov2019deep]. It maps users and items to embedding vectors stored in tables that can exceed `{python} LighthouseModels.dlrm_embedding_gb_str` of embeddings, making memory capacity rather than computation the binding constraint.
-
-The mobile lighthouse, **MobileNetV2**\index{MobileNetV2!depthwise separable convolutions}\index{MobileNetV2!efficiency gains}, is designed for efficient mobile vision tasks such as classification, detection, and segmentation [@sandler2018]. It performs the same image classification task as ResNet but uses depthwise separable convolutions, which separate spatial filtering from channel mixing, to reduce computation by `{python} LighthouseModels.mobilenet_flops_reduction_mult_str`. That reduction makes it a candidate for real-time inference within a smartphone's `{python} LighthouseModels.mobile_tdp_range_str` envelope; the implementation and workload determine whether it meets the deadline.
-
-The TinyML lighthouse, **keyword spotting (KWS)**\index{Keyword spotting!TinyML archetype}, represents the always-on sensing archetype. KWS systems detect short trigger phrases with compact models built for resource-constrained microcontrollers [@zhang2017hello]. The lighthouse workload has approximately `{python} LighthouseModels.kws_params_str`, about `{python} LighthouseModels.kws_size_kb_str` at INT8 (stored in flash), placing it in the kilobyte-memory, milliwatt-budget TinyML regime.
-
-The Smart Doorbell scenario applies the same always-on pattern to vision: a visual wake-word model that detects a person at the door on an ESP32-S3 microcontroller. Its feasibility is screened hierarchically, checking weight storage in flash before execution latency. Passing this storage check does not establish complete memory fit; intermediate results and runtime state must also fit in SRAM, as the TinyML section develops. @Fig-doorbell-scorecard tracks this two-level feasibility check by plotting resource demand against the vertical 100 percent saturation threshold for the ESP32-S3 microcontroller: the wake-vision model fits comfortably within Level 1 flash memory (11.9 percent utilization), but breaches Level 2 service-level latency (202.0 percent under a strict 50 ms responsiveness budget).
-
-::: {#fig-doorbell-scorecard fig-env="figure" fig-pos="htb" fig-cap="**Smart Doorbell Constraint Scorecard**: Each bar is demand over supply, so the dashed line marks the point where a level is exactly saturated. The model occupies a small fraction of the ESP32-S3's 4 MB flash budget (Level 1: PASS), but its 101 ms baseline latency is twice the 50 ms target chosen here for a responsive chime (Level 2: FAIL), even though it clears the scenario's canonical 200 ms budget." fig-alt="A horizontal bar chart showing two levels of constraints. Level 1: Memory (flash capacity) shows a green bar (PASS). Level 2: Latency (SLA) shows a red bar (FAIL), exceeding the limit line."}
-
-```{python}
-#| echo: false
-#| label: doorbell-scorecard
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DOORBELL SCORECARD (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Lighthouse model evaluation
-# │ Goal: Visualize the radar plot scorecard for the smart doorbell application
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Initialize the visualization modules
-import mlsysim
-import matplotlib.pyplot as plt
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-# │ Load the Doorbell scenario with a strict real-time interaction budget.
-# │ The canonical scenario uses a 200 ms SLA; this scorecard intentionally
-# │ tightens the target to show latency as the active deployment constraint.
-doorbell_strict = mlsysim.Scenarios.SmartDoorbell.model_copy(update={"sla_latency": mlsysim.Q_("50 ms")})
-doorbell_eval = doorbell_strict.evaluate()
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-# │ Plot the radar scorecard using the mlsysim helper
-fig, ax = mlsysim.plot_evaluation_scorecard(doorbell_eval)
-
-# graphical adjustments for aesthetics
-fig.set_size_inches(9, 4.2)
-
-for patch in ax.patches:
-    old_h = patch.get_height()
-    new_h = old_h * 0.45
-    patch.set_y(patch.get_y() + (old_h - new_h) / 2)
-    patch.set_height(new_h)
-
-# bar colors
-bar_colors = ["#55B27D", "#D9534F"]
-for patch, color in zip(ax.patches, bar_colors):
-    patch.set_facecolor(color)
-    patch.set_edgecolor("#2f5d46")
-    patch.set_linewidth(1.0)
-
-# color of the reference vertical line
-for line in ax.lines:
-    line.set_color("#444444")
-    line.set_linestyle("--")
-    line.set_linewidth(1.8)
-
-# style for percentage labels
-for txt in ax.texts:
-    s = txt.get_text().strip()
-
-    txt.set_fontsize(11)
-    txt.set_fontweight("bold")
-
-    if s.endswith("%"):
-        txt.set_color("#D9534F" if float(s.rstrip("%")) > 100 else "#11823b")  # red = over budget
-
-# the scorecard's memory level is evaluated against the ESP32-S3 flash capacity
-ax.set_yticks(ax.get_yticks(), [t.get_text().replace("Memory (RAM)", "Memory (flash)") for t in ax.get_yticklabels()])
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-# │ Display the figure
-plt.show()
-plt.close()
-```
-
-:::
-
-The range in compute requirements and memory footprints explains why no single deployment paradigm fits all workloads. A keyword spotter can operate with roughly `{python} LighthouseModels.kws_mflop_str` per inference and about `{python} LighthouseModels.kws_size_kb_str` of INT8 weights, while ResNet-50 requires about `{python} LighthouseModels.resnet_gflop_str` per image and roughly `{python} LighthouseModels.resnet_fp32_mb_str` of FP32 weights. The reference DLRM example already reaches `{python} LighthouseModels.dlrm_embedding_gb_str`, and production DLRM-style recommendation systems can exceed 100 TB. Language models add a bandwidth-dominated regime: billions of parameters streamed repeatedly from memory during autoregressive inference.
-
-The iron law and workload archetypes gain practical meaning when matched against real silicon. Whether an accelerator achieves high utilization or stalls on memory depends on system balance: the ratio of peak compute throughput to memory bandwidth and I/O capacity across hardware platforms.
-
-## System Balance and Hardware {#sec-ml-systems-system-balance-hardware-96ab}
+The iron law gains practical meaning when matched against real silicon. Whether an accelerator achieves high utilization or stalls on memory depends on system balance: the ratio of peak compute throughput to memory bandwidth and I/O capacity across hardware platforms.
 
 Physical constraints translate latency-vs-throughput trade-offs\index{Latency vs. throughput!trade-offs} into engineering decisions through concrete numbers. Operation latencies\index{Latency!decision thresholds} span roughly eight orders of magnitude, from about a nanosecond for an on-chip cache hit or a single accelerator multiply, through milliseconds for one mobile vision inference, to tens or hundreds of milliseconds for a cross-region network call. @Sec-appdx-machine-foundations-numbers-know-b531 collects the memory-hierarchy and network round-trip anchors along with illustrative application latency budgets. The span matters because of one strict rule: an operation with latency $> X$ *cannot* appear on the critical path of a system whose latency budget is $X$ ms.[^fn-critical-path-ml]
 
@@ -1218,6 +1019,205 @@ The last column of @tbl-representative-systems applies the pipelined bound in @e
 [^fn-pue-facility-efficiency]: **Power usage effectiveness (PUE)**\index{PUE!definition}: This metric isolates facility energy overhead, including cooling and power distribution, from the energy delivered to computing equipment. Even a PUE of 1.06 leaves substantial noncompute power\index{PUE!efficiency overhead} at data-center scale. TinyML does not require dedicated facility cooling, although sensing, communication, conversion losses, and sleep power still contribute to its complete system-energy budget. These device-level costs sit outside PUE.
 
 Each paradigm is therefore an operating envelope defined by a different binding resource, and moving from warehouse data centers down to microcontrollers traces a physical gradient that trades raw compute throughput for energy and memory efficiency. The four sections that follow walk that gradient one tier at a time, and each asks the same four questions, which the constraint map in each section draws as four branches: which constraint binds, how the system responds, where the paradigm fails, and which workloads fit. Because that structure is shared, each section concentrates on what is distinctive about its tier and on the one or two calculations that decide whether a workload belongs there.
+
+### Workload archetypes {#sec-ml-systems-workload-archetypes-fd10}
+
+The bottleneck principle reduces optimization to identifying the dominant constraint for a given workload. The answer depends on the tripartite D·A·M taxonomy\index{DAM taxonomy@D·A·M taxonomy!workload classification} diagrammed in @fig-ai-triad, which decomposes every ML system into its interdependent Data, Algorithm, and Machine axes. Different deployment environments create different bottlenecks along these axes, so the same model family can require different engineering when it moves from a cloud server with terabytes of memory to a microcontroller with kilobytes. The iron law turns that diagnostic into four **workload archetypes**\index{Workload archetype!definition}.[^fn-archetype-system-bottleneck] These are not model categories; they are recurring physical bottlenecks that determine which engineering moves can help.
+
+The first split separates arithmetic-bound systems from data-movement-bound systems. A **compute beast**\index{Arithmetic intensity!high intensity workloads}\index{Compute beast!definition} performs many calculations per byte loaded, so progress comes from higher arithmetic throughput, better utilization, and more parallel execution; large neural-network training is the canonical case. A **bandwidth hog**\index{Autoregressive generation!memory-bound}\index{Bandwidth hog!definition}, by contrast, waits on dense weight or activation movement, so wider memory buses and better data reuse matter more than additional peak FLOP/s; autoregressive text generation illustrates this regime.
+
+The second split covers workloads where the binding constraint is not dense arithmetic at all. **Sparse scatter**\index{Embedding table!memory capacity bound}\index{Sparse scatter!definition} workloads are dominated by irregular table lookups and poor cache locality, so memory capacity, access latency, and communication shape performance in recommendation systems with massive embedding tables. **Tiny constraint**\index{Tiny constraint!definition} workloads face the opposite envelope: energy per inference\index{Energy per inference!binding constraint} and memory footprint, not raw speed, determine whether always-on sensing\index{Always-on sensing!power constraints} can run at all.
+
+[^fn-archetype-system-bottleneck]: [offset=10mm] **Workload archetype**\index{Workload archetype!definition}: A classification of ML workloads by their dominant iron law bottleneck rather than their model family. The distinction matters because the optimization strategy differs fundamentally: a compute-bound workload benefits from faster arithmetic $(\PeakRate)$, while a bandwidth-bound workload benefits from wider memory buses or fewer bytes moved through reuse, fusion, compression, or lower precision. Misidentifying the archetype wastes optimization effort on the wrong term of the iron law, as when teams add accelerator FLOP/s to a memory-bound inference pipeline and observe zero speedup.
+
+[^fn-paradigm-deployment-tradeoff]: [offset=-12mm] **Deployment paradigm**\index{Deployment paradigm!definition}: A distinct operating regime defined by latency, power, memory, and connectivity constraints. The Cloud-to-TinyML spectrum changes which resources bind; optimizing within an infeasible regime cannot satisfy the application's deployment budget.
+
+[^fn-latency-system-tradeoff]: **Latency**\index{Latency!responsiveness constraint}\index{Latency!deployment constraint}: The time between issuing a request and receiving a result, corresponding to $T$ in the iron law, where propagation delay enters through the fixed-overhead term $\Latency$. The light barrier makes that propagation floor irreducible: the speed of light in fiber imposes a ~36 ms minimum round trip across the continental US, consuming the entire latency budget of a 10 ms safety-critical system before any computation begins. Every millisecond consumed by distance is a millisecond unavailable for model inference, which is why the light barrier forces paradigm selection rather than mere optimization.
+
+[^fn-bandwidth-memory-wall]: **Memory bandwidth (the memory wall)**\index{Memory bandwidth!memory wall}: The term "memory wall" was coined by Wulf and McKee in 1995, who predicted that the processor-memory performance gap would eventually dominate system performance—a prediction that proved prescient for ML workloads in which weight or activation movement can bind performance. In the iron law, bandwidth $(\Bandwidth)$ appears in the denominator of the data term $\DataVolume/\Bandwidth$, so doubling the bytes moved without a corresponding bandwidth increase raises the data-movement time. The resulting bottleneck depends on arithmetic intensity, batch size, data reuse, access pattern, and hardware balance rather than model size alone.
+
+::: {#lhs-ml-systems-five-reference-workloads .callout-lighthouse title="Five reference workloads"}
+
+@Sec-introduction-lighthouse-models-9b1c introduced five lighthouse models\index{Lighthouse model!reference workloads} by the system bottleneck each isolates (@tbl-lighthouse-examples); @tbl-ml-systems-lighthouse-archetypes pairs each with a representative workload archetype and deployment paradigm. The classifications describe operating regimes: batched image processing can emphasize arithmetic, single-request text generation can emphasize weight transfers, and a large recommendation table can exceed local memory capacity. Changing batch size, model size, or hardware can change the binding constraint. MobileNetV2 illustrates arithmetic designed for a smaller resource budget, but whether its latency and power fit a phone still depends on the implementation and workload. @Sec-network-architectures-lighthouse-roster-model-biographies-a763 provides full architectural details and model biographies.
+
+| **Lighthouse**             | **Archetype**             | **Deployment Paradigm**        |
+|:---------------------------|:--------------------------|:-------------------------------|
+| **ResNet-50**              | Compute Beast             | Cloud training, edge inference |
+| **GPT-2/Llama**            | Bandwidth Hog             | Cloud inference                |
+| **DLRM**                   | Sparse Scatter            | Cloud for large tables         |
+| **MobileNetV2**            | Compute Beast (efficient) | Mobile, edge                   |
+| **Keyword Spotting (KWS)** | Tiny Constraint           | TinyML, always-on              |
+
+: **Five Lighthouse Models**: Recurring workloads used throughout the book to ground the iron law in concrete practice. Each lighthouse pairs an archetype (Compute Beast, Bandwidth Hog, Sparse Scatter, Tiny Constraint) with the deployment paradigm where it predominantly runs, isolating a distinct systems bottleneck. {#tbl-ml-systems-lighthouse-archetypes}
+```{=latex}
+\vspace*{-2ex}
+```
+:::
+
+These archetypes map onto deployment paradigms. Large-scale compute beasts (training) and sparse scatter workloads gravitate to cloud data centers; efficient compute beasts such as MobileNetV2 can fit mobile and edge devices; bandwidth hogs run in the cloud unless a smaller model fits locally; and tiny constraint workloads belong on microcontrollers.
+
+```{python}
+#| echo: false
+#| label: lighthouse-setup
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LIGHTHOUSE MODEL SPECIFICATIONS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Workload archetype prose (five Lighthouse Model summaries)
+# │
+# │ Goal: Provide specs for the five Lighthouse Models (ResNet-50, GPT-2/Llama,
+# │       DLRM, MobileNetV2, KWS DS-CNN).
+# │ Show: Parameter count, FLOP profile, and memory footprint per workload.
+# │ How: Retrieve parameters and FLOPs from Models twin; derive sizes using
+# │       size_in_bytes() with 4-byte (FP32) precision, except KWS, which is
+# │       sized at 1-byte (INT8) precision as deployed on a microcontroller.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.fmt import check, fmt, fmt_count, fmt_count_range, fmt_flops, fmt_int, fmt_memory, fmt_multiple, fmt_qty_int, fmt_range
+from mlsysim.core.units import Mparam, Bparam, Kparam, MB, GB, KB, byte, GFLOPs, MFLOPs
+
+# ┌── LEGO ───────────────────────────────────────────────
+class LighthouseModels:
+    """Five reference workload specs for the archetype narrative."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    m_resnet = Models.Vision.ResNet50
+    m_gpt2 = Models.Language.GPT2
+    m_llama_7b = Models.Language.Llama2_7B
+    m_llama_70b = Models.Language.Llama2_70B
+    m_dlrm = Models.Recommendation.DLRM
+    m_mobilenet = Models.Vision.MobileNetV2
+    m_kws = Models.Tiny.DS_CNN
+    mobile_tdp_min_w, mobile_tdp_max_w = [int(v) for v in Platforms.Mobile.tdp_range_w.split("-")]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    resnet_fp32_size = m_resnet.size_in_bytes(4 * byte)
+    resnet_fp32_value = resnet_fp32_size.to(MB).magnitude
+    dlrm_embedding = m_dlrm.size_in_bytes()
+    mobilenet_flops_reduction = (m_resnet.inference_flops / m_mobilenet.inference_flops).to("count").magnitude
+    kws_size = m_kws.size_in_bytes(1 * byte)
+    kws_size_kb = kws_size.to(KB).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(resnet_fp32_size >= 90 * MB, f"ResNet50 size should be ~98 MB, got {resnet_fp32_value:.0f} MB")
+    check(mobilenet_flops_reduction > 10, "MobileNet reduction should be >10x vs ResNet.")
+    check(180 <= kws_size_kb <= 220, f"KWS INT8 size should be about 200 KB, got {kws_size_kb:.0f} KB")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    resnet_gflop_str = fmt_flops(m_resnet.inference_flops, unit=GFLOPs, precision=1)
+    resnet_params_m_str = fmt_count(m_resnet.parameters, scale="million", precision=1, label="parameter")
+    resnet_fp32_mb_str = fmt_memory(resnet_fp32_size, unit=MB, precision=1)
+    gpt2_params_b_str = fmt_count(m_gpt2.parameters, scale="billion", precision=1, label="parameter")
+    llama_range_str = fmt_count_range(
+        m_llama_7b.parameters,
+        m_llama_70b.parameters,
+        scale="billion",
+        precision=0,
+        commas=False,
+        label="parameter",
+    )
+    dlrm_embedding_gb_str = fmt_qty_int(dlrm_embedding, GB)
+    mobilenet_flops_reduction_mult_str = fmt_multiple(mobilenet_flops_reduction, precision=1)
+    mobile_tdp_range_str = fmt_range(
+        mobile_tdp_min_w,
+        mobile_tdp_max_w,
+        precision=0,
+        commas=False,
+        unit="W",
+    )
+    kws_params_str = fmt_count(m_kws.parameters, scale="K", commas=False, label="parameter")
+    kws_mflop_str = fmt_flops(m_kws.inference_flops, unit=MFLOPs, precision=0)
+    kws_size_kb_str = fmt_qty_int(kws_size, KB)
+```
+
+The first lighthouse, **ResNet-50**\index{ResNet-50!systems characteristics}, classifies images into 1,000 categories, processing each image through approximately `{python} LighthouseModels.resnet_gflop_str` using `{python} LighthouseModels.resnet_params_m_str` (`{python} LighthouseModels.resnet_fp32_mb_str` at FP32) [@he2016]. Used in medical imaging diagnostics, autonomous vehicle perception pipelines, and as the backbone for content moderation systems, its regular, compute-dense structure makes it the canonical benchmark for hardware accelerator performance.
+
+The language models **GPT-2/Llama**\index{GPT-2!autoregressive bottleneck}\index{Llama!memory-bound inference} exemplify autoregressive text generation [@radford2019language; @touvron2023llama]. These models generate text one token at a time. Because multi-billion parameter models exceed on-chip cache, weights reside in external memory; generating text token-by-token for one request at a time forces the processor to stream the weights across the memory bus for each token with little reuse across inputs (`{python} LighthouseModels.gpt2_params_b_str` for GPT-2, `{python} LighthouseModels.llama_range_str` for Llama). This sequential access pattern creates an autoregressive bottleneck that shapes serving cost [@pope2023efficiently].
+
+::: {.column-margin .margin-pointer}
+↪ Continuous batching and KV-cache paging, the runtime mechanisms that serve token-by-token generation, are developed in @sec-model-serving-continuous-batching-8bb6.
+:::
+
+The recommendation lighthouse, **DLRM**\index{DLRM!memory capacity bound}\index{Recommendation system!DLRM}, represents the embedding-heavy recommendation workload behind large-scale "You might also like" systems [@naumov2019deep]. It maps users and items to embedding vectors stored in tables that can exceed `{python} LighthouseModels.dlrm_embedding_gb_str` of embeddings, making memory capacity rather than computation the binding constraint.
+
+The mobile lighthouse, **MobileNetV2**\index{MobileNetV2!depthwise separable convolutions}\index{MobileNetV2!efficiency gains}, is designed for efficient mobile vision tasks such as classification, detection, and segmentation [@sandler2018]. It performs the same image classification task as ResNet but uses depthwise separable convolutions, which separate spatial filtering from channel mixing, to reduce computation by `{python} LighthouseModels.mobilenet_flops_reduction_mult_str`. That reduction makes it a candidate for real-time inference within a smartphone's `{python} LighthouseModels.mobile_tdp_range_str` envelope; the implementation and workload determine whether it meets the deadline.
+
+The TinyML lighthouse, **keyword spotting (KWS)**\index{Keyword spotting!TinyML archetype}, represents the always-on sensing archetype. KWS systems detect short trigger phrases with compact models built for resource-constrained microcontrollers [@zhang2017hello]. The lighthouse workload has approximately `{python} LighthouseModels.kws_params_str`, about `{python} LighthouseModels.kws_size_kb_str` at INT8 (stored in flash), placing it in the kilobyte-memory, milliwatt-budget TinyML regime.
+
+The Smart Doorbell scenario applies the same always-on pattern to vision: a visual wake-word model that detects a person at the door on an ESP32-S3 microcontroller. Its feasibility is screened hierarchically, checking weight storage in flash before execution latency. Passing this storage check does not establish complete memory fit; intermediate results and runtime state must also fit in SRAM, as the TinyML section develops. @Fig-doorbell-scorecard tracks this two-level feasibility check by plotting resource demand against the vertical 100 percent saturation threshold for the ESP32-S3 microcontroller: the wake-vision model fits comfortably within Level 1 flash memory (11.9 percent utilization), but breaches Level 2 service-level latency (202.0 percent under a strict 50 ms responsiveness budget).
+
+::: {#fig-doorbell-scorecard fig-env="figure" fig-pos="htb" fig-cap="**Smart Doorbell Constraint Scorecard**: Each bar is demand over supply, so the dashed line marks the point where a level is exactly saturated. The model occupies a small fraction of the ESP32-S3's 4 MB flash budget (Level 1: PASS), but its 101 ms baseline latency is twice the 50 ms target chosen here for a responsive chime (Level 2: FAIL), even though it clears the scenario's canonical 200 ms budget." fig-alt="A horizontal bar chart showing two levels of constraints. Level 1: Memory (flash capacity) shows a green bar (PASS). Level 2: Latency (SLA) shows a red bar (FAIL), exceeding the limit line."}
+
+```{python}
+#| echo: false
+#| label: doorbell-scorecard
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DOORBELL SCORECARD (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Lighthouse model evaluation
+# │ Goal: Visualize the radar plot scorecard for the smart doorbell application
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+# │ Initialize the visualization modules
+import mlsysim
+import matplotlib.pyplot as plt
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+# │ Load the Doorbell scenario with a strict real-time interaction budget.
+# │ The canonical scenario uses a 200 ms SLA; this scorecard intentionally
+# │ tightens the target to show latency as the active deployment constraint.
+doorbell_strict = mlsysim.Scenarios.SmartDoorbell.model_copy(update={"sla_latency": mlsysim.Q_("50 ms")})
+doorbell_eval = doorbell_strict.evaluate()
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+# │ Plot the radar scorecard using the mlsysim helper
+fig, ax = mlsysim.plot_evaluation_scorecard(doorbell_eval)
+
+# graphical adjustments for aesthetics
+fig.set_size_inches(9, 4.2)
+
+for patch in ax.patches:
+    old_h = patch.get_height()
+    new_h = old_h * 0.45
+    patch.set_y(patch.get_y() + (old_h - new_h) / 2)
+    patch.set_height(new_h)
+
+# bar colors
+bar_colors = ["#55B27D", "#D9534F"]
+for patch, color in zip(ax.patches, bar_colors):
+    patch.set_facecolor(color)
+    patch.set_edgecolor("#2f5d46")
+    patch.set_linewidth(1.0)
+
+# color of the reference vertical line
+for line in ax.lines:
+    line.set_color("#444444")
+    line.set_linestyle("--")
+    line.set_linewidth(1.8)
+
+# style for percentage labels
+for txt in ax.texts:
+    s = txt.get_text().strip()
+
+    txt.set_fontsize(11)
+    txt.set_fontweight("bold")
+
+    if s.endswith("%"):
+        txt.set_color("#D9534F" if float(s.rstrip("%")) > 100 else "#11823b")  # red = over budget
+
+# the scorecard's memory level is evaluated against the ESP32-S3 flash capacity
+ax.set_yticks(ax.get_yticks(), [t.get_text().replace("Memory (RAM)", "Memory (flash)") for t in ax.get_yticklabels()])
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+# │ Display the figure
+plt.show()
+plt.close()
+```
+
+:::
+
+The range in compute requirements and memory footprints explains why no single deployment paradigm fits all workloads. A keyword spotter can operate with roughly `{python} LighthouseModels.kws_mflop_str` per inference and about `{python} LighthouseModels.kws_size_kb_str` of INT8 weights, while ResNet-50 requires about `{python} LighthouseModels.resnet_gflop_str` per image and roughly `{python} LighthouseModels.resnet_fp32_mb_str` of FP32 weights. The reference DLRM example already reaches `{python} LighthouseModels.dlrm_embedding_gb_str`, and production DLRM-style recommendation systems can exceed 100 TB. Language models add a bandwidth-dominated regime: billions of parameters streamed repeatedly from memory during autoregressive inference.
 
 ## Cloud ML: Computational Power {#sec-ml-systems-cloud-ml-maximizing-computational-power-a338}
 
