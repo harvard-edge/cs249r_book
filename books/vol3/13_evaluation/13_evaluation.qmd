@@ -366,7 +366,83 @@ Here $z$ is the standard normal quantile for the selected two-sided confidence l
 
 [^fn-wald-interval-coverage]: **Wald Interval Coverage**: A systematic study of binomial intervals found that the Wald interval's actual coverage oscillates erratically with both $N$ and $p$, stays poor at sample sizes that textbook rules of thumb call safe, and recommended the Wilson interval for small samples [@brown2001interval]. Agent evaluation lives in exactly that regime: suites of tens of tasks, and violation rates near zero, where a nominal 95 percent Wald interval can promise far more than it delivers. \index{Wald interval!coverage failure}
 
-For zero acceptances in 50 independent tasks, @eq-wilson-interval gives a lower limit of zero and an upper limit of $z^2/(50+z^2)$, which panel B of @fig-vol3-sample-size-confidence-intervals marks. Read with the outcomes reversed, the same arithmetic prices a clean record: zero observed violations in 50 tasks remains consistent with a violation rate up to that limit.
+For zero acceptances in 50 independent tasks, @eq-wilson-interval gives a lower limit of zero and an upper limit of $z^2/(50+z^2)$, (a boundary @fig-vol3-sample-size-confidence-intervals visualizes below). Read with the outcomes reversed, the same arithmetic prices a clean record: zero observed violations in 50 tasks remains consistent with a violation rate up to that limit.
+
+
+Planning counts for evaluation suites follow from fundamental scaling laws. For a single proportion, the confidence interval half-width scales as $z\sqrt{p(1-p)/N}$, reaching its maximum at $p=0.5$. Because precision improves only as $1/\sqrt{N}$, halving the margin of error requires a fourfold increase in evaluation tasks. Detecting a difference between two configurations is considerably more demanding than estimating a single rate. For two independent arms with average acceptance probability $\bar p$, target difference $\Delta$, two-sided significance $\alpha$, and power $1-\beta$, a standard planning estimate of the tasks needed per arm is
+
+$$N_{\text{arm}}\approx\frac{2\,(z_{1-\alpha/2}+z_{1-\beta})^2\,\bar p(1-\bar p)}{\Delta^2}.$$ {#eq-vol3-eval-planning-power}
+
+@Sec-vol3-appendix-math-bootstrap derives the fuller equal-arm form, which keeps the pooled variance under the null but uses each arm's own variance under the alternative, and states its assumptions; @eq-vol3-eval-planning-power replaces the alternative variance with the pooled one.
+
+```{python}
+#| label: calc-vol3-evaluation-sample-size-scale
+#| echo: false
+# HOW MANY TASKS A CLAIM NEEDS (LEGO)
+# Goal: Give the magnitude of one-rate precision and two-arm detection.
+# Scope: Planning approximations at hypothetical rates; independent tasks.
+from math import sqrt, ceil
+from statistics import NormalDist
+from mlsysim.physics.statistics import calc_two_proportion_sample_size
+from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_percent, check
+
+def evaluation_wilson(x, n, z):
+    if not isinstance(x, int) or not isinstance(n, int) or not 0 <= x <= n or n <= 0:
+        raise ValueError("Require integer counts 0 <= x <= n and n > 0")
+    center = (x + z * z / 2) / (n + z * z)
+    spread = z * sqrt(x * (n - x) / n + z * z / 4) / (n + z * z)
+    return max(0.0, center - spread), min(1.0, center + spread)
+
+class SampleSizeScale:
+    # 1. LOAD: worst-case rate and targets.
+    p_half = 0.5
+    z95 = NormalDist().inv_cdf(0.975)
+    small_n = 100
+    target_half_width = 0.02
+    alpha, power = 0.05, 0.80
+    z_alpha, z_beta = 1.96, 0.84  # rounded quantiles for these targets
+    delta_large, delta_small = 0.04, 0.02
+
+    # 2. EXECUTE: one-rate half-widths and two-arm counts.
+    half_small = z95 * sqrt(p_half * (1 - p_half) / small_n)
+    wilson_lo, wilson_hi = evaluation_wilson(50, small_n, z95)
+    wilson_half_small = (wilson_hi - wilson_lo) / 2
+    n_for_target = ceil(z95**2 * p_half * (1 - p_half) / target_half_width**2)
+    arm_large = calc_two_proportion_sample_size(p_half, delta_large, z_alpha=z_alpha, z_beta=z_beta)
+    arm_small = calc_two_proportion_sample_size(p_half, delta_small, z_alpha=z_alpha, z_beta=z_beta)
+    arm_large_n, arm_small_n = round(arm_large), round(arm_small)
+    
+    zero_upper = evaluation_wilson(0, 50, z95)[1]
+
+    # 3. GUARD: scaling law and published-formula arithmetic.
+    check(abs(NormalDist().inv_cdf(1 - alpha / 2) - z_alpha) < 0.005, "Rounded significance quantile")
+    check(abs(NormalDist().inv_cdf(power) - z_beta) < 0.005, "Rounded power quantile")
+    check(abs(half_small - 0.098) < 0.0005, "Half-width at N=100, p=0.5")
+    check(abs(wilson_half_small - half_small) < 0.003, "Wilson close to normal at p=0.5")
+    check(n_for_target == 2401, "Tasks for a 2-point half-width")
+    check(abs(arm_large - 2450) < 1e-6 and abs(arm_small - 9800) < 1e-6, "Two-arm planning counts")
+    check(abs(arm_small / arm_large - 4) < 1e-9, "Halving the difference quadruples N")
+    check(abs(zero_upper - z95 * z95 / (50 + z95 * z95)) < 1e-12, "Wilson zero-count algebra")
+
+    # 4. OUTPUT
+    small_n_str = fmt_int(small_n)
+    alpha_str = fmt_percent(alpha, precision=0, style="prose")
+    power_str = fmt_percent(power, precision=0, style="prose")
+    half_small_pp_str = fmt(100 * half_small, precision=1)
+    wilson_half_pp_str = fmt(100 * wilson_half_small, precision=1)
+    target_pp_str = fmt(100 * target_half_width, precision=0)
+    n_for_target_str = fmt_int(n_for_target)
+    delta_large_pp_str = fmt(100 * delta_large, precision=0)
+    delta_small_pp_str = fmt(100 * delta_small, precision=0)
+    arm_large_str = fmt_int(arm_large_n)
+    arm_small_str = fmt_int(arm_small_n)
+```
+
+At $p=0.5$ and 95 percent confidence, `{python} SampleSizeScale.small_n_str` independent tasks give a half-width of about `{python} SampleSizeScale.half_small_pp_str` percentage points (the Wilson interval gives `{python} SampleSizeScale.wilson_half_pp_str`), and a half-width of `{python} SampleSizeScale.target_pp_str` points needs `{python} SampleSizeScale.n_for_target_str` tasks. With a `{python} SampleSizeScale.alpha_str` two-sided significance target and `{python} SampleSizeScale.power_str` power at $\bar p=0.5$, @eq-vol3-eval-planning-power asks for about `{python} SampleSizeScale.arm_large_str` tasks per arm to detect a `{python} SampleSizeScale.delta_large_pp_str`-point difference and `{python} SampleSizeScale.arm_small_str` per arm for a `{python} SampleSizeScale.delta_small_pp_str`-point difference. @Fig-vol3-sample-size-confidence-intervals charts this sampling behavior: Panel A plots the $1/\sqrt{N}$ half-width contraction across 0 to 2,500 tasks for three acceptance probabilities ($p \in \{0.05, 0.2, 0.5\}$), showing where curves flatten toward the $\pm 2$-point target; Panel B compares Wald and Wilson intervals at 50 tasks, highlighting how the Wald interval collapses to zero width at zero successes and breaches negative probability at two successes before converging with Wilson at 25 successes.
+
+::: {#fig-vol3-sample-size-confidence-intervals fig-env="figure" fig-pos="htb" fig-cap="**How Many Tasks an Interval Needs**: Panel A plots the normal-approximation half-width at 95 percent confidence against the number of independent tasks for three acceptance probabilities. At $p=0.5$, `{python} SampleSizeScale.small_n_str` tasks give about ±`{python} SampleSizeScale.half_small_pp_str` points, and `{python} SampleSizeScale.n_for_target_str` tasks reach the dashed ±`{python} SampleSizeScale.target_pp_str`-point target. Panel B compares Wald and Wilson intervals, in percent, for 50 tasks. With no acceptances, the Wald interval collapses to zero width, while the Wilson upper limit is `{python} SampleSizeScale.zero_upper_str`. With two acceptances, the Wald lower limit falls below zero, an impossible probability. At 25 acceptances the two intervals nearly coincide." fig-alt="Two panels. Panel A: line chart of normal-approximation half-width in points, from 0 to 20, against independent tasks from 0 to 2,500, with a solid curve for p equal to 0.5, a dashed curve for 0.2, and a dotted curve for 0.05. All three fall steeply and then flatten. Two points on the p equal to 0.5 curve are labeled, one at 100 tasks and one where the curve meets a dashed horizontal line at 2 points. Panel B: three rows of horizontal interval bars at 50 tasks, each comparing a gray Wald interval with a blue Wilson interval. With 0 successes, Wald is a single point at zero, labeled zero width, and Wilson extends from zero to a labeled upper limit. With 2 successes, the Wald bar extends into a shaded region below zero, labeled lower limit below 0, and the Wilson bar stays above zero. With 25 successes, the two bars nearly coincide around 50 percent."}
+![](images/svg/sample_size_confidence_intervals.svg)
+:::
 
 These binary examples assume complete verdicts. If an evaluation sweep leaves trials unresolved due to timeouts, infrastructure failures, or grader crashes, the evaluation team must prespecify a handling protocol before examining the data. Simply discarding uncompleted tasks introduces severe survivorship bias, skewing results toward trivial tasks that execute rapidly and pass without contention.
 
@@ -405,13 +481,6 @@ from math import sqrt, comb, ceil
 from statistics import NormalDist
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, check
 
-def evaluation_wilson(x, n, z):
-    if not isinstance(x, int) or not isinstance(n, int) or not 0 <= x <= n or n <= 0:
-        raise ValueError("Require integer counts 0 <= x <= n and n > 0")
-    center = (x + z * z / 2) / (n + z * z)
-    spread = z * sqrt(x * (n - x) / n + z * z / 4) / (n + z * z)
-    return max(0.0, center - spread), min(1.0, center + spread)
-
 def evaluation_paired_score(n11, b, c, n00, z):
     # Newcombe (1998), method 10. b=baseline-only; c=candidate-only.
     cells = (n11, b, c, n00)
@@ -445,7 +514,6 @@ class PairedAcceptance:
         tail_count += comb(discordant, j)
     exact_p = min(1.0, 2 * tail_count / 2**discordant) if discordant else 1.0
     noninferiority = lower > -tolerance
-    zero_upper = evaluation_wilson(0, 50, z)[1]
     # Planning: lower half-width scales as 1/sqrt(N); what N clears the margin?
     lower_width = delta - lower
     n_if_gain_holds = ceil(n * (lower_width / (delta + tolerance)) ** 2)
@@ -456,7 +524,6 @@ class PairedAcceptance:
     check(abs(delta - 0.04) < 1e-12, "Candidate-minus-baseline direction")
     check(abs(lower - (-0.032062854)) < 1e-8 and abs(upper - 0.111211210) < 1e-8, "Worksheet interval")
     check(not noninferiority and lower < 0 < upper, "Inconclusive gate and superiority")
-    check(abs(zero_upper - z * z / (50 + z * z)) < 1e-12, "Wilson zero-count algebra")
     check(n < n_if_gain_holds < 2 * n < n_if_no_gain, "Planning counts ordered")
     for cells, expected in [((20, 2, 12, 16), (0.0562, 0.3292)), ((27, 0, 0, 27), (-0.0351, 0.0351))]:
         _, lo, hi = evaluation_paired_score(*cells, z)
@@ -465,7 +532,6 @@ class PairedAcceptance:
     # 4. OUTPUT: all formatted exports are consumed below.
     n_str = fmt_int(n)
     b_str, c_str = fmt_int(b), fmt_int(c)
-    zero_upper_str = fmt_percent(zero_upper, precision=2, style="prose")
     delta_pp_str = fmt_int(round(100 * delta))
     lower_pp_str = fmt(100 * lower, precision=2)
     upper_pp_str = fmt(100 * upper, precision=2)
@@ -489,43 +555,21 @@ class PairedAcceptance:
 
 :::
 
-These planning counts follow from fundamental scaling laws. For a single proportion, the confidence interval half-width scales as $z\sqrt{p(1-p)/N}$, reaching its maximum at $p=0.5$. Because precision improves only as $1/\sqrt{N}$, halving the margin of error requires a fourfold increase in evaluation tasks. Detecting a difference between two configurations is considerably more demanding than estimating a single rate. For two independent arms with average acceptance probability $\bar p$, target difference $\Delta$, two-sided significance $\alpha$, and power $1-\beta$, a standard planning estimate of the tasks needed per arm is
-
-$$N_{\text{arm}}\approx\frac{2\,(z_{1-\alpha/2}+z_{1-\beta})^2\,\bar p(1-\bar p)}{\Delta^2}.$$ {#eq-vol3-eval-planning-power}
-
-@Sec-vol3-appendix-math-bootstrap derives the fuller equal-arm form, which keeps the pooled variance under the null but uses each arm's own variance under the alternative, and states its assumptions; @eq-vol3-eval-planning-power replaces the alternative variance with the pooled one.
-
 ```{python}
-#| label: calc-vol3-evaluation-sample-size-scale
+#| label: calc-vol3-evaluation-paired-efficiency
 #| echo: false
-# HOW MANY TASKS A CLAIM NEEDS (LEGO)
-# Goal: Give the magnitude of one-rate precision, two-arm detection, and pairing.
-# Scope: Planning approximations at hypothetical rates; independent tasks.
-from math import sqrt, ceil
-from statistics import NormalDist
-from mlsysim.physics.statistics import calc_two_proportion_sample_size
-from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_percent, check
+# PAIRED EFFICIENCY (LEGO)
+# Goal: Compute the variance reduction from pairing.
+from math import sqrt
+from mlsysim.fmt import fmt_percent, fmt_multiple, check
 
-class SampleSizeScale:
-    # 1. LOAD: worst-case rate, targets, and the worked paired table's cells.
-    p_half = 0.5
-    z95 = NormalDist().inv_cdf(0.975)
-    small_n = 100
-    target_half_width = 0.02
-    alpha, power = 0.05, 0.80
-    z_alpha, z_beta = 1.96, 0.84  # rounded quantiles for these targets
-    delta_large, delta_small = 0.04, 0.02
-    n11, b, c, n00 = 70, 12, 18, 50  # the worked paired-outcome table
-
-    # 2. EXECUTE: one-rate half-widths, two-arm counts, paired variance.
-    half_small = z95 * sqrt(p_half * (1 - p_half) / small_n)
-    wilson_lo, wilson_hi = evaluation_wilson(50, small_n, z95)
-    wilson_half_small = (wilson_hi - wilson_lo) / 2
-    n_for_target = ceil(z95**2 * p_half * (1 - p_half) / target_half_width**2)
-    arm_large = calc_two_proportion_sample_size(p_half, delta_large, z_alpha=z_alpha, z_beta=z_beta)
-    arm_small = calc_two_proportion_sample_size(p_half, delta_small, z_alpha=z_alpha, z_beta=z_beta)
-    arm_large_n, arm_small_n = round(arm_large), round(arm_small)
+class PairedEfficiency:
+    # 1. LOAD: variables from the paired comparison.
+    n11, b, c, n00 = 70, 12, 18, 50
     pairs = n11 + b + c + n00
+    z95 = SampleSizeScale.z95
+    
+    # 2. EXECUTE
     p_cand, p_base = (n11 + c) / pairs, (n11 + b) / pairs
     discordant = (b + c) / pairs
     diff = p_cand - p_base
@@ -535,48 +579,24 @@ class SampleSizeScale:
     paired_half = z95 * sqrt(var_paired / pairs)
     independent_mult = var_independent / var_paired
 
-    # 3. GUARD: scaling law, published-formula arithmetic, and pairing algebra.
-    check(abs(NormalDist().inv_cdf(1 - alpha / 2) - z_alpha) < 0.005, "Rounded significance quantile")
-    check(abs(NormalDist().inv_cdf(power) - z_beta) < 0.005, "Rounded power quantile")
-    check(abs(half_small - 0.098) < 0.0005, "Half-width at N=100, p=0.5")
-    check(abs(wilson_half_small - half_small) < 0.003, "Wilson close to normal at p=0.5")
-    check(n_for_target == 2401, "Tasks for a 2-point half-width")
-    check(abs(arm_large - 2450) < 1e-6 and abs(arm_small - 9800) < 1e-6, "Two-arm planning counts")
-    check(abs(arm_small / arm_large - 4) < 1e-9, "Halving the difference quadruples N")
+    # 3. GUARD
     check(abs(discordant - 0.2) < 1e-12 and abs(diff - 0.04) < 1e-12, "Worked-table discordance")
     check(0.35 < paired_share < 0.45, "Pairing removes most of the variance")
     check(abs(paired_half - 0.0713) < 0.0005, "Matches the worked interval's scale")
 
     # 4. OUTPUT
-    small_n_str = fmt_int(small_n)
-    alpha_str = fmt_percent(alpha, precision=0, style="prose")
-    power_str = fmt_percent(power, precision=0, style="prose")
-    half_small_pp_str = fmt(100 * half_small, precision=1)
-    wilson_half_pp_str = fmt(100 * wilson_half_small, precision=1)
-    target_pp_str = fmt(100 * target_half_width, precision=0)
-    n_for_target_str = fmt_int(n_for_target)
-    delta_large_pp_str = fmt(100 * delta_large, precision=0)
-    delta_small_pp_str = fmt(100 * delta_small, precision=0)
-    arm_large_str = fmt_int(arm_large_n)
-    arm_small_str = fmt_int(arm_small_n)
     discordant_str = fmt_percent(discordant, precision=0, style="prose")
     paired_share_str = fmt_percent(round(paired_share, 2), precision=0, style="prose")
     paired_half_pp_str = fmt(100 * paired_half, precision=1)
     independent_mult_str = fmt_multiple(independent_mult, precision=1)
 ```
 
-At $p=0.5$ and 95 percent confidence, `{python} SampleSizeScale.small_n_str` independent tasks give a half-width of about `{python} SampleSizeScale.half_small_pp_str` percentage points (the Wilson interval gives `{python} SampleSizeScale.wilson_half_pp_str`), and a half-width of `{python} SampleSizeScale.target_pp_str` points needs `{python} SampleSizeScale.n_for_target_str` tasks. With a `{python} SampleSizeScale.alpha_str` two-sided significance target and `{python} SampleSizeScale.power_str` power at $\bar p=0.5$, @eq-vol3-eval-planning-power asks for about `{python} SampleSizeScale.arm_large_str` tasks per arm to detect a `{python} SampleSizeScale.delta_large_pp_str`-point difference and `{python} SampleSizeScale.arm_small_str` per arm for a `{python} SampleSizeScale.delta_small_pp_str`-point difference. @Fig-vol3-sample-size-confidence-intervals charts this sampling behavior: Panel A plots the $1/\sqrt{N}$ half-width contraction across 0 to 2,500 tasks for three acceptance probabilities ($p \in \{0.05, 0.2, 0.5\}$), showing where curves flatten toward the $\pm 2$-point target; Panel B compares Wald and Wilson intervals at 50 tasks, highlighting how the Wald interval collapses to zero width at zero successes and breaches negative probability at two successes before converging with Wilson at 25 successes.
-
-::: {#fig-vol3-sample-size-confidence-intervals fig-env="figure" fig-pos="htb" fig-cap="**How Many Tasks an Interval Needs**: Panel A plots the normal-approximation half-width at 95 percent confidence against the number of independent tasks for three acceptance probabilities. At $p=0.5$, `{python} SampleSizeScale.small_n_str` tasks give about ±`{python} SampleSizeScale.half_small_pp_str` points, and `{python} SampleSizeScale.n_for_target_str` tasks reach the dashed ±`{python} SampleSizeScale.target_pp_str`-point target. Panel B compares Wald and Wilson intervals, in percent, for 50 tasks. With no acceptances, the Wald interval collapses to zero width, while the Wilson upper limit is `{python} PairedAcceptance.zero_upper_str`. With two acceptances, the Wald lower limit falls below zero, an impossible probability. At 25 acceptances the two intervals nearly coincide." fig-alt="Two panels. Panel A: line chart of normal-approximation half-width in points, from 0 to 20, against independent tasks from 0 to 2,500, with a solid curve for p equal to 0.5, a dashed curve for 0.2, and a dotted curve for 0.05. All three fall steeply and then flatten. Two points on the p equal to 0.5 curve are labeled, one at 100 tasks and one where the curve meets a dashed horizontal line at 2 points. Panel B: three rows of horizontal interval bars at 50 tasks, each comparing a gray Wald interval with a blue Wilson interval. With 0 successes, Wald is a single point at zero, labeled zero width, and Wilson extends from zero to a labeled upper limit. With 2 successes, the Wald bar extends into a shaded region below zero, labeled lower limit below 0, and the Wilson bar stays above zero. With 25 successes, the two bars nearly coincide around 50 percent."}
-![](images/svg/sample_size_confidence_intervals.svg)
-:::
-
-Pairing dramatically improves statistical efficiency by filtering out instance-level difficulty variance. Each task's candidate-minus-baseline outcome takes the value $-1$, $0$, or $+1$, so with discordant fraction $\psi$ the paired estimate has variance $(\psi-\Delta^2)/N$. The worked table has `{python} SampleSizeScale.discordant_str` discordant pairs, which puts the paired variance at about `{python} SampleSizeScale.paired_share_str` of the variance two independent arms would have at the same acceptance rates. The same precision therefore needs well under half as many tasks, and the worked interval spans about ±`{python} SampleSizeScale.paired_half_pp_str` points. Estimation, detection, and noninferiority thus need different counts, and a paired plan also rests on an assumed discordance rate that the study must later report as observed.
+Pairing dramatically improves statistical efficiency by filtering out instance-level difficulty variance. Each task's candidate-minus-baseline outcome takes the value $-1$, $0$, or $+1$, so with discordant fraction $\psi$ the paired estimate has variance $(\psi-\Delta^2)/N$. The worked table has `{python} PairedEfficiency.discordant_str` discordant pairs, which puts the paired variance at about `{python} PairedEfficiency.paired_share_str` of the variance two independent arms would have at the same acceptance rates. The same precision therefore needs well under half as many tasks, and the worked interval spans about ±`{python} PairedEfficiency.paired_half_pp_str` points. Estimation, detection, and noninferiority thus need different counts, and a paired plan also rests on an assumed discordance rate that the study must later report as observed.
 
 ::: {.column-margin}
 ![](images/svg/vol3_eval_margin_paired_variance.svg){width="100%" fig-alt="Two horizontal bars. A gray bar labeled independent arms is full length and labeled 100 percent. A purple bar labeled paired tasks is well under half as long, with its percentage printed inside and the word variance beside it."}
 
-*Pairing the worked comparison leaves about `{python} SampleSizeScale.paired_share_str` of the independent-arm variance.*
+*Pairing the worked comparison leaves about `{python} PairedEfficiency.paired_share_str` of the independent-arm variance.*
 :::
 
 The comparison so far uses one run per configuration per task. Permitting multiple attempts changes what success means and what it costs.
@@ -1617,7 +1637,7 @@ Single-run success rates evaluate an agent executing an isolated task once. Real
 ::: {.fallacy-pitfall}
 **Pitfall**: *Comparing two systems by whether their separate confidence intervals overlap.*
 
-Checking whether two marginal confidence intervals overlap is an overly conservative and statistically flawed criterion for comparing candidate releases. Separate Wilson score intervals quantify candidate and baseline success rates in isolation, but deployment decisions hinge on the distribution of their paired differences across identical task inputs (@sec-vol3-evaluation-paired). Because both systems run against the same evaluation suite, paired evaluation subtracts out benchmark task difficulty. In our benchmark comparison, exploiting this paired covariance retains only about `{python} SampleSizeScale.paired_share_str` of the variance present in two independent arms. Evaluating the systems as unpaired cohorts forces teams to run roughly `{python} SampleSizeScale.independent_mult_str` as many tasks to achieve identical statistical power. Teams should preserve task-level pairing throughout the evaluation harness, specify the required non-inferiority margin before running the benchmark, and decide releases based on the lower bound of the paired confidence interval.
+Checking whether two marginal confidence intervals overlap is an overly conservative and statistically flawed criterion for comparing candidate releases. Separate Wilson score intervals quantify candidate and baseline success rates in isolation, but deployment decisions hinge on the distribution of their paired differences across identical task inputs (@sec-vol3-evaluation-paired). Because both systems run against the same evaluation suite, paired evaluation subtracts out benchmark task difficulty. In our benchmark comparison, exploiting this paired covariance retains only about `{python} PairedEfficiency.paired_share_str` of the variance present in two independent arms. Evaluating the systems as unpaired cohorts forces teams to run roughly `{python} PairedEfficiency.independent_mult_str` as many tasks to achieve identical statistical power. Teams should preserve task-level pairing throughout the evaluation harness, specify the required non-inferiority margin before running the benchmark, and decide releases based on the lower bound of the paired confidence interval.
 :::
 
 ::: {.fallacy-pitfall}
