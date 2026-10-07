@@ -1703,6 +1703,10 @@ train_full_model(model, coreset)
 
 :::
 
+A coverage floor changes the indices retained by the score ranking. Consider disjoint classes A and B, a total coreset budget $K$ as in @tbl-coreset-comparison, and task-validated minimum counts $a$ and $b$ for the respective classes. First reserve the highest-scoring $a$ eligible examples from A and the highest-scoring $b$ from B. Fill the remaining $K-a-b$ slots from the global ranking, skipping indices already reserved. The allocation is infeasible if $K<a+b$, if either class lacks enough eligible examples to meet its floor, or if the eligible pool is smaller than $K$; the pipeline must revise the budget or acquire missing coverage before training.
+
+Suppose the unconstrained top-$K$ ranking contains only A examples and the budget can meet both floors. Reserving B's floor replaces the lowest-scoring $b$ members of that all-A subset with the highest-scoring eligible B examples, while the remaining slots still follow the score order. Coverage thus has an explicit opportunity cost in the selection score. Overlapping demographic or operational slices require joint constraint handling because one example may satisfy several floors; summing those floors as if the slices were disjoint can reject a feasible budget. Even a feasible allocation establishes only retained counts. Independent evaluation must still establish target quality and performance on the required slices.
+
 Together, these three static pruning techniques (deduplication, quality filtering, and coreset selection) shrink $\Operations$ before training begins, subject to the same fixed-schedule caveat as before. A schedule that adds compensating epochs or steps gives back part of the saving.
 
 Static pruning answers a question about *what* to keep, but it treats the answer as fixed. Once the pruned dataset is set, every epoch trains on the same subset. A sample's usefulness, however, can change as the model learns: examples that challenge an undertrained model may become easy after sufficient gradient updates. Dynamic selection techniques address this limitation by adapting the training data at each stage based on what the model has already mastered.
@@ -3212,13 +3216,13 @@ Echoing can introduce correlations when the same example appears within or acros
 
 These implementation patterns determine whether data selection yields net systems throughput. Proxy selection curtails probe compute when scoring rankings transfer to target architectures. Sharded file formats and shuffle buffers reconcile pseudo-random batch creation with hardware-level sequential streaming, while data echoing recovers stalled accelerator cycles when ingestion throughput limits the training loop.
 
-These patterns assume a centralized data pipeline in which a single host process evaluates importance metrics across a unified dataset. Scaling to multi-accelerator training shards datasets across independent storage volumes and distributed worker ranks, erecting communication and synchronization bottlenecks that can dismantle these idealized single-node assumptions.
+These patterns leave a coordination question when several accelerator workers share one host. Each worker scores or trains on its own shard, but the selected indices and scoring checkpoint must still describe one coherent dataset. Shared storage and host memory do not make each worker's local view representative of the corpus.
 
 ## Distributed Selection {#sec-data-selection-distributed-selection-d03e}
 
-Data sharding dissolves the single-process abstraction. In a centralized pipeline, coreset algorithms sort a single global ranking, curricula enforce a uniform sequence, and active-learning loops evaluate a shared candidate pool. Distributed execution\index{Distributed training!data selection challenges} shards storage across independent nodes, computes scores on out-of-sync model checkpoints, and isolates worker visibility. Scaling data selection across clusters introduces two physical constraints: synthesizing representative global subsets from isolated shard perspectives, and maintaining coherent sample rankings as worker states diverge.
+Data sharding dissolves the single-process abstraction even on one machine with two to eight accelerators. In a centralized pipeline, coreset algorithms sort a single global ranking, curricula enforce a uniform sequence, and active-learning loops evaluate a shared candidate pool. Parallel worker processes\index{Distributed training!data selection challenges} divide the corpus into local shards and may score them using different model checkpoints. Selection must reconstruct a representative global subset from these local views and keep rankings coherent as the model changes. The workers still share host memory capacity, storage bandwidth, and host-to-device links.
 
-Whether distributed selection stays faithful to the global dataset or collapses into local shard heuristics depends on how much cross-worker coordination each technique requires against the bandwidth available to sustain it. Evaluating distributed selection requires analyzing where statistical signal intersects storage sharding and network locality.
+Whether distributed selection stays faithful to the global dataset or collapses into local shard heuristics depends on how much cross-worker coordination each technique requires against the bandwidth available to sustain it. On one host, score gathering and index dispatch compete for CPU time and memory bandwidth with decoding and batch preparation. Evaluating selection therefore requires analyzing statistical fidelity alongside these shared resources.
 
 These are independent requirements. A coreset can remain representative yet cost too much to coordinate, while a cheap shard-local method can scale but systematically miss rare groups visible only in the global corpus. A distributed design therefore needs two acceptance tests: compare selected-data quality with a centralized or otherwise auditable reference, and compare selection overhead with the end-to-end training time it saves. Passing only one test is insufficient.
 
@@ -3226,16 +3230,16 @@ These are independent requirements. A coreset can remain representative yet cost
 
 In a basic data-parallel layout, each worker processes a distinct shard and model synchronization is handled separately. Data selection can add dependencies across those shards\index{Selection dependency!distributed training} (@tbl-selection-dependencies).
 
-| **Technique**           | **Single-Node Assumption**      | **Distributed Challenge**                    |
-|:------------------------|:--------------------------------|:---------------------------------------------|
-| **Coreset Selection**   | Global view of dataset          | Each worker sees only its shard              |
-| **Active Learning**     | Centralized uncertainty scoring | Scoring requires model synchronization       |
-| **Curriculum Learning** | Global difficulty ordering      | Workers may have different "hardest" samples |
-| **Deduplication**       | Hash table fits in memory       | Distributed hash tables add latency          |
+| **Technique**           | **Single-Process Assumption**   | **Distributed Challenge**                      |
+|:------------------------|:--------------------------------|:-----------------------------------------------|
+| **Coreset Selection**   | Global view of dataset          | Each worker sees only its shard                |
+| **Active Learning**     | Centralized uncertainty scoring | Scoring requires model synchronization         |
+| **Curriculum Learning** | Global difficulty ordering      | Workers may have different "hardest" samples   |
+| **Deduplication**       | One shared duplicate map        | Shard-local hashes miss cross-shard duplicates |
 
 : **Selection Dependencies in Distributed Training**: The table starts from a common centralized formulation of each technique and identifies the coordination problem introduced by sharding. Distributed variants may relax rather than reproduce the centralized result exactly. {#tbl-selection-dependencies .striped .hover}
 
-The selection dependencies admit several architectural solutions, each navigating a different point in the consistency-scalability trade-off space. The most straightforward approach centralizes selection while distributing training. A coordinator node performs selection on the full dataset, then distributes selected indices to workers. This preserves selection quality but introduces a single bottleneck:
+The selection dependencies admit several architectural solutions, each navigating a different point in the consistency-scalability trade-off space. The most straightforward approach centralizes selection while distributing training. A coordinator process performs selection on the full dataset, then distributes selected indices to workers. This preserves selection quality but introduces a single bottleneck:
 
 ```
 Coordinator: score_all_samples() → selected_indices
@@ -3243,7 +3247,7 @@ Broadcast: selected_indices → all workers
 Workers: train on subset(local_shard, selected_indices)
 ```
 
-The semantics remain clean, but the coordinator becomes a single point of failure and a possible bandwidth bottleneck. Whether that overhead is acceptable depends on the selection payload, refresh rate, network path, and cluster size.
+The semantics remain clean, but the coordinator can serialize scoring or index dispatch. Whether that overhead is acceptable depends on the selection payload, refresh rate, worker count, and copies through shared host memory. Adding accelerator workers does not increase the host memory available to the coordinator.
 
 Hierarchical selection\index{Hierarchical selection!distributed coreset} addresses this scalability limitation by distributing the selection computation itself. Each worker performs local selection on its shard, then a coordinator merges results:
 
@@ -3255,11 +3259,11 @@ Broadcast: final_indices → all workers
 
 Shard-local selection reduces coordinator load but introduces a quality trade-off: local quotas and score distributions may not preserve the global ranking or rare groups spread unevenly across shards. The merge step therefore needs normalization, coverage constraints, or a second global pass.
 
-When even hierarchical approaches prove too expensive, approximate global selection offers a fallback. These methods trade exactness for scalability through distributed approximate algorithms. Distributed MinHash\index{MinHash!distributed, cross-shard deduplication} enables deduplication by having each worker compute MinHash signatures independently; signatures are then aggregated to find near-duplicates across shards without requiring any single node to see all the data. Similarly, distributed uncertainty sampling allows workers to compute local uncertainty scores, with a global threshold determined by score distribution statistics rather than exact ranking.
+Cross-shard deduplication has the same visibility requirement. Workers can compute MinHash\index{MinHash!distributed, cross-shard deduplication} signatures locally, but a shared merge must compare candidates across shard boundaries. Independent local hash tables cannot detect a duplicate whose counterpart belongs to another worker. The merge must fit the host's memory budget or operate in bounded batches, rather than assuming that more workers supply more host capacity.
 
 ### Consistency challenges in active learning {#sec-data-selection-consistency-challenges-active-learning-59c9}
 
-The approximate selection strategies assume static selection criteria, but active learning introduces an additional complication: the model changes during selection. Consider what happens when Worker A scores samples using the model at step $t$ while Worker B simultaneously updates the model to step $t+1$. Worker A's scores are now stale and may select samples that the updated model would rank differently.
+Shard-local selection already needs a coherent score scale, but active learning introduces an additional complication because the model changes during selection. Consider what happens when Worker A scores samples using the model at step $t$ while Worker B simultaneously updates the model to step $t+1$. Worker A's scores are now stale and may select samples that the updated model would rank differently.
 
 The scoring schedule therefore defines the meaning of a query, not merely its cost. A reproducible system versions the model checkpoint, candidate-pool snapshot, scoring rule, and selected indices together. It can then measure how much ranking agreement decays with checkpoint age and choose a refresh interval from that evidence rather than from an arbitrary number of steps.
 
@@ -3269,7 +3273,7 @@ Several strategies mitigate this staleness problem, each with distinct overhead 
 - **Periodic score refresh**\index{Periodic score refresh!active learning}: Workers re-score every $k$ epochs rather than every batch, trading freshness for reduced overhead.
 - **Checkpoint-robust selection**: The system selects samples that exhibit high uncertainty under multiple model checkpoints, favoring decisions that are less sensitive to checkpoint choice. Agreement across past checkpoints is a robustness heuristic; ranking quality still needs validation as the model evolves.
 
-An illustrative eight-worker GPU-cluster scenario shows what the shard-local scoring and centralized merge of a one-time coreset selection cost in wall-clock time, the baseline any refresh strategy then multiplies.
+An illustrative one-host scenario with eight accelerator workers prices the shard-local scoring and centralized merge of a one-time coreset selection. Repeated refreshes incur this cost again; the assumed phase times include parallel execution and host coordination rather than promising linear speedup from the worker count.
 
 ```{python}
 #| echo: false
@@ -3323,11 +3327,11 @@ class DistributedOverheadCalc:
 
 ::: {#exmp-data-selection-distributed-coreset-selection .callout-example title="Distributed coreset selection"}
 
-**Scenario**: An eight-worker A100 GPU cluster selects a `{python} DistributedOverheadCalc.coreset_pct_str` coreset from ImageNet (`{python} DistributedOverheadCalc.imagenet_images_m_str` images) across distributed workers.
+**Scenario**: One host with `{python} DistributedOverheadCalc.workers_str` A100 accelerator workers selects a `{python} DistributedOverheadCalc.coreset_pct_str` coreset from ImageNet (`{python} DistributedOverheadCalc.imagenet_images_m_str` images) across local worker processes.
 
-**Diagnosis**: Centralized coreset scoring on a single node creates memory and compute bottlenecks. Distributed pipeline staging (shard-local embedding $\to$ parallel deduplication $\to$ local EL2N scoring $\to$ centralized top-$k$ merge) processes dataset selection in `{python} DistributedOverheadCalc.t_total_overhead_min_str`.
+**Diagnosis**: Scoring on one accelerator leaves the other devices unused. Shard-local embedding, parallel signature generation with cross-shard deduplication, local EL2N scoring, and a centralized candidate merge distribute that work. Under the assumed phase times, dataset selection takes `{python} DistributedOverheadCalc.t_total_overhead_min_str`.
 
-**Systems lesson**: Distributed coreset selection removes single-node memory as the scoring bottleneck. The two-tier coordinator-worker architecture diagrammed in @fig-distributed-coreset-architecture partitions scoring across parallel workers evaluating local EL2N metrics on partitioned shards, transmitting scores upward to a centralized coordinator that queries a global FAISS index and broadcasts final coreset indices back to the cluster.
+**Systems lesson**: Parallel scoring reduces work per accelerator, while embeddings, score arrays, and the global index must still fit within the machine's memory budget. In @fig-distributed-coreset-architecture, “Coordinator Node” names the logical selection role on this same host; the worker boxes represent accelerator processes, not additional machines. Workers return candidate scores and indices to the coordinator, which maintains the global FAISS index for embedding-based checks, merges local candidates, and dispatches the final coreset indices. The merge must enforce coverage floors and compare its result with the centralized reference, because candidates discarded locally cannot be recovered from their scores alone.
 
 :::
 
@@ -3386,7 +3390,7 @@ fill=GreenLine,text=white] (WW2){\textbf{Worker N}};
 
 Positive ROI can erode quickly when workers coordinate frequently during training. Distributed selection introduces a coordination tax\index{Coordination Tax!distributed data selection} whose size depends on what is synchronized and how often. That tax must remain smaller than the training time saved; if it approaches the limit, simplify the strategy or increase the refresh interval.
 
-A further constraint arises from cluster network topology\index{Distributed Selection!network topology constraints}. Gradient synchronization may use accelerator collectives over dedicated links, while embedding vectors, score arrays, and coreset indices may follow host or storage paths instead. The actual route depends on system architecture. Selection traffic can therefore expose CPU, network interface card, storage, or collective-network bottlenecks that the training profile alone does not reveal.
+The communication path adds a further constraint. Gradient synchronization may use accelerator collectives over local interconnects, while embedding vectors, score arrays, and coreset indices may pass through host memory and CPU dispatch. Selection can therefore expose host-memory, PCIe, storage, or process-synchronization bottlenecks that the training profile alone does not reveal. Extending the design to independent machines adds network topology\index{Distributed Selection!network topology constraints} and remote-storage constraints; those are a further scaling problem beyond the one-host design developed here.
 
 Yet operational feasibility does not guarantee economic viability. A deduplication pipeline that costs \$50K to engineer and saves \$10K per training run loses money on a single run and pays off only if enough runs reuse it. Deploying selection techniques requires rigorous financial accounting of capital, compute, and human annotation budgets.
 
@@ -3895,7 +3899,7 @@ A smaller training pool is one observation in the acceptance decision. Connect t
 
 - [ ] **Time savings**: Identify the scoring, coordination, and training times needed to compare a selected subset with full-data training at the same target quality.
 - [ ] **Cost objective**: Explain how an active-learning pipeline could reduce total expenditure even if it takes longer to train, and identify the costs that must enter that comparison.
-- [ ] **Coverage**: Decide whether unchanged aggregate accuracy is sufficient when a deployment-critical rare slice regresses, and name the additional validation evidence needed.
+- [ ] **Coverage**: Decide whether unchanged aggregate accuracy is sufficient when a deployment-critical rare slice regresses, and name the additional validation evidence needed. For the disjoint-class allocation in @sec-data-selection-coreset-selection-algorithms-2c74, explain why reducing $K$ below $a+b$ requires revising the selection plan before training, even if every remaining example has a high score.
 
 :::
 
