@@ -402,6 +402,58 @@
       }
     },
     {
+      "section_id": "#sec-communication-overlap",
+      "section_title": "Communication-Computation Overlap",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Layer-by-layer gradient overlap using PyTorch DDP gradient hooks",
+            "Bucket fusion trade-offs: amortizing launch overhead alpha vs delay in initial communication",
+            "Reverse forward-pass ordering for bucket assignment",
+            "Fundamental limits of overlap: nonoverlappable processor overhead o, boundary effects, memory buffer pressure",
+            "Quantitative overlap budgeting for transformer models"
+          ],
+          "question_strategy": "Open with an applied MCQ on bucket fusion trade-offs in PyTorch DDP, analyze exposed communication residuals in a quantitative SHORT question, probe boundary conditions in a SHORT question, and test bucket ordering mechanics in a FILL question.",
+          "difficulty_progression": "Architectural parameter tuning (bucket fusion) -> Quantitative overlap budgeting (exposed residuals) -> Boundary condition analysis -> Reverse-order assignment recall.",
+          "integration": "Integrates backward-pass computational graph execution with asynchronous collective communication streams.",
+          "ranking_explanation": "This section details the critical technique for hiding communication latency behind backward arithmetic, warranting a focused 4-question technical quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "In PyTorch DistributedDataParallel (DDP), how does bucket fusion balance the trade-off between communication startup latency ($\\alpha$) and the compute-communication overlap window?",
+            "choices": [
+              "Fusing multiple parameter gradients into buckets (e.g., 25--100 MB) amortizes per-collective startup overhead $\\alpha$ across many small tensors, but waiting for the entire bucket to compute gradients slightly delays the initial launch compared to individual tensor hooks.",
+              "Bucket fusion compresses all gradient tensors into 8-bit integers before allocating them to ring communication buffers.",
+              "Bucket fusion permanently disables all gradient hooks and forces all communication to occur after optimizer step completion.",
+              "Bucket fusion ensures that all layers in the transformer model have mathematically identical parameter counts."
+            ],
+            "answer": "The correct answer is A. Fusing multiple parameter gradients into buckets (e.g., 25--100 MB) amortizes per-collective startup overhead $\\alpha$ across many small tensors, but waiting for the entire bucket to compute gradients slightly delays the initial launch compared to individual tensor hooks. Modern transformer layers contain dozens of small weight matrices; launching a separate AllReduce for every individual tensor would issue thousands of collectives per step, paying the full software launch tax $\\alpha$ ($25\\text{--}50\\,\\mu\\text{s}$) on every call. Bucket fusion aggregates gradients into larger buffers (e.g., 25 MB) and launches a single consolidated AllReduce per bucket. The trade-off is timing: larger buckets amortize $\\alpha$ and maximize bandwidth saturation but must wait until the last tensor in the bucket completes backward computation before launching, which slightly delays the start of communication. Quantization is orthogonal to bucket fusion, disabling gradient hooks describes naive non-overlapped execution, and bucket fusion does not alter transformer model layer dimensions.",
+            "learning_objective": "Analyze the trade-off between startup latency amortization and communication launch delay in DDP bucket fusion."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "In the illustrative 32-layer, 7B-parameter FP32 gradient budget, each equal layer has 875 MB of gradients. Charging nine 100 MB buckets at 3 ms each gives 27 ms of communication per layer, while backward compute takes 15 ms. Under a single serialized communication stream, calculate total backward-plus-communication time with and without overlap and explain the exposed tail.",
+            "answer": "Sequential execution takes $32(15+27)=1344$ ms. With overlap, the first gradient becomes ready at 15 ms, then 32 communication stages take 27 ms each: $15+32\\times27=879$ ms, a 34.6 percent saving. Compute alone takes 480 ms, leaving 399 ms exposed: a 27 ms drain plus $31(27-15)=372$ ms of backlog. These values include the stated full-bucket charge for the final partial bucket.",
+            "learning_objective": "Calculate exposed communication residuals in pipelined training when collective transfer time exceeds layer backward computation."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain the startup and drain boundaries of bucketed backpropagation that limit communication-computation overlap even when intermediate layers hide communication successfully.",
+            "answer": "Communication cannot start until the first backward bucket is ready, leaving an initial compute-only startup interval. That first bucket can then overlap with later backward work; its communication is not inherently exposed. At the other end, the final bucket has no later backward computation to hide behind, so the optimizer must wait for its reduction and any accumulated communication backlog.",
+            "learning_objective": "Identify the output-layer and input-layer boundary conditions that prevent complete communication hiding in backward pass overlap."
+          },
+          {
+            "question_type": "FILL",
+            "question": "PyTorch DistributedDataParallel assigns parameter gradient tensors to communication buckets in ____ order of their execution in the forward pass, ensuring that the first bucket to fill matches the first layer evaluated during the backward pass to maximize the subsequent compute-communication overlap window.",
+            "answer": "reverse. Because backpropagation computes gradients from the output layer back toward the input layer, reverse forward-pass ordering ensures that gradient buckets fill and launch communication as early as possible during the backward pass.",
+            "learning_objective": "Identify reverse forward-pass bucket assignment as the ordering mechanism that maximizes backward overlap windows."
+          }
+        ]
+      }
+    },
+    {
       "section_id": "#sec-communication-collective-operations-collective-operations-communication-libraries-nccl-5307",
       "section_title": "Communication Libraries and Runtimes",
       "quiz_data": {
@@ -455,58 +507,6 @@
             "question": "True or False: Setting the environment variable NCCL_DEBUG=INFO modifies the mathematical reduction operator in NCCL from floating-point summation to exact integer bitwise addition to guarantee deterministic gradient aggregation across runs.",
             "answer": "False. `NCCL_DEBUG=INFO` is strictly an observability and diagnostic logging flag. It outputs runtime metadata to standard error, including detected physical hardware topology, GPU-to-NIC affinities, selected collective algorithms (e.g., Ring vs. Tree), channel counts, and communication protocols (e.g., Simple vs. LL/LL128). It does not alter the mathematical semantics, reduction operators, or numerical precision of collective operations.",
             "learning_objective": "Identify the diagnostic and logging purpose of the `NCCL_DEBUG` environment variable."
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-communication-overlap",
-      "section_title": "Communication-Computation Overlap",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Layer-by-layer gradient overlap using PyTorch DDP gradient hooks",
-            "Bucket fusion trade-offs: amortizing launch overhead alpha vs delay in initial communication",
-            "Reverse forward-pass ordering for bucket assignment",
-            "Fundamental limits of overlap: nonoverlappable processor overhead o, boundary effects, memory buffer pressure",
-            "Quantitative overlap budgeting for transformer models"
-          ],
-          "question_strategy": "Open with an applied MCQ on bucket fusion trade-offs in PyTorch DDP, analyze exposed communication residuals in a quantitative SHORT question, probe boundary conditions in a SHORT question, and test bucket ordering mechanics in a FILL question.",
-          "difficulty_progression": "Architectural parameter tuning (bucket fusion) -> Quantitative overlap budgeting (exposed residuals) -> Boundary condition analysis -> Reverse-order assignment recall.",
-          "integration": "Integrates backward-pass computational graph execution with asynchronous collective communication streams.",
-          "ranking_explanation": "This section details the critical technique for hiding communication latency behind backward arithmetic, warranting a focused 4-question technical quiz."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "In PyTorch DistributedDataParallel (DDP), how does bucket fusion balance the trade-off between communication startup latency ($\\alpha$) and the compute-communication overlap window?",
-            "choices": [
-              "Fusing multiple parameter gradients into buckets (e.g., 25--100 MB) amortizes per-collective startup overhead $\\alpha$ across many small tensors, but waiting for the entire bucket to compute gradients slightly delays the initial launch compared to individual tensor hooks.",
-              "Bucket fusion compresses all gradient tensors into 8-bit integers before allocating them to ring communication buffers.",
-              "Bucket fusion permanently disables all gradient hooks and forces all communication to occur after optimizer step completion.",
-              "Bucket fusion ensures that all layers in the transformer model have mathematically identical parameter counts."
-            ],
-            "answer": "The correct answer is A. Fusing multiple parameter gradients into buckets (e.g., 25--100 MB) amortizes per-collective startup overhead $\\alpha$ across many small tensors, but waiting for the entire bucket to compute gradients slightly delays the initial launch compared to individual tensor hooks. Modern transformer layers contain dozens of small weight matrices; launching a separate AllReduce for every individual tensor would issue thousands of collectives per step, paying the full software launch tax $\\alpha$ ($25\\text{--}50\\,\\mu\\text{s}$) on every call. Bucket fusion aggregates gradients into larger buffers (e.g., 25 MB) and launches a single consolidated AllReduce per bucket. The trade-off is timing: larger buckets amortize $\\alpha$ and maximize bandwidth saturation but must wait until the last tensor in the bucket completes backward computation before launching, which slightly delays the start of communication. Quantization is orthogonal to bucket fusion, disabling gradient hooks describes naive non-overlapped execution, and bucket fusion does not alter transformer model layer dimensions.",
-            "learning_objective": "Analyze the trade-off between startup latency amortization and communication launch delay in DDP bucket fusion."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "In the illustrative 32-layer, 7B-parameter FP32 gradient budget, each equal layer has 875 MB of gradients. Charging nine 100 MB buckets at 3 ms each gives 27 ms of communication per layer, while backward compute takes 15 ms. Under a single serialized communication stream, calculate total backward-plus-communication time with and without overlap and explain the exposed tail.",
-            "answer": "Sequential execution takes $32(15+27)=1344$ ms. With overlap, the first gradient becomes ready at 15 ms, then 32 communication stages take 27 ms each: $15+32\\times27=879$ ms, a 34.6 percent saving. Compute alone takes 480 ms, leaving 399 ms exposed: a 27 ms drain plus $31(27-15)=372$ ms of backlog. These values include the stated full-bucket charge for the final partial bucket.",
-            "learning_objective": "Calculate exposed communication residuals in pipelined training when collective transfer time exceeds layer backward computation."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain the startup and drain boundaries of bucketed backpropagation that limit communication-computation overlap even when intermediate layers hide communication successfully.",
-            "answer": "Communication cannot start until the first backward bucket is ready, leaving an initial compute-only startup interval. That first bucket can then overlap with later backward work; its communication is not inherently exposed. At the other end, the final bucket has no later backward computation to hide behind, so the optimizer must wait for its reduction and any accumulated communication backlog.",
-            "learning_objective": "Identify the output-layer and input-layer boundary conditions that prevent complete communication hiding in backward pass overlap."
-          },
-          {
-            "question_type": "FILL",
-            "question": "PyTorch DistributedDataParallel assigns parameter gradient tensors to communication buckets in ____ order of their execution in the forward pass, ensuring that the first bucket to fill matches the first layer evaluated during the backward pass to maximize the subsequent compute-communication overlap window.",
-            "answer": "reverse. Because backpropagation computes gradients from the output layer back toward the input layer, reverse forward-pass ordering ensures that gradient buckets fill and launch communication as early as possible during the backward pass.",
-            "learning_objective": "Identify reverse forward-pass bucket assignment as the ordering mechanism that maximizes backward overlap windows."
           }
         ]
       }
@@ -595,12 +595,12 @@
             "question_type": "MCQ",
             "question": "Match the three Lighthouse Archetypes to their dominant communication friction and primary optimization strategy as established in the chapter:",
             "choices": [
-              "Archetype A (GPT-4 / Dense LLM) -> Bandwidth-bound ($\\beta$), optimized by Hierarchical AllReduce and Rail-routing; Archetype B (DLRM / Recommendation) -> Granularity-, fabric-capacity-, or skew-bound, optimized by message coalescing, topology-aware routing, and shard balancing; Archetype C (Federated MobileNet) -> Uplink-bandwidth- and availability-bound, optimized by Aggressive Quantization with Error Feedback.",
+              "Archetype A (GPT-4/Llama-3) -> Bandwidth-bound ($\\beta$), optimized by Hierarchical AllReduce and Rail-routing; Archetype B (DLRM at Scale) -> Granularity-, fabric-capacity-, or skew-bound, optimized by message coalescing, topology-aware routing, and shard balancing; Archetype C (Federated MobileNet) -> Uplink-bandwidth- and availability-bound, optimized by Aggressive Quantization with Error Feedback.",
               "Archetype A -> Latency-bound, optimized by Star Topologies; Archetype B -> Bandwidth-bound, optimized by Ring AllReduce; Archetype C -> Compute-bound, optimized by Tensor Parallelism.",
               "Archetype A -> Contention-bound, optimized by CPU Paging; Archetype B -> Storage-bound, optimized by Checkpointing; Archetype C -> Network-bound, optimized by SHARP In-Switch Reduction.",
               "All three archetypes face identical communication constraints and use the exact same Double Binary Tree AllReduce configuration."
             ],
-            "answer": "The correct answer is A. Archetype A (GPT-4 / Dense LLM) -> Bandwidth-bound ($\\beta$), optimized by Hierarchical AllReduce and Rail-routing; Archetype B (DLRM / Recommendation) -> Granularity-, fabric-capacity-, or skew-bound, optimized by message coalescing, topology-aware routing, and shard balancing; Archetype C (Federated MobileNet) -> Uplink-bandwidth- and availability-bound, optimized by Aggressive Quantization with Error Feedback. Archetype A trains massive dense weights generating multi-gigabyte gradient tensors where inter-node bandwidth $\\beta$ dominates, making hierarchical reductions and rail-aligned fabrics essential. Archetype B shards sparse embedding tables; fine-grained lookup exchanges, fabric capacity, and uneven shard load decide its AllToAll time, requiring coalescing, topology-aware routing, and balanced table placement. Archetype C operates over slow, intermittent device uplinks where limited uplink bandwidth and client availability dictate aggressive quantization (e.g., INT8/1-bit) with error feedback. The star topology, checkpointing, and identical-configuration choices mischaracterize the archetypes' distinct physical regimes.",
+            "answer": "The correct answer is A. Archetype A (GPT-4/Llama-3) -> Bandwidth-bound ($\\beta$), optimized by Hierarchical AllReduce and Rail-routing; Archetype B (DLRM at Scale) -> Granularity-, fabric-capacity-, or skew-bound, optimized by message coalescing, topology-aware routing, and shard balancing; Archetype C (Federated MobileNet) -> Uplink-bandwidth- and availability-bound, optimized by Aggressive Quantization with Error Feedback. Archetype A trains massive dense weights generating multi-gigabyte gradient tensors where inter-node bandwidth $\\beta$ dominates, making hierarchical reductions and rail-aligned fabrics essential. Archetype B shards sparse embedding tables; fine-grained lookup exchanges, fabric capacity, and uneven shard load decide its AllToAll time, requiring coalescing, topology-aware routing, and balanced table placement. Archetype C operates over slow, intermittent device uplinks where limited uplink bandwidth and client availability dictate aggressive quantization (e.g., INT8/1-bit) with error feedback. The star topology, checkpointing, and identical-configuration choices mischaracterize the archetypes' distinct physical regimes.",
             "learning_objective": "Classify the three Lighthouse Archetypes by their dominant communication bottleneck and corresponding optimization strategy."
           },
           {
