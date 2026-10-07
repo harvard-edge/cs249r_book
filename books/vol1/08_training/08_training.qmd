@@ -543,7 +543,7 @@ Frameworks expose the hardware-software boundary as switches, such as an autocas
 
 Every training bottleneck ultimately traces back to the execution cost of specific mathematical operations. Sufficiently large matrix multiplications with high operand reuse can be compute-bound and governed by peak arithmetic throughput [@goto2008], whereas standalone low-intensity activation and normalization operations often face a memory-bandwidth ceiling. Meanwhile, optimizer states inflate the resident memory footprint regardless of arithmetic activity. Designing systems to execute these operations efficiently begins with accounting for each cost category separately.
 
-## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
+## Training Computation and Memory Costs {#sec-model-training-mathematical-foundations-d894}
 
 Linear algebra expresses matrix multiplication compactly as $\mathbf{C} = \mathbf{A}\mathbf{B}$. In hardware, executing this operation efficiently requires navigating the accelerator's physical memory hierarchy:
 
@@ -3830,7 +3830,7 @@ The parameters `num_workers` and `prefetch_factor` are not generic performance t
 ↩ The DataLoader's three knobs, worker count, prefetch depth, and pinned memory for DMA transfers, are established in @sec-ml-frameworks-domainspecific-data-organizations-48d9.
 :::
 
-Buffer management is the main trade-off. A buffer that is too small causes the GPU to wait for data preparation, reintroducing the idle time prefetching was meant to remove. An overly large buffer consumes memory that could otherwise store model parameters or larger batches. The right configuration coordinates CPU preparation, storage I/O, and GPU computation so each resource has work ready at the moment it can use it. These techniques yield the greatest benefit when storage access is slow, preprocessing is complex, or datasets are large.
+Buffer management is the main trade-off. A buffer that is too small causes the GPU to wait for data preparation, reintroducing the idle time prefetching was meant to remove. An overly large host-side buffer consumes memory that could otherwise support input processing and other host work. The right configuration coordinates CPU preparation, storage I/O, and GPU computation so each resource has work ready at the moment it can use it. These techniques yield the greatest benefit when storage access is slow, preprocessing is complex, or datasets are large.
 
 #### Practical considerations {#sec-model-training-pipeline-practical-considerations-4ba0}
 
@@ -4589,7 +4589,7 @@ class FlashAttentionTotal:
     ratio_mult_str = fmt_multiple(ratio, precision=1, commas=False)
 ```
 
-For $\SequenceLength = 4096$, $\AttentionHeadDimension = 64$, one materialized FP32 score matrix occupies $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` per head. The three FP32 input tensors occupy $(3 \times 4096{\times}64) \times 4$ bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` per head, a component-size ratio of `{python} FlashAttentionCalc.fa_reduction_mult_str` between one quadratic intermediate and the inputs. The comparison that decides memory is the whole per-head footprint each algorithm keeps for the backward pass. Standard attention stores the inputs, the output, and both the score and probability matrices, about `{python} FlashAttentionTotal.standard_total_mb_str`. FlashAttention stores the inputs, the output, and two numbers per row (the running maximum and sum), about `{python} FlashAttentionTotal.flash_total_mb_str`, roughly `{python} FlashAttentionTotal.ratio_mult_str` smaller, and the gap widens as $\SequenceLength$ grows because only the standard footprint is quadratic.
+For $\SequenceLength = 4096$, $\AttentionHeadDimension = 64$, one materialized FP32 score matrix occupies $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` per head. The three FP32 input tensors occupy $(3 \times 4096{\times}64) \times 4$ bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` per head, a component-size ratio of `{python} FlashAttentionCalc.fa_reduction_mult_str` between one quadratic intermediate and the inputs. The comparison that decides memory is the whole per-head footprint each algorithm keeps for the backward pass. The conventional baseline assumed here stores the inputs, the output, and both the score and probability matrices, about `{python} FlashAttentionTotal.standard_total_mb_str`. FlashAttention stores the inputs, the output, and two numbers per row (the running maximum and sum), about `{python} FlashAttentionTotal.flash_total_mb_str`, roughly `{python} FlashAttentionTotal.ratio_mult_str` smaller, and the gap widens as $\SequenceLength$ grows because only the standard footprint is quadratic.
 
 The IO pattern changes for the same reason. Standard attention reads $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from HBM, writes score, probability, and output matrices during the forward pass, then rereads those stored matrices during the backward pass before writing the gradients $d\mathbf{Q}$, $d\mathbf{K}$, and $d\mathbf{V}$ (shorthand for $\partial \LossFunction/\partial \mathbf{Q}$ and its counterparts). The resulting HBM traffic includes the same $\mathcal{O}(\SequenceLength^2)$ term that made the activation footprint large. FlashAttention forms score and probability blocks in SRAM and never writes the full $\SequenceLength \times \SequenceLength$ tensors to HBM. In the backward pass, it recomputes the needed blocks rather than reading stored full matrices. The exact HBM IO complexity depends on tile size and available SRAM because key and value blocks are streamed repeatedly across query blocks, so the bound is not simply $\mathcal{O}(\SequenceLength \cdot \HiddenDimension)$.
 
@@ -6928,7 +6928,7 @@ class GPT2SummaryChapterRecap:
 
 :::
 
-Training is where the iron law becomes a daily instrument. A profile read against the law names the dominant term, and the engineering task is to apply the least costly intervention that changes it before reaching for more hardware. Every intervention in this chapter, however, took the workload as given. The operation count $O$ was fixed by the model and the dataset, and the levers worked on how fast the system could execute it. The remaining lever is $O$ itself.
+Training is where the iron law becomes a daily instrument. A profile read against the law names the dominant term, and the engineering task is to apply the least costly intervention that changes it before reaching for more hardware. The analysis took the model and training corpus as given, while changing how the system executed their work, including the extra arithmetic needed for recomputation. A further lever is which examples enter that workload in the first place.
 
 ::: {.callout-chapter-connection title="From training to data selection"}
 
