@@ -15,7 +15,7 @@ Use the table to enter at the relevant problem. The probability section explains
 | Differentiable 3D scene reconstruction diverges during real-time tracking           | @sec-appendix-ml-3dgs             | 3D Gaussian Splatting parameters and covariance projection                                         |
 | Occupancy mapping retains phantom obstacles after objects move                      | @sec-appendix-ml-voxels           | Log-odds voxel updates, TSDF fusion, and raycast DRAM traffic                                      |
 | Small sensor noise produces explosive, unconstrained actuator commands              | @sec-appendix-ml-lipschitz        | Lipschitz continuity bounds and spectral normalization                                             |
-| A behavioral cloning policy drifts into unrecoverable off-trajectory states         | @sec-appendix-ml-compounding      | $\CompoundingCovariateDrift$ compounding error and DAgger linear reduction                         |
+| A behavioral cloning policy drifts into unrecoverable off-trajectory states         | @sec-appendix-ml-compounding      | $\CovariateDriftBound$ compounding error and DAgger linear reduction                               |
 | $\ell_2$ regression averages bimodal demonstrations into lethal obstacle collisions | @sec-appendix-ml-multimodal       | Conditional expectation proof and multimodal policy decoders                                       |
 | A generative decoder cannot finish a chunk within the setpoint period               | @sec-appendix-ml-diffusion        | Denoising evaluations $\DecoderEvaluationCount$ latency-expressiveness trade-off and flow matching |
 | Offline reinforcement learning selects ungrounded, destructive motor setpoints      | @sec-appendix-ml-affordances      | Bellman value overestimation and SayCan affordance grounding                                       |
@@ -956,20 +956,20 @@ Consider a 7-DoF arm with a two-finger gripper ($\ActionDimension = 8$) whose po
 
 Offline supervised evaluation samples from a fixed demonstration distribution. In closed-loop execution, current action $\mathbf{a}_t$ affects the subsequent physical state $s_{t+1}$ and the next observation distribution. This feedback loop creates **compounding covariate shift**.
 
-Let $\pi^*$ denote the expert demonstrator policy and $\hat{\pi}$ denote the learned policy. Suppose the single-step error probability under the expert's state distribution is bounded by $\epsilon$ for all timesteps $t \in \{1, \dots, T\}$:
-$$ \forall t \le T:\quad \mathbb{E}_{s \sim d_{\pi^*}^t} [ \mathbf{1}(\hat{\pi}(s) \ne \pi^*(s)) ] \le \epsilon $$
-In digital supervised learning (such as fixed-image classification), evaluation inputs are held fixed, so the expected count of prediction errors scales as $\mathcal{O}(T \epsilon)$. In closed-loop Physical AI, an action error alters the physical state of the robot, transporting it into states $s \notin \text{supp}(d_{\pi^*})$ that the demonstrator rarely or never visited. Offline training provides no valid statistical guarantee on action error in these learner-induced states.
+Let $\pi^*$ denote the expert demonstrator policy and $\hat{\pi}$ denote the learned policy. Suppose the single-step error probability under the expert's state distribution is bounded by $\epsilon$ for all timesteps $t \in \{1, \dots, \BehaviorCloningHorizon\}$:
+$$ \forall t \le \BehaviorCloningHorizon:\quad \mathbb{E}_{s \sim d_{\pi^*}^t} [ \mathbf{1}(\hat{\pi}(s) \ne \pi^*(s)) ] \le \epsilon $$
+In digital supervised learning (such as fixed-image classification), evaluation inputs are held fixed, so the expected count of prediction errors scales as $\mathcal{O}(\BehaviorCloningHorizon \epsilon)$. In closed-loop Physical AI, an action error alters the physical state of the robot, transporting it into states $s \notin \text{supp}(d_{\pi^*})$ that the demonstrator rarely or never visited. Offline training provides no valid statistical guarantee on action error in these learner-induced states.
 
 To derive the compounding error bound, we construct a formal trajectory coupling argument [@ross2011reduction]. Let $\mathcal{E}_t$ denote the event that the policy makes its first mistake at time $t$ ($\hat{\pi}(s_t) \ne \pi^*(s_t)$ and $\hat{\pi}(s_{t'}) = \pi^*(s_{t'})$ for all $t' < t$). Couple learner and expert trajectories with the same initial state and transition randomness. Until their first disagreement they coincide, so $\mathcal{E}_t$ is a subset of the disagreement event on the unconditioned expert trajectory and $\Pr(\mathcal{E}_t)\le\epsilon$. Conditioning on earlier agreement need not preserve the expert state marginal.
 
 The probability that at least one error has occurred at or before step $t$ is bounded by a union bound:[^fn-ml-compounding-error]
 $$ \Pr(\text{error by step } t) = \Pr\left( \bigcup_{t'=1}^t \mathcal{E}_{t'} \right) \le \sum_{t'=1}^t \Pr(\mathcal{E}_{t'}) \le t \epsilon $$
-Once an error occurs, the robot diverges into unmodeled states where downstream incremental cost is bounded by at most $C_{\max}$ per step. Summing over the entire finite execution horizon $T$:
+Once an error occurs, the robot diverges into unmodeled states where downstream incremental cost is bounded by at most $C_{\max}$ per step. Summing over the entire finite execution horizon $\BehaviorCloningHorizon$:
 $$
 \begin{aligned}
-J(\hat{\pi}) - J(\pi^*) &\le \sum_{t=1}^T C_{\max} \Pr(\text{error by step } t) \\
-&\le C_{\max} \sum_{t=1}^T t \epsilon \\
-&= C_{\max} \epsilon \frac{T(T+1)}{2} = \CompoundingCovariateDrift
+J(\hat{\pi}) - J(\pi^*) &\le \sum_{t=1}^{\BehaviorCloningHorizon} C_{\max} \Pr(\text{error by step } t) \\
+&\le C_{\max} \sum_{t=1}^{\BehaviorCloningHorizon} t \epsilon \\
+&= C_{\max} \epsilon \frac{\BehaviorCloningHorizon(\BehaviorCloningHorizon+1)}{2} = \CovariateDriftBound
 \end{aligned}
 $$
 The quadratic expression is a worst-case upper bound on excess cumulative cost, not a prediction of geometric trajectory error or a probability. Since $\Pr(\text{error by step }t)\le1$, a tighter bound replaces $t\epsilon$ by $\min(1,t\epsilon)$. For continuous actions, the disagreement indicator needs a specified tolerance or a surrogate loss tied to a cost bound; exact equality is generally too restrictive.
@@ -982,14 +982,14 @@ The **DAgger** (Dataset Aggregation) algorithm [@ross2011reduction] addresses th
 
 At each training iteration $i$:
 
-1. Execute policy $\hat{\pi}_i$ under the applicable safety envelope to collect trajectories $\mathcal{T}_i = \{s_1, s_2, \dots, s_T\}$.
+1. Execute policy $\hat{\pi}_i$ under the applicable safety envelope to collect trajectories $\mathcal{T}_i = \{s_1, s_2, \dots, s_{\BehaviorCloningHorizon}\}$.
 2. Query the expert to label every visited state $s_t \in \mathcal{T}_i$ with the optimal recovery action $a^* = \pi^*(s_t)$.
 3. Aggregate the recovery dataset $\mathcal{D} \leftarrow \mathcal{D} \cup \{(s_t, a^*)\}$.
 4. Retrain policy $\hat{\pi}_{i+1}$ on the aggregated dataset.
 
 For the DAgger bound, make a stronger assumption than the earlier per-step $C_{\max}$: one wrong action followed by the expert changes expected remaining cost by at most $u_{\max}$, independent of horizon. With expert labels on learner-visited states, a no-regret online learner, sufficient hypothesis capacity, and a valid finite-sample bound $\delta_N$, a selected policy can satisfy a bound of the form
-$$ J(\hat{\pi})-J(\pi^*) \le T u_{\max}(\epsilon_N+\gamma_N+\delta_N), $$
-where $\epsilon_N$ is best-in-class loss on the induced-state distribution, $\gamma_N$ is average online-learning regret, and $\delta_N$ covers finite-sample generalization and policy selection. It scales linearly in $T$ only when $u_{\max}=\mathcal{O}(1)$ and those errors remain controlled. The drift states need expert corrective labels; appending recovery trajectories alone does not supply them.
+$$ J(\hat{\pi})-J(\pi^*) \le \BehaviorCloningHorizon u_{\max}(\epsilon_N+\gamma_N+\delta_N), $$
+where $\epsilon_N$ is best-in-class loss on the induced-state distribution, $\gamma_N$ is average online-learning regret, and $\delta_N$ covers finite-sample generalization and policy selection. It scales linearly in $\BehaviorCloningHorizon$ only when $u_{\max}=\mathcal{O}(1)$ and those errors remain controlled. The drift states need expert corrective labels; appending recovery trajectories alone does not supply them.
 
 ### Closed-loop trajectory distributions and evaluation estimands {#sec-appendix-ml-trajectory-distribution}
 

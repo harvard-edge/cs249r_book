@@ -121,7 +121,7 @@ The estimates in this chapter are bounds and constructed budgets, and each names
 
 ### The single-machine iron law {#sec-performance-engineering-efficiency-frontier}
 
-The memory wall is one term in a larger budget. @Eq-iron-law-perf restates, for one replica, the single-machine iron law that the Fleet Law extends across many devices\index{Iron law!performance decomposition}. It decomposes execution time into three competing costs:
+The memory wall is one term in a larger budget. @Eq-iron-law-perf applies the single-machine iron law to local execution inside a replica, whose inter-device costs the Fleet Law accounts for separately\index{Iron law!performance decomposition}. It decomposes execution time into three competing costs:
 
 $$
 T = \frac{\DataVolume}{\Bandwidth} + \frac{O}{\PeakRate \cdot \EfficiencyHw} + \Latency
@@ -133,9 +133,9 @@ $$
 T \approx \max\left( \frac{O}{\PeakRate \cdot \EfficiencyHw}, \; \frac{\DataVolume}{\Bandwidth} \right) + \Latency
 $$
 
-Here, $\DataVolume$ is the data volume crossing the chosen memory boundary, $\Bandwidth$ is its bandwidth, $O$ is the operation count, and $\PeakRate \cdot \EfficiencyHw$ is the realized compute rate after accounting for hardware execution efficiency. The overhead term $\Latency$ collects the exposed latency outside those compute and memory terms, and it has two parts. Host dispatch, meaning kernel launches and other software costs, belongs to each device's own execution. Exposed communication and synchronization arise only because the replica spans several devices. This local execution budget supplies the service time of a replica; request queueing and routing add time outside that boundary. The roofline approximation asks which exposed term dominates at a given operating point. Increasing compute throughput for a memory-bound workload does not materially improve performance until the memory term is reduced. Eager framework execution can expose a large slice of the overhead term when the host submits many short kernels one at a time, a cost that @sec-performance-engineering-kernel-launch quantifies and that graph compilation and replay later attack.
+Here, $\DataVolume$ is the data volume crossing the chosen memory boundary, $\Bandwidth$ is its bandwidth, $O$ is the operation count, and $\PeakRate \cdot \EfficiencyHw$ is the realized compute rate after accounting for hardware execution efficiency. The overhead term $\Latency$ collects the exposed latency outside those compute and memory terms, and it has two parts. Host dispatch, meaning kernel launches and other software costs, belongs to each device's own execution. Exposed communication and synchronization arise only because the replica spans several devices. Local execution on each device and exposed inter-device delays together supply the service time of a replica; request queueing and routing add time outside that boundary. The roofline approximation asks which exposed term dominates at a given operating point. Increasing compute throughput for a memory-bound workload does not materially improve performance until the memory term is reduced. Eager framework execution can expose a large slice of the overhead term when the host submits many short kernels one at a time, a cost that @sec-performance-engineering-kernel-launch quantifies and that graph compilation and replay later attack.
 
-In the Fleet Law's terms, the data and compute terms together with the dispatch part of $\Latency$ form the single-device compute time $\IronlawTermTimesCompute$, while the communication and synchronization part of $\Latency$ becomes the Fleet Law's separate $\CommunicationTime$ and $\SynchronizationTime$ terms. In the rest of the chapter, overhead means host dispatch unless communication is named. A local optimization therefore reaches the fleet through whichever of those terms it shortens.
+In the Fleet Law's terms, the data and compute terms together with the dispatch part of $\Latency$ contribute to distributed local execution, whose unsharded reference time is $\IronlawTermTimesCompute$, while the communication and synchronization part of $\Latency$ becomes the Fleet Law's separate $\CommunicationTime$ and $\SynchronizationTime$ terms. For a measured device shard, partitioning has already reduced the local workload; its execution time must not be divided by the device count again. Independent serving replicas process different requests, so adding replicas raises aggregate capacity without dividing the latency of one request. In the rest of the chapter, overhead means host dispatch unless communication is named. A local optimization therefore reaches the fleet through whichever of those terms it shortens.
 
 ::: {.column-margin .margin-pointer}
 ↩ The Fleet Law, which extends this single-machine iron law across $N$ devices, is established in @sec-vol2-introduction-fleet-law.
@@ -2247,7 +2247,7 @@ FlashAttention reduces the memory wall within a single GPU by tiling across the 
 
 Verify understanding of memory-aware attention:
 
-- [ ] **Sequence-length scaling**: explain why FlashAttention provides a larger speedup for longer sequences (for example, 32K) than for short sequences (for example, 512).
+- [ ] **Sequence-length scaling**: explain why avoiding quadratic intermediates creates a larger potential benefit for longer sequences (for example, 32K) than for short sequences (for example, 512), and identify remaining limits that can prevent a larger measured speedup.
 - [ ] **Online softmax storage**: identify whether the "online softmax" statistics in the FlashAttention algorithm reside in HBM, L2 Cache, or SM SRAM.
 - [ ] **FLOPs unchanged**: evaluate the claim that FlashAttention reduces the total number of floating-point operations (FLOPs) required for attention.
 - [ ] **Memory to batch size**: explain how removing the $\mathcal{O}(S^2)$ prefill workspace can raise the number of requests a replica that mixes prefill and decode can admit.
@@ -4065,7 +4065,7 @@ The case study in @sec-performance-engineering-case-study combines these mechani
 ↩ The serving replica's measured capacity as the fleet orchestrator's unit of placement is established in @sec-fleet-orchestration-serving.
 :::
 
-In the Fleet Law's terms (@eq-fleet-law), the data and compute terms and the dispatch part of the overhead term together form $\IronlawTermTimesCompute$, so fusion, precision, compilation, and algorithmic change all shrink the per-replica compute term $\IronlawTermTimesCompute/N$, while communication-computation overlap enlarges $\OverlappedTime$. The chapter therefore spends its effort on the Compute ($C_1$) axis and its co-design boundary with Communication, and those gains reach the fleet only when the Communication and Coordination terms do not absorb them.
+In the Fleet Law's terms (@eq-fleet-law), the unsharded local-execution reference $\IronlawTermTimesCompute$ includes data movement, computation, and host dispatch. Fusion, precision, compilation, and algorithmic change shorten the distributed local-execution term $\IronlawTermTimesCompute/N$, while communication-computation overlap enlarges $\OverlappedTime$. The chapter therefore spends its effort on the Compute ($C_1$) axis and its co-design boundary with Communication, and those gains reach the fleet only when the Communication and Coordination terms do not absorb them.
 
 ::: {.callout-takeaways title="Match the software to the silicon"}
 

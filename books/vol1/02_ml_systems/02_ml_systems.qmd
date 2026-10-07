@@ -1661,7 +1661,7 @@ class CloudEdgeTCO:
     gpu_utilization_pct_str = fmt_percent(gpu_utilization, precision=1, commas=False, style='prose')
 ```
 
-In a worked comparison, @tbl-ml-systems-cloud-tco itemizes the annual GPU, network, load-balancer, and observability costs of an illustrative cloud implementation under public list pricing, and @tbl-ml-systems-edge-tco itemizes the corresponding hardware, power, cooling, network, and DevOps labor costs of an on-premises edge-server implementation.
+A vision system serves `{python} CloudEdgeTCO.requests_str` daily inferences at ResNet-50 scale (`{python} CloudEdgeTCO.inference_ms_str` latency, `{python} CloudEdgeTCO.response_kb_str` response). The comparison spans `{python} CloudEdgeTCO.server_life_years_str`. The `{python} CloudEdgeTCO.gpu_instances_str` instances are a provisioning choice (redundancy and headroom for traffic peaks), not a throughput requirement. @Tbl-ml-systems-cloud-tco itemizes the annual GPU, network, load-balancer, and observability costs of this fixed-capacity cloud implementation under public list pricing, and @tbl-ml-systems-edge-tco itemizes the corresponding hardware, power, cooling, network, and DevOps labor costs of an on-premises edge-server implementation.
 
 ```{=latex}
 \begingroup
@@ -1704,12 +1704,12 @@ In a worked comparison, @tbl-ml-systems-cloud-tco itemizes the annual GPU, netwo
 
 ::: {#nbk-ml-systems-cloud-vs-edge-tco .callout-notebook title="Cloud vs. edge TCO"}
 
-**Problem**: A vision system serves `{python} CloudEdgeTCO.requests_str` daily inferences at ResNet-50 scale (`{python} CloudEdgeTCO.inference_ms_str` latency, `{python} CloudEdgeTCO.response_kb_str` response). When all costs are included (GPU hours, network egress, power, cooling, and labor, itemized in @tbl-ml-systems-cloud-tco and @tbl-ml-systems-edge-tco), is cloud or on-premises edge deployment cheaper over `{python} CloudEdgeTCO.server_life_years_str`?
+**Problem**: When all costs are included (GPU hours, network egress, power, cooling, and labor, itemized in @tbl-ml-systems-cloud-tco and @tbl-ml-systems-edge-tco), is cloud or on-premises edge deployment cheaper over `{python} CloudEdgeTCO.server_life_years_str`?
 
 **Math**: The question is the annual cost at this operating point, so the comparison in @eq-edge-breakeven is the gap between the two annual totals:
 $$\text{Annual cost gap} = \text{Cloud annual TCO} - \text{Edge annual TCO}$$ {#eq-edge-breakeven}
 
-At `{python} CloudEdgeTCO.requests_str` inferences/day, the gap is `{python} CloudEdgeTCO.c_total_usd_str` − `{python} CloudEdgeTCO.e_total_usd_str` = `{python} CloudEdgeTCO.cost_gap_usd_str`. Almost all of the cloud bill is provisioned capacity rather than use. The `{python} CloudEdgeTCO.gpu_instances_str` instances are a provisioning choice (redundancy and headroom for traffic peaks), not a throughput requirement: at `{python} CloudEdgeTCO.inference_ms_str` per request the day's traffic needs only about `{python} CloudEdgeTCO.gpu_busy_hours_str` GPU-hours of the `{python} CloudEdgeTCO.gpu_provisioned_hours_str` provisioned, about `{python} CloudEdgeTCO.gpu_utilization_pct_str` utilization. Only egress scales with traffic.
+At `{python} CloudEdgeTCO.requests_str` inferences/day, the gap is `{python} CloudEdgeTCO.c_total_usd_str` − `{python} CloudEdgeTCO.e_total_usd_str` = `{python} CloudEdgeTCO.cost_gap_usd_str`. Almost all of the cloud bill is provisioned capacity rather than use. At `{python} CloudEdgeTCO.inference_ms_str` per request the day's traffic needs only about `{python} CloudEdgeTCO.gpu_busy_hours_str` GPU-hours of the `{python} CloudEdgeTCO.gpu_provisioned_hours_str` provisioned, about `{python} CloudEdgeTCO.gpu_utilization_pct_str` utilization. Only egress scales with traffic.
 
 **Result**: Edge costs about `{python} CloudEdgeTCO.edge_savings_str` less at this operating point. Because the fixed cloud pool alone already costs more than the whole edge deployment, no traffic level in this scenario makes the cloud cheaper; a genuine break-even\index{Break-even analysis!edge vs. cloud utilization} analysis would need cloud capacity that scales with demand.
 
@@ -2289,6 +2289,75 @@ ax.grid(axis="y", visible=False)
 plt.show()
 plt.close()
 ```
+
+:::
+
+```{python}
+#| echo: false
+#| label: energy-inference-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENERGY PER INFERENCE: ACCOUNTING BOUNDARY AND BATTERY BUDGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Reading the energy-per-inference numbers" perspective box, which
+# │          interprets @fig-energy-per-inference.
+# │
+# │ Goal: Contrast energy efficiency across deployment tiers.
+# │ Show: The A100 accounting boundary and how many KWS inferences vs. LLM
+# │       queries one phone battery could supply.
+# │ How: Reuse the EnergyAnchors values (energy-anchors-calc) and convert the
+# │      two endpoints into inferences per phone battery.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, Hardware, Engine, ReferenceStats
+from mlsysim.fmt import check, fmt_charge, fmt_count, fmt_latency, fmt_power, fmt_voltage
+from mlsysim.core.units import joule, kJ, mJ, uJ, ureg
+
+# ┌── LEGO ───────────────────────────────────────────────
+class EnergyInference:
+    """
+    Namespace for Energy Per Inference comparison.
+    Scenario: Battery life across Cloud vs. Edge vs. TinyML paradigms.
+    Energies come from EnergyAnchors (energy-anchors-calc), the same values
+    plotted in @fig-energy-per-inference.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    batt_energy_j = ReferenceStats.PhoneBattery.EnergyJ
+    full_server_draw = 1 * ureg.kW  # scenario assumption: whole 8-accelerator server at load
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    e_gpt4_j = EnergyAnchors.e_llm_query_j
+    e_resnet_cloud_j = EnergyAnchors.e_resnet_cloud_j
+    e_kws_j = EnergyAnchors.e_kws_j
+
+    # Accelerator-only accounting behind the cloud ResNet-50 row
+    a100_latency = EnergyAnchors.p_resnet_cloud.latency.to(ureg.ms)
+    a100_avg_power = (e_resnet_cloud_j / a100_latency).to(ureg.W)
+
+    # Inferences per full battery charge at the two endpoints
+    q_gpt4 = (batt_energy_j / e_gpt4_j).to("").magnitude
+    q_kws = (batt_energy_j / e_kws_j).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(a100_avg_power < Hardware.Cloud.A100.tdp, f"Batch-1 A100 average power should sit below TDP; got {a100_avg_power:.0f}.")
+    check(a100_latency < 1 * ureg.ms, f"Prose states a sub-millisecond A100 batch-1 window; got {a100_latency:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    q_gpt4_str = fmt_count(round(q_gpt4), commas=True, label="query")
+    q_kws_str = fmt_count(round(q_kws / BILLION) * BILLION, scale="billion", precision=0, commas=False, label="inference")
+
+    a100_latency_ms_str = fmt_latency(a100_latency, unit=ureg.ms, precision=2, commas=False)
+    a100_avg_power_w_str = fmt_power(round(a100_avg_power.magnitude, -1) * ureg.W, unit=ureg.W, precision=0, commas=False, approx=True)
+    full_server_draw_kw_str = fmt_power(full_server_draw, unit=ureg.kW, precision=0, commas=False, approx=True)
+    batt_cap_mah_str = fmt_charge(ReferenceStats.PhoneBattery.CapacityMah, unit=ureg.mAh, precision=0, commas=False)
+    batt_volt_str = fmt_voltage(ReferenceStats.PhoneBattery.VoltageV, unit=ureg.V, precision=1, commas=False)
+```
+
+::: {#psp-ml-systems-energy-per-inference .callout-perspective title="Reading the energy-per-inference numbers"}
+
+The logarithmic comparisons plotted in @fig-energy-per-inference combine solver-derived device-energy estimates with separate scale anchors; they are not controlled full-system measurements. Each vision bar counts one device over its batch-1 inference window. The cloud ResNet-50 bar, for example, charges an A100 averaging about `{python} EnergyInference.a100_avg_power_w_str` for `{python} EnergyInference.a100_latency_ms_str`; it excludes the host CPUs, memory, networking, and cooling that bring an entire server to about `{python} EnergyInference.full_server_draw_kw_str`, so a whole-server accounting of the same request would be several times larger.
+
+The span becomes tangible when measured in a familiar unit of energy, one smartphone battery\index{Energy per inference!paradigm comparison}. The nominal energy stored in a `{python} EnergyInference.batt_volt_str`, `{python} EnergyInference.batt_cap_mah_str` battery equals about `{python} EnergyInference.q_kws_str` keyword-spotting inferences but only about `{python} EnergyInference.q_gpt4_str` to a cloud LLM. The comparison is one of scale only: a cloud query's energy is spent in the data center, not drawn from the phone. Nor are the keyword-spotting counts elapsed battery life: actual runtime\index{TinyML!energy efficiency} still depends on inference cadence, sleep power, sensing, communication, and the rest of the device.
 
 :::
 
@@ -3169,75 +3238,6 @@ Operating at this physical scale requires microcontrollers (MCUs)[^fn-mcu-resour
 :::
 
 This definition reframes the iron law of ML systems. In terms of @eq-bottleneck, TinyML imposes a physical memory-capacity precondition that execution time does not capture: the weight footprint $\WeightMemory$ and activation footprint $\ActivationMemory$ must stay within memory capacity $C_{\text{mem}}$. When total memory is measured in kilobytes, model structure and runtime allocation determine feasibility before latency optimization begins, and every avoidable data movement spends part of the energy budget. The objective therefore shifts from raw throughput toward energy per inference and memory fit.
-
-```{python}
-#| echo: false
-#| label: energy-inference-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ENERGY PER INFERENCE: ACCOUNTING BOUNDARY AND BATTERY BUDGET
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Reading the energy-per-inference numbers" perspective box, which
-# │          interprets @fig-energy-per-inference.
-# │
-# │ Goal: Contrast energy efficiency across deployment tiers.
-# │ Show: The A100 accounting boundary and how many KWS inferences vs. LLM
-# │       queries one phone battery could supply.
-# │ How: Reuse the EnergyAnchors values (energy-anchors-calc) and convert the
-# │      two endpoints into inferences per phone battery.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Engine, ReferenceStats
-from mlsysim.fmt import check, fmt_charge, fmt_count, fmt_latency, fmt_power, fmt_voltage
-from mlsysim.core.units import joule, kJ, mJ, uJ, ureg
-
-# ┌── LEGO ───────────────────────────────────────────────
-class EnergyInference:
-    """
-    Namespace for Energy Per Inference comparison.
-    Scenario: Battery life across Cloud vs. Edge vs. TinyML paradigms.
-    Energies come from EnergyAnchors (energy-anchors-calc), the same values
-    plotted in @fig-energy-per-inference.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    batt_energy_j = ReferenceStats.PhoneBattery.EnergyJ
-    full_server_draw = 1 * ureg.kW  # scenario assumption: whole 8-accelerator server at load
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    e_gpt4_j = EnergyAnchors.e_llm_query_j
-    e_resnet_cloud_j = EnergyAnchors.e_resnet_cloud_j
-    e_kws_j = EnergyAnchors.e_kws_j
-
-    # Accelerator-only accounting behind the cloud ResNet-50 row
-    a100_latency = EnergyAnchors.p_resnet_cloud.latency.to(ureg.ms)
-    a100_avg_power = (e_resnet_cloud_j / a100_latency).to(ureg.W)
-
-    # Inferences per full battery charge at the two endpoints
-    q_gpt4 = (batt_energy_j / e_gpt4_j).to("").magnitude
-    q_kws = (batt_energy_j / e_kws_j).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(a100_avg_power < Hardware.Cloud.A100.tdp, f"Batch-1 A100 average power should sit below TDP; got {a100_avg_power:.0f}.")
-    check(a100_latency < 1 * ureg.ms, f"Prose states a sub-millisecond A100 batch-1 window; got {a100_latency:.2f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    q_gpt4_str = fmt_count(round(q_gpt4), commas=True, label="query")
-    q_kws_str = fmt_count(round(q_kws / BILLION) * BILLION, scale="billion", precision=0, commas=False, label="inference")
-
-    a100_latency_ms_str = fmt_latency(a100_latency, unit=ureg.ms, precision=2, commas=False)
-    a100_avg_power_w_str = fmt_power(round(a100_avg_power.magnitude, -1) * ureg.W, unit=ureg.W, precision=0, commas=False, approx=True)
-    full_server_draw_kw_str = fmt_power(full_server_draw, unit=ureg.kW, precision=0, commas=False, approx=True)
-    batt_cap_mah_str = fmt_charge(ReferenceStats.PhoneBattery.CapacityMah, unit=ureg.mAh, precision=0, commas=False)
-    batt_volt_str = fmt_voltage(ReferenceStats.PhoneBattery.VoltageV, unit=ureg.V, precision=1, commas=False)
-```
-
-::: {#psp-ml-systems-energy-per-inference .callout-perspective title="Reading the energy-per-inference numbers"}
-
-The logarithmic comparisons plotted in @fig-energy-per-inference combine solver-derived device-energy estimates with separate scale anchors; they are not controlled full-system measurements. Each vision bar counts one device over its batch-1 inference window. The cloud ResNet-50 bar, for example, charges an A100 averaging about `{python} EnergyInference.a100_avg_power_w_str` for `{python} EnergyInference.a100_latency_ms_str`; it excludes the host CPUs, memory, networking, and cooling that bring an entire server to about `{python} EnergyInference.full_server_draw_kw_str`, so a whole-server accounting of the same request would be several times larger.
-
-The span becomes tangible when measured in a familiar unit of energy, one smartphone battery\index{Energy per inference!paradigm comparison}. The nominal energy stored in a `{python} EnergyInference.batt_volt_str`, `{python} EnergyInference.batt_cap_mah_str` battery equals about `{python} EnergyInference.q_kws_str` keyword-spotting inferences but only about `{python} EnergyInference.q_gpt4_str` to a cloud LLM. The comparison is one of scale only: a cloud query's energy is spent in the data center, not drawn from the phone. Nor are the keyword-spotting counts elapsed battery life: actual runtime\index{TinyML!energy efficiency} still depends on inference cadence, sleep power, sensing, communication, and the rest of the device.
-
-:::
 
 The same four-branch map applies at the bottom of the spectrum (@fig-tiny-ml). Milliwatt budgets and kilobyte memories force on-chip integer execution and duty-cycled sleep, and they move the failure boundary away from latency toward compression-driven accuracy loss and risky firmware updates.
 

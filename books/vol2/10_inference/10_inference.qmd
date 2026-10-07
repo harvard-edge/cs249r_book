@@ -946,9 +946,9 @@ The scaling divide is therefore an interface and cache-policy decision. Every li
 
 Verify your understanding of how workload constraints drive architectural choices:
 
-- [ ] **LLM vs. vision**: explain why preemptive scheduling is more critical for LLMs than for vision models.
+- [ ] **LLM vs. vision**: explain when variable request lengths make preemptive scheduling useful and which KV-state costs can outweigh its benefit.
 - [ ] **State boundary**: distinguish request-scoped KV state from an optional cross-turn session cache and explain when sticky routing earns its imbalance cost.
-- [ ] **RecSys standard**: explain why feature-parallel batching is the standard for recommendation systems but not for LLMs.
+- [ ] **RecSys standard**: identify the lookup and placement characteristics that favor feature-parallel batching for a recommendation workload.
 - [ ] **Memory pressure**: identify which dimension (batching, memory, scheduling, topology, state) is primarily affected when quantization reduces model or KV-cache size.
 
 :::
@@ -1407,7 +1407,7 @@ Across model architectures, @tbl-batching-by-model summarizes candidate batching
 | **RecSys**        |   Feature-parallel    |        1000–10000s         |  Embedding lookup  |  Depends on sharding   |
 | **Speech**        |       Streaming       |             1              |     Real-time      |  N/A (latency-bound)   |
 
-: **Batching strategy by model type**: Each model class requires a distinct batching policy (from static/dynamic in vision to continuous in LLM decode and feature-parallel in recommendation) matched to its dominant hardware bottleneck. Typical batch sizes are operating ranges set by latency budgets and KV-cache capacity; they sit at or beyond the overhead-amortization knees of notebook \ref{nbk-inference-batching-efficiency-curve}, which mark where fixed costs stop dominating rather than where batching stops paying. {#tbl-batching-by-model}
+: **Batching strategy by model type**: Each model class requires a distinct batching policy (from static/dynamic in vision to continuous in LLM decode and feature-parallel in recommendation) matched to its dominant hardware bottleneck. Typical batch sizes are operating ranges set by latency budgets and KV-cache capacity; they may fall below or above the workload-specific overhead-amortization knees illustrated in notebook \ref{nbk-inference-batching-efficiency-curve}, which mark where fixed costs stop dominating rather than where batching stops paying. {#tbl-batching-by-model}
 
 Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: Little's Law\index{Little's Law!capacity planning},[^fn-littles-law-queuing] which relates concurrency, throughput, and latency in any stable system.
 
@@ -2952,7 +2952,7 @@ Batching policy and memory admission are coupled. In a full-attention deployment
 
 As a full-attention LLM generates a 2,000-word essay, each new token attends to representations of earlier tokens. The KV cache\index{KV Cache!memory footprint} retains the keys and values needed for that attention, with a per-request footprint that grows as generation proceeds. Large contiguous reservations can leave HBM reserved but unused or create gaps too small for another reservation. Admission can then fail even though the stored attention state occupies less than the available capacity.
 
-Two classes of techniques meet at this boundary. KV-state capacity techniques, such as PagedAttention\index{PagedAttention!virtual memory mapping} and prefix caching, decide where attention state lives and how much fragmentation the memory manager tolerates. Decode-time latency techniques, such as speculative decoding, change how much target-model work is needed per emitted token. Speculative decoding is not KV-cache compression; it trades extra draft-model state, target-model verification, and scheduler complexity for lower TPOT under the same memory budget. Prefill-decode disaggregation closes the section by treating the attention state as a payload, because separating the two phases means moving each request's cache between pools.
+Two classes of techniques meet at this boundary. KV-state capacity techniques, such as PagedAttention\index{PagedAttention!virtual memory mapping} and prefix caching, decide where attention state lives and how much fragmentation the memory manager tolerates. Decode-time latency techniques, such as speculative decoding, change how much target-model work is needed per emitted token. Speculative decoding is not KV-cache compression; it trades extra draft-model state, target-model verification, and scheduler complexity for lower TPOT under the same memory budget. Prefill-decode disaggregation treats the attention state as a payload, because separating the two phases means moving each request's cache between pools. Capacity accounting and adapter locality then determine how retained KV state and task-specific weights share the remaining memory budget.
 
 Wherever they can, the calculations that follow share one reference replica, the 70B model on one eight-GPU H100 node that performance engineering established, with FP16 weights split eight ways. A few leave it on purpose to make a single point, and each says so where it does. The attention layout matters even more, because it sets the bytes cached per token. Grouped query attention with eight KV heads, the layout of the Llama-family 70B models, caches one eighth the state of a 64-head multi-head attention baseline, so each calculation names its hardware and attention layout, and numbers from different calculations compare only after conversion to the same configuration.
 
@@ -6509,8 +6509,8 @@ The choice of sharding strategy depends on model architecture and deployment pri
 
 | **Factor**                | **Tensor Parallel** | **Pipeline Parallel** | **Expert Parallel** | **Embedding Shard** |
 |:--------------------------|:-------------------:|:---------------------:|:-------------------:|:-------------------:|
-| **Latency priority**      |         Best        |         Worst         |       Moderate      |         N/A         |
-| **Throughput priority**   |         Good        |    Best (pipelined)   |         Good        |         Best        |
+| **Latency priority**      | Compute savings exceed collectives | No staging-only reduction | Routing-dependent | Lookup-dependent |
+| **Throughput priority**   | Collective-limited | Full, balanced pipeline | Balanced expert traffic | Balanced lookup load |
 | **Interconnect limited**  |       Poor fit      |        Good fit       |       Moderate      |       Good fit      |
 | **Implementation effort** |         High        |          Low          |       Moderate      |         High        |
 

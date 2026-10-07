@@ -3044,6 +3044,37 @@ y_gpu = y_regular.to("cuda", non_blocking=True)
 
 :::
 
+##### Synchronization and correctness {.unnumbered}
+
+Concurrent execution introduces ordering constraints. When one stream's output becomes another stream's input, the system must enforce a happens-before relationship without unnecessarily serializing independent work. Two synchronization mechanisms\index{Synchronization!device vs. stream} exist, with dramatically different performance implications.
+
+Full device synchronization (`torch.cuda.synchronize()`) blocks all streams and the CPU until every queued operation completes. This creates a global serialization point that eliminates all overlap benefits. CUDA events\index{Synchronization event!inter-stream}\index{Synchronization event!fine-grained} provide the alternative: fine-grained synchronization that blocks only the dependent stream, allowing other streams and the CPU to continue execution (see @lst-cuda-events).
+
+::: {#lst-cuda-events lst-cap="**CUDA Events for Synchronization**: Events enable fine-grained producer-consumer patterns between streams without blocking the entire device."}
+
+```{.python}
+# Create streams and event
+stream1 = torch.cuda.Stream()
+stream2 = torch.cuda.Stream()
+event = torch.cuda.Event()
+
+# Stream 1: producer
+with torch.cuda.stream(stream1):
+    result1 = expensive_computation(data1)
+    event.record()  # Mark completion point
+
+# Stream 2: consumer (waits only for stream1's event)
+with torch.cuda.stream(stream2):
+    event.wait()  # Block stream2 until event is recorded
+    result2 = dependent_computation(result1)  # Safe to use result1
+```
+
+:::
+
+The performance difference between these approaches is categorical. Full synchronization after every operation converts a concurrent pipeline into a sequential one, entirely negating the hardware parallelism that streams expose. Event-based synchronization preserves the concurrent execution model while enforcing only the dependencies that correctness requires.
+
+Event-based synchronization extends the overlap principle to model-stage overlap within a single node. Different model stages on separate GPUs can process different microbatches concurrently, with each stage's computation overlapping the next stage's data reception (@lst-pipeline-parallelism-streams). The single-node implementation is enough to expose the synchronization principle that survives at larger scale.
+
 ::: {#lst-pipeline-parallelism-streams lst-cap="**Stage Overlap with Streams**: Overlap multiple model stages across microbatches using streams and events for inter-stage synchronization."}
 
 ```{.python}
@@ -3082,40 +3113,9 @@ for mb in range(num_microbatches):
 
 :::
 
-This overlap principle extends naturally to model-stage overlap within a single node. Different model stages on separate GPUs can process different microbatches concurrently, with each stage's computation overlapping the next stage's data reception (@lst-pipeline-parallelism-streams). The single-node implementation is enough to expose the synchronization principle that survives at larger scale. Once computation and communication overlap, the remaining challenge is ensuring correctness when operations complete out of order.
-
 ::: {.column-margin .margin-pointer}
 ↪ Layer-wise model partitioning across GPUs, whose idle pipeline stages this stage-overlap pattern addresses, is developed in @sec-model-training-model-parallelism-c97e.
 :::
-
-##### Synchronization and correctness {.unnumbered}
-
-Concurrent execution introduces ordering constraints. When one stream's output becomes another stream's input, the system must enforce a happens-before relationship without unnecessarily serializing independent work. Two synchronization mechanisms\index{Synchronization!device vs. stream} exist, with dramatically different performance implications.
-
-Full device synchronization (`torch.cuda.synchronize()`) blocks all streams and the CPU until every queued operation completes. This creates a global serialization point that eliminates all overlap benefits. CUDA events\index{Synchronization event!inter-stream}\index{Synchronization event!fine-grained} provide the alternative: fine-grained synchronization that blocks only the dependent stream, allowing other streams and the CPU to continue execution (see @lst-cuda-events).
-
-::: {#lst-cuda-events lst-cap="**CUDA Events for Synchronization**: Events enable fine-grained producer-consumer patterns between streams without blocking the entire device."}
-
-```{.python}
-# Create streams and event
-stream1 = torch.cuda.Stream()
-stream2 = torch.cuda.Stream()
-event = torch.cuda.Event()
-
-# Stream 1: producer
-with torch.cuda.stream(stream1):
-    result1 = expensive_computation(data1)
-    event.record()  # Mark completion point
-
-# Stream 2: consumer (waits only for stream1's event)
-with torch.cuda.stream(stream2):
-    event.wait()  # Block stream2 until event is recorded
-    result2 = dependent_computation(result1)  # Safe to use result1
-```
-
-:::
-
-The performance difference between these approaches is categorical. Full synchronization after every operation converts a concurrent pipeline into a sequential one, entirely negating the hardware parallelism that streams expose. Event-based synchronization preserves the concurrent execution model while enforcing only the dependencies that correctness requires.
 
 This synchronization discipline has one operational trap: debug code often leaves `torch.cuda.synchronize()` in the hot path, turning an overlapped pipeline into a serialized one. When overlap remains poor, profiling must separate scheduling stalls from kernel inefficiency. NVIDIA Nsight Systems\index{Nsight Systems!profiling tool} (`nsys profile`) shows CPU activity, GPU kernels, and memory transfers on one timeline. NVIDIA Nsight Compute\index{Nsight Compute!profiling tool} (`ncu`) then explains kernel behavior with hardware counters.
 
@@ -4544,7 +4544,7 @@ In this model, $T_{\text{sw}}$ exceeds the ideal lower bounds $\IronlawTermTimes
 
 ### Phase 4: Hardware abstraction (solving the abstraction problem) {.unnumbered}
 
-The identical Python script executes across heterogeneous hardware architectures through backend abstraction layers, as @tbl-framework-backends summarizes.
+The tensor operations in this training step map to heterogeneous hardware architectures through backend abstraction layers, as @tbl-framework-backends summarizes. The displayed script uses CUDA; another target requires matching device placement and a supported backend execution path.
 
 Each backend maps common tensor semantics to silicon-specific primitives. A single `loss.backward()` invocation routes to different execution pipelines depending on device placement. Differences in floating-point summation order, reduction trees, and non-deterministic atomic operations introduce numerical variation across backends, requiring equivalence to be validated against explicit numerical tolerances rather than bitwise identity.
 
