@@ -562,7 +562,7 @@ plt.close()
 
 The journey begins as gradients become ready during the backward pass. A synchronous data-parallel worker contributes gradients from its local examples, and the optimizer needs the correctly combined contributions before applying the shared update. Some exchanges can begin while independent backward computation continues. Tensor ownership determines the destination; gradient readiness determines when the journey can start.
 
-The specific "travel manifest" for this journey is dictated by the chosen parallelism strategy, because the way the math is split determines how the data moves. For Archetype A (GPT-4/Llama-3), dense gradient contributions are combined within each data-parallel group; in a hybrid layout, that group contains the matching parameter shard from each replica. AllReduce serves the replicated-gradient baseline. For Archetype B (DLRM at Scale),[^fn-dlrm-embedding-alltoall] lookup requests travel to embedding-shard owners and the resulting vectors return to the workers that need them. MoE\index{MoE!token routing} routing similarly sends activations to the ranks hosting selected experts and returns their outputs. These destination-specific exchanges motivate AllToAll.
+The specific "travel manifest" for this journey is dictated by the chosen parallelism strategy, because the way the math is split determines how the data moves. For Archetype A (GPT-4/Llama-3), dense gradient contributions are combined within each data-parallel group; in a hybrid layout, that group contains the matching parameter shard from each replica. AllReduce serves the replicated-gradient baseline. For Archetype B (DLRM at Scale),[^fn-dlrm-embedding-alltoall] lookup requests travel to embedding-shard owners and the resulting vectors return to the workers that need them. Mixture-of-experts (MoE)\index{MoE!token routing} routing similarly sends activations to the ranks hosting selected experts and returns their outputs. These destination-specific exchanges motivate AllToAll.
 
 [^fn-dlrm-embedding-alltoall]: [offset=6mm] **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction uses sharded embedding tables and exchanges the resulting sparse lookups across workers. The resulting AllToAll may be startup-bound when each destination receives a fine-grained message, injection- or reception-bound as aggregate payload grows, or fabric-bound under oversubscription, unfavorable routing, or shard-access skew. DLRM therefore supplies a destination-specific traffic pattern, not a universal latency regime.
 
@@ -921,7 +921,7 @@ class ChunkRegime:
 **Math**:
 
 1.  **Knee**: $\CrossoverPoint = \alpha \cdot \beta =$ `{python} CriticalMsgSize.alpha_s_sci_math` s $\times$ `{python} CriticalMsgSize.beta_bytes_s_sci_math` B/s $=$ `{python} CriticalMsgSize.n_star_kb_str`.
-2.  **Chunk per step**: a ring sends $M/N$ per step, `{python} ChunkRegime.chunk_small_kb_str` on `{python} ChunkRegime.n_small_str` ranks (above the knee) but only `{python} ChunkRegime.chunk_large_kb_str` on `{python} ChunkRegime.n_large_str` ranks (below it).
+2.  **Chunk per step**: A ring sends $M/N$ per step, `{python} ChunkRegime.chunk_small_kb_str` on `{python} ChunkRegime.n_small_str` ranks (above the knee) but only `{python} ChunkRegime.chunk_large_kb_str` on `{python} ChunkRegime.n_large_str` ranks (below it).
 3.  **Ring time** $2(N-1)\left(\alpha + \frac{M}{N\beta}\right)$: about `{python} ChunkRegime.ring_small_ms_str` on `{python} ChunkRegime.n_small_str` ranks, of which the byte term is `{python} ChunkRegime.bytes_small_ms_str`; about `{python} ChunkRegime.ring_large_ms_str` on `{python} ChunkRegime.n_large_str` ranks, where the byte term is still only `{python} ChunkRegime.bytes_large_ms_str`.
 
 **Systems insight**: The regime belongs to the chunk, not to the tensor. The byte term barely moves as the group grows, but at `{python} ChunkRegime.n_large_str` ranks each step carries a chunk below $\CrossoverPoint$, so startup dominates and the same bucket takes several times longer. Large language model (LLM)\index{LLM}\index{Large Language Model|see{LLM}} gradients are bandwidth-bound as tensors, yet a flat ring over a large group can still carry them in latency-bound steps. The levers then shift to larger buckets, fewer rounds, and hierarchy, which is why the algorithms of @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 compete on round count as well as bytes.
@@ -1432,7 +1432,7 @@ class MoeAllToAll:
 
 ::: {#nbk-collective-communication-alltoall-moe-token-routing .callout-notebook title="AllToAll for MoE token routing"}
 
-**Problem**: A mixture of experts (MoE) model processes a batch of `{python} MoeAllToAll.total_tokens_str` across `{python} MoeAllToAll.n_gpus_str` GPUs (`{python} MoeAllToAll.tokens_per_gpu_str` per GPU). Each token is a `{python} MoeAllToAll.hidden_dim_str`-dimensional hidden state in BF16 (`{python} MoeAllToAll.kb_per_token_str` per token). The gating network assigns each token to exactly 1 of `{python} MoeAllToAll.n_experts_str` experts (`{python} MoeAllToAll.experts_per_gpu_str` experts per GPU). Assuming uniform routing (each expert receives `{python} MoeAllToAll.tokens_per_expert_str`), how much data does each GPU send and receive?
+**Problem**: An MoE model processes a batch of `{python} MoeAllToAll.total_tokens_str` across `{python} MoeAllToAll.n_gpus_str` GPUs (`{python} MoeAllToAll.tokens_per_gpu_str` per GPU). Each token is a `{python} MoeAllToAll.hidden_dim_str`-dimensional hidden state in BF16 (`{python} MoeAllToAll.kb_per_token_str` per token). The gating network assigns each token to exactly 1 of `{python} MoeAllToAll.n_experts_str` experts (`{python} MoeAllToAll.experts_per_gpu_str` experts per GPU). Assuming uniform routing (each expert receives `{python} MoeAllToAll.tokens_per_expert_str`), how much data does each GPU send and receive?
 
 **Math**:
 
@@ -1943,7 +1943,7 @@ Physical placement determines the cost of these logical pairings. Rounds $k=0$ a
 
 NCCL can use a double binary tree\index{Double Binary Tree}\index{Double Binary Tree!complementary trees}\index{NCCL!double binary tree} for many message sizes and topologies, which addresses the bandwidth inefficiency of a standard binary tree while allowing topology-aware tree placement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. The idea is to construct two independent binary trees with complementary interior-node roles, then run both trees simultaneously, each carrying half the data.
 
-The complementary-tree construction balances endpoint work by making ranks that act as interior nodes in one tree act as leaves in the other. With eight ranks, build the first tree by labeling the nodes of a binary tree in in-order traversal (left subtree, then node, then right subtree). In a balanced seven-node tree labeled from 0, in-order traversal puts the leaves at the even ranks 0, 2, 4, and 6 and the interior nodes at 1, 3, and 5; in one simple construction the eighth rank, 7, joins as one more interior node above that tree. The odd ranks 1, 3, 5, and 7 thus form the first tree's interior and the even ranks are its leaves; the second tree shifts every rank by one position, so the even ranks become its interior and the odd ranks its leaves. Each tree carries half the tensor, $M/2$, and the two halves never meet.
+The complementary-tree construction balances endpoint work by making ranks that act as interior nodes in one tree act as leaves in the other. With eight ranks, build the first tree by labeling the nodes of a binary tree in the order of an in-order traversal (left subtree, then node, then right subtree). In a balanced seven-node tree labeled from 0, in-order traversal puts the leaves at the even ranks 0, 2, 4, and 6 and the interior nodes at 1, 3, and 5; in one simple construction the eighth rank, 7, joins as one more interior node above that tree. The odd ranks 1, 3, 5, and 7 thus form the first tree's interior and the even ranks are its leaves; the second tree shifts every rank by one position, so the even ranks become its interior and the odd ranks its leaves. Each tree carries half the tensor, $M/2$, and the two halves never meet.
 
 Two further steps bring the byte term down from the simple tree's $2\log_2 N \cdot M/\beta$ to about $2M/\beta$. First, each tree pipelines its half in small chunks, so while one chunk moves up from the leaves, the next is already leaving them and every level works at once; tree depth then adds startup rounds and a short pipeline fill, not repeated full-message transfers. Second, count what one rank sends during the reduce phase. As an interior node of one tree it combines the inputs of its (at most two) children and forwards one $M/2$ stream to its parent, and as a leaf of the other tree it sends its own $M/2$ contribution, so it sends about $M$ in total. The broadcast phase mirrors that traffic, for about $2M$ per rank across both phases, the same per-rank volume as the ring. This logical balance does not guarantee that every physical link stays busy or that both trees avoid shared fabric bottlenecks; rank placement and routing still matter.
 
@@ -2117,7 +2117,7 @@ class CrossoverReference:
     crossover = calc_ring_tree_crossover_size(n_ranks, alpha, beta).to(MB)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_ranks == 1024, f"Reference cluster should be 1,024 GPUs, got {n_ranks}")
-    check(2 ** log2n == n_ranks, "Reference rank count should be a power of two")
+    check(2**log2n == n_ranks, "Reference rank count should be a power of two")
     check(abs(crossover.to(MB).magnitude - 7.68) < 0.01, f"Crossover = {crossover}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     n_ranks_str = fmt(n_ranks, precision=0, commas=True)
@@ -2321,8 +2321,8 @@ class CommInfraScenario:
 
 On a DGX H100 node, each GPU's local NVLink capacity is `{python} CommInfraScenario.nvlink_perdir_gb_per_s_str` per direction, while its inter-node port provides `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str` over InfiniBand. These are endpoint capacity budgets, not a promise of uniform achieved rate to every peer. Intra-node connectivity and simultaneous traffic still matter. The hierarchical network\index{Hierarchical Network} in @tbl-bandwidth-hierarchy motivates a schedule that assigns work to each tier according to its usable capacity.
 
-| **Tier**       |   **Interconnect**  |                   **Bandwidth**                   |                      **Relative Speed**                      |
-|:---------------|:-------------------:|:-------------------------------------------------:|:------------------------------------------------------------:|
+| **Tier**       |   **Interconnect**  |                      **Bandwidth**                      |                      **Relative Speed**                      |
+|:---------------|:-------------------:|:-------------------------------------------------------:|:------------------------------------------------------------:|
 | **Intra-Node** |      NVLink 4.0     | `{python} CommInfraScenario.nvlink_perdir_gb_per_s_str` | `{python} CommInfraScenario.bandwidth_ratio_mult_str` faster |
 | **Inter-Node** | InfiniBand NDR 400G |   `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str`   |                     1$\times$ (baseline)                     |
 
@@ -3228,7 +3228,10 @@ class MoeSkew:
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(uniform_remote_tokens == 448, f"Uniform remote tokens = {uniform_remote_tokens}")
     check(hot_remote_tokens == 672, f"Hot remote tokens = {hot_remote_tokens}")
-    check(abs(uniform_rx.to(MB).magnitude - MoeAllToAll.total_sent.to(MB).magnitude) < 1e-9, "Uniform receive must equal the notebook's symmetric send volume")
+    check(
+        abs(uniform_rx.to(MB).magnitude - MoeAllToAll.total_sent.to(MB).magnitude) < 1e-9,
+        "Uniform receive must equal the notebook's symmetric send volume",
+    )
     # ┌── 4. OUTPUT ────────────────────────────────────────
     cap_str = fmt(cap, precision=1, commas=False)
     uniform_tokens_str = fmt(uniform_remote_tokens, precision=0, commas=False)
@@ -3246,7 +3249,7 @@ class MoeSkew:
 
 **Math**:
 
-1.  **Uniform receiver**: each GPU receives `{python} MoeSkew.uniform_tokens_str` remote tokens, or `{python} MoeSkew.uniform_rx_mb_str`, so $T_{\text{dispatch}} \ge$ `{python} MoeSkew.uniform_rx_mb_str` / `{python} MoeAllToAll.beta_gb_per_s_str` $\approx$ `{python} MoeSkew.uniform_bound_us_str`.
+1.  **Uniform receiver**: Each GPU receives `{python} MoeSkew.uniform_tokens_str` remote tokens, or `{python} MoeSkew.uniform_rx_mb_str`, so $T_{\text{dispatch}} \ge$ `{python} MoeSkew.uniform_rx_mb_str` / `{python} MoeAllToAll.beta_gb_per_s_str` $\approx$ `{python} MoeSkew.uniform_bound_us_str`.
 2.  **Hot receiver**: $B_{\text{max}}$ rises to `{python} MoeSkew.hot_tokens_str` remote tokens, or `{python} MoeSkew.hot_rx_mb_str`, so $T_{\text{dispatch}} \ge$ `{python} MoeSkew.hot_rx_mb_str` / `{python} MoeAllToAll.beta_gb_per_s_str` $\approx$ `{python} MoeSkew.hot_bound_us_str`.
 
 **Systems insight**: The exchange cannot finish before its hottest receiver, so a `{python} MoeSkew.cap_mult_str` load on one rank raises the dispatch bound for the whole layer by the same factor, even though every other rank receives less than before. Padding every expert to the same capacity does not avoid the cost; it makes every rank send and receive the padded volume, so all ranks pay what the hot rank paid. A variable-size exchange removes the padding but not the wait. Either way, provisioning for $C_{\text{cap}}$ is provisioning for the skewed bound, and the expert computation on the hot rank grows by the same factor.
@@ -3473,15 +3476,14 @@ The 1-bit Adam paper reports up to 5$\times$ communication-volume reduction whil
 
 The success of 1-bit Adam illustrates how the optimizer's structure can guide a compression scheme. Freezing the second moment and correcting compressed momentum together support the method's convergence analysis; replacing every gradient with its sign would not reproduce that algorithm. The reported end-to-end volume reduction of up to 5$\times$ includes the uncompressed warmup and other communication costs, so it is smaller than the raw 32$\times$ ratio of 1-bit values to FP32 momentum.
 
-
 ### Bandwidth versus convergence trade-offs in compression {#sec-communication-collective-operations-compression-tradeoffs}
 
 Gradient compression is not free; it trades reduced communication for increased variance or bias in the optimization process\index{Gradient Compression!trade-offs}. The comparison in @tbl-gradient-compression-methods summarizes the source-backed patterns from quantization, sparsification, error-feedback, and optimizer-aware compression work [@seide2014; @aji2017; @lin2018deep; @stich2018sparsified; @karimireddy2019error; @tang20211bit].
 
 | **Method**                | **Ratio vs. FP32** | **Ratio vs. BF16** | **Convergence Impact**                   | **Best Use Case**              |
 |:--------------------------|:------------------:|:------------------:|:-----------------------------------------|:-------------------------------|
-| **FP16**                  |      2$\times$     |  1$\times$ (none)  | Check range and numerical stability      | Common accelerator baseline    |
-| **INT8 + Error FB**       |  At most 4$\times$ |  At most 2$\times$ | Workload- and scaling-dependent          | Bandwidth-constrained clusters |
+| **FP16**                  |     2$\times$      |  1$\times$ (none)  | Check range and numerical stability      | Common accelerator baseline    |
+| **INT8 + Error FB**       | At most 4$\times$  | At most 2$\times$  | Workload- and scaling-dependent          | Bandwidth-constrained clusters |
 | **Top-k (1%) + Error FB** | At most 50$\times$ | At most 25$\times$ | Depends on sparsity and residual control | Cross-data center training     |
 | **1-bit + Error FB**      | At most 32$\times$ | At most 16$\times$ | Requires compression-aware optimization  | Extreme bandwidth constraints  |
 
