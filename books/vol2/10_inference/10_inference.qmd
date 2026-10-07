@@ -2390,7 +2390,7 @@ class A100HardwareScenario:
 
 **Diagnosis**: The system runs across `{python} A100HardwareScenario.num_gpus_str` A100 GPUs linked via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. For a `{python} A100HardwareScenario.activation_transfer_mb_str` payload, the bandwidth-only transfer estimate is $\CommunicationTime \approx$ `{python} A100HardwareScenario.pcie_transfer_ms_str` over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. Collective startup, topology, and contention can add time. The service still runs an older request-level batching server rather than an iteration-level engine, with max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, so a batch holds its members until its longest generation finishes. The scenario assumes that `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches experience head-of-line queuing delay $L_{\text{lat,queue}}$ as short requests wait behind long generations.
 
-**Systems lesson**: The shape of the latency distribution separates the two candidates. The PCIe transfer is paid by every request, so it shifts p50 and p95 along with p99; a cost that leaves p50 and p95 within the SLO while only p99 spikes must come from a mechanism that strikes a minority of requests. Traces that show per-step transfer time near the bandwidth estimate across all percentiles rule the interconnect out as the tail's cause, and traces that show short requests waiting behind long generations rule head-of-line blocking in. Adopting continuous batching removes that blocking structurally. Until the server can be replaced, the following policy approximates it within request-level batching:
+**Systems lesson**: The latency distribution motivates tracing both candidates. A transfer paid by every request contributes to every latency percentile, but its service-time cost can also amplify tail queueing near saturation. In this scenario, traces showing stable transfer times too small to explain the additional delay, together with short requests waiting behind long generations, identify the fixed-membership barrier as the immediate cause. Continuous admission removes that barrier; prefill scheduling, cache capacity, and other waits still require measurement. Until the server can be replaced, the following policy reduces output-length variation within request-level batches:
 
 1. **Request classification**: Classify requests by expected output length (short: under `{python} A100HardwareScenario.short_token_threshold_str` tokens, medium: `{python} A100HardwareScenario.short_token_threshold_str` to `{python} A100HardwareScenario.medium_token_threshold_str` tokens, long: over `{python} A100HardwareScenario.medium_token_threshold_str` tokens)
 2. **Differentiated batching**: Limit short batches to `{python} A100HardwareScenario.short_batch_size_str`, medium to `{python} A100HardwareScenario.medium_batch_size_str`, long to `{python} A100HardwareScenario.long_batch_size_str`
@@ -2962,7 +2962,7 @@ Wherever they can, the calculations that follow share one reference replica, the
 
 ### The KV cache wall and memory capacity {#sec-inference-scale-kv-cache-wall}
 
-Increasing batch size in LLM serving can encounter the KV cache wall\index{KV Cache!capacity wall} before execution resources are fully used. The capacity model in @fig-kv-cache-wall leaves the reference replica to show the wall on a single device. It combines an idealized 35 GB weight payload for a quantized 70B model with its full-attention, eight-KV-head GQA state on one 80 GB H100. With the illustrated cache dimensions and precision, a batch of 8 reaches the memory boundary at roughly 17K tokens per sequence. Quantization metadata, runtime buffers, and other allocations reduce the capacity available in an actual deployment, so the plotted boundary is an optimistic sizing limit.
+Increasing batch size in LLM serving can encounter the KV cache wall\index{KV Cache!capacity wall} before execution resources are fully used. The capacity model in @fig-kv-cache-wall leaves the reference replica to show the wall on a single device. It combines an idealized 35 GB weight payload for a quantized 70B model with its full-attention, eight-KV-head GQA state on one H100, using a conservative decimal budget matching its nameplate label. This illustrative budget differs from the registered byte capacity used in the node estimator below. With the illustrated cache dimensions and precision, a batch of 8 reaches the memory boundary at roughly 17K tokens per sequence. Quantization metadata, runtime buffers, and other allocations reduce the capacity available in an actual deployment, so the plotted boundary is an optimistic sizing limit.
 
 ```{python}
 #| echo: false
@@ -3174,6 +3174,8 @@ class KVCacheCapacityEstimator:
 ```
 
 ::: {#nbk-inference-kv-cache-capacity-estimator .callout-notebook title="KV-cache capacity estimator"}
+
+Unlike the conservative decimal budgets used in the illustrative comparisons, this estimator retains the registered byte capacity when summing the node's HBM. Converting its display units does not change that byte count.
 
 **Problem**: A deployment serves an illustrative 70B-class GQA model with 128K context support (FP16 weights $\approx$ `{python} KVCacheCapacityEstimator.weight_gb_str`) on an `{python} KVCacheCapacityEstimator.node_gpus_str`$\times$ H100 node (`{python} KVCacheCapacityEstimator.total_hbm_gb_str` total HBM). The goal is to determine the maximum batch size for a context length of 128K tokens.
 
@@ -3945,7 +3947,7 @@ class KVCacheCalc:
 
 `{python} KVCacheCalc.kv_fp16_display_math`
 
-A single request's KV cache alone consumes a substantial fraction of the H100's `{python} KVCacheCalc.h100_mem_gb_str` of HBM. For a batch of 8 concurrent requests, the KV cache would require `{python} KVCacheCalc.batch8_kv_fp16_gb_str`, exceeding single-GPU capacity. Quantization reduces bytes per cached element, while architectural optimization can reduce the number of cached elements. These complementary levers change different factors in the capacity calculation.
+A single request's KV cache alone consumes a substantial fraction of the H100's `{python} KVCacheCalc.h100_mem_gb_str` of HBM. For a batch of 8 concurrent requests, the KV cache would require `{python} KVCacheCalc.batch8_kv_fp16_gb_str`, leaving no room for model weights or runtime state. Quantization reduces bytes per cached element, while architectural optimization can reduce the number of cached elements. These complementary levers change different factors in the capacity calculation.
 
 #### KV cache quantization {#sec-inference-scale-kv-quantization}
 
@@ -4017,6 +4019,8 @@ class PrecisionDividend:
 ::: {#nbk-inference-precision-dividend .callout-notebook title="The precision dividend with a full-width cache"}
 
 Notebook \ref{nbk-performance-engineering-precision-dividend} computed this dividend for the reference replica's eight-head GQA cache. Repeating it with the 64-head MHA baseline, whose requests carry eight times more KV state, separates what the attention layout changes from what precision changes.
+
+This comparison uses a conservative decimal HBM budget of `{python} PrecisionDividend.h100_mem_gb_str` per GPU, matching the nameplate label rather than the registered byte capacity used by the node estimator.
 
 **Problem**: A team serves a 70B model on `{python} PrecisionDividend.tensor_parallel_degree_str`$\times$ H100 GPUs. Weights in FP16 consume `{python} PrecisionDividend.fp16_weight_total_gb_str` (`{python} PrecisionDividend.fp16_weight_per_gpu_gb_str`/GPU). KV cache at FP16 consumes `{python} KVCacheCalc.kv_fp16_gb_str` per request. How does quantizing weights to INT4 and KV cache to INT8 change the maximum batch size?
 
@@ -4824,7 +4828,7 @@ class QuantizedServingCapacity:
     gpt3_int4_gb_str = fmt_memory(gpt3_int4, unit=GB, precision=1, commas=False)
 ```
 
-A 70B model with 4-bit weights requires approximately `{python} QuantizedServingCapacity.weight_int4_gb_str`, leaving `{python} QuantizedServingCapacity.kv_headroom_gb_str` on an `{python} QuantizedServingCapacity.a100_mem_gb_str` A100 for KV cache. With FP16 KV cache at about `{python} QuantizedServingCapacity.kv_per_1k_sequence_gb_str` per 1K-token sequence for the MHA baseline, this supports about `{python} QuantizedServingCapacity.max_1k_sequences_str` concurrent 1K-token sequences before other runtime overheads. With FP16 weights, the same 70B model would not fit on one A100 at all, so weight-only quantization changes both feasibility and batch capacity.
+This comparison uses a conservative decimal HBM budget matching the A100 nameplate label, rather than the registered byte capacity used by the node estimator. A 70B model with 4-bit weights requires approximately `{python} QuantizedServingCapacity.weight_int4_gb_str`, leaving `{python} QuantizedServingCapacity.kv_headroom_gb_str` on an `{python} QuantizedServingCapacity.a100_mem_gb_str` A100 for KV cache. With FP16 KV cache at about `{python} QuantizedServingCapacity.kv_per_1k_sequence_gb_str` per 1K-token sequence for the MHA baseline, this supports about `{python} QuantizedServingCapacity.max_1k_sequences_str` concurrent 1K-token sequences before other runtime overheads. With FP16 weights, the same 70B model would not fit on one A100 at all, so weight-only quantization changes both feasibility and batch capacity.
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
@@ -5673,6 +5677,8 @@ class MoECapacityPlan:
 
 ::: {#nbk-inference-moe-capacity-planning .callout-notebook title="MoE capacity planning"}
 
+This comparison uses a conservative decimal budget of `{python} MoECapacityPlan.h100_mem_gb_str` per GPU, matching the H100 nameplate label rather than the registered byte capacity used by the node estimator.
+
 **Problem**: A team deploys DeepSeek-V3 (`{python} MoECapacityPlan.moe_total_params_b_str` total parameters, `{python} MoECapacityPlan.moe_active_params_b_str` active per token) for a chatbot application. The model uses FP8 weights (1 byte per parameter). The cluster has `{python} MoECapacityPlan.node_gpus_str`-GPU nodes, each with `{python} MoECapacityPlan.node_gpus_str`$\times$ H100 GPUs (`{python} MoECapacityPlan.h100_mem_gb_str` HBM per GPU, `{python} MoECapacityPlan.node_capacity_gb_str` per node). How many nodes are needed, and what is the per-token decode latency?
 
 **Math**:
@@ -6296,7 +6302,9 @@ The arithmetic of these bullets is the design constraint. A dense INT8 table wit
 
 **Sharding strategy**:
 
-- **Hot embeddings** (top 1 percent by access frequency): Replicated across all shards
+The tier percentages below describe the admitted resident population, not the full entity catalog. Replica bytes count against the platform-wide resident budget, so the admitted population and replication scope must be chosen together.
+
+- **Hot embeddings** (top 1 percent by access frequency): Replicated within selected shard groups
 - **Warm embeddings** (next `{python} MetaEmbeddingScaleCheck.warm_pct_str`): Column-sharded with `{python} MetaEmbeddingScaleCheck.tp_parallelism_str`-way parallelism
 - **Cold embeddings** (remaining `{python} MetaEmbeddingScaleCheck.cold_pct_str`): Row-sharded with consistent hashing
 
