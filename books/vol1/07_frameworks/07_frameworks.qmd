@@ -36,13 +36,13 @@ engine: jupyter
 
 _Why does the framework silently constrain every decision that comes after it?_
 
-Model equations do not execute themselves. A framework translates an architecture into work that hardware can run, and that translation is not neutral. It decides when operations execute, what intermediate state training retains, how memory is allocated, and which deployment targets can use the resulting artifact. These choices shape more than speed: they determine what can be debugged directly, what the compiler can optimize, and whether the same model survives the path from a research environment to a production runtime. The same model expressed through two execution paths can differ in speed or memory use by several times, a gap that no amount of model tuning recovers when the framework hides the structure a compiler needs. The abstractions that make experimentation convenient therefore create long-lived commitments. Once a project accumulates checkpoints, modules, data loaders, serving formats, and team expertise around a framework, changing it becomes a system migration rather than a library substitution, measured in engineer-months rather than afternoons. A framework well suited to rapid exploration can expose too little structure for efficient deployment, while a constrained execution path can sacrifice the flexibility needed during discovery. Because execution, differentiation, and abstraction meet in the same software layer, a local convenience can become a downstream performance or portability constraint. The engineering question is not which framework is universally best, but which trade-offs the workload, team, and target machine can afford to make fixed. Understanding frameworks is therefore about reasoning through those system choices rather than learning transient API syntax, which changes with each release while the underlying trade-offs persist. In D·A·M terms, the framework mediates algorithm-machine co-design by turning algorithmic intent and data representation into executable work under machine constraints.
+Model equations do not execute themselves. A framework translates an architecture into work that hardware can run, and that translation is not neutral. It decides when operations execute, what intermediate state training retains, how memory is allocated, and which deployment targets can use the resulting artifact. These choices shape more than speed. They also determine what can be debugged directly, what the compiler can optimize, and whether the same model survives the path from a research environment to a production runtime. The same model expressed through two execution paths can differ in speed or memory use by several times, a gap that no amount of model tuning recovers when the framework hides the structure a compiler needs. The abstractions that make experimentation convenient therefore create long-lived commitments. Once a project accumulates checkpoints, modules, data loaders, serving formats, and team expertise around a framework, changing it becomes a system migration rather than a library substitution, measured in engineer-months rather than afternoons. A framework well suited to rapid exploration can expose too little structure for efficient deployment, while a constrained execution path can sacrifice the flexibility needed during discovery. Because execution, differentiation, and abstraction meet in the same software layer, a local convenience can become a downstream performance or portability constraint. The engineering question is not which framework is universally best, but which trade-offs the workload, team, and target machine can afford to make fixed. Understanding frameworks is therefore about reasoning through those system choices rather than learning transient API syntax, which changes with each release while the underlying trade-offs persist. In D·A·M terms, the framework mediates algorithm-machine co-design by turning algorithmic intent and data representation into executable work under machine constraints.
 
 ::: {.callout-learning-objectives}
 
 - Explain how frameworks mediate algorithm-machine co-design through execution, differentiation, and hardware abstraction
 - Compare execution strategies using dispatch overhead, compilation cost, and deployment constraints
-- Analyze automatic differentiation and activation storage to choose recomputation or checkpointing
+- Analyze automatic differentiation and activation storage to decide which activations to retain and which to recompute
 - Implement module abstraction patterns for parameter discovery, mode behavior, serialization, and hooks
 - Calculate training-step FLOPs, memory traffic, and dispatch overhead to identify fusion and layout bottlenecks
 - Select TensorFlow, PyTorch, JAX, or edge runtimes based on model, hardware, team, and deployment requirements
@@ -51,13 +51,13 @@ Model equations do not execute themselves. A framework translates an architectur
 
 ## Three Framework Problems {#sec-ml-frameworks-three-problems-every-framework-must-solve-317d}
 
-An architecture is a graph of commitments: a transformer commits the system to attention, matrix multiplications, activation state, and memory traffic. The framework is the layer that turns that graph into work the machine can execute. A few calls such as `logits = model(tokens)`, `loss = criterion(logits, targets)`, and `loss.backward()` hide billions of floating-point operations across memory hierarchies, gradients through millions of parameters via automatic differentiation\index{Automatic differentiation!framework role}, thousands of GPU kernel launches, and gigabytes of intermediate state. The API looks simple because the framework is acting as a compiler for the silicon contract.
+@Sec-network-architectures ended by treating architecture selection as a contract with the hardware. A CNN commits the system to spatial locality and weight reuse, and a transformer commits it to attention, matrix multiplications, activation state, and memory traffic. Those commitments fix *what* work exists. The framework is the layer that decides *how* that work reaches the machine. A few calls such as `logits = model(tokens)`, `loss = criterion(logits, targets)`, and `loss.backward()` hide billions of floating-point operations across memory hierarchies, gradients through millions of parameters via automatic differentiation\index{Automatic differentiation!framework role}, thousands of GPU kernel launches, and gigabytes of intermediate state. The API looks simple because the framework is acting as a compiler for the silicon contract.
 
-Architectures specify what computations neural networks perform, but knowing *what* to compute is entirely different from knowing *how* to compute it efficiently. A transformer's attention mechanism requires coordinating computation across memory hierarchies and accelerator cores in patterns where naive implementations can run one to two orders of magnitude slower than optimized ones because of uncoalesced memory accesses (scattered reads the hardware cannot merge into wide memory transactions) and repeated round-trips to high-bandwidth memory (HBM). Implementing these operations from scratch for every model would make deep learning economically infeasible. ML frameworks exist to bridge this gap by lowering abstract model graphs into hardware-aligned execution pipelines that maximize compute unit utilization while minimizing off-chip memory traffic.
+The gap between *what* and *how* is wide. A transformer's attention mechanism requires coordinating computation across memory hierarchies and accelerator cores in patterns where naive implementations can run one to two orders of magnitude slower than optimized ones because of uncoalesced memory accesses (scattered reads the hardware cannot merge into wide memory transactions) and repeated round-trips to high-bandwidth memory (HBM). Implementing these operations from scratch for every model would make deep learning economically infeasible. ML frameworks exist to bridge this gap by lowering abstract model graphs into hardware-aligned execution pipelines that maximize compute unit utilization while minimizing off-chip memory traffic.
 
-A framework\index{ML framework!compiler analogy} is to machine learning what a compiler is to traditional programming. A C compiler translates human-readable code into optimized machine instructions, managing register allocation, instruction scheduling, and memory layout. An ML framework translates high-level model definitions into hardware-specific execution plans, managing operator fusion, memory reuse, and device placement. The correspondence is operational rather than figurative: modern frameworks incorporate optimizing compilers (such as Accelerated Linear Algebra (XLA) or TorchInductor) that lower graph representations directly to target machine code.
+A framework\index{ML framework!compiler analogy} is to machine learning what a compiler is to traditional programming. A C compiler translates human-readable code into optimized machine instructions, managing register allocation, instruction scheduling, and memory layout. An ML framework translates high-level model definitions into hardware-specific execution plans, managing kernel fusion, memory reuse, and device placement. The correspondence is operational rather than figurative: modern frameworks incorporate optimizing compilers (such as Accelerated Linear Algebra (XLA) or TorchInductor) that lower graph representations directly to target machine code.
 
-Every ML framework\index{ML framework!execution problem}\index{ML framework!differentiation problem}\index{ML framework!hardware abstraction problem}, regardless of API or design philosophy, must solve three core problems. The first is the *execution problem*: deciding when and how computation runs. A framework can execute operations immediately as written (eager execution\index{Eager execution!definition}[^fn-eager-execution-tradeoff]) or construct a computational graph\index{Computational graph!definition}[^fn-computational-graph-frameworks]\index{Deferred execution!graph construction}—a structured intermediate representation of operations and data dependencies—to optimize before launching device kernels (graph execution). This choice determines the fundamental trade-off between interactive debugging and whole-program compiler optimization.
+Every ML framework\index{ML framework!execution problem}\index{ML framework!differentiation problem}\index{ML framework!hardware abstraction problem}, regardless of API or design philosophy, must solve three core problems. The first is the *execution problem*: deciding when and how computation runs. A framework can execute operations immediately as written (eager execution\index{Eager execution!definition}[^fn-eager-execution-tradeoff]) or first construct a computational graph\index{Computational graph!graph execution}[^fn-computational-graph-frameworks]\index{Deferred execution!graph construction} (a record of operations and their data dependencies, developed in @sec-ml-frameworks-computational-graph-00f7) to optimize before launching device kernels (graph execution). This choice determines the fundamental trade-off between interactive debugging and whole-program compiler optimization.
 
 With an execution strategy in place, the framework must solve the *differentiation problem*: computing gradients automatically. Because gradient-based training requires derivatives of a scalar loss with respect to millions or billions of parameters, manual calculus is impossible at scale. Frameworks implement automatic differentiation by registering derivative rules across supported operator compositions, chaining vector-Jacobian products while managing numerical precision and the memory overhead of intermediate activations retained for backward passes.
 
@@ -67,7 +67,7 @@ With an execution strategy in place, the framework must solve the *differentiati
 
 The third problem is *hardware abstraction*: targeting diverse hardware from a single interface. The same model definition should be expressible across CPUs, GPUs, Tensor Processing Units (TPUs), and mobile accelerators, even though each target presents distinct memory hierarchies, instruction sets, and interconnect bandwidths. Within the GPU domain, framework ecosystems increasingly expose custom-kernel languages such as Triton [@tillet2019], allowing developers to write high-performance, block-level kernels without hand-crafting low-level CUDA or device assembly.
 
-[^fn-computational-graph-frameworks]: **Computational graph**\index{Computational graph!framework optimization}: The "optimize before executing" distinction in the triggering sentence is the key design choice. Capturing the program as a data structure lets a framework fuse compatible operations into fewer GPU kernels before execution, reducing launch overhead and intermediate memory traffic. The engineering cost of this visibility is that the executed program differs from the source code, making debugging harder, a trade-off every graph-based framework must justify against the performance gain.
+[^fn-computational-graph-frameworks]: **Computational graph**\index{Computational graph!framework optimization}: Optimizing before executing is the design choice that separates graph execution from eager execution. Capturing the program as a data structure lets a framework fuse compatible operations into fewer GPU kernels before execution, reducing launch overhead and intermediate memory traffic. The engineering cost of this visibility is that the executed program differs from the source code, making debugging harder, a trade-off every graph-based framework must justify against the performance gain.
 
 [^fn-eager-execution-tradeoff]: **Eager execution**\index{Eager execution!optimization trade-off}: This mode executes each operation immediately, which enables direct debugging with standard tools but sacrifices the global view needed for graph-level optimizations. Without capturing a larger region of computation, an eager runtime cannot fuse across that region or preplan its memory, leaving workload-dependent optimization opportunities for compilers such as `torch.compile`.
 
@@ -83,7 +83,7 @@ The "source code" is the model architecture (the $O$ term). The framework's job 
 2.  Maximize utilization $(\EfficiencyHw)$ by matching operations to specialized hardware units such as Tensor Cores.
 3.  Minimize overhead $(\Latency)$ through efficient asynchronous dispatch and graph capture.
 
-Choosing a framework therefore also chooses the compiler that determines hardware efficiency. The formal definition below makes that compiler role precise and separates frameworks from numerical libraries such as NumPy.
+Choosing a framework therefore also chooses the compiler that determines hardware efficiency. Read against the three framework problems, execution strategy bears most directly on $\Latency$, differentiation on $\DataVolume$ (and on the operation count $O$), and abstraction on $\EfficiencyHw$. These are emphases rather than exclusive assignments, since fusion, for example, cuts both launches and traffic, and the chapter uses this one mapping throughout. The formal definition below makes that compiler role precise and separates frameworks from numerical libraries such as NumPy.
 
 :::
 
@@ -91,17 +91,17 @@ Choosing a framework therefore also chooses the compiler that determines hardwar
 
 ***Machine learning frameworks***\index{ML framework!definition} are software systems that translate high-level mathematical model definitions into hardware-optimized execution plans by managing the computational graph, automatic differentiation, kernel dispatch, and memory allocation across the hardware hierarchy.
 
-1.  **Significance**: Frameworks directly determine the system efficiency $(\EfficiencyHw)$ term in the iron law. Compiler-backed operator fusion, for example, can eliminate writes and subsequent reads of intermediate values between compatible operations. Fusing a matrix multiplication, bias add, and rectified linear unit (ReLU) changes how the same mathematics reaches hardware without changing the model.
-2.  **Distinction**: Unlike a numerical library such as NumPy, which normally evaluates each operation as it is called, an ML framework can capture or defer execution to analyze a larger computational graph and apply cross-operation optimizations: operator fusion, memory layout transformations, and parallel scheduling. Those optimizations require visibility beyond separately dispatched operations.
+1.  **Significance**: Frameworks shape every iron law term that the model itself does not fix: the bytes moved $(\DataVolume)$, the hardware efficiency achieved $(\EfficiencyHw)$, and the fixed overhead paid $(\Latency)$. Compiler-backed kernel fusion, for example, can eliminate writes and subsequent reads of intermediate values between compatible operations. Fusing a matrix multiplication, bias add, and rectified linear unit (ReLU) changes how the same mathematics reaches hardware without changing the model.
+2.  **Distinction**: Unlike a numerical library such as NumPy, which normally evaluates each operation as it is called, an ML framework can capture or defer execution to analyze a larger computational graph and apply cross-operation optimizations: kernel fusion, memory layout transformations, and parallel scheduling. Those optimizations require visibility beyond separately dispatched operations.
 3.  **Common pitfall**: A frequent misconception is that frameworks are interchangeable API wrappers. Framework choice determines which compiler paths are available. PyTorch can recover graph-level optimization from eager code through `torch.compile()`, while TensorFlow and JAX commonly rely on XLA-backed compilation paths that lower operations to target hardware. Moving from eager execution to a compiler path can change throughput materially, but the gain depends on model structure, shapes, operator support, and hardware.
 
 :::
 
-An ML framework translates logical intent into physical execution under the constraints of the iron law, deciding how to partition computation across memory hierarchies, when to trade numerical precision for throughput, and how to schedule operations so that the dominant term—data movement ($\DataVolume$), arithmetic computation, or launch latency ($\Latency$)—is minimized. The framework is where the governing physics developed throughout this book becomes executable code.
+An ML framework translates logical intent into physical execution under the constraints of the iron law, deciding how to partition computation across memory hierarchies, when to trade numerical precision for throughput, and how to schedule operations so that whichever term dominates (data movement $\DataVolume$, arithmetic computation, or launch latency $\Latency$) is minimized. The framework is where the governing physics developed throughout this book becomes executable code.
 
 The machinery hidden behind `loss.backward()` (operation recording, gradient allocation, reverse-order traversal, and kernel dispatch) would require substantial manual bookkeeping even for a three-layer network. Building it from scratch for every model would be economically prohibitive for most organizations, which is why the history of ML frameworks is a history of progressively automating these layers.
 
-The three problems—execution, differentiation, and abstraction—did not emerge simultaneously. Each arose as a response to scaling limitations in the previous generation of tools, creating a historical progression of abstractions from low-level linear algebra routines to compiled graph runtimes.
+Execution, differentiation, and abstraction did not emerge as problems simultaneously. Each arose as a response to scaling limitations in the previous generation of tools, creating a historical progression of abstractions from low-level linear algebra routines to compiled graph runtimes.
 
 ## The Ladder of Abstraction {#sec-ml-frameworks-frameworks-evolved-ac68}
 
@@ -111,7 +111,11 @@ The first rung established reusable hardware primitives (1979–1992). The origi
 
 The second rung introduced unified array abstractions to unlock developer velocity (2005–2006). NumPy\index{NumPy!framework foundation}[^fn-numpy-array-abstraction] addressed the productivity barrier of low-level languages by wrapping BLAS and LAPACK in high-level Python [@harris2020]. Under NumPy's strided array model, Python manages control flow and tensor metadata (shape, strides, and data type), while the underlying C runtime dispatches vector and matrix loops across contiguous memory buffers. This vectorization contract—orchestrating high-level algorithmic intent in an interpreted language while delegating inner loops to compiled native routines—became the architectural template for scientific and numerical computing.
 
-The third rung automated gradient computation (2007–present). Deep learning frameworks\index{Deep learning framework!automatic differentiation} such as Theano,[^fn-theano-framework-origin] TensorFlow [@abadi2016tensorflow], and PyTorch [@paszke2019pytorch] solved the scalability limits of manual differentiation. While numerical packages required practitioners to derive and implement analytical backpropagation gradients by hand—a process error-prone and unmanageable for deep networks—modern frameworks turned automatic differentiation over computational graphs into a core runtime primitive. By capturing operations in a directed acyclic graph during the forward pass, these frameworks automatically construct the backward graph to evaluate vector-Jacobian products, transforming the calculus of the chain rule into automated reverse-mode execution.
+The third rung automated gradient computation (2007–present). Deep learning frameworks\index{Deep learning framework!automatic differentiation} such as Theano,[^fn-theano-framework-origin] TensorFlow [@abadi2016tensorflow], and PyTorch [@paszke2019pytorch] solved the scalability limits of manual differentiation. While numerical packages required practitioners to derive and implement analytical backpropagation gradients by hand—a process error-prone and unmanageable for deep networks—modern frameworks turned automatic differentiation over computational graphs into a core runtime primitive. By capturing operations in a directed acyclic graph during the forward pass, these frameworks automatically construct the backward graph to evaluate vector-Jacobian products, transforming the calculus of the chain rule into automated reverse-mode execution. That automation let the bitter lesson operate at the pace of research. Once a new architecture no longer needed a hand-derived backward pass, general methods that scale with computation could be tried as quickly as their forward functions could be written.
+
+::: {.column-margin .margin-pointer}
+↩ The bitter lesson, that general methods which exploit growing computation outlast hand-engineered approaches, is established in @sec-introduction-bitter-lesson-79c7.
+:::
 
 [^fn-blas-routine-acceleration]: **BLAS (basic linear algebra subprograms)**\index{BLAS!performance foundation}: The 1979 API specification that forms the bottom rung of the ladder described here; it standardized a fixed set of Fortran-callable vector operations, separating the public routine names from the machine-specific implementation decisions beneath them. Every framework above it inherits the broader version of this bargain: call a standard linear-algebra primitive from any language and let a tuned vendor library target the silicon. For modern general matrix multiply (GEMM) on NVIDIA GPUs, that tuned path is cuBLAS rather than the 1979 BLAS specification itself [@nvidia_cublas].
 
@@ -193,23 +197,27 @@ Each generation abstracted away details that consumed engineering effort in the 
 
 :::
 
-Preventing these silent mismatches requires a framework either to expose intermediate state for interactive debugging or to enforce its contracts during compilation, which makes the execution strategy the first and most consequential framework design choice. That choice comes first because runtime dispatch and graph capture determine not only the debugging experience but also what optimizations automatic differentiation and hardware mapping can subsequently exploit.
+Preventing these silent mismatches requires checking contracts somewhere between writing code and running it. A framework can check them as each operation executes, when the failing line and its intermediate values are directly visible, or before execution, when a captured graph can be validated and optimized as a whole. When those checks and optimizations happen is the execution problem. It is the first framework design choice because runtime dispatch and graph capture determine not only the debugging experience but also what optimizations automatic differentiation and hardware mapping can subsequently exploit.
 
 ## Execution Problem {#sec-ml-frameworks-execution-problem-e1e1}
 
-Consider two engineers writing the same neural network. The first debugs interactively, printing tensor shapes after each operation, inspecting intermediate values, and stepping through code with `pdb`. The second waits 30 seconds for compilation, then watches the model run 3$\times$ faster while losing that direct, line-by-line view of intermediate state. Both are correct; they have made different choices about the **execution problem**\index{Execution problem!definition}, the question of whether operations should execute immediately as written or be recorded for later execution. This choice creates a cascade of engineering trade-offs that shape every aspect of framework behavior, from debugging workflows to deployment options to peak hardware utilization.
+Consider two engineers writing the same neural network. The first debugs interactively, printing tensor shapes after each operation, inspecting intermediate values, and stepping through code with `pdb`. The second waits 30 seconds for compilation, then watches a model built from many small operations run 3$\times$ faster while losing that direct, line-by-line view of intermediate state. Both are correct; they have made different choices about the **execution problem**\index{Execution problem!definition}, the question of whether operations should execute immediately as written or be recorded for later execution. This choice creates a cascade of engineering trade-offs that shape every aspect of framework behavior, from debugging workflows to deployment options to peak hardware utilization.
 
 ### Why execution strategy matters: The memory wall {#sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8}
 
-The execution strategy of an ML framework is fundamentally constrained by the widening compute-bandwidth gap quantified by the memory-wall equation (@eq-memory-wall). Processor arithmetic has scaled far faster than memory bandwidth, creating the memory wall\index{Memory wall!execution strategy impact}\index{Memory wall!framework execution}. Modern accelerators can perform arithmetic far faster than they can fetch data. Element-wise operations such as ReLU use only a tiny fraction of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. @Sec-appdx-machine-foundations-roofline-model-2529 formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
+The execution strategy of an ML framework is constrained by the memory wall\index{Memory wall!execution strategy impact}\index{Memory wall!framework execution}, the widening gap between compute growth and memory-bandwidth growth that @eq-memory-wall quantifies. Modern accelerators can perform arithmetic far faster than they can fetch data. Element-wise operations such as ReLU use only a tiny fraction of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. @Sec-appdx-machine-foundations-roofline-model-2529 formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
+
+::: {.column-margin .margin-pointer}
+↩ The memory wall and the growth-rate ratio behind it are established in @sec-ml-systems-deployment-spectrum-71be.
+:::
 
 The physical root of this imbalance is accelerator chip topography: silicon is partitioned between tiny, ultra-fast on-chip storage (registers and SRAM scratchpads, operating at tens of terabytes per second but holding only tens of megabytes) and large off-chip device memory (High Bandwidth Memory [HBM] or GDDR, holding 40--80 GB but reached across external memory buses with hundreds of cycles of latency). When evaluating an unoptimized sequence of three operations—such as $\text{LayerNorm} \to \text{Dropout} \to \text{ReLU}$—a framework dispatches three separate GPU kernels. The first reads inputs from HBM and writes intermediate results back to HBM; the second reads those results and writes back again; the third reads them a final time. Shuttling intermediate tensors across the external bus three times dwarfs the computation time, leaving arithmetic units idle.
 
 The memory wall classifies operations as either compute-bound\index{Compute-bound!operation classification} (limited by arithmetic throughput) or memory-bound\index{Memory-bound!operation classification} (limited by data movement). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory bound, though the large matrix multiplications that dominate total compute time can be compute bound.
 
-The key optimization for memory-bound operations is kernel fusion\index{Kernel fusion!definition}\index{Kernel fusion!optimizing memory-bound ops}, combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel-gpu-dispatch] to avoid intermediate memory traffic. Instead of three round-trips to HBM, a fused kernel loads inputs from HBM once, evaluates normalization, dropout, and ReLU entirely within on-chip registers and SRAM, and writes only the final output tensor back to HBM—slashing memory traffic by roughly $3\times$. Attention kernels[^fn-flashattention-fusion-fw] use the same principle at larger scale: instead of materializing the full attention matrix in HBM, a fused implementation can keep tiles close to the compute units, cut HBM accesses by up to 9$\times$, and produce workload-specific speedups from 15 percent to 3$\times$ [@dao2022].
+The key optimization for memory-bound operations is kernel fusion\index{Kernel fusion!definition}\index{Kernel fusion!optimizing memory-bound ops} (also called operator fusion), combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel-gpu-dispatch] to avoid intermediate memory traffic. Instead of three round-trips to HBM, a fused kernel loads inputs from HBM once, evaluates normalization, dropout, and ReLU entirely within on-chip registers and SRAM, and writes only the final output tensor back to HBM, which cuts memory traffic by roughly $3\times$. Attention kernels[^fn-flashattention-fusion-fw] use the same principle at larger scale: instead of materializing the full attention matrix in HBM, a fused implementation can keep tiles close to the compute units, cut HBM accesses by up to 9$\times$, and produce workload-specific speedups from 15 percent to 3$\times$ [@dao2022].
 
-[^fn-kernel-gpu-dispatch]: **Kernel (GPU)**\index{Operator kernel!GPU definition}: In GPU programming, a kernel is the function dispatched to execute in parallel across thousands of threads. Each kernel launch incurs 5--20 $\mu$s of CPU-side overhead for parameter assembly and GPU signaling, which means that small, unfused operations spend more time on launch overhead $(\Latency)$ than on useful arithmetic. Reducing kernel count through fusion is therefore a direct attack on the overhead term of the iron law.
+[^fn-kernel-gpu-dispatch]: **Kernel (GPU)**\index{Operator kernel!GPU definition}: In GPU programming, a kernel is the function dispatched to execute in parallel across thousands of threads. Each kernel launch costs about 5 $\mu$s of CPU-side overhead for parameter assembly and GPU signaling, and an eager framework's Python dispatch adds about 10 $\mu$s more before the launch, the split this chapter's overhead model uses. Small, unfused operations therefore spend more time on launch overhead $(\Latency)$ than on useful arithmetic. Reducing kernel count through fusion is therefore a direct attack on the overhead term of the iron law.
 
 [^fn-flashattention-fusion-fw]: **Fused attention kernel**\index{Attention mechanism!fused kernel}: A fused attention kernel combines the $\mathbf{Q}\mathbf{K}^T$ product, softmax, and value-weighted output into a tiled implementation that keeps intermediate values in on-chip memory rather than materializing the full attention matrix in HBM. FlashAttention\index{FlashAttention!framework fusion example} is the canonical named example introduced in @sec-network-architectures-memory-requirements-72c3 and reports up to 9$\times$ fewer HBM accesses with workload-specific speedups from 15 percent to 3$\times$ [@dao2022]. The framework lesson is broader than the specific algorithm: fusion can shift an operation's position on the Roofline Model from bandwidth-limited toward throughput-limited execution by reducing round-trips through external memory.
 
@@ -217,7 +225,7 @@ Frameworks can fuse only operations visible together. Separately dispatched eage
 
 ### The computational graph {#sec-ml-frameworks-computational-graph-00f7}
 
-To expose multi-operation optimization opportunities to compilers, frameworks represent programs as a computational graph\index{Computational graph!definition (DAG)}: a directed acyclic graph (DAG) where nodes represent operations and edges represent data dependencies. This graph serves as the framework's internal model of the computation.
+To expose multi-operation optimization opportunities to compilers, frameworks represent programs as a computational graph\index{Computational graph!definition (DAG)}: a directed acyclic graph (DAG) where nodes represent operations and edges represent data dependencies. It is the same structure that backpropagation traverses in reverse, here serving as the framework's internal model of the computation for scheduling and optimization as well.
 
 Mathematical operations can be decoupled from physical execution through graph representations. @Fig-comp-graph diagrams this minimal abstraction: directed edges route input variables $x$ and $y$ into the central transformation operator $f(x, y)$, which emits the output variable $z$ independent of physical evaluation order.
 
@@ -432,15 +440,13 @@ node[above,pos=0.45,text=black!70,font=\sffamily\footnotesize]{Interacts with}
 
 :::
 
-This graph representation is more than a visualization; it is the data structure that enables both efficient execution and automatic differentiation. The timing of its construction forces a fundamental systems trade-off across debugging, optimization, deployment, and flexibility. Interactive debugging demands immediate execution so developers can inspect intermediate values and step through logic with standard tools. Global optimization requires observing large operator sequences at once to fuse kernels and plan memory reuse. Standalone deployment favors graphs that run without the host interpreter, while dynamic architectures require control flow that branches on computed tensor values.
-
-No single execution model optimizes all these dimensions simultaneously. Framework architectures must balance these competing constraints against hardware limits. The three execution families that follow reflect different resolutions to this core systems trade-off: balancing graph visibility for whole-program compilation against immediate evaluation for interactive debugging.
+This graph representation is more than a visualization; it is the data structure that enables both efficient execution and automatic differentiation. The timing of its construction forces a fundamental systems trade-off across debugging, optimization, deployment, and flexibility. Interactive debugging demands immediate execution so developers can inspect intermediate values and step through logic with standard tools. Global optimization requires observing large operator sequences at once to fuse kernels and plan memory reuse. Standalone deployment favors graphs that run without the host interpreter, while dynamic architectures require control flow that branches on computed tensor values. No single execution model serves all four demands at once.
 
 ### Three execution strategies {#sec-ml-frameworks-three-execution-strategies-5934}
 
-The computational graph enables global optimization, but it leaves a critical design choice unresolved: *when* the runtime constructs the graph. Consider an elementary expression such as `y = x * 2`. Evaluating the multiplication immediately yields a concrete tensor in `y`. This imperative flow is intuitive and directly debuggable, but the runtime sees only one operation at a time. Deferring execution records the operation symbolically into a dependency graph executed only upon request. That staging separates intent from evaluation, giving the compiler the end-to-end visibility required for operator fusion and memory planning.
+The computational graph enables global optimization, but it leaves a critical design choice unresolved: *when* the runtime constructs the graph. Consider an elementary expression such as `y = x * 2`. Evaluating the multiplication immediately yields a concrete tensor in `y`. This imperative flow is intuitive and directly debuggable, but the runtime sees only one operation at a time. Deferring execution records the operation symbolically into a dependency graph executed only upon request. That staging separates intent from evaluation, giving the compiler the end-to-end visibility required for kernel fusion and memory planning.
 
-Neither approach dominates; each embodies different trade-offs between *flexibility* and *optimization potential*. Modern frameworks have explored three primary execution strategies: eager execution with dynamic graphs, static computation graphs, and hybrid approaches that combine just-in-time (JIT) compilation with eager development. Each strategy has distinct systems implications.
+Modern frameworks resolve this tension between *flexibility* and *optimization potential* with three execution strategies: eager execution with dynamic graphs, static computation graphs, and hybrid approaches that combine just-in-time (JIT) compilation with eager development.
 
 #### Eager execution with dynamic graphs {#sec-ml-frameworks-eager-execution-dynamic-graphs-29c2}
 
@@ -518,7 +524,7 @@ After `backward()` completes, the autograd graph is normally released. The next 
 
 :::
 
-In eager execution frameworks, operations evaluate imperatively as host code encounters them. @Fig-mlfm-dynamic-graph-flow models this define-by-run execution cycle: the Python dispatch stage ("Define Operation") issues an individual operation to a device stream ("Execute Operation"), whereupon the "More operations?" decision diamond routes the "Yes" branch back along the iterative return rail until the sequence reaches the "End" terminal state.
+In eager execution frameworks, operations evaluate imperatively as host code encounters them. The define-by-run cycle is therefore a loop of one operation at a time (@fig-mlfm-dynamic-graph-flow). Python defines an operation, the device executes it, and control returns to Python for the next one, so when the runtime decides what to launch it never sees more than the current operation.
 
 ::: {#fig-mlfm-dynamic-graph-flow fig-env="figure" fig-pos="htb" fig-cap="**Dynamic Graph Execution Flow**: In eager execution, each operation is issued as the program encounters it. Accelerator work may execute asynchronously after dispatch. This define-by-run model enables natural debugging and data-dependent control flow while limiting optimization across Python calls." fig-alt="Left-to-right flowchart with Start, Define Operation under Python Dispatch, Execute Operation under GPU Kernel, a More operations? decision, and End. A Yes branch loops back to Define Operation; a No branch continues to End."}
 
@@ -845,9 +851,9 @@ with tf.Session() as sess:
 
 :::
 
-Static graph compilation separates graph construction from tensor execution. @Fig-mlfm-static-graph stages this lifecycle into two strictly decoupled phases: an ahead-of-time "Definition Phase" (enclosing Define Operations, Declare Variables, and Build Graph) that constructs the symbolic DAG without allocating tensor memory, followed across the phase boundary by the runtime "Execution Phase" (Load Data, Run Graph, and Get Results) where concrete buffers materialize on accelerators.
+Static graph compilation separates graph construction from tensor execution. In the definition phase, the program declares operations and variables and builds the symbolic DAG without allocating any tensor memory. Only in the execution phase do data load, concrete buffers materialize on the accelerator, and the captured graph run (@fig-mlfm-static-graph).
 
-::: {#fig-mlfm-static-graph fig-env="figure" fig-pos="htb" fig-cap="**Static Graph Execution Lifecycle**: Separating symbolic graph definition (left) from concrete execution (right) provides global visibility over the computation, allowing compilers to apply ahead-of-time optimizations—such as operator fusion, buffer reuse, and layout transforms—before any tensors are materialized." fig-alt="Flow diagram showing two phases. Definition phase: Define operations, declare variables, build graph. Execution phase: Load data, run graph, get results. Arrows connect boxes left to right."}
+::: {#fig-mlfm-static-graph fig-env="figure" fig-pos="htb" fig-cap="**Static Graph Execution Lifecycle**: Separating symbolic graph definition (left) from concrete execution (right) provides global visibility over the computation, allowing compilers to apply ahead-of-time optimizations (such as kernel fusion, buffer reuse, and layout transforms) before any tensors are materialized." fig-alt="Flow diagram showing two phases. Definition phase: Define operations, declare variables, build graph. Execution phase: Load data, run graph, get results. Arrows connect boxes left to right."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily\small]
@@ -1145,7 +1151,7 @@ Because the framework has the complete graph before execution, it can perform ah
 
 Compilers such as **XLA**\index{XLA!definition}\index{XLA!graph compilation}[^fn-xla-graph-compiler] [@GoogleXLA] extend this approach, compiling captured subgraphs into fused machine code specialized for target hardware.
 
-[^fn-xla-graph-compiler]: **XLA (accelerated linear algebra)**\index{XLA!compilation speedup}: The "optimized machine code" in the triggering sentence means XLA can fuse subgraphs, specialize layouts, and lower high-level operations into backend-specific code; fusion attacks both launch overhead $(\Latency)$ and intermediate memory writes $(\DataVolume)$, but the realized speedup depends on whether the graph contains enough fusible, memory-bound work for the compiler to remove. Large GEMM-heavy regions may already be compute bound, while chains of small elementwise operations can benefit more because fusion removes repeated trips through external memory. The benefit is not a fixed multiplier: XLA helps when it can fuse operations, specialize layouts and shapes, and reduce launch or memory overhead, so gains depend on graph structure, backend support, and input-shape stability.
+[^fn-xla-graph-compiler]: **XLA (accelerated linear algebra)**\index{XLA!compilation speedup}: Compiling to fused machine code means XLA can fuse subgraphs, specialize layouts, and lower high-level operations into backend-specific code; fusion attacks both launch overhead $(\Latency)$ and intermediate memory writes $(\DataVolume)$, but the realized speedup depends on whether the graph contains enough fusible, memory-bound work for the compiler to remove. Large GEMM-heavy regions may already be compute bound, while chains of small elementwise operations can benefit more because fusion removes repeated trips through external memory. The benefit is not a fixed multiplier: XLA helps when it can fuse operations, specialize layouts and shapes, and reduce launch or memory overhead, so gains depend on graph structure, backend support, and input-shape stability.
 
 ##### Systems implications {.unnumbered}
 
@@ -1155,7 +1161,7 @@ The cost of this performance is reduced flexibility. Standard Python control flo
 
 #### Hybrid approaches: JIT compilation {#sec-ml-frameworks-hybrid-approaches-jit-compilation-8954}
 
-**JIT compilation**\index{JIT compilation!fidelity vs. generality} pursues both eager debugging and graph optimization at once by capturing computation at runtime. The core trade-off is *fidelity vs. generality*. Tracing captures the execution path taken during a sample run, producing high fidelity to that path but missing branches not taken. Source-level compilation (scripting) analyzes supported program structure, preserving supported control flow but requiring a restricted language subset. Both approaches produce an intermediate representation (IR)[^fn-ir-intermediate-representation] that enables graph optimizations such as operator fusion, constant folding, dead code elimination, and buffer reuse.
+**JIT compilation**\index{JIT compilation!fidelity vs. generality} pursues both eager debugging and graph optimization at once by capturing computation at runtime. The core trade-off is *fidelity vs. generality*. Tracing captures the execution path taken during a sample run, producing high fidelity to that path but missing branches not taken. Source-level compilation (scripting) analyzes supported program structure, preserving supported control flow but requiring a restricted language subset. Both approaches produce an intermediate representation (IR)[^fn-ir-intermediate-representation] that enables graph optimizations such as kernel fusion, constant folding, dead code elimination, and buffer reuse.
 
 [^fn-ir-intermediate-representation]: **Intermediate representation (IR)**\index{Intermediate representation!compiler pattern}: The "intermediate" captures this format's architectural role: a language-independent layer that decouples the frontend (Python capture) from the backend (hardware code generation), exactly as LLVM IR decouples C/Rust/Swift frontends from x86/ARM backends. ML frameworks adopted this compiler pattern because it reduces the $\mathcal{O}(M \times N)$ cost of supporting $M$ frontends and $N$ backends to $\mathcal{O}(M + N)$: a single graph capture mechanism (TorchDynamo, tf2xla) can target multiple hardware backends without rewriting the capture logic.
 
@@ -1194,7 +1200,7 @@ The same hazard survives in modern graph-capture systems, which is why they guar
 
 The previous approaches force a choice between flexible eager execution and compiler-visible graphs. Modern JIT compilation narrows this trade-off by automatically capturing regions of eager code into optimized graphs\index{Graph compilation!eager-mode capture} with limited developer intervention.
 
-Graph-capture JIT systems follow the same architectural pattern across frameworks. The first execution observes tensor operations, records a graph region guarded by assumptions about shapes, dtypes, layouts, and control flow, lowers that region into an intermediate representation, applies fusion and layout optimizations, and caches executable code for later calls that satisfy the same guards. When eager fallback is enabled, unsupported Python code forms a graph boundary where execution returns to the eager runtime; a configuration requiring full-graph capture can instead report an error. PyTorch 2.0's `torch.compile` [@ansel2024] is a concrete instance of this pattern, but the systems idea is broader than the API: compilation pays only when captured regions are long enough and stable enough to amortize capture, lowering, code generation, and cache-management costs.
+Graph-capture JIT systems follow the same architectural pattern across frameworks. The first execution observes tensor operations, records a graph region guarded by assumptions about shapes, dtypes, layouts, and control flow, lowers that region into an intermediate representation, applies fusion and layout optimizations, and caches executable code for later calls that satisfy the same guards. The compiled artifact is valid only while those assumptions hold, so a failed guard forces the runtime to recompile or fall back to eager execution. When eager fallback is enabled, unsupported Python code forms a graph boundary where execution returns to the eager runtime; a configuration requiring full-graph capture can instead report an error. PyTorch 2.0's `torch.compile` [@ansel2024] is a concrete instance of this pattern, but the systems idea is broader than the API: compilation pays only when captured regions are long enough and stable enough to amortize capture, lowering, code generation, and cache-management costs.
 
 Compilation therefore attacks the dispatch tax of @sec-ml-frameworks-eager-execution-dynamic-graphs-29c2 directly, and fusion adds a second saving in memory traffic. The physics of software overhead in notebook \ref{nbk-frameworks-physics-software-overhead} models both.
 
@@ -1291,7 +1297,7 @@ Fusion wins on two fronts at once. Collapsing two launches into one halves the p
 
 :::
 
-@Fig-python-tax contrasts these execution timelines across a 55-microsecond window. In the eager trace (top), five successive operations repeatedly stall the GPU: each 1-microsecond blue kernel launch is separated by a 10-microsecond red host dispatch gap, leaving the device largely idle. The compiled trace (bottom) collapses the same sequence into a single 5-microsecond dispatch and one 4-microsecond fused blue kernel, eliminating intermediate latency gaps and amortizing the Python overhead.
+Over a sequence of five small operations, the same arithmetic leaves the device idle most of the time (@fig-python-tax). The eager trace draws each gap at only the `{python} FusionSpeedup.python_dispatch_us_str` Python-dispatch share of the per-operation tax, so it understates the full cost, and even so each 1 $\mu$s kernel keeps the device busy for less than a tenth of every dispatch-plus-compute cycle. The compiled trace pays one `{python} FusionSpeedup.kernel_launch_only_us_str` kernel launch, because replaying a captured region skips per-operation Python dispatch, and runs one fused kernel. That kernel is drawn at 4 $\mu$s rather than the 5 $\mu$s of the separate kernels to suggest the intermediate traffic fusion removes; the shortening is illustrative, not measured.
 
 ::: {#fig-python-tax fig-env="figure" fig-pos="htb" fig-cap="**The Python Tax**: Execution timelines show how eager mode incurs repeated host dispatch latency ($\Latency$) between short GPU kernels, leaving the accelerator periodically idle. Compilation fuses these operations into a single kernel launch, eliminating intermediate dispatch gaps and maximizing hardware occupancy." fig-alt="Gantt chart of execution timeline. Eager mode shows alternating red Python dispatch and blue GPU kernel blocks. Compiled mode shows one red dispatch block followed by one fused blue compute block."}
 
@@ -1360,13 +1366,11 @@ plt.close()
 
 :::
 
-Automating this fusion is the design goal behind graph-capture compilers such as PyTorch 2.0's `torch.compile`.[^fn-torch-compile-hybrid] They capture eager tensor regions and compile them into fused kernels without requiring engineers to write custom CUDA.[^fn-cuda-dispatch-overhead]
+Graph-capture compilers such as `torch.compile`[^fn-torch-compile-hybrid] automate exactly this fusion over the regions they capture, without requiring engineers to write custom CUDA.[^fn-cuda-dispatch-overhead]
 
-[^fn-torch-compile-hybrid]: **`torch.compile`**\index{torch.compile!hybrid execution}: It is a 2020s PyTorch implementation of graph-capture JIT compilation: bytecode interception extracts tensor regions from eager programs, an intermediate representation carries those regions to compiler backends, and cached generated code is reused while guard conditions continue to hold.
+[^fn-torch-compile-hybrid]: **`torch.compile`**\index{torch.compile!hybrid execution}: PyTorch's capture front end analyzes Python bytecode as each frame runs, rather than recording tensor operations alone. That vantage lets it keep capturing across Python control flow it can resolve from guarded values and insert a graph break where it cannot, which is why graph breaks rather than tracing errors are its characteristic failure mode.
 
-[^fn-cuda-dispatch-overhead]: **CUDA (compute unified device architecture)**\index{CUDA!dispatch overhead}: NVIDIA's parallel computing platform (2007) serving as the foundational layer between high-level Python operations and GPU silicon; when PyTorch executes `torch.matmul(A, W)`, the call traverses the framework's dispatcher, selects a cuBLAS kernel, and launches it on the GPU. Each launch incurs 5--20 $\mu$s of CPU-side overhead. For small operations, this dispatch overhead $(\Latency)$ can exceed useful compute time. Fusing compatible groups among $N_{\text{ops}}$ operations then reduces launch count as well as intermediate memory traffic; capturing the graph alone does not imply a single kernel.
-
-The core engineering questions are therefore conceptual, not API-specific. A capture compiler needs a frontend that identifies graph regions in an eager program, an intermediate representation that separates the captured computation from Python, and a backend that lowers the region to hardware-specific code. It also needs a guard system: the compiled artifact is valid only while assumptions about tensor rank, dtype, layout, and control-flow path remain true. When a guard fails, the runtime must recompile or fall back to eager execution.
+[^fn-cuda-dispatch-overhead]: **CUDA (compute unified device architecture)**\index{CUDA!dispatch overhead}: NVIDIA's parallel computing platform (2007) serving as the foundational layer between high-level Python operations and GPU silicon; when PyTorch executes `torch.matmul(A, W)`, the call traverses the framework's dispatcher, selects a cuBLAS kernel, and launches it on the GPU. Each launch adds the `{python} FusionSpeedup.kernel_launch_only_us_str` kernel-launch share of the per-operation tax on top of the framework's Python dispatch. For small operations, this dispatch overhead $(\Latency)$ can exceed useful compute time. Fusing compatible groups among $N_{\text{ops}}$ operations then reduces launch count as well as intermediate memory traffic; capturing the graph alone does not imply a single kernel.
 
 Graph breaks mark the boundary where compilation stops applying. Data-dependent Python control flow, unsupported library calls, I/O, custom Python objects, and highly variable shapes can shorten compiled regions. With eager fallback enabled, a break separates compiled subgraphs with standard Python execution, reintroducing interpreter dispatch and limiting fusion across the boundary. Tensor handles can pass between these regions while their storage remains on the device; host reads of device values can additionally require synchronization. This is why graph-break analysis belongs in performance engineering: the relevant metric is not whether compilation is enabled, but how much of the hot path remains inside long, stable compiled regions.
 
@@ -1530,7 +1534,7 @@ class CompilationBenchmark:
 \endgroup
 ```
 
-These throughput differences across execution modes raise a practical question—which framework execution strategy best serves each workload archetype. The appropriate strategy depends on the workload, backend, and dominant iron law term, and @tbl-framework-archetype-strategy maps each recurring archetype to a candidate execution strategy.
+These throughput differences are not uniform across workloads, so the execution strategy should follow the workload archetype. The appropriate strategy depends on the workload, backend, and dominant iron law term, and @tbl-framework-archetype-strategy maps each recurring archetype to a candidate execution strategy.
 
 ::: {.column-margin .margin-pointer}
 ↩ The workload archetypes and the iron law term that dominates each are established in @sec-ml-systems-workload-archetypes-fd10.
@@ -1540,10 +1544,10 @@ These throughput differences across execution modes raise a practical question�
 |:------------------------------|:------------------------------------------------------------------------|:------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **ResNet-50 (Compute Beast)** | $\frac{O}{\PeakRate \cdot \EfficiencyHw}$ (Compute)                     | Compiled dense kernels                          | Regular dense kernels benefit from layout selection, precision lowering, and backend specialization; fusion helps most in surrounding memory- or launch-bound regions |
 | **GPT-2 (Bandwidth Hog)**     | $\frac{\DataVolume}{\Bandwidth}$ (Memory Bandwidth)                     | Fused attention + graph compilation             | Fused attention and compilation reduce HBM round-trips and improve cache reuse                                                                                        |
-| **DLRM (Sparse Scatter)**     | $\frac{\DataVolume}{\Bandwidth_{\text{random}}}+L_{\text{lat,network}}$ | Specialized lookup kernels and measured capture | Irregular gathers limit some optimizations; measure compilation benefits in dense regions and surrounding dispatch                                                    |
-| **DS-CNN (Tiny Constraint)**  | $\Latency$ (Overhead)                                                   | Ahead-of-time microcontroller runtime           | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                           |
+| **DLRM (Sparse Scatter)**     | $\frac{\DataVolume}{\Bandwidth}+\Latency$ (Gathers, Network)            | Specialized lookup kernels and measured capture | Irregular gathers limit some optimizations; measure compilation benefits in dense regions and surrounding dispatch                                                    |
+| **DS-CNN (Tiny Constraint)**  | Memory Capacity (Feasibility Gate)                                      | Ahead-of-time microcontroller runtime           | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                           |
 
-: **Framework Execution Strategy by Workload**: Candidate execution strategies for each workload archetype, aligned to the dominant iron law term. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
+: **Framework Execution Strategy by Workload**: Candidate execution strategies for each workload archetype, aligned to the dominant iron law term. For the Tiny Constraint row, memory capacity is a feasibility gate that must be met before any iron law term matters. For the Sparse Scatter row, the bandwidth and latency are those of irregular embedding gathers and the network exchange that follows them, not the streaming peak. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
 
 ::: {#lhs-frameworks-framework-strategy-by-archetype .callout-lighthouse title="Framework strategy by archetype"}
 
@@ -1565,7 +1569,7 @@ Evaluating @eq-compile-breakeven with the hypothetical ResNet-50 values gives ap
 
 Long-lived production inference ($N_{\text{dev}} \approx 0$, $N_{\text{prod}} \rightarrow \infty$) extends this reuse further, providing more opportunity to amortize compilation. Aggressive autotuning can be worthwhile even when setup takes much longer, provided the model converts correctly, meets numerical requirements, and improves measured performance over the deployment lifetime.
 
-The cases form a continuum of increasing reuse. @Fig-compilation-continuum plots total time against production executions on a logarithmic scale ($10^2$ to $10^7$), where the vertical axis intercepts reflect upfront compilation latency and the curve slopes reflect per-execution marginal cost. Dotted vertical lines isolate two crossover thresholds: the steep blue eager trajectory yields to the moderate orange JIT curve at $2 \times 10^6$ runs ("Eager wins" gives way to "JIT wins"), while the flat green AOT curve overtakes JIT beyond $6.7 \times 10^6$ runs ("AOT wins") once its higher upfront compilation penalty is fully amortized.
+The cases form a continuum of increasing reuse (@fig-compilation-continuum). Each strategy's total time starts at its one-time compilation cost and grows at its per-execution cost, so eager wins at low execution counts, JIT wins once its compilation is amortized, and AOT wins only at the largest counts, where its higher upfront cost is fully repaid. The figure's crossovers (near $2 \times 10^6$ and $6.7 \times 10^6$ executions) come from an illustrative cost model in arbitrary units, not from the ResNet-50 scenario, whose eager-to-compiled breakeven sits near `{python} CompilationBenchmark.resnet_breakeven_images_str`. What carries over is the order of the regions, not their positions.
 
 ::: {#fig-compilation-continuum fig-env="figure" fig-pos="htb" fig-cap="**The Compilation Continuum**: An illustrative cost model shows how one-time compilation cost and per-execution cost create eager, JIT, and AOT crossover regions as production executions increase. The crossover locations depend on the assumed compilation costs and per-execution rates." fig-alt="Line graph with production executions on a logarithmic x-axis and total time in arbitrary units on the y-axis. Blue eager, orange JIT, and green AOT lines rise at decreasing slopes from different initial offsets. Dotted vertical lines mark the eager–JIT and JIT–AOT crossovers; labels identify the region where each strategy has the lowest total time."}
 
@@ -1665,7 +1669,7 @@ $$
 \text{Overhead Ratio} = \frac{N_{\text{ops}} \cdot t_{\text{dispatch}}}{\IronlawTermTimesCompute + \IronlawTermTimesMemory}
 $$ {#eq-dispatch-overhead}
 
-When Overhead Ratio $> 1$, the model is overhead-bound. Compilation can provide its largest gains for overhead-bound workloads because fusion reduces the number of dispatches. The training-step trace in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1 works this effect through end to end, previewed by the numbers that follow.
+When Overhead Ratio $> 1$, the model is overhead-bound. The ratio and the dispatch tax introduced with eager execution measure the same imbalance from two sides. With $T_{\text{sw}} = N_{\text{ops}} \cdot t_{\text{dispatch}}$, the tax share $T_{\text{sw}}/(T_{\text{sw}}+T_{\text{hw}})$ equals $\text{Overhead Ratio}/(1+\text{Overhead Ratio})$, so a ratio above 1 is the same threshold as a dispatch tax above 50 percent. Compilation can provide its largest gains for overhead-bound workloads because fusion reduces the number of dispatches. The training-step trace in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1 works this effect through end to end, previewed by the numbers that follow.
 
 ```{python}
 #| echo: false
@@ -1739,7 +1743,7 @@ class DispatchTaxSmallLarge:
 
 Applying @eq-dispatch-overhead means comparing the software overhead $T_{\text{sw}} = N_{\text{ops}} \cdot t_{\text{dispatch}}$ with the hardware execution time $T_{\text{hw}}$ (both in seconds). The regime depends on the size of individual operations rather than on the model's parameter count. Notebook \ref{nbk-frameworks-dispatch-tax} contrasts a small multilayer perceptron with a large transformer layer to quantify when host overhead or device arithmetic bounds the system.
 
-::: {#nbk-frameworks-dispatch-tax .callout-notebook title="The dispatch tax"}
+::: {#nbk-frameworks-dispatch-tax .callout-notebook title="Dispatch overhead at two scales"}
 
 **Problem**: Determine the threshold where host-side Python interpreter dispatch overhead bounds end-to-end execution time relative to accelerator hardware execution.
 
@@ -1754,6 +1758,7 @@ Applying @eq-dispatch-overhead means comparing the software overhead $T_{\text{s
 **Scenario two: GPT-3 Layer (Compute Bound)**
 
 *   **Compute**: Huge matrix multiplications.
+*   **Assumptions**: Both times below are illustrative round values for one GPT-3-scale layer over a large batch, not derived from a specific accelerator. The conclusion does not hinge on them, because at the chapter's `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` the ratio would reach 1 only if the layer issued thousands of separately dispatched kernels.
 *   **Hardware time**: $T_{\text{hw}} \approx$ `{python} DispatchTaxSmallLarge.gpt3_hw_time_ms_str` = `{python} DispatchTaxSmallLarge.gpt3_hw_time_us_str`.
 *   **Software overhead**: `{python} DispatchTaxSmallLarge.t_sw_math`.
 *   **Ratio**: `{python} DispatchTaxSmallLarge.gpt3_sw_time_us_str`/`{python} DispatchTaxSmallLarge.gpt3_hw_time_us_str` ≈ `{python} DispatchTaxSmallLarge.dispatch_ratio_large_str`.
@@ -1773,7 +1778,7 @@ The compilation continuum reaches its extreme at the far edge\index{Edge deploym
 
 ::: {#lhs-frameworks-lighthouse-example-smart-doorbell-tinyml .callout-lighthouse title="Lighthouse example: KWS on TinyML"}
 
-**Scenario**: Deploying the Smart Doorbell's keyword spotting (KWS) model, the DS-CNN Tiny Constraint lighthouse, to an ARM Cortex-M4 with 256 KB RAM and 1 MB Flash.
+**Scenario**: Deploying the keyword spotting (KWS) lighthouse, a DS-CNN and the volume's Tiny Constraint workload, to an ARM Cortex-M4 microcontroller with 256 KB RAM and 1 MB Flash. This is a smaller target than the ESP32-S3 of the earlier smart-doorbell scenario, chosen to show the runtime at its tightest.
 
 **Constraint**: A full PyTorch and Python runtime exceeds the device's memory budget by orders of magnitude.
 
@@ -1784,7 +1789,7 @@ Micro-frameworks such as **TensorFlow Lite Micro (TFLM)**\index{TensorFlow Lite 
 2.  Kernel selection: Only the specific kernels used by the model (for example, Conv2D, DepthwiseConv) need to be linked or registered with the runtime.
 3.  **Compact interpreter execution**: The MCU runs a small C/C++ interpreter over a flat model representation, with the model and arena bound at initialization rather than assembled dynamically at runtime.
 
-**Silicon contract**: On TinyML devices, the contract is strictly memory-bound. The framework's primary job is to ensure the model's intermediate activations (the "working set") fit within the MCU's tiny SRAM.
+**Silicon contract**: On TinyML devices, the binding term is memory capacity, not bandwidth or dispatch overhead, which is why @tbl-framework-archetype-strategy treats it as a feasibility gate. The framework's primary job is to ensure the model's intermediate activations (the "working set") fit within the MCU's tiny SRAM.
 
 :::
 
@@ -1804,7 +1809,7 @@ The choice of execution mode determines both developer velocity and model perfor
 **Modern compromise**
 
 - [ ] **JIT compilation**: how does `torch.compile` bridge the gap?
-- [ ] **Dispatch-overhead estimate**: if six operations each incur the chapter's `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` dispatch tax while hardware work takes 2.6 $\mu$s, which term dominates?
+- [ ] **Dispatch-overhead estimate**: if six operations each incur the chapter's `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` dispatch tax while hardware work takes `{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str`, which term dominates?
 
 :::
 
@@ -1814,11 +1819,11 @@ The execution problem determines when computation happens and what optimizations
 
 Consider what training actually requires: for each of millions of parameters, compute how a tiny change alters the loss. Doing this manually for even a simple three-layer network requires deriving and implementing dozens of partial derivatives; for a modern transformer with billions of parameters, manual differentiation is economically impossible. A framework that executes efficiently but cannot differentiate can run inference but cannot learn.
 
-The **differentiation problem**\index{Differentiation problem!definition} is the task of computing gradients[^fn-gradient-descent-memory] automatically. Neural network training requires derivatives of a scalar loss $\LossFunction$ with respect to millions or billions of parameters. When executing the forward pass, the runtime records an execution tape and saves intermediate activation buffers for subsequent derivative evaluations. Because a single scalar loss depends on many parameters, reverse-mode automatic differentiation (AD)\index{Automatic differentiation!definition}[^fn-autodiff-reverse-mode] is efficient: a single reverse traversal computes all requested parameter gradients, whereas recovering the same full gradient with forward mode requires one tangent direction per parameter. Major ML frameworks therefore use reverse-mode AD for ordinary scalar-loss training [@baydin2018].
+The **differentiation problem**\index{Differentiation problem!definition} is the task of computing gradients[^fn-gradient-descent-memory] automatically. Neural network training requires derivatives of a scalar loss $\LossFunction$ with respect to millions or billions of parameters. When executing the forward pass, the runtime records an execution tape and saves intermediate activation buffers for subsequent derivative evaluations. Backpropagation already showed why reverse-mode automatic differentiation (AD)\index{Automatic differentiation!definition}[^fn-autodiff-reverse-mode] suits this shape of problem, since one reverse traversal from a single scalar loss yields every parameter gradient, a claim the forward-versus-reverse comparison below makes precise. Major ML frameworks therefore use reverse-mode AD for ordinary scalar-loss training [@baydin2018].
 
-[^fn-gradient-descent-memory]: **Automatic differentiation (AD)**\index{Automatic differentiation!reverse-mode memory cost}: The "automatically" in the triggering sentence is the key word: AD mechanizes the chain rule as a graph traversal, eliminating the manual derivative computation that made scaling beyond toy networks impractical. The systems trade-off that makes this feasible is the choice of reverse mode, which exploits the many-to-one topology of training (many parameters, one scalar loss) to compute all gradients in a single backward pass. Forward mode would require one pass per parameter, making billion-parameter training computationally impossible.
+[^fn-gradient-descent-memory]: **Gradients**\index{Gradient!memory footprint}: A gradient holds one value for every parameter it differentiates, so each weight tensor acquires a gradient tensor of the same shape. Computing gradients automatically therefore doubles the parameter-sized state before any optimizer runs, which is why every training-memory ledger later in this chapter lists gradients as a full copy of the weights.
 
-[^fn-autodiff-reverse-mode]: **Reverse-mode AD**\index{Automatic differentiation!reverse mode}: The $\mathcal{O}(1)$-vs.-$\mathcal{O}(\Parameters)$ asymmetry of reverse mode (one backward pass instead of one forward pass for each of $\Parameters$ parameters) has a concrete price: reverse mode retains the operation-dependent values required by derivative rules during the backward traversal. Activation checkpointing changes this saved set by omitting selected values and recomputing them during the backward pass.
+[^fn-autodiff-reverse-mode]: **Reverse-mode AD**\index{Automatic differentiation!reverse mode}: Reverse mode's single backward pass has a concrete price, because the operation-dependent values that derivative rules read must be retained until the backward traversal reaches them. Activation checkpointing changes this saved set by omitting selected values and recomputing them during the backward pass.
 
 Building on the backpropagation algorithm, the systems engineering of differentiation addresses how frameworks represent computation graphs, manage memory for intermediate values, and orchestrate the backward pass efficiently across accelerators. The framework mechanizes the chain rule as large-scale systems bookkeeping: tracking operator dependencies, staging activation buffers, and dispatching backward kernels. @Lst-auto_diff_intro illustrates the core idea with a simple three-operation function.
 
@@ -1964,9 +1969,9 @@ The algorithmic structure of @algo-reverse-mode-ad-trace reveals its systems cos
 
 For the concrete function in @lst-auto_diff_intro evaluated at $x=2.0$, the forward pass records $a=x^2=4.0$, $b=\sin(x)\approx0.9093$, and $c=ab\approx3.637$. Seeding $\bar{c}=1.0$, the product rule yields adjoints $\bar{a}=0.9093$ and $\bar{b}=4.0$. The square branch contributes $0.9093\cdot4.0\approx3.6372$ to $\bar{x}$, while the sine branch contributes $4.0\cos(2.0)\approx-1.6646$. Accumulating both paths gives the exact derivative $\partial c/\partial x = \bar{x} \approx 1.973$.
 
-This single backward traversal computes $\partial c/\partial x$ regardless of how many fan-out paths connect $x$ to $c$. In a deep neural network, every weight tensor influences the scalar loss through thousands of divergent paths across successive layers; reverse mode aggregates all incoming adjoints in one reverse sweep. This efficiency makes training a `{python} GPT3ReverseModeParams.gpt3_params_b_str`-parameter model such as GPT-3 computationally tractable: reverse mode requires $\mathcal{O}(1)$ backward passes relative to parameter count.
+This single backward traversal computes $\partial c/\partial x$ regardless of how many fan-out paths connect $x$ to $c$. In a deep neural network, every weight tensor influences the scalar loss through thousands of divergent paths across successive layers; reverse mode aggregates all incoming adjoints in one reverse sweep. That one sweep, rather than one pass per parameter, is what keeps training a `{python} GPT3ReverseModeParams.gpt3_params_b_str`-parameter model such as GPT-3 computationally tractable.
 
-Executing this traversal in hardware exposes a physical constraint: evaluating local derivatives during the backward pass requires the operating point established during forward execution. The framework must therefore determine which forward tensors to persist in device memory, when to allocate them, and when to free them. Modern frameworks manage this lifecycle through dynamic computational graphs and gradient accumulation.[^fn-gradient-accumulation-batch]
+Executing this traversal in hardware exposes a physical constraint: evaluating local derivatives during the backward pass requires the operating point established during forward execution. The framework must therefore determine which forward tensors to persist in device memory, when to allocate them, and when to free them. The recorded graph answers the "when to free" question, because each saved tensor can be released as soon as the last backward rule that reads it has run. The peak itself is bounded separately, by splitting a large batch into micro-batches whose saved activations are freed before the next one starts while their gradients sum into the same buffers (gradient accumulation).[^fn-gradient-accumulation-batch]
 
 [^fn-gradient-accumulation-batch]: **Gradient accumulation**\index{Gradient accumulation!memory trade-off}: The framework processes a large logical batch as smaller mini-batches, freeing each mini-batch's saved activations after backward while accumulating parameter-sized gradients. Processing 4,096 samples in 64-sample mini-batches can reduce the batch-dependent activation peak by up to 64$\times$ when activation memory scales linearly with batch size; weights, gradients, optimizer state, and other fixed costs do not shrink. The trade-off is more sequential work before each optimizer update.
 
@@ -2042,7 +2047,7 @@ class GPT3MemoryFootprint:
 
 #### Memory management strategies {#sec-ml-frameworks-memory-management-strategies-b008}
 
-A `{python} GPT3MemoryFootprint.gpt3_params_b_str`-parameter model in FP16 requires `{python} GPT3MemoryFootprint.gpt3_fp16_gb_str` just for weights, exceeding the physical memory of any single accelerator. Reverse-mode AD compounds this memory pressure by retaining operation-dependent forward activations for backward derivative rules. In an illustrative 100-layer network trained with batch size 64, saved activations contribute an additional 8--12 GB alongside weights, gradients, and optimizer states. Memory capacity, rather than raw floating-point throughput, frequently establishes the feasibility boundary of training.
+A `{python} GPT3MemoryFootprint.gpt3_params_b_str`-parameter model in FP16 requires `{python} GPT3MemoryFootprint.gpt3_fp16_gb_str` just for weights, exceeding the physical memory of any single accelerator. Reverse-mode AD compounds this memory pressure by retaining operation-dependent forward activations for backward derivative rules. Even a model whose weights fit easily pays this tax. In the illustrative ResNet-50 scenario of @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2, batch-64 saved activations exceed the FP32 weights by roughly two orders of magnitude, on top of weights, gradients, and optimizer states. Memory capacity, rather than raw floating-point throughput, frequently establishes the feasibility boundary of training.
 
 This saved-activation footprint accumulates across successive layers. @Lst-reverse_memory demonstrates how each forward layer adds an activation tensor that must persist until the backward sweep unwinds to that layer.
 
@@ -2061,7 +2066,7 @@ def deep_network(x, w1, w2, w3):
 
 :::
 
-Frameworks mitigate this memory wall through two primary architectural strategies. The first is activation checkpointing\index{Activation checkpointing!definition}\index{Activation checkpointing!memory-compute trade-off} (or gradient checkpointing): rather than buffering every intermediate activation, the runtime stores only selected segment boundary tensors and recomputes dropped intermediates on demand during the backward pass. The essential systems mechanism is the runtime contract: the framework marks boundary activations as persistent and regenerates intermediate values when backward execution reaches that segment. @Lst-checkpoint-recompute illustrates this contract: the forward pass preserves only segment boundaries, and the backward pass re-executes the forward segment to regenerate activations rather than loading them from global memory.
+This is a capacity limit rather than the bandwidth gap of the memory wall, and frameworks relieve it through two primary architectural strategies. The first is activation checkpointing\index{Activation checkpointing!definition}\index{Activation checkpointing!memory-compute trade-off} (or gradient checkpointing): rather than buffering every intermediate activation, the runtime stores only selected segment boundary tensors and recomputes dropped intermediates on demand during the backward pass. The essential systems mechanism is the runtime contract: the framework marks boundary activations as persistent and regenerates intermediate values when backward execution reaches that segment. @Lst-checkpoint-recompute illustrates this contract: the forward pass preserves only segment boundaries, and the backward pass re-executes the forward segment to regenerate activations rather than loading them from global memory.
 
 ::: {.column-margin .margin-pointer}
 ↪ Activation checkpointing schedules and their recomputation cost are operationalized in @sec-model-training-optimal-checkpoint-placement-strategy-4a0d.
@@ -2086,9 +2091,9 @@ out = checkpoint(
 
 :::
 
-The second strategy is *operation fusion*\index{Kernel fusion}\index{Kernel fusion!eliminating intermediate allocations}.[^fn-operation-fusion-bandwidth] Rather than executing matrix multiplication, bias addition, and activation functions as separate kernels that serialize intermediate tensors to accelerator global memory (HBM), compilers fuse compatible operators into a single kernel that passes intermediate values through registers or on-chip shared memory.
+The second strategy is the kernel fusion\index{Kernel fusion!eliminating intermediate allocations} that the memory wall motivated in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8, applied here to the body of a layer. Its capacity benefit is narrower than its traffic benefit. Temporaries that pass only between the fused operators are never allocated in HBM, so they add nothing to peak memory, while any value a backward rule reads must still be stored.[^fn-operation-fusion-bandwidth] Rather than executing matrix multiplication, bias addition, and activation functions as separate kernels that serialize intermediate tensors to accelerator global memory (HBM), compilers fuse compatible operators into a single kernel that passes intermediate values through registers or on-chip shared memory.
 
-[^fn-operation-fusion-bandwidth]: **Operation fusion**\index{Kernel fusion!bandwidth reduction}: When compatible operations execute as separate kernels, intermediate results may be written to HBM and read back by the next kernel. Fusion can keep those values on chip and avoid the corresponding transfers. The realized benefit depends on the operations, shapes, compiler, and hardware.
+[^fn-operation-fusion-bandwidth]: **Fusion and saved state**\index{Kernel fusion!backward-pass interaction}: Fusion removes the forward round-trip of an intermediate through HBM, but it does not remove the backward pass's need for that value. If a derivative rule reads a fused intermediate, such as the pre-activation whose sign forms the ReLU mask, the fused kernel must still write that value (or a compact mask) to memory, or the backward pass must recompute it. Fusion and checkpointing therefore interact, because the compiler decides which intermediates to materialize from what the backward graph will read.
 
 The backward pass itself relies on specialized hardware-optimized kernels. Rather than synthesizing backward passes from naive elementary operations, frameworks invoke tuned backward kernels (such as cuDNN primitives) that optimize memory access strides and register usage on accelerator hardware [@chetlur2014cudnn]. Combining checkpointing, kernel fusion, and specialized backward kernels enables large architectures to train within physical accelerator memory limits without incurring out-of-memory faults.
 
@@ -2147,7 +2152,7 @@ In a retained-activation implementation, saved device tensors remain live until 
 # │ Goal: Compare an illustrative ResNet-50 training peak with FP32 weight storage
 # │       without treating weight bytes as complete inference memory.
 # │ Show: "~102 MB FP32 weights vs. 8.4–12.4 GB illustrative training peak"—inline
-# │       and in "The Administrative Tax" callout (@sec-ml-frameworks-tensor-structure-dimensions-4a14).
+# │       and in "The Administrative Tax" callout (after the training-checkpoint listings, Differentiation Problem).
 # │ How: model.size_in_bytes() helpers; m_as(MB/Mparam) for unit extraction.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -2210,7 +2215,7 @@ Consider an illustrative ResNet-50\index{ResNet-50!training memory footprint} tr
 
 This disparity underscores why accelerator training capacity cannot be deduced from parameter counts alone. Total training memory obeys the four-component formulation ($\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerstateMemory + \ActivationMemory$) plus allocator overhead, as stated in @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e.
 
-Frameworks provide three graph-level controls to manage this trade-off. Gradient checkpointing\index{Activation checkpointing!recomputation strategy} [@chen2016training] alters what the graph retains: the engine stores selected segment boundaries and regenerates intermediate activations during the backward pass. In iron law terms, checkpointing increases the arithmetic operation count ($O$) to reduce peak activation storage; its effect on transfer volume ($\DataVolume$) depends on the recomputation path. Tensor detachment sets a gradient boundary: calling `.detach()` makes subsequent operations treat that tensor as independent of its prior computation. It does not retroactively free all previously saved state, and cutting a path changes which gradients are computed. Mixed-precision training provides a third lever: representing eligible activations and weights in 16-bit formats halves their bytes relative to FP32, reducing tensor volume ($\DataVolume$) and enabling higher arithmetic throughput on supported Tensor Cores ($\PeakRate$). @Sec-model-training formalizes these graph mechanisms into cluster sizing decisions.
+Frameworks provide three graph-level controls to manage this trade-off. Activation checkpointing\index{Activation checkpointing!recomputation strategy} [@chen2016training], whose runtime contract @lst-checkpoint-recompute showed, alters what the graph retains: the engine stores selected segment boundaries and regenerates intermediate activations during the backward pass. In iron law terms, checkpointing increases the arithmetic operation count ($O$) to reduce peak activation storage; its effect on transfer volume ($\DataVolume$) depends on the recomputation path. Tensor detachment sets a gradient boundary: calling `.detach()` makes subsequent operations treat that tensor as independent of its prior computation. It does not retroactively free all previously saved state, and cutting a path changes which gradients are computed. Transfer learning shows the payoff. When a frozen feature extractor runs with gradient recording disabled and its output enters the trainable head as a constant, autograd saves none of the extractor's activations, so only the head pays the activation-storage cost. Mixed-precision training provides a third lever: representing eligible activations and weights in 16-bit formats halves their bytes relative to FP32, reducing tensor volume ($\DataVolume$) and enabling higher arithmetic throughput on supported Tensor Cores ($\PeakRate$).
 
 ::: {.column-margin .margin-pointer}
 ↪ The decision of when these single-machine levers stop being enough and training must scale beyond one machine is developed in @sec-model-training-scale-physical-ceiling-e06c.
@@ -2312,7 +2317,7 @@ for inputs, targets in dataloader:
 
 :::
 
-##### Optimizer state and checkpointing {.unnumbered}
+##### Optimizer state and training checkpoints {.unnumbered}
 
 ```{python}
 #| echo: false
@@ -2375,9 +2380,9 @@ class Model7B:
 ↪ How to budget and reduce optimizer memory during training is developed in @sec-model-training-optimizer-memory-training-loop-4383.
 :::
 
-Resuming training after preemption or hardware failure requires restoring model weights and optimizer states in lockstep: first-moment vectors, second-moment variance estimates, and step counters. In the mixed-precision Adam recipe modeled here, a checkpoint holds the FP16 working weights (2 bytes per parameter), the FP32 master weights (4 bytes), and the two FP32 moments (8 bytes), 14 bytes per parameter; the FP16 gradients, which every step recomputes, are left out of the 16-byte training-state ledger that @sec-model-training-optimizer-memory-training-loop-4383 budgets. This explicit weight-copy recipe is distinct from choosing operation dtypes with autocast. For a 7-billion-parameter model, its checkpoint tensor payload therefore carries approximately `{python} Model7B.model_7b_total_gb_str` (`{python} Model7B.model_7b_fp16_gb_str` + `{python} Model7B.model_7b_master_gb_str` + `{python} Model7B.model_7b_adam_gb_str`), `{python} Model7B.model_7b_ckpt_mult_str` the FP16 weights alone. Checkpoint volume directly governs recovery latency across distributed storage, connecting fault tolerance to the iron law's $\DataVolume$ term.
+A training checkpoint is a different mechanism from the activation checkpointing above. It is a file on storage, written every so often so that training can resume after preemption or hardware failure, and resuming requires restoring model weights and optimizer states in lockstep: first-moment vectors, second-moment variance estimates, and step counters. In the mixed-precision Adam recipe modeled here, a checkpoint holds the FP16 working weights (2 bytes per parameter), the FP32 master weights (4 bytes), and the two FP32 moments (8 bytes), 14 bytes per parameter; the FP16 gradients, which every step recomputes, are left out of the 16-byte training-state ledger that @sec-model-training-optimizer-memory-training-loop-4383 budgets. That 16-byte total matches the FP32 Adam ledger of @sec-neural-computation-memory-training-vs-inference but divides differently, 2 + 2 + 4 + 8 bytes rather than 4 + 4 + 8, because the mixed-precision recipe trades full-precision weights and gradients for 16-bit working copies plus an FP32 master. This explicit weight-copy recipe is distinct from choosing operation dtypes with autocast. For a 7-billion-parameter model, its checkpoint tensor payload therefore carries approximately `{python} Model7B.model_7b_total_gb_str` (`{python} Model7B.model_7b_fp16_gb_str` + `{python} Model7B.model_7b_master_gb_str` + `{python} Model7B.model_7b_adam_gb_str`), `{python} Model7B.model_7b_ckpt_mult_str` the FP16 weights alone. Checkpoint volume directly governs recovery latency across distributed storage, connecting fault tolerance to the iron law's $\DataVolume$ term.
 
-@Sec-model-training analyzes how to budget and reduce optimizer memory. At the framework level, optimizers expose internal state dictionaries via `state_dict()` for serialization. @Lst-state-dict-interface demonstrates accessing optimizer state dictionaries, and @lst-checkpoint-save-load shows saving and restoring model parameters and optimizer states. Reproducing the training trajectory also requires the relevant random-number state, data position, learning-rate scheduler, and gradient-scaler state.
+At the framework level, optimizers expose internal state dictionaries via `state_dict()` for serialization. @Lst-state-dict-interface demonstrates accessing optimizer state dictionaries, and @lst-checkpoint-save-load shows saving and restoring model parameters and optimizer states. Reproducing the training trajectory also requires the relevant random-number state, data position, learning-rate scheduler, and gradient-scaler state.
 
 ::: {#lst-state-dict-interface lst-cap="**State Dictionary Interface**: Optimizers expose internal state through state_dict(), enabling serialization of momentum buffers and adaptive learning rate estimates for checkpointing."}
 
@@ -2420,11 +2425,135 @@ optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
 :::
 
+A checkpoint holds only persistent state. During a training step, the FP16 gradients rejoin that ledger in device memory and the saved activations from reverse-mode AD sit on top of it, so device memory must hold more than the checkpoint file suggests. Notebook \ref{nbk-frameworks-administrative-tax} prices the full accounting for a billion-parameter model.
+
+```{python}
+#| echo: false
+#| label: admin-tax-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ADMINISTRATIVE TAX CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Administrative Tax" explaining hidden memory costs
+# │
+# │ Goal: Demonstrate the hidden memory costs of large-scale training.
+# │ Show: That a 2 GB model requires ~23 GB of VRAM during training.
+# │ How: Sum FP16 gradients, FP32 master weights, Adam moments, and activations
+# │      for a 1-billion-parameter model (mixed-precision Adam, 16 B/param).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import BILLION, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GB, param
+from mlsysim.fmt import fmt, check, fmt_math, fmt_memory, fmt_multiple
+
+# ┌── LEGO ───────────────────────────────────────────────
+class AdminTax:
+    """
+    Namespace for Administrative Tax Calculation.
+    Scenario: Memory overhead for 1-billion-parameter model.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    params_count = 1 * BILLION * param
+    batch_size = 32
+    layers = 100
+    seq_len = 1024
+    width = 1024
+    saved_tensors_per_layer = 1
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    weights = params_count * BYTES_FP16
+    grads = weights
+    master = params_count * BYTES_FP32
+    opt = params_count * BYTES_ADAM_STATE
+    persistent = weights + grads + master + opt
+    persistent_mult = (persistent / weights).to("").magnitude
+
+    # Step 1: Activation approximation: Batch * Layers * Sequence * Width * saved tensors * FP16
+    act_bytes = batch_size * layers * seq_len * width * saved_tensors_per_layer * BYTES_FP16
+
+    total = persistent + act_bytes
+    tax = total - weights
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tax.to(GB).magnitude > 15, f"Administrative tax ({tax.to(GB).magnitude:.1f} GB) unexpectedly low.")
+    check(persistent_mult == 8, "Mixed-precision Adam state should be 8x FP16 weights")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    admin_weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
+    admin_grads_gb_str = fmt_memory(grads, unit=GB, precision=0, commas=False)
+    admin_master_gb_str = fmt_memory(master, unit=GB, precision=0, commas=False)
+    admin_opt_gb_str = fmt_memory(opt, unit=GB, precision=0, commas=False)
+    admin_persistent_gb_str = fmt_memory(persistent, unit=GB, precision=0, commas=False)
+    admin_persistent_mult_str = fmt_multiple(persistent_mult, precision=0, commas=False)
+    admin_act_gb_str = fmt_memory(act_bytes, unit=GB, precision=1, commas=False)
+    admin_tax_gb_str = fmt_memory(tax, unit=GB, precision=1, commas=False)
+    admin_batch_str = fmt(batch_size, precision=0, commas=False)
+    admin_layers_str = fmt(layers, precision=0, commas=False)
+    admin_seq_len_str = fmt(seq_len, precision=0, commas=False)
+    admin_width_str = fmt(width, precision=0, commas=False)
+    admin_saved_tensors_str = fmt(saved_tensors_per_layer, precision=0, commas=False)
+
+    admin_act_gb_num_str = fmt(act_bytes.to(GB).magnitude, precision=1, commas=False)
+    admin_act_calc_math = fmt_math(
+        f"{admin_batch_str} \\times {admin_layers_str} \\times {admin_seq_len_str} \\times {admin_width_str} \\times {admin_saved_tensors_str} \\times 2 \\approx \\mathbf{{{admin_act_gb_num_str}\\,\\text{{GB}}}}"
+    )
+```
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Goal: ResNet-50 illustrative training-peak/weight-storage ratio for admin-tax callout.
+from mlsysim import Models
+from mlsysim.fmt import fmt_multiple_range, check
+
+class ResNetAdminTaxRatio:
+    """ResNet-50 illustrative training peak vs. FP32 weight-storage ratio."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Cross-cell dependency: the peak is read from ResNetMemory (defined in
+    # @sec-ml-frameworks-pytorch-autograd-internals-4fa0, earlier in this
+    # chapter) so the two call sites cannot drift apart.
+    model = Models.Vision.ResNet50
+    training_min = ResNetMemory.training_min
+    training_max = ResNetMemory.training_max
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fp32 = model.size_in_bytes(BYTES_FP32)
+    training_ratio_min = (training_min / fp32).to_base_units().magnitude
+    training_ratio_max = (training_max / fp32).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(training_ratio_min < training_ratio_max, "Training memory ratio range must be ordered")
+    check(training_ratio_min > 1.0, "Training memory must exceed weight storage")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    resnet_training_ratio_range_mult_str = fmt_multiple_range(training_ratio_min, training_ratio_max, precision=1, commas=False)
+```
+
+::: {#nbk-frameworks-administrative-tax .callout-notebook title="The administrative tax"}
+
+The illustrative ResNet-50 breakdown in @sec-ml-frameworks-pytorch-autograd-internals-4fa0 was ~`{python} ResNetAdminTaxRatio.resnet_training_ratio_range_mult_str` larger than FP32 weight storage alone. The following scenario expands the accounting to gradients, optimizer state, and saved activations at billion-parameter scale.
+
+**Problem**: Calculate the cumulative memory overhead that gradients, optimizer states, and forward activations add beyond raw model weights in this billion-parameter training scenario.
+
+**Math**:
+
+1.  Model weights (FP16): `{python} AdminTax.admin_weights_gb_str`.
+2.  Gradients (FP16): `{python} AdminTax.admin_grads_gb_str` (same size as weights).
+3.  Master weights (FP32): `{python} AdminTax.admin_master_gb_str`, the full-precision copy that mixed-precision training updates.
+4.  Optimizer states (Adam): `{python} AdminTax.admin_opt_gb_str` (momentum and variance in FP32, 4$\times$ the FP16 weight memory).
+5.  Activations: For a batch size of `{python} AdminTax.admin_batch_str` and a `{python} AdminTax.admin_layers_str`-layer network, reverse-mode AD retains the operation-dependent values required by derivative rules; activation checkpointing can omit selected values and recompute them during the backward pass.
+    $$ \ActivationMemoryActivations \approx \BatchSize \times \NumberOfLayers \times \SequenceLength \times \HiddenDimension \times n_{\text{saved}} \times \ElementStorageSize $$
+    For a `{python} AdminTax.admin_seq_len_str`-token sequence, `{python} AdminTax.admin_width_str`-wide hidden state, `{python} AdminTax.admin_saved_tensors_str` saved tensor per layer, and $\ElementStorageSize = 2$ bytes for FP16: `{python} AdminTax.admin_act_calc_math`. Materialized attention terms can add a separate $\BatchSize \times \NumberOfAttentionHeads \times \SequenceLength^2$ component, which is why memory-efficient attention kernels matter.
+
+**Systems insight**: A `{python} AdminTax.admin_weights_gb_str` model carries `{python} AdminTax.admin_persistent_gb_str` of persistent training state before the first batch is processed, `{python} AdminTax.admin_persistent_mult_str` its FP16 weights (16 bytes per parameter in the mixed-precision Adam recipe). During a training step, batch-dependent activations add another `{python} AdminTax.admin_act_gb_str`, raising the peak "administrative tax" to ~`{python} AdminTax.admin_tax_gb_str` beyond the weights. During training, data movement includes saving and retrieving these activations.
+
+:::
+
 The mathematical foundations of automatic differentiation predated the deep learning resurgence by decades; the engineering challenge was mechanizing those principles into high-performance software infrastructure. Manually deriving and writing backward kernels for a single layer requires tracking intermediate variables, implementing local chain rules, and managing device buffer lifecycles. For modern transformer architectures containing multi-head self-attention, layer normalizations, and residual projections across hundreds of layers, manual differentiation across thousands of tensor dependencies is infeasible. Autograd engines mechanize this derivation across arbitrary topologies, precision modes, and accelerator backends, transforming an intractable analytical problem into automated graph execution.
 
-#### Memory management in gradient computation {#sec-ml-frameworks-memory-management-gradient-computation-bb77}
+#### Tensor lifetimes and the caching allocator {#sec-ml-frameworks-memory-management-gradient-computation-bb77}
 
-The memory management strategies examined in @sec-ml-frameworks-memory-management-strategies-b008 (activation checkpointing and operator fusion) exist because reverse-mode AD requires access to computational history. In the retained-activation scheme of @lst-reverse_memory, forward layers add saved tensors that remain live until backward traversal consumes them. This saved-activation footprint peaks at the onset of backpropagation and recedes as intermediate buffers are released. Total training memory can peak later as gradients and temporary workspaces become live. Modern runtimes reclaim saved tensors once their backward consumers and other references no longer need them.
+Checkpointing and fusion (@sec-ml-frameworks-memory-management-strategies-b008) decide which values exist during a training step. The runtime still has to decide when each value's memory is reclaimed and how fresh memory is obtained. In the retained-activation scheme of @lst-reverse_memory, forward layers add saved tensors that remain live until backward traversal consumes them. This saved-activation footprint peaks at the onset of backpropagation and recedes as intermediate buffers are released. Total training memory can peak later as gradients and temporary workspaces become live. Modern runtimes reclaim saved tensors once their backward consumers and other references no longer need them.
 
 Beyond tensor lifetimes, frameworks face a lower-level systems bottleneck: driver-level allocation latency. Invoking synchronous device memory allocations (such as `cudaMalloc`) incurs substantial OS and driver overhead, forcing host-device synchronizations that drain accelerator command queues. To eliminate this latency, modern frameworks intercept allocations with **caching allocators**\index{Memory management!caching allocators} that maintain pools of pre-reserved device memory blocks across training iterations. Suballocating from these pools amortizes device allocation costs and avoids the synchronizations that `cudaMalloc` can force, though varying tensor lifetimes can still induce memory fragmentation.
 
@@ -2587,129 +2716,7 @@ Every computation in a neural network operates on tensors.[^fn-tensor-hardware-c
 
 :::
 
-The tensor abstraction consumes far more memory than model weights alone suggest. Engineers who estimate memory from parameter count alone allocate accordingly and encounter out-of-memory errors that seem inexplicable. A quick memory accounting makes the hidden cost concrete: gradients, optimizer momentum, and stored activations accompany every weight tensor.
-
-```{python}
-#| echo: false
-#| label: admin-tax-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ADMINISTRATIVE TAX CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Administrative Tax" explaining hidden memory costs
-# │
-# │ Goal: Demonstrate the hidden memory costs of large-scale training.
-# │ Show: That a 2 GB model requires ~23 GB of VRAM during training.
-# │ How: Sum FP16 gradients, FP32 master weights, Adam moments, and activations
-# │      for a 1-billion-parameter model (mixed-precision Adam, 16 B/param).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import BILLION, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32, GB, param
-from mlsysim.fmt import fmt, check, fmt_math, fmt_memory, fmt_multiple
-
-# ┌── LEGO ───────────────────────────────────────────────
-class AdminTax:
-    """
-    Namespace for Administrative Tax Calculation.
-    Scenario: Memory overhead for 1-billion-parameter model.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params_count = 1 * BILLION * param
-    batch_size = 32
-    layers = 100
-    seq_len = 1024
-    width = 1024
-    saved_tensors_per_layer = 1
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    weights = params_count * BYTES_FP16
-    grads = weights
-    master = params_count * BYTES_FP32
-    opt = params_count * BYTES_ADAM_STATE
-    persistent = weights + grads + master + opt
-    persistent_mult = (persistent / weights).to("").magnitude
-
-    # Step 1: Activation approximation: Batch * Layers * Sequence * Width * saved tensors * FP16
-    act_bytes = batch_size * layers * seq_len * width * saved_tensors_per_layer * BYTES_FP16
-
-    total = persistent + act_bytes
-    tax = total - weights
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(tax.to(GB).magnitude > 15, f"Administrative tax ({tax.to(GB).magnitude:.1f} GB) unexpectedly low.")
-    check(persistent_mult == 8, "Mixed-precision Adam state should be 8x FP16 weights")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    admin_weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
-    admin_grads_gb_str = fmt_memory(grads, unit=GB, precision=0, commas=False)
-    admin_master_gb_str = fmt_memory(master, unit=GB, precision=0, commas=False)
-    admin_opt_gb_str = fmt_memory(opt, unit=GB, precision=0, commas=False)
-    admin_persistent_gb_str = fmt_memory(persistent, unit=GB, precision=0, commas=False)
-    admin_persistent_mult_str = fmt_multiple(persistent_mult, precision=0, commas=False)
-    admin_act_gb_str = fmt_memory(act_bytes, unit=GB, precision=1, commas=False)
-    admin_tax_gb_str = fmt_memory(tax, unit=GB, precision=1, commas=False)
-    admin_batch_str = fmt(batch_size, precision=0, commas=False)
-    admin_layers_str = fmt(layers, precision=0, commas=False)
-    admin_seq_len_str = fmt(seq_len, precision=0, commas=False)
-    admin_width_str = fmt(width, precision=0, commas=False)
-    admin_saved_tensors_str = fmt(saved_tensors_per_layer, precision=0, commas=False)
-
-    admin_act_gb_num_str = fmt(act_bytes.to(GB).magnitude, precision=1, commas=False)
-    admin_act_calc_math = fmt_math(
-        f"{admin_batch_str} \\times {admin_layers_str} \\times {admin_seq_len_str} \\times {admin_width_str} \\times {admin_saved_tensors_str} \\times 2 \\approx \\mathbf{{{admin_act_gb_num_str}\\,\\text{{GB}}}}"
-    )
-```
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Goal: ResNet-50 illustrative training-peak/weight-storage ratio for admin-tax callout.
-from mlsysim import Models
-from mlsysim.fmt import fmt_multiple_range, check
-
-class ResNetAdminTaxRatio:
-    """ResNet-50 illustrative training peak vs. FP32 weight-storage ratio."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Cross-cell dependency: the peak is read from ResNetMemory (defined in
-    # @sec-ml-frameworks-pytorch-autograd-internals-4fa0, earlier in this
-    # chapter) so the two call sites cannot drift apart.
-    model = Models.Vision.ResNet50
-    training_min = ResNetMemory.training_min
-    training_max = ResNetMemory.training_max
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fp32 = model.size_in_bytes(BYTES_FP32)
-    training_ratio_min = (training_min / fp32).to_base_units().magnitude
-    training_ratio_max = (training_max / fp32).to_base_units().magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(training_ratio_min < training_ratio_max, "Training memory ratio range must be ordered")
-    check(training_ratio_min > 1.0, "Training memory must exceed weight storage")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    resnet_training_ratio_range_mult_str = fmt_multiple_range(training_ratio_min, training_ratio_max, precision=1, commas=False)
-```
-
-::: {#nbk-frameworks-administrative-tax .callout-notebook title="The administrative tax"}
-
-The illustrative ResNet-50 breakdown in @sec-ml-frameworks-pytorch-autograd-internals-4fa0 was ~`{python} ResNetAdminTaxRatio.resnet_training_ratio_range_mult_str` larger than FP32 weight storage alone. The following scenario expands the accounting to gradients, optimizer state, and saved activations at billion-parameter scale.
-
-**Problem**: Calculate the cumulative memory overhead that gradients, optimizer states, and forward activations add beyond raw model weights in this billion-parameter training scenario.
-
-**Math**:
-
-1.  Model weights (FP16): `{python} AdminTax.admin_weights_gb_str`.
-2.  Gradients (FP16): `{python} AdminTax.admin_grads_gb_str` (same size as weights).
-3.  Master weights (FP32): `{python} AdminTax.admin_master_gb_str`, the full-precision copy that mixed-precision training updates.
-4.  Optimizer states (Adam): `{python} AdminTax.admin_opt_gb_str` (momentum and variance in FP32, 4$\times$ the FP16 weight memory).
-5.  Activations: For a batch size of `{python} AdminTax.admin_batch_str` and a `{python} AdminTax.admin_layers_str`-layer network, reverse-mode AD retains the operation-dependent values required by derivative rules; activation checkpointing can omit selected values and recompute them during the backward pass.
-    $$ \ActivationMemoryActivations \approx \BatchSize \times \NumberOfLayers \times \SequenceLength \times \HiddenDimension \times n_{\text{saved}} \times \ElementStorageSize $$
-    For a `{python} AdminTax.admin_seq_len_str`-token sequence, `{python} AdminTax.admin_width_str`-wide hidden state, `{python} AdminTax.admin_saved_tensors_str` saved tensor per layer, and $\ElementStorageSize = 2$ bytes for FP16: `{python} AdminTax.admin_act_calc_math`. Materialized attention terms can add a separate $\BatchSize \times \NumberOfAttentionHeads \times \SequenceLength^2$ component, which is why memory-efficient attention kernels matter.
-
-**Systems insight**: A `{python} AdminTax.admin_weights_gb_str` model carries `{python} AdminTax.admin_persistent_gb_str` of persistent training state before the first batch is processed, `{python} AdminTax.admin_persistent_mult_str` its FP16 weights (16 bytes per parameter in the mixed-precision Adam recipe). During a training step, batch-dependent activations add another `{python} AdminTax.admin_act_gb_str`, raising the peak "administrative tax" to ~`{python} AdminTax.admin_tax_gb_str` beyond the weights. During training, data movement includes saving and retrieving these activations.
-
-:::
+Because weights, gradients, master copies, optimizer moments, and saved activations are all tensors, they draw on the same device allocator and differ only in shape, dtype, device, and lifetime. That uniformity lets one caching allocator and one placement mechanism serve every role. It is also why a parameter count underestimates memory, since each weight tensor brings several companion tensors with it, as the training-state ledger in notebook \ref{nbk-frameworks-administrative-tax} showed.
 
 #### Tensor structure and dimensions {#sec-ml-frameworks-tensor-structure-dimensions-4a14}
 
@@ -2874,7 +2881,7 @@ Stride choices become performance choices. Row-major layout (used by NumPy, PyTo
 
 These memory layout details have direct performance implications, but no ordering is universally superior. Efficient access depends on which dimension an operation traverses, the kernel's supported layouts, vectorization, and the target memory hierarchy. A mismatched layout may require strided access or a conversion, while a kernel designed for that layout can access it efficiently. PyTorch's `.transpose()` creates a view by changing stride metadata while sharing storage. A later reshape can reuse that storage only when the strides permit the requested view. Calling `.contiguous()` copies elements into a new buffer when the requested contiguous layout is not already present.
 
-The dtype\index{Tensor!data types (dtypes)} is the tensor-level lever that trades numerical range against data movement. The standard choice in machine learning has been FP32 precision, exposed in frameworks through dtype literals such as `float32`, offering a balance of precision and efficiency. Modern frameworks extend this with multiple numeric types for different needs. Integer types support indexing and embedding operations. Reduced-precision types such as FP16 enable efficient mobile deployment. INT8 precision allows fast inference on specialized hardware. The choice of numeric type affects both model behavior and computational efficiency: neural network training typically requires FP32 precision for critical accumulations to maintain stable gradient computations, while inference tasks can often use lower precision\index{Quantization!inference precision} (framework dtype literals such as `int8` or even `int4`, corresponding to INT8 and INT4), reducing memory usage and increasing processing speed. Mixed-precision training approaches combine these benefits by using FP32 for critical accumulations while performing most computations at lower precision.
+The dtype\index{Tensor!data types (dtypes)} is the tensor-level lever that trades numerical range against data movement. The standard choice in machine learning has been FP32 precision, exposed in frameworks through dtype literals such as `float32`, offering a balance of precision and efficiency. Modern frameworks extend this with multiple numeric types for different needs. Integer types support indexing and embedding operations. Reduced-precision types such as FP16 enable efficient mobile deployment. INT8 precision allows fast inference on specialized hardware. The choice of numeric type affects both model behavior and computational efficiency: neural network training typically requires FP32 precision for critical accumulations to maintain stable gradient computations, while inference tasks can often use lower precision\index{Quantization!inference precision} (framework dtype literals such as `int8` or even `int4`, corresponding to INT8 and INT4), reducing memory usage and increasing processing speed. The autocast policy of @sec-ml-frameworks-mixedprecision-training-support-d31d combines these benefits per operation, running most computations at 16-bit precision while keeping accumulations and numerically sensitive operations in FP32.
 
 Type conversions become another point where abstraction meets physics. Operating on tensors with different types demands explicit conversion rules to preserve numerical correctness. These conversions introduce computational costs and risk precision loss. Frameworks provide type casting capabilities but rely on developers to maintain numerical precision across operations.
 
@@ -2986,7 +2993,7 @@ The cost of moving data between devices varies by orders of magnitude depending 
 
 : **Device Transfer Overhead**: Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2$\times$ total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). These transfer costs can dominate lightweight operations, making device placement critical. {#tbl-device-transfer-overhead tbl-colwidths="[25,25,20,30]"}
 
-These numbers connect directly to the iron law of performance. Every cross-device transfer contributes to $(\DataVolume/\Bandwidth)$ at a fraction of on-device bandwidth. Dividing 1 GB by the stated PCIe 4.0 peak gives `{python} DeviceBandwidthHierarchy.pcie4_1gb_ms_str`, a bandwidth-only lower bound that omits protocol, launch, synchronization, topology, and contention overhead. Transfers can dominate lightweight or small-batch workloads, so deployed latency must be measured rather than inferred from peak bandwidth alone.
+These numbers connect directly to the iron law of ML systems. Every cross-device transfer contributes to $(\DataVolume/\Bandwidth)$ at a fraction of on-device bandwidth. Dividing 1 GB by the stated PCIe 4.0 peak gives `{python} DeviceBandwidthHierarchy.pcie4_1gb_ms_str`, a bandwidth-only lower bound that omits protocol, launch, synchronization, topology, and contention overhead. Transfers can dominate lightweight or small-batch workloads, so deployed latency must be measured rather than inferred from peak bandwidth alone.
 
 Device placement discipline protects the bandwidth hierarchy from accidental PCIe traffic. Every tensor carries a device attribute, and frameworks enforce a strict invariant: operations can only combine tensors on the same device. A `RuntimeError` results from mixing `cuda:0` and `cuda:1` tensors, preventing silent cross-device transfers.
 
@@ -3183,6 +3190,10 @@ class DataloaderThroughput:
 
 Streams and events address placement and movement by overlapping transfers with computation so that the GPU rarely stalls on a single tensor. Scheduling alone, however, cannot help if data arrives too slowly in the first place. The next constraint is input delivery: data must arrive fast enough to sustain throughput. The core systems principle is straightforward: the data pipeline\index{Data pipeline!throughput optimization} must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at `{python} DataloaderThroughput.img_res_str` by `{python} DataloaderThroughput.img_res_str` resolution requires approximately `{python} DataloaderThroughput.dataloader_mb_per_s_str` of sustained raw uint8 image throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the iron law drops below 1.
 
+::: {.column-margin .margin-pointer}
+↩ The feeding problem, in which data delivery must keep pace with accelerator consumption, is established in @sec-data-engineering-feeding-problem.
+:::
+
 Frameworks address this throughput requirement through three mechanisms. The first is parallel worker processes: the DataLoader\index{DataLoader!throughput optimization} spawns multiple CPU processes, each independently loading and preprocessing samples. When storage access, decoding, augmentation, or normalization makes one loader process too slow to feed the accelerator, multiple workers can overlap I/O wait with preprocessing. Once the input pipeline meets demand, extra workers add overhead rather than throughput. When `num_workers > 0`, the DataLoader distributes sample indices across workers through a shared queue, and workers push completed samples to a data queue that the main process assembles into batches.
 
 The second mechanism is prefetching\index{Prefetching!data loader pipeline}. With multiprocessing enabled, `prefetch_factor` controls how many batches each worker prepares in advance. Four workers with `prefetch_factor=2` can maintain up to eight prefetched batches, increasing the chance that input work overlaps accelerator computation. Prefetching cannot guarantee that the accelerator never stalls; storage, decoding, augmentation, and contention can still make production slower than consumption. The cost is additional host memory proportional to the queued data.
@@ -3278,17 +3289,17 @@ DataLoaders, Datasets, and collation functions solve input delivery by sustainin
 
 #### Parameter structures {.unnumbered}
 
-A GPT-3 scale model stores `{python} GPT3ParameterStructures.gpt3_params_b_str` parameters, occupying `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` in FP16. Managing these parameters across devices, keeping gradients synchronized, and maintaining optimizer state (Adam state alone can add about 4$\times$ the FP16 weight memory, as the Administrative Tax notebook showed) is a core framework responsibility. Because parameters persist throughout training and inference, frameworks organize them into compact structures that minimize memory while enabling fast read and write access. During multi-GPU training, frameworks may replicate parameters across devices for parallel computation while keeping a synchronized master copy; parameter-server systems are one communication-efficient design for workers to read and write globally shared parameters [@li2014communication]. Synchronizing multi-billion parameter models can require transferring tens of GB of gradients per step, which is why frameworks expose communication backends that can synchronize tensors efficiently.
+A GPT-3 scale model stores `{python} GPT3ParameterStructures.gpt3_params_b_str` parameters, occupying `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` in FP16. Managing these parameters across devices, keeping gradients synchronized, and maintaining optimizer state (Adam state alone can add about 4$\times$ the FP16 weight memory, as notebook \ref{nbk-frameworks-administrative-tax} showed) is a core framework responsibility. Because parameters persist throughout training and inference, frameworks organize them into compact structures that minimize memory while enabling fast read and write access. During multi-GPU training, frameworks may replicate parameters across devices for parallel computation while keeping a synchronized master copy. One early design, the parameter server, keeps the shared weights on dedicated servers that workers read from and send updates to [@li2014communication]. Synchronizing multi-billion parameter models can require transferring tens of GB of gradients per step, which is why frameworks expose communication backends that can synchronize tensors efficiently.
 
-Parameter structures must also adapt to varying precision requirements. Training typically uses FP32 for gradient stability, but inference and large-scale training increasingly use FP16 or INT8. Frameworks implement type casting and mixed-precision management to enable these optimizations without compromising numerical accuracy.
+Parameter structures must also hold the same weights at more than one precision. In the mixed-precision Adam recipe of @sec-ml-frameworks-mixedprecision-training-support-d31d, each parameter exists during training as FP16 working weights and FP32 master weights, and an inference export may store it again in FP16 or INT8. The framework's casting and mixed-precision machinery keeps these copies synchronized, so the optimizer updates the master copy and the kernels read the working copy.
 
 #### Distributed execution contexts {.unnumbered}
 
 The computational graph defines *what* to compute, but *where* and *how* that computation runs across devices is the job of execution contexts\index{Distributed training!execution contexts}. On a single node, execution contexts manage CUDA streams and events (introduced in @sec-ml-frameworks-device-memory-management-9404) to overlap computation and data transfer across GPUs.
 
-When training scales beyond a single machine, these same abstractions extend to named groups of devices. Frameworks use constructs such as `ProcessGroup`\index{ProcessGroup!distributed execution} (PyTorch) or `Mesh` (JAX) to describe which tensors and operations belong together, relying on communication libraries such as the NVIDIA Collective Communications Library (NCCL) to execute collective primitives—such as **ring-AllReduce**\index{AllReduce!collective communication} for gradient aggregation and **AllGather**\index{AllGather!collective communication} for parameter gathering. The runtime manages these primitives to maximize interconnect utilization: intra-node NVLink links deliver up to $900\text{ GB/s}$ of bidirectional bandwidth per GPU on H100-class systems (`{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` on the A100 of @tbl-device-transfer-overhead), whereas inter-node InfiniBand or Ethernet networks drop to $50\text{--}400\text{ Gbps}$ ($6.25\text{--}50\text{ GB/s}$), making collective communication efficiency the primary bottleneck in distributed training scaling. The important framework idea is the abstraction boundary: user code names placement relationships, and the framework preserves those relationships while the hardware path changes underneath.
+When work spans several accelerators, these same abstractions extend to named groups of devices. Frameworks use constructs such as `ProcessGroup`\index{ProcessGroup!distributed execution} (PyTorch) or `Mesh` (JAX) to declare which tensors and operations belong together, and they carry out group-wide operations, such as summing every replica's gradients into one result (an AllReduce\index{AllReduce!collective communication}), through a communication library. The cost of those operations follows the hardware path. Inside one node, NVLink delivers `{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` of bidirectional bandwidth per A100 (@tbl-device-transfer-overhead), while the network links between machines are an order of magnitude or more slower. The important framework idea is the abstraction boundary. User code names placement relationships, and the framework preserves those relationships while the hardware path changes underneath.
 
-These concepts shape framework API design by establishing the placement primitives required for multi-accelerator execution. At the framework level, the central requirement is placement expressiveness: when models exceed single-device memory, frameworks must provide structured abstractions to partition data, operators, and state across hardware boundaries. A GPT-3 scale model, for instance, cannot fit on a single GPU—its `{python} GPT3ParameterStructures.gpt3_params_b_str` parameters alone require `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` in FP16, far exceeding any GPU's memory. To address this memory bottleneck, @fig-3d-parallelism diagrams how framework placement abstractions partition model state across a 3D accelerator grid (eight clusters of four GPUs, 32 in total, each labeled by its first GPU index from GPU 0 to GPU 28). Three orthogonal braces define the placement axes: the vertical brace splits work "Across replicas" (data parallelism), the horizontal brace distributes stages "Across layer groups" (pipeline parallelism), and the depth brace shards hidden dimensions "Within tensors" (tensor parallelism). @Sec-model-training-scaling-training-systems-adfd formalizes these dimensions as concrete distributed training strategies and analyzes their communication costs.
+At the framework level, the central requirement is placement expressiveness. When models exceed single-device memory, frameworks must provide structured abstractions to partition data, operators, and state across hardware boundaries. A GPT-3 scale model, for instance, cannot fit on a single GPU, since its `{python} GPT3ParameterStructures.gpt3_params_b_str` parameters alone require `{python} GPT3ParameterStructures.gpt3_fp16_gb_str` in FP16. A framework can place such a model along three independent axes (@fig-3d-parallelism). It can replicate the model and split the batch across replicas (data parallelism), split the layer sequence into stages on different devices (pipeline parallelism), or split individual tensors along their hidden dimensions (tensor parallelism). This chapter needs only the idea that the framework must be able to express these placements. @Sec-model-training-scaling-training-systems-adfd formalizes these dimensions as concrete distributed training strategies and analyzes their communication costs.
 
 ::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Device Placement Dimensions**: A grid of eight accelerator clusters arranged in two rows and four columns, each containing stacked computational units. The braces preview three ways a framework can place work when a model no longer fits one device: across layer groups, across replicated batches, and within very large tensors." fig-alt="Grid of 8 GPU clusters in two rows and four columns. A horizontal brace labels splitting across layer groups, a vertical brace labels replicated batch groups, and a depth brace labels splitting within large tensors."}
 
@@ -3602,7 +3613,7 @@ class Module7bRuntimeMemory:
     model_7b_fp16_gb_str = fmt_memory(model_7b_fp16, unit=GB, precision=0, commas=False)
 ```
 
-The memory manager allocates and reclaims GPU memory across the computational graph's lifetime. Model parameters (a 7-billion-parameter model consumes approximately `{python} Module7bRuntimeMemory.model_7b_fp16_gb_str` in FP16) persist for the entire training run, while activation tensors live only until the backward pass consumes them. PyTorch's caching allocator maintains a memory pool, subdividing and reusing freed blocks without returning them to CUDA, which avoids repeated `cudaMalloc` calls that can cost tens of microseconds and may be worse when they synchronize the device. For models that exceed GPU memory, the manager can apply checkpointing by discarding selected activations during the forward pass and recomputing them during the backward pass. The policy question—which activations to keep, and how much recomputation to tolerate—belongs to the training pipeline; the framework abstraction is what makes that policy executable.
+The memory manager allocates and reclaims GPU memory across the computational graph's lifetime. Model parameters (a 7-billion-parameter model consumes approximately `{python} Module7bRuntimeMemory.model_7b_fp16_gb_str` in FP16) persist for the entire training run, while activation tensors live only until the backward pass consumes them. Both draw on the caching allocator of @sec-ml-frameworks-memory-management-gradient-computation-bb77, which reuses freed blocks instead of paying for a `cudaMalloc` call (tens of microseconds, more when it synchronizes the device). When a model exceeds device memory, the same manager executes the activation-checkpointing policy of @sec-ml-frameworks-memory-management-strategies-b008. The policy question (which activations to keep, and how much recomputation to tolerate) belongs to the training pipeline; the framework abstraction is what makes that policy executable.
 
 The resource optimizer integrates scheduling and memory decisions with backend kernel selection. Matrix-multiplication libraries choose among tiled GEMM implementations according to shapes, dtype, layout, workspace, and hardware. A poor schedule can leave resources idle, while memory-pool fragmentation or excessive live state can cause an out-of-memory error even when aggregate device capacity appears sufficient.
 
@@ -3648,7 +3659,7 @@ Hardware-facing mechanisms—tensors, kernels, streams, and memory managers—en
 
 Every major framework implements this through a module abstraction that binds parameter tensors, forward computation, and lifecycle hooks into a unified interface. PyTorch's `nn.Module`\index{Module abstraction!PyTorch nn.Module}[^fn-nn-module-composition] provides an instructive case study because its design patterns recur across frameworks: Keras uses similar layer abstractions [@chollet2018keras], JAX's Flax employs analogous module structures, and TensorFlow's functional API shares conceptual parallels. Three enduring design principles recur regardless of syntax or programming paradigm.
 
-[^fn-nn-module-composition]: **nn.Module**\index{nn.Module!parameter management}: The "design patterns recur" claim holds because `nn.Module` solves a universal organizational problem: it automatically registers any assigned submodule or parameter into a hierarchical tree, enabling a single `.to('cuda')` call to recursively place millions of parameters onto a GPU. Keras layers, JAX Flax modules, and TensorFlow's `tf.Module` all implement the same tree-walking pattern. Without it, managing model state would require manual bookkeeping that scales linearly with architectural depth, a cost that grows prohibitive for models with hundreds of layers.
+[^fn-nn-module-composition]: **nn.Module**\index{nn.Module!parameter management}: The pattern recurs across frameworks because the organizational problem is universal. `nn.Module` automatically registers any assigned submodule or parameter into a hierarchical tree, enabling a single `.to('cuda')` call to recursively place millions of parameters onto a GPU. Keras layers, JAX Flax modules, and TensorFlow's `tf.Module` all implement the same tree-walking pattern. Without it, managing model state would require manual bookkeeping that scales linearly with architectural depth, a cost that grows prohibitive for models with hundreds of layers.
 
 ### Automatic parameter discovery {#sec-ml-frameworks-nn-module-parameter-discovery-4a91}
 
@@ -3879,7 +3890,7 @@ A team that prototypes quickly but cannot deploy the resulting model, or deploys
 
 TensorFlow's architecture\index{TensorFlow!graph-first architecture} spans eager development and graph-based optimization across hardware from cloud TPUs to microcontrollers. TensorFlow 2 executes eagerly by default. Performance-sensitive functions can be captured with `tf.function`, and deployment formats route captured computation to server, mobile, and browser runtimes. This dual path preserves the production graph capabilities inherited from TensorFlow 1.x without requiring every TensorFlow 2 program to build a complete graph before it runs.
 
-Within a captured `tf.function`, TensorFlow can apply graph optimizations such as constant folding, operator fusion, and layout planning. @Fig-tensorflow-architecture diagrams how the SavedModel serialization format acts as the central decoupling boundary across this pipeline. Heterogeneous training workflows on the left—incorporating `tf.data` preprocessing, modeling APIs (`tf.keras`, TensorFlow Hub, Estimators), and distribution strategies across CPUs, GPUs, and TPUs—serialize into a unified SavedModel artifact. From this central interface, graph definitions pass through supported serving or target-specific conversion paths into deployment runtimes on the right (TensorFlow Serving\index{TensorFlow Serving!production deployment}, TensorFlow Lite, TensorFlow.js\index{TensorFlow.js!browser deployment}, and native language bindings\index{SavedModel!TensorFlow export format}) without retaining Python runtime dependencies.
+Within a captured `tf.function`, TensorFlow can apply graph optimizations such as constant folding, kernel fusion, and layout planning. @Fig-tensorflow-architecture diagrams how the SavedModel serialization format acts as the central decoupling boundary across this pipeline. Heterogeneous training workflows on the left—incorporating `tf.data` preprocessing, modeling APIs (`tf.keras`, TensorFlow Hub, Estimators), and distribution strategies across CPUs, GPUs, and TPUs—serialize into a unified SavedModel artifact. From this central interface, graph definitions pass through supported serving or target-specific conversion paths into deployment runtimes on the right (TensorFlow Serving\index{TensorFlow Serving!production deployment}, TensorFlow Lite, TensorFlow.js\index{TensorFlow.js!browser deployment}, and native language bindings\index{SavedModel!TensorFlow export format}) without retaining Python runtime dependencies.
 
 ::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline**: The SavedModel format provides a boundary between training and deployment by capturing graph structure, weights, and signatures. The right-hand paths include direct serving and target-specific conversion for Lite and JavaScript runtimes. Supported operators and conversion determine whether each path can run without Python in production." fig-alt="Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
 
@@ -4121,7 +4132,7 @@ Deploying a model from an 8-GPU training cluster to an autonomous vehicle's 30-w
 
 : **Deployment Target Constraint Map**: Runtime assumptions, optimization levers, and binding constraints for each deployment tier, from cloud servers to microcontrollers. {#tbl-deployment-frameworks tbl-colwidths="[15,35,25,25]"}
 
-These boundaries demonstrate why target selection acts as a hard filter on framework architecture rather than a late packaging detail. For example, the Smart Doorbell KWS model in @sec-ml-frameworks-tinyml-micro-runtimes-2a1b exemplifies the microcontroller tier. Operating within kilobytes of memory requires a runtime with a fixed, preallocated arena and a compact C/C++ footprint, eliminating dynamic memory allocation and Python runtime overhead entirely. This physical restriction forces a practical separation: engineering teams train models in expressive, dynamic environments on cloud GPUs, but must deploy them into runtimes with drastically narrower execution assumptions.
+These boundaries demonstrate why target selection acts as a hard filter on framework architecture rather than a late packaging detail. For example, the KWS lighthouse deployment in @sec-ml-frameworks-tinyml-micro-runtimes-2a1b exemplifies the microcontroller tier. Operating within kilobytes of memory requires a runtime with a fixed, preallocated arena and a compact C/C++ footprint, eliminating dynamic memory allocation and Python runtime overhead entirely. This physical restriction forces a practical separation: engineering teams train models in expressive, dynamic environments on cloud GPUs, but must deploy them into runtimes with drastically narrower execution assumptions.
 
 The **ONNX**\index{ONNX!definition}\index{ONNX!cross-framework portability}[^fn-onnx-format-portability] format addresses this fragmentation by standardizing model exchange across runtimes [@bai2019onnx]. A pipeline can train an architecture in PyTorch, export the computation graph to an ONNX intermediate representation, and execute the serialized graph in ONNX Runtime or compile it for a target accelerator. In contrast, TensorFlow Lite relies on its own conversion path, translating TensorFlow SavedModels into FlatBuffers rather than routing through ONNX. Although standard interchange formats reduce manual model conversion between development and production environments, they do not eliminate compatibility testing, operator coverage gaps, or custom-kernel fallback overhead.
 
@@ -4131,7 +4142,7 @@ The **ONNX**\index{ONNX!definition}\index{ONNX!cross-framework portability}[^fn-
 
 @Fig-onnx diagrams this hub-and-spoke interoperability\index{ONNX!hub-and-spoke interoperability} topology centered on the common ONNX intermediate representation. On the left, training frameworks—including PyTorch, TensorFlow, Keras, Caffe2, MXNet, and CNTK—route inward spokes along the "Export to ONNX" pathway. On the right, outward spokes fan out through the "Load from ONNX" boundary to target execution engines, delivering the serialized computation graph to ONNX Runtime and downstream target frameworks without reimplementing model code.
 
-[^fn-onnx-format-portability]: **ONNX**\index{ONNX!framework portability}: The "fragmentation" ONNX addresses is that the framework used for model development may not match the runtime best suited to the deployment target. ONNX defines a hardware-agnostic graph representation that decouples the two, reducing the engineer-months of manual model conversion that would otherwise be required each time a deployment target changes. The accepted trade-off is that ONNX export can lose framework-specific optimizations or custom operators, requiring fallback implementations.
+[^fn-onnx-format-portability]: **ONNX**\index{ONNX!framework portability}: The framework used for model development often differs from the runtime best suited to the deployment target. ONNX defines a hardware-agnostic graph representation that decouples the two, reducing the engineer-months of manual model conversion that would otherwise be required each time a deployment target changes. The accepted trade-off is that ONNX export can lose framework-specific optimizations or custom operators, requiring fallback implementations.
 
 ::: {#fig-onnx fig-env="figure" fig-pos="htb" fig-cap="**Framework Interoperability**: The inward spokes represent exports into the shared ONNX format, while the outward spokes represent loads into compatible tools and runtimes; portability requires support on both sides of that boundary." fig-alt="Hub diagram with ONNX at center. Left side (export): PyTorch, TensorFlow, Keras, Caffe2, MXNet, Microsoft CNTK with arrows pointing inward. Right side (load): ONNX Runtime plus the same six frameworks with arrows pointing outward."}
 
@@ -4212,17 +4223,13 @@ Software compatibility alone does not guarantee execution; the framework runtime
 
 : **TensorFlow Hardware Targets**: TensorFlow variants target progressively more constrained hardware, shifting from x86, GPUs, and TPUs to Arm Cortex-A platforms and then Arm Cortex-M processors, DSPs, and MCUs. Actual binary size and memory footprint depend on the build, selected operators, delegates, model, and runtime configuration. {#tbl-tf-hw-comparison tbl-colwidths="[24,26,25,25]"}
 
-These hardware boundaries reflect the fundamental physical constraints—the light barrier, the power wall, and the memory wall—that divide the deployment spectrum into distinct operational regimes. In a data center, multi-megabyte runtime binaries and dynamic memory management overhead are negligible compared to gigabytes of high-bandwidth device memory. On a microcontroller with 256 KB of SRAM and 1 MB of flash, a general-purpose runtime cannot even be loaded. The framework must replace dynamic heap allocators with a single pre-allocated memory arena sized ahead of time to hold tensor activations and scratchpad buffers.
-
-::: {.column-margin .margin-pointer}
-↩ The light barrier, the power wall, and the memory wall that divide deployment into distinct operating regimes are established in @sec-ml-systems-deployment-spectrum-71be.
-:::
+These hardware boundaries reflect the light barrier, the power wall, and the memory wall, the physical constraints that divide the deployment spectrum into distinct operating regimes. In a data center, multi-megabyte runtime binaries and dynamic memory management overhead are negligible compared to gigabytes of high-bandwidth device memory. On the Cortex-M4 of the KWS lighthouse in @sec-ml-frameworks-tinyml-micro-runtimes-2a1b, with 256 KB of SRAM and 1 MB of flash, a general-purpose runtime cannot even be loaded. The framework must replace dynamic heap allocators with a single pre-allocated memory arena sized ahead of time to hold tensor activations and scratchpad buffers.
 
 #### Production-ready evaluation factors {#sec-ml-frameworks-productionready-evaluation-factors-e088}
 
 Satisfying model requirements, software dependencies, and hardware constraints establishes technical feasibility, but production viability requires evaluating operational reliability under sustained serving workloads. Runtimes that rely on dynamic memory allocation or host-language interpreters introduce tail-latency (p99) variance through garbage collection pauses and heap fragmentation. Static tensor arenas and ahead-of-time graph lowering can reduce allocation and interpreter variability. Tail latency still requires measurement under the target workload, including contention and synchronization.
 
-Precision optimization forms a central operational lever. Lowering numerical precision from FP32 to FP16 or BF16 halves bytes per represented value, and lowering it to FP8 or INT8 quarters them; realized traffic and throughput depend on supported kernels and conversions. When a deployment uses quantization, its toolchain must support the chosen path: post-training quantization (PTQ), which converts an already-trained model using a small representative calibration dataset to set value ranges, or quantization-aware training (QAT), which simulates low-precision arithmetic during training to recover accuracy margins before deployment; @sec-model-compression-precision-reduction-strategies-db83 develops both. Beyond per-device execution, production viability depends on toolchain stability: whether model checkpoints maintain backward compatibility across runtime updates, whether the framework exposes telemetry hooks for profiling kernel execution, and whether serving infrastructure can deploy updated graph definitions without downtime.
+Precision optimization forms a central operational lever. Lowering numerical precision from FP32 to FP16 or BF16 halves bytes per represented value, and lowering it to FP8 or INT8 quarters them; realized traffic and throughput depend on supported kernels and conversions. When a deployment uses quantization, its toolchain must support the chosen path: post-training quantization (PTQ), which converts an already-trained model using a small representative calibration dataset to set value ranges, or quantization-aware training (QAT), which simulates low-precision arithmetic during training to recover accuracy margins before deployment. Beyond per-device execution, production viability depends on toolchain stability: whether model checkpoints maintain backward compatibility across runtime updates, whether the framework exposes telemetry hooks for profiling kernel execution, and whether serving infrastructure can deploy updated graph definitions without downtime.
 
 ::: {.column-margin .margin-pointer}
 ↪ Post-training quantization, its calibration, and quantization-aware training are developed in @sec-model-compression-precision-reduction-strategies-db83.
@@ -4238,7 +4245,7 @@ The preceding sections evaluated execution, differentiation, and hardware abstra
 
 ## Anatomy of a Training Step {#sec-ml-frameworks-putting-together-anatomy-training-step-c7f1}
 
-In every iteration of a training loop, millions of floating-point operations, dynamic memory allocations, and hardware kernel launches must synchronize within tens of milliseconds. Execution, differentiation, and hardware abstraction operate simultaneously during model training\index{Training!step, anatomy}. In @lst-training-step-anatomy, a minimal two-layer multilayer perceptron illustrates this convergence across eight executable statements. Tracing each statement through the runtime stack connects the quantitative principles developed in @sec-ml-frameworks-three-problems-every-framework-must-solve-317d to physical execution: tensor allocation, kernel dispatch, dynamic graph recording, gradient computation, and parameter updates.
+In every iteration of a training loop, millions of floating-point operations, dynamic memory allocations, and hardware kernel launches must synchronize within tens of milliseconds. Execution, differentiation, and hardware abstraction operate simultaneously during model training\index{Training!step, anatomy}. In @lst-training-step-anatomy, a minimal two-layer multilayer perceptron illustrates this convergence across eight executable statements. Tracing each statement through the runtime stack connects the quantitative principles developed in @sec-ml-frameworks-compilation-continuum-principle-c106 to physical execution: tensor allocation, kernel dispatch, dynamic graph recording, gradient computation, and parameter updates.
 
 The example assumes trainable CUDA tensors `W1` and `W2` with shapes `(784, 256)` and `(256, 10)`, matching bias vectors `b1` and `b2`, and an optimizer already constructed over these parameters. The listing shows one iteration after that setup.
 
@@ -4302,7 +4309,7 @@ class TrainingStepDims:
 
 During the forward pass\index{Forward pass!kernel dispatch}, executing `h = torch.relu(x @ W1 + b1)` triggers an eager execution sequence:
 
-1. Python dispatch\index{Python dispatch!overhead}: The Python interpreter invokes `torch.matmul`, which routes through PyTorch's C++ dispatcher to select the CUDA backend, incurring several microseconds of host CPU overhead before issuing work to the device.
+1. Python dispatch\index{Python dispatch!overhead}: The Python interpreter invokes `torch.matmul`, which routes through PyTorch's C++ dispatcher to select the CUDA backend, incurring the Python-dispatch share of the per-operation tax (about `{python} FusionSpeedup.python_dispatch_us_str` in this chapter's model) before issuing work to the device.
 2. Kernel selection\index{Kernel dispatch!BLAS kernel selection}: cuBLAS selects a GEMM kernel configured for dimensions `{python} TrainingStepDims.train_batch_str` $\times$ `{python} TrainingStepDims.train_input_str` $\times$ `{python} TrainingStepDims.train_hidden_str`, partitioning the computation into thread blocks sized to fit the streaming multiprocessor shared memory and L2 cache tiles.
 3. Kernel launch: The host thread enqueues the launch descriptor into the GPU command stream, consuming driver launch latency while asynchronous execution allows host execution to proceed without blocking on completion.
 4. GPU execution: The streaming multiprocessors stream `W1` from HBM[^fn-hbm-capacity-constraint] through L2 cache into registers and Tensor Cores, evaluate the matrix product, and write the output activations back to HBM.
@@ -4358,7 +4365,7 @@ After backward fills the parameter `.grad` buffers, `optimizer.step()` reads tho
 
 ### Phase 3: Memory traffic analysis (the physics at work) {.unnumbered}
 
-The ledger in @tbl-training-step-roofline covers selected forward operations and a modeled backward pass, excluding optimizer-update and bias-addition costs. Applying @eq-dispatch-overhead within that scope gives the FLOPs, memory traffic, and arithmetic intensity for each listed operation:
+The ledger in @tbl-training-step-roofline covers selected forward operations and a modeled backward pass, excluding optimizer-update and bias-addition costs. Within that scope, counting FLOPs and bytes for each listed operation gives its arithmetic intensity, and summing them gives the hardware time that @eq-dispatch-overhead later weighs against dispatch cost:
 
 ```{python}
 #| echo: false
@@ -4529,7 +4536,7 @@ The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_s
 - $\IronlawTermTimesMemory \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
 - Assuming `{python} MnistTrainingStepCalc.mnist_n_ops_str` kernel launches, the software overhead $T_{\text{sw}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
 
-In this model, $T_{\text{sw}}$ exceeds the ideal lower bounds $\IronlawTermTimesCompute$ and $\IronlawTermTimesMemory$ by more than an order of magnitude, suggesting a possible overhead-bound\index{Overhead-bound!small model training} regime. Actual kernel times, achieved bandwidth, and host-device overlap must be profiled to confirm that diagnosis. If dispatch dominates, the following mechanisms target the launch tax:
+In this model, $T_{\text{sw}}$ exceeds the ideal lower bounds $\IronlawTermTimesCompute$ and $\IronlawTermTimesMemory$ by more than an order of magnitude, so the overhead ratio of @eq-dispatch-overhead sits far above 1 and the step is overhead-bound\index{Overhead-bound!small model training} under these assumptions. This is the small-MLP regime of notebook \ref{nbk-frameworks-dispatch-tax}, now reached from a real training loop. Profiling has a specific job here, which is to confirm that measured kernel times, achieved bandwidth, and host-device overlap match the model before acting on it. If dispatch dominates, the following mechanisms target the launch tax:
 
 - Kernel fusion (`torch.compile`): Fusing consecutive memory-bound operations into a single kernel avoids intermediate round-trips to HBM and collapses launch boundaries.
 - Batch size scaling: Increasing the batch size scales the arithmetic payload linearly while keeping dispatch overhead constant, amortizing fixed launch latency across more compute operations.
@@ -4719,7 +4726,7 @@ class CompilationOverheadCalc:
 
 **Fallacy**: *Compilation overhead is negligible.*
 
-Engineers assume compilation overhead is a one-time cost that pays off quickly. The hypothetical values in @tbl-training-benchmark assign ResNet-50 higher compiled throughput and a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. Under those assumptions, a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes completes in `{python} CompilationOverheadCalc.eager_total_s_str` in eager mode and `{python} CompilationOverheadCalc.compiled_total_s_str` in compiled mode, including recompilation overhead. The compiled workflow is therefore about `{python} CompilationOverheadCalc.compiled_slowdown_mult_str` slower in this illustrative rapid-prototyping scenario. Teams that enable compilation during rapid prototyping can waste time waiting for recompilations that negate throughput gains.
+Engineers assume compilation overhead is a one-time cost that pays off quickly. The hypothetical values in @tbl-training-benchmark assign ResNet-50 higher compiled throughput and a compile window of `{python} CompilationOverheadCalc.compile_min_s_str` to `{python} CompilationOverheadCalc.compile_max_s_str` per graph change. Under those assumptions, timed with the table's inference throughputs (a training loop would add backward work but pay the same recompilation cost), a `{python} CompilationOverheadCalc.n_images_str`-image experiment with `{python} CompilationOverheadCalc.n_recompilations_str` code changes completes in `{python} CompilationOverheadCalc.eager_total_s_str` in eager mode and `{python} CompilationOverheadCalc.compiled_total_s_str` in compiled mode, including recompilation overhead. The compiled workflow is therefore about `{python} CompilationOverheadCalc.compiled_slowdown_mult_str` slower in this illustrative rapid-prototyping scenario. Teams that enable compilation during rapid prototyping can waste time waiting for recompilations that negate throughput gains.
 
 :::
 
@@ -4735,11 +4742,11 @@ The right framework mode depends on the loop. During exploration, eager executio
 
 Machine learning frameworks solve three core systems challenges that make deep learning tractable on modern hardware. The first is execution: deciding when and how operations run. Frameworks balance the trade-off between eager evaluation for interactive debugging and graph execution for whole-program compilation, while modern hybrid approaches such as `torch.compile` capture graphs dynamically without sacrificing the Python control loop. The second is differentiation: computing gradients automatically. Frameworks implement reverse-mode automatic differentiation that applies the chain rule across compositions of operations, constructing an autograd tape or backward graph of vector-Jacobian products while making the required forward values available through retention or recomputation. This primitive makes training large models feasible through a single `loss.backward()` call. The third is abstraction: targeting heterogeneous hardware from a unified interface. Frameworks provide multi-dimensional tensor abstractions, intermediate representations, and runtime dispatch systems that bridge high-level model definitions to optimized device kernels across CPUs, GPUs, TPUs, and custom accelerators.
 
-These challenges are linked through the iron law of ML systems (@sec-introduction-iron-law-ml-systems-c32a): execution strategy affects dispatch latency $(\Latency)$, differentiation adds arithmetic and memory traffic $(\DataVolume)$, and abstraction influences hardware utilization efficiency $(\EfficiencyHw)$. These are diagnostic emphases, not exclusive assignments: fusion changes both launches and traffic, while differentiation changes work and live storage. Workloads with little reuse are frequently memory-bandwidth bound ($\DataVolume/\Bandwidth$). Frameworks mitigate this memory wall through compiler optimizations: kernel fusion merges compatible element-wise operations to keep intermediates in registers or on-chip SRAM instead of round-tripping through global memory, while selective recomputation trades additional floating-point operations $(O)$ to relieve peak activation memory pressure.
+These challenges are linked through the iron law of ML systems (@sec-introduction-iron-law-ml-systems-c32a): execution strategy affects dispatch latency $(\Latency)$, differentiation adds arithmetic and memory traffic $(\DataVolume)$, and abstraction influences hardware utilization efficiency $(\EfficiencyHw)$. These are diagnostic emphases, not exclusive assignments, since fusion changes both launches and traffic while differentiation changes both work and live storage. Workloads with little reuse are frequently memory-bandwidth bound ($\DataVolume/\Bandwidth$). Frameworks mitigate this memory wall through kernel fusion, which merges compatible element-wise operations to keep intermediates in registers or on-chip SRAM instead of round-tripping through global memory. The separate capacity limit yields to selective recomputation, which trades additional floating-point operations $(O)$ for lower peak activation memory.
 
 ::: {.callout-takeaways title="The layer between math and hardware"}
 
-* **Every framework solves three problems**: Execution dictates runtime dispatch, differentiation computes gradients, and abstraction targets heterogeneous hardware. TensorFlow, PyTorch, and JAX make distinct infrastructure wagers across these axes—from static graph capture to dynamic tracing and functional transformations—establishing architectural commitments that outlast API syntax.
+* **Every framework solves three problems**: Execution dictates runtime dispatch, differentiation computes gradients, and abstraction targets heterogeneous hardware. TensorFlow, PyTorch, and JAX make distinct infrastructure wagers across these axes, from static graph capture to dynamic tracing and functional transformations, and those wagers are architectural commitments that outlast API syntax.
 * **The memory wall drives optimization**: Accelerator compute capacity has outpaced memory bandwidth, making off-chip data movement a recurring bottleneck. Kernel fusion and lower-precision layouts can reduce the memory traffic term ($\DataVolume/\Bandwidth$), while selective recomputation primarily reduces peak activation storage by adding work.
 * **Compilation must amortize setup cost**: The compilation continuum principle in @eq-compilation-benefit quantifies when runtime speedup offsets compilation overhead. While dynamic workloads favor eager execution, repeatedly executed graphs benefit from JIT or ahead-of-time compilation, where the dispatch overhead law (@eq-dispatch-overhead) demonstrates that small operations gain disproportionately when host launch overhead ($\Latency$) is reduced.
 * **Module abstractions automate state management**: Automatic parameter registration, mode-dependent execution (training versus inference), and hierarchical state serialization enable multi-billion-parameter model updates in a single optimizer step across diverse hardware backends.
@@ -4751,7 +4758,7 @@ A framework presents itself as an ergonomic programming interface, yet its true 
 
 ::: {.callout-chapter-connection title="From control room to power plant"}
 
-Frameworks are the software substrate that translates abstract architectures into executable kernels. Computational graphs, autograd tapes, and kernel dispatch pipelines are the control room instruments: they give engineers visibility into and control over the training process. The machinery is built, but every budget decision it exposes remains unmade: which activations to checkpoint when memory runs short, how large a batch the hardware allows, and at what point a single device stops being enough. @Sec-model-training is where those bills come due. It budgets memory, time, and cost for real training runs and shows how far one machine can go before scaling out.
+Frameworks are the software substrate that translates abstract architectures into executable kernels. Computational graphs, autograd tapes, and kernel dispatch pipelines are the control room instruments: they give engineers visibility into and control over the training process. This chapter traced a single training step through that machinery. A training run repeats that step many thousands or millions of times, and every budget decision the machinery exposes is still unmade, including which activations to checkpoint when memory runs short, how large a batch the hardware allows, and at what point a single device stops being enough. @Sec-model-training is where those bills come due. It opens with why training costs orders of magnitude more than inference, then budgets memory, time, and cost for real training runs and shows how far one machine can go before scaling out.
 
 :::
 
