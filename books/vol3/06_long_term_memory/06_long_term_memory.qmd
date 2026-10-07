@@ -39,7 +39,7 @@ A context window holds the working state of one model call, and retained attenti
 - Classify persistent records by their source, evidential role, and relationship to derived search representations
 - Specify a retrieval contract that bounds access, returned content, resource use, and required freshness
 - Choose among pre-staged evidence, a direct read, and model-directed search from how much of the need the task names
-- Select retrieval methods for an information need, decide from the bandwidth floor when an exact vector scan suffices, and estimate multi-hop evidence against a serialized-token budget
+- Select retrieval methods for an information need, use a bandwidth floor to screen exact vector scans against a latency budget, and estimate multi-hop evidence against a serialized-token budget
 - Design a memory write policy for admission, correction, supersession, expiry, and deletion
 - Explain version-aware exclusion and fallback without mistaking removal of stale candidates for complete fresh retrieval
 - Evaluate cross-session memory policies by task outcomes, update behavior, and total resource cost
@@ -285,7 +285,7 @@ A naive sizing policy that accounts only for raw document bodies would admit `{p
 
 Because subword tokenizers (such as Byte-Pair Encoding) merge tokens across string boundaries, tokenizing text fragments in isolation and summing their counts yields an inaccurate total. Runtimes must measure token lengths on the final, fully serialized prompt structure using the target model's tokenizer. When a critical record exceeds the remaining budget, the runtime must not silently truncate the text. Instead, it should stage a syntactically coherent excerpt with explicit truncation markers, defer the item to a subsequent retrieval pass, or return an opaque handle that the model can resolve on demand.
 
-Every staged token also incurs concrete inference engine overhead beyond occupying space in the context window. Retrieved context must be processed through the model's compute-intensive prefill phase and then pinned in accelerator memory as key-value (KV) cache tensors for the duration of the generation cycle or prefix cache retention window. Staging fifty candidate records instead of five scales both prefill latency and memory pressure in direct proportion to the token volume. Every retained token counts against the resident-fit bound of the serving node's KV pool, so a generous staging policy reduces how many trajectories the node can serve concurrently.
+Every staged token also incurs concrete inference engine overhead beyond occupying space in the context window. Retrieved context must be processed through the model's compute-intensive prefill phase and then pinned in accelerator memory as key-value (KV) cache tensors for the duration of the generation cycle or prefix cache retention window. Staging more records increases the token volume that the serving engine must process and retain, although the resulting prefill latency depends on the model, prefix reuse, and serving configuration. Every retained token counts against the resident-fit bound of the serving node's KV pool, so a generous staging policy reduces how many trajectories the node can serve concurrently.
 
 ::: {.column-margin .margin-pointer}
 ↩ The per-sequence footprint of key-value cache state, and how it limits the number of sequences a node can serve concurrently, is established in @sec-vol3-kvcache-geometry.
@@ -1480,9 +1480,9 @@ Every quantity below is a hypothetical given chosen for round arithmetic, not a 
 **2. Where the exact scan stops paying (Basic).** A tenant's store holds $N = 2{,}000{,}000$ vectors of dimension $d = 1{,}024$ in FP16 ($w = 2$ bytes). The host sustains 100 GB/s of memory bandwidth and 2 TFLOP/s of peak arithmetic, and each search has a 5 ms latency budget.
 
 (a) Compute the bytes, FLOPs, and arithmetic intensity of one exact scan, and compare the intensity with the host's ridge point.
-(b) What is the bandwidth floor for one full scan, and how many eligible vectors can an exact scan cover within the budget?
-(c) A scope filter restricts most queries to one project of 150,000 vectors. Should those queries use an exact scan or an ANN index?
-(d) Would storing the full corpus as INT8 bring an unfiltered exact scan within budget?
+(b) What is the bandwidth floor for one full scan, and what optimistic eligible-vector ceiling does that floor set under the budget?
+(c) A scope filter restricts most queries to one project of 150,000 vectors. Does the bandwidth floor rule out an exact scan, and what measurement would decide whether it meets the search budget?
+(d) Would storing the full corpus as INT8 bring the bandwidth floor of an unfiltered exact scan within budget?
 
 **3. How much agreement buys (Basic).** Lexical search returns P, Q, R, S in that order, and dense search returns S, T, P, U. Every candidate is fully scoped to the same `r18` snapshot, ties break by candidate identifier, and the runtime stages three records.
 
@@ -1506,7 +1506,7 @@ Every quantity below is a hypothetical given chosen for round arithmetic, not a 
 (a) Which designs fit the memory budget? Compute the resident bytes of each.
 (b) For IVF-PQ, give the subvector dimension, the per-query lookup-table size with FP32 entries, and the compression ratio over the FP16 vectors.
 (c) With $n_{\text{probe}} = 16$ and evenly filled cells, how many bytes of codes does one query scan, and how does that compare with the bytes read to compare the query against every coarse centroid? What does the comparison suggest about the next optimization?
-(d) Full-precision re-scoring of a 100-candidate shortlist reads vectors from secondary storage. How many bytes does that fetch, and why is it the price of the design's recall rather than an avoidable overhead?
+(d) Full-precision re-scoring of a 100-candidate shortlist reads vectors from secondary storage. How many bytes does that fetch, what distance accuracy does it recover, and which upstream misses can it not repair?
 
 **6. Synchronous re-indexing in a repair session (Intermediate).** Each edit in a repair session changes 5 files and 15 indexed chunks. Stipulated costs are 4 ms to parse a file, 2 ms to update one chunk's postings, 40 ms per local embedding batch of up to 8 chunks, 150 ms per batch on a remote service, 50 ns to write an exclusion entry per file, and 30 ns to check one of 40 candidates per query. A session performs 60 edits, and the model's next dependent query arrives 2 s after each edit.
 
