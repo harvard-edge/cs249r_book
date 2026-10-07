@@ -131,7 +131,7 @@ static int run_sgemm(Stage stage , const float* A, const float * B , float* C, i
                 break;
             }
             case STAGE_COALESCED: {
-                // x covers columns, y covers rowsssssssssssss
+                // x covers columns, y covers rows
                 dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
                 sgemm_coalesced<<<grid, block>>>(dA, dB, dC, M, K, N);
                 break;
@@ -157,7 +157,7 @@ cleanup:
 }
 
 // C-ABI entry points, loaded from Python with ctypes
-// C-ABI entry points, loaded from Python with ctypes
+
 extern "C" {
 
 int tinytorch_cuda_gemm_naive(const float* A, const float* B, float* C,
