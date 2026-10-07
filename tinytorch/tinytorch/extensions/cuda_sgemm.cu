@@ -173,6 +173,13 @@ int tinytorch_cuda_gemm_tiled(const float* A, const float* B, float* C,
                               int M, int K, int N) {
     return run_sgemm(STAGE_TILED, A, B, C, M, K, N);
 }
+/** GPUs the CUDA runtime can see, or 0 when there is none or no usable driver. */
+int tinytorch_cuda_device_count(void) {
+    int count = 0;
+    if (cudaGetDeviceCount(&count) != cudaSuccess) return 0;
+    return count;
+}
+
 
 
 } // extern "C"
