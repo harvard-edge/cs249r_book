@@ -3,9 +3,9 @@
     "source_file": "books/vol2/04_data_storage/04_data_storage.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 11,
-    "sections_with_quizzes": 11,
-    "sections_without_quizzes": 0
+    "total_sections": 13,
+    "sections_with_quizzes": 12,
+    "sections_without_quizzes": 1
   },
   "sections": [
     {
@@ -345,6 +345,69 @@
       }
     },
     {
+      "section_id": "#sec-storage-checkpointing",
+      "section_title": "Checkpoint Storage",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "checkpoint volume calculations (175B resumable Adam state = 2.45 TB)",
+            "tiered checkpoint staging mechanics (local NVMe write vs async PFS copy)",
+            "ZeRO-3 sharded checkpointing vs naive full-replica checkpoint storms",
+            "checkpoint retention policies and restore verification imperatives"
+          ],
+          "question_strategy": "Focus on the write path, $T_{\\text{write}}$ minimization, and fault recovery. Test tiered staging arithmetic ($0.34\\text{ s}$ local vs $2.45\\text{ s}$ PFS), sharding math, retention policies, and workflow ordering.",
+          "difficulty_progression": "Start with tiered staging mechanics (MCQ), evaluate restore verification with TF, analyze ZeRO-3 sharding math (SHORT), evaluate retention policies (MCQ), and sequence tiered checkpoint workflow steps (ORDER).",
+          "integration": "Builds on training dynamics and the compute infrastructure chapter; sets up fault tolerance principles in distributed clusters.",
+          "ranking_explanation": "Addresses the single most demanding write workload in ML systems and the mechanics of preventing catastrophic data loss."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A 256-node cluster saves a 175B-parameter resumable checkpoint ($2.45\\text{ TB}$ total: $350\\text{ GB}$ FP16 weights, $700\\text{ GB}$ FP32 master weights, and $1.4\\text{ TB}$ of Adam moments) every 10 minutes. Under tiered staging, each node writes its $9.57\\text{ GB}$ ZeRO-3 shard to local NVMe ($28\\text{ GB/s}$ local array) in $\\approx 0.34\\text{ s}$, followed by an asynchronous background copy to a $1\\text{ TB/s}$ parallel file system taking $\\approx 2.45\\text{ s}$. What is the exposed training pause time ($T_{\\text{write}}$) per checkpoint?",
+            "choices": [
+              "Roughly $2.8\\text{ s}$, because training must remain paused until both the local write and the durable PFS copy complete.",
+              "Roughly $0.34\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while the PFS replication proceeds asynchronously in the background.",
+              "Zero seconds, because modern storage drivers execute zero-copy writes without interrupting GPU tensor execution.",
+              "Roughly $2.45\\text{ s}$, because parallel file system latency determines the minimum barrier synchronization time across nodes."
+            ],
+            "answer": "The correct answer is B. Roughly $0.34\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while PFS replication proceeds asynchronously. The synchronous phase is $9.57\\text{ GB} / 28\\text{ GB/s} \\approx 0.342\\text{ s}$, about $0.057\\%$ of a 10-minute interval. The 2.8-second and 2.45-second options incorrectly block training on the shared-tier transfer. Zero seconds is impossible because the job must still capture and persist a consistent local snapshot. This is a local-write estimate excluding snapshot and coordination overhead. The checkpoint remains vulnerable to node loss until it reaches its durability boundary; retain the previous committed generation during background replication.",
+            "learning_objective": "Explain how tiered checkpoint staging minimizes the exposed training pause time by decoupling local NVMe writes from asynchronous durable replication"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In distributed ML infrastructure, storage reliability is defined primarily as a write-completion property: once all nodes successfully execute and acknowledge their checkpoint write calls, the checkpoint can be guaranteed reliable for cluster recovery.",
+            "answer": "False. Storage reliability is a restore property, not a write property. A checkpoint is only reliable if the infrastructure continuously and automatically validates that saved shards can be located, reconstructed, schema-validated, and restored under realistic preemption and recovery conditions; unvalidated backups frequently fail during real incidents due to silent corruption, missing metadata, or software version mismatches.",
+            "learning_objective": "Evaluate the difference between write-completion acknowledgments and end-to-end restore validation in checkpoint reliability"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A cluster of 1,024 accelerators trains a 70B-parameter model whose resumable checkpoint contains $140\\text{ GB}$ of FP16 weights, $280\\text{ GB}$ of FP32 master weights, and $560\\text{ GB}$ of Adam moments, or $980\\text{ GB}$ per full replica. Contrast naive full-replica checkpointing with ZeRO-3 sharded checkpointing across a $100\\text{ GB/s}$ shared storage fabric.",
+            "answer": "Naive full-replica checkpointing makes all 1,024 replicas write the same $980\\text{ GB}$ state, generating $1{,}003.52\\text{ TB}$ of traffic and taking roughly $10{,}035\\text{ s}$, or $167.3$ minutes, across a $100\\text{ GB/s}$ fabric. ZeRO-3 writes one logical copy partitioned across the workers, collapsing total write volume to $980\\text{ GB}$ and shared-fabric time to roughly $9.8\\text{ s}$. Gradients are absent from both totals because the restored job recomputes them.",
+            "learning_objective": "Analyze how ZeRO-3 state sharding reduces cluster checkpoint write volume and eliminates multi-hour checkpoint storm stalls"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A 30-day training run of a 175B model generates 4,320 resumable checkpoints totaling roughly $10.6\\text{ PB}$ of state data. Which retention policy balances rapid failure recovery, long-term auditability, and storage cost without exhausting the parallel file system budget?",
+            "choices": [
+              "Retain all 4,320 checkpoints on the parallel file system to provide granular step-by-step rollback capabilities throughout the entire 30-day run.",
+              "Delete all intermediate checkpoints immediately after each step and rely exclusively on live memory replication across peer nodes for fault tolerance.",
+              "Retain the 3 most recent checkpoints on the parallel file system for fast local recovery, copy every 100th checkpoint to cloud object storage for long-term lineage, and purge older intermediate snapshots.",
+              "Compress all checkpoints with gzip and write them directly to cold tape archive without maintaining any copies on NVMe or parallel file systems."
+            ],
+            "answer": "The correct answer is C. Keeping the 3 most recent checkpoints on the parallel file system bounds active high-performance storage to $7.35\\text{ TB}$ ($3 \\times 2.45\\text{ TB}$), while archiving every 100th checkpoint preserves 43 historical snapshots in object storage. Retaining all $10.6\\text{ PB}$ on the PFS wastes high-cost capacity; deleting all checkpoints eliminates restart protection; and tape-only retention imposes excessive recovery latency.",
+            "learning_objective": "Design a tiered checkpoint retention policy that balances rapid crash recovery against long-term storage capacity costs"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the sequence of steps executed during a tiered asynchronous checkpointing operation: (1) Background daemons asynchronously transfer the local checkpoint shards from NVMe to the shared parallel file system, (2) The training orchestrator initiates a synchronized step barrier across all worker ranks, (3) Each rank snapshots its model weights and optimizer state shard into a local pinned DRAM buffer, (4) The training barrier releases and accelerators immediately resume forward-backward computation for the next step, (5) Each node flushes its pinned memory snapshot to local NVMe at full drive bandwidth.",
+            "answer": "The correct order is: (2) The training orchestrator initiates a synchronized step barrier across all worker ranks, (3) Each rank snapshots its model weights and optimizer state shard into a local pinned DRAM buffer, (5) Each node flushes its pinned memory snapshot to local NVMe at full drive bandwidth, (4) The training barrier releases and accelerators immediately resume forward-backward computation for the next step, (1) Background daemons asynchronously transfer the local checkpoint shards from NVMe to the shared parallel file system. The process begins with a coordinated barrier (2), creates a fast in-memory snapshot (3), writes the shard to local NVMe (5), releases the compute barrier to resume training (4), and asynchronously replicates the shard to shared storage in the background (1).",
+            "learning_objective": "Analyze the multi-stage execution workflow of tiered asynchronous checkpointing"
+          }
+        ]
+      }
+    },
+    {
       "section_id": "#sec-storage-economics",
       "section_title": "Storage Economics",
       "quiz_data": {
@@ -409,64 +472,51 @@
       }
     },
     {
-      "section_id": "#sec-storage-checkpointing",
-      "section_title": "Checkpoint Storage",
+      "section_id": "#sec-storage-inference",
+      "section_title": "Storage for Inference Workloads",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "checkpoint volume calculations (175B resumable Adam state = 2.45 TB)",
-            "tiered checkpoint staging mechanics (local NVMe write vs async PFS copy)",
-            "ZeRO-3 sharded checkpointing vs naive full-replica checkpoint storms",
-            "checkpoint retention policies and restore verification imperatives"
+            "cold-start load time as the serving-side storage metric (350 GB of FP16 weights)",
+            "parallel loading across striped drives and the host-memory bound on a warm DRAM load",
+            "model rollout as a fan-out read burst that mirrors a checkpoint storm"
           ],
-          "question_strategy": "Focus on the write path, $T_{\\text{write}}$ minimization, and fault recovery. Test tiered staging arithmetic ($0.34\\text{ s}$ local vs $2.45\\text{ s}$ PFS), sharding math, retention policies, and workflow ordering.",
-          "difficulty_progression": "Start with tiered staging mechanics (MCQ), evaluate restore verification with TF, analyze ZeRO-3 sharding math (SHORT), evaluate retention policies (MCQ), and sequence tiered checkpoint workflow steps (ORDER).",
-          "integration": "Builds on training dynamics and the compute infrastructure chapter; sets up fault tolerance principles in distributed clusters.",
-          "ranking_explanation": "Addresses the single most demanding write workload in ML systems and the mechanics of preventing catastrophic data loss."
+          "question_strategy": "Test the load-time arithmetic for one replica across tiers, then the fleet-wide rollout, so students see the inversion from sustained dataset throughput to bulk model reads.",
+          "difficulty_progression": "Start with single-replica cold-start arithmetic (MCQ), explain why a warm DRAM load is bounded by host memory rather than per-GPU links (SHORT), then evaluate rollout sources at fleet scale (MCQ).",
+          "integration": "Builds on the fifth workload inversion and the tier bandwidths of the storage hierarchy; sets up model loading and replica management in the inference chapter.",
+          "ranking_explanation": "Serving reuses the training hierarchy for a different objective, and cold-start and rollout arithmetic is where that difference becomes quantitative."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A 256-node cluster saves a 175B-parameter resumable checkpoint ($2.45\\text{ TB}$ total: $350\\text{ GB}$ FP16 weights, $700\\text{ GB}$ FP32 master weights, and $1.4\\text{ TB}$ of Adam moments) every 10 minutes. Under tiered staging, each node writes its $9.57\\text{ GB}$ ZeRO-3 shard to local NVMe ($28\\text{ GB/s}$ local array) in $\\approx 0.34\\text{ s}$, followed by an asynchronous background copy to a $1\\text{ TB/s}$ parallel file system taking $\\approx 2.45\\text{ s}$. What is the exposed training pause time ($T_{\\text{write}}$) per checkpoint?",
+            "question": "A serving node must load the $350\\text{ GB}$ of FP16 weights of a 175B-parameter model into accelerator memory. Which source gives the shortest cold start under the chapter's stated rates?",
             "choices": [
-              "Roughly $2.8\\text{ s}$, because training must remain paused until both the local write and the durable PFS copy complete.",
-              "Roughly $0.34\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while the PFS replication proceeds asynchronously in the background.",
-              "Zero seconds, because modern storage drivers execute zero-copy writes without interrupting GPU tensor execution.",
-              "Roughly $2.45\\text{ s}$, because parallel file system latency determines the minimum barrier synchronization time across nodes."
+              "Eight Gen4 NVMe drives read in parallel, each supplying one $43.75\\text{ GB}$ shard at $7\\text{ GB/s}$, for about 6.2 seconds.",
+              "A single Gen5 NVMe drive at $14\\text{ GB/s}$, for about 25 seconds.",
+              "The node's $4\\text{ GB/s}$ share of the parallel file system, for about 87.5 seconds.",
+              "A single object-storage client at $1\\text{ GB/s}$, for about 5.8 minutes."
             ],
-            "answer": "The correct answer is B. Roughly $0.34\\text{ s}$, because the training barrier releases immediately after the fast local NVMe write completes, while PFS replication proceeds asynchronously. The synchronous phase is $9.57\\text{ GB} / 28\\text{ GB/s} \\approx 0.342\\text{ s}$, about $0.057\\%$ of a 10-minute interval. The 2.8-second and 2.45-second options incorrectly block training on the shared-tier transfer. Zero seconds is impossible because the job must still capture and persist a consistent local snapshot. This is a local-write estimate excluding snapshot and coordination overhead. The checkpoint remains vulnerable to node loss until it reaches its durability boundary; retain the previous committed generation during background replication.",
-            "learning_objective": "Explain how tiered checkpoint staging minimizes the exposed training pause time by decoupling local NVMe writes from asynchronous durable replication"
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: In distributed ML infrastructure, storage reliability is defined primarily as a write-completion property: once all nodes successfully execute and acknowledge their checkpoint write calls, the checkpoint can be guaranteed reliable for cluster recovery.",
-            "answer": "False. Storage reliability is a restore property, not a write property. A checkpoint is only reliable if the infrastructure continuously and automatically validates that saved shards can be located, reconstructed, schema-validated, and restored under realistic preemption and recovery conditions; unvalidated backups frequently fail during real incidents due to silent corruption, missing metadata, or software version mismatches.",
-            "learning_objective": "Evaluate the difference between write-completion acknowledgments and end-to-end restore validation in checkpoint reliability"
+            "answer": "The correct answer is A. Striping the weights across eight drives divides the load into $43.75\\text{ GB}$ shards that load concurrently, so the load takes $43.75 / 7 \\approx 6.2\\text{ s}$. One faster drive still moves all $350\\text{ GB}$ serially ($350 / 14 = 25\\text{ s}$), and the shared tiers are slower still for a single node.",
+            "learning_objective": "Calculate cold-start load times for model weights from different storage tiers and explain why parallel striping shortens them"
           },
           {
             "question_type": "SHORT",
-            "question": "A cluster of 1,024 accelerators trains a 70B-parameter model whose resumable checkpoint contains $140\\text{ GB}$ of FP16 weights, $280\\text{ GB}$ of FP32 master weights, and $560\\text{ GB}$ of Adam moments, or $980\\text{ GB}$ per full replica. Contrast naive full-replica checkpointing with ZeRO-3 sharded checkpointing across a $100\\text{ GB/s}$ shared storage fabric.",
-            "answer": "Naive full-replica checkpointing makes all 1,024 replicas write the same $980\\text{ GB}$ state, generating $1{,}003.52\\text{ TB}$ of traffic and taking roughly $10{,}035\\text{ s}$, or $167.3$ minutes, across a $100\\text{ GB/s}$ fabric. ZeRO-3 writes one logical copy partitioned across the workers, collapsing total write volume to $980\\text{ GB}$ and shared-fabric time to roughly $9.8\\text{ s}$. Gradients are absent from both totals because the restored job recomputes them.",
-            "learning_objective": "Analyze how ZeRO-3 state sharding reduces cluster checkpoint write volume and eliminates multi-hour checkpoint storm stalls"
+            "question": "A warm replica keeps the $350\\text{ GB}$ of weights in host DRAM. Each GPU's own host link could move its $43.75\\text{ GB}$ shard in about 0.7 seconds, yet the full load takes about 1.8 seconds. Explain why.",
+            "answer": "All eight shard transfers read from the same host memory, whose $200\\text{ GB/s}$ bandwidth must carry the whole $350\\text{ GB}$, which takes about 1.8 seconds. The per-GPU links run in parallel, so they are not the bottleneck; the shared host-memory bandwidth is. A warm replica therefore trades DRAM capacity for a host-memory-bound load that is still several times faster than a striped NVMe read.",
+            "learning_objective": "Identify the shared resource that bounds a parallel weight load from host memory"
           },
           {
             "question_type": "MCQ",
-            "question": "A 30-day training run of a 175B model generates 4,320 resumable checkpoints totaling roughly $10.6\\text{ PB}$ of state data. Which retention policy balances rapid failure recovery, long-term auditability, and storage cost without exhausting the parallel file system budget?",
+            "question": "A serving fleet of 100 replicas of a 175B-parameter model deploys a new version, so all replicas must read $35\\text{ TB}$ of FP16 weights at once. Which statement correctly evaluates the shared sources?",
             "choices": [
-              "Retain all 4,320 checkpoints on the parallel file system to provide granular step-by-step rollback capabilities throughout the entire 30-day run.",
-              "Delete all intermediate checkpoints immediately after each step and rely exclusively on live memory replication across peer nodes for fault tolerance.",
-              "Retain the 3 most recent checkpoints on the parallel file system for fast local recovery, copy every 100th checkpoint to cloud object storage for long-term lineage, and purge older intermediate snapshots.",
-              "Compress all checkpoints with gzip and write them directly to cold tape archive without maintaining any copies on NVMe or parallel file systems."
+              "A $100\\text{ GB/s}$ object store finishes in about 5.8 minutes, while the $1\\text{ TB/s}$ parallel file system would take about 35 seconds but only by claiming the whole file system from co-tenant training jobs.",
+              "The parallel file system is always the right source because 35 seconds is shorter, and serving reads cannot interfere with training jobs.",
+              "The object store finishes in about 35 seconds because each replica reads only its own share of the weights.",
+              "Rollout time is independent of the source tier because each replica's load is limited by its own PCIe link."
             ],
-            "answer": "The correct answer is C. Keeping the 3 most recent checkpoints on the parallel file system bounds active high-performance storage to $7.35\\text{ TB}$ ($3 \\times 2.45\\text{ TB}$), while archiving every 100th checkpoint preserves 43 historical snapshots in object storage. Retaining all $10.6\\text{ PB}$ on the PFS wastes high-cost capacity; deleting all checkpoints eliminates restart protection; and tape-only retention imposes excessive recovery latency.",
-            "learning_objective": "Design a tiered checkpoint retention policy that balances rapid crash recovery against long-term storage capacity costs"
-          },
-          {
-            "question_type": "ORDER",
-            "question": "Order the sequence of steps executed during a tiered asynchronous checkpointing operation: (1) Background daemons asynchronously transfer the local checkpoint shards from NVMe to the shared parallel file system, (2) The training orchestrator initiates a synchronized step barrier across all worker ranks, (3) Each rank snapshots its model weights and optimizer state shard into a local pinned DRAM buffer, (4) The training barrier releases and accelerators immediately resume forward-backward computation for the next step, (5) Each node flushes its pinned memory snapshot to local NVMe at full drive bandwidth.",
-            "answer": "The correct order is: (2) The training orchestrator initiates a synchronized step barrier across all worker ranks, (3) Each rank snapshots its model weights and optimizer state shard into a local pinned DRAM buffer, (5) Each node flushes its pinned memory snapshot to local NVMe at full drive bandwidth, (4) The training barrier releases and accelerators immediately resume forward-backward computation for the next step, (1) Background daemons asynchronously transfer the local checkpoint shards from NVMe to the shared parallel file system. The process begins with a coordinated barrier (2), creates a fast in-memory snapshot (3), writes the shard to local NVMe (5), releases the compute barrier to resume training (4), and asynchronously replicates the shard to shared storage in the background (1).",
-            "learning_objective": "Analyze the multi-stage execution workflow of tiered asynchronous checkpointing"
+            "answer": "The correct answer is A. The rollout reads $35\\text{ TB}$ in one burst, so time is volume divided by the aggregate rate the source can give the fleet: $35\\text{ TB} / 100\\text{ GB/s} \\approx 5.8$ minutes, or $35\\text{ TB} / 1\\text{ TB/s} = 35$ seconds. The faster option starves every training job sharing the file system, the read-side mirror of a checkpoint storm, which is why fleets stage new versions locally, roll updates across replica groups, or let loaded replicas supply the rest.",
+            "learning_objective": "Size a fleet-wide model rollout against shared storage tiers and identify its interference with co-tenant training"
           }
         ]
       }
@@ -559,6 +609,14 @@
             "learning_objective": "Explain the mechanism of model collapse caused by recursive training on uncurated synthetic data"
           }
         ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-emerging",
+      "section_title": "Storage Technologies That Move Tiers",
+      "quiz_data": {
+        "quiz_needed": false,
+        "rationale": "Short survey section on devices that shift tier boundaries (CXL memory, computational storage, persistent memory); its durable idea, that tiers trade proximity for capacity, is assessed with the storage hierarchy and the checkpoint pause in earlier quizzes."
       }
     },
     {

@@ -447,7 +447,7 @@ Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` 
 
 Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of $N$ elements of $\ElementStorageSize$ bytes each, fusion reduces memory traffic from $2kN \ElementStorageSize$ bytes (each operation reads and writes) to $2N \ElementStorageSize$ bytes (one read, one write)—a $k\times$ reduction.
 
-FlashAttention\index{FlashAttention!appendix refresher} is an I/O-aware tiled attention algorithm: it computes the score, softmax, and value-product stages in SRAM tiles without materializing the full attention matrix in HBM, reducing HBM traffic and auxiliary attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$. The original work reports up to 3$\times$ wall-clock speedups on its evaluated workloads [@dao2022]; realized gains depend on shape and hardware (see @sec-appdx-algorithm-flash-attention for the step-by-step derivation). Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built.
+FlashAttention\index{FlashAttention!appendix refresher} is an I/O-aware tiled attention algorithm: it computes the score, softmax, and value-product stages in SRAM tiles without materializing the full attention matrix in HBM, reducing auxiliary attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ for a fixed head dimension. HBM traffic also falls, with its reduction depending on head dimension and available SRAM capacity. The original work reports up to 3$\times$ wall-clock speedups on its evaluated workloads [@dao2022]; realized gains depend on shape and hardware (see @sec-appdx-algorithm-flash-attention for the step-by-step derivation). Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built.
 
 ## Baur–Strassen Reverse-Mode AD Complexity Theorem {#sec-appdx-algorithm-baur-strassen}
 
@@ -490,7 +490,7 @@ We now perform operation-by-operation micro-cost accounting for all primitive no
 3. **Division ($v_j = v_i/v_k$)**:
    - Local derivatives: $\frac{\partial v_j}{\partial v_i} = \frac{1}{v_k}$, $\frac{\partial v_j}{\partial v_k} = -\frac{v_i}{v_k^2} = -\frac{v_j}{v_k}$.
    - Backward updates: $\bar{v}_i \gets \bar{v}_i + \frac{\bar{v}_j}{v_k}$ and $\bar{v}_k \gets \bar{v}_k - \frac{\bar{v}_j \cdot v_j}{v_k}$.
-   - Cost: 2 multiplications/divisions + 2 additions = 4 operations in backward pass for 1 forward operation. Work ratio: $\text{Fwd}(1) + \text{Bwd}(4) = 5 \text{ OPs} \le 5 \cdot 1$.
+   - Cost: Compute the quotient of the incoming adjoint and the denominator once, then reuse it in both updates: add it to the numerator adjoint, and multiply it by the cached forward output before subtracting from the denominator adjoint. This requires 2 multiplications/divisions + 2 additions = 4 operations in backward pass for 1 forward operation. Work ratio: $\text{Fwd}(1) + \text{Bwd}(4) = 5 \text{ OPs} \le 5 \cdot 1$.
 4. **Unary transcendental operations ($v_j = \phi(v_i)$)**:
    - Local derivative: $\frac{\partial v_j}{\partial v_i} = \phi'(v_i)$.
    - Backward update: $\bar{v}_i \gets \bar{v}_i + \bar{v}_j \cdot \phi'(v_i)$.

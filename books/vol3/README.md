@@ -17,10 +17,10 @@ An agent adds three exposures beyond a single model call, horizon (how many turn
 
 | Part | Chapters |
 |:-----|:---------|
-| Introduction | Foundations of Agentic Systems |
+| Introduction | Introduction |
 | I. The Model | The Foundation Model; Test-Time Compute |
 | II. Agent Memory | Context Engineering; KV Cache Management; Long-Term Memory |
-| III. Tool Use | Tool Calling; Agent Sandboxes |
+| III. Tool Use | Tool Calling; Agent Sandboxes; Agent Security |
 | IV. The Agent Runtime | The Agent Harness; Durable Execution; Failure Recovery; Agent Evaluation |
 | V. Learning from Trajectories | Trajectory Curation; Trajectory Fine-Tuning; Reinforcement Learning from Verifiable Rewards |
 | VI. Agents at Scale | Multi-Agent Coordination; Agent Economics |

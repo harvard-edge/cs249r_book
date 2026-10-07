@@ -3,8 +3,8 @@
     "source_file": "books/vol2/05_distributed_training/05_distributed_training.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 11,
-    "sections_with_quizzes": 11,
+    "total_sections": 10,
+    "sections_with_quizzes": 10,
     "sections_without_quizzes": 0
   },
   "sections": [
@@ -172,10 +172,13 @@
             "hardware efficiency vs statistical efficiency distinction",
             "stale-synchronous parallel (SSP) staleness penalty on optimization",
             "linear learning-rate scaling rules and warmup schedules",
-            "critical batch size and diminishing returns in convergence"
+            "critical batch size and diminishing returns in convergence",
+            "E4M3 vs E5M2 numerical formats and use-case assignment (weights/activations vs gradients)",
+            "per-tensor dynamic scaling mechanism to avoid underflow/overflow",
+            "distributed communication payload reduction without changing parallelization axes"
           ],
-          "question_strategy": "Open with learning rate scaling in an MCQ, compare hardware vs statistical efficiency in a SHORT question, examine bounded staleness in an MCQ, test critical batch size definition in a FILL question, and evaluate diminishing returns beyond critical batch size in a TF question.",
-          "difficulty_progression": "Applied hyperparameter scaling -> conceptual efficiency contrast -> optimization staleness mechanism -> core definition recall -> theoretical limits evaluation.",
+          "question_strategy": "Open with learning rate scaling in an MCQ, compare hardware vs statistical efficiency in a SHORT question, examine bounded staleness in an MCQ, test critical batch size definition in a FILL question, and evaluate diminishing returns beyond critical batch size in a TF question. Close with the FP8 subsection: precision format assignment in an MCQ, dynamic scaling in a SHORT question, and precision reduction vs geometric partitioning in a TF question.",
+          "difficulty_progression": "Applied hyperparameter scaling -> conceptual efficiency contrast -> optimization staleness mechanism -> core definition recall -> theoretical limits evaluation. -> FP8 format comparison -> numerical stability mechanism -> conceptual scope evaluation.",
           "integration": "Bridges distributed systems metrics (MFU, step time) with continuous optimization theory (gradient variance, critical batch size, learning rate schedules).",
           "ranking_explanation": "This section establishes the quantitative criteria for evaluating whether distributed scaling actually accelerates time-to-solution."
         },
@@ -221,6 +224,30 @@
             "question": "True or False: Scaling data parallelism significantly beyond a model's critical batch size ($B \\gg B^*$) continues to reduce total GPU-hours to reach target loss because additional GPUs always increase processed samples per second.",
             "answer": "False. Beyond the critical batch size $B^*$, gradient updates become saturated with redundant information, causing sample efficiency (loss reduction per sample) to collapse. While hardware step throughput (samples/sec) may scale with added workers, the total number of samples and FLOPs required to achieve target loss grows disproportionately, increasing total GPU-hours and compute cost.",
             "learning_objective": "Evaluate the compute cost consequences of scaling data parallelism beyond the critical batch size"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does standard FP8 mixed-precision training pair the E4M3 format for forward-pass activations and weights with the E5M2 format for backward-pass gradients?",
+            "choices": [
+              "E4M3 has a wider numerical range than E5M2, which prevents gradient underflow during backpropagation",
+              "E4M3 provides higher precision (3 mantissa bits, range $\\pm 448$) suitable for bounded activations, while E5M2 provides a wider dynamic range (5 exponent bits, range $\\pm 57344$) necessary for gradients spanning multiple orders of magnitude",
+              "E4M3 is an integer format while E5M2 is a floating-point format supported exclusively on CPU hosts",
+              "E5M2 requires half the memory bandwidth of E4M3, accelerating the backward pass AllReduce"
+            ],
+            "answer": "The correct answer is B. Forward-pass activations and weights follow relatively well-behaved, bounded distributions where higher numerical precision (3 mantissa bits in E4M3) preserves representational accuracy. Backward-pass gradients can vary across many orders of magnitude and require the wider dynamic range of E5M2 (5 exponent bits, representing values up to $\\pm 57344$) to prevent catastrophic overflow and underflow. The assertion that E4M3 has a wider range than E5M2 inverts their specifications. Both E4M3 and E5M2 are 8-bit floating-point formats occupying identical memory footprints (1 byte per element).",
+            "learning_objective": "Compare E4M3 and E5M2 FP8 formats based on numerical range, precision, and training tensor roles"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why per-tensor dynamic scaling is necessary in FP8 distributed training and describe how the scaling factor is computed during execution.",
+            "answer": "FP8 scaling maps each tensor into the limited representable range. A simple current-maximum rule uses $S=\\mathrm{FP8}_{\\max}/\\max(|X|)$ before casting, with an appropriate zero-tensor guard. For a product of independently scaled operands, the output must be divided by the product of their scales. Practical policies may use history or smaller scaling blocks; the objective is to balance rounding, underflow, and overflow.",
+            "learning_objective": "Explain how dynamic scaling prevents underflow and overflow in narrow dynamic range FP8 tensors"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Converting training tensors to FP8 eliminates the need for tensor and pipeline parallelism when training 100B+ parameter models because FP8 changes the geometric parallelization axes.",
+            "answer": "False. FP8 operand formats do not change the parallelization axes. Stored parameters, master weights, optimizer state, activations, and collective payloads can use different dtypes; enabling FP8 matrix multiplication does not halve all of them. Large models can still require tensor, pipeline, or sharded data parallelism to meet the full training-state budget.",
+            "learning_objective": "Distinguish numerical precision reduction from model partitioning across distributed parallelism axes"
           }
         ]
       }
@@ -291,50 +318,6 @@
             "question": "True or False: Ring Attention scales context length beyond single-GPU memory capacity by circulating key/value blocks in an accelerator ring across $N-1$ communication rounds while overlapping transfer with block-level attention computation.",
             "answer": "True. Ring Attention partitions the query, key, and value sequences across $N$ GPUs so each device holds only $S/N$ tokens of key/value state. Each GPU evaluates its query block against all $N$ key/value blocks, including its local block, using $N-1$ transfers. Transfer can overlap block computation when the interconnect and compute budget permit; the distributed state capacity grows with worker count.",
             "learning_objective": "Evaluate the memory and communication mechanism of Ring Attention for long-context sequence parallelism"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-distributed-training-fp8",
-      "section_title": "FP8 for Distributed Training",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "E4M3 vs E5M2 numerical formats and use-case assignment (weights/activations vs gradients)",
-            "per-tensor dynamic scaling mechanism to avoid underflow/overflow",
-            "distributed communication payload reduction without changing parallelization axes"
-          ],
-          "question_strategy": "Open with precision format assignment in an MCQ, explain dynamic scaling in a SHORT question, and evaluate precision reduction vs geometric partitioning in a TF question.",
-          "difficulty_progression": "Format comparison -> numerical stability mechanism -> conceptual scope evaluation.",
-          "integration": "Connects low-precision arithmetic hardware support with distributed communication payload reduction.",
-          "ranking_explanation": "FP8 operand precision is distinct from stored-state and collective-wire precision; payload savings require an explicitly narrowed communication path."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "Why does standard FP8 mixed-precision training pair the E4M3 format for forward-pass activations and weights with the E5M2 format for backward-pass gradients?",
-            "choices": [
-              "E4M3 has a wider numerical range than E5M2, which prevents gradient underflow during backpropagation",
-              "E4M3 provides higher precision (3 mantissa bits, range $\\pm 448$) suitable for bounded activations, while E5M2 provides a wider dynamic range (5 exponent bits, range $\\pm 57344$) necessary for gradients spanning multiple orders of magnitude",
-              "E4M3 is an integer format while E5M2 is a floating-point format supported exclusively on CPU hosts",
-              "E5M2 requires half the memory bandwidth of E4M3, accelerating the backward pass AllReduce"
-            ],
-            "answer": "The correct answer is B. Forward-pass activations and weights follow relatively well-behaved, bounded distributions where higher numerical precision (3 mantissa bits in E4M3) preserves representational accuracy. Backward-pass gradients can vary across many orders of magnitude and require the wider dynamic range of E5M2 (5 exponent bits, representing values up to $\\pm 57344$) to prevent catastrophic overflow and underflow. The assertion that E4M3 has a wider range than E5M2 inverts their specifications. Both E4M3 and E5M2 are 8-bit floating-point formats occupying identical memory footprints (1 byte per element).",
-            "learning_objective": "Compare E4M3 and E5M2 FP8 formats based on numerical range, precision, and training tensor roles"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain why per-tensor dynamic scaling is necessary in FP8 distributed training and describe how the scaling factor is computed during execution.",
-            "answer": "FP8 scaling maps each tensor into the limited representable range. A simple current-maximum rule uses $S=\\mathrm{FP8}_{\\max}/\\max(|X|)$ before casting, with an appropriate zero-tensor guard. For a product of independently scaled operands, the output must be divided by the product of their scales. Practical policies may use history or smaller scaling blocks; the objective is to balance rounding, underflow, and overflow.",
-            "learning_objective": "Explain how dynamic scaling prevents underflow and overflow in narrow dynamic range FP8 tensors"
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: Converting training tensors to FP8 eliminates the need for tensor and pipeline parallelism when training 100B+ parameter models because FP8 changes the geometric parallelization axes.",
-            "answer": "False. FP8 operand formats do not change the parallelization axes. Stored parameters, master weights, optimizer state, activations, and collective payloads can use different dtypes; enabling FP8 matrix multiplication does not halve all of them. Large models can still require tensor, pipeline, or sharded data parallelism to meet the full training-state budget.",
-            "learning_objective": "Distinguish numerical precision reduction from model partitioning across distributed parallelism axes"
           }
         ]
       }
@@ -592,14 +575,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Why is gradient accumulation NOT a cost-free substitute for true physical scale-out even though it reduces gradient AllReduce communication frequency by a factor of $K$?",
+            "question": "Why is gradient accumulation NOT a cost-free substitute for true physical scale-out even though it reduces gradient AllReduce communication frequency by a factor of $k$?",
             "choices": [
               "It is mathematically incompatible with the Adam optimizer",
-              "It requires keeping live gradient buffers resident in HBM, increases optimizer update latency by $K\\times$, and risks FP16 numerical overflow when summing hundreds of gradient tensors",
+              "It requires keeping live gradient buffers resident in HBM, increases optimizer update latency by $k\\times$, and risks FP16 numerical overflow when summing hundreds of gradient tensors",
               "It requires dedicated InfiniBand links between CPU and GPU for each microstep",
               "It forces batch normalization layers to synchronize across all nodes on every forward pass"
             ],
-            "answer": "The correct answer is B. Gradient accumulation requires keeping a live gradient buffer resident in HBM throughout the accumulation window, delays parameter updates by $K$ forward/backward steps (slowing convergence dynamics), and risks numerical overflow when repeatedly accumulating unscaled FP16 values in early training. Gradient accumulation is fully compatible with Adam. It does not require special CPU-GPU InfiniBand links. It does not force cross-node batch normalization synchronization.",
+            "answer": "The correct answer is B. Gradient accumulation requires keeping a live gradient buffer resident in HBM throughout the accumulation window, delays parameter updates by $k$ forward/backward steps (slowing convergence dynamics), and risks numerical overflow when repeatedly accumulating unscaled FP16 values in early training. Gradient accumulation is fully compatible with Adam. It does not require special CPU-GPU InfiniBand links. It does not force cross-node batch normalization synchronization.",
             "learning_objective": "Analyze the memory, latency, and numerical stability trade-offs of gradient accumulation"
           },
           {
@@ -648,8 +631,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Contrast the primary partitioning strategy and binding hardware bottleneck for Archetype A (Dense Large Language Models like GPT-4/Llama-3) versus Archetype B (Large-Scale Recommendation Models / DLRM).",
-            "answer": "Archetype A (dense LLMs) uses Hybrid 3D Parallelism (Tensor, Pipeline, and Data Parallelism) and is bound by GPU compute throughput and high-bandwidth interconnects (NVLink and InfiniBand). Archetype B (DLRM) uses Embedding Sharding across Parameter Server architectures and is bound by aggregate memory capacity (terabytes of DRAM/HBM) and random-access memory latency for sparse lookups rather than dense compute.",
+            "question": "Contrast the primary partitioning strategy and binding hardware bottleneck for Archetype A (GPT-4/Llama-3) versus Archetype B (DLRM at Scale).",
+            "answer": "Archetype A (GPT-4/Llama-3) uses Hybrid 3D Parallelism (Tensor, Pipeline, and Data Parallelism) and is bound by GPU compute throughput and high-bandwidth interconnects (NVLink and InfiniBand). Archetype B (DLRM at Scale) uses Embedding Sharding across Parameter Server architectures and is bound by aggregate memory capacity (terabytes of DRAM/HBM) and random-access memory latency for sparse lookups rather than dense compute.",
             "learning_objective": "Compare distributed training archetypes by their primary partitioning strategy and binding hardware bottleneck"
           },
           {
