@@ -414,11 +414,11 @@ Verify your understanding of when to move from single-machine to distributed inf
 
 The contrast between training and inference\index{Training!vs. inference requirements} centers on the unit of useful progress. Training evaluates throughput together with convergence over a run; interactive serving evaluates completed requests against quality and latency targets. Offline inference can also prioritize throughput, while training still loses progress to stragglers and stalls. The distinction is therefore which delays violate the workload's contract, not whether one activity cares about time and the other does not. @Tbl-training-inference-inversion summarizes the priorities of long-running training and interactive serving across six system aspects.
 
-| **Aspect**              |   **Distributed Training**    |      **Distributed Inference**       |
+| **Aspect**              |    **Distributed Training**   |      **Distributed Inference**       |
 |:------------------------|:-----------------------------:|:------------------------------------:|
 | **Primary metric**      |   Throughput (samples/hour)   |           Latency (p99 ms)           |
 | **Acceptable variance** |             Hours             |             Milliseconds             |
-| **State management**    |    Checkpoints (periodic)     |      Session state (continuous)      |
+| **State management**    |     Checkpoints (periodic)    |      Session state (continuous)      |
 | **Batch formation**     |       Large, controlled       |       Request-driven, variable       |
 | **Failure tolerance**   |    Restart from checkpoint    | Redirect if capacity and state allow |
 | **Cost structure**      | Fixed duration, variable rate |     Variable duration, fixed SLO     |
@@ -844,12 +844,12 @@ The optimization techniques organize into a serving hierarchy\index{Serving!hier
 
 Each level supplies a different measurement boundary. @Tbl-serving-hierarchy associates request latency, replica throughput, aggregate service capacity, and cross-tenant efficiency with the controls most directly responsible for them. Their effects still cross boundaries: batching can increase replica throughput while adding request delay, and replica placement can change both communication cost and service capacity. The hierarchy helps locate the decision without treating its metric in isolation. In C³ terms, batching and cache management improve compute reuse, sharding introduces communication, and routing, isolation, and autoscaling coordinate the resources that make those gains usable.
 
-| **Level**    | **Optimization Target** | **Key Techniques**                     |
-|:-------------|:-----------------------:|:---------------------------------------|
-| **Request**  |   Per-request latency   | Dynamic batching, response caching     |
-| **Replica**  | Throughput, utilization | KV-cache paging, kernel fusion         |
-| **Service**  |    Aggregate capacity   | Load balancing, routing, autoscaling   |
-| **Platform** |   Resource efficiency   | Multi-tenancy, scheduling, placement   |
+| **Level**    | **Optimization Target** | **Key Techniques**                   |
+|:-------------|:-----------------------:|:-------------------------------------|
+| **Request**  |   Per-request latency   | Dynamic batching, response caching   |
+| **Replica**  | Throughput, utilization | KV-cache paging, kernel fusion       |
+| **Service**  |    Aggregate capacity   | Load balancing, routing, autoscaling |
+| **Platform** |   Resource efficiency   | Multi-tenancy, scheduling, placement |
 
 : **Serving hierarchy optimization targets**: Each level of the serving hierarchy targets distinct performance metrics, from per-request latency at the request tier to aggregate resource efficiency at the platform tier. {#tbl-serving-hierarchy}
 
@@ -1390,8 +1390,8 @@ The knee occurs where the variable compute cost $(B \times t_{\text{req}})$ star
 2. **LLM Decode** $(T_{\text{fixed}} = 40\text{ ms}, t_{\text{req}} = 0.5\text{ ms})$:
    - Knee: $B \approx 40\text{ ms}/0.5\text{ ms} =$ `{python} BatchingEfficiency.bec_llm_knee_str`.
    - **Result**: The larger fixed cost in this decode example moves the overhead-amortization knee to a larger batch.
-   - **Where 0.5 ms comes from**: it is an assumed marginal cost per added sequence, dominated by reading that sequence's own KV state at a moderate context length. Unlike the weight stream, that read is private to each sequence, so it grows with batch size instead of being shared.
-   - **Where 40 ms comes from**: it is roughly the time to stream the model's `{python} InferenceSetup.llama70b_fp16_gb_str` of FP16 weights through one H100's `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` of HBM bandwidth, the aggregate weight traffic of one decode step expressed in single-device time. No single H100 holds those weights. The reference replica of @sec-performance-engineering-batch-size spreads them over eight GPUs, which divides both $T_{\text{fixed}}$ and $t_{\text{req}}$ by the tensor-parallel degree and leaves their ratio, and therefore the knee, unchanged.
+   - **Where 0.5 ms comes from**: It is an assumed marginal cost per added sequence, dominated by reading that sequence's own KV state at a moderate context length. Unlike the weight stream, that read is private to each sequence, so it grows with batch size instead of being shared.
+   - **Where 40 ms comes from**: It is roughly the time to stream the model's `{python} InferenceSetup.llama70b_fp16_gb_str` of FP16 weights through one H100's `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` of HBM bandwidth, the aggregate weight traffic of one decode step expressed in single-device time. No single H100 holds those weights. The reference replica of @sec-performance-engineering-batch-size spreads them over eight GPUs, which divides both $T_{\text{fixed}}$ and $t_{\text{req}}$ by the tensor-parallel degree and leaves their ratio, and therefore the knee, unchanged.
 
 **Systems insight**: Because streaming the weights is the dominant per-step cost of decode, the system has not reached the efficiency knee until batch size `{python} BatchingEfficiency.bec_llm_knee_str`. The knee depends on the ratio of fixed to per-request cost, not on how many devices share them, which is why sharing weight reads across concurrent requests matters at every replica size. The batch a service actually runs also depends on context length, cache capacity, kernel efficiency, and the latency target; continuous batching and paged allocation are the mechanisms that let a replica reach it.
 
@@ -1401,10 +1401,10 @@ Across model architectures, @tbl-batching-by-model summarizes candidate batching
 
 | **Model Type**    | **Batching Strategy** |   **Typical Batch Size**   | **Key Constraint** | **Throughput Scaling** |
 |:------------------|:---------------------:|:--------------------------:|:------------------:|:----------------------:|
-| **Vision (CNN)**  |    Static/Dynamic     |           32–256           |    GPU compute     |   Near-linear to 64+   |
+| **Vision (CNN)**  |     Static/Dynamic    |           32–256           |    GPU compute     |   Near-linear to 64+   |
 | **LLM (prefill)** |        Dynamic        |            1–64            |    GPU compute     |       Sub-linear       |
-| **LLM (decode)**  |      Continuous       | Tens–hundreds (KV-limited) |  Memory bandwidth  |       Log-linear       |
-| **RecSys**        |   Feature-parallel    |        1000–10000s         |  Embedding lookup  |  Depends on sharding   |
+| **LLM (decode)**  |       Continuous      | Tens–hundreds (KV-limited) |  Memory bandwidth  |       Log-linear       |
+| **RecSys**        |    Feature-parallel   |        1000–10000s         |  Embedding lookup  |  Depends on sharding   |
 | **Speech**        |       Streaming       |             1              |     Real-time      |  N/A (latency-bound)   |
 
 : **Batching strategy by model type**: Each model class requires a distinct batching policy (from static/dynamic in vision to continuous in LLM decode and feature-parallel in recommendation) matched to its dominant hardware bottleneck. Typical batch sizes are operating ranges set by latency budgets and KV-cache capacity; they may fall below or above the workload-specific overhead-amortization knees illustrated in notebook \ref{nbk-inference-batching-efficiency-curve}, which mark where fixed costs stop dominating rather than where batching stops paying. {#tbl-batching-by-model}
@@ -2299,14 +2299,14 @@ Kernel design must also adapt. Batched GPU kernels traditionally assume fixed ba
 
 @Tbl-batching-tradeoffs summarizes these trade-offs:
 
-| **Dimension**             | **Traditional Batching**  | **Continuous Batching**          |
+| **Dimension**             |  **Traditional Batching** | **Continuous Batching**          |
 |:--------------------------|:-------------------------:|:---------------------------------|
 | **Implementation effort** | Low (standard frameworks) | High (custom scheduler, kernels) |
-| **Memory overhead**       |     Fixed allocation      | Dynamic + fragmentation mgmt     |
-| **Scheduler work**        |      Once per batch       | Every decode iteration           |
-| **Debugging complexity**  |  Deterministic behavior   | State-dependent, harder to trace |
-| **Throughput (variable)** |         Baseline          | Up to $1 + k \cdot \text{CV}$    |
-| **Throughput (uniform)**  |         Baseline          | ~1.0$\times$ (no improvement)    |
+| **Memory overhead**       |      Fixed allocation     | Dynamic + fragmentation mgmt     |
+| **Scheduler work**        |       Once per batch      | Every decode iteration           |
+| **Debugging complexity**  |   Deterministic behavior  | State-dependent, harder to trace |
+| **Throughput (variable)** |          Baseline         | Up to $1 + k \cdot \text{CV}$    |
+| **Throughput (uniform)**  |          Baseline         | ~1.0$\times$ (no improvement)    |
 
 : **Traditional vs. continuous batching trade-offs**: Continuous batching provides significant throughput gains for variable-length workloads at the cost of implementation complexity. For uniform-length workloads, the complexity overhead may not justify adoption. {#tbl-batching-tradeoffs}
 
@@ -6507,12 +6507,12 @@ Each NVLink generation[^fn-nvlink-bandwidth-inf] has raised this intra-node ceil
 
 The choice of sharding strategy depends on model architecture and deployment priorities. @Tbl-sharding-selection evaluates each approach across four critical factors:
 
-| **Factor**                | **Tensor Parallel** | **Pipeline Parallel** | **Expert Parallel** | **Embedding Shard** |
-|:--------------------------|:-------------------:|:---------------------:|:-------------------:|:-------------------:|
-| **Latency priority**      | Compute savings exceed collectives | No staging-only reduction | Routing-dependent | Lookup-dependent |
-| **Throughput priority**   | Collective-limited | Full, balanced pipeline | Balanced expert traffic | Balanced lookup load |
-| **Interconnect limited**  |       Poor fit      |        Good fit       |       Moderate      |       Good fit      |
-| **Implementation effort** |         High        |          Low          |       Moderate      |         High        |
+| **Factor**                |        **Tensor Parallel**         |   **Pipeline Parallel**   |   **Expert Parallel**   | **Embedding Shard**  |
+|:--------------------------|:----------------------------------:|:-------------------------:|:-----------------------:|:--------------------:|
+| **Latency priority**      | Compute savings exceed collectives | No staging-only reduction |    Routing-dependent    |   Lookup-dependent   |
+| **Throughput priority**   |         Collective-limited         |  Full, balanced pipeline  | Balanced expert traffic | Balanced lookup load |
+| **Interconnect limited**  |              Poor fit              |          Good fit         |         Moderate        |       Good fit       |
+| **Implementation effort** |                High                |            Low            |         Moderate        |         High         |
 
 : **Sharding strategy selection guide**: Evaluation of tensor, pipeline, expert, and embedding sharding across latency targets, throughput priorities, interconnect constraints, and implementation complexity. {#tbl-sharding-selection}
 

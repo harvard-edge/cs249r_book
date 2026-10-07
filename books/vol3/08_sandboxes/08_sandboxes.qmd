@@ -631,7 +631,7 @@ class WorkspaceCost:
     base_image = 2.4 * GB  # scenario: repository, toolchain, and dependencies
     written = 40 * MB  # scenario: edits and build outputs per workspace
     fixture = 1.2 * GB
-    block = 64 * KiB
+    block = 64 * KB
     modified_per_workspace = 1 * byte
 
     # EXECUTE: Provisioning payloads, then one full-file or one block copy.
@@ -648,7 +648,7 @@ class WorkspaceCost:
 
     # GUARD: Separate requested mutations from payload-copy accounting.
     check(abs(file_copy.to(GB).magnitude - 38.4) < 1e-12, "File-copy total")
-    check(block_copy.to(MiB).magnitude == 2, "One private block per workspace")
+    check(abs(block_copy.to(MB).magnitude - 2.048) < 1e-12, "One private block per workspace")
     check(logical_changes.to(byte).magnitude == 32, "Requested logical changes")
     check(block_copy < file_copy, "Copy granularity changes copied payload")
     check(abs(full_copy.to(GB).magnitude - 76.8) < 1e-9, "Full-copy provisioning total")
@@ -666,10 +666,10 @@ class WorkspaceCost:
     overlay_time_str = fmt_time(overlay_time, unit="s", precision=2)
     copy_vs_overlay_mult_str = fmt_multiple(copy_vs_overlay, precision=0)
     fixture_str = fmt_memory(fixture, unit=GB, precision=1)
-    block_str = fmt_memory(block, unit=KiB, precision=0)
+    block_str = fmt_memory(block, unit=KB, precision=0)
     modified_str = fmt_count(modified_per_workspace.to(byte).magnitude * count)
     file_copy_str = fmt_memory(file_copy, unit=GB, precision=1)
-    block_copy_str = fmt_memory(block_copy, unit=MiB, precision=0)
+    block_copy_str = fmt_memory(block_copy, unit=KB, precision=0, commas=True)
     logical_changes_str = fmt_memory(logical_changes, unit=byte, precision=0)
     file_vs_block_mult_str = fmt_multiple(file_vs_block_rounded, precision=0, commas=True)
 ```
@@ -970,11 +970,11 @@ class SandboxPoolSizing:
     reserve = 4
     restore_workers = 2
     restore_time = Agents.Coding.SWE_Bench_Runner.sandbox_snapshot_restore_latency  # illustrative profile, at stated concurrency
-    shared_resident = 1 * GiB
-    active_private = 64 * MiB
-    standby_private = 8 * MiB
-    control_per_instance = 8 * MiB  # monitor, page tables, and control state
-    headroom = 256 * MiB  # designated allowance, not a safety guarantee
+    shared_resident = 1 * GB
+    active_private = 64 * MB
+    standby_private = 8 * MB
+    control_per_instance = 8 * MB  # monitor, page tables, and control state
+    headroom = 256 * MB  # designated allowance, not a safety guarantee
 
     # 2. EXECUTE — no new arrivals, lease returns, or restore failures.
     queued = burst - reserve
@@ -995,7 +995,7 @@ class SandboxPoolSizing:
     check(last_admission == 60 * ms, "Queued work precedes reserve rebuilding")
     check(reserve_ready == 90 * ms, "Reserve replenishment takes two further rounds")
     check(last_admission_doubled == 30 * ms, "Doubling workers halves the drain")
-    check(resident_budget == 2208 * MiB, "All stated residency terms are charged")
+    check(abs(resident_budget.to(MB).magnitude - 2184) < 1e-9, "All stated residency terms are charged")
 
     # 4. OUTPUT — every displayed quantity has a named formatted export.
     burst_str = fmt_count(burst * count)
@@ -1010,15 +1010,15 @@ class SandboxPoolSizing:
     workers_doubled_str = fmt_count(workers_doubled * count)
     last_admission_doubled_str = fmt_time(last_admission_doubled, unit="ms", precision=0)
     instances_str = fmt_count(instances * count)
-    shared_str = fmt_memory(shared_resident, unit=MiB, precision=0, commas=True)
-    active_private_str = fmt_memory(active_private, unit=MiB, precision=0, commas=True)
-    standby_private_str = fmt_memory(standby_private, unit=MiB, precision=0, commas=True)
-    control_each_str = fmt_memory(control_per_instance, unit=MiB, precision=0, commas=True)
-    headroom_str = fmt_memory(headroom, unit=MiB, precision=0, commas=True)
-    active_total_str = fmt_memory(active_total, unit=MiB, precision=0, commas=True)
-    standby_total_str = fmt_memory(standby_total, unit=MiB, precision=0, commas=True)
-    control_total_str = fmt_memory(control_total, unit=MiB, precision=0, commas=True)
-    resident_budget_str = fmt_memory(resident_budget, unit=MiB, precision=0, commas=True)
+    shared_str = fmt_memory(shared_resident, unit=MB, precision=0, commas=True)
+    active_private_str = fmt_memory(active_private, unit=MB, precision=0, commas=True)
+    standby_private_str = fmt_memory(standby_private, unit=MB, precision=0, commas=True)
+    control_each_str = fmt_memory(control_per_instance, unit=MB, precision=0, commas=True)
+    headroom_str = fmt_memory(headroom, unit=MB, precision=0, commas=True)
+    active_total_str = fmt_memory(active_total, unit=MB, precision=0, commas=True)
+    standby_total_str = fmt_memory(standby_total, unit=MB, precision=0, commas=True)
+    control_total_str = fmt_memory(control_total, unit=MB, precision=0, commas=True)
+    resident_budget_str = fmt_memory(resident_budget, unit=MB, precision=0, commas=True)
 ```
 
 ::: {#nbk-08-sizing-a-pre-warmed-microvm-pool .callout-notebook title="Consuming and replenishing a ready reserve"}
@@ -1029,7 +1029,7 @@ class SandboxPoolSizing:
 
 **Math**: Initial admission consumes the reserve, leaving `{python} SandboxPoolSizing.burst_str` − `{python} SandboxPoolSizing.reserve_str` = `{python} SandboxPoolSizing.queued_str` tasks waiting. The workers serve those tasks in `{python} SandboxPoolSizing.rounds_str` rounds of `{python} SandboxPoolSizing.restore_str`, so the last admission occurs at `{python} SandboxPoolSizing.last_admission_str`. Rebuilding the original reserve takes another `{python} SandboxPoolSizing.reserve_rounds_str` rounds. The pool has its full reserve again at `{python} SandboxPoolSizing.reserve_ready_str`, while all `{python} SandboxPoolSizing.burst_str` admitted leases remain active. Admitting the burst finishes allocating the environments, but the trajectories themselves continue executing.
 
-For an illustrative memory allowance at that final state, suppose immutable resident pages consume `{python} SandboxPoolSizing.shared_str` shared across the pool. Each active instance has `{python} SandboxPoolSizing.active_private_str` of additional private resident state, and each standby has `{python} SandboxPoolSizing.standby_private_str`. The resulting `{python} SandboxPoolSizing.instances_str` instances each require `{python} SandboxPoolSizing.control_each_str` for monitor, page-table, and control state. Reserve another `{python} SandboxPoolSizing.headroom_str` of headroom. The ledger is in binary MiB, the unit the inputs are stated in, and sums the exact byte quantities.
+For an illustrative memory allowance at that final state, suppose immutable resident pages consume `{python} SandboxPoolSizing.shared_str` shared across the pool. Each active instance has `{python} SandboxPoolSizing.active_private_str` of additional private resident state, and each standby has `{python} SandboxPoolSizing.standby_private_str`. The resulting `{python} SandboxPoolSizing.instances_str` instances each require `{python} SandboxPoolSizing.control_each_str` for monitor, page-table, and control state. Reserve another `{python} SandboxPoolSizing.headroom_str` of headroom. The ledger is in decimal megabytes and sums the exact byte quantities.
 
 `{python} SandboxPoolSizing.shared_str` shared + `{python} SandboxPoolSizing.active_total_str` active-private + `{python} SandboxPoolSizing.standby_total_str` standby-private + `{python} SandboxPoolSizing.control_total_str` control + `{python} SandboxPoolSizing.headroom_str` headroom = `{python} SandboxPoolSizing.resident_budget_str`.
 
@@ -1108,17 +1108,17 @@ In the connection-pool repair scenario, this architecture preserves candidate pa
 
 @Tbl-vol3-sandboxes-key-equations summarizes the mathematical foundations established across the chapter, connecting access authorization and boundary overhead to the queueing models that govern warm-pool capacity.
 
-| Equation                                                                                                                                                                                                                      | What it bounds or decides                                                                                      | Where derived                        |
-|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:-------------------------------------|
-| $\text{admit}(a, \CapabilityGrant, t) \iff \text{authentic}(\CapabilityGrant) \land a.\text{op} \in \mathcal{R}_\Gamma \land a.\text{target} \sqsubseteq \mathcal{O}_\Gamma \land \phi_\Gamma(a) \land t < \GrantExpiryTime$ | Whether one proposed access may proceed under a scoped grant                                                   | @eq-vol3-capability-verdict          |
-| $\Gamma_{\text{child}} \sqsubseteq \Gamma_{\text{parent}} \Rightarrow \mathcal{A}(\Gamma_{\text{child}}) \subseteq \mathcal{A}(\Gamma_{\text{parent}})$                                                                       | Whether a derived grant is an attenuation; it leaves the retained parent usable                                | @sec-vol3-sandboxes-least-privilege  |
-| $\sigma_i = \text{HMAC}(\sigma_{i-1}, c_i)$                                                                                                                                                                                   | Offline narrowing of a token that no holder can widen                                                          | @eq-vol3-macaroon-chain              |
-| $T_{\text{syscall}} = T_{\text{trap}} + T_{\text{filter}} + T_{\text{switch}}$                                                                                                                                                | Which envelope a system-call-heavy workload can afford                                                         | @eq-vol3-syscall-tax                 |
-| $W \ge T_{\text{setup}}(1-\phi)/\phi$                                                                                                                                                                                         | Useful work per call at which a fresh envelope per call keeps setup below the cap $\phi$                       | @sec-vol3-sandboxes-envelope-choice  |
-| $N_{\text{active}} = \ArrivalRate \, \LeaseHoldTime$                                                                                                                                                                           | Mean leases held, set by horizon rather than tool latency                                                      | @eq-vol3-pool-active                 |
-| $N_{\text{reserve}} \ge \ArrivalRate T_{\text{init}} + z_{1-\epsilon}\sqrt{\ArrivalRate T_{\text{init}}}$                                                                                                               | Standby reserve for a stockout target $\epsilon$ (read the Poisson tail directly when the mean is small) | @eq-vol3-pool-reserve                |
-| $M_{\text{pool}} = M_{\text{template}} + N_{\text{active}} M_{\text{dirty}} + N_{\text{reserve}} M_{\text{standby}}$                                                                                                          | Resident memory of a copy-on-write pool                                                                        | @eq-vol3-pool-memory                 |
-| $\lceil (N_{\text{burst}} - N_{\text{reserve}})/w \rceil \, T_{\text{init}}$                                                                                                                                                  | Wait of the last admission in a burst drained by $w$ restore workers                                           | @sec-vol3-sandboxes-pooling-queueing |
+| Equation                                                                                                                                                                                                                     | What it bounds or decides                                                                                | Where derived                        |
+|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------|:-------------------------------------|
+| $\text{admit}(a, \CapabilityGrant, t) \iff \text{authentic}(\CapabilityGrant) \land a.\text{op} \in \mathcal{R}_\Gamma \land a.\text{target} \sqsubseteq \mathcal{O}_\Gamma \land \phi_\Gamma(a) \land t < \GrantExpiryTime$ | Whether one proposed access may proceed under a scoped grant                                             | @eq-vol3-capability-verdict          |
+| $\Gamma_{\text{child}} \sqsubseteq \Gamma_{\text{parent}} \Rightarrow \mathcal{A}(\Gamma_{\text{child}}) \subseteq \mathcal{A}(\Gamma_{\text{parent}})$                                                                      | Whether a derived grant is an attenuation; it leaves the retained parent usable                          | @sec-vol3-sandboxes-least-privilege  |
+| $\sigma_i = \text{HMAC}(\sigma_{i-1}, c_i)$                                                                                                                                                                                  | Offline narrowing of a token that no holder can widen                                                    | @eq-vol3-macaroon-chain              |
+| $T_{\text{syscall}} = T_{\text{trap}} + T_{\text{filter}} + T_{\text{switch}}$                                                                                                                                               | Which envelope a system-call-heavy workload can afford                                                   | @eq-vol3-syscall-tax                 |
+| $W \ge T_{\text{setup}}(1-\phi)/\phi$                                                                                                                                                                                        | Useful work per call at which a fresh envelope per call keeps setup below the cap $\phi$                 | @sec-vol3-sandboxes-envelope-choice  |
+| $N_{\text{active}} = \ArrivalRate \, \LeaseHoldTime$                                                                                                                                                                         | Mean leases held, set by horizon rather than tool latency                                                | @eq-vol3-pool-active                 |
+| $N_{\text{reserve}} \ge \ArrivalRate T_{\text{init}} + z_{1-\epsilon}\sqrt{\ArrivalRate T_{\text{init}}}$                                                                                                                    | Standby reserve for a stockout target $\epsilon$ (read the Poisson tail directly when the mean is small) | @eq-vol3-pool-reserve                |
+| $M_{\text{pool}} = M_{\text{template}} + N_{\text{active}} M_{\text{dirty}} + N_{\text{reserve}} M_{\text{standby}}$                                                                                                         | Resident memory of a copy-on-write pool                                                                  | @eq-vol3-pool-memory                 |
+| $\lceil (N_{\text{burst}} - N_{\text{reserve}})/w \rceil \, T_{\text{init}}$                                                                                                                                                 | Wait of the last admission in a burst drained by $w$ restore workers                                     | @sec-vol3-sandboxes-pooling-queueing |
 
 : **Key equations of agent sandboxing**: Each relation formalizes an access decision or provisioning boundary; the final four equations size warm sandbox pools from arrival rate, task horizon, and environment restore latency. {#tbl-vol3-sandboxes-key-equations tbl-colwidths="[46,38,16]"}
 
@@ -1154,7 +1154,7 @@ Agent systems inherit this entire architectural foundation, but they fundamental
 
 ## Exercises {#sec-vol3-sandboxes-exercises}
 
-All givens below are hypothetical problem inputs, not measurements of any product. Decimal units apply throughout these problems (1 GB is $10^9$ bytes and 1 KB is $10^3$ bytes), whereas the chapter's worked notebooks size memory in binary units (1 MiB is $2^{20}$ bytes), so a problem's answer need not reproduce a notebook value digit for digit.
+All givens below are hypothetical problem inputs, not measurements of any product. Decimal units apply throughout these problems (1 GB is $10^9$ bytes and 1 KB is $10^3$ bytes), while configured guest memory in the worked notebooks is a binary capacity quoted in conventional megabytes, so a problem's answer need not reproduce a notebook value digit for digit.
 
 **Problem 1 (Basic): Splitting a repair grant across test shards.** A repair task holds $\Gamma_{\text{repair}} = (\mathcal{R}_\Gamma=\{\text{read}, \text{write}, \text{execute}\},\ \mathcal{O}_\Gamma=\texttt{repo/},\ \phi_\Gamma,\ \GrantExpiryTime=T_0 + 900\,\text{s})$, where $\phi_\Gamma$ binds use to this task and carries an aggregate budget of 600 CPU-seconds. The controller proposes three children for parallel test shards: $\Gamma_a = (\{\text{read}, \text{execute}\},\ \texttt{repo/tests/},\ 250\ \text{CPU-s},\ T_0 + 600\,\text{s})$, $\Gamma_b = (\{\text{read}, \text{execute}\},\ \texttt{repo/},\ 200\ \text{CPU-s},\ T_0 + 1200\,\text{s})$, and $\Gamma_c = (\{\text{read}, \text{write}\},\ \texttt{repo/src/},\ 200\ \text{CPU-s},\ T_0 + 600\,\text{s})$. (a) Apply the component-wise attenuation check to each child and decide which may be issued. (b) The parent keeps 150 CPU-seconds for its own work. Decide whether the valid children fit the aggregate budget, and whether they would still fit if $\Gamma_b$ were corrected to expire at $T_0 + 900\,\text{s}$. (c) At $T_0 + 700\,\text{s}$ a shard holding $\Gamma_a$ requests execute on `repo/tests/run.sh`. Evaluate @eq-vol3-capability-verdict term by term and state the verdict.
 
