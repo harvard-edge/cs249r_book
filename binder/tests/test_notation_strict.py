@@ -267,8 +267,10 @@ def test_glyph_collisions_within_a_chapter():
         RegistryEntry("Time", "T", "time"),
     ], {}, BUILTINS)
     assert glyph_collisions("Use $\\BatchSize$ and $\\Time$.\n", reg) == []
-    col = glyph_collisions("Use $\\BatchSize$.\n\nThen $\\GemmRightOperand$.\n", reg)
-    assert col == [{"latex": "B", "macros": ["BatchSize", "GemmRightOperand"], "lines": [1, 3]}]
+    col = glyph_collisions("## One\n\nUse $\\BatchSize$.\n\nThen $\\GemmRightOperand$.\n", reg)
+    assert col == [{"section": "One", "latex": "B", "macros": ["BatchSize", "GemmRightOperand"], "lines": [3, 5]}]
+    # the same two meanings in different top-level sections do not collide
+    assert glyph_collisions("## One\n\n$\\BatchSize$\n\n## Two\n\n$\\GemmRightOperand$\n", reg) == []
 
 
 def test_apply_drops_a_label_that_belonged_to_the_replaced_symbol():

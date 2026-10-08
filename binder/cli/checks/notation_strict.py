@@ -945,12 +945,13 @@ def apply_assignments(source: str, assignments: List[Dict],
 
 
 def glyph_collisions(source: str, registry: Registry) -> List[Dict]:
-    """Different symbols that look identical in one chapter.
+    """Different symbols that look identical in one section of a chapter.
 
     Two registered macros may share LaTeX (``p`` is a pass probability in one
-    chapter and a candidate rate in another), but never in the same chapter:
-    the reader sees one letter mean two things. Returns one record per shared
-    rendering: the LaTeX, the macros, and the first line each appears on.
+    place and a candidate rate in another), but never within one top-level
+    (``##``) section: the reader, who reads a section at a time, would see one
+    letter mean two things. Returns one record per shared rendering and
+    section: the section, the LaTeX, the macros, and the first line of each.
     """
     table = registry.macro_table()
 
@@ -959,10 +960,20 @@ def glyph_collisions(source: str, registry: Registry) -> List[Dict]:
                      lambda m: table.get("\\" + m.group(1), m.group(0)) if m.group(1) != "Glyph" else m.group(0), s)
         return out if out == s or depth > 8 else expand(out, depth + 1)
 
-    first: Dict[str, Dict[str, int]] = collections.defaultdict(dict)
+    h2_at, current = [], ""
+    in_fence = False
+    for line in source.split("\n"):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+        elif not in_fence and line.startswith("## "):
+            current = line[3:].strip()
+        h2_at.append(current)
+
+    first: Dict[Tuple[str, str], Dict[str, int]] = collections.defaultdict(dict)
     for span in extract_math(source):
         if span.source not in ("body", "caption"):
             continue
+        section = h2_at[span.line - 1] if span.line - 1 < len(h2_at) else ""
         for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", span.text):
             name = m.group(1)
             if not registry.is_macro(name) or name == "Glyph":
@@ -970,9 +981,9 @@ def glyph_collisions(source: str, registry: Registry) -> List[Dict]:
             canon = registry.canonical(name)
             look = _span_norm(expand(registry.entries[canon].latex)) if canon in registry.entries else ""
             if look:
-                first[look].setdefault(canon, span.line)
-    return [{"latex": look, "macros": sorted(ms), "lines": [ms[m] for m in sorted(ms)]}
-            for look, ms in sorted(first.items()) if len(ms) > 1]
+                first[(section, look)].setdefault(canon, span.line)
+    return [{"section": sec, "latex": look, "macros": sorted(ms), "lines": [ms[m] for m in sorted(ms)]}
+            for (sec, look), ms in sorted(first.items()) if len(ms) > 1]
 
 
 def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> Dict:

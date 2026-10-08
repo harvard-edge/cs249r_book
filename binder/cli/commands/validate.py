@@ -836,7 +836,7 @@ class ValidateCommand:
             Scope("strict", "_run_notation_strict",
                   note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
             Scope("collisions", "_run_notation_collisions",
-                  note="no chapter of a volume in COLLISION_CHECKED_VOLUMES uses two different symbols that render alike"),
+                  note="no top-level section of a chapter in COLLISION_CHECKED_VOLUMES uses two different symbols that render alike"),
             Scope("conventions", "_run_notation_conventions",
                   note="every registry entry follows the naming and field conventions (mlsysim/mlsysim/notation/data/README.md)"),
         ],
@@ -13223,12 +13223,14 @@ class ValidateCommand:
             rel = f.relative_to(repo)
             if len(rel.parts) < 2 or rel.parts[1] not in COLLISION_CHECKED_VOLUMES:
                 continue
+            if rel.as_posix().endswith("frontmatter/notation.qmd"):
+                continue        # the notation chapter lists every meaning by design
             checked += 1
             for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg):
                 issues.append(ValidationIssue(
                     file=str(rel), line=min(c["lines"]), code="notation-glyph-collision",
-                    message=f"{', '.join(chr(92) + m for m in c['macros'])} all render ${c['latex']}$ in this chapter: "
-                            "a reader sees one letter mean two things",
+                    message=f"{', '.join(chr(92) + m for m in c['macros'])} all render ${c['latex']}$ in the section "
+                            f"'{c['section'][:60]}': a reader sees one letter mean two things",
                     suggestion="give one of them a distinguishing subscript (a new entry), or use one meaning here",
                     rule_doc="mlsysim/mlsysim/notation/data/README.md"))
         return ValidationRunResult(
