@@ -7,13 +7,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "mlsysim"))
 from mlsysim.notation import Notation
 
-# Volume I chapters retain legacy layer-width commands while their printed
-# notation chapter is pinned. Render them through the canonical registry names.
-# These aliases expand to registry macros, so their symbols cannot drift.
-COMPATIBILITY_ALIASES = {
-    r"\LayerInputAndOutputWidths": r"\LayerInputWidth",
-    r"\LayerInputAndOutputWidthsTwo": r"\LayerOutputWidth",
-}
+# Retired names (each entry's `aliases:`) still compile, expanding to the
+# canonical macro, so old chapters render while the strict check reports them.
+COMPATIBILITY_ALIASES = Notation.aliases()
 
 tex_lines = [
     "% AUTO-GENERATED NOTATION MACROS FROM MLSYSIM",

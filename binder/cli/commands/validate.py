@@ -12739,55 +12739,19 @@ class ValidateCommand:
         project_root = books.parent
         if str(project_root / "mlsysim") not in sys.path:
             sys.path.insert(0, str(project_root / "mlsysim"))
+        # Fail loudly: an empty registry would report every table row as unused
+        # (this happened silently whenever numpy was missing; fixed 2026-10-08).
         try:
             from mlsysim.notation import Notation
-            all_macros = {s.macro for s in Notation.list()}
-        except Exception:
-            all_macros = set()
-
-        macro_aliases = {
-            r"\ActivationMemoryActivations": r"\ActivationMemory",
-            r"\WeightMemoryWeights": r"\WeightMemory",
-            r"\GradientMemoryGradients": r"\GradientMemory",
-            r"\BatchServiceTimeSvc": r"\BatchServiceTime",
-            r"\RequestTimeInSystemLat": r"\RequestTimeInSystem",
-            r"\TrainingDistributionZero": r"\TrainingDistribution",
-            r"\TsdfAccumulatedVolumeVox": r"\TsdfAccumulatedWeight",
-            r"\SamplingPeriodAndRate": r"\SamplingPeriod",
-            r"\TorqueAndBackemfConstants": r"\MotorTorqueConstant",
-            r"\WindingAndAmbientTemperature": r"\WindingTemperature",
-            r"\RotorAndLoadInertia": r"\RotorInertia",
-            r"\IronlawTermTimesCompute": r"\IronLawComputeTime",
-            r"\IronlawTermTimesMemory": r"\IronLawMemoryTime",
-            r"\AcceleratorCountGpu": r"\AcceleratorCount",
-            r"\CollectiveCompletionTimeRing": r"\RingAllReduceCompletionTime",
-            r"\CollectiveCompletionTimeTree": r"\TreeAllReduceCompletionTime",
-            r"\MeanTimeBetweenFailuresThree": r"\MeanTimeBetweenFailures",
-            r"\NumberOfKeyvalueHeadsKv": r"\NumberOfKeyValueHeads",
-            r"\ScalingExponentScale": r"\ScalingExponent",
-            r"\ContentionAndCoherencyCoefficientsTwo": r"\CoherencyContentionCoefficient",
-            r"\BarrierConstraintRowsCbf": r"\BarrierConstraintMatrix",
-            r"\BarrierConstraintRowsCbfTwo": r"\BarrierConstraintVector",
-            r"\ContinuousPeakCurrent": r"\ContinuousCurrent",
-            r"\ContinuousPeakCurrentTwo": r"\PeakCurrent",
-            r"\ContinuousPeakTorqueHold": r"\HoldingTorque",
-            r"\CoordinateReferenceFramesB": r"\BodyReferenceFrame",
-            r"\CoordinateReferenceFramesW": r"\WorldReferenceFrame",
-            r"\CredibleDecelerationBrake": r"\CredibleBrakingDeceleration",
-            r"\FundamentalAndEssentialMatrices": r"\FundamentalMatrix",
-            r"\FundamentalAndEssentialMatricesTwo": r"\EssentialMatrix",
-            r"\LinearBarrierDecayRateCbf": r"\LinearBarrierDecayRate",
-            r"\PhaseInductanceAndResistance": r"\PhaseInductance",
-            r"\PhaseInductanceAndResistanceTwo": r"\PhaseResistance",
-            r"\RotorAndLoadInertiaTwo": r"\LoadInertia",
-            r"\SprtBoundariesLo": r"\SprtLowerBoundary",
-            r"\SprtBoundariesUp": r"\SprtUpperBoundary",
-            r"\TransmissionEfficiencyGear": r"\GearboxTransmissionEfficiency",
-            r"\TruncatedSignedDistanceVox": r"\TruncatedSignedDistance",
-            r"\VirtualDampingAndStiffness": r"\VirtualDampingMatrix",
-            r"\VirtualDampingAndStiffnessTwo": r"\VirtualStiffnessMatrix",
-            r"\WindingAndAmbientTemperatureTwo": r"\AmbientTemperature",
-        }
+        except Exception as exc:
+            raise RuntimeError(
+                "notation coverage cannot import mlsysim (" + type(exc).__name__ + ": " + str(exc)
+                + "). Run binder with the project virtual environment on PATH."
+            ) from exc
+        all_macros = {s.macro for s in Notation.list()}
+        # Retired names compile to their canonical macro (registry `aliases:`).
+        macro_aliases = Notation.aliases()
+        all_macros |= set(macro_aliases)
 
         issues: List[ValidationIssue] = []
         files_checked = 0
