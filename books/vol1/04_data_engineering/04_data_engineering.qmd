@@ -170,7 +170,7 @@ Data movement incurs physical and financial friction, the cost that the data-gra
 
 ::: {#nbk-data-engineering-physics-data-gravity .callout-notebook title="The physics of data gravity"}
 
-**Problem**: A `{python} DataGravity.dataset_pb_str` training dataset resides in a US East data center, while a remote accelerator pod is available in US West. Is it faster to move the data or to move the compute?
+**Problem**: A `{python} DataGravity.dataset_pb_str` training dataset resides in a US East data center, while a remote accelerator pod is available in US West. What transfer time and egress cost does remote training add, and when would suitable compute near the data avoid that overhead?
 
 **Math**:
 
@@ -181,15 +181,15 @@ Data movement incurs physical and financial friction, the cost that the data-gra
 ```{=latex}
 \vspace*{-2ex}
 ```
-**Systems insight**: If training takes less than `{python} DataGravity.transfer_hours_str`, data transfer takes longer than training. If training costs less than `{python} DataGravity.transfer_cost_str` (approximately `{python} DataGravity.tpu_hours_str`), bandwidth costs more than compute. For petabyte-scale data, code moves to data\index{Data locality!code-to-data}; for gigabyte-scale data, data moves to code\index{Data locality!data-to-code}.
+**Systems insight**: If training takes less than `{python} DataGravity.transfer_hours_str`, data transfer takes longer than training. If training costs less than `{python} DataGravity.transfer_cost_str` (approximately `{python} DataGravity.tpu_hours_str`), bandwidth costs more than compute. When suitable compute is available near the data, these transfer costs favor moving code to data\index{Data locality!code-to-data}. Smaller datasets make moving data to code\index{Data locality!data-to-code} more practical, but placement still depends on compute availability and comparative training time.
 
 :::
 
 ### Task-relevant signal {#sec-data-engineering-information-entropy-5622}
 
-Not all bits deliver equal utility per unit of movement cost. While physical storage measures bytes, machine learning optimization extracts **task-relevant signal**\index{Task-relevant signal!definition}, a task-specific measure of gradient information rather than raw Shannon entropy. A dataset containing one million identical images incurs substantial data gravity while providing zero additional gradient information beyond the first sample. Conversely, a curated collection of 10,000 diverse edge cases carries negligible data gravity yet contributes rich supervisory signal. Evaluating task-relevant signal against data gravity defines the return on data movement:
+Not all bits deliver equal utility per unit of movement cost. While physical storage measures bytes, machine learning optimization extracts **task-relevant signal**\index{Task-relevant signal!definition}, a task-specific measure of gradient information rather than raw Shannon entropy. A dataset containing one million identical images incurs substantial data gravity without adding distinct observations beyond the first sample. Repeated optimization on that sample can still change gradients as the model changes. Conversely, a curated collection of 10,000 diverse edge cases carries negligible data gravity yet contributes rich supervisory signal. Evaluating task-relevant signal against data gravity defines the return on data movement:
 $$ \text{Data Selection Gain} \propto \frac{\text{Task-Relevant Signal}}{\text{Data Gravity}} $$ {#eq-data-selection-gain}
-This relationship favors datasets whose marginal learning value justifies their transfer overhead. Deduplication and active learning (which asks the current model to choose the examples it is least certain about for labeling, @sec-data-engineering-scaling-aiassisted-labeling-9360) directly optimize this ratio by eliminating redundant byte volume and prioritizing high-signal training examples.
+This relationship favors datasets whose marginal learning value justifies their transfer overhead. Deduplication and active learning (which asks the current model to choose the examples it is least certain about for labeling, @sec-data-engineering-scaling-aiassisted-labeling-9360) can improve this ratio by eliminating redundant byte volume and proposing uncertain examples for labeling. Uncertainty does not establish learning value; ambiguous or corrupted examples can also be uncertain, so the selection policy requires validation.
 
 ::: {.column-margin .margin-pointer}
 ↪ The information-compute ratio, which measures the learning signal each sample returns per unit of training compute, is developed in @sec-data-selection-informationcompute-ratio-8c0b.
@@ -291,13 +291,13 @@ class FeedingProblem:
 
 Data gravity dictates the cost of moving data in bulk; **the feeding problem**\index{Feeding problem!definition} dictates the cost of delivering it to execution units in real time. It is an input/output **flow rate**\index{Flow rate!definition} bottleneck: storage bandwidth fails to keep pace with compute throughput.
 
-When data delivery and computation overlap, the bottleneck principle holds that a system runs only as fast as its slowest stage. The scenario this chapter carries through its pipeline and storage sections makes the constraint concrete: one reference accelerator training ResNet-50. Dividing the accelerator's peak arithmetic rate by the work of one training step per image (a forward pass plus a backward pass costing about twice as much) gives an arithmetic ceiling of about `{python} FeedingProblem.ceiling_img_per_s_str`; Notebook \ref{nbk-data-engineering-storage-bandwidth-budget} at the end of the storage discussion works the numbers in full. In practice a well-tuned pipeline sustains about `{python} FeedingProblem.img_per_s_str`, roughly `{python} FeedingProblem.sustained_fraction_pct_str` of that ceiling, once memory-bound layers, decode, augmentation, and synchronization take their share. Each image sits on disk as a `{python} FeedingProblem.compressed_image_kb_str` JPEG, so storage must deliver `{python} FeedingProblem.compressed_bw_mb_per_s_str`. When the attached volume supplies only `{python} FeedingProblem.disk_bw_mb_per_s_str`, compute units stall on I/O. This gap defines **the feeding tax**\index{Feeding tax!definition}: wall-clock time lost to I/O wait, which directly degrades system efficiency $(\EfficiencyHw)$\index{System efficiency!feeding tax}. On this baseline cloud block storage, the accelerator spends about `{python} FeedingProblem.feeding_tax_pct_str` of every step waiting for data.
+When data delivery and computation overlap, the bottleneck principle holds that a system runs only as fast as its slowest stage. The scenario this chapter carries through its pipeline and storage sections makes the constraint concrete: one reference accelerator training ResNet-50. Dividing the accelerator's peak arithmetic rate by the work of one training step per image (a forward pass plus a backward pass costing about twice as much) gives an arithmetic ceiling of about `{python} FeedingProblem.ceiling_img_per_s_str`; Notebook \ref{nbk-data-engineering-storage-bandwidth-budget} at the end of the storage discussion works the numbers in full. In practice a well-tuned pipeline sustains about `{python} FeedingProblem.img_per_s_str`, roughly `{python} FeedingProblem.sustained_fraction_pct_str` of that ceiling, once memory-bound layers, decode, augmentation, and synchronization take their share. Each image sits on disk as a `{python} FeedingProblem.compressed_image_kb_str` JPEG, so storage must deliver `{python} FeedingProblem.compressed_bw_mb_per_s_str`. When the attached volume supplies only `{python} FeedingProblem.disk_bw_mb_per_s_str`, compute units stall on I/O. This gap defines **the feeding tax**\index{Feeding tax!definition}: the throughput penalty from insufficient input supply, which directly degrades system efficiency $(\EfficiencyHw)$\index{System efficiency!feeding tax}. Under steady-state overlap, divide the supplied `{python} FeedingProblem.disk_bw_mb_per_s_str` by the required `{python} FeedingProblem.compressed_bw_mb_per_s_str` to obtain the fraction of the sustained training rate that storage can support. Subtracting that fraction from one gives a modeled feeding tax of about `{python} FeedingProblem.feeding_tax_pct_str`. This is the throughput loss relative to the supplied sustained baseline, not a measurement of all accelerator idle time or utilization relative to advertised peak.
 
 ::: {.column-margin .margin-pointer}
 ↩ The bottleneck principle is established in @sec-ml-systems-bottleneck-principle-3514.
 :::
 
-Which bytes are counted matters as much as how many. After decoding, the same image becomes a `{python} FeedingProblem.decoded_image_kb_str` FP32 tensor in host memory, about `{python} FeedingProblem.decode_expansion_str` times its compressed size, so the same training rate moves `{python} FeedingProblem.req_bw_gb_per_s_str` through host memory and across the host-to-accelerator link. Compression thus trades storage bandwidth for CPU decode work. A pipeline that caches pre-decoded tensors on disk to skip that work pays the full `{python} FeedingProblem.req_bw_gb_per_s_str` at the storage tier instead, and the same volume would leave the accelerator idle `{python} FeedingProblem.tensor_tax_pct_str` of the time. Later sections apply this slowest-stage bound to the CPU decode workers (@sec-data-engineering-data-ingestion-8efc) and to the storage tiers (@sec-data-engineering-ml-storage-systems-architecture-options-67fa) without re-deriving it. Distance also increases energy consumption: as data travels farther from arithmetic logic units, transport energy dwarfs the cost of computation itself.
+Which bytes are counted matters as much as how many. After decoding, the same image becomes a `{python} FeedingProblem.decoded_image_kb_str` FP32 tensor in host memory, about `{python} FeedingProblem.decode_expansion_str` times its compressed size, so the same training rate moves `{python} FeedingProblem.req_bw_gb_per_s_str` through host memory and across the host-to-accelerator link. Compression thus trades storage bandwidth for CPU decode work. A pipeline that caches pre-decoded tensors on disk to skip that work pays the full `{python} FeedingProblem.req_bw_gb_per_s_str` at the storage tier instead, and applying the same supply-to-demand calculation gives a modeled throughput loss of `{python} FeedingProblem.tensor_tax_pct_str` relative to the sustained baseline. Later sections apply this slowest-stage bound to the CPU decode workers (@sec-data-engineering-data-ingestion-8efc) and to the storage tiers (@sec-data-engineering-ml-storage-systems-architecture-options-67fa) without re-deriving it. Distance also increases energy consumption: as data travels farther from arithmetic logic units, transport energy dwarfs the cost of computation itself.
 
 ```{python}
 #| echo: false
@@ -368,7 +368,7 @@ Because data movement incurs physical energy costs, data volume acts like physic
 
 :::
 
-The energy hierarchy and the signal-density heuristic converge on the same optimization lever: effective data engineering maximizes the Data Selection Gain defined in @eq-data-selection-gain. Data curation functions as **signal-to-noise engineering**\index{Signal-to-noise engineering}\index{Data cleaning!signal-to-noise engineering}. Deduplication strips away redundant byte volume while preserving task-relevant signal, directly amplifying the selection gain. Active learning prioritizes high-signal examples over repetitive samples, concentrating information density per byte transferred. Filtering uninformative records conserves interconnect bandwidth and storage energy, preventing upstream I/O starvation from idling accelerator execution units.
+The energy hierarchy and the signal-density heuristic converge on the same optimization lever: effective data engineering maximizes the Data Selection Gain defined in @eq-data-selection-gain. Data curation functions as **signal-to-noise engineering**\index{Signal-to-noise engineering}\index{Data cleaning!signal-to-noise engineering}. Deduplication strips away redundant byte volume while preserving task-relevant signal, directly amplifying the selection gain. Active learning proposes examples whose labels may add learning value; validation determines whether that policy improves information density per byte transferred. Filtering uninformative records conserves interconnect bandwidth and storage energy, preventing upstream I/O starvation from idling accelerator execution units.
 
 Treating data as a physical substance grounds data pipeline design in hardware realities: bandwidth limits determine flow rates, memory hierarchies dictate energy dissipation, and dataset scale governs compute placement.
 
@@ -797,7 +797,7 @@ Recommendation systems\index{Recommendation system!scalability challenge} built 
 
 : **DLRM Scalability Profile**: Recommendation models stress data engineering along memory capacity and sparse-access bandwidth rather than compute. {#tbl-data-engineering-dlrm-scalability tbl-colwidths="[10,29,61]"}
 
-At ingestion, high-cardinality categorical IDs remain compact records in a throughput-bound stream. The network- and memory-capacity bottleneck emerges later, when training or serving must fetch sparse embeddings from terabytes of partitioned table state. Mitigating this asymmetry requires table partitioning and the caching provided by a *feature store*, the shared service that holds precomputed model inputs for both training and serving, which @sec-data-engineering-feature-stores-bridging-training-serving-55c8 defines.
+At ingestion, high-cardinality categorical IDs remain compact records in a throughput-bound stream. The network- and memory-capacity bottleneck emerges later, when training or serving must fetch sparse embeddings from terabytes of partitioned table state. Mitigating this asymmetry requires partitioning and caching the learned embedding tables, which are model parameters updated during training. A *feature store*, the shared service that holds precomputed model inputs for both training and serving, manages a different kind of state; @sec-data-engineering-feature-stores-bridging-training-serving-55c8 defines that role. It may hold representations computed by a separate model, but it does not replace the recommendation model's learned parameter tables.
 
 :::
 
@@ -905,7 +905,7 @@ class FalsePositiveTarget:
 
 ::: {#nbk-data-engineering-false-positive-targets .callout-notebook title="False positive targets"}
 
-**Problem**: An always-on KWS system must tolerate at most one false wake-up per month. With one-second classification windows running around the clock, how strict does the per-window false positive rate need to be?
+**Problem**: An always-on KWS system budgets at most one expected false wake-up per month. Under a model that counts one nonkeyword classification window each second around the clock, how strict does the per-window false positive rate need to be?
 
 **Variables**:
 
@@ -918,13 +918,13 @@ class FalsePositiveTarget:
 ```
 **Math**:
 
-- **False positive rate (FPR)**\index{False positive rate!always-on systems}: `{python} FalsePositiveTarget.tolerance_str` tolerated false wake divided by the monthly window count gives approximately `{python} FalsePositiveTarget.fpr_math`
+- **False positive rate (FPR)**\index{False positive rate!always-on systems}: `{python} FalsePositiveTarget.tolerance_str` expected false wake divided by the monthly nonkeyword-window count gives approximately `{python} FalsePositiveTarget.fpr_math`
 - **Nonkeyword rejection requirement**: `{python} FalsePositiveTarget.rejection_pct_str` rejection of nonkeyword windows.
 
 ```{=latex}
 \vspace*{-3.5ex}
 ```
-**Systems insight**: Aggregate accuracy (for example, "99 percent accuracy") is insufficient here. Evaluation must report false accepts per hour (FA/Hr)\index{False Accepts per Hour} together with the corresponding false-rejection behavior.
+**Systems insight**: This calculation bounds the expected monthly count, not the maximum number of false wakes in every month. Expectation does not require independent windows. Aggregate accuracy (for example, "99 percent accuracy") is insufficient here. Evaluation must report false accepts per hour (FA/Hr)\index{False Accepts per Hour} together with the corresponding false-rejection behavior.
 
 :::
 
@@ -1040,7 +1040,7 @@ class KWSDesignSpaceTradeoffs:
 
 : **KWS Data Engineering Design Space**: Illustrative scenario inputs that price each design choice along four axes, namely quality, latency, cost, and memory; the entries are not measurements from one system and should not be combined as additive effects. Each row moves from a baseline (left of the arrow) to an alternative, and every entry gives the effect of that move. Higher sampling rates double raw-audio storage and processing, while more training examples multiply labeling and storage requirements. Actual quality and latency must be measured on the target pipeline. {#tbl-kws-design-space tbl-colwidths="[30,22,16,16,16]"}
 
-Operating under milliwatt power envelopes and strict tens-of-kilobytes SRAM budgets means an engineering team cannot select the most accurate option along every axis simultaneously. Turning these cataloged trade-offs into a production deployment requires solving a constrained optimization problem: allocating a finite data budget across labeling, storage, and governance to maximize model accuracy while staying within the hardware footprint. Notebook \ref{nbk-data-engineering-optimizing-kws-design-space} steps through this optimization for a smart-speaker deployment.
+Operating under milliwatt power envelopes and strict tens-of-kilobytes SRAM budgets means an engineering team cannot select the most accurate option along every axis simultaneously. Turning these cataloged trade-offs into a production deployment requires solving a constrained optimization problem: allocating a finite data budget across labeling, storage, and governance to maximize model accuracy while staying within the hardware footprint. Notebook \ref{nbk-data-engineering-optimizing-kws-design-space} works through a constrained allocation and candidate design for a smart-speaker deployment.
 
 ```{python}
 #| echo: false
@@ -1144,19 +1144,19 @@ class KWSDesignConstraints:
 
 **Scenario**: A KWS system for a smart speaker has these constraints:
 
-- **Target**: `{python} KWSDesignConstraints.kws_accuracy_target_str` accuracy, fewer than `{python} KWSDesignConstraints.kws_false_wake_month_str`
+- **Target**: `{python} KWSDesignConstraints.kws_accuracy_target_str` accuracy, an expected false-wake budget below `{python} KWSDesignConstraints.kws_false_wake_month_str`
 - **Budget**: `{python} KWSDesignConstraints.kws_budget_str` total data engineering budget
 - **Memory**: `{python} KWSDesignConstraints.kws_memory_limit_design_kb_str` model size limit (always-on island)
 - **Timeline**: `{python} KWSDesignConstraints.kws_timeline_months_str` to production
 
-**Step 1**: Let the scarcest resource choose the conservative options.
+**Step 1**: Choose conservative options for the constrained device.
 
 For this scenario, the team chooses two conservative options:
 
 - 13 MFCC coefficients, because every MFCC frame lives in the always-on island's SRAM as model input and buffered state, so the 40-coefficient option triples a cost the device pays continuously
 - Local inference to avoid network latency and preserve offline operation
 
-Neither alternative is ruled out by the `{python} KWSDesignConstraints.kws_memory_limit_design_kb_str` limit alone; the deployed model, preprocessing state, and runtime need their own footprint measurements. The choice rests on where each cost lands. The `{python} KWSDesignSpaceTradeoffs.mfcc_accuracy_gain_range_str` that 40 coefficients would add is cheaper to recover with data, which is paid once in the cloud, than with on-device memory, which is paid on every device for its whole life.
+Neither alternative is ruled out by the `{python} KWSDesignConstraints.kws_memory_limit_design_kb_str` limit alone; the deployed model, preprocessing state, and runtime need their own footprint measurements. The choice rests on where each cost lands. The table suggests a potential `{python} KWSDesignSpaceTradeoffs.mfcc_accuracy_gain_range_str` benefit from 40 coefficients. The team instead tests whether better training coverage can recover the quality gap while preserving the smaller on-device representation. Data collection spends a central budget, whereas the larger feature representation consumes memory and compute on every device; their relative cost and achieved quality still require measurement.
 
 **Step 2**: Calculate budget allocation.
 
@@ -1178,11 +1178,11 @@ The quality plan has three components:
 - Partial data-volume gain from 750K real examples
 - A gap to the `{python} KWSDesignConstraints.kws_accuracy_target_str` target that the options below must close
 
-Three options from the design space remain within budget and memory constraints. Their listed gains cannot simply be added to the base accuracy, because they overlap (noisy data and synthetic augmentation both buy robustness to acoustic conditions), so the plan is a candidate whose combined effect must be measured on the trained system:
+Three options from the design space are candidates for closing the gap; their collection, storage, processing, and deployed-footprint costs must be checked against the allocations. Their listed gains cannot simply be added to the base accuracy, because they overlap (noisy data and synthetic augmentation both buy robustness to acoustic conditions), so the plan is a candidate whose combined effect must be measured on the trained system:
 
-- 16 kHz sampling: +2–4 percent accuracy, `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` raw-audio storage ✓ (fits budget; on the device only the short window of raw samples feeding each MFCC computation doubles, because every frame still reduces to 13 coefficients)
-- Noisy training data: +10–15 percent real-world accuracy, `{python} KWSDesignSpaceTradeoffs.noisy_collection_cost_mult_str` collection cost ✓ (for a targeted noisy slice only, paid from the storage/processing allocation)
-- Synthetic augmentation: +3–5 percent robustness, `{python} KWSDesignSpaceTradeoffs.synthetic_cost_savings_mult_str` cheaper than real data ✓
+- 16 kHz sampling: +2–4 percent accuracy, `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` raw-audio storage (requires cost validation; on the device only the short window of raw samples feeding each MFCC computation doubles, because every frame still reduces to 13 coefficients)
+- Noisy training data: +10–15 percent real-world accuracy, `{python} KWSDesignSpaceTradeoffs.noisy_collection_cost_mult_str` collection cost (proposed for a targeted noisy slice; its cost must fit the storage/processing allocation)
+- Synthetic augmentation: +3–5 percent robustness, `{python} KWSDesignSpaceTradeoffs.synthetic_cost_savings_mult_str` cheaper than real data in the illustrative row; generation, verification, and storage costs remain to be measured
 
 **Step 4**: Final configuration.
 
@@ -1194,7 +1194,7 @@ The scenario combines these choices with 13 MFCCs and the computed 750K real-lab
 
 :::
 
-@Tbl-data-engineering-kws-configuration records the resulting configuration, pairing each design choice with the constraint that forces it: sampling and augmentation are bought where they fit the budget, while precision and memory are pinned by the always-on island.
+@Tbl-data-engineering-kws-configuration records the resulting configuration, pairing each design choice with the constraint that motivates it: sampling and augmentation draw on the stated allocations, while the always-on island sets the deployed-footprint constraint. Actual costs and working-state memory still require validation.
 
 ```{=latex}
 \begingroup
@@ -1203,12 +1203,12 @@ The scenario combines these choices with 13 MFCCs and the computed 750K real-lab
 
 | **Choice**            | **Selection**                                   | **Rationale**                                                                                                                                          |
 |:----------------------|:------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Sampling rate**     | 16 kHz                                          | +2–4% accuracy for 2$\times$ raw-audio storage, within budget; on device only the raw-sample window grows, since each MFCC frame keeps 13 coefficients |
-| **MFCC coefficients** | 13                                              | One-third the feature memory and compute of 40 coefficients in always-on SRAM; the forgone accuracy is cheaper to recover with data                    |
+| **Sampling rate**     | 16 kHz                                          | +2–4% accuracy for 2$\times$ raw-audio storage, subject to cost validation; on device only the raw-sample window grows, since each MFCC frame keeps 13 coefficients |
+| **MFCC coefficients** | 13                                              | One-third the feature memory and compute of 40 coefficients in always-on SRAM; test whether improved data coverage recovers the quality gap                    |
 | **Training examples** | 750K real + illustrative synthetic augmentation | Human-label count follows from the budget; synthetic volume is a scenario choice                                                                       |
 | **Data diversity**    | Noisy + clean mix                               | Critical for real-world deployment                                                                                                                     |
 | **Inference**         | Local, reduced precision                        | Reduced precision can lower footprint; the final 64 KB fit requires the quantization analysis in @sec-model-compression-quantization-precision-cd46    |
-| **Augmentation**      | Heavy synthetic                                 | 10$\times$ cost efficiency                                                                                                                             |
+| **Augmentation**      | Heavy synthetic                                 | Illustrative 10$\times$ per-example cost advantage; total generation and review costs require validation                                               |
 
 : **KWS Candidate Configuration**: A scenario that uses the computed real-label budget and records the remaining sampling, augmentation, and deployment choices for measurement against the quality and memory targets. {#tbl-data-engineering-kws-configuration tbl-colwidths="[16,20,64]"}
 
@@ -1295,9 +1295,9 @@ Preexisting datasets from repositories such as Kaggle, UCI [@uci_repo], and Imag
 
 The viability of dataset reuse depends on documentation fidelity. Without detailed records of sensor calibration, environment distributions, and filtering thresholds, external data compromises experimental reproducibility [@pineau2021improving; @henderson2018]. Thorough documentation specifies collection methodology, label taxonomy definitions, and baseline error distributions, enabling independent validation. As ingestion scales to millions of samples, dataset variety compounds latent label noise [@gudivada2017data], rendering manual inspection impossible and necessitating automated validation pipelines.
 
-Reuse carries a less visible risk. Standard validation metrics can create an illusion of model readiness when the benchmark itself is unrepresentative, and when many teams train on the same repository, its blind spots do not average out across their models. They recur in every model at once, so five models trained on one dataset fail together rather than independently (@fig-misalignment).
+Reuse carries a less visible risk. Standard validation metrics can create an illusion of model readiness when the benchmark itself is unrepresentative, and when many teams train on the same repository, its blind spots do not average out across their models. They can recur across models, so five models trained on one dataset can share correlated failures (@fig-misalignment).
 
-::: {#fig-misalignment fig-env="figure" fig-pos="htb" fig-cap="**Shared Dataset Bias Propagation**: Five models (A through E) all train on a single central dataset repository, reached by a path labeled shared training data. Beneath the models, five labeled arrows (bias propagation, shared limits, blind spots, common weaknesses, and systemic issues) converge on one box, limited real-world alignment. Training every model on one dataset does not produce five independent defects; it produces one correlated failure across the ecosystem." fig-alt="A central training dataset repository at the top connects downward to five model boxes labeled A through E, with one path labeled shared training data. Below the models, five labeled arrows reading bias propagation, shared limits, blind spots, common weaknesses, and systemic issues converge on a single box labeled limited real-world alignment. A dashed boundary around the models and that box is labeled potential issues."}
+::: {#fig-misalignment fig-env="figure" fig-pos="htb" fig-cap="**Shared Dataset Bias Propagation**: Five models (A through E) all train on a single central dataset repository, reached by a path labeled shared training data. Beneath the models, five labeled arrows (bias propagation, shared limits, blind spots, common weaknesses, and systemic issues) converge on one box, limited real-world alignment. Shared training data can propagate correlated blind spots across models; their failures need not be independent." fig-alt="A central training dataset repository at the top connects downward to five model boxes labeled A through E, with one path labeled shared training data. Below the models, five labeled arrows reading bias propagation, shared limits, blind spots, common weaknesses, and systemic issues converge on a single box labeled limited real-world alignment. A dashed boundary around the models and that box is labeled potential issues."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily\small]
@@ -1699,7 +1699,7 @@ All cost figures reflect approximate 2024 cloud provider rates and are intended 
 
 [^fn-pricing-cost-ratios]: **Pricing ratios**\index{Cloud pricing!cost-latency trade-off}: Cloud and labeling prices reflect provider policy and labor markets, not physical invariants, so the ratio between labeling and compute moves whenever either side reprices. Storage adds its own policy multipliers: archive tiers such as the Glacier row in @tbl-data-engineering-cost-constants charge more for faster retrieval. Verify current prices before using these ratios in a deployment decision.
 
-Web scraping offers the primary mechanism to bypass manual annotation costs at scale. Foundational vision datasets such as ImageNet [@imagenet_website] and OpenImages [@kuznetsova2020] relied on automated scraping, while modern language models depend on multi-terabyte web crawls [@groeneveld2024]. Ingestion pipelines targeting domain-specific corpora, such as public code repositories [@chen2021evaluating], expand coverage at low per-sample acquisition costs. However, automated scrapers encounter severe operational fragility: schema and DOM mutations break extraction parsers, HTTP 429 rate limits throttle network bandwidth, and dynamic JavaScript rendering introduces capture omissions. Raw web crawls also capture anachronistic or irrelevant samples that contaminate supervised targets.
+Web scraping reduces the cost of collecting raw examples at scale. Supervision remains a separate expense unless the source and task already supply usable labels or training targets. Foundational vision datasets such as ImageNet [@imagenet_website] and OpenImages [@kuznetsova2020] relied on automated scraping, while modern language models depend on multi-terabyte web crawls [@groeneveld2024]. Ingestion pipelines targeting domain-specific corpora, such as public code repositories [@chen2021evaluating], expand coverage at low per-sample acquisition costs. However, automated scrapers encounter severe operational fragility: schema and DOM mutations break extraction parsers, HTTP 429 rate limits throttle network bandwidth, and dynamic JavaScript rendering introduces capture omissions. Raw web crawls also capture anachronistic or irrelevant samples that contaminate supervised targets.
 
 The 1914 street scene in @fig-traffic-light captures this failure mode directly: an uncurated web query for "traffic light" returned a historical Cleveland intersection where streetcars and a roadside control booth surround early manually switched signals. If an autonomous driving model trained on such samples, it would learn spurious correlations with trolley tracks, period attire, and handwritten label annotations rather than modern LED traffic lights.
 
@@ -1715,7 +1715,7 @@ Crowdsourcing\index{Crowdsourcing!data labeling}\index{Crowdsourcing!annotation}
 
 [^fn-mturk-labeling-scale]: **Amazon Mechanical Turk (MTurk)**\index{Mechanical Turk!labeling scale}: A crowdsourcing platform that routes small tasks to distributed workers and can scale annotation beyond expert-only workflows. @snow2008 evaluate this pattern for natural-language annotation tasks, showing that non-expert annotations can be useful when task design and quality control are handled carefully. For wake-word audio collection, the same systems trade-off appears in domain-specific form: scale is attractive, but submissions still need acoustic checks such as signal-to-noise ratio, duration, and recording validity before they can safely enter the training set.
 
-Synthetic data generation\index{Synthetic data!generation}\index{Data augmentation!synthetic data}\index{Synthetic data!scalability} removes the human labor bottleneck by generating training samples algorithmically. This shifts the engineering trade-off: marginal generation cost approaches zero, but verification cost increases, as synthetic data is useful only if the simulator accurately reflects the physical distributions of the target deployment environment. @Fig-synthetic-data diagrams this dual-track dataflow, routing simulation outputs alongside real-world historical telemetry into an additive blending stage that feeds downstream model training.
+Synthetic data generation\index{Synthetic data!generation}\index{Data augmentation!synthetic data}\index{Synthetic data!scalability} reduces physical collection and labeling labor by generating training samples algorithmically. Generation still incurs per-sample compute and storage costs, alongside verification costs. Its learning value depends on whether the generator represents task-relevant conditions in the target deployment environment. @Fig-synthetic-data diagrams this dual-track dataflow, routing simulation outputs alongside real-world historical telemetry into an additive blending stage that feeds downstream model training.
 
 ::: {#fig-synthetic-data fig-env="figure" fig-pos="htb" fig-cap="**Synthetic Data Augmentation**: Combining simulated edge cases with historical system data during training. Algorithmic generation supplements real-world observations to close coverage gaps for rare events and dangerous operating regimes without incurring proportional human collection costs. Source: [@anylogic_synthetic]." fig-alt="Six-stage diagram: a simulation model produces synthetic data, and a real system produces historical data; both datasets feed an ML algorithm that produces a trained ML model."}
 
@@ -2058,11 +2058,11 @@ Synthetic data\index{Synthetic data!rare event coverage}\index{Synthetic data!si
 
 **Diagnosis**: Pure physical collection cannot cover rare acoustic edge cases within project deadlines. Generating synthetic audio variations via pitch shifting, additive noise, and room impulse response simulation expands training set diversity without expensive field collection.
 
-**Systems lesson**: Synthetic data generation acts as an automated data pipeline multiplier. Using synthetic augmentation targeted at known edge cases fills distribution coverage gaps that would otherwise require prohibitive physical dataset collection.
+**Systems lesson**: Synthetic data generation acts as an automated data pipeline multiplier. Targeted augmentation proposes expanded acoustic coverage; pitch, noise, and room-response changes do not establish fidelity to rare accents. Held-out real recordings across the relevant speaker and acoustic conditions must establish whether the expansion improves deployment quality.
 
 :::
 
-The reference corpus spans `{python} KWSAcquisitionScale.dataset_size_million_samples_str` across `{python} KWSAcquisitionScale.languages_count_str`; closing the product's remaining coverage gaps requires choosing acquisition channels by their marginal cost and contribution. Curated public benchmarks provide low-cost initial model initialization; web scraping delivers high-throughput acoustic volume; crowdsourcing collects targeted samples for underrepresented dialects; and parametric simulation synthesizes tail-end acoustic distortions. Combining these tiers closes the coverage gap without exceeding hardware and labeling budgets.
+The reference corpus spans `{python} KWSAcquisitionScale.dataset_size_million_samples_str` across `{python} KWSAcquisitionScale.languages_count_str`; closing the product's remaining coverage gaps requires choosing acquisition channels by their marginal cost and contribution. Curated public benchmarks provide low-cost initial model initialization; web scraping delivers high-throughput acoustic volume; crowdsourcing collects targeted samples for underrepresented dialects; and parametric simulation synthesizes tail-end acoustic distortions. Combining these tiers creates a candidate coverage plan. Held-out real recordings establish which gaps it closes, while measured generation, collection, labeling, and storage costs determine whether it fits the budget; the deployed pipeline still requires footprint validation.
 
 ### Coverage and diversity requirements {#sec-data-engineering-coverage-diversity-requirements-ce87}
 
@@ -2418,17 +2418,17 @@ class RealtimePerCore:
 **Physics**:
 
 1.  **Throughput**: At `{python} RealtimeCost.events_per_sec_str` and `{python} RealtimeCost.event_size_kb_str` per event, the pipeline carries `{python} RealtimeCost.throughput_gb_per_s_str`.
-2.  **Stream requirements**: To sustain `{python} RealtimeCost.throughput_gb_per_s_str` with less than 100 ms latency, the design assumes each core can parse, validate, and update features for about `{python} RealtimePerCore.stream_per_core_mb_per_s_str` of events, which takes `{python} RealtimePerCore.stream_primary_cores_str` primary cores; a standby core for each keeps latency bounded when one fails, for `{python} RealtimeCost.stream_cores_str` always-on cores in total. Running those cores for `{python} RealtimeCost.stream_hours_str` at `{python} RealtimeCost.stream_cost_per_hr_str` costs `{python} RealtimeCost.stream_cost_str`.
+2.  **Stream requirements**: To sustain `{python} RealtimeCost.throughput_gb_per_s_str` with less than 100 ms latency, the design assumes each core can parse, validate, and update features for about `{python} RealtimePerCore.stream_per_core_mb_per_s_str` of events, which takes `{python} RealtimePerCore.stream_primary_cores_str` primary cores; a standby core for each provisions recovery capacity, for `{python} RealtimeCost.stream_cores_str` always-on cores in total. That capacity does not establish the 100 ms target: failure detection, state recovery, replay, and the full ingestion path must also be validated under failure. Running those cores for `{python} RealtimeCost.stream_hours_str` at `{python} RealtimeCost.stream_cost_per_hr_str` costs `{python} RealtimeCost.stream_cost_str`.
 3.  **Batch requirements**: Process `{python} RealtimeCost.hourly_tb_str` (`{python} RealtimeCost.batch_window_hr_str` window) in `{python} RealtimeCost.batch_window_min_str`. That is `{python} RealtimePerCore.batch_aggregate_gb_per_s_str` in aggregate. Sequential reads over large files let each core sustain about `{python} RealtimePerCore.batch_per_core_mb_per_s_str`, more than a streaming core handling events one at a time, so the batch design needs `{python} RealtimeCost.batch_cores_str` cores for `{python} RealtimeCost.batch_window_min_str` per clock hour, accumulating `{python} RealtimeCost.batch_core_hours_str` per day. At `{python} RealtimeCost.stream_cost_per_hr_str`, that costs `{python} RealtimeCost.batch_cost_str`.
 
 ```{=latex}
 \vspace*{-1ex}
 ```
-**Systems insight**: Real-time is approximately `{python} RealtimeCost.cost_ratio_mult_str` more expensive for the same data volume. This tax is justified only when the value of subsecond latency exceeds the added cost.
+**Systems insight**: Under these provisioning and per-core throughput assumptions, streaming compute costs approximately `{python} RealtimeCost.cost_ratio_mult_str` as much as batch compute for the same data volume. This premium is justified when the value of subsecond latency exceeds the added cost.
 
 :::
 
-As the preceding cost calculation shows, the real-time premium stems directly from resource provisioning. Streaming systems require always-on infrastructure with redundant compute and storage to meet millisecond latency targets without dropping events. Batch systems, by contrast, provision ephemeral instances that process high volumes sequentially at high utilization before shutting down. Deciding between them depends on whether downstream inference strictly requires sub-second feature freshness.
+The preceding cost calculation prices a specific provisioning choice: always-on streaming cores with standby capacity, versus batch cores released after each processing window. It assumes higher per-core throughput for sequential batch work and does not price storage, buffering, or failover coordination. Those assumptions produce this scenario's compute premium; they do not establish that batch is always cheaper or that the streaming design meets its latency target. Deciding between the patterns requires validating the full cost and failure behavior against the feature freshness that downstream inference needs.
 
 The ingestion paradigm also shapes how the downstream model trains. Batch ingestion naturally pairs with periodic retraining: data accumulates in storage, an automated job retrains the model on the updated corpus, and a verified checkpoint deploys to serving. Stream ingestion makes that batch boundary less natural, raising the possibility of continuous online learning, in which model weights update directly as events arrive. Continuous updates, however, introduce operational risks that batch checkpoints avoid. Sudden distribution shifts, corrupted records, or adversarial payloads from any public-facing input path can reach the model before validation gates intervene. Most production systems therefore decouple ingestion from training: they stream data into a durable buffer while training on validated batches, reserving continuous online updates for tightly bounded, low-risk domains.
 
@@ -2444,7 +2444,7 @@ Across many machines or regions, that policy encounters additional consistency a
 
 Batch or streaming decides when records arrive; the next decision is where they are transformed relative to persistent storage. Traditional extract, transform, load (ETL)[^fn-etl-quality-first] ($\text{E} \to \text{T} \to \text{L}$) transforms records in an external engine before they land, whereas extract, load, transform (ELT)[^fn-elt-flexibility-first] ($\text{E} \to \text{L} \to \text{T}$) lands raw records in staging tables and transforms them inside the warehouse (@fig-etl-vs-elt). Where that boundary sits determines what each later schema change costs and how much raw data must be retained.
 
-[^fn-etl-quality-first]: **Extract, transform, load (ETL)**\index{ETL!reprocessing cost}: Conventional ETL validates *schema and data types*, deterministic checks that either pass or fail. ML ETL must additionally validate *distributional properties*: that the distribution of values has not shifted in a way that degrades model performance, requiring the statistical drift tests developed in @sec-data-engineering-quality-validation-monitoring-498f rather than schema validation alone, where the pass/fail threshold is a business decision, not a technical one. The further trade-off is rigidity: changing feature computation logic requires reprocessing the entire dataset from raw sources, a cost that grows linearly with data volume.
+[^fn-etl-quality-first]: **Extract, transform, load (ETL)**\index{ETL!reprocessing cost}: Conventional ETL validates *schema and data types*, deterministic checks that either pass or fail. ML ETL must additionally monitor *distributional properties* using the statistical drift tests developed in @sec-data-engineering-quality-validation-monitoring-498f. A detected shift prompts investigation; labeled outcome evidence establishes whether model quality has degraded. Thresholds reflect the task and failure cost. Changing feature computation logic may require replaying retained raw sources over affected records and aggregation windows. The reprocessing cost depends on that scope, the transformation, and the execution plan rather than invariably requiring a full-dataset pass.
 
 [^fn-elt-flexibility-first]: **Extract, load, transform (ELT)**\index{ELT!iteration speed}: This approach stores raw data before transformation, allowing teams to revise a transformation query and rerun it over the stored input without re-ingesting from source systems. The iteration time still depends on data volume, query complexity, warehouse capacity, and materialization strategy.
 
@@ -2733,29 +2733,31 @@ class EtlEltCost:
 
 **Problem**: A team processes `{python} EtlEltCost.daily_raw_tb_str` of raw clickstream data daily and must compute user session features for `{python} EtlEltCost.n_models_str` ML models, each requiring different aggregation windows (1-hour, 24-hour, 7-day). Which is cheaper, ETL or ELT?
 
+**Accounting boundary**: Both designs serve the same aggregation windows and retain replayable upstream raw logs for `{python} EtlEltCost.retention_days_str`. The comparison excludes that shared source retention and its common ingestion costs. ETL retains only the derived history in the warehouse, assumed to occupy `{python} EtlEltCost.etl_tb_each_str` per model over the same horizon; ELT keeps an additional raw copy there and computes features on demand. Transient query outputs are not retained as separate ELT datasets. Source retrieval and compute for later backfills must be priced separately when the designs differ.
+
 **Math**:
 
 1.  **ETL approach**: Transform before loading. Compute all three aggregation windows in a Spark cluster before loading into the warehouse.
     *   Spark compute: `{python} EtlEltCost.daily_raw_tb_str` at `{python} EtlEltCost.spark_per_tb_usd_str` = `{python} EtlEltCost.etl_spark_usd_str`
     *   Storage: `{python} EtlEltCost.etl_datasets_str` transformed datasets, ~`{python} EtlEltCost.etl_tb_each_str` each = `{python} EtlEltCost.etl_total_storage_tb_str` at `{python} EtlEltCost.s3_per_tb_mo_usd_str` = `{python} EtlEltCost.etl_storage_usd_str`
-    *   Schema change cost: Re-run full pipeline (~`{python} EtlEltCost.schema_change_etl_hours_str`) per change
+    *   Feature-definition change: Replay the retained source logs and rerun the pipeline; the assumed rerun takes ~`{python} EtlEltCost.schema_change_etl_hours_str` after the edit
 2.  **ELT approach**: Load raw data first, transform in warehouse.
     *   Storage: `{python} EtlEltCost.daily_raw_tb_str` raw/day, `{python} EtlEltCost.retention_days_str` retention = `{python} EtlEltCost.elt_storage_tb_str` at `{python} EtlEltCost.s3_per_tb_mo_usd_str` = `{python} EtlEltCost.elt_storage_usd_str`
     *   Query compute: `{python} EtlEltCost.n_models_str` models, each with `{python} EtlEltCost.query_cost_per_str` of daily query cost over `{python} EtlEltCost.retention_days_str`, totals `{python} EtlEltCost.elt_query_usd_str`
-    *   Schema change cost: Rewrite SQL query (~`{python} EtlEltCost.schema_change_elt_minutes_str`) per change
+    *   Feature-definition change: Rewrite the SQL query (~`{python} EtlEltCost.schema_change_elt_minutes_str`), then execute and validate it against the retained raw copy; execution time is not supplied
 
 ```{=latex}
 \vspace*{-0.75ex}
 ```
-**Systems insight**: ETL saves `{python} EtlEltCost.savings_str` in storage. After normalizing Spark compute to a monthly cost, ETL totals `{python} EtlEltCost.etl_total_usd_str` (`{python} EtlEltCost.etl_spark_monthly_usd_str` compute + `{python} EtlEltCost.etl_storage_usd_str` storage), while ELT totals `{python} EtlEltCost.elt_total_usd_str` (`{python} EtlEltCost.elt_storage_usd_str` storage + `{python} EtlEltCost.elt_query_usd_str` query compute), for a cloud-cost advantage of `{python} EtlEltCost.total_savings_str` before engineering labor. The other side of the ledger is schema change. Each feature-definition change costs an ETL rerun that takes `{python} EtlEltCost.schema_change_ratio_mult_str` as long as the ELT query edit, although the two durations end at different points (the edit excludes query execution, and a rerun's elapsed time is not all engineer time). Which pattern wins therefore depends on how often definitions change and what an engineer-hour costs. Stable schemas favor ETL's lower cloud bill, while frequent changes can repay ELT's storage premium.
+**Systems insight**: ETL saves `{python} EtlEltCost.savings_str` in storage. After normalizing Spark compute to a monthly cost, ETL totals `{python} EtlEltCost.etl_total_usd_str` (`{python} EtlEltCost.etl_spark_monthly_usd_str` compute + `{python} EtlEltCost.etl_storage_usd_str` storage), while ELT totals `{python} EtlEltCost.elt_total_usd_str` (`{python} EtlEltCost.elt_storage_usd_str` storage + `{python} EtlEltCost.elt_query_usd_str` query compute), for a cloud-cost advantage of `{python} EtlEltCost.total_savings_str` before engineering labor. The other side of the ledger is feature-definition change. Compare elapsed time from the start of an edit to validated, feature-ready output in both designs, then account separately for the engineer time spent editing, supervising, and validating. A pipeline rerun and a SQL edit are different endpoints, so their durations cannot establish a speedup or a labor saving. Stable definitions favor this scenario's lower ETL cloud bill; frequent changes favor ELT only if measured labor and reprocessing savings repay its additional raw copy.
 
 :::
 
 The result runs against ELT's reputation, because raw retention rather than compute dominates the bill in this scenario. Production ML systems rarely use one pattern exclusively. Structured tables often flow through ETL for efficiency and compliance, while unstructured data pushes the ELT preference further. For deep learning workloads processing images, audio, or text, the "Transform" step often executes inside the ML framework's data loader rather than in the warehouse at all, applying random crops, spectrogram generation, or text tokenization on-the-fly during each training epoch. Materializing ten augmented variants upstream would increase a 50,000-image dataset to 500,000 stored copies, so ELT's "load raw, transform late" principle extends naturally to the training loop itself.
 
-Query reuse is the second input to the choice, alongside change rate. Transformed data that is queried hundreds of times amortizes ETL compute, whereas single-pass exploratory queries gain nothing from transforming upfront. @Lst-etl-elt-cost-comparison turns the notebook's components into that decision rule. It totals each pattern's monthly cloud bill, then divides ELT's extra cost by the labor value of the time ELT saves on each schema change, which gives the number of changes per month above which ELT pays for itself.
+Query reuse is the second input to the choice, alongside change rate. Transformed data that is queried hundreds of times amortizes ETL compute, whereas single-pass exploratory queries gain nothing from transforming upfront. @Lst-etl-elt-cost-comparison turns the notebook's components into that decision rule. It totals each pattern's monthly cloud bill, then illustrates a labor-only break-even under stipulated engineer-hour savings per feature-definition change. Applying that calculation requires positive measured savings through the same feature-ready endpoint; without them, change frequency alone cannot repay ELT's larger cloud bill.
 
-::: {#lst-etl-elt-cost-comparison lst-cap="**ETL vs. ELT Break-Even**: Monthly cloud cost of each transformation strategy, and the schema-change rate at which ELT's cheaper changes repay its larger cloud bill."}
+::: {#lst-etl-elt-cost-comparison lst-cap="**ETL vs. ELT Break-Even**: Monthly cloud cost of each transformation strategy and an illustrative labor-only break-even under stipulated savings per feature-definition change."}
 
 ```{.python}
 # ETL vs ELT: monthly cloud cost and schema-change break-even
@@ -2766,7 +2768,8 @@ n_models = 3
 retention_days = 30
 query_cost_per = 5  # $/model/day of warehouse queries
 
-# ETL: transform daily, store three derived 2 TB datasets
+# Shared upstream raw retention and ingestion are outside this boundary.
+# ETL: transform daily, retain 30 days of derived history (2 TB/model)
 etl_compute_mo = daily_raw_tb * spark_per_tb * retention_days
 etl_storage_mo = 3 * 2 * s3_per_tb_mo
 etl_total_mo = etl_compute_mo + etl_storage_mo
@@ -2776,18 +2779,28 @@ elt_storage_mo = daily_raw_tb * retention_days * s3_per_tb_mo
 elt_query_mo = n_models * query_cost_per * retention_days
 elt_total_mo = elt_storage_mo + elt_query_mo
 
-# ELT's extra cloud bill must be repaid by cheaper schema changes
+# Labor-only scenario: assume positive engineer-hour savings per change
 cloud_gap_mo = elt_total_mo - etl_total_mo
 
 
 def break_even_changes_per_month(hours_saved_per_change, cost_per_hour):
-    """Changes per month above which ELT costs less in total."""
+    """Labor-only break-even, assuming positive hours saved per change."""
     return cloud_gap_mo / (hours_saved_per_change * cost_per_hour)
+
+
+# Illustrative labor assumptions, not elapsed rerun/query durations:
+# ETL needs 4 engineer-hours per change; ELT needs 1.
+hours_saved_per_change = 4 - 1
+cost_per_hour = 100  # fully loaded $/engineer-hour
+changes_per_month = break_even_changes_per_month(
+    hours_saved_per_change, cost_per_hour
+)
+print(f"Labor-only break-even: {changes_per_month:.1f} changes/month")
 ```
 
 :::
 
-In this scenario ELT's extra cloud bill is `{python} EtlEltCost.total_savings_str`. Saving a few engineer-hours on each feature-definition change repays that only if such changes are frequent. The inputs a team must measure are its own change rate and the engineer time each change actually costs under each pattern.
+In this scenario ELT's extra cloud bill is `{python} EtlEltCost.total_savings_str`. The listing evaluates the labor-only break-even with explicit assumed engineer-hours and hourly cost. Those assumptions include editing, supervision, and validation through the same feature-ready endpoint, not time spent waiting for a job. The calculation is a screening comparison; unequal source-retrieval charges, backfill compute, or retained output costs alter the break-even. A team must measure its own change rate and those per-change costs before selecting a pattern.
 
 #### Feature computation placement {#sec-data-engineering-feature-computation-placement-a998}
 
@@ -2909,7 +2922,7 @@ An observed maximum difference of $\mathcal{D}_{\text{KS}} = 0.08$ exceeds the c
 
 The K-S test detects drift in continuous features; @sec-data-engineering-detecting-responding-data-drift-509a details distribution shift taxonomies (covariate, label, concept, and label-quality drift) along with the population stability index and KL divergence metrics.
 
-Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating the data source has changed in ways that will affect model performance.
+Categorical features require different statistical approaches. Instead of comparing means and variances, monitoring systems track category frequency distributions. When new categories appear that never existed in training data, or when existing categories shift substantially in relative frequency, the system flags potential data quality issues or genuine distribution shifts; for example, the proportion of "mobile" vs. "desktop" traffic might change by more than 20 percent. This statistical vigilance catches subtle problems that simple schema validation misses entirely: age values may remain in the valid range of 18–95, while the distribution shifts from primarily 25–45 year olds to primarily 65+ year olds, indicating that the input population has changed in ways that may affect model performance. Outcome checks are needed to establish whether quality changed.
 
 Validation at the pipeline level encompasses multiple strategies working together. Schema validation executes synchronously as data enters the pipeline, rejecting malformed records immediately before they can propagate downstream. Modern tools like TensorFlow Data Validation (TFDV)\index{TensorFlow Data Validation} [@breck2019data] automatically infer schemas from training data, capturing expected data types, value ranges, and presence requirements.
 
@@ -3104,9 +3117,9 @@ In ML systems, dead-letter queues serve dual purposes beyond failure analysis. P
 
 Moving beyond ad-hoc error handling, cascade failure prevention requires circuit breaker\index{Reliability!circuit breakers}[^fn-circuit-breaker-ml] patterns and bulkhead isolation to prevent single component failures from propagating throughout the system. When a feature computation service fails, the circuit breaker pattern stops calling that service after detecting repeated failures, preventing the caller from waiting on timeouts that would cascade into its own failure.
 
-[^fn-circuit-breaker-ml]: **Circuit breaker**\index{Circuit breaker!cascade prevention}: Named for its three-state behavior (closed for normal flow, open with faults blocked, half-open for a recovery probe) after the electrical safety device that interrupts current on overload. In ML data pipelines, the circuit breaker prevents a failing feature computation service from cascading timeouts through the entire serving path: once failure count exceeds a threshold, the breaker opens and the pipeline falls back to cached or default features rather than waiting on a dead service.
+[^fn-circuit-breaker-ml]: **Circuit breaker**\index{Circuit breaker!cascade prevention}: Named for its three-state behavior (closed for normal flow, open with faults blocked, half-open for a recovery probe) after the electrical safety device that interrupts current on overload. In ML data pipelines, the circuit breaker prevents a failing feature computation service from cascading timeouts through the entire serving path: once failure count exceeds a threshold, the breaker opens. The pipeline may use cached or default features only within a validated feature-age and task-quality contract; otherwise it rejects the request rather than waiting on a dead service.
 
-Automated recovery engineering extends beyond simple retry logic. Exponential backoff, jitter, load shedding, and circuit breakers reduce request pressure on struggling services while allowing transient faults to recover; simply increasing timeouts can retain resources longer and worsen overload. Multi-tier fallback systems provide degraded service when primary data sources fail: serving slightly stale cached features when real-time computation fails, or using approximate features when exact computation times out. A recommendation system unable to compute user preferences from the past 30 days might fall back to preferences from the past 90 days, providing less precise but still useful recommendations rather than failing entirely. Comprehensive alerting and escalation procedures ensure human intervention occurs when automated recovery fails, with sufficient diagnostic information captured during the failure to enable rapid debugging.
+Automated recovery engineering extends beyond simple retry logic. Exponential backoff, jitter, load shedding, and circuit breakers reduce request pressure on struggling services while allowing transient faults to recover; simply increasing timeouts can retain resources longer and worsen overload. Multi-tier fallback systems can provide degraded service when primary data sources fail, using cached or approximate features only when their age and quality satisfy a validated fallback contract. A recommendation system unable to compute user preferences from the past 30 days might fall back to preferences from the past 90 days if evaluation establishes acceptable recommendation quality with that representation. If no fallback meets the contract, the system rejects the request. Comprehensive alerting and escalation procedures ensure human intervention occurs when automated recovery fails, with sufficient diagnostic information captured during the failure to enable rapid debugging.
 
 Retry logic, dead-letter queues, and circuit breakers serve as runtime error handlers in the dataset compiler. They catch malformed inputs and failing dependencies without halting the entire pipeline. With ingestion, validation, drift monitoring, and these handlers in place, the frontend delivers records that are well-formed and checked, yet still raw. Audio arrives at inconsistent sample rates, text carries varying encodings, and numeric features span incompatible scales. Training requires transforming these heterogeneous records into a uniform representation while guaranteeing that identical transformations execute during both training and serving.
 
@@ -3264,7 +3277,7 @@ Data locality becomes critical at this scale. At 10 GB/s, moving one terabyte ac
 
 ::: {#nbk-data-engineering-coordination-tax .callout-notebook title="The coordination tax"}
 
-**Problem**: Mean normalization must be computed across 1 TB of features distributed across 100 nodes. Is it faster to (A) gather all data to one node and compute centrally, or (B) compute local means and aggregate them?
+**Problem**: Mean normalization must be computed across 1 TB of features distributed across 100 equal-size partitions with equal record counts. Is it faster to (A) gather all data to one node and compute centrally, or (B) compute local means and aggregate them?
 
 **Option A (centralized)**:
 
@@ -3278,14 +3291,14 @@ Data locality becomes critical at this scale. At 10 GB/s, moving one terabyte ac
 **Option B (distributed)**:
 
 - Each node computes local mean: ~0.05 to 0.2 seconds (10 GB at RAM speed)
-- Send 100 partial means (8 bytes each): $<1\text{ ms}$
+- Send 100 partial means (8 bytes each): $<1\text{ ms}$ of idealized payload transmission at the stated bandwidth; round trips, coordination, and stragglers add latency
 - Aggregate: negligible
-- Total: ~0.05 to 0.2 seconds (hundreds to a few thousand times faster)
+- Modeled compute and payload-transfer bound: ~0.05 to 0.2 seconds, before coordination overhead; the complete reduction requires measurement
 
 ```{=latex}
 \vspace*{-0.5ex}
 ```
-**Systems insight**: Algebraically decomposable reductions can often use partial aggregation near the data; for example, a distributed mean carries partial sums and counts. Joins and cross-products may require shuffling, although partitioning and colocation can reduce that cost. Pipeline design should minimize unnecessary movement by pushing suitable computation toward the data, the compute-follows-data principle central to systems like MapReduce [@dean2004mapreduce], Spark [@zaharia2010spark], and modern ML frameworks.
+**Systems insight**: Algebraically decomposable reductions can often use partial aggregation near the data. Averaging the partial means is valid here because record counts are equal; for unequal partitions, carry partial sums and counts and divide the combined sum by the combined count. The mathematical mean is unchanged, although floating-point reduction order can change rounding. Joins and cross-products may require shuffling, although partitioning and colocation can reduce that cost. Pipeline design should minimize unnecessary movement by pushing suitable computation toward the data, the compute-follows-data principle central to systems like MapReduce [@dean2004mapreduce], Spark [@zaharia2010spark], and modern ML frameworks.
 
 :::
 
@@ -3461,7 +3474,7 @@ Labeling failures arise from two distinct sources requiring different engineerin
 
 Given these inherent quality challenges, production ML systems implement multiple layers of quality control. Systematic quality checks\index{Label quality!systematic checks} continuously monitor the labeling pipeline through random sampling of labeled data for expert review and statistical methods to flag potential errors. The infrastructure must efficiently process these checks across millions of examples without creating bottlenecks. Sampling strategies typically validate 1-10 percent of labels, balancing detection sensitivity against review costs. Higher-risk applications like medical diagnosis or autonomous vehicles may validate 100 percent of labels through multiple independent reviews, while lower-stakes applications like product recommendations may validate only 1 percent through spot checks.
 
-Beyond random sampling approaches, collecting multiple labels per data point, often referred to as "consensus labeling,"\index{Consensus labeling!quality control} can help identify controversial or ambiguous cases. Commercial labeling platforms such as Labelbox\index{Labelbox} and Scale AI\index{Scale AI} expose consensus and tiered quality-control workflows [@labelbox_consensus; @scaleai_qc], but the statistical core is inter-annotator agreement. The consensus infrastructure typically collects several labels per example, computing metrics like Fleiss' kappa\index{Fleiss' kappa!inter-annotator agreement}, a generalization of the Cohen's kappa statistic introduced in @sec-data-engineering-detecting-responding-data-drift-509a from two raters to any number of annotators [@fleiss1971measuring]. Examples with low agreement, using thresholds such as the Landis-Koch bands as operational heuristics, route to expert review rather than forcing consensus from genuinely ambiguous cases [@landis1977measurement].
+Beyond random sampling approaches, collecting multiple labels per data point, often referred to as "consensus labeling,"\index{Consensus labeling!quality control} can help identify controversial or ambiguous cases. Commercial labeling platforms such as Labelbox\index{Labelbox} and Scale AI\index{Scale AI} expose consensus and tiered quality-control workflows [@labelbox_consensus; @scaleai_qc], but the statistical core is inter-annotator agreement. The consensus infrastructure typically collects several labels per example, computing metrics like Fleiss' kappa\index{Fleiss' kappa!inter-annotator agreement}, a generalization of the Cohen's kappa statistic introduced in @sec-data-engineering-detecting-responding-data-drift-509a from two raters to any number of annotators [@fleiss1971measuring]. Kappa summarizes agreement across a collection of rated examples; it is not a confidence score for an individual label. Per-example disagreement and failed gold-standard checks can route items to expert review. Landis-Koch bands are operational heuristics for interpreting aggregate agreement, not correctness guarantees [@landis1977measurement]. Independent gold-standard checks and expert audits assess correctness because annotators can agree on the same systematic error.
 
 The consensus approach reflects an economic trade-off essential for scalable systems. Expert review costs more per example than crowdsourced labeling, but forcing agreement on ambiguous examples through majority voting of nonexperts can produce systematically biased labels. By routing only genuinely ambiguous cases to experts, identified through low inter-annotator agreement or failed gold-standard checks, systems balance cost against quality. This tiered approach enables processing millions of examples economically while maintaining quality standards through targeted expert intervention.
 
@@ -3769,7 +3782,7 @@ At this stage, the compilation pipeline has produced its core artifacts: feature
 
 ## Storage Architecture {#sec-data-engineering-strategic-storage-architecture-1a6b}
 
-The feeding problem has already priced one storage mismatch. On baseline cloud block storage, the chapter's ResNet-50 accelerator waits on I/O for about `{python} FeedingProblem.feeding_tax_pct_str` of every step (@sec-data-engineering-feeding-problem). The KWS data poses the same question at two scales, the multilingual reference corpus (`{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` spanning `{python} KWSAutomatedLabelingScale.languages_count_str`) and the much smaller product-specific labeled subset. Both require deliberate storage layouts to balance training throughput against serving latency. Reconciling these divergent access profiles demands mapping workload access patterns directly onto the physical capabilities of underlying storage media.
+The feeding problem has already priced one storage mismatch. On baseline cloud block storage, the simplified supply bound reduces the chapter's sustained ResNet-50 rate by about `{python} FeedingProblem.feeding_tax_pct_str` (@sec-data-engineering-feeding-problem). The KWS data poses the same question at two scales, the multilingual reference corpus (`{python} KWSAutomatedLabelingScale.dataset_size_million_samples_str` spanning `{python} KWSAutomatedLabelingScale.languages_count_str`) and the much smaller product-specific labeled subset. Both require deliberate storage layouts to balance training throughput against serving latency. Reconciling these divergent access profiles demands mapping workload access patterns directly onto the physical capabilities of underlying storage media.
 
 In the compiler framework, storage plays the part of an operating system's program loader, which decides where compiled artifacts sit in the memory hierarchy and how quickly they can be brought to the processor that executes them. The framework data loader met during ingestion is a client of that placement, reading whatever layout storage provides, rather than the placement itself. Storage requirements for machine learning diverge fundamentally from those of transactional systems. Rather than optimizing for frequent small writes and point lookups that characterize banking or e-commerce, ML workloads prioritize sustained sequential read bandwidth, large-scale scans across gigabytes to petabytes, and schema flexibility. A relational database serving an e-commerce catalog handles millions of individual product queries per second with low latency, but an ML training job scanning that same catalog sequentially across dozens of epochs can stall when its access path issues many small reads instead of exploiting bulk scans.
 
@@ -4229,7 +4242,7 @@ Storage formats determine how much "waste" data must move to retrieve the signal
 $$ \text{Effective Bandwidth} = \text{Physical Bandwidth} \times \eta_{\text{format}} $$ {#eq-effective-bandwidth}
 Values below 1 mean the format spends part of the physical data path on irrelevant bytes; improving layout can therefore raise usable throughput without changing the storage device.
 
-**Scenario**: Training a fraud model using `{python} FormatEfficiency.needed_cols_str` features from a `{python} FormatEfficiency.total_cols_str`-column table.
+**Scenario**: Training a fraud model using `{python} FormatEfficiency.needed_cols_str` features from a `{python} FormatEfficiency.total_cols_str`-column table, assuming equal uncompressed byte size per column.
 
 Row-oriented formats (such as CSV)\index{Row-oriented storage!CSV} must read all `{python} FormatEfficiency.total_cols_str` columns to retrieve the `{python} FormatEfficiency.needed_cols_str` required features, giving a useful-byte fraction of `{python} FormatEfficiency.eta_csv_str` and wasting `{python} FormatEfficiency.waste_pct_str` of disk bandwidth. Conversely, column-oriented formats (such as Parquet)\index{Columnar storage!Parquet} read only the selected columns, achieving $\eta_{\text{format}} \approx$ `{python} FormatEfficiency.eta_parquet_str` (ignoring metadata overhead) and delivering `{python} FormatEfficiency.throughput_ratio_mult_str` higher effective throughput.
 
@@ -4297,7 +4310,7 @@ class CompressionTradeoff:
 
 Compression algorithms\index{Compression!algorithm selection} trade storage density against CPU decompression bandwidth. While gzip\index{Gzip!decompression speed} achieves higher compression ratios of 6$\times$ to 8$\times$, Snappy\index{Snappy!decompression speed} achieves 2$\times$ to 3$\times$ compression but decompresses at `{python} CompressionTradeoff.snappy_decompress_mb_per_s_str`, roughly `{python} CompressionTradeoff.decompress_speedup_mult_str` faster than gzip's `{python} CompressionTradeoff.gzip_decompress_mb_per_s_str`. Reading a `{python} CompressionTradeoff.compress_dataset_gb_str` dataset compressed with gzip costs `{python} CompressionTradeoff.gzip_min_str` of CPU decompression per epoch, while Snappy costs only `{python} CompressionTradeoff.snappy_min_str`. Over `{python} CompressionTradeoff.n_epochs_str`, this `{python} CompressionTradeoff.time_diff_min_str` difference per epoch compounds to `{python} CompressionTradeoff.total_diff_hours_str` of host CPU time. That CPU time lengthens training only when decompression sits on the critical path, as it does when host-side decode is the binding stage of the dataloader choke point; with spare host cores and prefetching, it hides behind accelerator compute. The trade reverses when storage bandwidth binds instead. Gzip's higher compression ratio means fewer bytes per sample cross the storage path, which raises $R_{\text{data}}$ in @eq-data-supply, so the right codec depends on which stage binds. Snappy suits a CPU-bound loader, and a denser codec suits a storage-bound one.
 
-Beyond format and compression, data partitioning\index{Data!partitioning, query optimization} governs retrieval efficiency by aligning storage layout with common access patterns. A recommendation system processing user interactions partitions data by timestamp and user demographic segments, allowing training runs to query recent temporal slices without scanning the full historical repository. Partitioning strategies interact directly with distributed training: range partitioning by user ID routes consistent user profiles to specific data-parallel ranks (workers that each train on a different slice of every batch), while random partitioning guarantees that all workers receive independent and identically distributed samples. Granularity is critical: too few coarse partitions limit parallel worker concurrency, while millions of micro-shards induce excessive metadata overhead and degrade sequential disk prefetching. In multi-accelerator training, partition skew creates severe straggler bottlenecks: if seven workers in an eight-accelerator job finish loading their batch in 12 ms but one worker reads from an oversized partition and takes 180 ms, that single straggler delays gradient synchronization across the entire cluster. Balanced partitioning that matches worker read budgets is therefore an architectural prerequisite for high accelerator efficiency.
+Beyond format and compression, data partitioning\index{Data!partitioning, query optimization} governs retrieval efficiency by aligning storage layout with common access patterns. A recommendation system processing user interactions partitions data by timestamp and user demographic segments, allowing training runs to query recent temporal slices without scanning the full historical repository. Partitioning strategies interact directly with distributed training: range partitioning by user ID routes consistent user profiles to specific data-parallel ranks (workers that each train on a different slice of every batch), while random partitioning mixes records from the source pool across workers under the sampling policy. It does not remove correlations already present in that pool or prevent leakage between evaluation splits; speaker grouping and other independence constraints must be enforced separately. Granularity is critical: too few coarse partitions limit parallel worker concurrency, while millions of micro-shards induce excessive metadata overhead and degrade sequential disk prefetching. In multi-accelerator training, partition skew creates severe straggler bottlenecks: if seven workers in an eight-accelerator job finish loading their batch in 12 ms but one worker reads from an oversized partition and takes 180 ms, that single straggler delays gradient synchronization across the entire cluster. Balanced partitioning that matches worker read budgets is therefore an architectural prerequisite for high accelerator efficiency.
 
 ### Storage across the ML lifecycle {#sec-data-engineering-storage-across-ml-lifecycle-2b22}
 
@@ -4521,9 +4534,9 @@ Like technical debt in traditional software engineering, data debt\index{Data de
 
 ### Debugging data pipelines {#sec-data-engineering-debugging-data-pipelines-2f26}
 
-When data debt matures, it manifests as unexplained accuracy degradation, ingestion pipeline crashes, or subgroup performance disparities. Effective debugging\index{Debugging!data pipelines}\index{Pipeline!failure diagnosis} isolates root causes across the data-machine interface: data cascades (@sec-data-engineering-data-cascades-systematic-foundations-matter-2efe) demonstrate that upstream ingestion flaws trigger downstream anomalies, training-serving skew (@sec-data-engineering-ensuring-trainingserving-consistency-c683) reveals discrepancies between offline feature generation and online serving, and drift detection (@sec-data-engineering-detecting-responding-data-drift-509a) identifies statistical divergence over time. @Fig-debug-flowchart formalizes this triage procedure into a four-stage decision tree, screening symptoms across temporal degradation, train-validation divergence, serving skew, and subgroup disparities to isolate data faults before questioning model capacity.
+When data debt matures, it manifests as unexplained accuracy degradation, ingestion pipeline crashes, or subgroup performance disparities. Effective debugging\index{Debugging!data pipelines}\index{Pipeline!failure diagnosis} isolates root causes across the data-machine interface: data cascades (@sec-data-engineering-data-cascades-systematic-foundations-matter-2efe) demonstrate that upstream ingestion flaws trigger downstream anomalies, training-serving skew (@sec-data-engineering-ensuring-trainingserving-consistency-c683) reveals discrepancies between offline feature generation and online serving, and drift detection (@sec-data-engineering-detecting-responding-data-drift-509a) identifies statistical divergence over time. @Fig-debug-flowchart organizes four symptom checks across temporal degradation, train-validation divergence, serving skew, and subgroup disparities. A positive answer identifies a candidate cause, not an exit from the investigation. Continue through the remaining checks because several faults can coexist, and confirm each cause with controlled artifact comparisons before selecting an intervention.
 
-::: {#fig-debug-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Data Pipeline Debugging Flowchart**: Four sequential checks prioritize hypotheses involving drift, overfitting or data artifacts, training-serving skew, and subgroup coverage. Each branch suggests a hypothesis to investigate rather than a conclusive diagnosis; if no listed condition holds, the final box suggests examining model architecture or capacity." fig-alt="Vertical flowchart with four blue diamond decision nodes and result boxes suggesting hypotheses involving data drift, overfitting or data artifacts, training-serving skew, and subgroup coverage. A gray box at the bottom suggests examining model architecture or capacity after the listed checks."}
+::: {#fig-debug-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Data Pipeline Debugging Flowchart**: Four sequential checks prioritize hypotheses involving drift, overfitting or data artifacts, training-serving skew, and subgroup coverage. Each side branch suggests a candidate cause. Continue through every check even after a positive answer, then confirm the causes before applying the indicated repairs. Other hypotheses include model, code, and hardware faults." fig-alt="Vertical flowchart with four blue diamond decision nodes and result boxes suggesting hypotheses involving data drift, overfitting or data artifacts, training-serving skew, and subgroup coverage. Downward arrows labeled continue lead through every check; a gray box at the bottom names model, code, and hardware as other hypotheses."}
 
 ```{.tikz}
 \scalebox{0.87}{%
@@ -4687,12 +4700,12 @@ to[out=-45,in=0] (-0.35,-2) -| cycle;
 \node[Result, right=1.5 of D1](R1){};
 \pic[shift={(0.37,-0.55)}] at  (R1.west){graph={scalefac=0.55,picname=1,filllcolor=OrangeLine, Linewidth=0.7pt}};
 \node[Result,draw=none,anchor=south east,minimum width=42mm, fill=none](R3T)
-at (R1.south east){\textbf{Data Drift}\\[-2pt]\footnotesize (Freshness Debt)\\[-2pt] \footnotesize Check PSI, Distributions};
+at (R1.south east){\textbf{Candidate Drift}\\[-2pt]\footnotesize (Freshness Debt)\\[-2pt] \footnotesize Check PSI, Distributions};
 \draw[Line] (D1.east) -- node[Text,above=1pt]{Yes} (R1.west);
 
 % Branch 1: No -> D2
 \node[Diamond, below=1.25 of D1](D2){Training Acc $\gg$ Validation Acc?};
-\draw[Line] (D1.south) -- node[Text,right=1pt]{No/Constant} (D2.north);
+\draw[Line] (D1.south) -- node[Text,right=1pt]{Continue} (D2.north);
 
 % Branch 2: Yes (Overfitting/Quality)
 \node[Result, right=1.5 of D2](R2){};
@@ -4705,32 +4718,32 @@ scale=0.58, every node/.append style={transform shape}]
 \pic[shift={(0,0)}] at  (0.8,0.8){puzzle={scalefac=0.2,picname=1,filllcolor=cyan!70}};
 \end{scope}
 \node[Result,draw=none,anchor=south east,minimum width=42mm, fill=none](R3T)
-at (R2.south east){\textbf{Overfitting/Artifacts}\\[-1pt] \footnotesize Check Label Noise,
+at (R2.south east){\textbf{Candidate Artifacts}\\[-1pt] \footnotesize Check Label Noise,
 \\[-1pt]
 Duplicates};
 \draw[Line] (D2.east) -- node[Text,above=1pt]{Yes} (R2.west);
 
 % Branch 2: No -> D3
 \node[Diamond, below=1.25 of D2](D3){Validation Acc $\gg$ Production Acc?};
-\draw[Line] (D2.south) -- node[Text,right=1pt]{No ($\approx$)} (D3.north);
+\draw[Line] (D2.south) -- node[Text,right=1pt]{Continue} (D3.north);
 
 % Branch 3: Yes (Skew)
 \node[Result, right=1.5 of D3](R3){};
 \draw[Line] (D3.east) -- node[Text,above=1pt]{Yes} (R3.west);
 \pic[shift={(0.72,0)}] at (R3.west) {gear={9/1.3/1.8/9/7/0.8/scalefac=0.3,drawcolor=GreenD,filllcolor=GreenD}};
 \node[Result,draw=none,anchor=south east,minimum width=45mm, fill=none](R3T)
-at (R3.south east){\textbf{Training-Serving Skew}\\[-1pt] \footnotesize Check Transformations,\\[-1pt] Schema};
+at (R3.south east){\textbf{Candidate Skew}\\[-1pt] \footnotesize Check Transformations,\\[-1pt] Schema};
 
 % Branch 3: No -> D4
 \node[Diamond, below=1.25 of D3](D4){Performance inconsistent across subgroups?};
-\draw[Line] (D3.south) -- node[Text,right=1pt]{No ($\approx$)} (D4.north);
+\draw[Line] (D3.south) -- node[Text,right=1pt]{Continue} (D4.north);
 
 % Branch 4: Yes (Bias)
 \node[Result, right=1.5 of D4](R4){};
 \pic[shift={(0.65,0)}] at  (R4.west){target={scalefac=0.45,picname=1,drawcolor=BlueLine,
 filllcolor=cyan!90!,Linewidth=0.7pt, filllcirclecolor=cyan!20}};
 \node[Result,draw=none,anchor=south east,minimum width=45mm, fill=none](R5T)
-at (R4.south east){\textbf{Bias/Coverage Gap}\\ \footnotesize Check Slice Metrics};
+at (R4.south east){\textbf{Candidate Coverage Gap}\\ \footnotesize Check Slice Metrics};
 \draw[Line] (D4.east) -- node[Text,above=1pt]{Yes} (R4.west);
 
 % Branch 4: No -> Model Issue
@@ -4738,14 +4751,14 @@ at (R4.south east){\textbf{Bias/Coverage Gap}\\ \footnotesize Check Slice Metric
 \pic[rotate=20,shift={(0.27,-0.35)}] at  (R5.west){square={scalefac=0.4,picname=1,
 filllcolor=VioletLine, Linewidth=0.5pt}};
 \node[Box,draw=none,anchor=south east,minimum width=32mm, fill=none](R5T)
-at (R5.south east){\textbf{Model Architecture}\\or Capacity Issue};
-\draw[Line] (D4.south) -- node[Text,right=1pt]{No} (R5.north);
+at (R5.south east){\textbf{Other Hypotheses}\\\footnotesize Model, Code, Hardware};
+\draw[Line] (D4.south) -- node[Text,right=1pt]{Continue} (R5.north);
 
 % Context Labels
-\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R1.south) {Fix: Retraining, Monitoring};
-\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R2.south) {Fix: Deduplication, Audit};
-\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R3.south) {Fix: Feature Store, Consistency};
-\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R4.south) {Fix: Targeted Collection};
+\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R1.south) {If confirmed: Validate Retraining};
+\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R2.south) {If confirmed: Deduplicate, Audit};
+\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R3.south) {If confirmed: Repair Feature Path};
+\node[text width=45mm, align=center, font=\footnotesize\sffamily, anchor=north] at (R4.south) {If confirmed: Targeted Collection};
 \end{tikzpicture}}
 ```
 
@@ -4754,6 +4767,8 @@ at (R5.south east){\textbf{Model Architecture}\\or Capacity Issue};
 Production ML failures frequently trace to data dependencies and operational pipeline shifts rather than model architecture alone.[^fn-failure-data-dominance] Prioritizing training-serving skew, distribution drift, and label noise isolates upstream input failure modes before initiating costly architectural redesigns or hyperparameter sweeps.
 
 [^fn-failure-data-dominance]: **ML failure distribution**\index{ML failure!data dominance}: Treat the data-dominance pattern as a diagnostic heuristic rather than a universal empirical distribution. Data and operational checks serve as initial triage hypotheses, but they do not eliminate code defects, hardware communication bottlenecks, or numerical instability.
+
+The KWS regression that opened this section needs three separate comparisons. Replay fixed raw recordings through the old and current preprocessing paths, with model weights and fitted state held fixed; changed features or predictions reveal a processing-path effect on those recordings, but do not establish microphone-population drift. Rescore fixed predictions under the old and revised labeling rubrics; a changed score identifies an evaluation-definition effect without proving that the detector changed. Finally, compare old- and new-microphone cohorts using one validated preprocessing path and one evaluation rubric, accounting for differences in speakers and acoustic conditions. A cohort gap warrants investigation of hardware coverage, but the microphone is not established as the cause unless those other conditions are controlled. Confirmed transform defects call for pipeline repair and revalidation; a remaining quality loss on representative new-microphone audio can justify targeted acquisition and a retraining comparison.
 
 ::: {#chk-data-engineering-pipeline-diagnosis .callout-checkpoint title="From data contracts to diagnosis"}
 
@@ -4773,7 +4788,7 @@ Data engineering pipelines rarely fail with immediate runtime crashes; instead, 
 
 **Fallacy**: *More data always improves model performance.*
 
-The bitter lesson says that general methods fed with more data and compute keep winning, but it does not say each new sample is worth as much as the last. Beyond a threshold, additional data yields diminishing returns described by empirical scaling laws, fitted curves relating model error to dataset size. Studies across computer vision, translation, and language modeling find that test loss falls as a power law in dataset size, so each successive error reduction demands a multiplicatively larger volume of samples [@hestness2017deep]. In systems terms, redundant examples consume disk I/O, host-to-device bus bandwidth, and accelerator FLOPs without imparting new gradient signal. The task-relevant signal heuristic from @sec-data-engineering-physics-data-cdcb captures this trade-off: scaling raw byte volume without preserving information density inflates infrastructure cost while yielding negligible improvements in evaluation loss.
+The bitter lesson says that general methods fed with more data and compute keep winning, but it does not say each new sample is worth as much as the last. Beyond a threshold, additional data yields diminishing returns described by empirical scaling laws, fitted curves relating model error to dataset size. Studies across computer vision, translation, and language modeling find that test loss falls as a power law in dataset size, so each successive error reduction demands a multiplicatively larger volume of samples [@hestness2017deep]. In systems terms, repeated examples consume disk I/O, host-to-device bus bandwidth, and accelerator FLOPs without adding distinct observations. Their gradients can still change as the model learns, so redundancy must be judged by marginal evaluation benefit rather than assumed to contribute no gradient. The task-relevant signal heuristic from @sec-data-engineering-physics-data-cdcb captures this trade-off: scaling raw byte volume without preserving information density inflates infrastructure cost while yielding negligible improvements in evaluation loss.
 
 :::
 
@@ -4801,7 +4816,7 @@ Preprocessing pipelines convert raw observations into tensors using transformati
 
 **Pitfall**: *Ignoring data serialization cost.*
 
-Profiling often focuses exclusively on GPU kernel execution while data loaders quietly parse raw JSON or CSV files. Parsing text-based records requires host CPU cores to spend hundreds of cycles per sample on string decoding, tokenization, ASCII-to-float conversions, and heap allocations. This CPU serialization bottleneck starves accelerator compute engines, leaving GPUs idling on PCIe input transfers. Binary serialization formats, such as Apache Arrow or memory-mapped arrays, eliminate parsing overhead by storing numbers directly in machine-native binary representations, which the loader can then place in the pinned buffers that the dataloader choke point (@sec-data-engineering-data-ingestion-8efc) relies on for DMA transfers across PCIe. For tabular schemas, columnar formats such as Parquet eliminate disk I/O by reading only required column projections. Benchmarking data ingestion against accelerator consumption rates reveals whether host CPU deserialization is throttling training throughput.
+Profiling often focuses exclusively on GPU kernel execution while data loaders quietly parse raw JSON or CSV files. Parsing text-based records requires host CPU cores to spend hundreds of cycles per sample on string decoding, tokenization, ASCII-to-float conversions, and heap allocations. This CPU serialization bottleneck starves accelerator compute engines, leaving GPUs idling on PCIe input transfers. Binary serialization formats, such as Apache Arrow or memory-mapped arrays, eliminate parsing overhead by storing numbers directly in machine-native binary representations, which the loader can then place in the pinned buffers that the dataloader choke point (@sec-data-engineering-data-ingestion-8efc) relies on for DMA transfers across PCIe. For tabular schemas, columnar formats such as Parquet reduce unnecessary disk I/O by reading only required column projections. Benchmarking data ingestion against accelerator consumption rates reveals whether host CPU deserialization is throttling training throughput.
 
 :::
 
@@ -4948,7 +4963,7 @@ class StorageLoadingRecap:
 * **Data cascades make upstream quality the highest-leverage investment**: The compounding failure arcs in @fig-cascades show how early collection errors bypass intermediate testing and force complete pipeline restarts from deployment. The four pillars (Quality, Reliability, Scalability, Governance) organize prevention, while documentation, schema, quality, and freshness debt require continuous remediation.
 * **Data is code; version it, test it, review it**: Under the data-as-code principle (\ref{pri-data-as-code}), a dataset change is a code change. Give it version control, validation tests, and review.
 * **Training-serving consistency is nonnegotiable**: Feature transformations shared by training and serving must have equivalent semantics and reuse the same learned state, such as normalization constants and vocabulary mappings.
-* **Pipeline architecture choices have large cost implications**: Streaming costs more to operate than batch, while ETL trades storage savings for greater schema-change overhead. Select ingestion patterns by the value of latency, not the appeal of real time.
+* **Pipeline architecture choices have large cost implications**: The chapter's provisioning scenario prices streaming above batch, while its matched-retention example trades ETL storage savings against schema-change overhead. Actual costs depend on provisioning, retention, replay, and required freshness. Select ingestion patterns by the value of latency, not the appeal of real time.
 * **Labeling can dominate cost and requires substantial resource allocation**: Labeling can cost hundreds to more than a thousand times one optimized training run; in the reference calculation in @sec-data-engineering-scalability-cost-optimization-b9b3, the ratio is `{python} DataEngineeringSummaryRecap.ratio_low_mult_str` to `{python} DataEngineeringSummaryRecap.ratio_high_mult_str`. Labeling can remain a costly scheduling bottleneck even when annotation work is parallelized.
 * **Storage hierarchy determines iteration speed**: The `{python} StorageLoadingRecap.load_speedup_mult_str` throughput gap between local NVMe (`{python} StorageLoadingRecap.nvme_bw_gb_per_s_str`) and cloud object storage (100 MB/s) changes input-loading time under the stated bandwidth assumptions. Total iteration time also includes transformation and model execution, so the loading ratio is not an end-to-end speedup.
 * **The degradation equation becomes actionable through drift and outcome monitoring**: Divergence metrics such as KL measure changes between $\CurrentDistribution$ and $\TrainingDistribution$, while labeled outcomes or validated proxies determine whether those changes correspond to model degradation.
