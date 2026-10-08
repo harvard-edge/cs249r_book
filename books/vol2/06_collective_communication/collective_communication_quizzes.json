@@ -29,14 +29,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A distributed training cluster triples its GPU count from 64 to 192 GPUs on a dense model training run. Despite aggregate arithmetic peak throughput tripling, the step time drops by only 30%, and per-GPU compute utilization falls from 65% to 34%. Based on the chapter local-versus-global scaling asymmetry, what is the primary physical mechanism causing this scaling degradation?",
+            "question": "A dense-model training run triples its GPU count from 64 to 192 while holding the global work per update fixed. Step time drops by only 30%, and per-GPU compute utilization falls. Which scaling mechanism should the team investigate, without treating these aggregates as proof of the cause?",
             "choices": [
               "Backpropagation stops functioning correctly across multiple nodes because gradients cannot be computed concurrently across independent data batches.",
               "Floating-point accumulation during gradient reduction becomes numerically unstable when more than 64 GPUs participate in the collective.",
               "Host CPU memory bandwidth saturates because all optimizer states must be shuffled through host DRAM on every multi-node step.",
-              "Computation is local and scales linearly with added silicon, but synchronization is a global physical data-movement problem where coordination costs and network transit across physical links grow while per-GPU compute workload shrinks."
+              "Local compute can shrink while global synchronization and shared-link transfers remain exposed; rank-aligned traces are needed to determine whether communication actually limits the step."
             ],
-            "answer": "The correct answer is D. Computation is local and scales linearly with added silicon, but synchronization is a global physical data-movement problem where coordination costs and network transit across physical links grow while per-GPU compute workload shrinks. Computation parallelizes locally on each accelerator arithmetic units, but preserving a single shared optimization trajectory requires information to traverse physical links with finite latency, bandwidth, and energy. As per-worker batch compute time shrinks ($T_{\\text{compute}}/N$), global communication and barrier synchronization overheads occupy an increasing fraction of the step. The claim that backpropagation cannot run concurrently confuses mathematical definition with system execution, numerical instability is not an inherent scaling barrier for standard floating-point accumulators, and modern GPU collectives bypass host DRAM via GPUDirect RDMA.",
+            "answer": "The correct answer is D. Under fixed global work, added workers can reduce local computation while required exchanges retain startup, byte-transfer, and coordination costs. Those costs may then occupy more of the critical path. Step time and utilization alone do not identify communication as the cause: input stalls, placement, kernel efficiency, or stragglers can produce similar symptoms. Compare rank-aligned readiness and transfer traces with matched collective measurements before selecting an intervention.",
             "learning_objective": "Analyze why per-GPU compute utilization drops as distributed training scales using the local-compute versus global-communication asymmetry."
           },
           {
@@ -65,9 +65,9 @@
           },
           {
             "question_type": "FILL",
-            "question": "The physical data movement hierarchy demonstrates that moving a bit across inter-node InfiniBand fabrics consumes orders of magnitude more energy than fetching it from local SRAM; within this hierarchy, the transport mechanism that allows network interface cards to read and write directly to and from GPU memory over PCIe without staging through host CPU memory buffers is known as ____ RDMA.",
-            "answer": "GPUDirect. GPUDirect RDMA eliminates intermediate copy round-trips through host DRAM and CPU memory buses, reducing per-message software latency $\\alpha$ down to a few microseconds and preventing host memory bandwidth saturation during multi-GPU collective operations.",
-            "learning_objective": "Identify GPUDirect RDMA as the kernel-bypass mechanism that eliminates host memory staging during GPU communication."
+            "question": "On a supported hardware and transport path, the mechanism that lets a NIC read and write GPU memory without staging payloads through host DRAM is known as ____ RDMA.",
+            "answer": "GPUDirect. A supported GPUDirect RDMA path lets the NIC access GPU memory without staging the payload through host DRAM. This removes that staging traffic, but does not guarantee a particular launch latency, eliminate CPU coordination, or prevent every source of host-memory contention. Measure the configured device, PCIe, NIC, and transport path.",
+            "learning_objective": "Identify GPUDirect RDMA as a mechanism for avoiding host-memory payload staging."
           }
         ]
       }
@@ -93,26 +93,26 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A cluster utilizes InfiniBand NDR 400 Gbps networking with an effective collective-launch latency $\\alpha = 1.5\\,\\mu\\text{s}$ and per-port bandwidth $\\beta = 50\\text{ GB/s}$. How does the critical message size $n^* = \\alpha \\cdot \\beta$ guide system optimization when comparing a 4 KB MoE token routing payload against a 140 GB gradient AllReduce tensor?",
+            "question": "A single-transfer model uses effective startup cost $\\alpha=1.5\\,\\mu\\text{s}$ and per-direction bandwidth $\\beta=50\\text{ GB/s}$. Which conclusion follows for a 4 KB transfer, and what must be added before classifying a complete gradient AllReduce?",
             "choices": [
-              "The 4 KB payload ($n \\ll n^* = 75\\text{ KB}$) is latency-bound, requiring message fusion and kernel-bypass optimizations, while the 140 GB payload ($n \\gg n^*$) is bandwidth-bound, requiring payload compression and bandwidth-optimal collective routing.",
-              "Both payloads are bandwidth-bound because total cluster size determines whether latency or bandwidth dominates, meaning gradient quantization will accelerate the 4 KB message by 4x.",
-              "The 4 KB payload is bandwidth-bound because small messages saturate network injection queues faster, while the 140 GB gradient is latency-bound due to packet serialization delay.",
+              "The single-transfer knee is 75 KB, so startup dominates the 4 KB transfer. A complete AllReduce additionally requires the schedule’s round count and chunk size, then calibration for its placement.",
+              "The 4 KB transfer is bandwidth-bound because adding ranks makes every individual transfer saturate its port.",
+              "The 75 KB knee is a maximum buffer size, so larger messages cannot be sent over this link.",
               "The critical message size defines the maximum possible buffer size that can be transferred in a single CUDA stream without host CPU intervention."
             ],
-            "answer": "The correct answer is A. The 4 KB payload ($n \\ll n^* = 75\\text{ KB}$) is latency-bound, requiring message fusion and kernel-bypass optimizations, while the 140 GB payload ($n \\gg n^*$) is bandwidth-bound, requiring payload compression and bandwidth-optimal collective routing. The critical message size $n^* = \\alpha \\cdot \\beta = (1.5 \\times 10^{-6}\\text{ s}) \\times (50 \\times 10^9\\text{ B/s}) = 75\\text{ KB}$ marks the exact crossover point where the latency term $\\alpha$ equals the bandwidth transit term $n/\\beta$. Messages well below $75\\text{ KB}$ spend the vast majority of time in software launch overhead and link startup; reducing byte size via compression yields virtually zero speedup, whereas fusing many small messages into one large batch amortizes $\\alpha$. Conversely, for the 140 GB gradient, the bandwidth term ($140\\text{ GB} / 50\\text{ GB/s} = 2.8\\text{ s}$) dwarfs the $1.5\\,\\mu\\text{s}$ startup tax by six orders of magnitude, making byte-reduction and bandwidth-optimal algorithms the essential levers. The claim that both are bandwidth-bound ignores the critical size threshold, the claim that small messages are bandwidth-bound reverses the physical definitions, and the buffer-limit definition confuses a cost-model crossover with hardware allocation limits.",
+            "answer": "The correct answer is A. The single-transfer terms are equal at $\\alpha\\beta=75\\text{ KB}$. A 4 KB transfer therefore spends more modeled time in startup than in byte transfer. Fusion of compatible ready messages or a lower-overhead path are candidates, with packing and readiness costs included. For a ring AllReduce of an $M$-byte tensor over $N$ ranks, compare each $M/N$ chunk with the knee and count $2(N-1)$ rounds; the full tensor’s size alone does not classify the schedule. Compression only removes byte-transfer work and must also win against encoding, aggregation, and quality costs.",
             "learning_objective": "Apply the critical message size $n^* = \\alpha \\cdot \\beta$ to classify communication workloads into latency-bound and bandwidth-bound regimes."
           },
           {
             "question_type": "MCQ",
-            "question": "An engineering team models communication-computation overlap using the LogP model. The backward pass computation for a transformer layer takes $600\\,\\mu\\text{s}$, the network wire transit latency $L_{\\text{lat}} = 200\\,\\mu\\text{s}$, and the processor overhead is $o = 50\\,\\mu\\text{s}$ to initiate and $o = 50\\,\\mu\\text{s}$ to complete the collective on the GPU. What is the effective execution time of this overlapped step, and which component remains exposed?",
+            "question": "In a toy overlap budget, independent computation takes $600\\,\\mu\\text{s}$ and the complete network interval takes $200\\,\\mu\\text{s}$. Initiation and completion each cost $50\\,\\mu\\text{s}$ on the same execution resource as that computation. Assume independent network progress and no contention. What is the effective elapsed time, and which component remains exposed?",
             "choices": [
               "Effective time is $600\\,\\mu\\text{s}$, and communication is 100% hidden because $L_{\\text{lat}} < T_{\\text{compute}}$.",
               "Effective time is $800\\,\\mu\\text{s}$, because network latency and processor overhead must both be added directly to compute time.",
               "Effective time is $750\\,\\mu\\text{s}$, because the gap parameter $g$ adds an irreducible stall to the compute pipeline.",
               "Effective time is $700\\,\\mu\\text{s}$ ($2o + \\max(T_{\\text{compute}}, L_{\\text{lat}})$), where the $200\\,\\mu\\text{s}$ network latency is completely hidden behind the $600\\,\\mu\\text{s}$ compute, but the $100\\,\\mu\\text{s}$ of processor overhead ($2o$) remains exposed."
             ],
-            "answer": "The correct answer is D. Effective time is $700\\,\\mu\\text{s}$ ($2o + \\max(T_{\\text{compute}}, L_{\\text{lat}})$), where the $200\\,\\mu\\text{s}$ network latency is completely hidden behind the $600\\,\\mu\\text{s}$ compute, but the $100\\,\\mu\\text{s}$ of processor overhead ($2o$) remains exposed. In the LogP model, network wire latency $L_{\\text{lat}}$ represents data in flight across the fabric, which proceeds asynchronously while the accelerator executes arithmetic kernels. However, processor overhead $o$ represents the nonoverlappable time during which the accelerator or CPU is actively engaged in kernel launch, descriptor preparation, memory registration, or stream synchronization. Because the processor cannot execute compute kernels during these initiation and completion windows, the $2o = 100\\,\\mu\\text{s}$ overhead remains fully exposed. The effective time is $2o + \\max(T_{\\text{compute}}, L_{\\text{lat}}) = 100\\,\\mu\\text{s} + \\max(600\\,\\mu\\text{s}, 200\\,\\mu\\text{s}) = 700\\,\\mu\\text{s}$. The claim of $600\\,\\mu\\text{s}$ erroneously assumes processor overhead can be overlapped, the claim of $800\\,\\mu\\text{s}$ ignores asynchronous wire transit hiding, and the $750\\,\\mu\\text{s}$ value introduces an ungrounded injection stall.",
+            "answer": "The correct answer is D. Under the stated shared-resource assumptions, initiation and completion add $2o=100\\,\\mu\\text{s}$. Independent computation hides the 200-microsecond network interval, giving $2o+\\max(600,200)=700\\,\\mu\\text{s}$. This is a scoped overlap budget, not a claim that all CPU coordination blocks every GPU execution resource. Other processor placement, dependencies, progress, or contention require a different schedule.",
             "learning_objective": "Calculate effective overlapped step time using the LogP model by separating overlappable wire latency from nonoverlappable processor overhead."
           },
           {
@@ -123,8 +123,8 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: In the LogP communication model, upgrading a network fabric to achieve lower physical wire latency ($L_{\\text{lat}}$) will not reduce step time if the overlapped computation window $T_{\\text{compute}}$ already exceeds $L_{\\text{lat}}$ and the nonoverlappable processor overhead $o$ remains unchanged.",
-            "answer": "True. When $T_{\\text{compute}} > L_{\\text{lat}}$, all physical wire transit latency is already hidden behind arithmetic execution ($\\max(T_{\\text{compute}}, L_{\\text{lat}}) = T_{\\text{compute}}$). The exposed communication delay in that regime is governed entirely by the nonoverlappable processor overhead $2o$ (CUDA kernel launch, memory registration, stream synchronization). Reducing $L_{\\text{lat}}$ further yields zero step-time reduction unless software overhead $o$ is also reduced.",
+            "question": "True or False: In the stated toy LogP budget with independent work, network progress, and no contention, upgrading a network fabric to achieve lower physical wire latency ($L_{\\text{lat}}$) will not reduce step time if the overlapped computation window $T_{\\text{compute}}$ already exceeds $L_{\\text{lat}}$ and the nonoverlappable processor overhead $o$ remains unchanged.",
+            "answer": "True under those assumptions. The budget is $2o+\\max(T_{\\text{compute}},L_{\\text{lat}})$. When independent compute already covers the complete network interval, reducing that interval alone leaves the maximum and elapsed time unchanged. This does not establish the same result for a different dependency schedule, processor placement, or contended transfer.",
             "learning_objective": "Evaluate how computation-latency overlap renders further wire latency reductions ineffective when processor overhead dominates."
           },
           {
@@ -149,8 +149,8 @@
             "FSDP communication patterns: parameter sharding, AllGather in forward, ReduceScatter in backward, alpha sensitivity",
             "Physical injection link sharing during concurrent peer transfers"
           ],
-          "question_strategy": "Open with an applied MCQ on why MoE AllToAll hits a scaling wall earlier than AllReduce, follow with an architectural MCQ on FSDP communication patterns vs DDP, test FSDP forward/backward timing asymmetry in a SHORT reflection, evaluate physical injection port sharing in a TF question, and reinforce the AllReduce decomposition identity in a FILL question.",
-          "difficulty_progression": "Structural scaling comparison (AllToAll contention) -> Architectural workflow analysis (FSDP vs DDP) -> Asymmetric timing reflection (AllGather vs ReduceScatter) -> Hardware injection constraint test -> Core algebraic decomposition recall.",
+          "question_strategy": "Open with an applied MCQ on why MoE AllToAll hits a scaling wall earlier than AllReduce, follow with an architectural MCQ on FSDP communication patterns vs DDP, test FSDP dependency exposure in a SHORT reflection, evaluate physical injection port sharing in a TF question, and reinforce the AllReduce decomposition identity in a FILL question.",
+          "difficulty_progression": "Structural scaling comparison (AllToAll contention) -> Architectural workflow analysis (FSDP vs DDP) -> Dependency and overlap reflection (AllGather vs ReduceScatter) -> Hardware injection constraint test -> Core algebraic decomposition recall.",
           "integration": "Connects high-level distributed training architectures (ZeRO/FSDP, MoE, DLRM) to low-level group communication primitives.",
           "ranking_explanation": "This section introduces the foundational vocabulary of collective operations, warranting a comprehensive 5-question technical quiz."
         },
@@ -181,9 +181,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "In Fully Sharded Data Parallel (FSDP), AllGather and ReduceScatter have asymmetric timing sensitivities during the training step. Explain why AllGather operations in the forward pass are typically latency-critical while ReduceScatter operations in the backward pass are bandwidth-dominated and easier to hide.",
-            "answer": "In FSDP, the forward-pass AllGather is strictly latency-critical because layer computation cannot begin until all parameter shards are fetched and reconstructed; any delay in AllGather directly stalls the forward compute stream on the critical path. In contrast, during the backward pass, ReduceScatter operates on gradient tensors that have already been computed by the current layer. Because subsequent backward computation for earlier layers can immediately proceed on the GPU compute stream, the ReduceScatter can be launched asynchronously in a separate communication stream, effectively hiding its bandwidth transit time behind the backward arithmetic of preceding layers.",
-            "learning_objective": "Analyze the asymmetric timing sensitivity of forward AllGather and backward ReduceScatter operations in FSDP pipelines."
+            "question": "In Fully Sharded Data Parallel (FSDP), when does a parameter AllGather or gradient ReduceScatter add exposed delay to a training step? Explain why the primitive name alone does not identify a latency-bound or bandwidth-bound transfer.",
+            "answer": "A layer waits when its parameter AllGather has not completed by the time computation needs those parameters. Prefetching can hide the gather within independent work, at the cost of additional resident parameters. ReduceScatter starts after the required gradients are ready and can overlap remaining backward computation, but its final transfer or backlog can remain exposed before the optimizer step. Message size, group size, topology, achieved transfer duration, and the available overlap window determine the cost; a consumer dependency does not establish startup dominance.",
+            "learning_objective": "Analyze FSDP communication exposure using parameter dependencies, gradient readiness, prefetch memory, and available overlap windows."
           },
           {
             "question_type": "TF",
@@ -223,33 +223,33 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Why does Ring AllReduce achieve the information-theoretic lower bound for bandwidth ($2 \\frac{N-1}{N} \\frac{M}{\\beta}$) while a standard binary Tree AllReduce incurs a bandwidth penalty of $\\mathcal{O}(\\log N \\cdot \\frac{M}{\\beta})$?",
+            "question": "Why does Ring AllReduce achieve the information-theoretic lower bound for bandwidth ($2 \\frac{N-1}{N} \\frac{M}{\\beta}$) while a simple unsegmented binary Tree AllReduce incurs a bandwidth penalty of $\\mathcal{O}(\\log N \\cdot \\frac{M}{\\beta})$?",
             "choices": [
-              "Ring AllReduce keeps all $N$ physical links simultaneously active in every step with uniform chunk sizes ($M/N$), whereas a standard binary tree leaves a large fraction of links idle at each tree level and repeatedly transmits full-message payloads up and down the hierarchy.",
+              "Ring AllReduce distributes uniform chunks ($M/N$) across all logical ring edges in each round, whereas the simple unsegmented tree sends full messages through successive levels of a reduction and broadcast.",
               "Ring AllReduce compresses floating-point gradients to 1-bit representations during ring circulation, whereas Tree AllReduce always uses uncompressed FP64 precision.",
               "Tree AllReduce requires an external parameter server node to perform floating-point additions, whereas Ring AllReduce computes sums purely in network switch ASICs.",
               "Ring AllReduce eliminates the latency term $\\alpha$ entirely by using asynchronous token rings, whereas Tree AllReduce scales latency quadratically with cluster size."
             ],
-            "answer": "The correct answer is A. Ring AllReduce keeps all $N$ physical links simultaneously active in every step with uniform chunk sizes ($M/N$), whereas a standard binary tree leaves a large fraction of links idle at each tree level and repeatedly transmits full-message payloads up and down the hierarchy. In Ring AllReduce, every node sends and receives a chunk of size $M/N$ concurrently in every one of the $2(N-1)$ steps, yielding 100% link utilization and sending exactly $2 \\frac{N-1}{N} M$ bytes per node and receiving the same volume. In contrast, in a standard binary tree reduction and broadcast, only half the links are active at the leaves, one-quarter at the next level, and only two at the root, while unpipelined implementations transmit full $M$-byte buffers across $\\log_2 N$ levels. The claim regarding 1-bit compression is false because Ring AllReduce operates on exact floating-point data, the parameter server claim confuses tree collectives with star topologies, and Ring AllReduce retains a linear $2(N-1)\\alpha$ latency term rather than eliminating latency.",
-            "learning_objective": "Compare Ring AllReduce and standard Tree AllReduce in terms of link utilization and asymptotic bandwidth complexity."
+            "answer": "The correct answer is A. Each ring rank sends a uniform chunk in every round, yielding the balanced byte-volume lower bound. The simple unsegmented tree instead forwards full messages along successive levels, adding byte-transfer time to the dependency path. Logical ring edges may share physical links, so byte optimality does not guarantee peak link utilization. The ring needs neither gradient compression nor switch arithmetic and retains a startup cost that grows with rank count.",
+            "learning_objective": "Compare Ring AllReduce and a simple unsegmented Tree AllReduce in terms of balanced byte volume and elapsed transfer cost."
           },
           {
             "question_type": "MCQ",
-            "question": "An infrastructure engineer evaluates AllReduce algorithm selection for synchronizing gradients across a 256-GPU cluster with per-node launch latency $\\alpha = 5\\,\\mu\\text{s}$ and link bandwidth $\\beta = 50\\text{ GB/s}$. Using the log-aware crossover model $M_{\\text{crossover}} \\approx \\frac{N \\alpha \\beta}{\\log_2 N}$, what is the crossover message size, and which algorithm should be selected for a 500 KB activation tensor versus a 100 MB gradient bucket?",
+            "question": "An infrastructure engineer evaluates AllReduce algorithm selection for synchronizing gradients across a 256-GPU cluster with per-node launch latency $\\alpha = 5\\,\\mu\\text{s}$ and link bandwidth $\\beta = 50\\text{ GB/s}$. Using the log-aware crossover model $M_{\\text{crossover}} \\approx \\frac{N \\alpha \\beta}{\\log_2 N}$, within the simple full-message Tree versus Ring comparison, what is the crossover message size, and which modeled candidate has lower cost for a 500 KB activation tensor versus a 100 MB gradient bucket?",
             "choices": [
               "The crossover is $M_{\\text{crossover}} \\approx 1.25\\text{ GB}$; Tree AllReduce should be selected for both tensors because $\\log_2(256) = 8$ is always smaller than 256.",
               "The crossover is $M_{\\text{crossover}} \\approx 800\\text{ KB}$; Ring AllReduce should be selected for 500 KB, and Tree AllReduce for 100 MB.",
               "The crossover is $M_{\\text{crossover}} \\approx 16\\text{ GB}$; Butterfly AllReduce should be selected for both tensors regardless of network topology.",
               "The crossover is $M_{\\text{crossover}} \\approx \\frac{256 \\times (5 \\times 10^{-6}\\text{ s}) \\times (50 \\times 10^9\\text{ B/s})}{8} = 8\\text{ MB}$; Tree AllReduce wins for the 500 KB tensor (latency-dominated), while Ring AllReduce wins for the 100 MB bucket (bandwidth-dominated)."
             ],
-            "answer": "The correct answer is D. The crossover is $M_{\\text{crossover}} \\approx \\frac{256 \\times (5 \\times 10^{-6}\\text{ s}) \\times (50 \\times 10^9\\text{ B/s})}{8} = 8\\text{ MB}$; Tree AllReduce wins for the 500 KB tensor (latency-dominated), while Ring AllReduce wins for the 100 MB bucket (bandwidth-dominated). Equating $T_{\\text{ring}} = 2(N-1)\\alpha + 2\\frac{N-1}{N}\\frac{M}{\\beta}$ and $T_{\\text{tree}} = 2\\log_2 N \\cdot \\alpha + 2\\log_2 N \\cdot \\frac{M}{\\beta}$ yields the crossover threshold $M_{\\text{crossover}} \\approx \\frac{N \\alpha \\beta}{\\log_2 N}$. For $N=256$, $\\log_2(256) = 8$, so $M_{\\text{crossover}} \\approx \\frac{256 \\times 5\\,\\mu\\text{s} \\times 50\\text{ GB/s}}{8} = \\frac{64\\text{ MB}}{8} = 8\\text{ MB}$. For the 500 KB tensor ($M < 8\\text{ MB}$), latency dominates, and Tree AllReduce wins by avoiding Ring's $2(255) \\times 5\\,\\mu\\text{s} = 2.55\\text{ ms}$ startup delay. For the 100 MB bucket ($M > 8\\text{ MB}$), bandwidth dominates, and Ring AllReduce wins by avoiding Tree's $8\\times$ bandwidth penalty. The $1.25\\text{ GB}$ crossover miscalculates the formula, the $800\\text{ KB}$ choice inverts algorithm assignments, and the $16\\text{ GB}$ choice ignores message-size regime transitions.",
-            "learning_objective": "Calculate the Ring-versus-Tree AllReduce crossover message size and select the optimal algorithm based on buffer size."
+            "answer": "The correct answer is D. The crossover is $M_{\\text{crossover}} \\approx \\frac{256 \\times (5 \\times 10^{-6}\\text{ s}) \\times (50 \\times 10^9\\text{ B/s})}{8} = 8\\text{ MB}$; Tree AllReduce wins for the 500 KB tensor (latency-dominated), while Ring AllReduce wins for the 100 MB bucket (bandwidth-dominated). Equating $T_{\\text{ring}} = 2(N-1)\\alpha + 2\\frac{N-1}{N}\\frac{M}{\\beta}$ and $T_{\\text{tree}} = 2\\log_2 N \\cdot \\alpha + 2\\log_2 N \\cdot \\frac{M}{\\beta}$ yields the crossover threshold $M_{\\text{crossover}} \\approx \\frac{N \\alpha \\beta}{\\log_2 N}$. For $N=256$, $\\log_2(256) = 8$, so $M_{\\text{crossover}} \\approx \\frac{256 \\times 5\\,\\mu\\text{s} \\times 50\\text{ GB/s}}{8} = \\frac{64\\text{ MB}}{8} = 8\\text{ MB}$. For the 500 KB tensor ($M < 8\\text{ MB}$), latency dominates, and Tree AllReduce wins by avoiding Ring's $2(255) \\times 5\\,\\mu\\text{s} = 2.55\\text{ ms}$ startup delay. For the 100 MB bucket ($M > 8\\text{ MB}$), bandwidth dominates, and Ring AllReduce wins by avoiding Tree's $8\\times$ bandwidth penalty. The $1.25\\text{ GB}$ crossover miscalculates the formula, the $800\\text{ KB}$ choice inverts algorithm assignments, and the $16\\text{ GB}$ choice ignores message-size regime transitions. These are predictions for the stated two-model comparison, not a selection guarantee over optimized trees, hierarchy, or a contended runtime. Benchmark candidate collective duration and exposed step time.",
+            "learning_objective": "Calculate the approximate Ring-versus-simple-Tree crossover and identify lower modeled cost under stated assumptions."
           },
           {
             "question_type": "SHORT",
-            "question": "Recursive halving-doubling (Butterfly AllReduce) achieves both logarithmic latency ($2\\log_2 N \\cdot \\alpha$) and bandwidth optimality ($2 \\frac{N-1}{N} \\frac{M}{\\beta}$). Why does this algorithm often underperform on large multi-node GPU clusters in practice compared to Double Binary Tree or Hierarchical AllReduce?",
-            "answer": "Butterfly AllReduce underperforms on large physical clusters because in each round $k$, ranks pair with partners at logical distance $2^k$ (using bitwise XOR $i \\oplus 2^k$). In later rounds (such as $k = \\log_2 N - 1$), ranks in the first half of the cluster must communicate directly with ranks in the second half. On real hierarchical data center networks, these long-distance pairings force cross-rack and cross-spine traffic that ignores physical link boundaries, causing severe bisection bandwidth contention and switch queue congestion. In contrast, Double Binary Tree and Hierarchical AllReduce are specifically constructed to align with physical network tiers (NVLink within nodes, InfiniBand across nodes), avoiding cross-domain contention.",
-            "learning_objective": "Explain why the theoretical optimality of Butterfly AllReduce fails on real hierarchical network fabrics due to distance-$2^k$ nonlocal communication."
+            "question": "Recursive halving-doubling (Butterfly AllReduce) combines logarithmic startup rounds with bandwidth-optimal byte volume in a flat-network model. What physical placement condition can defeat that modeled advantage, and why do double-tree or hierarchical alternatives still require measurement?",
+            "answer": "XOR partner pairs can share a constrained fabric cut if the rank placement sends their concurrent exchanges across it. For example, pairing the two logical rank halves crosses racks only when those halves occupy different racks. Shared paths and changing chunk sizes can then erode the flat-network advantage. Complementary trees balance logical endpoint work, and hierarchy distributes work across tiers, but neither construction guarantees disjoint physical paths or sufficient port capacity. Compare achieved collective duration and exposed step time under the actual placement.",
+            "learning_objective": "Explain how rank placement and shared physical paths can limit Butterfly AllReduce and its alternatives."
           },
           {
             "question_type": "SHORT",
@@ -323,8 +323,8 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: In-network reduction technologies like NVIDIA SHARP reduce collective communication latency for small-to-medium tensors by performing arithmetic summation directly inside switch ASICs as packets traverse the fabric, eliminating intermediate GPU memory store-and-forward round-trips.",
-            "answer": "True. SHARP offloads reduction operations (such as sum, min, max) to the InfiniBand switch hardware. As data packets traverse the switch aggregation tree, the switch ASIC combines incoming payloads at line rate and forwards the reduced sum. This eliminates the store-and-forward path through intermediate GPU memory buffers, reclaiming GPU memory bandwidth and significantly reducing latency for small-to-medium message collectives.",
+            "question": "True or False: On a supported aggregation path, SHARP can move intermediate reduction arithmetic from endpoints into switches, but the resulting latency and training-step benefit still depend on message size, placement, switch resources, and exposed dependencies.",
+            "answer": "True. Aggregation-capable switches combine contributions in the packet path, avoiding some intermediate endpoint receive-reduce-forward work. Startup, switch processing, data movement, and contention remain. The supported operation and datatype, aggregation-resource availability, and binding links determine collective benefit; independent computation and consumer readiness determine how much reaches step time. In-network reduction does not guarantee a fixed speedup for every tensor.",
             "learning_objective": "Identify how in-network reduction (SHARP) offloads collective arithmetic to switch ASICs to eliminate store-and-forward GPU memory traffic."
           },
           {
@@ -350,8 +350,8 @@
             "1-bit Adam: warmup stabilization, frozen second moment as preconditioner, compressed momentum",
             "Compression trade-offs: time-to-accuracy vs time-per-step, payback condition T_overhead < T_comm * (1 - 1/Ratio)"
           ],
-          "question_strategy": "Open with an applied calculation MCQ on Top-k sparsification index encoding overhead, follow with a mathematical MCQ on the error feedback telescoping sum, analyze 1-bit Adam optimizer state compression in a SHORT question, test unconditional quantization speedup misconceptions in a TF question, and sequence 1-bit Adam optimization stages in an ORDER question.",
-          "difficulty_progression": "Realized compression accounting (index overhead) -> Mathematical error correction (error feedback) -> Optimizer co-design analysis (1-bit Adam) -> Economic payback evaluation -> Algorithmic workflow sequencing.",
+          "question_strategy": "Open with an applied calculation MCQ on Top-k sparsification index encoding overhead, follow with a mathematical MCQ on the error feedback telescoping sum, analyze 1-bit Adam optimizer state compression in a SHORT question, test unconditional quantization speedup misconceptions in a TF question, and explain 1-bit Adam phases and residual dependencies in a SHORT question.",
+          "difficulty_progression": "Realized compression accounting (index overhead) -> Mathematical error correction (error feedback) -> Optimizer co-design analysis (1-bit Adam) -> Economic payback evaluation -> Optimizer phase and residual dependency reasoning.",
           "integration": "Connects numerical representation and optimization convergence theory to physical communication payload reduction.",
           "ranking_explanation": "This section covers gradient compression algorithms and theoretical convergence preservation under bandwidth scarcity, warranting a comprehensive 5-question technical quiz."
         },
@@ -378,25 +378,25 @@
               "It preserves deferred residuals, so average transmitted and original updates differ by $(e_1-e_{K+1})/K$, which vanishes if the residual grows sublinearly."
             ],
             "answer": "The correct answer is D. Error feedback carries discarded information into later updates. Summing the recurrence gives $\\sum v_t=\\sum g_t+e_1-e_{K+1}$. The average difference vanishes only when the residual divided by the step count tends to zero. This identity supports convergence analysis under further assumptions; it does not guarantee convergence for any compressor or workload.",
-            "learning_objective": "Explain how the Error Feedback recurrence relation restores convergence in lossy gradient compression via telescoping sum conservation."
+            "learning_objective": "Explain the conditional cumulative-update conservation established by the error-feedback recurrence."
           },
           {
             "question_type": "SHORT",
             "question": "How does 1-bit Adam achieve high compression ratios on optimizer state communication without suffering the severe convergence degradation of naive 1-bit SGD?",
-            "answer": "1-bit Adam achieves robust convergence by co-designing compression with the optimization trajectory in two distinct phases: (1) during an initial warmup phase, it runs standard uncompressed Adam until the non-linear variance / second-moment estimate ($v_t$) stabilizes; (2) it then freezes $v_t$ to serve as a fixed, localized adaptive preconditioner and transitions to compressing only the linear momentum / first-moment state ($m_t$) to 1 bit per parameter (sign plus scale). By compressing the momentum state, which is error-compensated locally with residual feedback, rather than raw stochastic gradients, and preserving the stabilized second-moment geometry, 1-bit Adam reduces communication volume by up to $5\\times$ while matching the convergence speed and final accuracy of full-precision Adam.",
+            "answer": "1-bit Adam first runs uncompressed Adam until the second-moment estimate stabilizes, then freezes that estimate as a preconditioner and communicates compressed momentum with residual correction. This optimizer-aware design supports the method’s convergence analysis under its assumptions. The paper reports up to fivefold end-to-end communication-volume reduction while matching uncompressed Adam’s convergence speed on its evaluated workloads; that result is not a guarantee for every workload or a fivefold training speedup. Warmup, scale metadata, encoding cost, and exposed communication determine the realized benefit.",
             "learning_objective": "Analyze the two-phase architecture of 1-bit Adam that separates variance stabilization from error-compensated momentum compression."
           },
           {
             "question_type": "TF",
             "question": "True or False: Applying $4\\times$ gradient quantization will always decrease end-to-end training step time because reducing communication payload bytes is unconditionally beneficial regardless of whether the cluster is in a compute-bound or communication-bound regime.",
-            "answer": "False. Compression is a trade of computational overhead for network bandwidth savings ($T_{\\text{overhead}} < T_{\\text{comm}}(N) \\times (1 - 1/\\text{Ratio})$). When training is compute-bound ($T_{\\text{compute}} \\gg T_{\\text{comm}}$) or when communication takes place over high-speed intra-node NVLink, the GPU time spent calculating quantization scales, rounding values, and dequantizing tensors can exceed the tiny fraction of network time saved. Furthermore, quantization noise can degrade optimizer convergence, requiring 5--10% more total iterations to reach target accuracy, which increases overall wall-clock training time.",
+            "answer": "False. Reducing payload bytes can save transfer time, but encoding and decoding consume execution resources, startup costs remain, and communication already hidden behind computation offers little exposed time to remove. In a serial synchronization budget, encoding must cost less than the transfer time saved; with overlap, compare the exposed critical-path saving. Compression can also change the number of steps needed to reach the same quality target. That penalty is workload-dependent, so evaluate complete time to quality rather than assuming a fixed extra-iteration percentage.",
             "learning_objective": "Evaluate why gradient compression fails to improve wall-clock time in compute-bound or low-latency communication regimes."
           },
           {
-            "question_type": "ORDER",
-            "question": "Sequence the five operational stages of 1-bit Adam distributed optimization: (1) freeze the second-moment estimate $v_t$ to serve as a fixed adaptive preconditioner, (2) run standard Adam with full-precision communication during a warmup phase until variance stabilizes, (3) compress momentum $m_t$ to 1 bit per parameter (sign) plus a scaling factor, (4) store the compression residual locally and re-inject it into the next momentum update via error feedback, (5) communicate the compressed 1-bit momentum vectors across workers via AllReduce.",
-            "answer": "The correct order is: (2) run standard Adam with full-precision communication during a warmup phase until variance stabilizes, (1) freeze the second-moment estimate $v_t$ to serve as a fixed adaptive preconditioner, (3) compress momentum $m_t$ to 1 bit per parameter (sign) plus a scaling factor, (5) communicate the compressed 1-bit momentum vectors across workers via AllReduce, (4) store the compression residual locally and re-inject it into the next momentum update via error feedback. The algorithm first warms up with uncompressed Adam; freezes the second moment as a preconditioner; compresses the first moment (momentum) to 1-bit; transmits the compressed momentum via AllReduce; and accumulates the quantization residual locally for re-injection into the subsequent step.",
-            "learning_objective": "Order the five operational stages of 1-bit Adam from variance warmup to error-compensated momentum communication."
+            "question_type": "SHORT",
+            "question": "Describe the two phases of 1-bit Adam and the dependency that connects each compressed momentum message to the next residual-corrected update. Does residual storage have to wait for network transmission to finish?",
+            "answer": "Uncompressed Adam first stabilizes the second-moment estimate, which is then frozen as a preconditioner. In the compressed phase, the current momentum and carried residual determine the compressed message and next residual. The message is communicated through the supported compressed aggregation path, and the residual must be preserved before the next update that uses it. Computing or storing that residual need not wait for transmission to finish when buffer ownership and runtime dependencies permit; the essential order is warmup before freezing and residual production before its next use.",
+            "learning_objective": "Explain the two phases and residual dependencies of 1-bit Adam without imposing an unnecessary transport order."
           }
         ]
       }
@@ -410,12 +410,12 @@
           "focus_areas": [
             "Layer-by-layer gradient overlap using PyTorch DDP gradient hooks",
             "Bucket fusion trade-offs: amortizing launch overhead alpha vs delay in initial communication",
-            "Reverse forward-pass ordering for bucket assignment",
+            "Parameter registration order and observed backward readiness for bucket assignment",
             "Fundamental limits of overlap: nonoverlappable processor overhead o, boundary effects, memory buffer pressure",
             "Quantitative overlap budgeting for transformer models"
           ],
-          "question_strategy": "Open with an applied MCQ on bucket fusion trade-offs in PyTorch DDP, analyze exposed communication residuals in a quantitative SHORT question, probe boundary conditions in a SHORT question, and test bucket ordering mechanics in a FILL question.",
-          "difficulty_progression": "Architectural parameter tuning (bucket fusion) -> Quantitative overlap budgeting (exposed residuals) -> Boundary condition analysis -> Reverse-order assignment recall.",
+          "question_strategy": "Open with an applied MCQ on bucket fusion trade-offs in PyTorch DDP, analyze exposed communication residuals in a quantitative SHORT question, probe boundary conditions in a SHORT question, and analyze bucket membership and readiness in a SHORT question.",
+          "difficulty_progression": "Architectural parameter tuning (bucket fusion) -> Quantitative overlap budgeting (exposed residuals) -> Boundary condition analysis -> Readiness-based bucket assignment reasoning.",
           "integration": "Integrates backward-pass computational graph execution with asynchronous collective communication streams.",
           "ranking_explanation": "This section details the critical technique for hiding communication latency behind backward arithmetic, warranting a focused 4-question technical quiz."
         },
@@ -424,12 +424,12 @@
             "question_type": "MCQ",
             "question": "In PyTorch DistributedDataParallel (DDP), how does bucket fusion balance the trade-off between communication startup latency ($\\alpha$) and the compute-communication overlap window?",
             "choices": [
-              "Fusing multiple parameter gradients into buckets (e.g., 25--100 MB) amortizes per-collective startup overhead $\\alpha$ across many small tensors, but waiting for the entire bucket to compute gradients slightly delays the initial launch compared to individual tensor hooks.",
+              "Grouping multiple parameter gradients into a bucket amortizes per-collective startup overhead, but the bucket must wait until all required gradients are ready, reducing the available overlap window.",
               "Bucket fusion compresses all gradient tensors into 8-bit integers before allocating them to ring communication buffers.",
               "Bucket fusion permanently disables all gradient hooks and forces all communication to occur after optimizer step completion.",
               "Bucket fusion ensures that all layers in the transformer model have mathematically identical parameter counts."
             ],
-            "answer": "The correct answer is A. Fusing multiple parameter gradients into buckets (e.g., 25--100 MB) amortizes per-collective startup overhead $\\alpha$ across many small tensors, but waiting for the entire bucket to compute gradients slightly delays the initial launch compared to individual tensor hooks. Modern transformer layers contain dozens of small weight matrices; launching a separate AllReduce for every individual tensor would issue thousands of collectives per step, paying the full software launch tax $\\alpha$ ($25\\text{--}50\\,\\mu\\text{s}$) on every call. Bucket fusion aggregates gradients into larger buffers (e.g., 25 MB) and launches a single consolidated AllReduce per bucket. The trade-off is timing: larger buckets amortize $\\alpha$ and maximize bandwidth saturation but must wait until the last tensor in the bucket completes backward computation before launching, which slightly delays the start of communication. Quantization is orthogonal to bucket fusion, disabling gradient hooks describes naive non-overlapped execution, and bucket fusion does not alter transformer model layer dimensions.",
+            "answer": "The correct answer is A. Fusion replaces many small reductions with fewer larger ones, amortizing startup cost. Each bucket waits for its last required gradient, so a larger bucket can delay launch enough to expose communication that smaller buckets could hide. The useful size depends on readiness, tensor sizes, achieved transfer duration, and collective ordering. Measure training-step time, including the final transfer and any backlog; larger buckets do not guarantee bandwidth saturation or only a slight delay. Fusion does not itself quantize gradients or change layer dimensions.",
             "learning_objective": "Analyze the trade-off between startup latency amortization and communication launch delay in DDP bucket fusion."
           },
           {
@@ -445,10 +445,10 @@
             "learning_objective": "Identify the output-layer and input-layer boundary conditions that prevent complete communication hiding in backward pass overlap."
           },
           {
-            "question_type": "FILL",
-            "question": "PyTorch DistributedDataParallel assigns parameter gradient tensors to communication buckets in ____ order of their execution in the forward pass, ensuring that the first bucket to fill matches the first layer evaluated during the backward pass to maximize the subsequent compute-communication overlap window.",
-            "answer": "reverse. Because backpropagation computes gradients from the output layer back toward the input layer, reverse forward-pass ordering ensures that gradient buckets fill and launch communication as early as possible during the backward pass.",
-            "learning_objective": "Identify reverse forward-pass bucket assignment as the ordering mechanism that maximizes backward overlap windows."
+            "question_type": "SHORT",
+            "question": "Why can one late gradient delay a DDP bucket whose other gradients are ready? Explain how parameter registration order and observed backward readiness can guide bucket membership without guaranteeing an optimal overlap schedule.",
+            "answer": "A bucket cannot launch its reduction until all required gradients are ready, so one late gradient consumes the overlap window of the others. Reverse parameter registration order can approximate backward readiness, and some configurations rebuild buckets using observed readiness. Registration order need not match forward execution order in branched models or models with reused parameters. Grouping gradients that become ready together can help, while the runtime must preserve compatible collective order across ranks and measure the resulting step time.",
+            "learning_objective": "Analyze how gradient readiness and bucket membership affect DDP communication overlap."
           }
         ]
       }
@@ -474,15 +474,15 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "What architectural optimizations make NVIDIA NCCL significantly faster than standard CPU-centric MPI or Gloo for multi-GPU collective communication on NVIDIA clusters?",
+            "question": "Which mechanisms make NCCL a useful candidate for GPU-resident collective communication on NVIDIA clusters?",
             "choices": [
               "NCCL runs all collective communication on host CPU threads using OpenMP parallel loops.",
-              "NCCL combines GPUDirect RDMA (bypassing host CPU memory), kernel fusion (folding reduction arithmetic directly into GPU memory transfer kernels), and channel pipelining (saturating multiple physical NICs concurrently).",
+              "NCCL combines supported GPUDirect paths, fused reduction and data movement, and parallel channels with topology-aware placement.",
               "NCCL eliminates all network synchronization barriers by approximating gradient additions as stochastic random walks.",
               "NCCL replaces InfiniBand hardware with standard TCP/IP operating system sockets."
             ],
             "answer": "The correct answer is B. NCCL optimizes GPU-resident collectives through topology-aware transfers, fused reduction kernels, and parallel channels. GPUDirect paths avoid unnecessary host-memory staging when the hardware and configuration support them. CPU-centric paths can incur extra copies; CUDA-aware MPI can also communicate GPU buffers directly, so the advantage must be evaluated against the actual backend rather than assuming all MPI stages through host memory.",
-            "learning_objective": "Identify the GPU-specific architectural optimizations (GPUDirect RDMA, kernel fusion, channel pipelining) that distinguish NCCL from general-purpose communication libraries."
+            "learning_objective": "Identify NCCL mechanisms that support GPU-resident collectives and explain why achieved performance requires measurement."
           },
           {
             "question_type": "MCQ",
@@ -541,10 +541,10 @@
             "choices": [
               "async_op=True is an invalid argument that causes PyTorch to raise a runtime exception on GPU clusters.",
               "Asynchronous operations automatically disable GPUDirect RDMA and route all traffic through host CPU RAM.",
-              "async_op=True only returns control immediately to the host CPU thread; the underlying GPU stream must still execute nonoverlappable processor overhead ($o$), and if the concurrent GPU compute kernel is shorter than the communication time, the GPU will stall at the stream synchronization barrier.",
+              "A nonblocking call does not guarantee independent work, effective runtime progress, or completion before a dependent consumer needs the result; overhead, contention, and unfinished transfers can remain exposed.",
               "Asynchronous collectives are mathematically restricted to Broadcast operations and cannot execute gradient AllReduces."
             ],
-            "answer": "The correct answer is C. async_op=True only returns control immediately to the host CPU thread; the underlying GPU stream must still execute nonoverlappable processor overhead ($o$), and if the concurrent GPU compute kernel is shorter than the communication time, the GPU will stall at the stream synchronization barrier. When `async_op=True` is invoked, the Python runtime merely enqueues the collective on a dedicated CUDA stream and immediately returns control to the CPU, preventing host thread blocking. However, the physical GPU must still spend processor overhead $o$ launching kernels and tracking stream events. Furthermore, before the optimizer step can apply parameter updates, a stream synchronization barrier (`torch.cuda.current_stream().wait_stream(...)`) must ensure that all collective data has arrived. If the arithmetic computation on the compute stream finishes in less time than the collective transfer on the communication stream, the GPU stalls completely. `async_op=True` is a valid API, GPUDirect RDMA remains active, and asynchronous execution applies to all collective primitives.",
+            "answer": "The correct answer is C. Returning a work handle lets the host continue, but it does not make the transfer instantaneous or guarantee overlap. Independent computation must cover the transfer interval, the runtime must make progress, and dependent consumers must wait for completion using the backend’s synchronization contract. Launch and completion overhead or shared-resource contention can reduce the benefit. A waiting consumer does not imply that every GPU resource stalls, and nonblocking execution does not inherently disable GPUDirect or restrict collectives to Broadcast.",
             "learning_objective": "Analyze the fallacy that asynchronous collectives guarantee complete latency hiding using the LogP model and stream barrier semantics."
           },
           {
@@ -605,8 +605,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Summarize the fundamental physical difference between scaling compute and scaling communication in large-scale machine learning clusters, and explain why communication inevitably becomes the governing constraint (the communication term of the Fleet Law) as cluster size $N$ increases for a fixed global workload.",
-            "answer": "Compute scales locally: adding an accelerator adds independent arithmetic ALUs that process local data concurrently, scaling aggregate theoretical compute linearly ($T_{\\text{compute}}/N$). In contrast, communication is fundamentally global: maintaining a single mathematically coherent optimization trajectory requires synchronizing weights or gradients across physical links governed by finite propagation speed (speed of light), limited link bandwidth ($\\beta$), protocol launch overheads ($\\alpha$), and network bisection contention. For a fixed global workload, as cluster size $N$ expands, per-worker computation time shrinks while collective coordination hops, barrier synchronizations, and tail latencies grow, inevitably driving the communication-to-computation ratio $\\rho = T_{\\text{comm}} / T_{\\text{compute}}$ upward until data movement dominates step time.",
+            "question": "For a fixed global workload, explain why adding workers can increase the share of step time spent waiting for communication. What evidence is needed before calling communication the governing constraint?",
+            "answer": "Added workers provide more arithmetic capacity and can shrink local computation, while required global exchanges still pay startup, transfer, and coordination costs. In a fixed-payload ring model, per-rank bytes approach a constant while startup rounds grow with group size. Real layouts can change payloads, paths, overlap, and useful kernel throughput. Communication becomes governing when its required results remain exposed on the measured dependency path; aligned readiness and transfer traces establish that condition. Aggregate utilization or worker count alone does not prove it.",
             "learning_objective": "Synthesize the physical scaling asymmetry between local compute and global communication in distributed ML systems."
           }
         ]
