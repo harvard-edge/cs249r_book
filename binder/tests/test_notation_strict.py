@@ -179,3 +179,22 @@ def test_apply_refuses_when_text_moved():
     a = [dict(_site(src, "N"), raw="M", macro="NumberOfDevices")]
     new, refused = apply_assignments(src, a)
     assert new == src and refused
+
+
+def _alias_package():
+    site = {"line": 3, "col": 5, "token_start": 0, "token_end": 13, "raw": "\\OldBandwidth",
+            "kind": "alias", "source": "body"}
+    return {"sections": [{"heading": "Intro", "sites": [site]}]}
+
+
+def test_alias_without_a_row_gets_its_canonical_macro():
+    from notation_strict import assign_from_glossary
+    res = assign_from_glossary(_alias_package(), {"rows": []}, REG)
+    assert [(a["macro"], a["via"]) for a in res["assignments"]] == [("Bandwidth", "alias")]
+
+
+def test_glossary_row_overrides_an_alias_used_with_another_meaning():
+    from notation_strict import assign_from_glossary
+    row = {"symbol": "\\OldBandwidth", "macro": "LinkBandwidth", "lines": [3]}
+    res = assign_from_glossary(_alias_package(), {"rows": [row]}, REG)
+    assert [(a["macro"], a["via"]) for a in res["assignments"]] == [("LinkBandwidth", "glossary")]

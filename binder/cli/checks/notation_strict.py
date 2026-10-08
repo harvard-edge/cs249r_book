@@ -840,9 +840,10 @@ def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> D
     """Turn a chapter glossary into exact edits, without judgment.
 
     A site gets the glossary row whose glyph matches and whose lines include the
-    site's line. Retired aliases get their canonical macro. A site with no
-    matching row is ``unresolved``; a site with several is ``ambiguous``: both go
-    back to a person or model, nothing is guessed.
+    site's line. A retired alias gets its canonical macro unless a glossary row
+    claims it (the alias was used with a meaning its canonical entry does not
+    have). A site with no matching row is ``unresolved``; a site with several is
+    ``ambiguous``: both go back to a person or model, nothing is guessed.
     """
     rows = glossary.get("rows", [])
     out = {"assignments": [], "unresolved": [], "ambiguous": [], "not_body": []}
@@ -851,10 +852,6 @@ def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> D
             site = dict(site, section=sec["heading"])
             if site["source"] != "body":
                 out["not_body"].append(site)
-                continue
-            if site["kind"] == "alias":
-                macro = registry.canonical(site["raw"].lstrip("\\"))
-                out["assignments"].append(dict(site, macro=macro, via="alias"))
                 continue
             def matches(r: Dict) -> bool:
                 if (r.get("symbol") or r.get("glyph")) != site["raw"]:
@@ -868,6 +865,10 @@ def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> D
                      in {(x["line"], x["col"], x["token_start"]) for x in r.get("sites", [])}
                      and (r.get("symbol") or r.get("glyph")) == site["raw"]]
             hits = exact or [r for r in rows if matches(r)]
+            if site["kind"] == "alias" and not hits:
+                macro = registry.canonical(site["raw"].lstrip("\\"))
+                out["assignments"].append(dict(site, macro=macro, via="alias"))
+                continue
             if len(hits) == 1:
                 out["assignments"].append(dict(site, macro=hits[0]["macro"], via="glossary", meaning=hits[0].get("meaning", "")))
             elif not hits:
