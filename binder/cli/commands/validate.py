@@ -77,11 +77,11 @@ def _is_chapter_qmd(path) -> bool:
 # finished. For them, notation rows must be used by a chapter (not only by the
 # notation chapter's own notes), and no chapter may use two different symbols
 # that render alike. Add a volume here when its conversion lands.
-STRICT_CONVERTED_VOLUMES: set = {"vol1", "vol2"}
+STRICT_CONVERTED_VOLUMES: set = {"vol1", "vol2", "vol3"}
 # Volumes whose chapters are held to one letter, one meaning (check notation
 # --scope collisions). Separate from conversion: resolving a collision changes
 # what readers see, so each volume joins after an editorial pass.
-COLLISION_CHECKED_VOLUMES: set = {"vol1", "vol2"}
+COLLISION_CHECKED_VOLUMES: set = {"vol1", "vol2", "vol3"}
 # Iron-law rows every volume's notation chapter must carry, used or not.
 CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
 
@@ -13226,7 +13226,9 @@ class ValidateCommand:
             if rel.as_posix().endswith(("frontmatter/notation.qmd", "glossary/glossary.qmd")):
                 continue        # notation chapter and glossary: independent entries, every meaning by design
             checked += 1
-            for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg):
+            # an appendix of derivations: each ### derivation keeps its home chapter's notation
+            level = 3 if "/backmatter/appendix_" in rel.as_posix() else 2
+            for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg, level):
                 issues.append(ValidationIssue(
                     file=str(rel), line=min(c["lines"]), code="notation-glyph-collision",
                     message=f"{', '.join(chr(92) + m for m in c['macros'])} all render ${c['latex']}$ in the section "
