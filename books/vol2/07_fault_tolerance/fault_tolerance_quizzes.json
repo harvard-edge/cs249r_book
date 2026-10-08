@@ -41,13 +41,13 @@
           {
             "question_type": "SHORT",
             "question": "Using an illustrative unprotected-memory soft-error rate of 250 FIT/Mbit and 80 GiB of HBM per device, explain why a 1,024-GPU training cluster needs ECC protection.",
-            "answer": "Using the chapter's 80 GiB device capacity gives about $7.04\\times10^5$ Mbit across 1,024 GPUs. Multiplying by 250 FIT/Mbit yields about $1.76\\times10^8$ FIT, or 176 uncorrected events per hour, approximately one every 20 seconds. ECC removes many common memory errors before they become application-visible. Without protection, frequent corruption would threaten run integrity even though not every physical bit flip causes a failed training step.",
+            "answer": "Using the chapter's 80 GiB device capacity gives about $7.04\\times10^8$ Mbit across 1,024 GPUs. Multiplying by 250 FIT/Mbit yields about $1.76\\times10^{11}$ FIT. Since 1 FIT is one event per billion hours, this is about 176 raw memory errors per hour, approximately one every 20 seconds. ECC corrects covered error patterns before they become application-visible; the residual job-interrupting and silent-corruption rates depend on the protection scheme, not the raw rate alone.",
             "learning_objective": "Analyze why high-density memory subsystems dominate the soft-error failure budget in distributed ML clusters."
           },
           {
             "question_type": "TF",
             "question": "Because electronic components exhibit a constant failure rate during their useful life phase under the exponential reliability model, cluster operators should assign newly delivered accelerator nodes directly to multi-week foundation model pretraining runs without prior burn-in testing.",
-            "answer": "False. Newly manufactured hardware exhibits an elevated failure rate during the initial infant mortality phase of the bathtub curve due to manufacturing defects, marginal packaging, and assembly flaws. Operators must subject fresh nodes to stress workloads (burn-in testing) for 24 to 168 hours before production deployment; failing to do so exposes multi-week pretraining runs to frequent early-life crashes that invalidate training progress and force costly rollbacks.",
+            "answer": "False. Newly manufactured hardware can exhibit elevated early-life failure rates from manufacturing defects, marginal packaging, and assembly flaws. Operators screen new or repaired nodes under qualified stress procedures before assigning expensive long jobs. Temperature, voltage, duration, and acceptance criteria depend on the component and procedure; a generic burn-in duration is not an operating specification or a guarantee of later reliability.",
             "learning_objective": "Evaluate the operational risks of bypassing burn-in screening for newly deployed accelerator hardware."
           },
           {
@@ -99,7 +99,7 @@
               "Permanent stuck-at-0 fault; immediately discard all training checkpoints because the device cannot execute any instructions.",
               "Software race condition; upgrade the host OS kernel and increase the AllReduce heartbeat timeout threshold."
             ],
-            "answer": "The correct answer is B. Intermittent faults appear sporadically under specific load, thermal, or voltage conditions (such as micro-cracks in solder joints or voltage margins during high $di/dt$ swings) and disappear when the system cools or reboots. The proper response is to collect telemetry, quarantine the suspect node, and service it. Treating this as a transient fault that can be safely retried risks recurring silent corruption under sustained load. Treating this as a hard permanent stuck-at fault misdiagnoses why the unit passed cold-boot tests. Attributing the defect to a software race condition ignores the physical thermal and load dependency.",
+            "answer": "The correct answer is B. The recurring load-dependent signature is consistent with an intermittent fault and warrants quarantine and tests under the conditions that exposed it. Passing a cold-boot test does not clear that risk. Thermal correlation alone does not exclude software or runtime defects; replay and telemetry must corroborate hardware attribution before repair or replacement. Retrying without validation risks recurring corruption.",
             "learning_objective": "Classify hardware faults by their temporal signature and determine appropriate mitigation strategies."
           },
           {
@@ -121,9 +121,9 @@
               "It causes an immediate kernel execution timeout that terminates the local process group within milliseconds.",
               "It corrupts operating system page tables, forcing an immediate kernel panic and node reboot.",
               "It triggers a PCIe bus reset that automatically redirects subsequent GEMM operations to host CPU memory.",
-              "It deterministically skews specific output rows or columns of every matrix multiplication routed through that functional unit without crashing the process."
+              "It can produce repeatable incorrect values in computations using the defective datapath while the process remains alive."
             ],
-            "answer": "The correct answer is D. A stuck-at fault in a Tensor Core arithmetic datapath corrupts the specific matrix tiles computed by the defective lane, producing a repeatable, biased output every time the affected unit executes. Because the GPU continues processing instructions without throwing an exception or crashing the host OS, training loss may decline normally for hundreds of steps before accumulated gradient bias causes loss divergence or degraded evaluation metrics. The other descriptions incorrectly describe fail-stop behavior, kernel panics, or transparent host fallback.",
+            "answer": "The correct answer is D. A stuck-at datapath defect can repeatedly corrupt affected computations without raising a process exception. The visible effect depends on which instructions, values and lanes use the faulty circuit, and whether later operations mask the error. It need not affect every matrix multiplication or always cause divergence. The other choices incorrectly require a crash, bus reset or automatic CPU fallback.",
             "learning_objective": "Compare the manifestation of permanent datapath faults in specialized accelerator matrix units against scalar processor faults."
           }
         ]
@@ -219,7 +219,7 @@
           {
             "question_type": "SHORT",
             "question": "Justify why a silent data preprocessing defect (such as unintended prompt truncation or incorrect token masking) presents a much higher compute and financial risk than a syntax error that crashes on the first batch.",
-            "answer": "A syntax error crashes immediately at zero compute loss, providing instant feedback before training resources are consumed. A silent data preprocessing defect allows the distributed cluster to continue running for days or weeks, consuming hundreds of thousands of dollars in compute while optimizing the model against corrupted or truncated objectives. The defect is often discovered only post-training when downstream evaluation benchmarks fail, resulting in complete loss of the training run.",
+            "answer": "A syntax error usually stops execution early and gives direct feedback, limiting wasted work. A silent preprocessing defect can preserve valid shapes while changing the objective, allowing expensive training to continue before evaluation exposes the problem. The loss depends on when the defect is detected, which state or data it affected, and whether valid checkpoints permit recovery; it need not invalidate the entire run.",
             "learning_objective": "Justify why silent software transformations in data pipelines present higher business and compute risk than fail-stop software errors."
           },
           {
@@ -276,7 +276,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain how fault-injection frameworks such as Fidelity bridge the abstraction gap between low-level hardware faults and high-level software models.",
-            "answer": "Fidelity models the low-level microarchitectural manifestation of hardware faults—tracing how radiation-induced upsets or timing faults propagate through registers, cache lines, and arithmetic functional units—and maps their downstream effects directly into realistic software-visible tensor perturbations. This allows developers to run scalable software-level resilience evaluations that accurately reflect physical hardware failure distributions.",
+            "answer": "Such frameworks model how lower-level faults in registers, memory and numerical units become software-visible errors, then use that mapping to guide scalable software injection. The mapping narrows the abstraction gap; its fidelity depends on the modeled hardware, fault distribution and calibration. It does not automatically establish coverage of every production fault.",
             "learning_objective": "Analyze how bridging frameworks map microarchitectural hardware faults to software-level tensor perturbations."
           }
         ]
@@ -307,12 +307,12 @@
             "question": "In a 10,000-GPU cluster training an Archetype A 175B model, what occurs during an uncoordinated synchronous checkpoint write to a shared network filesystem (NFS), and how does asynchronous NVMe staging resolve the problem?",
             "choices": [
               "The coordinator node memory overflows because all 10,000 workers route their gradients through a single master process.",
-              "Thousands of workers concurrently flush multiple terabytes of optimizer state, saturating switch buffers and causing a checkpoint storm; asynchronous staging writes state to local host RAM/NVMe in seconds, resuming computation immediately while background threads flush to persistent storage.",
+              "Concurrent multi-terabyte writes can exceed shared-path capacity and stall training; consistent local staging can overlap the durable flush with training when staging capacity and sustained drain bandwidth suffice.",
               "All GPUs enter a permanent hardware deadlock because NCCL collectives cannot execute while PCIe buses are active.",
               "The model weights are corrupted because synchronous writes allow workers to update parameters while disk serialization is in progress."
             ],
-            "answer": "The correct answer is B. When 10,000 workers simultaneously write multi-GB shards to a shared filesystem, aggregate bandwidth demand creates a massive checkpoint storm, causing packet drops and multi-minute training stalls. Asynchronous staging snapshots GPU state to host CPU RAM or local NVMe via fast PCIe/NVLink streams in seconds (cutting critical-path pause time to under 1%), allowing training to resume while background threads trickle data to durable storage. Routing all worker state through a single coordinator describes centralized checkpointing, not standard sharded NFS writes. NCCL deadlock and write corruption misstate the physical I/O bottleneck.",
-            "learning_objective": "Design asynchronous staging pipelines to eliminate synchronous checkpoint storms in large training clusters."
+            "answer": "The correct answer is B. Concurrent shard writes can overload the shared network or storage path, growing queues and causing stalls or timeouts. Asynchronous checkpointing first captures a consistent snapshot protected from later updates, then flushes it in the background. Exposed capture time and resource contention remain overhead; staging must hold outstanding snapshots and the sustained drain rate must keep up. Recovery can use a generation only after its required shards reach the durability tier and completion is published. Staging does not guarantee a fixed overhead percentage or remove the shared bandwidth limit. The other choices confuse sharded writes with a coordinator funnel, or misstate checkpoint consistency and collective behavior.",
+            "learning_objective": "Evaluate asynchronous staging pipelines against consistent-capture, buffering, sustained-bandwidth, and durability requirements."
           },
           {
             "question_type": "FILL",
@@ -341,7 +341,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain the memory composition breakdown of checkpoint files for large language models trained with mixed-precision AdamW, detailing why optimizer states dominate storage requirements.",
-            "answer": "In mixed-precision training, model weights stored in 16-bit precision (BF16/FP16) require only 2 bytes per parameter. The AdamW optimizer, however, maintains master parameter weights in FP32 (4 bytes), first-moment momentum vectors in FP32 (4 bytes), and second-moment variance vectors in FP32 (4 bytes), totaling 12 bytes per parameter for optimizer state alone. Consequently, optimizer state accounts for roughly $75\\%$ to $85\\%$ of the total checkpoint payload (e.g., $\\approx 840$ GB out of $\\approx 980$ GB for a 70B model).",
+            "answer": "In the chapter’s reference mixed-precision AdamW format, BF16/FP16 weights occupy 2 bytes per parameter, separate FP32 master weights occupy 4 bytes, and the two FP32 moment tensors occupy 8 bytes. Optimizer-side state therefore accounts for 12 of 14 bytes per parameter, about 86 percent, or 840 GB of a 980 GB checkpoint for a 70B model before metadata. Implementations with different state formats require their own payload calculation.",
             "learning_objective": "Analyze the composition of checkpoint storage payloads across model weights and optimizer states."
           },
           {
@@ -354,12 +354,12 @@
             "question_type": "MCQ",
             "question": "What is the primary advantage of adopting a bounded asynchronous checkpoint consistency model over a strict synchronous checkpoint model in a 10,000-GPU cluster?",
             "choices": [
-              "It allows workers to proceed within a bounded window ($1 \\le k \\le 3$ steps) of each other, dramatically reducing idle time spent waiting on barrier synchronization from the slowest worker while tracking the earliest consistent cut across shards.",
+              "It can reduce barrier waiting by letting workers progress within a bounded step window while retaining compatible shard versions or replay information to construct a consistent recovery cut.",
               "It guarantees that all workers write their state at the exact same nanosecond without requiring any communication with a coordinator.",
               "It eliminates the need for persistent storage by maintaining checkpoints entirely in L2 cache memory.",
               "It ensures that lost computation after a hardware crash is always zero steps."
             ],
-            "answer": "The correct answer is A. In large clusters, strict synchronous barriers force thousands of healthy GPUs to wait for the single slowest worker (straggler) at every checkpoint. Bounded asynchronous consistency allows workers to progress within $k$ steps of each other, decoupling execution from rigid synchronization while allowing the checkpoint manager to track a consistent wavefront for recovery. Nanosecond synchronization is physically impossible across distributed networks. Storing multi-TB checkpoints in L2 cache is impossible. Zero lost computation is impossible in periodic checkpointing.",
+            "answer": "The correct answer is A. A bounded-asynchronous protocol can reduce barrier waiting, but bounded step skew alone does not make saved shards mutually consistent. The manager must retain compatible versions or sufficient replay information to reconstruct a valid cut before publishing a recoverable generation. This differs from asynchronous flushing of one synchronized snapshot, which overlaps I/O without relaxing recovery consistency. The other choices do not provide a valid persistent recovery protocol.",
             "learning_objective": "Evaluate consistency models and two-phase commit protocols for distributed checkpointing."
           }
         ]
@@ -399,7 +399,7 @@
           {
             "question_type": "SHORT",
             "question": "Compare a warm restart with a cold restart for a single-GPU failure in a 1,000-GPU cluster in terms of recovery latency, memory state guarantees, and software complexity.",
-            "answer": "A cold restart kills all 1,000 worker processes and reloads the entire model and optimizer state from storage, providing a clean state guarantee and simple implementation at the cost of high recovery latency (4–10 minutes) and discarding valid in-memory state on 999 healthy nodes. A warm restart preserves the in-memory state of surviving workers and replaces only the failed node, cutting recovery latency to 30–90 seconds by avoiding full checkpoint reloading, but requires complex runtime software support for dynamic communicator reconstruction without memory leaks.",
+            "answer": "A cold restart stops the worker group and restores a valid checkpoint, trading a full reload and warmup for simpler state handling. A warm restart keeps surviving processes, but a replacement must reconstruct state at the survivors' committed step or the group must roll back to a common recovery point; combining an older shard with advanced survivor state is unsafe. The chapter's 4–10-minute cold and 30–90-second warm ranges are planning examples, not guarantees. Warm recovery additionally requires runtime support for membership changes and communicator reconstruction, with cold restart as a safety net.",
             "learning_objective": "Compare warm and cold restart mechanisms for distributed training failure recovery."
           },
           {
@@ -416,14 +416,14 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Sequence the six sequential operational stages executed by an automated cluster recovery pipeline after classifying a hard worker failure:\n(1) Resource Reclamation: Scheduler marks defective node as draining and requests spare node\n(2) Job Termination: Broadcast termination signal to tear down invalidated communicator\n(3) Checkpoint Loading: Workers read local partition state shards from distributed storage\n(4) Training Resumption: Data loaders fast-forward batch pointers and training loop restarts\n(5) Job Restart: Launch fresh container processes and re-initialize training runtime binary\n(6) State Synchronization: Workers execute rendezvous and re-initialize NCCL communicators",
-            "answer": "The correct sequence is (2) -> (1) -> (5) -> (3) -> (6) -> (4).\n- (2) Job Termination: Tear down dead communicator across surviving workers.\n- (1) Resource Reclamation: Isolate and drain failed node; provision replacement.\n- (5) Job Restart: Launch replacement container and re-initialize execution runtime.\n- (3) Checkpoint Loading: Workers load durable parameter and optimizer shards.\n- (6) State Synchronization: Reconstruct NCCL communicators and verify step parity.\n- (4) Training Resumption: Fast-forward data pipeline and resume forward passes.",
+            "question": "Sequence the six sequential operational stages executed by the chapter’s stated cold-restart recovery path after classifying a hard worker failure:\n(1) Resource Reclamation: Scheduler marks defective node as draining and requests spare node\n(2) Job Termination: Broadcast termination signal to tear down invalidated communicator\n(3) Checkpoint Loading: Workers read local partition state shards from distributed storage\n(4) Training Resumption: Data loaders restore recorded position and sampling state, and training resumes\n(5) Job Restart: Launch fresh container processes and re-initialize training runtime binary\n(6) State Synchronization: Workers execute rendezvous and re-initialize NCCL communicators",
+            "answer": "The correct sequence is (2) -> (1) -> (5) -> (3) -> (6) -> (4).\n- (2) Job Termination: Tear down dead communicator across surviving workers.\n- (1) Resource Reclamation: Isolate and drain failed node; provision replacement.\n- (5) Job Restart: Launch replacement container and re-initialize execution runtime.\n- (3) Checkpoint Loading: Workers load durable parameter and optimizer shards.\n- (6) State Synchronization: Reconstruct NCCL communicators and verify step parity.\n- (4) Training Resumption: Restore the recorded input-stream position and sampling state, then resume training.",
             "learning_objective": "Design the end-to-end operational stages of an automated failure recovery pipeline."
           },
           {
             "question_type": "TF",
             "question": "In heartbeat failure detection ($T_{\\text{timeout}} = H + k\\sigma_d$), reducing the safety multiplier $k$ to a very small value (e.g., $k=1$) is universally optimal because it minimizes detection latency $T_{\\text{detect}}$ without any operational downsides.",
-            "answer": "False. Setting $k$ too small makes the timeout overly aggressive, causing frequent false-positive failure declarations whenever transient network congestion, garbage collection, or brief checkpoint I/O causes a heartbeat delay. False positives trigger unnecessary, costly job restarts that waste far more compute than the minor reduction in detection latency saves.",
+            "answer": "False. A smaller multiplier shortens the waiting threshold but can increase false failure declarations when healthy workers are delayed. The resulting recovery can discard useful work. Whether those costs exceed faster detection benefits depends on measured delay tails, failure rates and recovery costs; there is no universally optimal multiplier.",
             "learning_objective": "Analyze the trade-off between detection latency and false positive failure declarations in heartbeat monitoring."
           }
         ]
@@ -442,7 +442,7 @@
             "Framework support: PyTorch Elastic (TorchElastic), DeepSpeed, Ray Train, Horovod Elastic",
             "Workload-specific state invariants (LLM curriculum, recommendation freshness, vision augmentation, scientific ML)"
           ],
-          "question_strategy": "Evaluate how elastic training dynamically reshapes worker groups and recalculates optimization hyperparameters without halting training.",
+          "question_strategy": "Evaluate how elastic recovery reshapes worker groups and preserves training invariants through a coordinated membership change.",
           "difficulty_progression": "Tests elastic adaptation fundamentals, analyzes learning rate and accumulation adjustments, evaluates spot preemption economics, contrasts state invariants across workloads, and identifies the rendezvous protocol.",
           "integration": "Bridges fixed-size checkpoint recovery to dynamic cluster resource management.",
           "ranking_explanation": "Tier 1 architectural section covering dynamic resizing, hyperparameter adaptation, and workload invariants."
@@ -454,34 +454,34 @@
             "choices": [
               "It automatically pauses the run and waits indefinitely until physical hardware repair replaces the defective node.",
               "It shifts the missing 8 ranks of computation entirely to host CPU threads without changing the communication topology.",
-              "It dynamically reconstructs the communication group across the 1,016 surviving GPUs, redistributes data shards, adjusts batch size/learning rate or gradient accumulation, and resumes training from the last checkpoint at 99.2% capacity.",
+              "It can rebuild the worker group and restore valid state on the survivors when memory and parallelism permit, preserving data and batch invariants; 99.2% retained device count does not guarantee the same fraction of throughput.",
               "It ignores the lost node and allows the remaining workers to continue training without synchronizing gradients."
             ],
-            "answer": "The correct answer is C. Elastic training breaks the rigid fixed-worker assumption: upon node loss, the framework halts the old group, forms a new process group across surviving workers, redistributes data loader partitions, rescales batch size or gradient accumulation steps, and resumes execution at slightly reduced throughput. Waiting indefinitely describes static fixed-size recovery. Shifting to host CPU threads is infeasible for large models due to compute mismatch. Ignoring the lost worker violates AllReduce synchronization and causes communication deadlocks.",
+            "answer": "The correct answer is C. Elastic recovery can resume at a changed worker count when the remaining allocation supports the model state and parallel decomposition. The runtime must recover missing shards, establish membership, and preserve the logical input stream; training code must preserve batch size or validate the changed optimization policy. A worker-group restart may still be required, and retained device count alone does not determine throughput. Fixed-size recovery instead waits to regain its required allocation. Ignoring the lost participant does not repair its collective or state dependencies.",
             "learning_objective": "Explain how elastic training transforms hard capacity loss into temporary throughput degradation."
           },
           {
             "question_type": "SHORT",
             "question": "When an elastic training job resizes from $N_{\\text{base}}$ to $N_{\\text{new}}$ workers, compare using gradient accumulation adjustment versus learning rate recalibration to preserve optimization dynamics.",
-            "answer": "To preserve optimization dynamics without altering the effective global batch size, surviving workers can increase gradient accumulation steps (e.g., doubling accumulation steps if worker count halves), maintaining identical mathematical updates at the expense of proportional wall-clock step slowdown. Alternatively, if gradient accumulation is not adjusted, global batch size decreases, requiring learning rate scaling (such as linear scaling $\\eta_{\\text{new}} = \\eta_{\\text{base}} \\cdot \\frac{N_{\\text{new}}}{N_{\\text{base}}}$ or conservative square-root scaling) to preserve convergence stability.",
+            "answer": "Increasing gradient accumulation can preserve examples per update when workers are lost; halving worker count requires doubling accumulation if the microbatch is unchanged. It does not guarantee identical updates because reduction order and microbatch-dependent statistics can change, and communication and overlap determine wall time. If the global batch changes, linear or square-root learning-rate scaling offers candidate policies that must be validated for the optimizer, schedule, and workload; neither guarantees convergence stability.",
             "learning_objective": "Design mathematical adaptation rules for learning rate and gradient accumulation during worker group resizing."
           },
           {
             "question_type": "MCQ",
             "question": "How does elastic recovery transform the economics of training large foundation models on preemptible cloud 'spot' instances?",
             "choices": [
-              "It treats spot instance preemption events as normal elastic membership changes, dynamically resizing the cluster and avoiding job aborts, enabling teams to utilize heavily discounted capacity ($70\\%\\text{--}80\\%$ savings) despite frequent node reclaim events.",
+              "It can resume at reduced scale after preemption when state and parallelism fit the survivors, reducing waiting for replacement capacity; net savings still depend on lost work, recovery cost, and preemption frequency.",
               "It forces cloud providers to guarantee $100\\%$ uptime for spot instances by running redundant dummy processes.",
               "It eliminates all network communication requirements, allowing spot instances to train completely independently without synchronizing weights.",
               "It converts spot instances into dedicated on-demand instances at zero additional billing charge."
             ],
-            "answer": "The correct answer is A. Preemptible spot instances are priced at steep discounts (e.g. $70\\%\\text{--}80\\%$ below on-demand rates) because providers can reclaim them at any moment. Traditional static jobs abort on the first preemption, making spot training impractical. Elastic training absorbs preemption as a routine worker-count reduction, resizing and continuing progress so that cost savings far outweigh minor throughput adjustment pauses. The other options describe impossible cloud contract guarantees or nonsensical distributed architectures.",
+            "answer": "The correct answer is A. Fixed-size jobs can checkpoint and restart after reacquiring their required allocation; elasticity can reduce that waiting by resuming with fewer workers when memory, state, and parallelism constraints permit. Both paths pay for lost work, restoration, and group reconstruction. A discounted device-hour price therefore does not establish lower cost per retained training result: frequent preemption or expensive recovery can erase the apparent savings. The other choices invent guarantees or remove necessary synchronization.",
             "learning_objective": "Evaluate the economic and architectural requirements of running distributed ML workloads on preemptible cloud instances."
           },
           {
             "question_type": "TF",
             "question": "For large recommendation systems with multi-terabyte embedding tables, checkpoint and recovery strategies must always prioritize strict full-state reproducibility over embedding freshness to avoid business revenue loss.",
-            "answer": "False. In recommendation systems, embedding freshness is the primary driver of ranking accuracy and user engagement. Losing hours of real-time embedding updates during a multi-hour full-state rollback directly reduces revenue. Recommendation fault tolerance prioritizes freshness over full-state determinism, utilizing tiered and incremental checkpointing with fast state reload.",
+            "answer": "False. Recovery must satisfy both the workload's state-validity contract and its measured tolerance for stale embeddings. Incremental checkpoints can reconstruct an exact generation from a base and required deltas, while tiered placement can shorten restoration. Neither technique inherently trades consistency for freshness; accepting approximate or stale state requires a separate validated recovery contract.",
             "learning_objective": "Compare recovery state invariants between dense foundation models and embedding-heavy recommendation architectures."
           },
           {
@@ -507,7 +507,7 @@
             "Stateful LLM serving challenges: KV cache loss, prefix/prompt caching, recommendation feature stores"
           ],
           "question_strategy": "Evaluate how sub-second serving latency budgets transform fault tolerance from batch checkpointing to real-time state migration and replica routing.",
-          "difficulty_progression": "Calculates replica availability, examines KV cache state vulnerability, compares replication topologies, contrasts stateless and stateful failover, analyzes failover stages, and compares state storage architectures.",
+          "difficulty_progression": "Calculates replica availability, examines KV cache state vulnerability, compares replication topologies, contrasts stateless and stateful failover, analyzes failover dependencies, and compares state storage architectures.",
           "integration": "Transitions reliability from multi-hour batch training to millisecond-level inference serving.",
           "ranking_explanation": "Tier 1 serving section establishing the fundamental mechanisms of inference resilience."
         },
@@ -521,7 +521,7 @@
               "Annual downtime is 0 seconds; three replicas provide mathematically absolute fault tolerance under all operating conditions.",
               "Annual downtime drops to approximately 31.5 seconds ($99.9999\\%$ availability); real-world availability is lower because correlated failures (shared power, top-of-rack switches, DNS, software bugs) violate the independence assumption."
             ],
-            "answer": "The correct answer is D. The formula for $k=3$ independent replicas yields $A_{\\text{system}} = 1 - (1 - 0.99)^3 = 1 - (0.01)^3 = 1 - 10^{-6} = 0.999999$ ($99.9999\\%$ availability, or $365 \\times 24 \\times 3600 \\times 10^{-6} \\approx 31.5$ seconds downtime/year). In practice, shared failure domains (such as common top-of-rack switches, power feeds, shared feature stores, or buggy model code deployed across all replicas) introduce correlation that prevents achieving six-nines availability. Two independent 99-percent replicas yield about 52.6 minutes of annual downtime, whereas three yield about 31.5 seconds. The 3.65-day option ignores redundancy entirely. Absolute zero downtime is physically impossible.",
+            "answer": "The correct answer is D. The formula for $k=3$ independent replicas yields $A_{\\text{system}} = 1 - (1 - 0.99)^3 = 1 - (0.01)^3 = 1 - 10^{-6} = 0.999999$ ($99.9999\\%$ availability, or $365 \\times 24 \\times 3600 \\times 10^{-6} \\approx 31.5$ seconds downtime/year). In practice, shared failure domains (such as common top-of-rack switches, power feeds, shared feature stores, or buggy model code deployed across all replicas) introduce correlation that prevents achieving six-nines availability. Two independent 99-percent replicas yield about 52.6 minutes of annual downtime, whereas three yield about 31.5 seconds. The 3.65-day option ignores redundancy entirely. Absolute zero downtime is physically impossible. This idealized formula also assumes reliable routing and enough ready capacity on the surviving replicas to serve demand; independence alone does not establish request-level availability.",
             "learning_objective": "Calculate redundant replica availability and identify factors that violate component independence."
           },
           {
@@ -545,13 +545,13 @@
           {
             "question_type": "TF",
             "question": "In stateless model serving (such as single-image classification), a crashed GPU replica requires complex distributed state synchronization and session rollback before a client's request can be retried on another node.",
-            "answer": "False. In stateless serving, each request contains all necessary input data, and model weights are identical across replicas. When a replica fails, the load balancer or client can immediately retry the in-flight request on any healthy replica without state recovery or synchronization overhead.",
+            "answer": "False. A stateless request supplies the input needed by another compatible, ready replica, so no session-state restoration is required. A retry still needs surviving capacity, safe operation semantics, the original deadline and a bounded retry budget. Routing or detection delays can remain; statelessness does not guarantee immediate successful completion.",
             "learning_objective": "Compare request failover mechanisms between stateless and stateful model serving systems."
           },
           {
-            "question_type": "ORDER",
-            "question": "Sequence the automated stages executed by an inference cluster when a model replica experiences a GPU hardware fault:\n(1) Readiness probe fails after consecutive missed heartbeats or failed inference correctness check\n(2) Health monitoring sidecar detects GPU error code and drops container health status\n(3) Load balancer deregisters the unhealthy replica and updates routing table\n(4) In-flight and incoming requests are redirected to surviving healthy replicas\n(5) Orchestrator terminates the unhealthy pod and schedules a replacement replica on a healthy node",
-            "answer": "The correct sequence is (2) -> (1) -> (3) -> (4) -> (5).\n- (2) Health monitoring sidecar detects GPU hardware error.\n- (1) Readiness probe fails after failed health check.\n- (3) Load balancer deregisters replica from active rotation.\n- (4) Traffic is seamlessly rerouted to surviving healthy replicas.\n- (5) Orchestrator terminates the failed container and provisions a replacement.",
+            "question_type": "SHORT",
+            "question": "After a serving replica suffers a GPU fault, what dependencies must hold before requests can safely use alternate replicas, and which recovery work can proceed concurrently?",
+            "answer": "Health evidence must remove the failed replica from routing. Alternate replicas must be ready and have capacity; stateful requests also need their required context restored or reconstructed. Retried work must be safe, remain within its original deadline and retry budget, and pass admission control. Provisioning a replacement can proceed concurrently with rerouting to existing ready replicas. Detection, routing propagation and state recovery can add delay; failover is not necessarily seamless.",
             "learning_objective": "Analyze the automated health detection and traffic rerouting stages during inference replica failover."
           },
           {
@@ -597,7 +597,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain the four-tier feature degradation strategy (Critical, Important, Useful, Optional) and describe how it maintains service availability when feature store dependencies degrade.",
-            "answer": "The strategy classifies input features by their impact on model quality. If Critical features (e.g., User ID, Item ID) are missing, the request cannot be served and is blocked. If Important features (user history) are missing, precomputed population defaults are used (causing a modest 5–10% quality drop). If Useful features (real-time context) lag, cached values are used (2–5% quality drop). If Optional features (secondary metadata) fail, they are omitted (<2% quality drop). This tiered approach converts a binary failure into a controlled, acceptable quality reduction.",
+            "answer": "The example policy blocks requests missing Critical features, substitutes validated defaults for Important features, uses cached values for Useful features, and omits Optional features. Its 5–10%, 2–5%, and less-than-2% quality-loss ranges are illustrative policy budgets, not inherent effects of those categories. Defaults and cached representations must be compatible with the model, and measured fallback quality must satisfy the chosen budget before deployment.",
             "learning_objective": "Design tiered feature degradation policies to maintain inference service availability during feature store outages."
           },
           {
@@ -635,7 +635,7 @@
         "rationale": {
           "focus_areas": [
             "Why distributed ML systems are hard to debug: nondeterminism, Heisenbugs, scale, partial failures",
-            "Three pillars of observability: metrics (when/where), logs (what), traces (why)",
+            "Three pillars of observability: metrics (when/where), logs (event context), traces (request path)",
             "ML-specific debugging: NaN propagation, mixed-precision loss scaling, data validation",
             "Common failure patterns: training loss signatures (gradient explosion, loss plateau, NaN divergence) and serving cascade diagnosis"
           ],
@@ -672,7 +672,7 @@
               "Traces generate automatic pull requests to fix the bug; Metrics execute the rollback; Logs alert the end users.",
               "The three pillars cannot be correlated because each uses completely incompatible timestamp formats."
             ],
-            "answer": "The correct answer is B. Metrics provide the high-level 'when and where' (latency spike at 14:32, error rate 15%); distributed Traces provide the 'why and who' by showing which specific span across the microservice graph broke its latency budget (the 700 ms feature lookup); structured Logs provide the detailed 'what' (connection timeouts to Redis cache causing an avalanche of direct database queries). The other options misstate observability functions, suggest impossible automated actions, or deny correlation capabilities.",
+            "answer": "The correct answer is B. Metrics identify the symptom's timing and scope; traces locate the excessive delay in the feature-service span; logs connect cache timeouts with increased direct database requests. Together they narrow the failure path and support containment through a circuit breaker and validated fallback. They do not yet distinguish a failed cache process from a network or resource problem, so targeted repair requires corroborating evidence. The other choices misstate the functions of observability or deny the shared identifiers that allow correlation.",
             "learning_objective": "Analyze metrics, distributed traces, and structured logs to diagnose cascade failures in ML pipelines."
           },
           {
@@ -684,7 +684,7 @@
           {
             "question_type": "TF",
             "question": "In distributed tracing systems utilizing OpenTelemetry, capturing execution time across microservices is sufficient for incident triage without recording structured trace and span correlation identifiers in service logs.",
-            "answer": "False. Without injecting distributed trace and span IDs into structured log records, operators cannot correlate high-level latency bottlenecks identified in trace visualizations with the exact local exceptions, memory allocations, and warning logs emitted by backend service processes during the failure window.",
+            "answer": "False as a general sufficiency claim. Trace timing helps locate delayed spans, while trace and span identifiers in structured logs link those spans to local events and exceptions. Other evidence may still support initial triage without that linkage, but missing correlation makes exact request-level diagnosis harder.",
             "learning_objective": "Evaluate the role of trace and span context propagation in distributed log correlation."
           }
         ]
@@ -697,7 +697,7 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Meta OPT-175B: 992 A100s, 35+ manual and ~70 automatic restarts, asynchronous checkpointing reducing overhead from 12% to <3%, loss spike rollbacks",
+            "Meta OPT-175B: 992 A100s, 35+ manual and ~70 automatic restarts, train-log freshness monitoring, loss spike rollbacks",
             "Google TPUv4 Pod resilience: 4,096 chips, 64 cubes, OCS optical circuit switching, dynamic topology reconstitution",
             "Netflix chaos engineering: continuous failure injection for ML serving dependencies and fallback validation",
             "Microsoft DeepSpeed: ZeRO sharded optimizer state, universal checkpointing, framework-scheduler integration"
@@ -710,20 +710,20 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Why does Google's TPUv4 supercomputer architecture utilize Optical Circuit Switches (OCS) to dynamically reconfigure the 3D torus mesh around faulty cubes, rather than attempting in-place software routing around dead chips within the active slice?",
+            "question": "Why does Google's TPUv4 recovery design combine OCS-based replacement of unhealthy cubes with fault-tolerant routing for supported link-outage patterns?",
             "choices": [
               "Because TPU chips have zero local memory and cannot execute software routing algorithms.",
               "Because optical circuit switches are cheaper than standard copper Ethernet cables for intra-rack links.",
-              "In a tightly coupled $4{\\times}4{\\times}4$ 3D torus mesh, a single dead chip or optical link creates a hole that breaks collective AllReduce rings; OCS reconfigures optical light paths to swap in a healthy spare 64-chip cube, reconstituting the identical communication topology in minutes.",
+              "A machine outage can remove a required job participant, requiring a healthy replacement cube; a link outage can instead require a supported alternate communication path. The response must preserve the job's communication topology.",
               "Because OCS switches completely eliminate the need for checkpointing during multi-month training jobs."
             ],
-            "answer": "The correct answer is C. In tightly coupled torus supercomputers, collective communication depends on strict, unbroken dimensional rings. Rather than attempting complex in-slice software rerouting that would destroy collective efficiency, Google treats the 64-chip cube as the atomic unit of replacement; the OCS optical fabric dynamically detaches the faulty cube and connects a healthy spare cube, preserving the rigid 3D mesh topology. The other options misrepresent memory architecture, cable economics, or claim impossible checkpoint elimination.",
+            "answer": "The correct answer is C. OCS allows the recovery system to assemble job-sized slices from healthy spare cubes after machine outages. Fault-tolerant routing handles supported OCS outage patterns when alternate paths remain available. Replacing a participant and repairing a communication path are distinct responses; neither follows from the failed-device count alone. The other choices misrepresent memory architecture or economics, or incorrectly eliminate checkpointing.",
             "learning_objective": "Analyze how optical circuit switching enables topology-preserving fault tolerance in tightly coupled accelerator pods."
           },
           {
             "question_type": "SHORT",
             "question": "During the training of Meta's OPT-175B model on 992 A100 GPUs, describe how the team addressed both physical hardware failures and mathematical loss spikes.",
-            "answer": "For physical hardware failures (at least 35 manual and an estimated 70+ automatic restarts over two months from ECC memory errors, network issues, and lost GPUs), the team relied on restart from the latest checkpoint, with train-log freshness monitoring (a 15-minute threshold, later relaxed to one hour) bounding how long a silent hang could idle the cluster. For mathematical loss spikes (numerical divergence and gradient overflow), the team rolled back to an earlier clean checkpoint and resumed with a reduced learning rate (ultimately roughly two-thirds of GPT-3's rate). The two remedies differ, which is why the run had to retain checkpoint history rather than only its newest snapshot.",
+            "answer": "For physical hardware failures (at least 35 manual and an estimated 70+ automatic restarts over two months from ECC memory errors, network issues, and lost GPUs), the team relied on restart from the latest checkpoint, with train-log freshness monitoring (a 15-minute threshold, later relaxed to one hour) contributing to detection delay; polling and response could extend the idle window. For mathematical loss spikes (numerical divergence and gradient overflow), the team rolled back to an earlier clean checkpoint and resumed with a reduced learning rate (ultimately roughly two-thirds of GPT-3's rate). The two remedies differ, which is why the run had to retain checkpoint history rather than only its newest snapshot.",
             "learning_objective": "Compare physical hardware fault recovery and algorithmic numerical divergence recovery in large-scale LLM training."
           },
           {
@@ -741,7 +741,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain how Microsoft DeepSpeed coordinates ZeRO sharded optimizer states with persistent checkpointing to achieve fault tolerance during distributed training on massive models.",
-            "answer": "DeepSpeed shards parameter, gradient, and optimizer states across workers using ZeRO. Because each GPU holds only a unique partition of the state, a node crash destroys its resident shards. DeepSpeed coordinates distributed checkpoint saves where each worker writes only its local state shard to durable storage. During recovery, DeepSpeed reloads the distributed checkpoint files, using Universal Checkpointing primitives to repartition shards across the active worker topology assigned by the cluster scheduler.",
+            "answer": "ZeRO partitions optimizer state, gradients and parameters at different stages; ZeRO-3 partitions all three. A lost worker can remove a required live shard, so recovery needs another valid copy or a durable checkpoint. Distributed checkpointing writes the required state shards, while the launcher restores a valid worker group. Universal Checkpointing supports selected changes in parallelism and topology; training code still owns sufficient state capture, input coverage and batch policy.",
             "learning_objective": "Evaluate state persistence and recovery mechanisms in ZeRO-sharded distributed training frameworks."
           }
         ]
@@ -775,7 +775,7 @@
               "Optimal interval is 50 hours; checkpointing every 15 minutes causes disk sectors to wear out in days.",
               "Optimal interval is 1 minute; checkpointing every 15 minutes risks losing 100% of the training dataset."
             ],
-            "answer": "The correct answer is B. Applying the Young-Daly formula: $\\tau_{\\text{opt}} = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot \\text{MTBF}_{\\text{system}}} = \\sqrt{2 \\times 5 \\times 3000} = \\sqrt{30{,}000} \\approx 173.2\\text{ minutes}$ (approx. 2.9 hours). Setting an interval of 15 minutes deviates by more than an order of magnitude, spending massive cluster time on unnecessary storage writes. The 15-minute, 50-hour, and 1-minute options misapply the square-root law or make exaggerated failure claims.",
+            "answer": "The correct answer is B. Applying the Young-Daly formula: $\\tau_{\\text{opt}} = \\sqrt{2 \\cdot T_{\\text{write}} \\cdot \\text{MTBF}_{\\text{system}}} = \\sqrt{2 \\times 5 \\times 3000} = \\sqrt{30{,}000} \\approx 173.2\\text{ minutes}$ (approx. 2.9 hours). Setting an interval of 15 minutes deviates by more than an order of magnitude, spending massive cluster time on unnecessary storage writes. The 15-minute, 50-hour, and 1-minute options misapply the square-root law or make exaggerated failure claims. A stricter recovery point objective can justify a shorter interval even when it increases expected waste.",
             "learning_objective": "Calculate Young-Daly optimal intervals to demonstrate why intuition-based checkpoint scheduling causes excessive I/O overhead."
           },
           {
@@ -799,7 +799,7 @@
           {
             "question_type": "TF",
             "question": "Because modern accelerator hardware incorporates hardware ECC on High Bandwidth Memory and CRC on interconnects, application-level gradient checksums and loss validation checks are redundant and unnecessary in 10,000-GPU clusters.",
-            "answer": "False. Hardware ECC corrects single-bit memory errors and detects double-bit errors, but multi-bit memory upsets, combinational arithmetic logic faults in Tensor Cores, and software transformation errors can bypass hardware defenses and cause silent data corruption (SDC). Large-scale fleets require end-to-end software validation (gradient checksums, loss spike detectors, canary batches) to catch corrupted model updates.",
+            "answer": "False. ECC and CRC protect the error patterns covered by their implementations within storage and transport boundaries. They do not validate arbitrary arithmetic or software transformations. Checksums test byte integrity or agreement, while replay, independent computation, invariants and statistical checks provide different evidence about computed results. Coverage must match the declared fault model; no single check establishes end-to-end correctness.",
             "learning_objective": "Evaluate the limitations of hardware ECC and justify the necessity of end-to-end software verification against silent data corruption."
           }
         ]
@@ -829,10 +829,10 @@
             "choices": [
               "Training fault tolerance only operates on CPUs, whereas serving fault tolerance only operates on GPUs.",
               "Training fault tolerance requires $100\\%$ uptime with zero dropped packets, whereas serving fault tolerance tolerates hours of total outage.",
-              "Training fault tolerance is checkpoint-centric, prioritizing batch state durability and tolerating minutes of recovery latency; serving fault tolerance is state-migration-centric, prioritizing sub-second latency SLAs and graceful degradation.",
+              "Training preserves accumulated progress through valid checkpoints and a recovery budget; interactive serving needs ready alternate capacity and required request context within its latency budget, or a validated fallback.",
               "Training fault tolerance relies exclusively on active-active replication, whereas serving fault tolerance relies exclusively on cold disk restarts."
             ],
-            "answer": "The correct answer is C. Training workloads are long-running batch processes where state (parameters + optimizer) is massive but recovery can afford minutes of restart time without user-facing impact. Serving workloads are real-time, user-facing systems where requests demand millisecond responses, requiring replica redundancy, session affinity, and graceful quality degradation rather than slow checkpoint reloads. The other choices invert or misstate latency requirements and architectural mechanisms.",
+            "answer": "The correct answer is C. Training recovery preserves valid model, optimizer and input-stream state while budgeting lost work and recovery delay. Interactive serving has a much shorter request deadline, so it needs ready capacity and a policy to reconstruct, replicate or abandon derived state. Stateless requests need no session migration; stateful requests may require context recovery. Validated degradation applies when full service cannot meet the budget. The other choices misstate hardware or recovery requirements.",
             "learning_objective": "Compare fundamental architectural requirements and latency budgets between training and serving fault tolerance."
           },
           {

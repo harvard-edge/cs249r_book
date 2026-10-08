@@ -704,7 +704,7 @@ A common misconception is that doubling cluster size halves training time. In pr
 
 ## Strategy Selection {#sec-appdx-reliability-foundations-strategy-selection}
 
-Checkpoint/restart is not the only fault tolerance strategy. For serving workloads where downtime is measured in lost revenue, redundancy provides a fundamentally different trade-off. For elastic training, the system can shrink around failures rather than stopping. Choosing the right strategy depends on the workload's tolerance for latency, cost, and complexity.
+Checkpoint/restart is not the only fault tolerance strategy. For serving workloads where downtime is measured in lost revenue, redundancy provides a fundamentally different trade-off. Elastic training can resume on a smaller allocation when valid state and a feasible parallel decomposition remain available. Choosing the right strategy depends on the workload's tolerance for latency, cost, and complexity.
 
 ### Checkpoint/restart vs. redundancy vs. elastic training {#sec-appdx-reliability-foundations-strategies}
 
@@ -712,24 +712,24 @@ The three canonical strategies represent different points in the trade-off space
 
 **Checkpoint/restart** periodically saves full system state and rolls back to the last checkpoint after failure. It is the workhorse of large-scale training: conceptually simple, well-understood, and effective when MTBF is much larger than checkpoint cost. The weakness is that recovery requires stopping all workers and replaying lost computation.
 
-**Redundancy** maintains duplicate copies of state or computation. If one replica fails, another immediately takes over. This is the dominant strategy for inference serving, where even seconds of downtime are unacceptable. The cost is 2--3$\times$ the compute resources, which is prohibitive for training but justified for revenue-critical serving.
+**Redundancy** maintains alternate copies of state or computation. A surviving serving replica can take over only when routing, readiness, capacity, and the required request state meet the latency budget. Dedicated duplicate or triplicate execution costs 2--3$\times$ the compute resources; active-active serving instead shares normal traffic across replicas while reserving failover headroom. The justified overhead depends on the workload and recovery contract.
 
-**Elastic training** allows the training job to continue with fewer workers when a failure occurs, rather than stopping entirely. Workers are added back when replacement nodes become available. This minimizes wall-clock interruption but requires frameworks that support dynamic world-size changes (for example, TorchElastic), and it introduces complexity in learning rate adjustment and gradient normalization. @Tbl-strategy-comparison summarizes the trade-offs.
+**Elastic training** allows a job to resume with fewer workers when the smaller allocation can hold its state and support its parallel decomposition. Membership changes can still require a coordinated restart and checkpoint reload; TorchElastic restarts the worker group. Workers may be added back when capacity becomes available. The recovery path must restore missing shards, preserve data coverage, and either preserve the effective batch size or validate a changed optimization policy. Elasticity can reduce waiting for replacement capacity, but does not guarantee a shorter interruption. @Tbl-strategy-comparison summarizes the trade-offs.
 
 | **Criterion**         | **Checkpoint/Restart** |      **Redundancy**     |     **Elastic Training**    |
 |:----------------------|:----------------------:|:-----------------------:|:---------------------------:|
-| **Recovery latency**  |    Minutes (replay)    | Milliseconds (failover) |    Seconds (reconfigure)    |
-| **Resource overhead** | ~3--13% (storage + IO) |   100--200% (replicas)  |   ~5--10% (spare capacity)  |
+| **Recovery latency**  |    Minutes (replay)    | Milliseconds (failover) |    Restart and resize dependent    |
+| **Resource overhead** | ~3--13% (storage + IO) |   100--200% (replicas)  |   Resize and standby policy dependent  |
 | **Workload fit**      |    Training (batch)    |     Serving (online)    |   Training (long-running)   |
 | **Implementation**    |         Simple         |         Moderate        |           Complex           |
 | **State management**  |   Periodic snapshots   |  Continuous replication | Distributed with resharding |
-| **Failure mode**      |  Job pauses, replays   |   Transparent to user   |  Throughput dip, continues  |
+| **Failure mode**      |  Job pauses, replays   |   Transparent to user   |  Pause, restore, then resume  |
 
-: **Fault Tolerance Strategy Comparison**: Each strategy excels in a different regime. Real-world systems often combine strategies: checkpoint/restart for training with redundancy for the metadata service and checkpoint storage layer. {#tbl-strategy-comparison}
+: **Fault Tolerance Strategy Comparison**: The latency and overhead ranges are illustrative, not guarantees; elasticity does not inherently require spare capacity. Real-world systems often combine strategies: checkpoint/restart for training with redundancy for the metadata service and checkpoint storage layer. {#tbl-strategy-comparison}
 
 ### The availability stacking formula {#sec-appdx-reliability-foundations-availability}
 
-For serving workloads, availability is typically expressed as a percentage: 99 percent ("two nines"), 99.9 percent ("three nines"), and so on. Redundancy improves availability by running $k$ independent replicas. The system is unavailable only when all replicas are simultaneously down, which @eq-availability-stacked captures:
+For serving workloads, availability is typically expressed as a percentage: 99 percent ("two nines"), 99.9 percent ("three nines"), and so on. Redundancy improves availability by running $k$ independent replicas. Under an idealized model with reliable routing and enough capacity on any surviving replica, the system is unavailable only when all replicas are simultaneously down, which @eq-availability-stacked captures:
 
 $$ A_{\text{system}} = 1 - (1 - A)^k $$ {#eq-availability-stacked}
 
