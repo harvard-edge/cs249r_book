@@ -81,7 +81,7 @@ STRICT_CONVERTED_VOLUMES: set = {"vol1"}
 # Volumes whose chapters are held to one letter, one meaning (check notation
 # --scope collisions). Separate from conversion: resolving a collision changes
 # what readers see, so each volume joins after an editorial pass.
-COLLISION_CHECKED_VOLUMES: set = set()
+COLLISION_CHECKED_VOLUMES: set = {"vol1"}
 # Iron-law rows every volume's notation chapter must carry, used or not.
 CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
 

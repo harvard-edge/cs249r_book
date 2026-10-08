@@ -2,7 +2,7 @@
 quiz: training_quizzes.json
 concepts: training_concepts.yml
 engine: jupyter
-notation-local: [\AcceleratorConsumptionRate, \AcceleratorStepTime, \AccumulatedSyncTime, \AccumulatedUpdateTime, \AccumulationStepCount, \ActivationCheckpointCount, \AdamFirstMoment, \AdamMomentDecayRate, \AdamSecondMoment, \BaseBatchSize, \BaseLearningRate, \BatchBufferMemory, \BatchDataVolume, \BatchFetchTime, \BatchOperations, \BatchProcessingTime, \ClusterNodeCount, \CommunicationTime, \EffectiveStorageThroughput, \FeedForwardOperations, \FullBatchLoss, \HostPower, \HostTransferBandwidth, \InputPipelineRate, \LayerIntermediateStateMemory, \MicrobatchGradient, \MicrobatchIndex, \MicrobatchPassTime, \MicrobatchSize, \ModelStepOperations, \OptimizerStepTime, \OutputProjectionOperations, \PerExampleForwardBackwardTime, \PipelineBufferMemory, \PipelineIterationTime, \PrefetchBufferCount, \PreprocessingServiceTime, \PreprocessingThroughput, \ProcessingBufferCount, \RmspropSquaredGradientAverage, \ScaledBatchSize, \ScaledLearningRate, \StandardNormalCumulativeDistribution, \StorageReadTime, \StorageThroughput, \SystemMemoryBandwidth, \TensorCoreAccumulatorMatrix, \TensorCoreLeftInput, \TensorCoreOutputMatrix, \TensorCoreRightInput, \TokenizationTime, \TrainingThroughput, \TransferBufferCount, \UpdatedSoftmaxRunningMaximum, \WorkerTransformTime]
+notation-local: [\AcceleratorConsumptionRate, \AccumulatedSyncTime, \AccumulatedUpdateTime, \AccumulationStepCount, \ActivationCheckpointCount, \AdamFirstMoment, \AdamMomentDecayRate, \AdamSecondMoment, \BaseBatchSize, \BaseLearningRate, \BatchBufferMemory, \BatchDataVolume, \BatchFetchTime, \BatchOperations, \BatchProcessingTime, \ClusterNodeCount, \CommunicationTime, \EffectiveStorageThroughput, \FeedForwardOperations, \FullBatchLoss, \HostPower, \HostTransferBandwidth, \InputPipelineRate, \LayerIntermediateStateMemory, \MicrobatchGradient, \MicrobatchIndex, \MicrobatchPassTime, \MicrobatchSize, \ModelStepOperations, \OptimizerStepTime, \OutputProjectionOperations, \PerExampleForwardBackwardTime, \PipelineBufferMemory, \PipelineIterationTime, \PrefetchBufferCount, \PreprocessingServiceTime, \PreprocessingThroughput, \ProcessingBufferCount, \RmspropSquaredGradientAverage, \ScaledBatchSize, \ScaledLearningRate, \StandardNormalCumulativeDistribution, \StorageReadTime, \StorageThroughput, \SystemMemoryBandwidth, \TensorCoreAccumulatorMatrix, \TensorCoreLeftInput, \TensorCoreOutputMatrix, \TensorCoreRightInput, \TokenizationTime, \TrainingThroughput, \TransferBufferCount, \UpdatedSoftmaxRunningMaximum, \WorkerTransformTime]
 ---
 
 # Model Training {#sec-model-training}
@@ -546,7 +546,7 @@ Every training bottleneck ultimately traces back to the execution cost of specif
 
 ## Training Computation and Memory Costs {#sec-model-training-mathematical-foundations-d894}
 
-Linear algebra expresses matrix multiplication compactly as $\GemmOutputMatrix= \GemmLeftOperand\GemmRightOperand$. In hardware, executing this operation efficiently requires navigating the accelerator's physical memory hierarchy:
+Linear algebra expresses a layer's matrix multiplication compactly as $\PreactivationMatrix= \ActivationMatrix\WeightMatrix$. In hardware, executing this operation efficiently requires navigating the accelerator's physical memory hierarchy:
 
 - **Global device memory (HBM or GDDR)**: Located off-chip, offering large storage capacity (typically 16 to 96 GB) to hold weights, optimizer states, and large activation tensors, but communicating across an external memory bus bounded by $\approx 1.5\text{--}3.5\text{ TB/s}$ of bandwidth.
 - **On-chip SRAM (registers and shared memory)**: Located directly on the processor die adjacent to the arithmetic execution units. It delivers ultra-high aggregate bandwidth ($\approx 15\text{--}20\text{ TB/s}$), but has strictly limited capacity (typically 30 to 50 MB across the entire chip).
@@ -717,7 +717,7 @@ O_{\text{QKV}} = `{python} GPT2Compute.mac_factor_str` \times `{python} GPT2Comp
 \\
 = `{python} GPT2Compute.mac_factor_str` \times `{python} GPT2Compute.n_projections_str` \times (`{python} GPT2Compute.batch_str` \times `{python} GPT2Compute.seq_len_str` \times `{python} GPT2Compute.hidden_str` \times `{python} GPT2Compute.hidden_str`) \approx `{python} GPT2Compute.qkv_billion_str` \text{ billion FLOPs}
 \end{gather*}
-**Attention matmuls** ($\AttentionQueryMatrix\AttentionKeyMatrix^T$ and $\AttentionWeightMatrix\AttentionValuesMatrix$, where $\AttentionWeightMatrix$ holds the attention probabilities):
+**Attention matmuls** ($\AttentionQueryMatrix\AttentionKeyMatrix^T$ and the product of the attention probabilities with $\AttentionValuesMatrix$):
 \begin{gather*}
 O_{\text{QK}} = `{python} GPT2Compute.mac_factor_str` \times B \times \NumberOfAttentionHeads \times S \times S \times \AttentionHeadDimension
 = `{python} GPT2Compute.attn_qk_billion_str` \text{ billion FLOPs}
@@ -2495,7 +2495,7 @@ class StorageBandwidthNvme:
 3. **Batching and padding**: Padding and packing generate an int64 tensor of shape `{python} GPT2DataPipeline.batch_size_seq_str` $\times$ `{python} GPT2DataPipeline.seq_len_token_str`, producing `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Transferring the tensor across a PCIe Gen3 x16 bus (`{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` bandwidth) takes $\BatchTransferTime=$ `{python} GPT2DataPipeline.transfer_ms_str`, making bus transfer negligible.
 
-**Systems insight**: Single-core CPU preparation ($\HostPreparationTime\approx$ `{python} GPT2DataPipeline.prep_ms_str`) consumes most of the accelerator step budget ($\AcceleratorStepTime\approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), so a serial pipeline pays both costs on every step and the accelerator compute stage is busy for only about `{python} GPT2DataPipeline.serial_utilization_pct_str`. Push preparation any slower and the accelerator starves outright. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces the ideal average interval between prepared batches to $\TokenizationTime/ \WorkerCount \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $\HostPreparationTime$ with $\AcceleratorStepTime$ to keep the compute stage supplied for `{python} GPT2DataPipeline.utilization_pct_str` of steady-state execution, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs. This busy-time fraction does not establish peak arithmetic utilization, and parallel workers need not shorten the latency of an individual batch.
+**Systems insight**: Single-core CPU preparation ($\HostPreparationTime\approx$ `{python} GPT2DataPipeline.prep_ms_str`) consumes most of the accelerator step budget ($\AcceleratorBatchTime\approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), so a serial pipeline pays both costs on every step and the accelerator compute stage is busy for only about `{python} GPT2DataPipeline.serial_utilization_pct_str`. Push preparation any slower and the accelerator starves outright. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces the ideal average interval between prepared batches to $\TokenizationTime/ \WorkerCount \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $\HostPreparationTime$ with $\AcceleratorBatchTime$ to keep the compute stage supplied for `{python} GPT2DataPipeline.utilization_pct_str` of steady-state execution, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs. This busy-time fraction does not establish peak arithmetic utilization, and parallel workers need not shorten the latency of an individual batch.
 
 :::
 
@@ -3262,7 +3262,7 @@ Among these three regimes, data-bound stalls are the most frequently misdiagnose
 
 **Scenario**: An engineering team builds a PyTorch data-loading pipeline using standard Python `threading` for CPU-bound image preprocessing that holds the global interpreter lock (GIL).
 
-**Diagnosis**: The GIL serializes these Python-level preprocessing threads, making host preparation time ($\HostPreparationTime\approx 250 \text{ ms}$) vastly exceed GPU execution time ($\AcceleratorStepTime\approx 12 \text{ ms}$), reducing the accelerator busy-time fraction to about 4.6 percent in this serial preparation-and-compute model. Here the fraction measures time spent computing, not arithmetic efficiency relative to peak throughput.
+**Diagnosis**: The GIL serializes these Python-level preprocessing threads, making host preparation time ($\HostPreparationTime\approx 250 \text{ ms}$) vastly exceed GPU execution time ($\AcceleratorBatchTime\approx 12 \text{ ms}$), reducing the accelerator busy-time fraction to about 4.6 percent in this serial preparation-and-compute model. Here the fraction measures time spent computing, not arithmetic efficiency relative to peak throughput.
 
 **Systems lesson**: Python CPU work that holds the GIL can serialize threads and starve GPUs; native operations may release it. Process workers (`num_workers > 0`) avoid interpreter serialization, while the NVIDIA Data Loading Library (DALI) can move eligible work off the host.
 
@@ -4097,7 +4097,7 @@ class MixedPrecisionMemory:
 
 - Parameters and gradients (FP32): `{python} MixedPrecisionMemory.fp32_pg_gb_str` (`{python} MixedPrecisionMemory.fp32_p_gb_str` parameters + `{python} MixedPrecisionMemory.fp32_g_gb_str` gradients)
 - Activations (batch = `{python} MixedPrecisionMemory.mp_batch_size_str`): ~`{python} MixedPrecisionMemory.fp32_act_gb_str`
-- Optimizer states (Adam $\AdamFirstMoment_t$, $\AdamSecondMoment_t$ in FP32): `{python} MixedPrecisionMemory.fp32_opt_gb_str`
+- Optimizer states (Adam first and second moments in FP32): `{python} MixedPrecisionMemory.fp32_opt_gb_str`
 - Total: ~`{python} MixedPrecisionMemory.fp32_t_gb_str` (exceeds any single GPU)
 
 **FP16 mixed precision**:
@@ -4106,7 +4106,7 @@ class MixedPrecisionMemory:
 - Activations (FP16): ~`{python} MixedPrecisionMemory.fp16_act_gb_str`
 - Gradients (FP16): `{python} MixedPrecisionMemory.fp16_g_gb_str`
 - FP32 master weights: `{python} MixedPrecisionMemory.master_gb_str` (for precise optimizer updates)
-- Optimizer states (Adam $\AdamFirstMoment_t$, $\AdamSecondMoment_t$ in FP32): `{python} MixedPrecisionMemory.mp_opt_gb_str`
+- Optimizer states (Adam first and second moments in FP32): `{python} MixedPrecisionMemory.mp_opt_gb_str`
 - Total: ~`{python} MixedPrecisionMemory.fp16_t_gb_str` (still tight, but manageable with optimizations)
 
 **Mixed precision + illustrative fourfold activation reduction**:
