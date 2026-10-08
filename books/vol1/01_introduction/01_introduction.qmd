@@ -1699,11 +1699,84 @@ class IntroRidgePoint:
     ridge_str = fmt_arithmetic_intensity(round(ridge) * flop / byte, unit=flop / byte, precision=0, commas=False)
 ```
 
-Decomposing execution time matters only if the engineer can diagnose which term dominates the critical path. The answer depends on how many operations a workload performs per byte it moves, a ratio called arithmetic intensity $(\ArithmeticIntensity = \Operations/\DataVolume)$, relative to the machine's ability to compute and move data. Setting the memory term equal to the compute term locates the boundary. At an intensity of $\RooflineRidgePoint = \PeakRate/\Bandwidth$ FLOP/byte (taking $\EfficiencyHw = 1$), moving the data and performing the arithmetic take equal time. The Roofline Model, a plot of attainable throughput against arithmetic intensity, calls this machine-specific value the **ridge point**\index{Ridge point!definition}. For a current data-center accelerator of the class used in the GPT-3 estimate below, it sits near `{python} IntroRidgePoint.ridge_str`, so a workload must perform on the order of a hundred operations on every byte it fetches before arithmetic, rather than memory, sets its pace. A workload whose intensity falls below the ridge point is memory-bound, so a faster processor leaves its execution time unchanged; a workload above it is compute-bound, so more bandwidth leaves it unchanged. The lighthouse workloads introduced below sit on opposite sides of this line. Overhead $(\Latency)$ sits outside the comparison and can dominate both terms for small requests. Every optimization technique developed in this book manipulates one of these variables by moving less data ($\DataVolume$), executing fewer operations ($\Operations$), utilizing hardware more effectively ($\EfficiencyHw$), or hiding orchestration delay ($\Latency$). A GPT-3-class training estimate isolates the compute term to show how an efficiency change affects execution time under stated assumptions.
+Decomposing execution time matters only if the engineer can diagnose which term dominates the critical path. The answer depends on how many operations a workload performs per byte it moves, a ratio called arithmetic intensity $(\ArithmeticIntensity = \Operations/\DataVolume)$, relative to the machine's ability to compute and move data. Setting the memory term equal to the compute term locates the boundary. At an intensity of $\RooflineRidgePoint = \PeakRate/\Bandwidth$ FLOP/byte (taking $\EfficiencyHw = 1$), moving the data and performing the arithmetic take equal time. The Roofline Model, a plot of attainable throughput against arithmetic intensity, calls this machine-specific value the **ridge point**\index{Ridge point!definition}. For a current data-center accelerator of the class used in the GPT-3 estimate below, it sits near `{python} IntroRidgePoint.ridge_str`, so a workload must perform on the order of a hundred operations on every byte it fetches before arithmetic, rather than memory, sets its pace. Under ideal overlap, a workload below the ridge point is memory-bound, so faster arithmetic leaves the movement-limited bound unchanged; a workload above it is compute-bound, so more bandwidth leaves the arithmetic-limited bound unchanged. In sequential execution, reducing either term still reduces the sum, but improving the smaller term yields a limited end-to-end gain. The lighthouse workloads introduced below sit on opposite sides of this line. Overhead $(\Latency)$ sits outside the comparison and can dominate both terms for small requests. Every optimization technique developed in this book manipulates one of these variables by moving less data ($\DataVolume$), executing fewer operations ($\Operations$), utilizing hardware more effectively ($\EfficiencyHw$), or hiding orchestration delay ($\Latency$). A complete single-accelerator estimate makes the difference between these execution models explicit before a larger training estimate isolates the compute term.
 
 ::: {.column-margin .margin-pointer}
 ↪ The Roofline Model, which bounds attainable throughput by arithmetic intensity and locates the ridge point, is developed in @sec-appdx-machine-foundations-roofline-model-2529.
 :::
+
+```{python}
+#| echo: false
+#| label: intro-local-execution
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SINGLE-ACCELERATOR EXECUTION ESTIMATE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-introduction-iron-law-ml-systems-c32a, local execution callout
+# │ Goal: Convert workload quantities and rates into all three iron-law terms.
+# │ Show: Sequential time, ideal overlap bound, and the effect of more bandwidth.
+# │ How: Divide hypothetical bytes and operations by supplied effective rates.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import GB, GFLOP, second, ms
+from mlsysim.fmt import fmt_memory, fmt_bandwidth, fmt_flops, fmt_flop_rate, fmt_time, check
+
+class LocalExecution:
+    """Illustrative one-accelerator workload; no named hardware specification."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    data = 2 * GB                         # scenario assumption: total traffic
+    bandwidth = 100 * (GB / second)       # scenario assumption: effective rate
+    operations = 1 * GFLOP                # scenario assumption: arithmetic work
+    effective_rate = 100 * (GFLOP / second)  # scenario assumption: peak times efficiency
+    overhead = 5 * ms                     # scenario assumption: non-overlapped delay
+    bandwidth_gain = 2                    # scenario assumption: comparison upgrade
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    movement = (data / bandwidth).to(ms)
+    compute = (operations / effective_rate).to(ms)
+    sequential = movement + compute + overhead
+    overlapped_bound = max(movement, compute) + overhead
+    faster_bandwidth = bandwidth_gain * bandwidth
+    upgraded_movement = (data / faster_bandwidth).to(ms)
+    upgraded_sequential = upgraded_movement + compute + overhead
+    upgraded_bound = max(upgraded_movement, compute) + overhead
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(abs(sequential.to(ms).magnitude - 35) < 1e-9, "Sequential estimate must be 35 ms.")
+    check(abs(overlapped_bound.to(ms).magnitude - 25) < 1e-9, "Ideal overlap bound must be 25 ms.")
+    check(movement > compute, "Movement must dominate the baseline.")
+    check(abs((upgraded_movement - compute).to(ms).magnitude) < 1e-9, "Bandwidth upgrade must balance the stages.")
+    check(abs(upgraded_sequential.to(ms).magnitude - 25) < 1e-9, "Upgraded sequential estimate must be 25 ms.")
+    check(abs(upgraded_bound.to(ms).magnitude - 15) < 1e-9, "Upgraded overlap bound must be 15 ms.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    data_gb_str = fmt_memory(data, unit=GB, precision=0)
+    bandwidth_gb_per_s_str = fmt_bandwidth(bandwidth, unit=GB / second, precision=0)
+    operations_gflop_str = fmt_flops(operations, unit=GFLOP, precision=0)
+    effective_rate_gflop_per_s_str = fmt_flop_rate(effective_rate, unit=GFLOP / second, precision=0)
+    overhead_ms_str = fmt_time(overhead, unit=ms, precision=0)
+    movement_ms_str = fmt_time(movement, unit=ms, precision=0)
+    compute_ms_str = fmt_time(compute, unit=ms, precision=0)
+    sequential_ms_str = fmt_time(sequential, unit=ms, precision=0)
+    overlapped_bound_ms_str = fmt_time(overlapped_bound, unit=ms, precision=0)
+    faster_bandwidth_gb_per_s_str = fmt_bandwidth(faster_bandwidth, unit=GB / second, precision=0)
+    upgraded_movement_ms_str = fmt_time(upgraded_movement, unit=ms, precision=0)
+    upgraded_sequential_ms_str = fmt_time(upgraded_sequential, unit=ms, precision=0)
+    upgraded_bound_ms_str = fmt_time(upgraded_bound, unit=ms, precision=0)
+```
+
+::: {#nbk-introduction-local-execution .callout-notebook title="Pricing one local execution"}
+
+**Problem**: A hypothetical workload on one accelerator moves `{python} LocalExecution.data_gb_str` at `{python} LocalExecution.bandwidth_gb_per_s_str`, performs `{python} LocalExecution.operations_gflop_str` at an effective arithmetic rate of `{python} LocalExecution.effective_rate_gflop_per_s_str`, and incurs `{python} LocalExecution.overhead_ms_str` of fixed overhead. Movement precedes computation. What execution time does the iron law predict, and which rate should be improved first?
+
+**Math**: Dividing bytes by bytes/s gives a movement time of `{python} LocalExecution.movement_ms_str`. Dividing FLOPs by FLOP/s gives a compute time of `{python} LocalExecution.compute_ms_str`; the supplied effective rate already includes $\EfficiencyHw$, so it must not be multiplied by efficiency again. Adding these durations and overhead gives `{python} LocalExecution.sequential_ms_str`. Movement is the largest term.
+
+**Result**: Raising bandwidth to `{python} LocalExecution.faster_bandwidth_gb_per_s_str` reduces movement to `{python} LocalExecution.upgraded_movement_ms_str` and total sequential time to `{python} LocalExecution.upgraded_sequential_ms_str`. Arithmetic and overhead remain unchanged, so doubling bandwidth does not halve the total.
+
+**Systems insight**: If movement and computation could instead overlap ideally, with overhead still outside both phases, the lower bound would be `{python} LocalExecution.overlapped_bound_ms_str` before the upgrade and `{python} LocalExecution.upgraded_bound_ms_str` afterward. The upgrade balances the two stages; further bandwidth increases alone would leave that ideal bound unchanged. Whether the sum or the bound describes a measured run depends on its execution schedule.
+
+:::
+
+A larger training estimate isolates the compute term under an explicit arithmetic-dominated assumption. Its efficiency factor also accounts for the losses involved in coordinating many accelerators, beyond the local execution just calculated.
 
 ```{python}
 #| echo: false
@@ -1889,7 +1962,9 @@ The same physical terms that determine time and energy also determine cost: ever
 In the spirit of quantitative design, **return on compute (RoC)**\index{Return on compute!definition} measures the incremental accuracy gain per added dollar of infrastructure investment, in accuracy points per dollar:
 $$ \text{RoC} = \frac{\Delta \text{Accuracy}}{\Delta \text{Compute Cost}} $$ {#eq-intro-roc}
 
-The RoC test compares that ratio against what each point of accuracy is worth to the application. A 1-percentage-point gain may fail the test if it requires a 10$\times$ increase in $\Operations$ (total operations), because its cost then exceeds its value within the available budget. Read through this lens, an investment can raise RoC in two ways. It can enlarge the numerator by extracting more accuracy from the same data and compute, or it can shrink the denominator by buying the same accuracy for less. The GPT-3 estimate above isolates the second route. Raising $\EfficiencyHw$ from `{python} GPT3Training.eta_base_pct_str` to `{python} GPT3Training.eta_opt_pct_str` leaves the trained model, and therefore its accuracy, unchanged while returning `{python} GPT3Training.days_saved_str` of cluster time. The same accuracy now costs less, so every accuracy gain bought on that cluster carries a smaller $\Delta \text{Compute Cost}$ and a higher RoC. Any such optimization must still be checked against the system's other requirements. The bitter lesson teaches that scale works, but the iron law governs *how* to afford it.
+The RoC test compares that ratio against what each point of accuracy is worth to the application. A 1-percentage-point gain may fail the test if it requires a 10$\times$ increase in $\Operations$ (total operations), because its cost then exceeds its value within the available budget. Comparisons must use the same reference accuracy and cost, with positive quality gains and added costs. More accuracy for the same added cost raises the numerator; the same accuracy gain for less added cost shrinks the denominator.
+
+A cost reduction at unchanged quality is a related efficiency improvement. In the GPT-3 estimate, raising $\EfficiencyHw$ from `{python} GPT3Training.eta_base_pct_str` to `{python} GPT3Training.eta_opt_pct_str` leaves the trained model, and therefore its accuracy, unchanged while returning `{python} GPT3Training.days_saved_str` of cluster time. This is a saving at fixed quality. A subsequent quality improvement can have higher RoC if it delivers the same gain above a common baseline at lower added cost; that comparison requires measuring both quantities. Any such optimization must still be checked against the system's other requirements. The bitter lesson teaches that scale works, but the iron law governs *how* to afford it.
 
 ### Lighthouse models put the iron law into practice {#sec-introduction-lighthouse-models-9b1c}
 
@@ -1902,10 +1977,10 @@ Each lighthouse model illustrates a distinct stress case for the iron law under 
 - **ResNet-50**\index{ResNet-50!iron-law workload} probes compute throughput: by repeatedly reusing learned weight filters across spatial positions and batched inputs, arithmetic throughput ($\Operations/(\PeakRate \cdot \EfficiencyHw)$) dominates execution time.
 - **GPT-2/Llama**\index{GPT-2!bandwidth-bound decode}\index{Llama!bandwidth-bound decode} probes memory bandwidth, with GPT-2 anchoring the lighthouse and Llama standing for its larger modern successors: generating text token by token, the phase called decode, for one request at a time fetches billions of weight parameters from memory with minimal reuse per token, making data movement ($\DataVolume/\Bandwidth$) the binding constraint.
 - **DLRM**\index{DLRM!memory capacity bound} (Deep Learning Recommendation Model) probes memory capacity, the iron law's precondition that the workload fits at all: embedding tables, which store one dense numerical vector for each of millions of user and item IDs, reach about a hundred gigabytes in reference models (terabytes in production) and exceed single-accelerator device memory.
-- **MobileNetV2**\index{MobileNetV2!definition} probes latency ($\Latency$) under a battery: a phone-class vision model must meet a real-time deadline while sharing a battery-limited power budget and a thermal ceiling with everything else on the device.
+- **MobileNetV2**\index{MobileNetV2!definition} probes total response time under a battery: a phone-class vision model must meet a real-time deadline while sharing a battery-limited power budget and a thermal ceiling with everything else on the device.
 - **Keyword spotting (KWS)**\index{Keyword spotting!definition} probes the power envelope: an always-on microcontroller must listen continuously for a wake word within a milliwatt budget and kilobytes of memory.
 
-The iron law makes these differences actionable. Applying the same equation to two workloads yields opposite optimization strategies: doubling peak compute $\PeakRate$ accelerates compute-bound convolutions like ResNet-50, which sit above the ridge point once reuse amortizes memory access, but leaves memory-bound language generation, far below it, virtually unchanged; doubling memory bandwidth $\Bandwidth$ accelerates bandwidth-bound generation while leaving compute-saturated convolutions unchanged. @Tbl-lighthouse-examples summarizes why each lighthouse model serves as a diagnostic tool for a specific bottleneck.
+The iron law makes these differences actionable. Applying the same equation to two workloads yields opposite optimization strategies: doubling peak compute $\PeakRate$ accelerates compute-bound convolutions like ResNet-50, which sit above the ridge point once reuse amortizes memory access, but leaves memory-bound language generation, far below it, virtually unchanged; doubling memory bandwidth $\Bandwidth$ accelerates bandwidth-bound generation while providing little gain for compute-saturated convolutions. Exact invariance applies to the ideal-overlap bound while the same stage remains dominant; the sequential sum still includes both terms. @Tbl-lighthouse-examples summarizes why each lighthouse model serves as a diagnostic tool for a specific bottleneck.
 
 ```{=latex}
 \begingroup
@@ -2413,13 +2488,17 @@ The degradation equation, iron law, and efficiency framework supply quantitative
 
 :::
 
-A deterministic reliability target is a fixed requirement written into the system's specification, such as pedestrian recall of at least 95 percent over a stated operating population, or a 100 ms latency limit. The target itself does not vary, but because the verification gap rules out exhaustive proof, the system can meet it only through a statistical estimate with a stated confidence, which monitoring re-checks as the population changes. Holding stochastic behavior to such targets connects AI engineering to an earlier disciplinary convergence. Computer engineering emerged in the late 1960s and early 1970s[^fn-computer-engineering-lineage] when computing systems grew too complex for electrical engineering or computer science to address alone, uniting both around the integrated problem of building reliable computers from unreliable physical components. AI engineering faces an analogous challenge at the boundary of data, algorithms, and infrastructure. In this book's usage, AI engineering names the discipline, the shared body of principles such as the iron law and the degradation equation, while ML systems engineering names the work of applying those principles to build and operate a specific system, such as the spam filter, under its production constraints.
+A deterministic reliability target is a fixed requirement written into the system's specification, such as pedestrian recall of at least 95 percent over a stated operating population, or a 100 ms latency limit. The target itself does not vary. Statistical evaluation provides evidence, with a stated confidence, about whether population-level quality meets that target, and monitoring reassesses the evidence as the population changes. Evidence for a latency requirement depends on the execution contract: sampled response times support a statistical claim, while a hard bound requires assumptions and analysis covering the specified execution conditions.
+
+Holding stochastic behavior to such targets connects AI engineering to an earlier disciplinary convergence. Computer engineering emerged in the late 1960s and early 1970s[^fn-computer-engineering-lineage] when computing systems grew too complex for electrical engineering or computer science to address alone, uniting both around the integrated problem of building reliable computers from unreliable physical components. AI engineering faces an analogous challenge at the boundary of data, algorithms, and infrastructure. In this book's usage, AI engineering names the discipline, the shared body of principles such as the iron law and the degradation equation, while ML systems engineering names the work of applying those principles to build and operate a specific system, such as the spam filter, under its production constraints.
 
 [^fn-computer-engineering-lineage]: **Computer engineering**\index{Computer engineering!historical lineage}: Formalized as an academic discipline when Case Western Reserve launched the first accredited program in 1971, recognizing that neither electrical engineering nor computer science alone could address building reliable computers from unreliable components. ML systems engineering recapitulates this convergence: the binding constraint is not algorithmic or hardware in isolation but the integration of both under latency, power, and data-quality budgets that neither discipline's curriculum addresses.
 
 ### Engineering across the ML lifecycle {#sec-introduction-ml-system-lifecycle-849f}
 
 Putting an algorithmic advance into use requires data ingestion and preprocessing, computation within the available machine budget, reliable serving, and evidence of real-world performance. These obligations form a recurring lifecycle rather than a sequence that ends at deployment. The engineering object is no longer only code; it is code, data, model behavior, deployment context, and monitoring evidence evolving together. Production feedback can force a deployed system back into data collection and training, bending the familiar linear arc into a cycle.
+
+At the project level, six responsibilities organize this work: problem definition, data collection and preparation, model development and training, evaluation and validation, deployment and integration, and monitoring and maintenance. Problem definition establishes the task and acceptance requirements before collection begins; the finer-grained pipeline in @fig-ml-lifecycle-overview separates collection from preparation to expose their distinct feedback paths.
 
 The structural difference shows up first in tooling\index{ML development lifecycle!vs. traditional software}. Decades of established practice support code-defined behavior through version control that maintains precise histories, continuous integration pipelines that automate testing, and static analysis tools that measure quality. For learned behavior, these practices must also track dataset and model versions and test predictive quality, because source-code changes alone do not describe changes to the deployed system.
 
@@ -2830,13 +2909,13 @@ class DeploymentSystems:
 
 : **Four Deployment Paradigms**: Representative memory, compute, and power envelopes for cloud, edge, mobile, and TinyML systems, exposing the multi-order-of-magnitude span that prevents simple model reuse across tiers. Exact hardware twins and peak-rate calculations appear in the hardware chapters. {#tbl-introduction-deployment-paradigms tbl-colwidths="[10,19,24,30,17]"}
 
-From cloud to TinyML, the endpoints differ by roughly `{python} DeploymentSystems.mem_span_math` in memory and `{python} DeploymentSystems.compute_span_math` in compute. A span that wide is why engineers cannot shrink a cloud model to run on a microcontroller; each tier requires a redesign along the D·A·M axes, and @sec-ml-systems-deployment-spectrum-71be quantifies the three physical constraints behind those envelopes: the light barrier, the power wall, and the memory wall. The narrower question here is how each position reshapes the lifecycle. Cloud ML systems\index{Cloud ML} trade abundant computing resources for capacity limits, operational complexity, and high costs. TinyML systems\index{TinyML} on microcontrollers[^fn-microcontroller-tinyml-memory] invert the priority, because kilobyte-scale memory and milliwatt power budgets make feasibility precede model quality; a sensor may need to detect anomalies on one battery for years. Between these poles, placement becomes a constraint-allocation problem. Edge ML systems\index{Edge ML!latency and bandwidth} move computation toward data sources to reduce latency[^fn-latency-edge-constraint] and bandwidth demand, mobile ML systems\index{Mobile ML!resource constraints} share memory, thermal headroom, and battery power with every other application, and hybrid systems distribute work across tiers to balance latency, privacy, bandwidth, and update control.
+From cloud to TinyML, the endpoints differ by roughly `{python} DeploymentSystems.mem_span_math` in memory and `{python} DeploymentSystems.compute_span_math` in compute. A span that wide prevents arbitrary reuse of a cloud model on a microcontroller. Compression may make a model feasible, but its memory, timing, energy, and task quality must be checked on the target; some tasks require redesign along the D·A·M axes, and @sec-ml-systems-deployment-spectrum-71be quantifies the three physical constraints behind those envelopes: the light barrier, the power wall, and the memory wall. The narrower question here is how each position reshapes the lifecycle. Cloud ML systems\index{Cloud ML} trade abundant computing resources for capacity limits, operational complexity, and high costs. TinyML systems\index{TinyML} on microcontrollers[^fn-microcontroller-tinyml-memory] invert the priority, because kilobyte-scale memory and milliwatt power budgets make feasibility precede model quality; a sensor may need to detect anomalies on one battery for years. Between these poles, placement becomes a constraint-allocation problem. Edge ML systems\index{Edge ML!latency and bandwidth} move computation toward data sources to reduce latency[^fn-latency-edge-constraint] and bandwidth demand, mobile ML systems\index{Mobile ML!resource constraints} share memory, thermal headroom, and battery power with every other application, and hybrid systems distribute work across tiers to balance latency, privacy, bandwidth, and update control.
 
 [^fn-microcontroller-tinyml-memory]: [offset=-42mm] **Microcontrollers**\index{Microcontroller!TinyML substrate}: Single-chip computers with kilobytes of memory and milliwatts of power budget. For TinyML, memory and energy determine feasibility before model quality.
 
 [^fn-latency-edge-constraint]: [offset=-42mm] **Latency**\index{Latency!etymology}\index{Latency!edge deployment}: From Latin *latere* ("to lie hidden"), delay is invisible until it causes failure. At 30 m/s, every millisecond adds 3 cm of travel before braking begins, making latency the edge constraint.
 
-A single deployment decision cascades through the entire lifecycle. Latency-sensitive applications like autonomous vehicles or real-time fraud detection require edge or embedded architectures despite their resource constraints, while large language models gravitate toward centralized cloud infrastructure. Cloud systems must then balance accelerator clusters, storage, and network bandwidth against cost, which shapes how often models are retrained, what historical data is retained, and how inference load is distributed. Edge and mobile systems face fixed resource limits that constrain model complexity and update frequency, forcing aggressive model compression[^fn-model-compression-tradeoff] and careful scheduling.
+A single deployment decision cascades through the entire lifecycle. Local execution becomes necessary when the complete remote path cannot meet the application deadline. A vehicle cannot wait for a distant server to make an emergency decision. Fraud detection may likewise require execution near the transaction source if network travel, queuing, and inference exceed its response budget; the application name alone does not determine placement. Large language models often gravitate toward centralized cloud infrastructure because their resource demands exceed local capacity. Cloud systems must then balance accelerator clusters, storage, and network bandwidth against cost, which shapes how often models are retrained, what historical data is retained, and how inference load is distributed. Edge and mobile systems face fixed resource limits that constrain model complexity and update frequency, forcing aggressive model compression[^fn-model-compression-tradeoff] and careful scheduling.
 
 [^fn-model-compression-tradeoff]: **Model compression**\index{Model compression!definition}: A family of techniques that reduces model storage or computation, including quantization (storing values in fewer bits), pruning (removing parameters that contribute little), and distillation (training a smaller model to imitate a larger one). Its size and accuracy effects depend on the model, method, workload, and target hardware.
 
