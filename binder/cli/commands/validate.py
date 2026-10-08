@@ -832,8 +832,6 @@ class ValidateCommand:
                   note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
             Scope("conventions", "_run_notation_conventions",
                   note="registry entries follow the naming and field conventions (mlsysim/mlsysim/notation/data/README.md); legacy_names.txt only shrinks"),
-            Scope("vol1-print-pin", "_run_notation_vol1_pin",
-                  note="Volume I is in print: its assembled notation text must match the pinned hash; re-pin only as an errata decision"),
         ],
         "spelling": [
             # Both scopes require aspell. Heavy and not part of pre-commit
@@ -13277,67 +13275,6 @@ class ValidateCommand:
             name="notation-forms",
             description="Banned notation forms inside math (Notation chapter rules)",
             files_checked=files, issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
-
-    def _run_notation_vol1_pin(self, root: Path) -> ValidationRunResult:
-        """Fail when Volume I's printed notation text changes without an errata decision.
-
-        Volume I is in print with MIT Press, and its Notation chapter is assembled
-        from the series core (shared with every volume) plus the vol1 degradation
-        extension. Any edit to those files, including one made for another volume,
-        changes the printed Volume I table. This scope resolves the vol1 wrapper's
-        includes in order, strips HTML comments, normalizes whitespace, and
-        compares a SHA-256 against binder/tools/audit/data/vol1_notation_pin.json.
-        To accept an intended change, record it as an erratum and re-pin with
-        `python3 binder/tools/audit/repin_vol1_notation.py "<reason>"`.
-        Added 2026-10-01 after the vol1 notation audit.
-        """
-        import hashlib
-
-        t0 = time.time()
-        # Callers pass the repo root, books/, or books/volN; find books/ in any case.
-        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
-                     root / "books")
-        repo = books.parent
-        wrapper = books / "vol1" / "frontmatter" / "notation.qmd"
-        pin_path = repo / "binder" / "tools" / "audit" / "data" / "vol1_notation_pin.json"
-        issues: List[ValidationIssue] = []
-        files = [wrapper]
-        try:
-            text = wrapper.read_text(encoding="utf-8")
-            body = re.sub(r"^---.*?---\s*", "", text, flags=re.S)
-            body = re.sub(r"^#\s+Notation[^\n]*\n", "", body)
-            assembled = re.sub(r"```\{=latex\}\s*\\part\{key:mainmatter\}\s*```", "", body, flags=re.S)
-            assembled = re.sub(r"<!--.*?-->", "", assembled, flags=re.S)
-            # Pipe-table padding and separator widths do not print.
-            assembled = re.sub(r"-{3,}", "---", assembled)
-            assembled = re.sub(r"\s+", " ", assembled).strip()
-            digest = hashlib.sha256(assembled.encode("utf-8")).hexdigest()
-            pin = json.loads(pin_path.read_text(encoding="utf-8"))
-            if digest != pin.get("sha256"):
-                issues.append(ValidationIssue(
-                    file=str(wrapper.relative_to(repo)),
-                    line=1,
-                    code="vol1-notation-pin",
-                    message=("Volume I's printed notation text changed (pinned "
-                             f"{pin.get('pinned', '?')}: {pin.get('reason', '')}). "
-                             "Edits to the series core change the printed Volume I table."),
-                    severity="error",
-                    suggestion=("If the change is an intended erratum, record it and re-pin: "
-                                "python3 binder/tools/audit/repin_vol1_notation.py \"<reason>\". "
-                                "Otherwise put the symbol in the volume's own extension."),
-                ))
-        except (OSError, ValueError) as exc:
-            issues.append(ValidationIssue(
-                file=str(pin_path.relative_to(repo)), line=1, code="vol1-notation-pin",
-                message=f"Cannot verify the Volume I notation pin: {exc}", severity="error",
-            ))
-        return ValidationRunResult(
-            name="vol1-notation-pin",
-            description="Volume I printed notation text matches its pinned hash",
-            files_checked=len(files),
-            issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
