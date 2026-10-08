@@ -928,6 +928,37 @@ def apply_assignments(source: str, assignments: List[Dict],
     return source, refusals
 
 
+def glyph_collisions(source: str, registry: Registry) -> List[Dict]:
+    """Different symbols that look identical in one chapter.
+
+    Two registered macros may share LaTeX (``p`` is a pass probability in one
+    chapter and a candidate rate in another), but never in the same chapter:
+    the reader sees one letter mean two things. Returns one record per shared
+    rendering: the LaTeX, the macros, and the first line each appears on.
+    """
+    table = registry.macro_table()
+
+    def expand(s: str, depth: int = 0) -> str:
+        out = re.sub(r"\\([A-Za-z]+)(?![A-Za-z])",
+                     lambda m: table.get("\\" + m.group(1), m.group(0)) if m.group(1) != "Glyph" else m.group(0), s)
+        return out if out == s or depth > 8 else expand(out, depth + 1)
+
+    first: Dict[str, Dict[str, int]] = collections.defaultdict(dict)
+    for span in extract_math(source):
+        if span.source not in ("body", "caption"):
+            continue
+        for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", span.text):
+            name = m.group(1)
+            if not registry.is_macro(name) or name == "Glyph":
+                continue
+            canon = registry.canonical(name)
+            look = _span_norm(expand(registry.entries[canon].latex)) if canon in registry.entries else ""
+            if look:
+                first[look].setdefault(canon, span.line)
+    return [{"latex": look, "macros": sorted(ms), "lines": [ms[m] for m in sorted(ms)]}
+            for look, ms in sorted(first.items()) if len(ms) > 1]
+
+
 def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> Dict:
     """Turn a chapter glossary into exact edits, without judgment.
 

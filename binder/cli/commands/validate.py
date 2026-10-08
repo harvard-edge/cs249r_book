@@ -74,9 +74,10 @@ def _is_chapter_qmd(path) -> bool:
 
 
 # Strict notation (2026-10-08). Volumes whose conversion to registry macros is
-# finished: their notation rows must be used by a chapter, not only by the
-# notation chapter's own notes. Add a volume here when its conversion lands.
-STRICT_DEAD_ROW_VOLUMES: set = set()
+# finished. For them, notation rows must be used by a chapter (not only by the
+# notation chapter's own notes), and no chapter may use two different symbols
+# that render alike. Add a volume here when its conversion lands.
+STRICT_CONVERTED_VOLUMES: set = set()
 # Iron-law rows every volume's notation chapter must carry, used or not.
 CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
 
@@ -830,6 +831,8 @@ class ValidateCommand:
                   note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, per-volume transpose, raw thousands commas); default since 2026-10-01, when vol1-4 reached zero"),
             Scope("strict", "_run_notation_strict",
                   note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
+            Scope("collisions", "_run_notation_collisions",
+                  note="no chapter of a converted volume (STRICT_CONVERTED_VOLUMES) uses two different symbols that render alike"),
             Scope("conventions", "_run_notation_conventions",
                   note="every registry entry follows the naming and field conventions (mlsysim/mlsysim/notation/data/README.md)"),
         ],
@@ -12832,7 +12835,7 @@ class ValidateCommand:
             # notes) uses it. Switched on per volume once its strict-notation
             # conversion is done; until then chapters still write raw letters for
             # rows like \Time, so the stricter test would only report noise.
-            usage_for_dead_rows = chapter_usage if vol in STRICT_DEAD_ROW_VOLUMES else vol_usage
+            usage_for_dead_rows = chapter_usage if vol in STRICT_CONVERTED_VOLUMES else vol_usage
             unused = set(table_macros.keys()) - set(usage_for_dead_rows.keys()) - CORE_REQUIRED_ROWS
             for m in sorted(unused):
                 line = table_macros[m]
@@ -13188,6 +13191,29 @@ class ValidateCommand:
             name="notation-strict",
             description="No new raw symbols in math (ratchet against the baseline)",
             files_checked=len(files), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
+    def _run_notation_collisions(self, root: Path) -> ValidationRunResult:
+        """One letter, one meaning per chapter (added 2026-10-08)."""
+        t0 = time.time()
+        repo, ns, files = self._notation_strict_inputs(root)
+        reg = ns.Registry.load(repo)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for f in files:
+            rel = f.relative_to(repo)
+            if len(rel.parts) < 2 or rel.parts[1] not in STRICT_CONVERTED_VOLUMES:
+                continue
+            checked += 1
+            for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg):
+                issues.append(ValidationIssue(
+                    file=str(rel), line=min(c["lines"]), code="notation-glyph-collision",
+                    message=f"{', '.join(chr(92) + m for m in c['macros'])} all render ${c['latex']}$ in this chapter: "
+                            "a reader sees one letter mean two things",
+                    suggestion="give one of them a distinguishing subscript (a new entry), or use one meaning here",
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-collisions", description="No chapter uses two symbols that render alike",
+            files_checked=checked, issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
 
     def _run_notation_conventions(self, root: Path) -> ValidationRunResult:
         """Every registry entry follows the naming and field conventions (no exemption list)."""

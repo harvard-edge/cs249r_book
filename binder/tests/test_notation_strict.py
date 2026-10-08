@@ -257,3 +257,15 @@ def test_matrix_entry_positions_are_indices_and_are_kept():
     a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": 6, "raw": "A_{i0}", "macro": "LeftEntry"}]
     new, refused = apply_assignments(src, a, {"\\LeftEntry": "A"})
     assert refused == [] and new == "Entry $\\LeftEntry_{i0}$ here.\n"
+
+
+def test_glyph_collisions_within_a_chapter():
+    from notation_strict import glyph_collisions
+    reg = Registry([
+        RegistryEntry("BatchSize", "B", "batch size", "count"),
+        RegistryEntry("GemmRightOperand", "B", "right operand", "matrix"),
+        RegistryEntry("Time", "T", "time"),
+    ], {}, BUILTINS)
+    assert glyph_collisions("Use $\\BatchSize$ and $\\Time$.\n", reg) == []
+    col = glyph_collisions("Use $\\BatchSize$.\n\nThen $\\GemmRightOperand$.\n", reg)
+    assert col == [{"latex": "B", "macros": ["BatchSize", "GemmRightOperand"], "lines": [1, 3]}]
