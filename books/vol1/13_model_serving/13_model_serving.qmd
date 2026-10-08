@@ -2426,12 +2426,12 @@ from mlsysim.fmt import (
 )
 
 class CapacityPlanningCalc:
-    """ResNet-50 capacity planning: GPUs needed for 5000 QPS at 50 ms p99 with N+1 redundancy."""
+    """ResNet-50 capacity planning: GPUs needed for a 50 ms worker p99 subbudget with N+1 redundancy."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     cp_peak_qps_value = 5000 * (count / second)  # scenario assumption: peak traffic
-    cp_service_ms_value = 5 * ms  # scenario assumption: TensorRT FP16 service time
-    cp_p99_target_ms_value = 50 * ms  # scenario assumption: p99 latency SLO
+    cp_service_ms_value = 5 * ms  # scenario assumption: reference batch-1 GPU service time
+    cp_p99_target_ms_value = 50 * ms  # scenario assumption: queue-plus-GPU p99 subbudget
     cp_single_gpu_rate_value = (1 * count / cp_service_ms_value).to(count / second)
     cp_headroom_factor_value = 1.3  # 30% headroom for variance
     cp_fp32_bits_value = FP32_BITS  # FP32 bit width
@@ -2504,9 +2504,12 @@ CapacityPlanningCalc.cp_p99_target_ms_math_fragment = CapacityPlanningCalc._cp_p
 
 Consider designing a ResNet-50 serving system with these requirements:
 
-- **Target p99 latency**: 50 ms
+- **Queue-plus-GPU p99 subbudget**: `{python} CapacityPlanningCalc.cp_p99_target_ms_str`
 - **Peak expected traffic**: `{python} CapacityPlanningCalc.cp_peak_qps_str`
-- **Service time** (batch one, the chapter's reference ResNet-50 profile): 5 ms
+- **GPU service time** (batch one, the chapter's reference ResNet-50 profile): `{python} CapacityPlanningCalc.cp_service_ms_str`
+
+**Step 0**: Define the modeled request boundary.
+The worker model covers waiting for the GPU and the GPU forward pass only. This scenario allocates `{python} CapacityPlanningCalc.cp_p99_target_ms_str` to that portion of the request and separately assumes a combined 18 ms upper bound for network transit, serialization, preprocessing, transfer, and postprocessing. The end-to-end deadline must accommodate both allowances. A 50 ms end-to-end deadline would instead require subtracting the outside-worker allowance before applying the queue model; the arithmetic below would no longer apply. An outside-stage mean or p99 cannot substitute for the stipulated combined upper bound.
 
 **Step 1**: Find safe utilization.
 From @eq-p99-latency, $T_{\text{lat},\text{p99}} \approx$ `{python} CapacityPlanningCalc.mm1_p99_factor_str` $\times$ service time / $(1 - \ServingUtilization)$. Setting $T_{\text{lat},\text{p99}} \leq 50$ ms with 5 ms service time gives `{python} CapacityPlanningCalc.cp_rho_safe_math` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` maximum utilization). This is an M/M/1 p99 estimate under the stated arrival and service assumptions. The mean-wait comparison with M/D/1 does not establish a conservative bound on production p99; a load test must validate the tail.
@@ -2529,7 +2532,7 @@ The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traff
 
 This remains well below the `{python} CapacityPlanningCalc.cp_rho_safe_pct_str` safe utilization threshold, confirming N+1 redundancy is satisfied. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require `{python} CapacityPlanningCalc.cp_n_plus_2_min_gpus_str` under the same safe-utilization threshold, or about `{python} CapacityPlanningCalc.cp_n_plus_2_headroom_gpus_str` if the `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom must remain after two simultaneous failures.
 
-**Result**: Under batch-1 service, provision `{python} CapacityPlanningCalc.cp_final_ceil_str` V100 GPUs to serve `{python} CapacityPlanningCalc.cp_peak_qps_str` at 50 ms p99 latency with N+1 fault tolerance.
+**Result**: Under the batch-1 M/M/1 assumptions, `{python} CapacityPlanningCalc.cp_final_ceil_str` V100 GPUs supply the modeled queue-plus-GPU capacity for `{python} CapacityPlanningCalc.cp_peak_qps_str` within the `{python} CapacityPlanningCalc.cp_p99_target_ms_str` p99 subbudget, including one failed replica. End-to-end acceptance still requires validating the tail under load and the separately reserved outside-worker allowance.
 
 :::
 
@@ -3485,7 +3488,7 @@ Batch size variability can cause SLO violations even when mean latency appears s
 $$L_{\text{lat,envelope}} = T_{\text{window}} + T_{\text{svc}}(B_{\text{req,p99}})$$ {#eq-p99-batch-latency}
 For $\ArrivalRate$ = `{python} SloViolationCalc.qps_str` and $T_{\text{window}}$ = `{python} SloViolationCalc.T_slo_ms_str`, the mean request-seen batch size is `{python} SloViolationCalc.mean_batch_str` and its p99 is `{python} SloViolationCalc.p99_batch_str`. The mean latency is `{python} SloViolationCalc.mean_latency_ms_str`; the conservative envelope is `{python} SloViolationCalc.tail_envelope_ms_str`.
 
-The envelope is `{python} SloViolationCalc.envelope_ratio_mult_str` the mean, which is the lesson of this subsection: a configuration whose mean sits comfortably inside the SLO can still breach it when a full window coincides with an unusually large batch. The envelope overstates the true request p99, because those two worst cases need not hit the same request, and that makes it a safe screen. A configuration whose envelope fits the latency budget needs no further batching analysis; one whose envelope does not fit needs a load test before deployment.
+The envelope is `{python} SloViolationCalc.envelope_ratio_mult_str` the mean, which is the lesson of this subsection: a configuration whose mean sits comfortably inside the SLO can still breach it when a full window coincides with an unusually large batch. Under the available-worker calendar-window assumptions, the envelope conservatively screens formation plus service because the longest window wait and largest batch need not hit the same request. A passing configuration clears only this screen; acceptance still requires evaluating worker backlog and the other request stages under the intended traffic and dispatch policy. A failing configuration can be rejected conservatively or investigated with a more faithful model and load test. Neither outcome alone establishes compliance with the end-to-end SLO.
 
 ::: {#psp-model-serving-practitioners-perspective-latency-throughput-trade-off .callout-perspective title="The latency-throughput trade-off"}
 
@@ -3537,6 +3540,8 @@ def adaptive_batching_window(
 ```
 
 :::
+
+The heuristic selects a candidate formation timer. Its inputs omit time already spent by the oldest request and work queued ahead of the batch, so the returned window does not establish a remaining deadline allowance. Deadline-aware dispatch must account for both quantities and validate the service and outside-worker budgets under load.
 
 The nondominated batching configurations form a Pareto frontier\index{Pareto frontier!throughput-latency} where improving throughput requires accepting higher latency. @Tbl-pareto-batching shows five illustrative configurations:
 
@@ -3699,7 +3704,7 @@ For an illustrative ResNet-50 serving system with a 50 ms SLO and 500 QPS traffi
 | **Selected configuration**          | $T_{\text{window}}$ = `{python} PracticalConfigCalc.pc_config_window_ms_str`, $B_{\text{max}}$ = `{python} PracticalConfigCalc.pc_config_batch_str` | Candidate knob setting for load testing.              |
 | **Conservative tail envelope**      | `{python} PracticalConfigCalc.pc_tail_envelope_ms_str`                                                                                              | Full window plus request-seen p99 batch service time. |
 | **Illustrative saturated capacity** | `{python} PracticalConfigCalc.pc_predicted_throughput_img_per_s_str`                                                                                | Ideal batch rate derated by the efficiency factor.    |
-| **Served throughput**               | `{python} PracticalConfigCalc.pc_qps_img_per_s_str`                                                                                                 | Arrival-limited load handled by the configuration.    |
+| **Offered throughput**              | `{python} PracticalConfigCalc.pc_qps_img_per_s_str`                                                                                                 | Offered load; acceptance requires load validation.   |
 
 : **Practical Batching Configuration**: A 30 percent allocation sets a 15 ms maximum window; this illustrative scenario selects a 12 ms window below that bound and assumes a batch-32 cap. The reported latency is a conservative envelope, not the request-latency p99. {#tbl-practical-batching-config tbl-colwidths="[30,25,45]"}
 
@@ -3722,100 +3727,7 @@ $$\mathbb{E}[\text{batch size}] = \ArrivalRate \cdot T_{\text{window}}$$ {#eq-po
 
 For fixed calendar windows, variance equals the mean, so batch sizes fluctuate significantly at moderate traffic. With $\ArrivalRate = 200$ requests/second and $T_{\text{window}} = 10$ ms, the expected count is two, but roughly 14 percent of windows have zero requests (and launch no GPU work) while others may have four or more.
 
-A useful heuristic for the batching window balances waiting cost against throughput benefit. @Eq-optimal-window expresses one such rule:
-$$T_{\text{window}} \approx \min\left(L_{\text{lat,SLO}} - \BatchServiceTimeSvc, \sqrt{\frac{\BatchServiceTimeSvc}{\ArrivalRate}}\right)$$ {#eq-optimal-window}
-where $L_{\text{lat,SLO}}$ is the latency SLO, $\BatchServiceTimeSvc$ is the service time of the formed batch (in seconds), and $\ArrivalRate$ is the arrival rate (in requests per second), making the second term dimensionally consistent in seconds. The square-root form is a local cost-model heuristic: it balances a fixed per-batch benefit against a waiting cost that grows with the arrival interval. It is not a closed-form optimum for ML serving specifically; production systems calibrate the window empirically against observed traffic. A counterintuitive result emerges from @eq-optimal-window: as traffic increases, the optimal window decreases while achieved batch sizes still grow. @Tbl-traffic-adaptive demonstrates this phenomenon across four traffic levels.
-
-::: {.column-margin}
-![](images/svg/vol1_model_serving_margin_003.svg){width="100%" fig-alt="Two strokes against rising QPS: batch size climbs upward while the batching window falls."}
-
-*As QPS rises, the batching window shrinks while batch size grows.*
-:::
-
-```{python}
-#| echo: false
-#| label: traffic-adaptive-batching-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRAFFIC-ADAPTIVE BATCHING TABLE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: tbl-traffic-adaptive—window sizing from eq-optimal-window.
-# │
-# │ Goal: Demonstrate that higher arrival rates can use shorter batching windows
-# │       while still producing larger average batches.
-# │ Show: Computed window, expected batch size, and approximate service+wait latency.
-# │ How: Apply T_window = min(L_SLO - S, sqrt(S/lambda)) with one service-time assumption.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim.fmt import fmt, check, fmt_time
-
-# ┌── LEGO ───────────────────────────────────────────────
-class TrafficAdaptiveBatchingCalc:
-    """Traffic-adaptive batching windows derived from the displayed heuristic."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    latency_slo_ms = 50
-    service_time_ms = 25
-    arrival_rates = (100, 500, 1_000, 5_000)
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    service_time = service_time_ms * ms
-    latency_budget = (latency_slo_ms - service_time_ms) * ms
-    rows = []
-    for qps in arrival_rates:
-        arrival_rate = qps * count / second
-        unconstrained_window = ((service_time / arrival_rate) ** 0.5).to(second)
-        window = min(latency_budget, unconstrained_window)
-        avg_batch = (arrival_rate * window).to(count).magnitude
-        approx_latency = service_time + window
-        rows.append((qps, window, avg_batch, approx_latency))
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    windows_decrease = True
-    avg_batches_increase = True
-    for idx in range(len(rows) - 1):
-        windows_decrease = windows_decrease and rows[idx][1] > rows[idx + 1][1]
-        avg_batches_increase = avg_batches_increase and rows[idx][2] < rows[idx + 1][2]
-
-    check(windows_decrease, "Windows should decrease as traffic rises.")
-    check(avg_batches_increase, "Average batch size should increase as traffic rises.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    qps_100_str = fmt_rate(rows[0][0], "QPS")
-    window_100_ms_str = fmt_time(rows[0][1], 'millisecond', precision=1, commas=False)
-    avg_batch_100_str = fmt(rows[0][2], precision=1, commas=False)
-    latency_100_ms_str = fmt_time(rows[0][3], 'millisecond', precision=1, commas=False)
-
-    qps_500_str = fmt_rate(rows[1][0], "QPS")
-    window_500_ms_str = fmt_time(rows[1][1], 'millisecond', precision=1, commas=False)
-    avg_batch_500_str = fmt(rows[1][2], precision=1, commas=False)
-    latency_500_ms_str = fmt_time(rows[1][3], 'millisecond', precision=1, commas=False)
-
-    qps_1000_str = fmt_rate(rows[2][0], "QPS")
-    window_1000_ms_str = fmt_time(rows[2][1], 'millisecond', precision=0, commas=False)
-    avg_batch_1000_str = fmt_int(round(rows[2][2]), commas=False)
-    latency_1000_ms_str = fmt_time(rows[2][3], 'millisecond', precision=0, commas=False)
-
-    qps_5000_str = fmt_rate(rows[3][0], "QPS")
-    window_5000_ms_str = fmt_time(rows[3][1], 'millisecond', precision=2, commas=False)
-    avg_batch_5000_str = fmt(rows[3][2], precision=1, commas=False)
-    latency_5000_ms_str = fmt_time(rows[3][3], 'millisecond', precision=1, commas=False)
-```
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Arrival Rate**                                        |                     **Optimal Window**                    |                     **Avg Batch Size**                    |                    **Approx. Latency**                     |
-|:--------------------------------------------------------|:---------------------------------------------------------:|:---------------------------------------------------------:|:----------------------------------------------------------:|
-| **`{python} TrafficAdaptiveBatchingCalc.qps_100_str`**  |  `{python} TrafficAdaptiveBatchingCalc.window_100_ms_str` |  `{python} TrafficAdaptiveBatchingCalc.avg_batch_100_str` | `{python} TrafficAdaptiveBatchingCalc.latency_100_ms_str`  |
-| **`{python} TrafficAdaptiveBatchingCalc.qps_500_str`**  |  `{python} TrafficAdaptiveBatchingCalc.window_500_ms_str` |  `{python} TrafficAdaptiveBatchingCalc.avg_batch_500_str` | `{python} TrafficAdaptiveBatchingCalc.latency_500_ms_str`  |
-| **`{python} TrafficAdaptiveBatchingCalc.qps_1000_str`** | `{python} TrafficAdaptiveBatchingCalc.window_1000_ms_str` | `{python} TrafficAdaptiveBatchingCalc.avg_batch_1000_str` | `{python} TrafficAdaptiveBatchingCalc.latency_1000_ms_str` |
-| **`{python} TrafficAdaptiveBatchingCalc.qps_5000_str`** | `{python} TrafficAdaptiveBatchingCalc.window_5000_ms_str` | `{python} TrafficAdaptiveBatchingCalc.avg_batch_5000_str` | `{python} TrafficAdaptiveBatchingCalc.latency_5000_ms_str` |
-
-: **Traffic-Adaptive Batching**: Higher traffic enables shorter windows while still achieving larger average batches. Values are computed from @eq-optimal-window with a 50 ms SLO and a 25 ms service-time assumption, so the latency column is the approximate service-plus-window budget rather than a measured production p99. {#tbl-traffic-adaptive}
+Higher traffic can fill a desired batch sooner, permitting a shorter formation window. In the calendar-window model, the expected count follows @eq-poisson-batch; an oldest-request timer also includes the request that starts the window. Increasing the arrival rate therefore allows the same expected batch count with less deliberate waiting. The scheduler may instead target a larger batch if the latency and memory budgets permit it. Neither choice creates service capacity: the formed batches must complete fast enough to keep up with sustained arrivals, or resource backlog grows despite the shorter window. Window tuning must jointly check the arrival count, the service rate at the realized batch sizes, and the full request-latency distribution.
 
 #### Streaming traffic (correlated arrivals) {#sec-model-serving-streaming-traffic-correlated-arrivals-32b6}
 
@@ -3844,10 +3756,6 @@ Strict latency budgets make synchronized multi-camera frame processing challengi
 | **$T = 32$ ms** | Result ready for planning module  |
 
 : **Multi-camera frame timeline**: Event-by-event timeline for one synchronized frame set across six cameras at 30 FPS. Frames arrive over a 7 ms spread, inference cannot start until the last one lands at 15 ms, and the result reaches the planning module at 32 ms, leaving 1 ms of slack inside the 33 ms deadline. {#tbl-model-serving-multicamera-timeline}
-
-```{=latex}
-\endgroup
-```
 
 #### Single-user traffic (sequential arrivals) {#sec-model-serving-singleuser-traffic-sequential-arrivals-78da}
 
@@ -3991,7 +3899,7 @@ Batching is the primary lever for serving economics, but the optimal strategy de
 - [ ] **Wait vs. compute**: Given an end-to-end latency budget, can you separate batch formation, waiting for an available worker, and batch service time $\BatchServiceTime$? Which wait does a batching timeout control?
 - [ ] **Dynamic vs. static batching**: Describe why static batching fails under variable traffic arrival rates, and how dynamic batching with an adaptive time window resolves queue starvation.
 - [ ] **Traffic pattern matching**: Map deployment scenarios (cloud API, autonomous vehicle, mobile edge) to corresponding MLPerf scenarios, identifying the batching strategy suited to each operational constraint.
-- [ ] **Adaptive windows**: Explain why the illustrated window heuristic shortens the window as traffic increases, even though batches grow. What must a load test verify before deploying that choice?
+- [ ] **Adaptive windows**: For a desired expected batch count, explain why higher traffic permits a shorter formation window. How would you check whether the realized batches can keep up with arrivals, and what must a load test verify before accepting the configuration?
 - [ ] **When not to batch**: Name a latency target, runtime limitation, or memory condition under which a batching window of zero is the right configuration.
 
 :::
@@ -4786,8 +4694,8 @@ class CapacityPlanningRecap:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     cp_peak_qps_value = 5000 * (count / second)  # scenario assumption: peak traffic
-    cp_service_ms_value = 5 * ms  # scenario assumption: TensorRT FP16 service time
-    cp_p99_target_ms_value = 50 * ms  # scenario assumption: p99 latency SLO
+    cp_service_ms_value = 5 * ms  # scenario assumption: reference batch-1 GPU service time
+    cp_p99_target_ms_value = 50 * ms  # scenario assumption: queue-plus-GPU p99 subbudget
     cp_single_gpu_rate_value = (1 * count / cp_service_ms_value).to(count / second)
     cp_headroom_factor_value = 1.3
     mm1_p99_factor_value = 4.6
@@ -4816,7 +4724,7 @@ class CapacityPlanningRecap:
     cp_batched_final_ceil_str = fmt_count(cp_batched_final_ceil_value, commas=False)
 ```
 
-The worked example in @sec-model-serving-queuing-theory-tail-latency-29a6 demonstrates the complete workflow: starting from a 50 ms p99 SLO and 5,000 QPS target, deriving the M/M/1 utilization threshold of `{python} CapacityPlanningRecap.cp_rho_safe_pct_str` from @eq-p99-latency, and determining GPU count with headroom of `{python} CapacityPlanningRecap.cp_final_ceil_str`. That count assumes batch-1 service. For an illustrative capacity comparison, applying the same utilization factor to the saturated batched rate of `{python} CapacityPlanningRecap.cp_batched_rate_img_per_s_str` in @tbl-model-serving-resnet-cloud-cost gives `{python} CapacityPlanningRecap.cp_batched_gpus_ceil_str` V100s before headroom and `{python} CapacityPlanningRecap.cp_batched_final_ceil_str` after; the batch-1 plan needed `{python} CapacityPlanningRecap.cp_gpus_ceil_str` and `{python} CapacityPlanningRecap.cp_final_ceil_n_str`.
+The worked example in @sec-model-serving-queuing-theory-tail-latency-29a6 demonstrates the complete workflow: starting from a 50 ms queue-plus-GPU p99 subbudget, a separately reserved outside-worker allowance, and a 5,000 QPS target, deriving the M/M/1 utilization threshold of `{python} CapacityPlanningRecap.cp_rho_safe_pct_str` from @eq-p99-latency, and determining GPU count with headroom of `{python} CapacityPlanningRecap.cp_final_ceil_str`. That count assumes batch-1 service. For an illustrative capacity comparison, applying the same utilization factor to the saturated batched rate of `{python} CapacityPlanningRecap.cp_batched_rate_img_per_s_str` in @tbl-model-serving-resnet-cloud-cost gives `{python} CapacityPlanningRecap.cp_batched_gpus_ceil_str` V100s before headroom and `{python} CapacityPlanningRecap.cp_batched_final_ceil_str` after; the batch-1 plan needed `{python} CapacityPlanningRecap.cp_gpus_ceil_str` and `{python} CapacityPlanningRecap.cp_final_ceil_n_str`.
 
 This arithmetic compares assumed capacities under different service models; it does not establish equal p99 latency. Batching changes service times, realized batch sizes, and waiting distributions, so the factor derived for unbatched M/M/1 service cannot by itself certify the batched plan. The throughput opportunity is the batching gain of @sec-model-serving-throughput-optimization-18d1; its usable capacity requires a load test including formation delay and worker backlog. This scenario provisions peak load plus 30 percent headroom; production margins depend on the workload and policy. Autoscaling can reduce costs during low-traffic periods while meeting latency objectives during peaks; @sec-ml-operations-infrastructure-management-bf8f develops the operational policy layer around these serving calculations. Capacity must be sized for requests that meet the SLO, not for raw request volume.
 
@@ -5170,7 +5078,9 @@ With 4-bit weights occupying `{python} LlmServingCalc.model_weight_gb_str`, the 
 
 #### Unit economics {#sec-model-serving-unit-economics-b685}
 
-Consider a representative H100 SXM5 rental cost of approximately `{python} LlmServingCalc.hourly_cost_str`. For this calculation, token throughput counts both prompt and generated output tokens, totaling `{python} LlmServingCalc.tokens_per_req_str` per completed request. Taking the minimum of isolated prefill capacity and KV-residency capacity gives an optimistic throughput ceiling of `{python} LlmServingCalc.m_tokens_per_hour_str` and a lower-bound unit cost of `{python} LlmServingCalc.cost_per_million_tokens_usd_str`. Under the assumed prefill rate and KV-residency capacity, the figure is an optimistic cost floor for this workload on this GPU. Contention between prefill and decode and the extra capacity of batched decode are outside the model, so realized cost must be evaluated under the service's actual throughput conditions.
+Consider a representative H100 SXM5 rental cost of approximately `{python} LlmServingCalc.hourly_cost_str` and an assumed isolated prefill rate of 10,000 prompt tokens/s. Dividing that rate by the 1,000-token prompt gives the prefill request capacity. For this calculation, each completed request counts both prompt and generated output tokens, totaling `{python} LlmServingCalc.tokens_per_req_str`. Multiplying the limiting request rate by this token count and the seconds in an hour gives `{python} LlmServingCalc.m_tokens_per_hour_str`; dividing the hourly rental cost by that throughput gives `{python} LlmServingCalc.cost_per_million_tokens_usd_str`.
+
+The comparison also converts KV residency into a request rate by dividing the resident request count by the modeled time to complete prefill and decode. It assumes that all those resident requests can advance at the modeled per-request pace, which is an optimistic concurrency assumption rather than a measured decode capacity. Under these assumptions, isolated prefill supplies the smaller rate and sets the displayed cost floor. Shared prefill/decode contention, batched decode timing, runtime workspace, and SLO-qualified throughput determine whether the service realizes that rate; memory fit alone does not establish it.
 
 For large language models, memory capacity\index{Memory!capacity, LLM throughput}\index{KV cache!memory capacity} (the size of the unallocated VRAM dedicated to the KV cache) determines maximum concurrent residency, while prefill compute and decode bandwidth determine realized token throughput and cost under a specific traffic mix. Memory bandwidth\index{Memory bandwidth!LLM latency}\index{HBM!memory bandwidth} bounds low-batch decode latency; larger batches amortize parameter movement and shift the limit toward compute or KV-cache traffic.
 
