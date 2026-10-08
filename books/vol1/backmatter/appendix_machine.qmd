@@ -1,5 +1,6 @@
 ---
 engine: jupyter
+notation-local: [\CompletedRequestCount, \CumulativeArrivals, \CumulativeCompletions, \DeviceRequestCapacity, \InstantaneousRequestOccupancy, \IntervalMeanOccupancy, \LatencyBandwidthCrossoverSize, \ObservationIntervalLength, \RequestResidenceTime]
 ---
 
 # Machine Foundations {#sec-appdx-machine-foundations dropcap="chapter-opening"}
@@ -10,7 +11,7 @@ A datasheet reports peak throughput; a workload almost never reaches it. Closing
 
 This appendix is designed as a reference. When diagnosing performance issues, use this appendix to translate a vague symptom ("it’s slow") into a specific constraint ("memory bound at batch size one") and then choose the lever that can actually move.
 
-Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\Bandwidth$ for bandwidth).
+Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ for bandwidth).
 
 - **Establish the hardware vocabulary**: Start with the storage tiers in @sec-appdx-machine-foundations-memory-hierarchy-2278, then distinguish transfer delay from transfer rate in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320. The units check in @sec-appdx-machine-foundations-dimensional-analysis-76b3 prepares those quantities for the roofline calculation.
 - **Sanity-check feasibility**: Start with @sec-appdx-machine-foundations-numbers-know-b531 for order-of-magnitude numbers.
@@ -352,21 +353,21 @@ Every operation has an **arithmetic intensity**\index{Arithmetic intensity!appen
 :::
 
 The **ridge point**\index{Ridge point!appendix refresher} determines the hardware's balance. Formally, when computation and data movement execute under the overlapped iron law, idealized wall-clock time is bounded below by the critical path:
-$$ T \geq \max\left( \frac{O}{\PeakRate}, \frac{\DataVolume}{\Bandwidth} \right) $$
-Attainable throughput $\AttainableComputeRate = O / T$ is therefore bounded by:
-$$ \AttainableComputeRate \leq \frac{O}{\max\left( \frac{O}{\PeakRate}, \frac{\DataVolume}{\Bandwidth} \right)} = \min\left( \PeakRate, \frac{O}{\DataVolume} \times \Bandwidth \right) = \min(\PeakRate, I \times \Bandwidth) $$
-where $I = O / \DataVolume$ is operational intensity at the DRAM interface. The ridge point $\RooflineRidgePoint$ is the transition intensity where the compute and bandwidth ceilings meet:
+$$ \Time\geq \max\left( \frac{\Operations}{\PeakRate}, \frac{\DataVolume}{\Bandwidth} \right) $$
+Attainable throughput $\AttainableComputeRate = \Operations/ \Time$ is therefore bounded by:
+$$ \AttainableComputeRate \leq \frac{\Operations}{\max\left( \frac{\Operations}{\PeakRate}, \frac{\DataVolume}{\Bandwidth} \right)} = \min\left( \PeakRate, \frac{\Operations}{\DataVolume} \times \Bandwidth \right) = \min(\PeakRate, \ArithmeticIntensity\times \Bandwidth) $$
+where $\ArithmeticIntensity= \Operations/ \DataVolume$ is operational intensity at the DRAM interface. The ridge point $\RooflineRidgePoint$ is the transition intensity where the compute and bandwidth ceilings meet:
 $$ \PeakRate = \RooflineRidgePoint \times \Bandwidth \implies \RooflineRidgePoint = \frac{\PeakRate}{\Bandwidth} $$
 If a workload's operational intensity falls below $\RooflineRidgePoint$, it is memory bound; if above, it is compute bound.
 
 ::: {#psp-appendix-machine-batch-size-arithmetic-intensity .callout-perspective title="Batch size controls arithmetic intensity"}
 
-For matrix multiplications, arithmetic intensity scales with the batch dimension. For $\mathbf{Y} = \mathbf{X}\mathbf{W}$, where $\mathbf{X}$ is $(B\times \LayerInputWidth)$ and $\mathbf{W}$ is $(\LayerInputWidth\times \LayerOutputWidth)$:
+For matrix multiplications, arithmetic intensity scales with the batch dimension. For $\LayerOutputMatrix= \LayerInputMatrix\WeightMatrix$, where $\LayerInputMatrix$ is $(\BatchSize\times \LayerInputWidth)$ and $\WeightMatrix$ is $(\LayerInputWidth\times \LayerOutputWidth)$:
 
-- **FLOPs**: $2 \times B \times \LayerInputWidth \times \LayerOutputWidth$ (multiply-adds).
-- **Bytes**: Moving $\mathbf{X}$, $\mathbf{W}$, and $\mathbf{Y}$ costs approximately $\ElementStorageSize(B \LayerInputWidth + \LayerInputWidth\LayerOutputWidth + B \LayerOutputWidth)$ bytes.
+- **FLOPs**: $2 \times \BatchSize\times \LayerInputWidth \times \LayerOutputWidth$ (multiply-adds).
+- **Bytes**: Moving $\LayerInputMatrix$, $\WeightMatrix$, and $\LayerOutputMatrix$ costs approximately $\ElementStorageSize(\BatchSize\LayerInputWidth + \LayerInputWidth\LayerOutputWidth + \BatchSize\LayerOutputWidth)$ bytes.
 
-Doubling $B$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving, although activation traffic, cache behavior, shape, precision, and the ridge point determine whether it reaches the compute ceiling.
+Doubling $\BatchSize$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving, although activation traffic, cache behavior, shape, precision, and the ridge point determine whether it reaches the compute ceiling.
 
 :::
 
@@ -417,10 +418,10 @@ Two common operations fall on opposite sides of that ridge. General matrix multi
 The Roofline Model helps diagnose *where* a bottleneck lies. Before applying any performance equation, however, it must be verified as physically meaningful. Dimensional analysis provides this sanity check: any valid equation must be **dimensionally homogeneous**\index{Dimensional homogeneity!appendix refresher}—every term must resolve to the same units. If they do not, the equation contains an error.
 
 For serialized phases, consider the iron law of ML systems\index{Iron law of ML systems!appendix refresher} (principle \ref{pri-iron-law}) introduced in @sec-introduction-iron-law-ml-systems-c32a:
-$$ T = \frac{\DataVolume}{\Bandwidth} + \frac{O}{\PeakRate \cdot \EfficiencyHw} + \Latency $$
+$$ \Time= \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency $$
 
 Correctness is verified by confirming that every term resolves to time (seconds):
-$$ T [\text{s}] = \underbrace{ \frac{\DataVolume [\text{bytes}]}{\Bandwidth [\text{bytes/s}]} }_{\text{seconds}} + \underbrace{ \frac{O [\text{FLOPs}]}{\PeakRate [\text{FLOP/s}] \cdot \EfficiencyHw [1]} }_{\text{seconds}} + \underbrace{ \Latency [\text{s}] }_{\text{seconds}} $$
+$$ \Time[\text{s}] = \underbrace{ \frac{\DataVolume [\text{bytes}]}{\Bandwidth [\text{bytes/s}]} }_{\text{seconds}} + \underbrace{ \frac{\Operations[\text{FLOPs}]}{\PeakRate [\text{FLOP/s}] \cdot \EfficiencyHw [1]} }_{\text{seconds}} + \underbrace{ \Latency [\text{s}] }_{\text{seconds}} $$
 
 *   **Data term**: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \text{s}$
 *   **Compute term**: $\frac{\text{FLOPs}}{\text{FLOP/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOP}} = \text{s}$
@@ -438,14 +439,14 @@ Parallelization is the primary tool for scaling ML, but its limits depend on *ho
 
 **Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster a fixed-size problem runs as processors are added.
 
-Amdahl's law [@amdahl1967] states that speedup is limited by the serial fraction of the task.[^fn-amdahl-scaling-appendix] Let $T(1) = 1$ be normalized single-processor execution time, composed of serial fraction $1-\ParallelFraction$ and parallelizable fraction $\ParallelFraction$. If $\WorkerCountWorkers$ processors execute the parallel fraction with linear scaling and zero communication overhead, execution time on $\WorkerCountWorkers$ processors is:
-$$ T(\WorkerCountWorkers) = (1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCountWorkers} $$
+Amdahl's law [@amdahl1967] states that speedup is limited by the serial fraction of the task.[^fn-amdahl-scaling-appendix] Let $\Time(1) = 1$ be normalized single-processor execution time, composed of serial fraction $1-\ParallelFraction$ and parallelizable fraction $\ParallelFraction$. If $\WorkerCount$ processors execute the parallel fraction with linear scaling and zero communication overhead, execution time on $\WorkerCount$ processors is:
+$$ \Time(\WorkerCount) = (1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount} $$
 The resulting theoretical speedup is:
-$$ \text{Speedup}(\WorkerCountWorkers) = \frac{T(1)}{T(\WorkerCountWorkers)} = \frac{1}{(1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCountWorkers}} $$
+$$ \text{Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \frac{1}{(1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount}} $$
 
 [^fn-amdahl-scaling-appendix]: **Gene Amdahl (1922–2015)**\index{Amdahl, Gene|seealso{Amdahl's law}}: A legendary computer architect at IBM, where he was the chief architect of the System/360. He later founded Amdahl Corporation to compete with IBM in the mainframe market.
 
-As $\WorkerCountWorkers \to \infty$, the term $\frac{\ParallelFraction}{\WorkerCountWorkers} \to 0$, and the speedup converges to $1/(1-\ParallelFraction)$.
+As $\WorkerCount \to \infty$, the term $\frac{\ParallelFraction}{\WorkerCount} \to 0$, and the speedup converges to $1/(1-\ParallelFraction)$.
 
 ```{python}
 #| echo: false
@@ -528,9 +529,9 @@ class AmdahlExample:
     amdahl_inf_speedup_mult_str = fmt_multiple(amdahl_inf, precision=0, commas=False)
 ```
 
-*   With $\WorkerCountWorkers=1$, speedup is 1.
-*   With $\WorkerCountWorkers=$ `{python} AmdahlSetup.n_8_str`, speedup is 1/(`{python} AmdahlSetup.s_str` + `{python} AmdahlSetup.p_str`/`{python} AmdahlSetup.n_8_str`) ≈ `{python} AmdahlExample.amdahl_8_speedup_mult_str`.
-*   With $\WorkerCountWorkers \to \infty$, speedup is capped at 1/`{python} AmdahlSetup.s_str` = `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
+*   With $\WorkerCount=1$, speedup is 1.
+*   With $\WorkerCount=$ `{python} AmdahlSetup.n_8_str`, speedup is 1/(`{python} AmdahlSetup.s_str` + `{python} AmdahlSetup.p_str`/`{python} AmdahlSetup.n_8_str`) ≈ `{python} AmdahlExample.amdahl_8_speedup_mult_str`.
+*   With $\WorkerCount \to \infty$, speedup is capped at 1/`{python} AmdahlSetup.s_str` = `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
 
 No matter how many accelerators are added, this fixed workload cannot run faster than `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
 
@@ -540,12 +541,12 @@ No matter how many accelerators are added, this fixed workload cannot run faster
 
 This is the reality of Large Language Models. Rather than using 1,000 accelerators to train a model on a small dataset in milliseconds, they are used to train on a dataset 1,000$\times$ larger in reasonable time.
 
-For $\WorkerCountWorkers$ processors, let $1-\ParallelFraction$ be the serial fraction of execution time measured on those processors for the scaled workload, and $\ParallelFraction$ the parallel fraction. Gustafson's law [@gustafson1988] derives "scaled speedup" by asking how long that scaled problem would take on a single processor. On $\WorkerCountWorkers$ processors, normalized runtime is $T(\WorkerCountWorkers) = (1-\ParallelFraction) + \ParallelFraction = 1$. Executing the same total work on a single processor requires running the parallel fraction sequentially, taking $T(1) = (1-\ParallelFraction) + \WorkerCountWorkers \cdot \ParallelFraction = \WorkerCountWorkers - (1-\ParallelFraction)(\WorkerCountWorkers-1)$. The resulting scaled speedup is:
-$$ \text{Scaled Speedup}(\WorkerCountWorkers) = \frac{T(1)}{T(\WorkerCountWorkers)} = \WorkerCountWorkers - (1-\ParallelFraction)(\WorkerCountWorkers - 1) $$
+For $\WorkerCount$ processors, let $1-\ParallelFraction$ be the serial fraction of execution time measured on those processors for the scaled workload, and $\ParallelFraction$ the parallel fraction. Gustafson's law [@gustafson1988] derives "scaled speedup" by asking how long that scaled problem would take on a single processor. On $\WorkerCount$ processors, normalized runtime is $\Time(\WorkerCount) = (1-\ParallelFraction) + \ParallelFraction = 1$. Executing the same total work on a single processor requires running the parallel fraction sequentially, taking $\Time(1) = (1-\ParallelFraction) + \WorkerCount \cdot \ParallelFraction = \WorkerCount - (1-\ParallelFraction)(\WorkerCount-1)$. The resulting scaled speedup is:
+$$ \text{Scaled Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \WorkerCount - (1-\ParallelFraction)(\WorkerCount - 1) $$
 
 [^fn-gustafsons-law-scaling]: **John Gustafson**\index{Gustafson, John|seealso{Gustafson's law}}: A computer scientist known for his work in parallel computing and for introducing the Unum (universal number) format. His law was a direct response to the perceived "limits" of Amdahl's Law when applied to massive scale.
 
-Because the parallel part grows linearly with $\WorkerCountWorkers$ while the serial fraction $1-\ParallelFraction$ remains fixed, weak scaling can keep efficiency high as the problem grows.
+Because the parallel part grows linearly with $\WorkerCount$ while the serial fraction $1-\ParallelFraction$ remains fixed, weak scaling can keep efficiency high as the problem grows.
 
 ```{python}
 #| echo: false
@@ -626,9 +627,9 @@ class GustafsonExample:
     n_1000_minus_1_str = fmt(processor_count_1000 - 1, precision=0, commas=False)
 ```
 
-*   With $\WorkerCountWorkers=1$, speedup is 1.
-*   With $\WorkerCountWorkers=$ `{python} GustafsonExample.n_8_g_str`, Scaled Speedup is `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_8_g_minus_1_str`) = `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonExample.gustafson_8_serial_str` = `{python} GustafsonExample.gustafson_8_speedup_mult_str`.
-*   With $\WorkerCountWorkers=$ `{python} GustafsonExample.n_1000_str`, Scaled Speedup is `{python} GustafsonExample.n_1000_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_1000_minus_1_str`) ≈ `{python} GustafsonExample.gustafson_1000_speedup_mult_str`.
+*   With $\WorkerCount=1$, speedup is 1.
+*   With $\WorkerCount=$ `{python} GustafsonExample.n_8_g_str`, Scaled Speedup is `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_8_g_minus_1_str`) = `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonExample.gustafson_8_serial_str` = `{python} GustafsonExample.gustafson_8_speedup_mult_str`.
+*   With $\WorkerCount=$ `{python} GustafsonExample.n_1000_str`, Scaled Speedup is `{python} GustafsonExample.n_1000_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_1000_minus_1_str`) ≈ `{python} GustafsonExample.gustafson_1000_speedup_mult_str`.
 
 In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads.
 
@@ -693,7 +694,7 @@ class TrainingTimeRef:
         f"\\text{{Throughput}} = {int(n_gpus)} \\times ({sci_latex(x_flops_q.to(flop/second), 2)}) \\times {u_mfu:.2f} \\approx {sci_latex(throughput.to(flop/second), 3)} \\text{{ FLOP/s}}"
     )
     time_math = fmt_math(
-        f"T = \\frac{{{sci_latex(total_flops.to(flop), 1)}}}{{{sci_latex(throughput.to(flop/second), 3)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}"
+        f"\\Time = \\frac{{{sci_latex(total_flops.to(flop), 1)}}}{{{sci_latex(throughput.to(flop/second), 3)}}} \\approx {fmt(t_seconds_value, precision=1, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=1, commas=True)} \\text{{ minutes}}"
     )
 ```
 
@@ -704,14 +705,14 @@ The same scaling lens turns model size, data size, hardware count, and utilizati
 **Problem**: How long does dense-transformer training take for a stated model size, token count, accelerator count, peak rate, and utilization?
 
 **Math**:
-$$ T \approx \frac{6 \cdot P \cdot D}{\AcceleratorCountGpu \cdot \PeakRate \cdot \EfficiencyHw} $$
+$$ \Time\approx \frac{6 \cdot \Parameters\cdot \DatasetSize}{\AcceleratorCount \cdot \PeakRate \cdot \EfficiencyHw} $$
 
 **Variables**:
 
-*   **Training FLOP factor**: The factor 6 derives from $2P\text{ FLOP/token}$ for the forward pass and $4P\text{ FLOP/token}$ for the backward pass ($2P$ for activation gradients and $2P$ for weight gradients), yielding $6PD\text{ FLOPs}$ total across $D$ training tokens.
-*   **$P$**: Number of model parameters.
-*   **$D$**: Number of training tokens.
-*   **$\AcceleratorCountGpu$**: Number of GPUs.
+*   **Training FLOP factor**: The factor 6 derives from $2\Parameters\text{ FLOP/token}$ for the forward pass and $4\Parameters\text{ FLOP/token}$ for the backward pass ($2\Parameters$ for activation gradients and $2\Parameters$ for weight gradients), yielding $6\Parameters \DatasetSize\text{ FLOPs}$ total across $\DatasetSize$ training tokens.
+*   **$\Parameters$**: Number of model parameters.
+*   **$\DatasetSize$**: Number of training tokens.
+*   **$\AcceleratorCount$**: Number of GPUs.
 *   **$\PeakRate$**: Peak FLOP/s of one accelerator.
 *   **$\EfficiencyHw$**: Hardware utilization, typically 30 percent–50 percent in this training estimate.
 
@@ -726,12 +727,12 @@ $$ T \approx \frac{6 \cdot P \cdot D}{\AcceleratorCountGpu \cdot \PeakRate \cdot
 
 ### Little's Law {#sec-appdx-machine-foundations-littles-law-21a3}
 
-For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($\RequestConcurrency$), mean arrival rate ($\ArrivalRate$), and mean time in system ($\RequestTimeInSystemLat$):[^fn-littles-law-appendix]
-$$ \RequestConcurrency = \ArrivalRate \times \RequestTimeInSystemLat $$
+For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($\RequestConcurrency$), mean arrival rate ($\ArrivalRate$), and mean time in system ($\RequestTimeInSystem$):[^fn-littles-law-appendix]
+$$ \RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem $$
 
-The law follows from operational conservation of requests over any observation interval $[0, T]$. Let $A(t)$ denote cumulative arrivals and $C(t)$ cumulative completions, so the instantaneous in-flight queue occupancy is $Q(t) = A(t) - C(t)$. The average number of requests in the system over $[0, T]$ is $\bar{Q} = \frac{1}{T}\int_0^T Q(t)\,dt$. The total accumulated request-time $\int_0^T Q(t)\,dt$ equals the sum of residence times $\sum_{i=1}^{N(T)} W_i$ of all $N(T)$ requests completed by time $T$ (plus boundary terms that vanish as $T \to \infty$). Dividing both sides by $T$:
-$$ \bar{Q} = \frac{1}{T}\int_0^T Q(t)\,dt = \frac{N(T)}{T} \cdot \frac{1}{N(T)}\sum_{i=1}^{N(T)} W_i $$
-In the limit as $T \to \infty$ for a stable queue, $\lim_{T\to\infty} \frac{N(T)}{T} = \ArrivalRate$ and $\lim_{N\to\infty} \frac{1}{N}\sum_{i=1}^N W_i = \RequestTimeInSystemLat$, yielding $\RequestConcurrency = \ArrivalRate \times \RequestTimeInSystemLat$ regardless of arrival distribution or service-time distribution.
+The law follows from operational conservation of requests over any observation interval $[0, \ObservationIntervalLength]$. Let $\CumulativeArrivals(\TimeInstant)$ denote cumulative arrivals and $\CumulativeCompletions(\TimeInstant)$ cumulative completions, so the instantaneous in-flight queue occupancy is $\InstantaneousRequestOccupancy(\TimeInstant) = \CumulativeArrivals(\TimeInstant) - \CumulativeCompletions(\TimeInstant)$. The average number of requests in the system over $[0, \ObservationIntervalLength]$ is $\IntervalMeanOccupancy= \frac{1}{\ObservationIntervalLength}\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$. The total accumulated request-time $\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$ equals the sum of residence times $\sum_{i=1}^{\CompletedRequestCount(\ObservationIntervalLength)} \RequestResidenceTime_i$ of all $\CompletedRequestCount(\ObservationIntervalLength)$ requests completed by time $\ObservationIntervalLength$ (plus boundary terms that vanish as $\ObservationIntervalLength\to \infty$). Dividing both sides by $\ObservationIntervalLength$:
+$$ \IntervalMeanOccupancy= \frac{1}{\ObservationIntervalLength}\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant= \frac{\CompletedRequestCount(\ObservationIntervalLength)}{\ObservationIntervalLength} \cdot \frac{1}{\CompletedRequestCount(\ObservationIntervalLength)}\sum_{i=1}^{\CompletedRequestCount(\ObservationIntervalLength)} \RequestResidenceTime_i $$
+In the limit as $\ObservationIntervalLength\to \infty$ for a stable queue, $\lim_{\ObservationIntervalLength\to\infty} \frac{\CompletedRequestCount(\ObservationIntervalLength)}{\ObservationIntervalLength} = \ArrivalRate$ and $\lim_{\CompletedRequestCount\to\infty} \frac{1}{\CompletedRequestCount}\sum_{i=1}^\CompletedRequestCount \RequestResidenceTime_i = \RequestTimeInSystem$, yielding $\RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem$ regardless of arrival distribution or service-time distribution.
 
 [^fn-littles-law-appendix]: **John Little**\index{Little, John|seealso{Little's law}}: An Institute Professor at MIT and a pioneer in the field of operations research. His law, proved in 1961, is fundamental to queuing theory and is used across fields from manufacturing to computer network analysis.
 
@@ -783,13 +784,13 @@ class LittlesLawExample:
     total_mem_gb_str = fmt_memory(total_mem, unit=GB, precision=0, commas=False)
     max_concurrent_str = fmt(max_concurrent_value, precision=0, commas=False)
     max_throughput_math = fmt_math(
-        f"Q_{{\\text{{req,max}}}}/T_{{\\text{{lat}}}} = {max_concurrent_value}/{w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}"
+        f"\\DeviceRequestCapacity/\\RequestTimeInSystem = {max_concurrent_value}/{w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}"
     )
 ```
 
 To see this in practice, consider sustaining `{python} LittlesLawExample.lambda_qps_str` with `{python} LittlesLawExample.w_latency_ms_str` average latency. The law dictates that the system must support `{python} LittlesLawExample.lambda_qps_value_str` $\times$ `{python} LittlesLawExample.w_latency_s_str` = `{python} LittlesLawExample.L_concurrent_str` concurrent requests.
 
-This sizes worker pools, but memory needs another assumption. If every in-system request simultaneously holds `{python} LittlesLawExample.mem_per_req_gb_str` of device state, the average population implies `{python} LittlesLawExample.total_mem_gb_str`; queued requests may instead stay in host memory or share batched state. If `{python} LittlesLawExample.max_concurrent_str` device slots ($Q_{\text{req,max}}$, the most requests the device can hold at once) each remain occupied for `{python} LittlesLawExample.w_latency_ms_str`, their throughput proxy is `{python} LittlesLawExample.max_throughput_math`; Little's Law alone sets no physical maximum.
+This sizes worker pools, but memory needs another assumption. If every in-system request simultaneously holds `{python} LittlesLawExample.mem_per_req_gb_str` of device state, the average population implies `{python} LittlesLawExample.total_mem_gb_str`; queued requests may instead stay in host memory or share batched state. If `{python} LittlesLawExample.max_concurrent_str` device slots ($\DeviceRequestCapacity$, the most requests the device can hold at once) each remain occupied for `{python} LittlesLawExample.w_latency_ms_str`, their throughput proxy is `{python} LittlesLawExample.max_throughput_math`; Little's Law alone sets no physical maximum.
 
 These physics-based models—Roofline, Amdahl, Gustafson, and Little—diagnose *where* bottlenecks lie. Translating those diagnoses into actionable optimizations, however, requires understanding the concrete hardware structures that impose them: caches, memory buses, and interconnects.
 
@@ -924,13 +925,13 @@ The first step in systems intuition is understanding the cost of distance. @Tbl-
 
 Latency measures the wait for the *first* byte; bandwidth measures how many bytes follow. @Tbl-hardware-cheatsheet provides the constants for back-of-the-envelope "Roofline" calculations. These represent the "standard units of compute" for the current era of machine learning.
 
-| **Spec**             |                      **NVIDIA H100 (SXM)**                       |                                  **Google TPU v5p**                                  | **System Impact**                      |
-|:---------------------|:----------------------------------------------------------------:|:------------------------------------------------------------------------------------:|:---------------------------------------|
-| **BF16 Peak**        |    `{python} ArchReferenceTables.h100_flops_tflop_per_s_str`     |              `{python} ArchReferenceTables.tpuv5_flops_tflop_per_s_str`              | The "Speed Limit" ($\PeakRate$)        |
-| **Memory Bandwidth** |       `{python} ArchReferenceTables.h100_bw_tb_per_s_str`        |                 `{python} ArchReferenceTables.tpuv5_bw_tb_per_s_str`                 | The "Width of the Pipe" ($\Bandwidth$) |
-| **HBM Capacity**     |          `{python} ArchReferenceTables.h100_cap_gb_str`          |                   `{python} ArchReferenceTables.tpuv5_cap_gib_str`                   | Max Model Size ($P$)/Batch Size ($B$)  |
-| **On-chip SRAM**     |         `{python} ArchReferenceTables.h100_l2_mb_str` L2         |             `{python} ArchReferenceTables.tpuv5_sram_mib_str` VMEM/chip              | Critical for Operator Fusion           |
-| **Interconnect**     | `{python} ArchReferenceTables.h100_nvlink_gb_per_s_str` (NVLink) | `{python} ArchReferenceTables.tpuv5_ici_gb_per_s_str` (Inter-Chip Interconnect, ICI) | Determines Model Parallelism Scaling   |
+| **Spec**             |                      **NVIDIA H100 (SXM)**                       |                                  **Google TPU v5p**                                  | **System Impact**                                        |
+|:---------------------|:----------------------------------------------------------------:|:------------------------------------------------------------------------------------:|:---------------------------------------------------------|
+| **BF16 Peak**        |    `{python} ArchReferenceTables.h100_flops_tflop_per_s_str`     |              `{python} ArchReferenceTables.tpuv5_flops_tflop_per_s_str`              | The "Speed Limit" ($\PeakRate$)                          |
+| **Memory Bandwidth** |       `{python} ArchReferenceTables.h100_bw_tb_per_s_str`        |                 `{python} ArchReferenceTables.tpuv5_bw_tb_per_s_str`                 | The "Width of the Pipe" ($\Bandwidth$)                   |
+| **HBM Capacity**     |          `{python} ArchReferenceTables.h100_cap_gb_str`          |                   `{python} ArchReferenceTables.tpuv5_cap_gib_str`                   | Max Model Size ($\Parameters$)/Batch Size ($\BatchSize$) |
+| **On-chip SRAM**     |         `{python} ArchReferenceTables.h100_l2_mb_str` L2         |             `{python} ArchReferenceTables.tpuv5_sram_mib_str` VMEM/chip              | Critical for Operator Fusion                             |
+| **Interconnect**     | `{python} ArchReferenceTables.h100_nvlink_gb_per_s_str` (NVLink) | `{python} ArchReferenceTables.tpuv5_ici_gb_per_s_str` (Inter-Chip Interconnect, ICI) | Determines Model Parallelism Scaling                     |
 
 : **Reference Specs**: Key constants for quantitative analysis. Always check specific datasheets; HBM capacity follows vendor units, and interconnect bandwidth is aggregate bidirectional, so topology and direction matter. {#tbl-hardware-cheatsheet tbl-colwidths="[22,23,20,35]"}
 
@@ -1026,12 +1027,12 @@ In the cited 45 nm reference, fetching a 32-bit value from DRAM costs roughly `{
 ### Bandwidth vs. latency {#sec-appdx-machine-foundations-bandwidth-vs-latency-5320}
 
 Bandwidth\index{Bandwidth!latency trade-off} (throughput) and latency\index{Latency!bandwidth trade-off} (delay) are distinct constraints. For data volume $\DataVolume$ sent over effective bandwidth $\Bandwidth$ with fixed path latency $\Latency$, and assuming the latency and serialization costs do not overlap, total transfer time is:
-$$ T = \Latency + \frac{\DataVolume}{\Bandwidth} $$
+$$ \Time= \Latency + \frac{\DataVolume}{\Bandwidth} $$
 
 The crossover point is the transfer size where the two terms are equal:
-$$ D_{\text{vol,cross}} = \Latency \times \Bandwidth $$
+$$ \LatencyBandwidthCrossoverSize = \Latency \times \Bandwidth $$
 
-For transfers below $D_{\text{vol,cross}}$ (for example, small request or control messages), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
+For transfers below $\LatencyBandwidthCrossoverSize$ (for example, small request or control messages), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
 
 ```{python}
 #| echo: false
@@ -1209,12 +1210,12 @@ The choice of numerical format is a direct application of the iron law of ML sys
 
 Quantization\index{Quantization!appendix refresher} maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers. Two approaches dominate.
 
-For symmetric quantization\index{Quantization!symmetric}, let $\alpha = \max |x|$ over the calibrated range, assume $x$ is clipped to $[-\alpha, \alpha]$, and set the scale $s = \alpha/127$. The signed INT8 code is:
-$$ x_q = \text{round}\left(\frac{x}{s}\right) $$
+For symmetric quantization\index{Quantization!symmetric}, let $\SymmetricClippingThreshold= \max |\QuantizerInput|$ over the calibrated range, assume $\QuantizerInput$ is clipped to $[-\SymmetricClippingThreshold, \SymmetricClippingThreshold]$, and set the scale $\QuantizationScale= \SymmetricClippingThreshold/127$. The signed INT8 code is:
+$$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput}{\QuantizationScale}\right) $$
 This mapping works well for weight distributions centered around zero.
 
-Asymmetric quantization\index{Quantization!asymmetric} handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. Let $\alpha$ and $\beta$ bound the calibrated range, clip $x$ to $[\alpha, \beta]$, and set the scale $s = (\beta - \alpha)/255$. A common unsigned 8-bit mapping is:
-$$ x_q = \text{round}\left(\frac{x - \alpha}{s}\right) $$
+Asymmetric quantization\index{Quantization!asymmetric} handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. Let $\ClippingRangeLowerBound$ and $\ClippingRangeUpperBound$ bound the calibrated range, clip $\QuantizerInput$ to $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$, and set the scale $\QuantizationScale= (\ClippingRangeUpperBound- \ClippingRangeLowerBound)/255$. A common unsigned 8-bit mapping is:
+$$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput- \ClippingRangeLowerBound}{\QuantizationScale}\right) $$
 
 The choice between symmetric and asymmetric quantization depends on the tensor's distribution and has measurable accuracy implications.
 

@@ -35,15 +35,15 @@ Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network a
 
 :::
 
-For a batched inference system with batch size $B$, service time becomes a function of batch size. Let $\BatchServiceTimeSvc$ denote the time to process a batch of $B$ requests. From the physics of batching (@sec-inference-scale-batching-strategies-scale-6733), @eq-service-time-batch models this as:
+For a batched inference system with batch size $B$, service time becomes a function of batch size. Let $\BatchServiceTime(\BatchSize)$ denote the time to process a batch of $B$ requests. From the physics of batching (@sec-inference-scale-batching-strategies-scale-6733), @eq-service-time-batch models this as:
 
-$$\BatchServiceTimeSvc = T_{\text{fixed}} + t_{\text{req}} \cdot B$$ {#eq-service-time-batch}
+$$\BatchServiceTime(\BatchSize) = T_{\text{fixed}} + t_{\text{req}} \cdot B$$ {#eq-service-time-batch}
 
 where $T_{\text{fixed}}$ represents fixed service overhead (kernel launch, weight loading from high-bandwidth memory (HBM)) and $t_{\text{req}}$ represents marginal per-request computation time. This linear model captures the first-order behavior observed in production systems, though actual service times may exhibit slight sublinearity due to memory bandwidth saturation at large batch sizes.
 
 The **Effective Service Rate**\index{Effective Service Rate} for batched processing is:
 
-$$\EffectiveServiceRate = \frac{B}{\BatchServiceTimeSvc} = \frac{B}{T_{\text{fixed}} + t_{\text{req}} \cdot B}$$
+$$\EffectiveServiceRate(\BatchSize) = \frac{B}{\BatchServiceTime(\BatchSize)} = \frac{B}{T_{\text{fixed}} + t_{\text{req}} \cdot B}$$
 
 The effective rate increases with batch size, approaching the asymptotic limit $1/t_{\text{req}}$ as $B \to \infty$.
 
@@ -79,13 +79,13 @@ When batches reliably fill before timeout, this expression approaches $\mathbb{E
 
 The optimal batch size $B$ minimizes expected response time subject to throughput requirements:
 
-$$B = \operatorname{arg\,min}_{B} \mathbb{E}[T(B)] \quad \text{subject to} \quad \EffectiveServiceRate > \ArrivalRate$$
+$$B = \operatorname{arg\,min}_{B} \mathbb{E}[T(B)] \quad \text{subject to} \quad \EffectiveServiceRate(\BatchSize) > \ArrivalRate$$
 
 The constraint ensures system stability (service rate exceeds arrival rate).
 
 For a high-traffic regime in which batches of size $B$ reliably fill before timeout, substituting the response time components gives:
 
-$$\mathbb{E}[T(B)] = \mathbb{E}[W(B)] + \frac{B-1}{2\ArrivalRate} + \BatchServiceTimeSvc$$
+$$\mathbb{E}[T(B)] = \mathbb{E}[W(B)] + \frac{B-1}{2\ArrivalRate} + \BatchServiceTime(\BatchSize)$$
 
 For a tractable waiting-time estimate, use an M/G/1 surrogate that treats batches as Poisson "super-requests." If the request arrival rate is $\ArrivalRate$ and the average batch size is $B$, this surrogate uses batch arrival rate $\lambda_{\text{batch}}=\ArrivalRate/B$. This is not the exact process produced by grouping Poisson request arrivals, because fixed-size grouping yields Erlang inter-batch times; finite $K$ or $c>1$ requires a bulk-service model or simulation. Within the explicit surrogate, the Pollaczek-Khinchine formula gives:
 
@@ -95,9 +95,9 @@ where $\ServingUtilization = \lambda_{\text{batch}} \cdot \mathbb{E}[T_{\text{sv
 
 For the linear service time model with deterministic service in this surrogate:
 
-$$\mathbb{E}[W(B)] = \frac{\ArrivalRate \cdot \BatchServiceTimeSvc^2}{2B(1 - \ArrivalRate \cdot \BatchServiceTimeSvc/B)}$$
+$$\mathbb{E}[W(B)] = \frac{\ArrivalRate \cdot \BatchServiceTime(\BatchSize)^2}{2B(1 - \ArrivalRate \cdot \BatchServiceTime(\BatchSize)/B)}$$
 
-For production sizing, teams often first enforce a utilization headroom target rather than solving the full latency minimization problem. With $\BatchServiceTimeSvc=T_{\text{fixed}}+t_{\text{req}} B$, the constraint $\ServingUtilization=\ArrivalRate \BatchServiceTimeSvc/B \leq \rho_{\text{target}}$ yields the target-utilization batch bound (@eq-optimal-batch-approx):
+For production sizing, teams often first enforce a utilization headroom target rather than solving the full latency minimization problem. With $\BatchServiceTime(\BatchSize)=T_{\text{fixed}}+t_{\text{req}} B$, the constraint $\ServingUtilization=\ArrivalRate \BatchServiceTime(\BatchSize)/B \leq \rho_{\text{target}}$ yields the target-utilization batch bound (@eq-optimal-batch-approx):
 
 $$B_{\text{min}}(\rho_{\text{target}}) = \frac{\ArrivalRate T_{\text{fixed}}}{\rho_{\text{target}} - \ArrivalRate t_{\text{req}}}$$ {#eq-optimal-batch-approx}
 
@@ -272,7 +272,7 @@ Rounding up gives $B=$ `{python} PrefillServing.b_target_str` as the smallest ba
 
 Evaluating GPT-3 serving performance across batch sizes (@tbl-batch-size-comparison) exposes the trade-off between queuing delay and server utilization:
 
-| **Size $B$** |      **$\BatchServiceTimeSvc$ (ms)**       |                  **req/s**                  |         **$\ServingUtilization$**          |           **$\mathbb{E}[W]$ (ms)**          |       **$(B-1)/(2\ArrivalRate)$ (ms)**       |           **$\mathbb{E}[T]$ (ms)**           |
+| **Size $B$** |  **$\BatchServiceTime(\BatchSize)$ (ms)**  |                  **req/s**                  |         **$\ServingUtilization$**          |           **$\mathbb{E}[W]$ (ms)**          |       **$(B-1)/(2\ArrivalRate)$ (ms)**       |           **$\mathbb{E}[T]$ (ms)**           |
 |:-------------|:------------------------------------------:|:-------------------------------------------:|:------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|
 | **1**        | `{python} PrefillServing.cells[1]["svc"]`  |  `{python} PrefillServing.cells[1]["thru"]` | `{python} PrefillServing.cells[1]["rho"]`  |  `{python} PrefillServing.cells[1]["wait"]` | `{python} PrefillServing.cells[1]["accum"]`  | `{python} PrefillServing.cells[1]["total"]`  |
 | **4**        | `{python} PrefillServing.cells[4]["svc"]`  |  `{python} PrefillServing.cells[4]["thru"]` | `{python} PrefillServing.cells[4]["rho"]`  |  `{python} PrefillServing.cells[4]["wait"]` | `{python} PrefillServing.cells[4]["accum"]`  | `{python} PrefillServing.cells[4]["total"]`  |
@@ -529,7 +529,7 @@ Production systems must select batch size to meet Service Level Objectives (SLOs
 
 ##### Step 1 characterize service time {.unnumbered}
 
-Measure $T_{\text{fixed}}$ and $t_{\text{req}}$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $\BatchServiceTimeSvc = T_{\text{fixed}} + t_{\text{req}} B$.
+Measure $T_{\text{fixed}}$ and $t_{\text{req}}$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $\BatchServiceTime(\BatchSize) = T_{\text{fixed}} + t_{\text{req}} B$.
 
 ##### Step 2 compute stability threshold {.unnumbered}
 
@@ -543,7 +543,7 @@ Choose an integer batch size strictly above this boundary, assuming $\ArrivalRat
 
 Under the same Poisson-super-request surrogate and full-batch assumption, for each candidate $B \in \{B_{\text{min}}, 2B_{\text{min}}, ..., B_{\text{max}}\}$, compute:
 
-$$\mathbb{E}[T(B)] = \frac{\ArrivalRate \cdot \BatchServiceTimeSvc^2}{2B(1 - \ArrivalRate \BatchServiceTimeSvc/B)} + \frac{B-1}{2\ArrivalRate} + \BatchServiceTimeSvc$$
+$$\mathbb{E}[T(B)] = \frac{\ArrivalRate \cdot \BatchServiceTime(\BatchSize)^2}{2B(1 - \ArrivalRate \BatchServiceTime(\BatchSize)/B)} + \frac{B-1}{2\ArrivalRate} + \BatchServiceTime(\BatchSize)$$
 
 ##### Step 4 account for tail latency {.unnumbered}
 
@@ -561,12 +561,12 @@ $$B = \max\{B : T_{\text{p99}}(B) \leq \text{SLO}\}$$
 
 Operating rules for batch size selection (@tbl-batch-decision-framework) balance stability, latency SLOs, and cost efficiency:
 
-| **Condition**                 | **Recommended Action**                  |       **Rationale**       |
-|:------------------------------|:----------------------------------------|:-------------------------:|
-| $B < B_{\text{min}}$          | Increase batch size or add replicas     |     System is unstable    |
-| $T_{\text{p99}} > \text{SLO}$ | Re-evaluate stable batch sizes or add replicas       |   Latency exceeds target  |
-| $\ServingUtilization < 0.5$   | Consider reducing replicas to save cost | System is overprovisioned |
-| $\ServingUtilization > 0.85$  | Add replicas for headroom               |  Approaching instability  |
+| **Condition**                 | **Recommended Action**                         |       **Rationale**       |
+|:------------------------------|:-----------------------------------------------|:-------------------------:|
+| $B < B_{\text{min}}$          | Increase batch size or add replicas            |     System is unstable    |
+| $T_{\text{p99}} > \text{SLO}$ | Re-evaluate stable batch sizes or add replicas |   Latency exceeds target  |
+| $\ServingUtilization < 0.5$   | Consider reducing replicas to save cost        | System is overprovisioned |
+| $\ServingUtilization > 0.85$  | Add replicas for headroom                      |  Approaching instability  |
 
 : **Batch Size Decision Framework**: Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
 

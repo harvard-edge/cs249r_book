@@ -277,6 +277,9 @@ def convention_problems(s: NotationSymbol) -> List[str]:
     if d.lower().replace(" ", "") == name.lower():
         problems.append("definition only repeats the name; say what the symbol means")
     if not str(s.render_exception).strip():
+        if re.search(r"\([^()]*\)\s*$", s.latex):
+            problems.append("LaTeX ends in function arguments: register the bare symbol and write the "
+                            "arguments in the chapter (\\CommunicationTime(\\DeviceCount))")
         if s.kind in ("vector", "matrix") and not _BOLD.search(s.latex):
             problems.append(f"kind '{s.kind}' must render bold (\\mathbf, \\boldsymbol or \\bm)")
         if s.kind == "set" and not _SET.search(s.latex):

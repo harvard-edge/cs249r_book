@@ -77,7 +77,11 @@ def _is_chapter_qmd(path) -> bool:
 # finished. For them, notation rows must be used by a chapter (not only by the
 # notation chapter's own notes), and no chapter may use two different symbols
 # that render alike. Add a volume here when its conversion lands.
-STRICT_CONVERTED_VOLUMES: set = set()
+STRICT_CONVERTED_VOLUMES: set = {"vol1"}
+# Volumes whose chapters are held to one letter, one meaning (check notation
+# --scope collisions). Separate from conversion: resolving a collision changes
+# what readers see, so each volume joins after an editorial pass.
+COLLISION_CHECKED_VOLUMES: set = set()
 # Iron-law rows every volume's notation chapter must carry, used or not.
 CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
 
@@ -832,7 +836,7 @@ class ValidateCommand:
             Scope("strict", "_run_notation_strict",
                   note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
             Scope("collisions", "_run_notation_collisions",
-                  note="no chapter of a converted volume (STRICT_CONVERTED_VOLUMES) uses two different symbols that render alike"),
+                  note="no chapter of a volume in COLLISION_CHECKED_VOLUMES uses two different symbols that render alike"),
             Scope("conventions", "_run_notation_conventions",
                   note="every registry entry follows the naming and field conventions (mlsysim/mlsysim/notation/data/README.md)"),
         ],
@@ -12805,10 +12809,26 @@ class ValidateCommand:
                     qmd_text = "\n".join(clean_lines)
 
                 in_notation = "frontmatter/notation" in str(qmd)
+                # A chapter's own symbols (front matter `notation-local: [...]`)
+                # are declared there, not in the notation table; the declaration
+                # line itself is not a use (2026-10-08).
+                local_decl = set()
+                fm_end = 0
+                if qmd_text.startswith("---"):
+                    head = qmd_text.split("\n---", 1)[0]
+                    fm_end = head.count("\n") + 2
+                    lm = re.search(r"^notation-local:\s*\[(.*?)\]\s*$", head, re.M)
+                    if lm:
+                        local_decl = {macro_aliases.get("\\" + n, "\\" + n)
+                                      for n in re.findall(r"\\?([A-Z][A-Za-z]*)", lm.group(1))}
                 for lineno, line in enumerate(qmd_text.splitlines(), 1):
+                    if lineno <= fm_end:
+                        continue
                     for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", line):
                         macro_name = "\\" + m.group(1)
                         canon = macro_aliases.get(macro_name, macro_name)
+                        if canon in local_decl:
+                            continue
                         if canon in all_macros:
                             vol_usage[canon].append((qmd_rel, lineno))
                             # A row is alive only if a chapter uses it; the notation
@@ -13201,7 +13221,7 @@ class ValidateCommand:
         checked = 0
         for f in files:
             rel = f.relative_to(repo)
-            if len(rel.parts) < 2 or rel.parts[1] not in STRICT_CONVERTED_VOLUMES:
+            if len(rel.parts) < 2 or rel.parts[1] not in COLLISION_CHECKED_VOLUMES:
                 continue
             checked += 1
             for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg):
