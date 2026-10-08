@@ -443,6 +443,19 @@ def _index_like(body: str, registry: "Registry") -> bool:
     return letters <= set(ex.index) and re.fullmatch(r"[\dA-Za-z+\-,\s]*", rest) is not None
 
 
+def _top_level_scripts(latex: str) -> Set[str]:
+    """The script marks (_ ^) at brace depth 0 of an entry's LaTeX."""
+    depth, marks = 0, set()
+    for c in latex:
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif depth == 0 and c in "_^":
+            marks.add(c)
+    return marks
+
+
 def _macro_decoration_ok(mark: str, grp: List[str], registry: "Registry", entry: Optional["RegistryEntry"]) -> bool:
     """Decorations a registered macro may carry without becoming a new symbol (README).
 
@@ -452,10 +465,15 @@ def _macro_decoration_ok(mark: str, grp: List[str], registry: "Registry", entry:
     iteration (``W^{(\\LayerIndex)}``, ``m^{(1)}``); and ``*`` for the optimal value.
     Anything else, a text label above all, is a new symbol.
     """
+    # thin spaces and the like only nudge the position; they are not part of the symbol
+    grp = [x for x in grp if x not in ("\\,", "\\;", "\\:", "\\!")]
     if _decoration_ok(grp, registry.exempt):
         return True
-    body = "".join(x for x in grp if not x.isspace())
+    body = re.sub(r"\\[,;:!]", "", "".join(x for x in grp if not x.isspace()))
     if mark == "_":
+        # an index, or an order statistic's parenthesized rank (p_{(1)})
+        if body.startswith("(") and body.endswith(")"):
+            body = body[1:-1]
         return _index_like(body, registry)
     if body == "*":
         return True
@@ -481,6 +499,15 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
     ex = registry.exempt
     toks = tokenize(math)
     found: List[Finding] = []
+    # x_\Macro reads only the first token of the macro's LaTeX: with \beta_{\text{lat}}
+    # the label lands on x, or LaTeX stops on a double subscript. Scripts take {\Macro}.
+    for i, t in enumerate(toks):
+        if t in ("_", "^"):
+            j = _skip_space(toks, i + 1)
+            if j < len(toks) and toks[j].startswith("\\"):
+                e = registry.entries.get(registry.canonical(toks[j][1:]))
+                if e is not None and len(tokenize(e.latex)) > 1:
+                    found.append(Finding(t + toks[j], "unbraced-script", i, j + 1))
     sub_stack: List[int] = []      # 1 for a subscript group, 0 otherwise
     depth_sub = 0
     prev = ""                      # previous significant token
@@ -547,7 +574,12 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
                         j += 1
                     else:
                         grp, after = _read_group(toks, j + 1)
-                        if not _macro_decoration_ok(toks[j], grp, registry, entry):
+                        if entry is not None and toks[j] in _top_level_scripts(entry.latex):
+                            # \Macro_i where the macro is already p_{\text{gate}}: LaTeX
+                            # stops on a double subscript; {\Macro}_i is what renders
+                            found.append(Finding(t + toks[j] + "{" + "".join(grp).strip() + "}",
+                                                 "double-script", k, after))
+                        elif not _macro_decoration_ok(toks[j], grp, registry, entry):
                             found.append(Finding(t + toks[j] + "{" + "".join(grp).strip() + "}",
                                                  "decorated", k, after))
                         j = after
@@ -727,6 +759,8 @@ _KIND_ADVICE = {
     "greek": "write the macro whose meaning fits",
     "form": "register the bold/calligraphic/accented symbol; its LaTeX carries the form",
     "decorated": "a new subscript, superscript or prime makes a new symbol: register it",
+    "unbraced-script": "a macro used as a subscript or superscript must be braced, x^{\\Macro}: unbraced, LaTeX takes only its first token",
+    "double-script": "the macro already carries this script, so LaTeX stops on a double subscript or superscript: group it, {\\Macro}_i",
     "unknown": "neither a registry macro nor a LaTeX built-in: fix the spelling or register the symbol",
     "alias": "retired name: write the canonical macro",
     "out-of-scope": "not declared for this chapter: add it to the volume's notation chapter, or to this "

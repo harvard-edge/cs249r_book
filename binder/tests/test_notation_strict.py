@@ -80,6 +80,20 @@ def test_decorated_macros():
     assert raws(r"\Time'") == [(r"\Time'", "decorated")]
     assert raws(r"\Time^2 + \NumberOfDevices^{-1} + \GeneralizedCoordinates^\top + \Time_i") == []
     assert raws(r"\Time_{k+1} + \Time^{(i)}") == []                 # index expressions
+    assert raws(r"\Time_{(1)} \le \Time_{(2)} \le \Time_{(k)}") == []   # order statistics
+    assert raws(r"\LinkBandwidth^{\,i} + \Time^{\,\NumberOfDevices}") == []  # spacing is not a mark
+
+
+def test_index_on_a_subscripted_macro_must_be_grouped():
+    # T_{decode}_i is a LaTeX error (double subscript); {T_{decode}}_i renders
+    assert raws(r"\DecodeInterval_i") == [(r"\DecodeInterval_{i}", "double-script")]
+    assert raws(r"{\DecodeInterval}_i + \DecodeInterval^2") == []
+
+
+def test_a_macro_used_as_a_script_is_braced():
+    # x^\DecodeInterval reads x^T then _{decode} on x; x^{\DecodeInterval} is right
+    assert raws(r"2^\DecodeInterval") == [(r"^\DecodeInterval", "unbraced-script")]
+    assert raws(r"2^{\DecodeInterval} + 2^\NumberOfDevices") == []   # one-token LaTeX is fine
 
 
 def test_unknown_alias_scope():
