@@ -269,3 +269,12 @@ def test_glyph_collisions_within_a_chapter():
     assert glyph_collisions("Use $\\BatchSize$ and $\\Time$.\n", reg) == []
     col = glyph_collisions("Use $\\BatchSize$.\n\nThen $\\GemmRightOperand$.\n", reg)
     assert col == [{"latex": "B", "macros": ["BatchSize", "GemmRightOperand"], "lines": [1, 3]}]
+
+
+def test_apply_drops_a_label_that_belonged_to_the_replaced_symbol():
+    src = "Weights $\\mathbf{A}_{\\text{attn}}$ here.\n"
+    span = extract_math(src)[0]
+    toks = __import__("notation_strict").tokenize(span.text)
+    a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": len(toks), "raw": span.text, "macro": "AttentionWeightMatrix"}]
+    new, refused = apply_assignments(src, a, {"\\AttentionWeightMatrix": "\\mathbf{A}"})
+    assert refused == [] and new == "Weights $\\AttentionWeightMatrix$ here.\n"

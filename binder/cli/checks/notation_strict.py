@@ -858,6 +858,16 @@ def _macro_extent(toks: List[str], s0: int, s1: int, latex: Optional[str]) -> in
     return best
 
 
+def _apply_exemptions() -> Exemptions:
+    try:
+        return Exemptions.load(REPO_HINT)
+    except Exception:          # outside a checkout: the defaults
+        return Exemptions()
+
+
+_EX_FOR_APPLY = _apply_exemptions()
+
+
 def apply_assignments(source: str, assignments: List[Dict],
                       latex_of: Optional[Dict[str, str]] = None) -> Tuple[str, List[str]]:
     """Replace symbols at exact positions in body math.
@@ -906,7 +916,13 @@ def apply_assignments(source: str, assignments: List[Dict],
                     for j in range(s0, s1):
                         acc += toks[j]
                         if _span_norm(acc) == want and j + 1 < s1:
-                            keep = "".join(toks[j + 1:s1])
+                            rest = toks[j + 1:s1]
+                            r0 = _skip_space(rest, 0)
+                            # keep only an index or power; a label belongs to the replaced symbol
+                            if r0 < len(rest) and rest[r0] in ("_", "^"):
+                                grp, _ = _read_group(rest, r0 + 1)
+                                if _decoration_ok(grp, _EX_FOR_APPLY):
+                                    keep = "".join(rest)
                             break
             if any(not (s1 <= x0 or s0 >= x1) for x0, x1 in taken):
                 refusals.append(f"line {span.line}: assignments overlap at tokens {s0}-{s1}")
