@@ -280,3 +280,27 @@ def test_apply_drops_a_label_that_belonged_to_the_replaced_symbol():
     a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": len(toks), "raw": span.text, "macro": "AttentionWeightMatrix"}]
     new, refused = apply_assignments(src, a, {"\\AttentionWeightMatrix": "\\mathbf{A}"})
     assert refused == [] and new == "Weights $\\AttentionWeightMatrix$ here.\n"
+
+
+def test_apply_accepts_braced_and_bare_subscripts_as_the_same_raw():
+    src = "Time $T_N$ here.\n"
+    span = extract_math(src)[0]
+    a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": 3, "raw": "T_{N}", "macro": "MultiDeviceRunTime"}]
+    new, refused = apply_assignments(src, a, {"\\MultiDeviceRunTime": "T_N"})
+    assert refused == [] and new == "Time $\\MultiDeviceRunTime$ here.\n"
+
+
+def test_apply_takes_a_starred_symbol_whole():
+    src = "Critical $B^*$ batch.\n"
+    span = extract_math(src)[0]
+    a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": 1, "raw": "B", "macro": "CriticalBatchSize"}]
+    new, refused = apply_assignments(src, a, {"\\CriticalBatchSize": "B^{*}"})
+    assert refused == [] and new == "Critical $\\CriticalBatchSize$ batch.\n"
+
+
+def test_apply_takes_a_braced_starred_symbol_whole():
+    src = "Critical $B^{*}$ batch.\n"
+    span = extract_math(src)[0]
+    a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": 1, "raw": "B", "macro": "CriticalBatchSize"}]
+    new, refused = apply_assignments(src, a, {"\\CriticalBatchSize": "B^{*}"})
+    assert refused == [] and new == "Critical $\\CriticalBatchSize$ batch.\n"

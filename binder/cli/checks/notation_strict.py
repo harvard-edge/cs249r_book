@@ -832,7 +832,7 @@ def verify_rendering(before_text: str, after_text: str, rel: str,
 def _span_norm(s: str) -> str:
     """Compare LaTeX by content: no whitespace, no braces around one character."""
     s = re.sub(r"\s+", "", s)
-    return re.sub(r"([_^])\{(\\?[A-Za-z0-9])\}", r"\1\2", s)
+    return re.sub(r"([_^])\{(\\[A-Za-z]+|[^{}\\])\}", r"\1\2", s)
 
 
 def _macro_extent(toks: List[str], s0: int, s1: int, latex: Optional[str]) -> int:
@@ -853,7 +853,9 @@ def _macro_extent(toks: List[str], s0: int, s1: int, latex: Optional[str]) -> in
         got = _span_norm(acc)
         if got == want and j + 1 > best:
             best = j + 1
-        if len(got) > len(want) or not want.startswith(got):
+        # mid-group text (B^{) is not a prefix of the normalized LaTeX, so bound
+        # the search by length instead of stopping at the first mismatch
+        if len(acc) > 2 * len(latex) + 8:
             break
     return best
 
@@ -902,7 +904,7 @@ def apply_assignments(source: str, assignments: List[Dict],
         for a in sorted(items, key=lambda a: a["token_start"]):
             s0, s1 = a["token_start"], a["token_end"]
             got = "".join(toks[s0:s1])
-            if " ".join(got.split()) != " ".join(a["raw"].split()):
+            if _span_norm(got) != _span_norm(a["raw"]):   # T_N and T_{N} are the same text
                 refusals.append(f"line {span.line}: expected {a['raw']!r} at tokens {s0}-{s1}, found {got!r}")
                 continue
             keep = ""
@@ -982,8 +984,28 @@ def glyph_collisions(source: str, registry: Registry) -> List[Dict]:
             look = _span_norm(expand(registry.entries[canon].latex)) if canon in registry.entries else ""
             if look:
                 first[(section, look)].setdefault(canon, span.line)
-    return [{"section": sec, "latex": look, "macros": sorted(ms), "lines": [ms[m] for m in sorted(ms)]}
-            for (sec, look), ms in sorted(first.items()) if len(ms) > 1]
+    allowed = _same_glyph_ok()
+    out = []
+    for (sec, look), ms in sorted(first.items()):
+        names = sorted(ms)
+        # pairs the registry declares compatible (a quantity and its special case)
+        if len(names) > 1 and all(frozenset((x, y)) in allowed
+                                  for i, x in enumerate(names) for y in names[i + 1:]):
+            continue
+        if len(names) > 1:
+            out.append({"section": sec, "latex": look, "macros": names, "lines": [ms[m] for m in names]})
+    return out
+
+
+def _same_glyph_ok() -> Set[frozenset]:
+    """Pairs listed under same_glyph_ok in data/vocabulary.yaml."""
+    path = REPO_HINT / "mlsysim" / "mlsysim" / "notation" / "data" / "vocabulary.yaml"
+    try:
+        import yaml  # local: binder imports this module eagerly
+        rows = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("same_glyph_ok") or []
+    except Exception:
+        return set()
+    return {frozenset(m.lstrip("\\") for m in r["macros"]) for r in rows if len(r.get("macros", [])) == 2}
 
 
 def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> Dict:
@@ -1077,6 +1099,7 @@ def registry_table_at(repo: Path, ref: str) -> Dict[str, str]:
             table[e["macro"]] = e["latex"]
             for a in e.get("aliases", []) or []:
                 table[a] = e["macro"]
+    table["\\Glyph"] = "#1"     # defined by the build, not the registry
     return table
 
 
