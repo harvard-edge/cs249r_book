@@ -92,7 +92,7 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Which combination of architectural design choices correctly reflects the requirements of autoregressive large language model (LLM) serving compared to vision and recommendation workloads?",
+            "question": "Which combination of architectural design choices addresses variable-length autoregressive generation and reusable session context in the chapter's LLM serving scenario?",
             "choices": [
               "Continuous batching, paged memory management, preemptive scheduling, and stateful routing",
               "Static batching, preallocated memory management, first-come-first-served (FCFS) scheduling, and stateless routing",
@@ -104,7 +104,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Why does preallocated memory management in LLM serving waste 60% to 80% of GPU KV cache memory, and how does paged memory management solve this problem?",
+            "question": "Why can maximum-length KV cache preallocation waste memory when actual requests are shorter, and which allocation waste does paged memory management reduce?",
             "answer": "Maximum-length preallocation reserves unused slots when a request is shorter than the limit; the wasted fraction depends on the length distribution. Paged allocation assigns fixed-size KV blocks on demand and reuses free blocks across sequences. It removes external fragmentation within the fixed-block pool, but the final partially filled page still wastes some capacity. Reclaimed memory helps only if the scheduler can use it within latency and quality limits.",
             "learning_objective": "Explain the root causes of KV cache memory fragmentation under preallocation and how paged allocation mitigates them."
           },
@@ -164,7 +164,7 @@
               "Vision knee at $B \\approx 4$; LLM decode knee at $B \\approx 40$",
               "Vision knee at $B \\approx 2$; LLM decode knee at $B \\approx 80$"
             ],
-            "answer": "The correct answer is D. The knee of the batching efficiency curve occurs where the variable compute cost ($B \\times T_{\\text{var}}$) begins to exceed fixed overhead ($T_{\\text{fixed}}$). For the vision model, $B_{\\text{knee}} \\approx 2\\text{ ms} / 1\\text{ ms} = 2$. For LLM decode, $B_{\\text{knee}} \\approx 40\\text{ ms} / 0.5\\text{ ms} = 80$. This demonstrates why LLM serving requires massive continuous batches: the huge fixed cost of streaming model weights across HBM requires packing dozens to hundreds of concurrent requests to amortize bandwidth overhead. The inverted result swaps the two workloads; the intermediate configurations miscalculate the quotient of fixed and variable parameters.",
+            "answer": "The correct answer is D. The knee of the batching efficiency curve occurs where the variable compute cost ($B \\times T_{\\text{var}}$) begins to exceed fixed overhead ($T_{\\text{fixed}}$). For the vision model, $B_{\\text{knee}} \\approx 2\\text{ ms} / 1\\text{ ms} = 2$. For LLM decode, $B_{\\text{knee}} \\approx 40\\text{ ms} / 0.5\\text{ ms} = 80$. The larger LLM knee illustrates a stronger incentive to amortize weight reads across concurrent requests. The chosen batch can remain below that knee when arrivals, KV-cache capacity, or the latency budget limit useful concurrency; the knee is not a universal batch requirement. The inverted result swaps the two workloads; the intermediate configurations miscalculate the quotient of fixed and variable parameters.",
             "learning_objective": "Calculate the knee point on the batching efficiency curve for compute-bound versus memory-bandwidth-bound inference workloads."
           },
           {
@@ -181,26 +181,26 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A stable inference service completes 1,000 requests/sec with an assumed mean end-to-end latency of 100 ms. Each replica executes batches of eight in 80 ms. Using Little's Law for average in-flight work, what concurrency estimate and illustrative eight-slot headroom sizing follow, without claiming a P99 guarantee?",
+            "question": "A stable inference service completes 1,000 requests/sec with an assumed mean end-to-end latency of 100 ms. Each replica executes full batches of eight in 80 ms, giving 100 requests/sec of service capacity. With a separate target of at most 80% mean service utilization, what mean in-flight work and candidate fleet size follow, without claiming a P99 guarantee?",
             "choices": [
-              "Average concurrency is 100 requests; providing at least that many eight-slot positions gives 13 replicas as an illustrative sizing policy",
+              "Mean in-flight work is 100 requests; sizing service capacity at the 80% utilization target gives 13 replicas",
               "Required concurrency $Q_{\\text{req}} = 1{,}000$; minimum SLO-sized fleet $= 125$ replicas",
               "Required concurrency $Q_{\\text{req}} = 80$; minimum SLO-sized fleet $= 10$ replicas",
               "Required concurrency $Q_{\\text{req}} = 100$; minimum SLO-sized fleet $= 10$ replicas"
             ],
-            "answer": "The correct answer is A. Mean in-flight work is 1,000 × 0.1 = 100 requests. The stated eight-slot sizing policy gives ceil(100/8) = 13 replicas, each serving up to 100 requests/sec, for about 76.9% utilization. Ten replicas are the throughput-only saturation boundary. Little's Law relates averages; neither 13 replicas nor substitution of a P99 target for mean latency proves tail-SLO compliance.",
-            "learning_objective": "Apply Little's Law to mean concurrency and distinguish illustrative fleet sizing from percentile-SLO validation."
+            "answer": "The correct answer is A. Little's Law gives 1,000 × 0.1 = 100 requests in flight on average, including waiting work. Fleet sizing instead uses the separate utilization target: ceil(1,000/(0.8 × 100)) = 13 replicas, running at about 76.9% utilization. Their 104 executing positions exclude queues. Under the idealized assumption that all other latency is waiting or batch formation, the fixed 80 ms service time gives 80 requests executing on average and leaves 20 waiting or accumulating. Ten replicas are the throughput-only saturation boundary. The assumed mean and tail SLO both require validation; dividing in-flight work by batch slots does not establish the fleet size.",
+            "learning_objective": "Separate mean in-flight occupancy from executing capacity and size a candidate fleet with an explicit service-utilization target."
           },
           {
             "question_type": "SHORT",
-            "question": "What is the 'Logic Wall' in test-time compute scaling, and how does it fundamentally shift the serving optimization objective from tokens-per-second to steps-per-second?",
-            "answer": "The Logic Wall occurs when generative models utilize deliberative 'slow thinking' (generating chain-of-thought tokens, tree search, or self-correction steps) where compute per request scales dynamically with problem difficulty rather than remaining fixed. This shifts the serving constraint from maximizing raw token throughput (tokens/sec across memory bandwidth) to managing search steps per second and enforcing 'reasoning SLOs,' requiring dynamic compute allocation that budgets thinking depth based on prompt complexity and fleet load.",
+            "question": "What is the 'Logic Wall' in test-time compute scaling, and how does additional reasoning change the serving budget for a request?",
+            "answer": "The Logic Wall is reached when serial reasoning tokens exhaust a request's latency budget or its share of fleet capacity before further reasoning stops improving the answer. Additional generated tokens, candidate evaluations, or search steps increase work per request and can extend KV-cache residency without changing the bottleneck of each decode step. Dynamic compute allocation budgets that work using measured quality gains, request deadlines, and fleet load. Parallel candidate evaluations consume capacity without necessarily adding the same serial latency.",
             "learning_objective": "Explain the systems implications of test-time compute scaling and the concept of the Logic Wall."
           },
           {
             "question_type": "TF",
-            "question": "True or False: In adaptive batching systems like NVIDIA Triton, increasing the batching timeout window ($T_{\\text{window}}$) during sudden high-traffic load spikes is the optimal policy to reduce tail latency.",
-            "answer": "False. During high traffic arrival rates ($\\lambda_{\\text{current}}$), the batch window should shrink ($T_{\\text{window}} = \\min(T_{\\text{max}}, B_{\\text{target}}/\\lambda_{\\text{current}})$) because batches fill rapidly, allowing immediate dispatch to minimize queuing delay. Expanding the window during high load creates unnecessary batch formation delay and inflates P99 latency.",
+            "question": "True or False: Increasing the batching timeout window during a high-traffic spike is always the optimal policy for reducing tail latency.",
+            "answer": "False. In the chapter's traffic-adaptive rule, a fixed target batch fills sooner as arrival rate rises, permitting a shorter formation window. This reduces intentional formation delay, not the separate wait for a busy replica. Shrinking the maximum batch can also reduce service capacity and worsen queueing. The policy must be evaluated against arrival patterns, measured service rates, tail latency, and overload handling; neither a longer nor a shorter window is universally optimal.",
             "learning_objective": "Evaluate adaptive batching control policies under varying traffic arrival intensities."
           }
         ]
@@ -258,8 +258,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Why do un-chunked long prompt prefills (e.g., 10,000 tokens) cause severe tail latency spikes for concurrent decode requests, and how does chunked prefill (Sarathi-Serve) resolve this?",
-            "answer": "Prompt prefill is compute-heavy and executes over hundreds of milliseconds. In a unified engine, an un-chunked prefill monopolizes GPU Tensor Cores, completely blocking ongoing decode iterations for all concurrent active requests and triggering severe Time Per Output Token (TPOT) spikes. Chunked prefill divides long prompts into fixed-size token chunks (e.g., 200–512 tokens) and interleaves prefill chunk computation with regular decode steps, bounding prefill execution time per step and maintaining steady decode pacing.",
+            "question": "How can an un-chunked long prompt prefill delay active decode streams on the same worker, and what trade-off does chunked prefill introduce?",
+            "answer": "A policy that schedules a full long-prompt prefill before returning to decode can create a conspicuous gap in active streams' time between tokens (TBT). An isolated stall can be diluted in a long response's average time per output token (TPOT). Chunked prefill interleaves bounded prompt-token chunks with decode work, controlling how much prefill work enters each iteration. Smaller chunks can reduce interference while adding overhead and extending the incoming prompt's TTFT. A token budget alone does not guarantee a time bound; both TTFT and TBT tails require measurement.",
             "learning_objective": "Explain the operational mechanism of chunked prefill in preventing decode stalls and mitigating tail latency."
           },
           {
@@ -271,7 +271,7 @@
           {
             "question_type": "ORDER",
             "question": "Order the steps executed during a single verification round of Speculative Decoding:\n(1) Target model runs a single batched parallel forward pass across all $K$ candidate positions\n(2) Rejection sampling evaluates candidate tokens sequentially against target probability distributions\n(3) Draft model autoregressively generates $K$ candidate tokens\n(4) KV cache block tables are updated to append accepted tokens and one target correction token, discarding rejected branches",
-            "answer": "The correct sequence is (3) -> (1) -> (2) -> (4).\n- (3) The fast draft model autoregressively produces $K$ speculative tokens in lightweight forward passes.\n- (1) The large target model verifies all $K$ proposed tokens simultaneously in a single compute-bound forward pass.\n- (2) Rejection sampling determines how many draft tokens meet the target distribution criteria until a rejection or end-of-window.\n- (4) Accepted tokens plus one newly sampled target token are committed to the KV cache, and any unaccepted speculative allocations are released.",
+            "answer": "The correct sequence is (3) -> (1) -> (2) -> (4).\n- (3) The fast draft model autoregressively produces $K$ speculative tokens in lightweight forward passes.\n- (1) The target model evaluates the proposed positions in one forward pass. Verifying multiple positions can amortize weight reads, but whether the pass is compute-bound depends on its shape and hardware.\n- (2) Rejection sampling determines how many draft tokens meet the target distribution criteria until a rejection or end-of-window.\n- (4) Accepted tokens plus one newly sampled target token are committed to the KV cache, and any unaccepted speculative allocations are released.",
             "learning_objective": "Structure the sequence of execution and verification steps in speculative decoding."
           }
         ]
@@ -389,14 +389,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A production recommendation system operates 100+ TB of embedding tables with trillions of entities. How does a hybrid embedding sharding architecture distribute hot, warm, and cold embeddings to balance memory footprint and network overhead?",
+            "question": "An illustrative recommendation service has a resident embedding tier smaller than its full entity catalog. Within that admitted resident population, 1% of embeddings are hot, 10% warm, and 89% cold. Which hybrid placement matches the chapter's scenario while counting replicas against the resident memory budget?",
             "choices": [
-              "Hot (top 1%) embeddings are replicated in memory across all shards; warm (10%) are column-sharded with AllGather; cold (89%) are row-sharded on SSDs with AllToAll gather.",
+              "Hot (1%) embeddings are replicated within selected shard groups; warm (10%) are column-sharded; cold (89%) are row-sharded by entity hash, with transport chosen for the runtime.",
               "Hot embeddings are stored exclusively on remote cold storage; cold embeddings are replicated in HBM across all GPUs.",
               "All embeddings are strictly column-sharded across all GPUs regardless of popularity to eliminate network communication.",
               "Hot embeddings are sharded row-wise across CPUs; cold embeddings are broadcast via AllReduce to all GPU Tensor Cores."
             ],
-            "answer": "The correct answer is A. In hybrid embedding sharding (exemplified by Meta's DLRM infrastructure), the top 1% most frequently accessed 'hot' embeddings are replicated in local memory across all servers to eliminate network lookup latency. The next ~10% 'warm' embeddings are column-sharded across devices and combined via AllGather. The remaining ~89% 'cold' tail embeddings are row-sharded by entity hash across large SSD-backed CPU servers and retrieved via batched AllToAll network gathers.",
+            "answer": "The correct answer is A. The supplied hot/warm/cold split describes the admitted resident population, not every entity in the catalog or a verified named-company deployment. Selected-group replication spends memory to reduce hot-entry lookup traffic; column sharding spreads warm-entry access; row sharding places the cold tail. Replicated bytes remain part of the resident budget. The layouts do not uniquely prescribe AllGather, AllToAll, or shard RPCs; the runtime and input/output placement determine transport.",
             "learning_objective": "Design a hybrid embedding sharding topology that balances access locality, network collectives, and memory tiering for trillion-parameter recommendation systems."
           },
           {
@@ -467,7 +467,7 @@
               "Assign capacity-proportional weights (H100 weight $= 1000/22000 \\approx 4.55\\%$ per server; A100 weight $= 600/22000 \\approx 2.73\\%$ per server), achieving uniform 68.2% utilization across all nodes.",
               "Route 100% of traffic to A100 servers first and overflow remaining traffic to H100 servers."
             ],
-            "answer": "The correct answer is C. Total cluster capacity is $(10 \\times 1{,}000) + (20 \\times 600) = 10{,}000 + 12{,}000 = 22{,}000\\text{ QPS}$. Capacity-proportional routing assigns each H100 server a weight of $1{,}000 / 22{,}000 \\approx 4.55\\%$ ($681.8\\text{ QPS}$ load, $68.2\\%$ utilization) and each A100 server a weight of $600 / 22{,}000 \\approx 2.73\\%$ ($409.1\\text{ QPS}$ load, $68.2\\%$ utilization). Routing equal requests to heterogeneous nodes overloads the lower-capacity A100s ($83.3\\%$ utilization) while underutilizing H100s ($50\\%$ utilization).",
+            "answer": "The correct answer is C. Total cluster capacity is $(10 \\times 1{,}000) + (20 \\times 600) = 10{,}000 + 12{,}000 = 22{,}000\\text{ QPS}$. Capacity-proportional routing assigns each H100 server a weight of $1{,}000 / 22{,}000 \\approx 4.55\\%$ ($681.8\\text{ QPS}$ load, $68.2\\%$ utilization) and each A100 server a weight of $600 / 22{,}000 \\approx 2.73\\%$ ($409.1\\text{ QPS}$ load, $68.2\\%$ utilization). Equal routing leaves less latency headroom on the A100s ($83.3\\%$ utilization) than on H100s ($50\\%$ utilization). Both remain below their stated service capacities; these utilization values alone establish neither overload nor a tail-SLO violation.",
             "learning_objective": "Calculate capacity-proportional routing weights to balance resource utilization across heterogeneous accelerator fleets."
           },
           {
@@ -546,7 +546,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "When a cloud provider issues a 2-minute termination warning for a spot/preemptible GPU inference instance, describe the 4-step graceful shutdown sequence that must be executed to prevent data corruption and user-visible failures.",
+            "question": "When a cloud provider issues a 2-minute termination warning for a spot/preemptible GPU inference instance, describe a four-step shutdown sequence that reduces disruption within the remaining time budget.",
             "answer": "First stop admission and deregister the replica. Then drain admitted requests within the remaining deadline. Preserve recoverable session history or transferable state where the service supports it; otherwise plan bounded retries or reconstruction on healthy replicas. Finally terminate workers before reclamation. This sequence reduces disruption but cannot guarantee every long request finishes or that all KV state can be copied within two minutes.",
             "learning_objective": "Structure the graceful termination and state-preservation workflow for preemptible/spot inference instances."
           }
@@ -571,7 +571,7 @@
           {
             "question_type": "TF",
             "question": "True or False: Cross-region model sharding (spanning pipeline stages between US-East and Asia-Pacific) is an effective strategy for minimizing single-request P99 latency.",
-            "answer": "False. Cross-region network round-trip time (RTT) between distant data centers is 75–150 ms, which is 10–100$\\times$ larger than the per-stage compute time of an individual layer (1–5 ms). Inter-region pipeline communication severely bottlenecks execution, making cross-region sharding a last-resort disaster-recovery capacity workaround rather than a latency optimization. Latency minimization requires co-locating all sharded stages within a single datacenter and deploying independent regional replicas.",
+            "answer": "False for the stated interactive scenario. Exposed inter-region transfers add wide-area delay to the request critical path and can exceed the stage-compute budget. Compare actual transfer times, message sizes, and the request deadline rather than treating RTT as the cost of every stage. Independent regional replicas avoid these per-request cross-region stage transfers when the model fits within each eligible region; placement must also satisfy policy and available-capacity constraints.",
             "learning_objective": "Evaluate the latency implications and feasibility constraints of cross-region distributed model sharding."
           }
         ]
@@ -654,26 +654,26 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team upgrades a cluster serving a 13B LLM from 80 GB GPUs to 140 GB GPUs with identical HBM3 memory bandwidth (3.35 TB/s). Why does this hardware upgrade fail to increase single-request or small-batch decode token throughput?",
+            "question": "A team upgrades a cluster serving a 13B LLM from 80 GB GPUs to 140 GB GPUs with identical HBM3 memory bandwidth (3.35 TB/s). At an unchanged small batch and context length, with resident weights and weight-read-dominated decode, why does extra capacity alone not raise the bandwidth-limited throughput ceiling?",
             "choices": [
               "Autoregressive decode is strictly compute-bound; increasing memory without adding Tensor Cores leaves execution time unchanged.",
               "Autoregressive decode is memory-bandwidth bound ($D_{\\text{vol}} / \\text{BW}$); once model weights fit resident in memory, token generation speed is constrained by memory bandwidth, not total memory capacity.",
               "140 GB GPUs automatically disable CUDA graph compilation, adding driver launch latency to every iteration.",
               "The larger memory capacity forces PagedAttention block sizes to shrink from 16 tokens to 2 tokens."
             ],
-            "answer": "The correct answer is B. During autoregressive decoding, every generated token requires loading all model weights from HBM to on-chip SRAM ($T_{\\text{decode}} \\approx \\text{Model Bytes} / \\text{Memory Bandwidth}$). If the model already fits comfortably in 80 GB, expanding memory capacity to 140 GB does not increase memory bandwidth (which remains 3.35 TB/s). Token generation speed remains completely unchanged unless batch size is increased sufficiently to transition the workload from bandwidth-bound to compute-bound.",
+            "answer": "The correct answer is B. At the same small batch and context length, when weight reads dominate decode and the resident model already fits, extra memory capacity does not increase the bandwidth ceiling. A larger admitted batch can nevertheless raise aggregate token throughput by sharing weight reads across more sequences while execution remains bandwidth-bound. The gain stops when KV traffic, compute, or the latency budget binds; crossing into a compute-bound regime is not required for batching to help.",
             "learning_objective": "Analyze why memory bandwidth, rather than memory capacity, bounds autoregressive decode throughput."
           },
           {
             "question_type": "SHORT",
-            "question": "A capacity planner provisions an inference serving fleet for 80% average utilization based on mean daily traffic. According to queuing theory and autoscaling dynamics, why does this lead to catastrophic P99 SLO violations during traffic spikes?",
-            "answer": "Waiting grows sharply as utilization approaches one. At an 80% baseline, a 25% traffic increase reaches exactly 100% utilization, leaving no spare capacity to absorb arrival or service-time variation; a larger sustained increase exceeds capacity. Cold starts can take minutes, so reactive scaling may arrive after latency failures begin. Capacity planning therefore needs measured peak behavior and headroom, not average traffic alone.",
+            "question": "A capacity planner provisions an inference serving fleet for 80% average utilization based on mean daily traffic. Why can traffic spikes exhaust headroom before reactive scaling helps, and what determines whether the P99 SLO is missed?",
+            "answer": "Waiting grows sharply as utilization approaches one. At an 80% baseline, a 25% traffic increase reaches exactly 100% utilization, leaving no spare capacity to absorb arrival or service-time variation; a larger sustained increase exceeds capacity. Cold starts can take minutes, so reactive scaling may arrive after latency failures begin. Whether a spike misses the P99 SLO depends on its duration, the arrival and service-time distributions, the waiting budget, and admission policy. Capacity planning therefore needs measured peak behavior and ready headroom alongside average traffic.",
             "learning_objective": "Explain the queuing theory and autoscaling risks of provisioning inference fleets based on average rather than peak-plus-headroom demand."
           },
           {
             "question_type": "TF",
             "question": "True or False: Deploying continuous batching alone completely solves all throughput and latency bottlenecks in LLM serving.",
-            "answer": "False. Continuous batching addresses only decode-phase iteration scheduling. It does not eliminate the quadratic compute bottleneck of long prompt prefills, does not solve physical KV-cache memory capacity exhaustion, and does not mitigate cross-node communication overhead in sharded models. A production serving stack requires continuous batching combined with chunked prefill, PagedAttention, prefix caching, model sharding, and load balancing.",
+            "answer": "False. Continuous batching reuses slots at iteration boundaries. It does not remove the quadratic attention work of long full-attention prefills, shrink the KV tensors needed by admitted requests, or eliminate communication within sharded replicas. Additional mechanisms are selected for the binding constraint: chunking can limit prefill interference, paging can recover allocation waste, compatible prefix reuse can avoid repeated work, and sharding or replication can supply needed capacity. No fixed combination establishes the service contract without workload measurements.",
             "learning_objective": "Evaluate the scope and limitations of continuous batching within the end-to-end LLM serving pipeline."
           }
         ]
@@ -703,7 +703,7 @@
             "choices": [
               "Inference costs are a fixed one-time expense, while training costs scale continuously with user traffic.",
               "All inference workloads should be served using static batching on single-GPU instances to eliminate network communication.",
-              "Serving cost recurs with traffic throughout deployment; decode throughput is physically bound by HBM bandwidth ($D_{\\text{vol}} / \\text{BW}$), requiring co-design of iteration schedulers, paged memory managers, and sharding topologies.",
+              "Serving cost recurs with traffic throughout deployment; small-batch decode can bind on weight and KV traffic, so scheduling, memory allocation, and topology must be evaluated against the workload and service contract.",
               "Multi-tenancy isolation can be safely omitted if GPUs are upgraded to Blackwell architectures."
             ],
             "answer": "The correct answer is C. For the high-traffic, small-batch LLM setting, serving cost accumulates with completed work over the deployment lifetime, and weight/KV traffic often limits decode. Efficient operation coordinates scheduling, cache allocation, sharding, and routing under latency and quality constraints. Cost dominance and bandwidth limitation depend on traffic, model, and serving regime; neither is universal across all inference workloads.",
@@ -711,9 +711,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Why does production inference reverse the core optimization priority of distributed training from aggregate throughput (samples/hour) to tail latency (P99 ms)?",
-            "answer": "Distributed training is an offline batch workload where progress is measured in aggregate samples processed over hours or days, tolerating high variance and periodic checkpoint rollbacks. Production inference is a real-time, user-facing service where revenue and user engagement depend on strict P99 latency bounds (milliseconds); high latency variance or dropped requests cause immediate user abandonment and cascading failures in dependent microservices.",
-            "learning_objective": "Justify why production inference prioritizes tail latency over aggregate batch throughput."
+            "question": "Why must interactive inference evaluate tail latency alongside aggregate throughput, and how does its service contract differ from a training run?",
+            "answer": "Training evaluates aggregate progress, convergence, and time to solution over a run. Interactive inference receives external arrivals and must complete useful work within request-level latency, quality, and availability targets while paying recurring cost. High aggregate throughput does not establish timely responses when queues grow or token delivery stalls. Tail latency and SLO-compliant goodput therefore belong in the same evaluation; a latency-tolerant batch inference service can use a different contract.",
+            "learning_objective": "Explain why interactive serving evaluates tail latency and useful throughput under a request-level service contract."
           },
           {
             "question_type": "FILL",
