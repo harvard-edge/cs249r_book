@@ -537,9 +537,9 @@ Whichever type of shift is suspected, deciding whether it matters requires a mea
 
 Several implementation choices determine whether PSI is sensitive enough to be useful. Bin selection significantly affects PSI sensitivity. For categorical features, each category forms a natural bin. For continuous features, equal-width bins (10--20 bins typical) or quantile-based bins provide different trade-offs: equal-width bins preserve the absolute scale of the feature space, while quantile bins aim for balanced occupancy in the reference sample but may obscure changes within wide tail bins. Once chosen, the same boundaries must be used for the comparison population. Ties and deployment shifts can still produce sparse bins, so a bin-count convention alone does not ensure statistical stability.
 
-When a bin has zero observations in either distribution, adding a smoothing constant\index{Population Stability Index!smoothing constant} $\epsilon_{\text{smooth}}$ and renormalizing the bin probabilities prevents undefined logarithms. The choice can materially change PSI when bins are empty or sparsely populated, so the monitoring configuration must record the smoothing convention and check sensitivity to it. Monitoring population stability index over time as plotted in @fig-distribution-shift-detector reveals when a model drifts from the stable band into the warning band and then the major-shift band, triggering an escalation path that may lead to retraining after performance correlation.
+When a bin has zero observations in either distribution, adding a smoothing constant\index{Population Stability Index!smoothing constant} $\epsilon_{\text{smooth}}$ and renormalizing the bin probabilities prevents undefined logarithms. The choice can materially change PSI when bins are empty or sparsely populated, so the monitoring configuration must record the smoothing convention and check sensitivity to it. Monitoring population stability index over time as plotted in @fig-distribution-shift-detector reveals when the input population moves from the stable band into the warning band and then the major-shift band, triggering an escalation path that may lead to retraining after performance correlation. At week 41, the service approves and versions a new input reference after validating the changed operating population. The lower PSI thereafter compares traffic with that new reference, not the original one. Changing model weights alone would not reduce input PSI against a fixed reference, and the discontinuity does not establish improved predictions.
 
-::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**A Calibrated Distribution-Shift Workflow**: In this synthetic service, PSI enters the warning zone as user behavior shifts and crosses the service's escalation threshold at week 32. Root-cause analysis, offline validation, and a model release precede the restored baseline at week 41." fig-alt="Line plot of weekly PSI over 52 weeks with service-calibrated green, orange, and red alert zones. Drift crosses the escalation threshold at week 32, and a validated model update restores the baseline at week 41."}
+::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**A Calibrated Distribution-Shift Workflow**: In this synthetic service, PSI enters the warning zone as user behavior shifts and crosses the service's escalation threshold at week 32. Following investigation and validation of the changed operating population, the service versions a new input reference at week 41. Values on either side of that reference change use different comparison populations; the drop is not evidence of model recovery." fig-alt="Line plot of weekly PSI over 52 weeks with service-calibrated green, orange, and red alert zones. Drift crosses the escalation threshold at week 32. A discontinuity at week 41 marks an approved input-reference change, after which PSI uses the new reference."}
 
 ```{python}
 #| echo: false
@@ -574,7 +574,8 @@ ax.axhspan(thresh_critical, 0.45, color=COLORS['RedFill'], alpha=0.35, label=f'M
 ax.axhline(thresh_warning, color=COLORS['OrangeLine'], linestyle='--', linewidth=1.2, alpha=0.85)
 ax.axhline(thresh_critical, color=COLORS['RedLine'], linestyle='--', linewidth=1.2, alpha=0.85)
 
-ax.plot(weeks, psi_values, color=COLORS['primary'], linewidth=2.0, marker='o', markersize=5, label='Weekly PSI', zorder=3)
+ax.plot(weeks[:40], psi_values[:40], color=COLORS['primary'], linewidth=2.0, marker='o', markersize=5, label='Weekly PSI', zorder=3)
+ax.plot(weeks[40:], psi_values[40:], color=COLORS['primary'], linewidth=2.0, marker='o', markersize=5, zorder=3)
 
 shift_idx = np.where(psi_values >= thresh_critical)[0][0]
 ax.annotate(
@@ -591,11 +592,11 @@ ax.annotate(
     zorder=4,
 )
 
-retrain_idx = np.where((weeks > weeks[shift_idx]) & (psi_values < thresh_warning))[0][0]
+reference_idx = 40  # week 41 changes the input reference, not the model's measured quality
 ax.annotate(
-    'Validated Update Deployed\n(Baseline Restored)',
-    xy=(weeks[retrain_idx], psi_values[retrain_idx]),
-    xytext=(weeks[retrain_idx] + 4, psi_values[retrain_idx] + 0.08),
+    'Approved Reference Change\n(New Comparison Baseline)',
+    xy=(weeks[reference_idx], psi_values[reference_idx]),
+    xytext=(weeks[reference_idx] + 3, psi_values[reference_idx] + 0.08),
     fontsize=8.5,
     fontweight='bold',
     ha='center',
@@ -1257,7 +1258,7 @@ The attacker's access determines the evaluation a defense must survive. @Tbl-att
 |                  | PGD             | Iterative multi-step FGSM refinement                      |
 |                  | JSMA            | Targets the most influential features                     |
 | **Optimization** | C&W             | Minimizes perturbation size subject to misclassification  |
-|                  | DeepFool        | Finds minimal perturbation to cross the decision boundary |
+|                  | DeepFool        | Estimates a small boundary-crossing perturbation by local linearization |
 |                  | EAD             | Elastic net regularization for sparse perturbations       |
 | **Transfer**     | Transferability | Adversarial examples transfer across models (black-box)   |
 | **Physical**     | Patches         | Printed patches fool detectors in the real world          |
@@ -1607,7 +1608,7 @@ Language interfaces also carry the input-level attacker into text. Prompt inject
 ↩ Prompt injection as a failure of the boundary between control and data is established in @sec-security-privacy-llmspecific-threat-vectors-65f2.
 :::
 
-A common deployment pattern adds **output guardrails**\index{Output Guardrail!definition}, lightweight classifiers that scan generated text for policy violations\index{Output Guardrail!policy enforcement} or toxicity before the response returns to the user. A guardrail threshold trades the same two quantities as a selective-prediction threshold. Each false positive refuses or escalates a legitimate response, so the false-positive rate multiplied by the request rate sets the load on the refusal, retrieval, or human path; each false negative is residual risk that reaches the user. Choosing the threshold from a curve measured on representative traffic, rather than from the classifier's default, keeps that load inside the fallback capacity. The guardrail also adds a model inference to every response, so its latency counts against the serving deadline. Finally, a guardrail is itself a model with its own decision boundary, so it carries the same obligation as any other defense and must pass the adaptive evaluation above against an attacker who knows it is there.
+A common deployment pattern adds **output guardrails**\index{Output Guardrail!definition}, lightweight classifiers that scan generated text for policy violations\index{Output Guardrail!policy enforcement} or toxicity before the response returns to the user. A guardrail threshold trades the same two quantities as a selective-prediction threshold. Each false positive refuses or escalates a legitimate response, so the false-positive rate multiplied by the legitimate-request rate estimates false refusals or escalations; each false negative is residual risk that reaches the user. Total diverted load also includes correctly flagged harmful responses. The arrival rate at each refusal, retrieval, or human path is the incoming request rate multiplied by the fraction routed to that path under the policy, counting both true and false flags. Choosing the threshold from a curve measured on representative traffic, rather than from the classifier's default, allows the team to compare that load with the path's capacity. The guardrail also adds a model inference to every response, so its latency counts against the serving deadline. Finally, a guardrail is itself a model with its own decision boundary, so it carries the same obligation as any other defense and must pass the adaptive evaluation above against an attacker who knows it is there.
 
 Adversarial training, certified defenses, and generative guardrails address attacks on model inputs at inference time within bounded threat models. They do not establish that the model was trained on trustworthy data. If an adversary compromises the data pipeline long before the model is compiled, inference-time behavioral tests may reveal a backdoor, but cannot by themselves establish the integrity of the training pipeline. The data poisoning attacks described earlier demand their own class of defenses.
 
