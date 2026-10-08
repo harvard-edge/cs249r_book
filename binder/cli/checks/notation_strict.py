@@ -304,13 +304,36 @@ def extract_math(source: str, include_captions: bool = True) -> List[MathSpan]:
     return spans
 
 
+def _fstring_literal(body: str) -> str:
+    """The literal text of an f-string: {{ and }} become braces, each {field} becomes 1.
+
+    A numeral stands in for a computed value, so it can never read as a symbol.
+    """
+    out, i, n = [], 0, len(body)
+    while i < n:
+        if body.startswith("{{", i) or body.startswith("}}", i):
+            out.append(body[i])
+            i += 2
+        elif body[i] == "{":
+            depth, j = 1, i + 1
+            while j < n and depth:
+                depth += {"{": 1, "}": -1}.get(body[j], 0)
+                j += 1
+            out.append("1")
+            i = j
+        else:
+            out.append(body[i])
+            i += 1
+    return "".join(out)
+
+
 def extract_fmt_math(source: str) -> List[MathSpan]:
-    """LaTeX passed to fmt_math(...) inside Python cells (f-string fields replaced by X)."""
+    """LaTeX passed to fmt_math(...) inside Python cells (f-string fields become 1)."""
     out = []
     for m in _FMT_MATH.finditer(source):
         prefix, body = m.group(1).lower(), m.group(3)
         if "f" in prefix:
-            body = re.sub(r"\{\{|\}\}", lambda x: x.group(0)[0], re.sub(r"(?<!\{)\{[^{}]*\}(?!\})", "X", body))
+            body = _fstring_literal(body)
         if "r" not in prefix:
             body = body.replace("\\\\", "\\")
         out.append(MathSpan(source.count("\n", 0, m.start()) + 1, 1, body, False, "fmt_math"))

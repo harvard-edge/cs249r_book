@@ -104,7 +104,9 @@ def test_captions_are_read():
 
 def test_fmt_math_and_quiz():
     cell = 'x = fmt_math(r"\\alpha + N")\ny = fmt_math(f"{a} \\\\cdot \\\\beta")\n'
-    assert [s.text for s in extract_fmt_math(cell)] == ["\\alpha + N", "X \\cdot \\beta"]
+    assert [s.text for s in extract_fmt_math(cell)] == ["\\alpha + N", "1 \\cdot \\beta"]
+    nested = 'z = fmt_math(f"2^{{-{alpha:.3f}}} \\\\approx {x}")'
+    assert [s.text for s in extract_fmt_math(nested)] == ["2^{-1} \\approx 1"]
     assert [s.text for s in extract_quiz_math('{"q": "Find $p$ when $N=4$"}')] == ["p", "N=4"]
 
 
