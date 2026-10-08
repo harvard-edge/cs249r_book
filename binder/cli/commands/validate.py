@@ -831,7 +831,7 @@ class ValidateCommand:
             Scope("strict", "_run_notation_strict",
                   note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
             Scope("conventions", "_run_notation_conventions",
-                  note="registry entries follow the naming and field conventions (mlsysim/mlsysim/notation/data/README.md); legacy_names.txt only shrinks"),
+                  note="every registry entry follows the naming and field conventions (mlsysim/mlsysim/notation/data/README.md)"),
         ],
         "spelling": [
             # Both scopes require aspell. Heavy and not part of pre-commit
@@ -13190,31 +13190,21 @@ class ValidateCommand:
             files_checked=len(files), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
 
     def _run_notation_conventions(self, root: Path) -> ValidationRunResult:
-        """Registry entries follow the conventions; the legacy list only shrinks."""
+        """Every registry entry follows the naming and field conventions (no exemption list)."""
         t0 = time.time()
         repo, _, _ = self._notation_strict_inputs(root)
         if str(repo / "mlsysim") not in sys.path:
             sys.path.insert(0, str(repo / "mlsysim"))
         from mlsysim.notation import Notation
         from mlsysim.notation.types import convention_problems
-        data = repo / "mlsysim" / "mlsysim" / "notation" / "data"
-        legacy = {ln.strip() for ln in (data / "legacy_names.txt").read_text(encoding="utf-8").splitlines()
-                  if ln.strip() and not ln.startswith("#")}
         issues: List[ValidationIssue] = []
         for s_ in Notation.list():
             probs = convention_problems(s_)
-            yaml_file = f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml"
-            if probs and s_.macro not in legacy:
-                issues.append(ValidationIssue(file=yaml_file, line=1, code="notation-convention",
+            if probs:
+                issues.append(ValidationIssue(file=f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml", line=1,
+                                              code="notation-convention",
                                               message=f"{s_.macro}: " + "; ".join(probs),
                                               rule_doc="mlsysim/mlsysim/notation/data/README.md"))
-            if not probs and s_.macro in legacy:
-                issues.append(ValidationIssue(file="mlsysim/mlsysim/notation/data/legacy_names.txt", line=1,
-                                              code="notation-legacy-fixed",
-                                              message=f"{s_.macro} now follows the conventions: delete its line"))
-        for m in sorted(legacy - {s_.macro for s_ in Notation.list()}):
-            issues.append(ValidationIssue(file="mlsysim/mlsysim/notation/data/legacy_names.txt", line=1,
-                                          code="notation-legacy-gone", message=f"{m} no longer exists: delete its line"))
         return ValidationRunResult(
             name="notation-conventions", description="Registry entries follow the naming and field conventions",
             files_checked=len(Notation), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))

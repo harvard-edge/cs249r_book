@@ -12,9 +12,8 @@ Two levels of rule:
   is one of the allowed values.
 * **Convention rules** (``convention_problems``) describe what a good entry
   looks like: a meaningful name, a plain-language definition, LaTeX that fits
-  the kind. The registry test applies them to every entry that is not on the
-  frozen list of legacy names in ``data/legacy_names.txt``; that list only
-  shrinks.
+  the kind. The registry test applies them to every entry; there is no
+  exemption list.
 """
 from __future__ import annotations
 
@@ -25,8 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..fmt import MarkdownStr
 
-Kind = Literal["scalar", "count", "vector", "matrix", "set", "function", "distribution", "operator"]
-KINDS: Tuple[str, ...] = ("scalar", "count", "vector", "matrix", "set", "function", "distribution", "operator")
+Kind = Literal["scalar", "count", "index", "vector", "matrix", "set", "function", "distribution", "operator", "record"]
+KINDS: Tuple[str, ...] = ("scalar", "count", "index", "vector", "matrix", "set", "function", "distribution", "operator", "record")
 
 # TeX control words are letters only: "\Foo2" is "\Foo" followed by "2".
 _MACRO = re.compile(r"^\\[A-Z][A-Za-z]*$")
@@ -35,7 +34,7 @@ _MACRO = re.compile(r"^\\[A-Z][A-Za-z]*$")
 _BANNED_WORDS = {
     "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Other",
     "And", "Or", "Of", "The", "Var", "Symbol", "Value", "Quantity", "Term", "Macro",
-    "Bold", "Hat", "Bar", "Tilde", "Dot", "Cal", "Chapter", "Appendix", "Volume",
+    "Bold", "Hat", "Bar", "Tilde", "Dot", "Cal", "Chapter", "Appendix",
     "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta", "Iota", "Kappa",
     "Lambda", "Mu", "Nu", "Xi", "Pi", "Rho", "Sigma", "Tau", "Upsilon", "Phi", "Chi",
     "Psi", "Omega",
@@ -46,8 +45,10 @@ _ONE_WORD_OK = {
     "Throughput", "Speedup", "Trajectory", "Policy", "Reward", "Mass", "Gravity", "Pose",
     "Velocity", "Advantage",
 }
-_BOLD = re.compile(r"^\s*\\(mathbf|boldsymbol|bm)\b")
-_SET = re.compile(r"^\s*\\(mathcal|mathbb|mathscr)\b")
+# Bold anywhere in the symbol: \\hat{\\mathbf{y}} is a bold vector with a hat.
+_BOLD = re.compile(r"\\(mathbf|boldsymbol|bm)\b")
+# Calligraphic or blackboard anywhere: \\partial \\mathcal{C} is the boundary of a set.
+_SET = re.compile(r"\\(mathcal|mathbb|mathscr)\b")
 
 
 def split_words(name: str) -> List[str]:
@@ -67,6 +68,9 @@ class NotationSymbol(BaseModel):
     unit: MarkdownStr = MarkdownStr("")
     notes: MarkdownStr = MarkdownStr("")
     aliases: Tuple[str, ...] = Field(default_factory=tuple)
+    # Why the LaTeX keeps a field convention that the kind rule would reject
+    # (theta as a non-bold parameter vector, upright SE(3)). Excuses only that rule.
+    render_exception: MarkdownStr = MarkdownStr("")
     # Set by the loader from the file the entry sits in (data/<domain>.yaml).
     domain: str = ""
     # Legacy fields kept readable while the registry migrates; never written by new entries.
@@ -148,12 +152,13 @@ def convention_problems(s: NotationSymbol) -> List[str]:
         problems.append("definition lists several meanings (one entry per meaning)")
     if d.lower().replace(" ", "") == name.lower():
         problems.append("definition only repeats the name; say what the symbol means")
-    if s.kind in ("vector", "matrix") and not _BOLD.match(s.latex):
-        problems.append(f"kind '{s.kind}' must render bold (\\mathbf, \\boldsymbol or \\bm)")
-    if s.kind == "set" and not _SET.match(s.latex):
-        problems.append("kind 'set' must render calligraphic or blackboard (\\mathcal, \\mathbb, \\mathscr)")
-    if s.kind in ("scalar", "count") and _BOLD.match(s.latex):
-        problems.append(f"kind '{s.kind}' must not render bold")
+    if not str(s.render_exception).strip():
+        if s.kind in ("vector", "matrix") and not _BOLD.search(s.latex):
+            problems.append(f"kind '{s.kind}' must render bold (\\mathbf, \\boldsymbol or \\bm)")
+        if s.kind == "set" and not _SET.search(s.latex):
+            problems.append("kind 'set' must render calligraphic or blackboard (\\mathcal, \\mathbb, \\mathscr)")
+        if s.kind in ("scalar", "count", "index") and _BOLD.search(s.latex):
+            problems.append(f"kind '{s.kind}' must not render bold")
     if s.kind == "scalar" and not str(s.unit).strip():
         problems.append("a scalar needs a unit ('dimensionless' if it has none)")
     return problems

@@ -15,7 +15,6 @@ that is not a registered macro.
 data/
   README.md          this guide
   exempt.yaml        what math may contain that is not a symbol
-  legacy_names.txt   entries that predate the conventions (this list only shrinks)
   performance.yaml   iron law, roofline, memory, serving, energy
   learning.yaml      data, models, training, loss, degradation
   distributed.yaml   collectives, communication models, reliability, scheduling
@@ -62,9 +61,10 @@ needs the same meaning, add the row to that volume's notation chapter too.
 | `macro` | yes | The name the book writes. See *Naming*. |
 | `latex` | yes | Exactly what readers see. Bold, calligraphic, hats and `\text{}` subscripts belong here, never in the chapter. |
 | `definition` | yes | What the symbol **means**, as a plain noun phrase a reader would recognize. No LaTeX, no `$`. Never "(none)". |
-| `kind` | yes | One of `scalar`, `count`, `vector`, `matrix`, `set`, `function`, `distribution`, `operator`. The check uses it: a `vector` or `matrix` must render bold, a `set` calligraphic or blackboard. |
+| `kind` | yes | One of `scalar`, `count`, `index`, `vector`, `matrix`, `set`, `function`, `distribution`, `operator`, `record`. A `record` is a structured or textual object (a state, an action, a trajectory, a goal, a key) and has no unit. The check uses the kind: a `vector` or `matrix` must render bold, a `set` calligraphic or blackboard. |
 | `unit` | yes for `scalar` | SI or book units (`s`, `bytes/s`, `FLOP`). `dimensionless` when it has none. |
 | `notes` | no | Why this glyph, what it must not be confused with. LaTeX allowed here. |
+| `render_exception` | no | Only when the LaTeX keeps a field convention the kind rule would reject: `\theta` as a non-bold parameter vector, upright `SE(3)` as a set. One sentence saying which convention. It excuses the kind-vs-LaTeX rule and nothing else. |
 | `aliases` | no | Old macro names that still compile to this entry. The check flags their use so chapters move to the canonical name. |
 
 The domain comes from the file the entry sits in. Nothing in an entry says which
@@ -79,11 +79,18 @@ from the name, and find the name from the meaning.
 1. **PascalCase noun phrase, qualifier first, quantity last.** `PeakRate`,
    `LinkBandwidth`, `PrebrakeDelay`, `AttemptPassProbability`, `ReplicaCount`.
 2. **Two to five words.** Long enough to be unambiguous across the whole book,
-   because LaTeX macro names are global.
+   because LaTeX macro names are global. One-word names are reserved for the
+   series core (`Latency`, `Bandwidth`, `Energy`, `Policy` and a few more,
+   listed in `types.py`).
 3. **Never the glyph.** Not `Alpha`, `BigN`, `BoldQ`. The glyph lives in `latex:`.
-4. **Never a number or a joining word.** No digits, no `Two`/`Three`/`Four`,
-   no `And`/`Or`. Two quantities get two entries.
-5. **No placeholders.** No `Var`, `Symbol`, `Value`, `Quantity`, `Term` on their own.
+4. **Never a number or a joining word.** No digits, no `Two` to `Ten`, no
+   `Other`, no `And`/`Or`/`Of`/`The`, and no leading article (`AWorkerCount`).
+   Two quantities get two entries.
+5. **No placeholders or glyph words.** No `Var`, `Symbol`, `Value`, `Quantity`,
+   `Term`, `Macro`; no Greek letter names (`Alpha` to `Omega`, so Cohen's kappa
+   is `InterAnnotatorAgreement`); no decoration names (`Bold`, `Hat`, `Bar`,
+   `Tilde`, `Dot`, `Cal`); no `Chapter` or `Appendix`. The check
+   (`convention_problems` in `types.py`) holds the exact list.
 6. **Acronyms are words.** Write `KvCache`, `Tco`, `Mtbf`, `Gpu`, and only
    for acronyms the book itself defines; otherwise spell it out.
 7. **Same glyph, different meaning, different name.** `p` is
