@@ -1037,7 +1037,7 @@ where $g_i$ and $g_j$ are GPUs assigned to the job, $d(g_i, g_j)$ is their topol
 
 More sophisticated algorithms distinguish the communication requirements of different parallelism strategies. Frequent tensor-parallel activation exchanges favor a high-bandwidth, low-latency domain that meets the measured communication budget; that domain need not coincide with one server. Pipeline parallelism exchanges activations across stage boundaries rather than between every layer, but its tolerance for link delay depends on microbatch size and the pipeline schedule. Data-parallel gradient synchronization can overlap computation, making wider placement feasible when the exposed communication remains within budget. These patterns guide placement without establishing a universal ranking for every model or fabric.
 
-@Algo-topology-aware-placement combines the all-or-nothing gang constraint of @sec-fleet-orchestration-gang-scheduling, the locality cost of @eq-fleet-orchestration-locality-score, and an illustrative parallelism-to-topology mapping. Its enumeration expresses the decision conceptually: score feasible allocations and choose the least costly, leaving the job queued when none fits. A fleet-scale implementation must restrict that search using heuristics rather than enumerate every allocation.
+@Algo-topology-aware-placement combines the all-or-nothing gang constraint of @sec-fleet-orchestration-gang-scheduling, the locality cost of @eq-fleet-orchestration-locality-score, and an illustrative parallelism-to-topology mapping. Its enumeration expresses the decision conceptually: construct feasible rank mappings, score their allocations, and choose the lowest illustrative locality score, leaving the job queued when none fits. This surrogate does not guarantee minimum communication time or completion time. A fleet-scale implementation must restrict that search using heuristics rather than enumerate every allocation.
 
 ```pseudocode
 #| label: algo-topology-aware-placement
@@ -1047,17 +1047,19 @@ More sophisticated algorithms distinguish the communication requirements of diff
 \begin{algorithm}
 \caption{Topology-aware placement}
 \begin{algorithmic}
-\Require job requesting $N$ accelerators with tensor-, pipeline-, and data-parallel groups; cluster topology with per-level link costs $w(\cdot)$
-\Ensure an all-or-nothing placement of least communication cost, or the job stays queued
-\State enumerate the feasible slots: sets of $N$ free accelerators that satisfy every resource dimension \Comment{gang: all or nothing}
+\Require job requesting $N$ accelerators with tensor-, pipeline-, and data-parallel groups; cluster topology with illustrative per-level locality weights $w(\cdot)$
+\Ensure an all-or-nothing feasible placement with the lowest illustrative locality score, or the job stays queued
+\State enumerate candidate slots: sets of $N$ free accelerators that satisfy every resource dimension \Comment{gang: all or nothing}
+\State retain only slots that admit a rank mapping satisfying the job's tensor-, pipeline-, and data-parallel communication constraints
 \If{no feasible slot exists}
     \State leave the job queued without holding any accelerators \Comment{prevents hold-and-wait deadlock}
+    \State \Return no placement
 \EndIf
 \For{each feasible slot}
-    \State map tensor-parallel ranks within an NVLink domain, pipeline stages within a rack, data-parallel replicas across racks
+    \State use a feasible rank mapping: tensor-parallel ranks within an NVLink domain, pipeline stages within a rack, data-parallel replicas across racks where permitted
     \State score the slot by $\text{Cost}_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j))$
 \EndFor
-\State \Return the feasible slot of least $\text{Cost}_{\text{locality}}$ \Comment{topology-optimal, atomic}
+\State \Return the feasible slot of least $\text{Cost}_{\text{locality}}$ \Comment{minimum score among enumerated feasible placements; atomic allocation}
 \end{algorithmic}
 \end{algorithm}
 ```
