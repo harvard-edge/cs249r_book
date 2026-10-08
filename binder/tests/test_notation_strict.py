@@ -297,6 +297,10 @@ def test_glyph_collisions_within_a_chapter():
     assert col == [{"section": "One", "latex": "B", "macros": ["BatchSize", "GemmRightOperand"], "lines": [3, 5]}]
     # the same two meanings in different top-level sections do not collide
     assert glyph_collisions("## One\n\n$\\BatchSize$\n\n## Two\n\n$\\GemmRightOperand$\n", reg) == []
+    # in an appendix of derivations each ### derivation is the unit (level=3)
+    two_derivations = "## A\n\n### D1\n\n$\\BatchSize$\n\n### D2\n\n$\\GemmRightOperand$\n"
+    assert len(glyph_collisions(two_derivations, reg)) == 1
+    assert glyph_collisions(two_derivations, reg, level=3) == []
 
 
 def test_apply_drops_a_label_that_belonged_to_the_replaced_symbol():

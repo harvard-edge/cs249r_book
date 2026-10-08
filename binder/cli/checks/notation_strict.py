@@ -992,14 +992,16 @@ def apply_assignments(source: str, assignments: List[Dict],
     return source, refusals
 
 
-def glyph_collisions(source: str, registry: Registry) -> List[Dict]:
+def glyph_collisions(source: str, registry: Registry, level: int = 2) -> List[Dict]:
     """Different symbols that look identical in one section of a chapter.
 
     Two registered macros may share LaTeX (``p`` is a pass probability in one
     place and a candidate rate in another), but never within one top-level
     (``##``) section: the reader, who reads a section at a time, would see one
-    letter mean two things. Returns one record per shared rendering and
-    section: the section, the LaTeX, the macros, and the first line of each.
+    letter mean two things. In a back-matter appendix that collects
+    derivations, each ``###`` derivation is the unit (``level=3``): it keeps the
+    notation of the chapter it serves. Returns one record per shared rendering
+    and section: the section, the LaTeX, the macros, and the first line of each.
     """
     table = registry.macro_table()
 
@@ -1013,8 +1015,8 @@ def glyph_collisions(source: str, registry: Registry) -> List[Dict]:
     for line in source.split("\n"):
         if _FENCE.match(line):
             in_fence = not in_fence
-        elif not in_fence and line.startswith("## "):
-            current = line[3:].strip()
+        elif not in_fence and re.match(r"#{2,%d} " % level, line):
+            current = line.lstrip("#").strip()
         h2_at.append(current)
 
     first: Dict[Tuple[str, str], Dict[str, int]] = collections.defaultdict(dict)
