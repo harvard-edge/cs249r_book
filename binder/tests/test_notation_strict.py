@@ -198,3 +198,62 @@ def test_glossary_row_overrides_an_alias_used_with_another_meaning():
     row = {"symbol": "\\OldBandwidth", "macro": "LinkBandwidth", "lines": [3]}
     res = assign_from_glossary(_alias_package(), {"rows": [row]}, REG)
     assert [(a["macro"], a["via"]) for a in res["assignments"]] == [("LinkBandwidth", "glossary")]
+
+
+def test_apply_replaces_the_whole_span_a_macro_renders():
+    src = "Drift $D(P_t, P_0)$ grows.\n"
+    span = extract_math(src)[0]
+    toks = __import__("notation_strict").tokenize(span.text)
+    k = toks.index("P")
+    a = [{"line": 1, "col": span.col, "token_start": k, "token_end": k + 1, "raw": "P", "macro": "CurrentDistribution"}]
+    new, refused = apply_assignments(src, a, {"\\CurrentDistribution": "P_{t}"})
+    assert refused == [] and new == "Drift $D(\\CurrentDistribution, P_0)$ grows.\n"
+
+
+def test_apply_keeps_head_only_when_latex_is_one_token():
+    src = "Cost $2N_t$.\n"
+    span = extract_math(src)[0]
+    a = [{"line": 1, "col": span.col, "token_start": 1, "token_end": 2, "raw": "N", "macro": "NumberOfDevices"}]
+    new, _ = apply_assignments(src, a, {"\\NumberOfDevices": "N"})
+    assert new == "Cost $2\\NumberOfDevices_t$.\n"
+
+
+def test_glyph_mentions_are_wrapped_and_exempt():
+    src = "The book writes $B$ for batch size.\n"
+    span = extract_math(src)[0]
+    a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": 1, "raw": "B", "macro": "Glyph"}]
+    new, refused = apply_assignments(src, a, {"\\Glyph": "#1"})
+    assert refused == [] and new == "The book writes $\\Glyph{B}$ for batch size.\n"
+    assert raws("\\Glyph{B}") == []
+
+
+def test_inline_python_inside_math_is_a_value():
+    assert raws("\\frac{`{python} Cost.saved_str` \\times N}{`{python} Cost.total_str`}") == [("N", "letter")]
+
+
+def test_macro_decorations_that_keep_the_symbol():
+    reg = Registry([
+        RegistryEntry("WeightMatrix", r"\mathbf{W}", "weights", "matrix"),
+        RegistryEntry("LayerIndex", "l", "layer index", "index"),
+        RegistryEntry("DatasetSize", "D", "dataset size", "scalar"),
+        RegistryEntry("DataScalingExponent", r"\beta", "exponent", "scalar"),
+        RegistryEntry("ActivationFunction", r"\sigma", "activation", "function"),
+        RegistryEntry("Time", "T", "time"),
+    ], {}, BUILTINS)
+    ok = [r"\WeightMatrix^{(\LayerIndex)}", r"\WeightMatrix^{(\LayerIndex-1)}", r"\WeightMatrix^{(1)}",
+          r"\DatasetSize^{\DataScalingExponent}", r"\DatasetSize^{-\DataScalingExponent}", r"\Time^*",
+          r"\ActivationFunction'", r"\WeightMatrix_{\LayerIndex}", r"\Time_0"]
+    for m in ok:
+        assert [f.kind for f in judge(m, reg)] == [], m
+    bad = [r"\Time^{\text{new}}", r"\Time'", r"\Time_{\text{disk}}", r"\WeightMatrix^{(\DatasetSize)}"]
+    for m in bad:
+        assert [f.kind for f in judge(m, reg)] == ["decorated"], m
+
+
+def test_matrix_entry_positions_are_indices_and_are_kept():
+    assert raws("A_{i0}B_{0j}") == [("A", "letter"), ("B", "letter")]
+    src = "Entry $A_{i0}$ here.\n"
+    span = extract_math(src)[0]
+    a = [{"line": 1, "col": span.col, "token_start": 0, "token_end": 6, "raw": "A_{i0}", "macro": "LeftEntry"}]
+    new, refused = apply_assignments(src, a, {"\\LeftEntry": "A"})
+    assert refused == [] and new == "Entry $\\LeftEntry_{i0}$ here.\n"

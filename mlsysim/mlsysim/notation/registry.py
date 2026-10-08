@@ -16,7 +16,7 @@ import yaml
 from .types import NotationSymbol
 
 DATA_DIR = Path(__file__).parent / "data"
-_NOT_SYMBOL_FILES = {"exempt.yaml"}
+_NOT_SYMBOL_FILES = {"exempt.yaml", "vocabulary.yaml"}
 
 
 class NotationRegistry:

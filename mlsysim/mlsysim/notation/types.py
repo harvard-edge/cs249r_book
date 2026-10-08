@@ -18,7 +18,10 @@ Two levels of rule:
 from __future__ import annotations
 
 import re
-from typing import List, Literal, Tuple
+from pathlib import Path
+from typing import Dict, List, Literal, Optional, Tuple
+
+import yaml
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -49,6 +52,127 @@ _ONE_WORD_OK = {
 _BOLD = re.compile(r"\\(mathbf|boldsymbol|bm)\b")
 # Calligraphic or blackboard anywhere: \\partial \\mathcal{C} is the boundary of a set.
 _SET = re.compile(r"\\(mathcal|mathbb|mathscr)\b")
+
+
+# --- controlled vocabulary (data/vocabulary.yaml) ----------------------------
+
+_VOCAB_PATH = Path(__file__).parent / "data" / "vocabulary.yaml"
+_vocab_cache: Optional[Dict] = None
+
+
+def vocabulary() -> Dict:
+    """The units, quantity words and idioms in ``data/vocabulary.yaml``."""
+    global _vocab_cache
+    if _vocab_cache is None:
+        _vocab_cache = yaml.safe_load(_VOCAB_PATH.read_text(encoding="utf-8"))
+    return _vocab_cache
+
+
+_UNIT_TOKEN = re.compile(r"\s*([A-Za-z]+|\d+|[*/^()-])")
+
+
+def unit_dimension(unit: str) -> Optional[Dict[str, int]]:
+    """Base dimensions of a unit expression, or None if it uses an unknown unit.
+
+    Units combine with ``*``, ``/``, ``^n`` and parentheses; ``a/b/c`` is
+    ``a/(b*c)``. ``dimensionless`` is the empty dimension.
+    """
+    u = unit.strip()
+    if u == "dimensionless":
+        return {}
+    table = vocabulary()["units"]
+    toks = [m.group(1) for m in _UNIT_TOKEN.finditer(u)]
+    if "".join(toks) != u.replace(" ", ""):
+        return None
+    pos = 0
+
+    def add(a: Dict[str, int], b: Dict[str, int], sign: int) -> Dict[str, int]:
+        out = dict(a)
+        for k, v in b.items():
+            out[k] = out.get(k, 0) + sign * v
+        return {k: v for k, v in out.items() if v}
+
+    def factor() -> Optional[Dict[str, int]]:
+        nonlocal pos
+        if pos >= len(toks):
+            return None
+        tok = toks[pos]
+        if tok == "(":
+            pos += 1
+            inner = product()
+            if inner is None or pos >= len(toks) or toks[pos] != ")":
+                return None
+            pos += 1
+            base = inner
+        elif tok == "1":
+            pos += 1
+            base = {}
+        elif tok in table:
+            pos += 1
+            base = dict(table[tok] or {})
+        else:
+            return None
+        if pos < len(toks) and toks[pos] == "^":
+            pos += 1
+            neg = pos < len(toks) and toks[pos] == "-"
+            pos += neg
+            if pos >= len(toks) or not toks[pos].isdigit():
+                return None
+            n = int(toks[pos]) * (-1 if neg else 1)
+            pos += 1
+            base = {k: v * n for k, v in base.items()}
+        return base
+
+    def product() -> Optional[Dict[str, int]]:
+        nonlocal pos
+        acc = factor()
+        if acc is None:
+            return None
+        while pos < len(toks) and toks[pos] in "*/":
+            op = toks[pos]
+            pos += 1
+            nxt = factor()
+            if nxt is None:
+                return None
+            acc = add(acc, nxt, 1 if op == "*" else -1)
+        return acc
+
+    dim = product()
+    return dim if dim is not None and pos == len(toks) else None
+
+
+def quantity_word(name: str) -> Optional[str]:
+    """The vocabulary word a macro name ends in (longest match), if any."""
+    words = sorted(vocabulary()["words"], key=len, reverse=True)
+    for w in words:
+        if name.endswith(w) and (len(name) == len(w) or name[-len(w) - 1].islower() or name[-len(w)].isupper()):
+            return w
+    return None
+
+
+def _word_problems(s: "NotationSymbol", name: str) -> List[str]:
+    if any(name.endswith(i) for i in (vocabulary().get("idioms") or {})):
+        return []
+    w = quantity_word(name)
+    if w is None:
+        return []
+    rule = vocabulary()["words"][w]
+    probs: List[str] = []
+    if s.kind not in rule["kinds"]:
+        probs.append(f"a name ending in '{w}' must have kind {' or '.join(rule['kinds'])}, not '{s.kind}' "
+                     f"(rename the entry, or fix its kind)")
+    unit = str(s.unit).strip()
+    dim = unit_dimension(unit) if unit and unit != "varies" else None
+    if dim is None:
+        return probs
+    if "dimension" in rule and dim != rule["dimension"]:
+        probs.append(f"a name ending in '{w}' needs a unit of dimension {rule['dimension'] or 'dimensionless'}; "
+                     f"'{unit}' is {dim or 'dimensionless'}")
+    if rule.get("per_time_or_share") and dim and dim.get("time", 0) != -1:
+        probs.append(f"a name ending in '{w}' is per unit of time or a dimensionless share; '{unit}' is neither")
+    if rule.get("currency") and dim.get("currency", 0) != 1:
+        probs.append(f"a name ending in '{w}' is an amount of money; '{unit}' is not in USD")
+    return probs
 
 
 def split_words(name: str) -> List[str]:
@@ -159,6 +283,14 @@ def convention_problems(s: NotationSymbol) -> List[str]:
             problems.append("kind 'set' must render calligraphic or blackboard (\\mathcal, \\mathbb, \\mathscr)")
         if s.kind in ("scalar", "count", "index") and _BOLD.search(s.latex):
             problems.append(f"kind '{s.kind}' must not render bold")
-    if s.kind == "scalar" and not str(s.unit).strip():
+    unit = str(s.unit).strip()
+    if s.kind == "scalar" and not unit:
         problems.append("a scalar needs a unit ('dimensionless' if it has none)")
+    if s.kind in ("count", "index", "record") and unit:
+        problems.append(f"kind '{s.kind}' has no unit (say what is counted in the definition)")
+    if unit and unit != "varies" and unit_dimension(unit) is None:
+        problems.append(f"unit '{unit}' is not built from the units in data/vocabulary.yaml")
+    if unit == "varies" and not str(s.notes).strip():
+        problems.append("unit 'varies' needs notes saying what it depends on")
+    problems.extend(_word_problems(s, name))
     return problems

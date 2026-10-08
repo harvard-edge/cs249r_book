@@ -15,6 +15,7 @@ that is not a registered macro.
 data/
   README.md          this guide
   exempt.yaml        what math may contain that is not a symbol
+  vocabulary.yaml    the units and quantity words entries are checked against
   performance.yaml   iron law, roofline, memory, serving, energy
   learning.yaml      data, models, training, loss, degradation
   distributed.yaml   collectives, communication models, reliability, scheduling
@@ -62,7 +63,7 @@ needs the same meaning, add the row to that volume's notation chapter too.
 | `latex` | yes | Exactly what readers see. Bold, calligraphic, hats and `\text{}` subscripts belong here, never in the chapter. |
 | `definition` | yes | What the symbol **means**, as a plain noun phrase a reader would recognize. No LaTeX, no `$`. Never "(none)". |
 | `kind` | yes | One of `scalar`, `count`, `index`, `vector`, `matrix`, `set`, `function`, `distribution`, `operator`, `record`. A `record` is a structured or textual object (a state, an action, a trajectory, a goal, a key) and has no unit. The check uses the kind: a `vector` or `matrix` must render bold, a `set` calligraphic or blackboard. |
-| `unit` | yes for `scalar` | SI or book units (`s`, `bytes/s`, `FLOP`). `dimensionless` when it has none. |
+| `unit` | yes for `scalar` | Built from the units in `vocabulary.yaml` (`s`, `bytes/s`, `USD/token`, `kg*m^2`); `dimensionless` when it has none; `varies` when it depends on what the symbol is applied to, with notes saying how. Counts, indices and records have none. See *Units*. |
 | `notes` | no | Why this glyph, what it must not be confused with. LaTeX allowed here. |
 | `render_exception` | no | Only when the LaTeX keeps a field convention the kind rule would reject: `\theta` as a non-bold parameter vector, upright `SE(3)` as a set. One sentence saying which convention. It excuses the kind-vs-LaTeX rule and nothing else. |
 | `aliases` | no | Old macro names that still compile to this entry. The check flags their use so chapters move to the canonical name. |
@@ -142,11 +143,48 @@ silently changes every page that already uses it. Make a new entry instead.
   labels (group `\text{A}`); a variable is always italic, so writing one
   upright is a typesetting error the reader would see.
 
-A macro may carry an index, a power, an inverse or a transpose
-(`\Time_{t}`, `\Time^2`, `\Time^{-1}`, `\GeneralizedCoordinates^\top`).
-Any other subscript, superscript or prime (`\Bandwidth_{\text{bisect}}`,
-`\Policy^*`, `\Time'`) makes a new symbol, which needs its own entry.
+A macro may carry, without becoming a new symbol:
 
-A line that genuinely must show raw LaTeX (the notation chapter explaining what
-not to write, for instance) can carry `<!-- notation-ok: reason -->`. The check
-counts these and prints them on every run.
+- an **index** subscript: index letters, digits, or index and count macros
+  (`\Time_{t}`, `\LayerWidth_0`, `\GemmLeftOperandElement_{ik}`,
+  `\WeightMatrix_{\LayerIndex}`);
+- a **power**, including a power by another macro (`\Time^2`,
+  `\DatasetSize^{-\DataScalingExponent}`), an **inverse** (`^{-1}`) or a
+  **transpose** (`^\top`, `^T`);
+- a **parenthesized index** naming a layer, block or iteration
+  (`\WeightMatrix^{(\LayerIndex)}`, `\SoftmaxRowMaximum^{(1)}`);
+- **`*`** for the optimal value (`\RetrainingInterval^*`);
+- a **prime** on a function, meaning its derivative (`\ActivationFunction'`).
+
+Any other decoration, above all a text label (`\Bandwidth_{\text{bisect}}`,
+`\SoftmaxRowMaximum^{\text{new}}`), or a prime on a quantity, makes a new
+symbol, which needs its own entry.
+
+**Mentioning a letter.** Sometimes prose talks about a letter rather than a
+quantity: "the book writes $B$ for batch size, not bandwidth". Wrap it:
+`$\Glyph{B}$`. It renders exactly like `B`, the check ignores its argument,
+and anyone reading the source sees that the letter is mentioned, not used.
+
+## Units
+
+`vocabulary.yaml` lists every unit an entry may use, each with its base
+dimensions. Units combine with `*`, `/`, `^n` and parentheses. Data, compute,
+money and the countable things ML systems move (tokens, requests, samples) are
+dimensions of their own, so `bytes/s` is never confused with `Hz`, nor
+`USD/token` with a probability. Write the plural for an amount (`tokens`) and
+the singular after a slash (`USD/token`). A unit not built from the list fails
+the check; add it to the list only when no existing unit fits.
+
+## Quantity words
+
+Some words promise what kind of quantity a name is. When a name ends in one of
+them, the entry must agree: a `...Time`, `...Latency` or `...Interval` is in
+seconds, a `...Count` has kind `count`, a `...Probability` or `...Fraction` is
+dimensionless, a `...Bandwidth` is data per second, a `...Cost` is in USD, a
+`...Matrix` has kind `matrix`, and so on. A `...Rate` is per unit of time, or a
+dimensionless share per trial as statistics uses the word (error rate). The
+full list, with the kinds and dimensions each word allows, is in
+`vocabulary.yaml`. Names that end in none of these words are free; this rule
+only stops the common words from meaning two things. A few field terms that end
+in such a word but mean something else (`LearningRate`) are listed there as
+idioms, each with its reason.

@@ -54,6 +54,7 @@ TEXT_ARG_COMMANDS = {
     "text", "textrm", "textit", "textbf", "texttt", "textsf", "mathrm", "operatorname",
     "mbox", "label", "tag", "hspace", "vspace", "color", "textcolor", "href", "url",
     "begin", "end", "eqref", "ref",
+    "Glyph",  # a letter mentioned as a letter, not used as a quantity (README)
 }
 # Commands whose argument is a symbol that receives a font or an accent.
 FORM_COMMANDS = {
@@ -71,7 +72,6 @@ GREEK = {
     "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi",
     "Omega", "ell", "pi", "digamma", "varkappa",
 }
-ESCAPE_HATCH = re.compile(r"<!--\s*notation-ok:\s*(?P<reason>[^>]+?)\s*-->")
 
 
 # ===========================================================================
@@ -153,6 +153,7 @@ class Registry:
         table = {"\\" + m: e.latex for m, e in self.entries.items()}
         for a, c in self.aliases.items():
             table["\\" + a] = "\\" + c
+        table["\\Glyph"] = "#1"
         return table
 
     def candidates(self, tokens: Sequence[str]) -> List[RegistryEntry]:
@@ -172,7 +173,6 @@ class MathSpan:
     display: bool
     source: str = "body"     # body | caption | quiz | fmt_math
     section: str = ""
-    hatch: str = ""
 
 
 _FENCE = re.compile(r"^\s*(```+|~~~+)")
@@ -297,9 +297,6 @@ def extract_math(source: str, include_captions: bool = True) -> List[MathSpan]:
                     spans.append(MathSpan(idx + 1, m.start(2) + col, body, disp, "caption"))
     for s in spans:
         s.section = section_at[s.line - 1] if s.line - 1 < len(section_at) else ""
-        m = ESCAPE_HATCH.search(lines[s.line - 1])
-        if m:
-            s.hatch = m.group("reason")
     spans.sort(key=lambda s: (s.line, s.col))
     return spans
 
@@ -363,7 +360,9 @@ def extract_quiz_math(json_text: str) -> List[MathSpan]:
 # Judging one span
 # ===========================================================================
 
-_TOKEN = re.compile(r"\\[A-Za-z]+|\\.|[A-Za-z]|\d|\s+|.", re.S)
+# An inline `{python} ...` value is one token: Quarto substitutes a number or a
+# formatted string before Pandoc sees the math, so its letters are not symbols.
+_TOKEN = re.compile(r"`\{python\}[^`]*`|\\[A-Za-z]+|\\.|[A-Za-z]|\d|\s+|.", re.S)
 
 
 def tokenize(math: str) -> List[str]:
@@ -425,7 +424,52 @@ def _decoration_ok(group: List[str], ex: Exemptions) -> bool:
     # an index, an index expression (k+1, t-1), or a parenthesized one ((i), (\ell))
     if re.fullmatch(r"\(?(?:%s|\\ell)(?:[+-]\d+)?\)?" % idx, body):
         return True
+    # several indices, letters or digits (ij, i0, 0j, i,j): a matrix entry's position
+    if re.fullmatch(r"(?:%s|\d)(?:,?(?:%s|\d))+" % (idx, idx), body):
+        return True
     return False
+
+
+def _index_like(body: str, registry: "Registry") -> bool:
+    """Digits, index letters, index or count macros, joined by + - , (an index expression)."""
+    ex = registry.exempt
+    rest = body
+    for m in re.findall(r"\\([A-Za-z]+)", body):
+        e = registry.entries.get(registry.canonical(m))
+        if m not in ("ell",) and (e is None or e.kind not in ("index", "count")):
+            return False
+        rest = rest.replace("\\" + m, "", 1)
+    letters = set(re.findall(r"[A-Za-z]", rest))
+    return letters <= set(ex.index) and re.fullmatch(r"[\dA-Za-z+\-,\s]*", rest) is not None
+
+
+def _macro_decoration_ok(mark: str, grp: List[str], registry: "Registry", entry: Optional["RegistryEntry"]) -> bool:
+    """Decorations a registered macro may carry without becoming a new symbol (README).
+
+    Subscript: an index (``_t``, ``_{\\LayerIndex}``, ``_0``). Superscript: a
+    power, including a power by another macro (``D^{\\DataScalingExponent}``);
+    the inverse and the transpose; a parenthesized index naming a layer, block or
+    iteration (``W^{(\\LayerIndex)}``, ``m^{(1)}``); and ``*`` for the optimal value.
+    Anything else, a text label above all, is a new symbol.
+    """
+    if _decoration_ok(grp, registry.exempt):
+        return True
+    body = "".join(x for x in grp if not x.isspace())
+    if mark == "_":
+        return _index_like(body, registry)
+    if body == "*":
+        return True
+    if body.startswith("(") and body.endswith(")"):
+        return _index_like(body[1:-1], registry)
+    if "\\text" in body or "\\mathrm" in body or "\\operatorname" in body:
+        return False
+    # a power: macros, digits and arithmetic only
+    rest = re.sub(r"\\(?:frac|cdot|times|left|right|over)\b", "", body)
+    for m in re.findall(r"\\([A-Za-z]+)", rest):
+        if not registry.is_macro(m):
+            return False
+    rest = re.sub(r"\\[A-Za-z]+", "", rest)
+    return re.fullmatch(r"[\d+\-./(){}\s]*", rest) is not None
 
 
 def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> List[Finding]:
@@ -494,13 +538,16 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
                 elif scope is not None and name not in scope:
                     found.append(Finding(t, "out-of-scope", k, nk))
                 j = _skip_space(toks, nk)
+                entry = registry.entries.get(registry.canonical(name))
                 while j < len(toks) and toks[j] in ("_", "^", "'"):
                     if toks[j] == "'":
-                        found.append(Finding(t + "'", "decorated", k, j + 1))
+                        # a prime on a function is its derivative; on anything else, a new symbol
+                        if entry is None or entry.kind != "function":
+                            found.append(Finding(t + "'", "decorated", k, j + 1))
                         j += 1
                     else:
                         grp, after = _read_group(toks, j + 1)
-                        if not _decoration_ok(grp, ex):
+                        if not _macro_decoration_ok(toks[j], grp, registry, entry):
                             found.append(Finding(t + toks[j] + "{" + "".join(grp).strip() + "}",
                                                  "decorated", k, after))
                         j = after
@@ -616,7 +663,6 @@ class Violation:
     token_start: int
     token_end: int
     suggestions: List[Dict[str, str]] = field(default_factory=list)
-    hatch: str = ""
 
     def fingerprint(self) -> str:
         key = f"{self.raw}\x00{' '.join(self.math.split())}"
@@ -641,7 +687,7 @@ def scan_spans(spans: Iterable[MathSpan], rel: str, registry: Registry,
             else:
                 sug = [_entry_dict(e) for e in suggest(span.text, f, registry)]
             out.append(Violation(rel, span.line, span.col, span.section, span.source, f.raw, f.kind,
-                                 span.text, f.start, f.end, sug, span.hatch))
+                                 span.text, f.start, f.end, sug))
     return out
 
 
@@ -672,7 +718,6 @@ def work_package(violations: List[Violation], rel: str) -> Dict:
         if v.line not in sym["lines"]:
             sym["lines"].append(v.line)
     return {"file": rel, "volume": volume_of(rel), "raw_symbols": len(violations),
-            "hatches": sorted({v.hatch for v in violations if v.hatch}),
             "sections": list(sections.values()),
             "symbols": sorted(symbols.values(), key=lambda s: -s["count"])}
 
@@ -710,8 +755,6 @@ def render_text(pkg: Dict) -> str:
             out.append(f"    {sym['raw']:<20} x{sym['count']:<4} [{sym['kind']}] {_KIND_ADVICE[sym['kind']]}; {hint}")
         out.append(f"  Next: read each symbol's sentence and choose by meaning, or register a new symbol "
                    f"({RULE_DOC}). Full site list: --json.")
-    if pkg["hatches"]:
-        out.append(f"  Escape hatches on this file: {', '.join(pkg['hatches'])}")
     return "\n".join(out)
 
 
@@ -786,12 +829,44 @@ def verify_rendering(before_text: str, after_text: str, rel: str,
     return out
 
 
-def apply_assignments(source: str, assignments: List[Dict]) -> Tuple[str, List[str]]:
+def _span_norm(s: str) -> str:
+    """Compare LaTeX by content: no whitespace, no braces around one character."""
+    s = re.sub(r"\s+", "", s)
+    return re.sub(r"([_^])\{(\\?[A-Za-z0-9])\}", r"\1\2", s)
+
+
+def _macro_extent(toks: List[str], s0: int, s1: int, latex: Optional[str]) -> int:
+    """End token of the span a macro replaces.
+
+    A macro whose LaTeX is several tokens (``P_t``, ``\\Pr(E)``) replaces the
+    whole matching run, not just its head symbol; otherwise ``P_t`` would become
+    ``\\Macro_t`` and print the subscript twice. Without a longer match, the
+    site's own tokens.
+    """
+    if not latex:
+        return s1
+    want = _span_norm(latex)
+    best = s1
+    acc = ""
+    for j in range(s0, len(toks)):
+        acc += toks[j]
+        got = _span_norm(acc)
+        if got == want and j + 1 > best:
+            best = j + 1
+        if len(got) > len(want) or not want.startswith(got):
+            break
+    return best
+
+
+def apply_assignments(source: str, assignments: List[Dict],
+                      latex_of: Optional[Dict[str, str]] = None) -> Tuple[str, List[str]]:
     """Replace symbols at exact positions in body math.
 
     Each assignment is {"line", "col", "token_start", "token_end", "raw", "macro"},
     as produced from a work package. An assignment whose tokens no longer read
-    ``raw`` is refused, never guessed. Returns (new source, refusals).
+    ``raw`` is refused, never guessed. With ``latex_of`` (macro -> LaTeX), a
+    macro whose LaTeX spans several tokens replaces all of them. Returns (new
+    source, refusals).
     """
     spans = {(s.line, s.col): s for s in extract_math(source) if s.source == "body"}
     lines = source.split("\n")
@@ -820,15 +895,32 @@ def apply_assignments(source: str, assignments: List[Dict]) -> Tuple[str, List[s
             if " ".join(got.split()) != " ".join(a["raw"].split()):
                 refusals.append(f"line {span.line}: expected {a['raw']!r} at tokens {s0}-{s1}, found {got!r}")
                 continue
+            keep = ""
+            if latex_of:
+                lx = latex_of.get("\\" + a["macro"].lstrip("\\"))
+                s1 = _macro_extent(toks, s0, s1, lx)
+                # a site wider than the macro's LaTeX (A_{i0} for a macro rendering A):
+                # replace only the part the macro renders and keep the rest
+                if lx and a["macro"].lstrip("\\") != "Glyph":
+                    want, acc = _span_norm(lx), ""
+                    for j in range(s0, s1):
+                        acc += toks[j]
+                        if _span_norm(acc) == want and j + 1 < s1:
+                            keep = "".join(toks[j + 1:s1])
+                            break
             if any(not (s1 <= x0 or s0 >= x1) for x0, x1 in taken):
                 refusals.append(f"line {span.line}: assignments overlap at tokens {s0}-{s1}")
                 continue
             taken.append((s0, s1))
             rep = "\\" + a["macro"].lstrip("\\")
+            if a["macro"].lstrip("\\") == "Glyph":
+                rep = "\\Glyph{" + got.strip() + "}"
             j = s1
             while j < len(toks) and toks[j].isspace():
                 j += 1
-            if s1 < len(toks) and toks[s1][:1].isalpha():
+            if keep:
+                rep += keep
+            elif s1 < len(toks) and toks[s1][:1].isalpha():
                 rep += " "        # \Macro directly followed by a letter would merge into one control word
             edits.append((body_start + offsets[s0], body_start + offsets[s1], rep))
     for s, e, rep in sorted(edits, key=lambda x: -x[0]):
@@ -920,7 +1012,7 @@ def registry_table_at(repo: Path, ref: str) -> Dict[str, str]:
                            capture_output=True, text=True, check=True).stdout.split()
     table: Dict[str, str] = {}
     for n in names:
-        if not n.endswith(".yaml") or n == "exempt.yaml":
+        if not n.endswith(".yaml") or n in ("exempt.yaml", "vocabulary.yaml"):
             continue
         data = yaml.safe_load(_git_show(repo, ref, base + n)) or {}
         for e in data.get("symbols", []) or []:
@@ -981,7 +1073,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.apply:
         (path,) = [Path(p).resolve() for p in args.paths]
-        new, refusals = apply_assignments(path.read_text(encoding="utf-8"), json.loads(Path(args.apply).read_text()))
+        new, refusals = apply_assignments(path.read_text(encoding="utf-8"), json.loads(Path(args.apply).read_text()),
+                                          reg.macro_table())
         for r in refusals:
             print("refused:", r)
         path.write_text(new, encoding="utf-8")

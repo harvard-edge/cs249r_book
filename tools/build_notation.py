@@ -13,7 +13,7 @@ COMPATIBILITY_ALIASES = Notation.aliases()
 
 tex_lines = [
     "% AUTO-GENERATED NOTATION MACROS FROM MLSYSIM",
-    "% Do not edit manually. Edit mlsysim/notation/data/symbols.yaml instead.",
+    "% Do not edit manually. Edit the registry in mlsysim/mlsysim/notation/data/ instead.",
     "",
 ]
 
@@ -22,6 +22,11 @@ for s in Notation.list():
 
 for alias, canonical in COMPATIBILITY_ALIASES.items():
     tex_lines.append(f"\\newcommand{{{alias}}}{{{canonical}}}")
+
+# \Glyph{B}: a letter mentioned as a letter ("the book writes B for batch
+# size"), not used as a quantity. Renders its argument unchanged; the strict
+# check treats the argument like \text{}.
+tex_lines.append("\\newcommand{\\Glyph}[1]{#1}")
 
 macros_tex_path = PROJECT_ROOT / "books/shared/_includes/_macros.tex"
 macros_tex_path.write_text("\n".join(tex_lines) + "\n", encoding="utf-8")
@@ -35,6 +40,7 @@ for s in Notation.list():
     html_lines.append(f"\\newcommand{{{s.macro}}}{{{s.latex}}}")
 for alias, canonical in COMPATIBILITY_ALIASES.items():
     html_lines.append(f"\\newcommand{{{alias}}}{{{canonical}}}")
+html_lines.append("\\newcommand{\\Glyph}[1]{#1}")
 html_lines.extend(["$$", "</div>", ""])
 
 macros_html_path = PROJECT_ROOT / "books/shared/_includes/_macros.html"
