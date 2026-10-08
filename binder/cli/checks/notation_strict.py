@@ -484,6 +484,7 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
                 arg, after = _read_group(toks, nk)
                 raw = f"\\{name}{{{''.join(arg).strip()}}}"
                 if raw not in ex.forms:
+                    raw, after = _with_label(toks, raw, after, ex)
                     found.append(Finding(raw, "form", k, after))
                 k, prev = after, "}"
                 continue
@@ -508,7 +509,10 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
                 continue
             if name in GREEK:
                 if name not in ex.commands:
-                    found.append(Finding(t, "greek", k, nk))
+                    raw, end = _with_label(toks, t, nk, ex)
+                    found.append(Finding(raw, "greek", k, end))
+                    k, prev = end, "}"
+                    continue
                 k, prev = nk, t
                 continue
             if name not in registry.builtins:
@@ -526,10 +530,27 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
                                            or (nxt.startswith("\\") and registry.is_macro(nxt[1:]))))
             )
             if not exempt:
-                found.append(Finding(t, "letter", k, k + 1))
+                raw, end = _with_label(toks, t, k + 1, ex)
+                found.append(Finding(raw, "letter", k, end))
+                prev, k = "}", end
+                continue
         prev = t
         k += 1
     return found
+
+
+def _with_label(toks: List[str], raw: str, k: int, ex: "Exemptions") -> Tuple[str, int]:
+    """Extend a raw symbol by a descriptive subscript (A_{\\text{component}}).
+
+    A subscript that is an index, power or transpose is not part of the symbol;
+    a label subscript is, because the registry entry's LaTeX carries it.
+    """
+    j = _skip_space(toks, k)
+    if j < len(toks) and toks[j] == "_":
+        grp, after = _read_group(toks, j + 1)
+        if not _decoration_ok(grp, ex):
+            return raw + "_{" + "".join(grp).strip() + "}", after
+    return raw, k
 
 
 def suggest(math: str, f: Finding, registry: Registry) -> List[RegistryEntry]:
@@ -815,6 +836,36 @@ def apply_assignments(source: str, assignments: List[Dict]) -> Tuple[str, List[s
     return source, refusals
 
 
+def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> Dict:
+    """Turn a chapter glossary into exact edits, without judgment.
+
+    A site gets the glossary row whose glyph matches and whose lines include the
+    site's line. Retired aliases get their canonical macro. A site with no
+    matching row is ``unresolved``; a site with several is ``ambiguous``: both go
+    back to a person or model, nothing is guessed.
+    """
+    rows = glossary.get("rows", [])
+    out = {"assignments": [], "unresolved": [], "ambiguous": [], "not_body": []}
+    for sec in package["sections"]:
+        for site in sec["sites"]:
+            site = dict(site, section=sec["heading"])
+            if site["source"] != "body":
+                out["not_body"].append(site)
+                continue
+            if site["kind"] == "alias":
+                macro = registry.canonical(site["raw"].lstrip("\\"))
+                out["assignments"].append(dict(site, macro=macro, via="alias"))
+                continue
+            hits = [r for r in rows if r.get("glyph") == site["raw"] and site["line"] in r.get("lines", [])]
+            if len(hits) == 1:
+                out["assignments"].append(dict(site, macro=hits[0]["macro"], via="glossary", meaning=hits[0].get("meaning", "")))
+            elif not hits:
+                out["unresolved"].append(site)
+            else:
+                out["ambiguous"].append(dict(site, options=[h["macro"] for h in hits]))
+    return out
+
+
 # ===========================================================================
 # Command line (binder wires the same functions into `check notation`)
 # ===========================================================================
@@ -851,6 +902,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--find", metavar="WORDS", help="search the registry by meaning")
     ap.add_argument("--verify-rendering", metavar="REF", help="compare each file's rendered math with REF")
     ap.add_argument("--apply", metavar="ASSIGNMENTS_JSON", help="apply assignments to the single path given")
+    ap.add_argument("--assign", metavar="GLOSSARY_JSON", help="derive exact edits for the single path from a glossary")
     args = ap.parse_args(argv)
     repo = Path(args.repo).resolve()
     reg = Registry.load(repo)
@@ -868,6 +920,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"\\{e.macro:<34} {e.latex:<26} {e.kind:<9} {e.domain:<12} {e.meaning}")
         print(f"{len(hits)} match(es)" + (" (first 25; matches on every word come first)" if len(hits) > 25 else ""))
         return 0
+
+    if args.assign:
+        (path,) = [Path(p).resolve() for p in args.paths]
+        pkg = work_package(scan_path(path, repo, reg, scoped=False), str(path.relative_to(repo)))
+        res = assign_from_glossary(pkg, json.loads(Path(args.assign).read_text()), reg)
+        print(json.dumps(res, indent=1))
+        sys.stderr.write(f"{len(res['assignments'])} assigned, {len(res['unresolved'])} unresolved, "
+                         f"{len(res['ambiguous'])} ambiguous, {len(res['not_body'])} outside body math\n")
+        return 0 if not (res["unresolved"] or res["ambiguous"]) else 1
 
     if args.apply:
         (path,) = [Path(p).resolve() for p in args.paths]

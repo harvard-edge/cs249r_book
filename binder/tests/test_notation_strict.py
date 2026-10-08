@@ -64,6 +64,12 @@ def test_text_operatorname_and_single_letter_text():
     assert raws(r"5\,\text{s} + G=\text{A}") == [("G", "letter")]
 
 
+def test_label_subscripts_belong_to_the_symbol():
+    assert raws(r"(A_{\text{component}})^N") == [(r"A_{\text{component}}", "letter"), ("N", "letter")]
+    assert raws(r"x_i + \alpha_{\text{lr}} + \mathbf{q}_{\text{des}}") == [
+        ("x", "letter"), (r"\alpha_{\text{lr}}", "greek"), (r"\mathbf{q}_{\text{des}}", "form")]
+
+
 def test_forms():
     assert raws(r"\mathbf{q} + \hat{x} + \mathsf{y}") == [(r"\mathbf{q}", "form"), (r"\hat{x}", "form"), (r"\mathsf{y}", "form")]
     assert raws(r"\mathbb{E}[\NumberOfDevices] \in \mathbb{R}") == []
