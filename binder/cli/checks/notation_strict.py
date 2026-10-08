@@ -431,12 +431,19 @@ def _decoration_ok(group: List[str], ex: Exemptions) -> bool:
 
 
 def _index_like(body: str, registry: "Registry") -> bool:
-    """Digits, index letters, index or count macros, joined by + - , (an index expression)."""
+    """Digits, index letters, index or count macros, joined by + - , (an index expression).
+
+    A rounded rank (\\lceil B q \\rceil) is an index too; inside the brackets any
+    registered quantity may appear.
+    """
     ex = registry.exempt
-    rest = body
-    for m in re.findall(r"\\([A-Za-z]+)", body):
+    rounded = re.search(r"\\l(ceil|floor)", body) is not None
+    rest = re.sub(r"\\(lceil|rceil|lfloor|rfloor|left|right)\b", "", body)
+    for m in re.findall(r"\\([A-Za-z]+)", rest):
         e = registry.entries.get(registry.canonical(m))
-        if m not in ("ell",) and (e is None or e.kind not in ("index", "count")):
+        if m in ("ell", "cdot", "times"):
+            pass
+        elif e is None or (e.kind not in ("index", "count") and not rounded):
             return False
         rest = rest.replace("\\" + m, "", 1)
     letters = set(re.findall(r"[A-Za-z]", rest))
@@ -477,6 +484,9 @@ def _macro_decoration_ok(mark: str, grp: List[str], registry: "Registry", entry:
         return _index_like(body, registry)
     if body == "*":
         return True
+    # the optimum or a bootstrap replicate of an indexed quantity: ^{*(b)}
+    if body.startswith("*(") and body.endswith(")"):
+        return _index_like(body[2:-1], registry)
     if body.startswith("(") and body.endswith(")"):
         return _index_like(body[1:-1], registry)
     if "\\text" in body or "\\mathrm" in body or "\\operatorname" in body:
@@ -885,7 +895,9 @@ def _macro_extent(toks: List[str], s0: int, s1: int, latex: Optional[str]) -> in
     for j in range(s0, len(toks)):
         acc += toks[j]
         got = _span_norm(acc)
-        if got == want and j + 1 > best:
+        # never end on whitespace: the normalized text is the same, but taking it
+        # would swallow the space or line break after the symbol
+        if got == want and j + 1 > best and not toks[j].isspace():
             best = j + 1
         # mid-group text (B^{) is not a prefix of the normalized LaTeX, so bound
         # the search by length instead of stopping at the first mismatch

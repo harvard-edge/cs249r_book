@@ -81,6 +81,7 @@ def test_decorated_macros():
     assert raws(r"\Time^2 + \NumberOfDevices^{-1} + \GeneralizedCoordinates^\top + \Time_i") == []
     assert raws(r"\Time_{k+1} + \Time^{(i)}") == []                 # index expressions
     assert raws(r"\Time_{(1)} \le \Time_{(2)} \le \Time_{(k)}") == []   # order statistics
+    assert raws(r"\Time^{*(i)} + \Time_{(\lceil \NumberOfDevices \LinkBandwidth \rceil)}") == []  # bootstrap replicate; rounded rank
     assert raws(r"\LinkBandwidth^{\,i} + \Time^{\,\NumberOfDevices}") == []  # spacing is not a mark
 
 
@@ -222,6 +223,17 @@ def test_apply_replaces_the_whole_span_a_macro_renders():
     a = [{"line": 1, "col": span.col, "token_start": k, "token_end": k + 1, "raw": "P", "macro": "CurrentDistribution"}]
     new, refused = apply_assignments(src, a, {"\\CurrentDistribution": "P_{t}"})
     assert refused == [] and new == "Drift $D(\\CurrentDistribution, P_0)$ grows.\n"
+
+
+def test_apply_keeps_the_line_break_after_a_symbol():
+    # the normalized text of "T_{a}\n" equals that of "T_{a}"; the break must stay
+    src = "$$\nT_{a}\n+ 1\n$$\n"
+    span = extract_math(src)[0]
+    toks = __import__("notation_strict").tokenize(span.text)
+    k = toks.index("T")
+    a = [{"line": span.line, "col": span.col, "token_start": k, "token_end": k + 1, "raw": "T", "macro": "Time"}]
+    new, refused = apply_assignments(src, a, {"\\Time": "T_{a}"})
+    assert refused == [] and new == "$$\n\\Time\n+ 1\n$$\n"
 
 
 def test_apply_keeps_head_only_when_latex_is_one_token():
