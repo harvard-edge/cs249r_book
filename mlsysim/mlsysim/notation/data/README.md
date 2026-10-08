@@ -13,31 +13,37 @@ that is not a registered macro.
 
 ```
 data/
-  README.md            this guide
-  exempt.yaml          the few things math may contain that are not symbols
-  core.yaml            symbols used by two or more volumes
-  vol1.yaml … vol4.yaml  symbols used throughout one volume
-  local/
-    vol3/16_rlvr.yaml  symbols used inside one chapter only
+  README.md          this guide
+  exempt.yaml        what math may contain that is not a symbol
+  legacy_names.txt   entries that predate the conventions (this list only shrinks)
+  performance.yaml   iron law, roofline, memory, serving, energy
+  learning.yaml      data, models, training, loss, degradation
+  distributed.yaml   collectives, communication models, reliability, scheduling
+  agentic.yaml       trajectories, task contracts, tools, budgets, evaluation
+  physical.yaml      plant state, kinematics, contact, control, perception
 ```
 
-Pick the file by **where the symbol is used**, not by topic:
+An entry goes in the file for **what it is**, never for where the book uses
+it: the registry says what a symbol means; the book decides where to use it.
 
-| The symbol is used in | It goes in |
-|---|---|
-| two or more volumes | `core.yaml` |
-| several chapters of one volume, or that volume's notation chapter | `volN.yaml` |
-| one chapter only (a derivation's working variables) | `local/volN/<chapter>.yaml` |
+**How the book declares what it uses.** A chapter may write a macro when one of
+these lists it:
 
-A volume may use its own symbols and the core ones. A chapter may also use its
-local ones. Using another volume's symbol is an error: if the meaning really is
-the same, the symbol belongs in `core.yaml`.
+1. **its volume's notation chapter** (`books/volN/frontmatter/notation.qmd`,
+   written by hand): every symbol used across several chapters of that volume
+   has a row there; or
+2. **its own front matter**, for symbols only that chapter uses:
 
-Symbols in `core.yaml` and `volN.yaml` are **book-wide**: each one has a row in
-that volume's notation chapter (`books/volN/frontmatter/notation.qmd`, written
-by hand). Local symbols are not listed there; the chapter defines each one in
-prose where it first appears ("where $\KsStatistic$ is the largest gap between
-the two cumulative distributions").
+   ```yaml
+   notation-local: [\ReplicaCount, \ComponentAvailability]
+   ```
+
+   The chapter defines each local symbol in prose where it first appears
+   ("where $\ReplicaCount$ is the number of replicas the router probes").
+
+Writing any other registry macro is an error (`out-of-scope`): borrowing a
+symbol because its letter looks right is how meanings drift. If a second volume
+needs the same meaning, add the row to that volume's notation chapter too.
 
 ## What an entry looks like
 
@@ -61,8 +67,8 @@ the two cumulative distributions").
 | `notes` | no | Why this glyph, what it must not be confused with. LaTeX allowed here. |
 | `aliases` | no | Old macro names that still compile to this entry. The check flags their use so chapters move to the canonical name. |
 
-The volume and scope come from the file the entry sits in, so they are never
-written by hand and cannot disagree with it.
+The domain comes from the file the entry sits in. Nothing in an entry says which
+volume uses it: the notation chapters and `notation-local` lists say that.
 
 ## Naming
 
@@ -92,7 +98,7 @@ from the name, and find the name from the meaning.
 1. **Search by meaning first.** `./binder/binder notation find "link bandwidth"`
    lists entries whose name, definition or notes match. Reuse an entry whose
    meaning is the same; never reuse one whose letter merely looks right.
-2. **Choose the file** from the table in *Where symbols live*.
+2. **Choose the file** by what the symbol is (see *Where symbols live*).
 3. **Write the entry** with every required field, name it by the rules above,
    and keep the file's existing grouping (entries sit under `# --- group ---`
    comment headings).
@@ -100,7 +106,8 @@ from the name, and find the name from the meaning.
    `./binder/binder check notation --scope registry`. The registry check rejects
    a missing field, a name that breaks the rules, a duplicate meaning, and a
    `kind` that does not match the LaTeX.
-5. **Book-wide symbols** also get a row in that volume's notation chapter.
+5. **Declare it where it is used**: a row in the volume's notation chapter, or
+   the chapter's `notation-local` list if no other chapter uses it.
 
 ## Renaming or retiring a symbol
 
@@ -111,11 +118,27 @@ silently changes every page that already uses it. Make a new entry instead.
 
 ## What math may contain besides macros
 
-`exempt.yaml` lists it: index letters `i`, `j`, `k`; `d` in differentials;
-Euler's `e`; `\pi`; the transpose `^T`; numerals; operators and standard
-functions (`\sum`, `\log`, `\max`, `\Pr`, `\nabla`, ...); the number sets and
-expectation (`\mathbb{R}`, `\mathbb{E}`); big-O `\mathcal{O}`; and anything
-inside `\text{}`, `\mathrm{}` or `\operatorname{}`. Nothing else.
+`exempt.yaml` lists it, and nothing else is allowed:
+
+- **Index letters by role.** `i`, `j`, `k`, `n`, `t` inside a subscript only
+  (`x_i`, `\sum_{i=1}^{\NumberOfDevices}`, `\MechanicalPlantState_{t}`,
+  `\ActionChunk_{k+1}`). The same letter outside a subscript is a symbol.
+- **`d`** immediately before a variable in a differential (`dx`, `d\Time`),
+  **`e`** as a base (`e^{x}`), **`T`** as a transpose superscript (`A^T`).
+- **Constants and operators**: `\pi`, `\infty`, numerals, and the LaTeX
+  built-ins that are not symbols (`\sum`, `\frac`, `\log`, `\max`, `\Pr`,
+  `\nabla`, spacing).
+- **Number sets and friends**: `\mathbb{R}`, `\mathbb{N}`, `\mathbb{Z}`,
+  `\mathbb{E}`, `\mathbb{P}`, `\mathbb{1}`, big-O `\mathcal{O}`.
+- **Upright text**: anything inside `\text{}`, `\mathrm{}` or
+  `\operatorname{}`. Upright single letters are units (`5\,\text{s}`) or
+  labels (group `\text{A}`); a variable is always italic, so writing one
+  upright is a typesetting error the reader would see.
+
+A macro may carry an index, a power, an inverse or a transpose
+(`\Time_{t}`, `\Time^2`, `\Time^{-1}`, `\GeneralizedCoordinates^\top`).
+Any other subscript, superscript or prime (`\Bandwidth_{\text{bisect}}`,
+`\Policy^*`, `\Time'`) makes a new symbol, which needs its own entry.
 
 A line that genuinely must show raw LaTeX (the notation chapter explaining what
 not to write, for instance) can carry `<!-- notation-ok: reason -->`. The check

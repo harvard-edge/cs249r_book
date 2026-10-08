@@ -820,6 +820,10 @@ class ValidateCommand:
                   note="bidirectional volume coverage: every macro used in a volume is defined in its notation.qmd, and every notation.qmd row is used in that volume"),
             Scope("forms", "_run_notation_forms",
                   note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, per-volume transpose, raw thousands commas); default since 2026-10-01, when vol1-4 reached zero"),
+            Scope("strict", "_run_notation_strict",
+                  note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
+            Scope("conventions", "_run_notation_conventions",
+                  note="registry entries follow the naming and field conventions (mlsysim/mlsysim/notation/data/README.md); legacy_names.txt only shrinks"),
             Scope("vol1-print-pin", "_run_notation_vol1_pin",
                   note="Volume I is in print: its assembled notation text must match the pinned hash; re-pin only as an errata decision"),
         ],
@@ -13118,6 +13122,81 @@ class ValidateCommand:
             files_checked=len(files), issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
+
+    def _notation_strict_inputs(self, root: Path):
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()), root / "books")
+        repo = books.parent
+        from cli.checks import notation_strict as ns
+        files = sorted(books.glob("vol*/**/*.qmd")) + sorted(books.glob("vol*/**/*_quizzes.json"))
+        files = [f for f in files if "_build" not in f.parts]
+        return repo, ns, files
+
+    def _run_notation_strict(self, root: Path) -> ValidationRunResult:
+        """Strict notation ratchet (added 2026-10-08).
+
+        Every raw symbol in math is fingerprinted (symbol + its math span). A
+        commit may remove fingerprints but never add one beyond the stored
+        baseline, so the book can only move toward full registry notation.
+        `./binder/binder notation report <file>` explains what to do.
+        """
+        t0 = time.time()
+        repo, ns, files = self._notation_strict_inputs(root)
+        reg = ns.Registry.load(repo)
+        violations = []
+        for f in files:
+            violations += ns.scan_path(f, repo, reg)
+        current = ns.baseline_of(violations)
+        base_path = repo / "binder" / "tools" / "audit" / "data" / "notation_strict_baseline.json"
+        baseline = json.loads(base_path.read_text(encoding="utf-8")) if base_path.exists() else {}
+        worse = ns.ratchet(current, baseline)
+        issues: List[ValidationIssue] = []
+        by_fp = {}
+        for v in violations:
+            by_fp.setdefault((v.file, v.fingerprint()), v)
+        for f, fps in sorted(worse.items()):
+            for fp in fps:
+                v = by_fp[(f, fp)]
+                issues.append(ValidationIssue(
+                    file=f, line=v.line, code="notation-strict-new-raw-symbol",
+                    message=f"new raw symbol {v.raw} ({v.kind}) in math: every symbol must be a registered macro",
+                    context=v.math[:160],
+                    suggestion=("candidates: " + ", ".join("\\" + c["macro"] + " (" + c["meaning"] + ")" for c in v.suggestions[:4]))
+                               if v.suggestions else "register a symbol; see ./binder/binder notation report " + f,
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-strict",
+            description="No new raw symbols in math (ratchet against the baseline)",
+            files_checked=len(files), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
+    def _run_notation_conventions(self, root: Path) -> ValidationRunResult:
+        """Registry entries follow the conventions; the legacy list only shrinks."""
+        t0 = time.time()
+        repo, _, _ = self._notation_strict_inputs(root)
+        if str(repo / "mlsysim") not in sys.path:
+            sys.path.insert(0, str(repo / "mlsysim"))
+        from mlsysim.notation import Notation
+        from mlsysim.notation.types import convention_problems
+        data = repo / "mlsysim" / "mlsysim" / "notation" / "data"
+        legacy = {ln.strip() for ln in (data / "legacy_names.txt").read_text(encoding="utf-8").splitlines()
+                  if ln.strip() and not ln.startswith("#")}
+        issues: List[ValidationIssue] = []
+        for s_ in Notation.list():
+            probs = convention_problems(s_)
+            yaml_file = f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml"
+            if probs and s_.macro not in legacy:
+                issues.append(ValidationIssue(file=yaml_file, line=1, code="notation-convention",
+                                              message=f"{s_.macro}: " + "; ".join(probs),
+                                              rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+            if not probs and s_.macro in legacy:
+                issues.append(ValidationIssue(file="mlsysim/mlsysim/notation/data/legacy_names.txt", line=1,
+                                              code="notation-legacy-fixed",
+                                              message=f"{s_.macro} now follows the conventions: delete its line"))
+        for m in sorted(legacy - {s_.macro for s_ in Notation.list()}):
+            issues.append(ValidationIssue(file="mlsysim/mlsysim/notation/data/legacy_names.txt", line=1,
+                                          code="notation-legacy-gone", message=f"{m} no longer exists: delete its line"))
+        return ValidationRunResult(
+            name="notation-conventions", description="Registry entries follow the naming and field conventions",
+            files_checked=len(Notation), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
 
     def _run_notation_forms(self, root: Path) -> ValidationRunResult:
         """Flag notation forms the Notation chapter rules out, inside math spans.

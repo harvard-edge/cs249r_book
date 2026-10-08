@@ -937,6 +937,32 @@ class MLSysBookCLI:
         """
         return self.validate_command.run(args)
 
+    def handle_notation_command(self, args):
+        """Notation tools: report, find, verify, apply (binder/cli/checks/notation_strict.py).
+
+        ./binder/binder notation report <files>        raw symbols per section, with candidates
+        ./binder/binder notation report --json <files> the same as a work package
+        ./binder/binder notation find "link bandwidth" search the registry by meaning
+        ./binder/binder notation verify <REF> <files>  prove rendering is unchanged since REF
+        ./binder/binder notation apply <assignments.json> <file>
+        """
+        from cli.checks import notation_strict as ns
+        if not args or args[0] in ("help", "--help", "-h"):
+            console.print(self.handle_notation_command.__doc__)
+            return True
+        sub, rest = args[0], args[1:]
+        if sub == "report":
+            return ns.main(rest) == 0
+        if sub == "find":
+            return ns.main(["--find", " ".join(rest)]) == 0
+        if sub == "verify" and rest:
+            return ns.main(["--verify-rendering", rest[0], *rest[1:]]) == 0
+        if sub == "apply" and len(rest) == 2:
+            return ns.main(["--apply", rest[0], rest[1]]) == 0
+        console.print(f"[red]Unknown notation subcommand: {sub}[/red]")
+        console.print(self.handle_notation_command.__doc__)
+        return False
+
     def handle_fix_command(self, args):
         """Handle fix (maintenance) namespace command.
 
@@ -1207,6 +1233,7 @@ class MLSysBookCLI:
             "info": self.handle_info_command,
             "bib": self.handle_bib_command,
             "headings": self.handle_headings_command,
+            "notation": self.handle_notation_command,
             "layout": self.handle_layout_command,
             "render": self.handle_render_command,
             "reset": self.handle_reset_command,
