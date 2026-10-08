@@ -1774,7 +1774,7 @@ $$
 $$
 Flattening the filter weights into a column vector $\mathbf{w}_{\text{col}} = [w_1, w_2, w_3, w_4]^T$, the entire convolution collapses into a single standard matrix product: $\mathbf{Y}_{\text{col}} = \mathbf{X}_{\text{col}} \mathbf{w}_{\text{col}}$.
 
-Generalizing to batched multi-channel inputs, a tensor of shape $(\BatchSize, C_{\text{in}}, H_{\text{img}}, W_{\text{img}})$ unpacks into an unfolded matrix of shape $[(\BatchSize \cdot H_{\text{out}} \cdot W_{\text{out}}) \times (K^2 \cdot C_{\text{in}})]$, while convolutional filters reshape to $[(K^2 \cdot C_{\text{in}}) \times C_{\text{out}}]$. Their product yields an output matrix of shape $[(\BatchSize \cdot H_{\text{out}} \cdot W_{\text{out}}) \times C_{\text{out}}]$. In $\mathbf{X}_{\text{col}}$, input element `5` appears in all four rows. For stride-1 convolutions with kernel size $K$, input pixels shared across overlapping receptive fields are duplicated up to $K^2$ times in memory (a $4\times$ memory footprint expansion for $2\times 2$, or $9\times$ for $3\times 3$). Compilers willingly accept this temporary memory expansion because modern accelerators contain wide matrix engines optimized specifically for peak GEMM throughput.
+Generalizing to batched multi-channel inputs, a tensor of shape $(\BatchSize, C_{\text{in}}, H_{\text{img}}, W_{\text{img}})$ unpacks into an unfolded matrix of shape $[(\BatchSize \cdot H_{\text{out}} \cdot W_{\text{out}}) \times (K^2 \cdot C_{\text{in}})]$, while convolutional filters reshape to $[(K^2 \cdot C_{\text{in}}) \times C_{\text{out}}]$. Their product yields an output matrix of shape $[(\BatchSize \cdot H_{\text{out}} \cdot W_{\text{out}}) \times C_{\text{out}}]$. In $\mathbf{X}_{\text{col}}$, input element `5` appears in all four rows, but the whole miniature input expands from nine elements to sixteen, a storage ratio of $16/9$. For large stride-1 inputs whose output area is close to the input area, fully materialized unfolding approaches the kernel area as its expansion factor. The smaller ratio here reflects the borders of a valid convolution. Materializing the buffer trades this additional storage and traffic for access to wide matrix engines optimized for GEMM throughput; implicit GEMM, described after @fig-im2col-diagram, avoids allocating that duplicated buffer.
 
 [^fn-im2col-lowering-transformation]: **im2col (image to column)**\index{im2col!memory trade-off}: Rather than being a new learning algorithm, im2col-style lowering is an implementation technique used by CNN frameworks and libraries such as Caffe and cuDNN [@jia2014; @chetlur2014cudnn]: it converts convolutions into standard GEMM calls by unfolding overlapping patches into matrix columns. The trade-off is memory: in a simple fully materialized stride-1 $K{\times}K$ transform, interior input elements can appear in up to $K^2$ columns (9 times for $3{\times}3$ filters), though borders, stride, padding, tiling, and direct-convolution algorithms reduce the realized expansion. This memory-for-simplicity exchange explains why mobile frameworks (TFLite, NNAPI) prefer direct convolution, while data center GPUs with abundant HBM may use GEMM-oriented lowering when it improves throughput. \index{im2col!data center vs. mobile}
 
@@ -3406,6 +3406,10 @@ def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_head):
 
 :::
 
+The attention listing accounts for information mixing across positions, but a complete block also transforms features within each position. An ordinary position-wise feed-forward network applies a dense projection from hidden width $\HiddenDimension$ to an intermediate layer output width $\LayerOutputWidth$, a nonlinear activation, and a second dense projection back to $\HiddenDimension$. For a sequence of length $\SequenceLength$, its tensor shapes follow $\SequenceLength{\times}\HiddenDimension \to \SequenceLength{\times}\LayerOutputWidth \to \SequenceLength{\times}\HiddenDimension$. The same two weight matrices apply independently at every position, so the MLP accounting gives $2\SequenceLength\HiddenDimension\LayerOutputWidth$ MACs and an intermediate tensor with $\SequenceLength\LayerOutputWidth$ elements. This intermediate width is the feed-forward width in @tbl-nn-architectures-machine-demands.
+
+For one full-sequence block at batch one, with one standard multi-head self-attention sublayer and that two-layer feed-forward network, the query, key, value, and output projections together require $4\SequenceLength\HiddenDimension^2$ MACs. The two attention products add $2\SequenceLength^2\HiddenDimension$ MACs across all heads, whose widths sum to $\HiddenDimension$. Adding the feed-forward cost completes the block's matrix-product account; these counts omit biases, softmax, normalization, nonlinear activations, and residual additions, and assume dense evaluation of all position pairs. At fixed widths, projections and the feed-forward network grow linearly with sequence length, while the pairwise products grow quadratically. Which part dominates therefore depends on both the sequence length and the chosen widths, even before memory traffic is measured.
+
 Parallel sequence processing shifts fundamentally during autoregressive inference: generating output tokens step-by-step reintroduces sequential serialization and converts compute-bound matrix multiplications into memory-bandwidth-bound matrix-vector operations, as quantified in @sec-network-architectures-system-implications-77ac via the GPT-2 XL lighthouse.
 
 ### System implications {#sec-network-architectures-system-implications-77ac}
@@ -4486,7 +4490,7 @@ The throughput ceiling converts an abstract compute requirement into a concrete 
 # │ Context: Real-time wildlife monitoring case study, candidate evaluation
 # │
 # │ Goal: Select a vision model for constrained edge deployment.
-# │ Show: MobileNetV2 fits the memory and latency budget while KWS is too small.
+# │ Show: MobileNetV2 is a candidate; live tensors and workspace remain unknown.
 # │ How: Compare local candidate specs, runtime memory, compute, and energy.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4548,19 +4552,18 @@ class WildlifeModelSizing:
     kws_example_params_k = Models.Tiny.DS_CNN.parameters.to(Kparam).magnitude
     kws_example_flops_mflops = Models.Tiny.DS_CNN.inference_flops.to(MFLOPs).magnitude
 
-    activation_memory = image_dim * image_dim * activation_channels * activation_bytes * byte
+    single_feature_map_memory = image_dim * image_dim * activation_channels * activation_bytes * byte
     os_buffers = os_buffers_mb * MB
     edge_ram = edge_ram_mb * MB
     model_budget = model_budget_mb * MB
     inference_power = inference_power_mw * milliwatt
-    total_runtime = mnv2_int8 + activation_memory + os_buffers
+    memory_screen_subtotal = mnv2_int8 + single_feature_map_memory + os_buffers
     compute_latency_ms = mnv2_flops_mflops / edge_int8_tops / THOUSAND
     compute_latency = compute_latency_ms * millisecond
     energy_per_inf = inference_power * compute_latency
     energy_per_day = inferences_per_day * energy_per_inf
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(total_runtime < edge_ram, "MobileNetV2 runtime footprint must fit in 512 MB edge RAM.")
     check(compute_latency_ms < target_latency_ms, "MobileNetV2 estimated latency must meet 500 ms target.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -4578,9 +4581,9 @@ class WildlifeModelSizing:
     mnv2_int8_mb_str = fmt_memory(mnv2_int8, unit=MB, precision=1, commas=False)
     kws_example_params_str = fmt_params(Models.Tiny.DS_CNN.parameters, scale="K", precision=0, commas=False)
     kws_example_mflop_str = fmt_flops(kws_example_flops_mflops * MFLOPs, unit=MFLOPs, precision=0, commas=False)  # e.g. "20 MFLOP"
-    activation_mb_str = fmt_memory(activation_memory, unit=MB, precision=1, commas=False)
+    single_feature_map_mb_str = fmt_memory(single_feature_map_memory, unit=MB, precision=1, commas=False)
     os_buffers_mb_str = fmt_memory(os_buffers, unit=MB, precision=0, commas=False)
-    total_runtime_mb_str = fmt_memory(total_runtime, unit=MB, precision=1, commas=False)
+    memory_screen_subtotal_mb_str = fmt_memory(memory_screen_subtotal, unit=MB, precision=1, commas=False)
     edge_ram_mb_str = fmt_memory(edge_ram, unit=MB, precision=0, commas=False)
     edge_int8_tops_value_str = fmt_magnitude(edge_int8_tops * TOPS, unit=TOPS, precision=3, commas=False)  # e.g. "0.002"
     edge_int8_gops_str = fmt_ops_rate(edge_int8_tops * TOPS, unit=GOPS, precision=0, commas=False)  # 0.002 TOPS -> 2 GOPS
@@ -4590,12 +4593,6 @@ class WildlifeModelSizing:
     inferences_per_day_str = fmt_rate(inferences_per_day, "inferences/day", precision=0, commas=False)
     energy_mj_str = fmt_energy(energy_per_inf, unit=mJ, precision=1, commas=False)  # e.g. "41.8 mJ"
     energy_j_str = fmt_energy(energy_per_day, unit=J, precision=1, commas=False)  # e.g. "4.2 J"
-    memory_check_math = fmt_math(
-        f"\\underbrace{{\\text{{{mnv2_int8_mb_str}}}}}_{{\\text{{Model}}}} + "
-        f"\\underbrace{{{image_dim} \\times {image_dim} \\times {activation_channels} \\times {activation_bytes} \\approx \\text{{{activation_mb_str}}}}}_{{\\text{{Activations}}}} + "
-        f"\\underbrace{{\\text{{{os_buffers_mb_str}}}}}_{{\\text{{OS/Buffers}}}} = "
-        f"\\text{{{total_runtime_mb_str}}} \\ll \\text{{{edge_ram_mb_str}}}~\\checkmark"
-    )
     compute_check_math = fmt_math(
         f"\\frac{{{mnv2_mflop_value_str} \\times 10^6 \\text{{ INT8 ops}}}}{{{edge_int8_tops_value_str} \\times 10^{{12}} \\text{{ INT8 ops/s}}}} = "
         f"{compute_latency_ms_str} \\text{{ latency}} \\ll {target_latency_ms_str} \\text{{ target}}~\\checkmark"
@@ -4639,9 +4636,7 @@ With physical constraints established, the third step evaluates candidate archit
 
 While MobileNetV1 demonstrates the viability of depthwise separable convolutions, MobileNetV2 offers inverted residual blocks with linear bottlenecks as another compact candidate. Sizing the model with width multiplier `{python} WildlifeModelSizing.width_mult_str` yields ~`{python} WildlifeModelSizing.mnv2_params_str` parameters (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights) and costs ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$ input resolution. Its weight footprint fits the allocation; task evaluation must establish whether its capacity meets the accuracy target for the 50 species.
 
-The fourth step, hardware sizing, checks the candidate against physical platform budgets. The estimated memory footprint fits within available device RAM:
-
-`{python} WildlifeModelSizing.memory_check_math`
+The fourth step, hardware sizing, checks the candidate against physical platform budgets. INT8 weights occupy `{python} WildlifeModelSizing.mnv2_int8_mb_str`, one $224{\times}224{\times}64$ FP32 feature map occupies `{python} WildlifeModelSizing.single_feature_map_mb_str`, and the scenario reserves `{python} WildlifeModelSizing.os_buffers_mb_str` for OS and runtime buffers. Their `{python} WildlifeModelSizing.memory_screen_subtotal_mb_str` subtotal is only a single-feature-map screen. Peak memory must instead include the weights, the maximum sum of simultaneously live tensor bytes, kernel workspace, and OS and runtime buffers. Inputs and outputs can coexist, and a residual path retains its input while the branch executes. The scenario has not yet established that live-tensor peak or the required workspace, so the small subtotal supports candidacy without confirming a fit in `{python} WildlifeModelSizing.edge_ram_mb_str` of RAM.
 
 For the candidate system-on-chip (SoC), an ARM Cortex-A53 at 1.2 GHz with NEON SIMD, this planning calculation assumes sustained throughput of ~`{python} WildlifeModelSizing.edge_int8_gops_str` INT8:
 `{python} WildlifeModelSizing.compute_check_math`
