@@ -73,6 +73,14 @@ def _is_chapter_qmd(path) -> bool:
 
 
 
+# Strict notation (2026-10-08). Volumes whose conversion to registry macros is
+# finished: their notation rows must be used by a chapter, not only by the
+# notation chapter's own notes. Add a volume here when its conversion lands.
+STRICT_DEAD_ROW_VOLUMES: set = set()
+# Iron-law rows every volume's notation chapter must carry, used or not.
+CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
+
+
 @dataclass
 
 
@@ -12721,7 +12729,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_notation_coverage(self, root: Path) -> ValidationRunResult:
+    def _run_notation_coverage(self, root: Path) -> ValidationRunResult:  # noqa: C901
         """Enforce bidirectional notation coverage between chapters and notation.qmd.
 
         For each volume:
@@ -12779,6 +12787,7 @@ class ValidateCommand:
                                 table_macros[canon] = lineno
 
             vol_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
+            chapter_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
             for qmd in sorted(v_dir.rglob("*.qmd")):
                 files_checked += 1
                 qmd_text = qmd.read_text(encoding="utf-8")
@@ -12794,12 +12803,17 @@ class ValidateCommand:
                             clean_lines.append(ln)
                     qmd_text = "\n".join(clean_lines)
 
+                in_notation = "frontmatter/notation" in str(qmd)
                 for lineno, line in enumerate(qmd_text.splitlines(), 1):
                     for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", line):
                         macro_name = "\\" + m.group(1)
                         canon = macro_aliases.get(macro_name, macro_name)
                         if canon in all_macros:
                             vol_usage[canon].append((qmd_rel, lineno))
+                            # A row is alive only if a chapter uses it; the notation
+                            # chapter's own notes cannot keep a row alive (2026-10-08).
+                            if not in_notation:
+                                chapter_usage[canon].append((qmd_rel, lineno))
 
             # 1. Under-coverage: Used in volume, but missing from notation table
             missing = set(vol_usage.keys()) - set(table_macros.keys())
@@ -12816,7 +12830,12 @@ class ValidateCommand:
                 ))
 
             # 2. Over-coverage: Defined in notation table, but unused in volume
-            unused = set(table_macros.keys()) - set(vol_usage.keys())
+            # 2026-10-08: a row is alive only if a chapter (not the notation chapter's own
+            # notes) uses it. Switched on per volume once its strict-notation
+            # conversion is done; until then chapters still write raw letters for
+            # rows like \Time, so the stricter test would only report noise.
+            usage_for_dead_rows = chapter_usage if vol in STRICT_DEAD_ROW_VOLUMES else vol_usage
+            unused = set(table_macros.keys()) - set(usage_for_dead_rows.keys()) - CORE_REQUIRED_ROWS
             for m in sorted(unused):
                 line = table_macros[m]
                 issues.append(ValidationIssue(
@@ -13158,7 +13177,11 @@ class ValidateCommand:
                 v = by_fp[(f, fp)]
                 issues.append(ValidationIssue(
                     file=f, line=v.line, code="notation-strict-new-raw-symbol",
-                    message=f"new raw symbol {v.raw} ({v.kind}) in math: every symbol must be a registered macro",
+                    message=(f"{v.raw} is used here but not declared for this chapter (add a row to the volume's notation chapter, or list it in the chapter's notation-local)"
+                             if v.kind == "out-of-scope" else
+                             f"{v.raw} is a retired macro name: write the canonical one"
+                             if v.kind == "alias" else
+                             f"new raw symbol {v.raw} ({v.kind}) in math: every symbol must be a registered macro"),
                     context=v.math[:160],
                     suggestion=("candidates: " + ", ".join("\\" + c["macro"] + " (" + c["meaning"] + ")" for c in v.suggestions[:4]))
                                if v.suggestions else "register a symbol; see ./binder/binder notation report " + f,
