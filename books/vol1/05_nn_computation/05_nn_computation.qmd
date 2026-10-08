@@ -3595,14 +3595,16 @@ class MnistFlopsCalc:
     inference_total = param_mem + inf_act
     inference_total_kb = inference_total.to(KB).magnitude
     per_image_kops = (total_flops_value / batch_size) / THOUSAND
-    single_image_arith_intensity = (((total_flops_value / batch_size) * flop) / inference_total).to(flop / byte).magnitude
+    single_image_traffic = param_mem + (in_dim + 2 * h1_dim + 2 * h2_dim + out_dim) * bytes_per_element
+    single_image_arith_intensity = (((total_flops_value / batch_size) * flop) / single_image_traffic).to(flop / byte).magnitude
     layer1_pct = weights[0] / total_macs * 100
     batch_in_values = batch_size * in_dim
     batch_h1_values = batch_size * h1_dim
     batch_h2_values = batch_size * h2_dim
     batch_out_values = batch_size * out_dim
     batch_act_total_values = batch_in_values + batch_h1_values + batch_h2_values + batch_out_values
-    batch_inference_traffic = param_mem + (batch_act_total_values * bytes_per_element)
+    # Separate dense layers; fused bias/activation; each hidden output is written then read.
+    batch_inference_traffic = param_mem + batch_size * (in_dim + 2 * h1_dim + 2 * h2_dim + out_dim) * bytes_per_element
     batch_inference_traffic_kb = batch_inference_traffic.to(KB).magnitude
     batch_arith_intensity = ((total_flops_value * flop) / batch_inference_traffic).to(flop / byte).magnitude
 
@@ -3677,7 +3679,7 @@ class MnistFlopsCalc:
 **Systems insight**:
 
 1. Layer 1 dominates: The first layer accounts for `{python} MnistFlopsCalc.layer1_pct_str` of all operations because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
-2. Compute vs. memory: At batch 1, `{python} MnistFlopsCalc.per_image_kops_str` KOp must amortize a parameter read for only one image, giving an arithmetic intensity of ~`{python} MnistFlopsCalc.single_image_arith_intensity_str` under this traffic model. At batch 32, one read of the parameters plus one pass through the batch activations moves at least ~`{python} MnistFlopsCalc.batch_inference_traffic_kb_str` KB and raises the intensity to ~`{python} MnistFlopsCalc.batch_arith_intensity_str`. Additional cache misses and intermediate traffic can lower the realized value. The comparison shows why batching improves reuse, but memory- or compute-bound behavior still depends on the machine's ridge point, the balance $\PeakRate/\Bandwidth$ introduced with the iron law, which the Roofline model in @sec-appdx-machine-foundations-roofline-model-2529 develops.
+2. Compute vs. memory: At batch 1, `{python} MnistFlopsCalc.per_image_kops_str` KOp must amortize a parameter read for only one image, giving an arithmetic intensity of ~`{python} MnistFlopsCalc.single_image_arith_intensity_str` under this traffic model. At batch 32, one parameter read, one input read, one final-output write, and a write followed by a read for each hidden tensor move ~`{python} MnistFlopsCalc.batch_inference_traffic_kb_str` KB and raise the intensity to ~`{python} MnistFlopsCalc.batch_arith_intensity_str`. This idealized FP32 model treats each dense layer as a separate kernel with fused bias and activation, and counts transfers across a memory boundary at which no operands remain resident between kernels or batches. A hidden activation contributes twice because its producer writes it and its consumer reads it. Cache residency or cross-layer fusion can reduce traffic at that boundary; extra transfers can increase it. The comparison shows why batching improves reuse, but memory- or compute-bound behavior still depends on the machine's ridge point, the balance $\PeakRate/\Bandwidth$ introduced with the iron law, which the Roofline model in @sec-appdx-machine-foundations-roofline-model-2529 develops.
 3. Scaling intuition: Doubling the hidden layer widths (784 → 256 → 128 → 10) increases the operation count by about `{python} MnistFlopsCalc.double_ratio_mult_str` to about `{python} MnistFlopsCalc.double_total_mops_str` MOp. This comes from recomputing each layer: layers 1 and 3 double, layer 2 quadruples, so the total grows by about `{python} MnistFlopsCalc.double_ratio_exact_mult_str` rather than four times.
 
 :::
@@ -3869,7 +3871,7 @@ Gradient descent assumes the gradient is already in hand, but the loss alone doe
 
 ***Backpropagation***\index{Backpropagation!definition}\index{Backpropagation!gradient computation}\index{Gradient!backpropagation} is the gradient-computation algorithm training systems use to apply the chain rule to a computational graph, using recorded operations and saved or recomputed forward-pass values to compute the gradient of the loss with respect to every parameter in a single backward traversal.
 
-1.  **Significance**: For dense layers, the backward pass costs on the order of twice the forward-pass FLOPs (a ratio derived from the layer equations later in this section) and requires retaining or recomputing the intermediate values needed by the chain rule. For a model with $\NumberOfLayers$ layers, batch size $\BatchSize$, and layer widths $n_1,\ldots,n_{\NumberOfLayers}$, a simplified activation ledger scales as $\mathcal{O}\!\left(B\sum_{\LayerIndex=1}^{\NumberOfLayers} n_\LayerIndex\right)$. Gradients and optimizer state add further memory, so a model that fits on one accelerator for inference may not fit there for training.
+1.  **Significance**: For dense layers that require both parameter and input gradients, the backward pass costs on the order of twice the forward-pass FLOPs (a ratio derived from the layer equations later in this section) and requires retaining or recomputing the intermediate values needed by the chain rule. For a model with $\NumberOfLayers$ layers, batch size $\BatchSize$, and layer widths $n_1,\ldots,n_{\NumberOfLayers}$, a simplified activation ledger scales as $\mathcal{O}\!\left(B\sum_{\LayerIndex=1}^{\NumberOfLayers} n_\LayerIndex\right)$. Gradients and optimizer state add further memory, so a model that fits on one accelerator for inference may not fit there for training.
 2.  **Distinction**: Numerical differentiation requires a perturbed evaluation for each of the model's $\Parameters$ parameters. Reverse-mode automatic differentiation computes all $\Parameters$ gradients in one backward traversal whose cost is proportional to the computational graph, avoiding $\Parameters$ separate forward passes.
 3.  **Common pitfall**: A frequent misconception is that backpropagation is learning. It is a gradient computation algorithm; gradient descent performs the actual parameter update. Confusing the two obscures the systems-level separation: backpropagation determines memory requirements (activation storage), while the optimizer determines additional state requirements (the per-parameter buffers that some optimizers keep).
 
@@ -3918,7 +3920,7 @@ The mathematical foundations of backpropagation provide the theoretical basis fo
 \State compute loss $\mathcal{L}(\mathbf{A}^{(\NumberOfLayers)}, \mathbf{y})$; seed the output gradient $\nabla_{\mathbf{A}^{(\NumberOfLayers)}}\mathcal{L}$
 \For{$\LayerIndex = \NumberOfLayers$ down to $1$} \Comment{same local rule repeats}
     \State use the saved forward values to compute $\nabla_{\mathbf{W}^{(\LayerIndex)}}\mathcal{L}, \nabla_{\mathbf{b}^{(\LayerIndex)}}\mathcal{L}$
-    \State propagate $\nabla_{\mathbf{A}^{(\LayerIndex-1)}}\mathcal{L}$ to the previous layer
+    \State propagate $\nabla_{\mathbf{A}^{(\LayerIndex-1)}}\mathcal{L}$ only if that input gradient is required
 \EndFor
 \State \Return the accumulated parameter gradients
 \end{algorithmic}
@@ -3969,7 +3971,37 @@ $$ \frac{\partial \mathcal{L}}{\partial \mathbf{A}^{(\LayerIndex-1)}} = \frac{\p
 
 Here, the product $(\BatchSize \times n_\LayerIndex) \times (n_\LayerIndex \times n_{\LayerIndex-1}) \to (\BatchSize \times n_{\LayerIndex-1})$ contracts over the output dimension $n_\LayerIndex$, preserving the per-example activation shape for preceding layers.
 
-These equations reveal the physical origin of the classic systems rule that the backward pass requires roughly twice the arithmetic of the forward pass ($2\times$). While the forward pass executes a single matrix multiplication per dense layer ($\mathbf{A}^{(\LayerIndex-1)}\mathbf{W}^{(\LayerIndex)}$), the backward pass must evaluate two distinct matrix multiplications of identical computational complexity: one to compute weight gradients (${\mathbf{A}^{(\LayerIndex-1)}}^T \frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}}$) and another to propagate gradients to the preceding layer ($\frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(\LayerIndex)}} {\mathbf{W}^{(\LayerIndex)}}^T$). A full training iteration thus requires $1 + 2 = 3\times$ the forward FLOPs.
+These equations reveal the physical origin of the classic systems rule that the backward pass requires roughly twice the arithmetic of the forward pass. While the forward pass executes a single matrix multiplication per dense layer, the backward pass evaluates two products of the same arithmetic complexity when both weight and input gradients are required. The weight-gradient product trains that layer's parameters; the input-gradient product supplies the signal needed to train preceding layers. For ordinary parameter training on fixed MNIST images, no preceding trainable layer consumes the gradient with respect to raw pixels, so the first layer's input-gradient product can be omitted.
+
+```{python}
+#| echo: false
+#| label: mnist-training-arithmetic
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MNIST TRAINING MATRIX WORK
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Dense backward-pass cost in @sec-neural-computation-derivative-calculation-process-edaa.
+# │ Goal: Price parameter training when raw-input gradients are not required.
+# │ Show: The matrix-work multiplier relative to the forward pass.
+# │ How: Count three products per layer, then omit the first input-gradient product.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_multiple, check
+
+class MnistTrainingArithmetic:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    dims = [784, 128, 64, 10]  # running teaching architecture
+    batch_size = 32
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    layer_flops = [2 * batch_size * a * b for a, b in zip(dims[:-1], dims[1:])]
+    forward_flops = sum(layer_flops)
+    training_flops = 3 * forward_flops - layer_flops[0]
+    training_ratio = training_flops / forward_flops
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(2.08 < training_ratio < 2.09, "MNIST matrix-work multiplier should be about 2.08.")
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    training_ratio_mult_str = fmt_multiple(training_ratio, precision=2, commas=False)
+```
+
+The resulting dense matrix work is three forward-pass counts minus the first layer's forward count, or about `{python} MnistTrainingArithmetic.training_ratio_mult_str` the forward matrix work for this network, before activation derivatives, bias reductions, loss, and optimizer work. Three times the forward matrix work remains a useful approximation when input gradients are needed throughout, or when the omitted first-layer product is a small fraction of total work. The running network makes the exception visible because its first layer accounts for most of its arithmetic.
 
 ::: {#psp-nn-computation-memory-cost-backprop .callout-perspective title="The memory cost of backprop"}
 
@@ -4487,7 +4519,7 @@ The credit assignment problem asks how the loss depends on parameters throughout
 
 **Training vs. inference**
 
-- [ ] **Computational cost**: if the forward pass requires $\Operations$ operations, why does training require roughly $3\Operations$ total operations?
+- [ ] **Computational cost**: under what input-gradient assumption does dense training require roughly three times the forward matrix work, and which product can ordinary training on fixed raw inputs omit?
 - [ ] **Memory cost**: why must training retain or recompute the forward values needed by the backward pass, and how does this scale with batch size and network depth?
 - [ ] **Layer cost**: for a dense layer mapping 4,096 inputs to 4,096 outputs at batch size 32, estimate its forward FLOPs and its FP16 activation bytes to one significant figure, then say which of the two doubling the batch grows.
 
@@ -4607,7 +4639,7 @@ If any concepts feel unclear, review the earlier sections on forward passes, los
 
 ## Inference Pipeline {#sec-neural-computation-inference-pipeline-5372}
 
-Training transforms randomly initialized weights into parameters that encode useful patterns, but deployment executes those parameters under a completely different resource profile. During inference,\index{Inference!deployment phase}\index{Training vs. inference!resource differences}[^fn-inference-phase-shift] the same mathematical operators face a fundamentally different operating regime: strict latency deadlines replace bulk training throughput, gradients and optimizer state disappear from memory, and target execution environments range from milliwatt edge processors to multi-accelerator cloud servers. This transition reshapes how memory bandwidth, compute capacity, and pipeline stages govern system performance.
+Training transforms randomly initialized weights into parameters that encode useful patterns, but deployment executes those parameters under a completely different resource profile. During inference,\index{Inference!deployment phase}\index{Training vs. inference!resource differences}[^fn-inference-phase-shift] the same mathematical operators face a fundamentally different operating regime: online latency deadlines or offline throughput targets replace the training objective, gradients and optimizer state disappear from memory, and target execution environments range from milliwatt edge processors to multi-accelerator cloud servers. This transition reshapes how memory bandwidth, compute capacity, and pipeline stages govern system performance.
 
 [^fn-inference-phase-shift]: **Inference**\index{Inference!etymology}: From Latin *inferre* ("to bring in, to conclude"), borrowed from logic where it means deriving conclusions from premises. The ML usage marks a systems boundary: training executes forward and backward passes and maintains optimizer state, while ordinary inference executes the forward graph with frozen parameters. Removing gradients, optimizer state, and most saved activations can reduce memory and computation substantially, but the ratio depends on architecture, batch size, precision, runtime workspace, and serving strategy.
 
@@ -5047,7 +5079,7 @@ Use the MNIST classifier (`{python} MnistInferenceResourceLocal.mnist_arch_str`)
 - [ ] **System lifecycle**: can you trace the lifecycle from architecture design to training loop to trained model to inference deployment?
 - [ ] **Training vs. inference memory**: at a matched batch size, can you explain why this ledger gives training roughly `{python} MnistInferenceResourceLocal.training_ratio_mult_str` the memory of inference, naming the gradients, optimizer state, and saved-activation terms?
 - [ ] **End-to-end trace**: can you trace one digit image through preprocessing, forward propagation, output probabilities, postprocessing, and final prediction?
-- [ ] **Bottleneck spotting**: at 100 images per second, each image has a 10 ms average budget; can you name which stages (decoding, transfer, forward pass, postprocessing) could exceed it, and explain why Amdahl's law makes the unaccelerated stages matter?
+- [ ] **Bottleneck spotting**: a stage that processes one image at a time must sustain a mean service time no greater than 10 ms to support 100 images per second; can you identify a stage that could limit that rate? Why is this completion interval not an end-to-end request-latency measurement when stages overlap, and why do unaccelerated stages matter under Amdahl's law?
 - [ ] **Human-in-the-loop**: can you explain how a confidence threshold decides which predictions go to human review, what moving it trades, and why it must be monitored after deployment?
 
 :::
@@ -5084,7 +5116,7 @@ Training must cover handwriting variation rather than optimize only for a curate
 ↩ Why evaluation on curated data must be validated against field conditions is established in @sec-ml-workflow-evaluation-validation-stage-b47d.
 :::
 
-Confidence thresholds\index{Confidence threshold!automation trade-off} determine the division of labor between automation and human review. A high threshold rejects more items for manual handling; a low threshold accepts more model errors. An expected-cost rule chooses threshold $\ResponseThreshold$ to minimize $r_{\text{manual}}(\ResponseThreshold)\,C_{\text{manual}} + r_{\text{error}}(\ResponseThreshold)\,C_{\text{error}}$ subject to throughput and latency constraints, where $r_{\text{manual}}(\ResponseThreshold)$ and $r_{\text{error}}(\ResponseThreshold)$ are the fractions of items sent to manual review and misclassified at threshold $\ResponseThreshold$, and $C_{\text{manual}}$ and $C_{\text{error}}$ are their per-item costs.
+Confidence thresholds\index{Confidence threshold!automation trade-off} determine the division of labor between automation and human review. A high threshold rejects more items for manual handling; a low threshold accepts more model errors. An expected-cost rule chooses threshold $\ResponseThreshold$ to minimize $r_{\text{manual}}(\ResponseThreshold)\,C_{\text{manual}} + r_{\text{error}}(\ResponseThreshold)\,C_{\text{error}}$ subject to throughput and latency constraints, where $r_{\text{manual}}(\ResponseThreshold)$ and $r_{\text{error}}(\ResponseThreshold)$ are, respectively, the fractions of all arriving items sent to manual review and accepted with an erroneous automated classification at threshold $\ResponseThreshold$, and $C_{\text{manual}}$ and $C_{\text{error}}$ are their per-item costs. The error fraction uses the same arrival denominator as the review fraction. If error is reported only among accepted items, multiply that conditional rate by the accepted fraction before applying the cost rule; rejected items incur review cost rather than an automated-error cost in this simplified ledger.
 
 ### Shared pipeline architecture {#sec-neural-computation-production-system-architecture-130f}
 
@@ -5548,8 +5580,8 @@ Reasoning through the D·A·M taxonomy prevents treating systems problems as iso
 # │       training-memory examples executable.
 # │ Show: A 20 ms model can miss a 50 ms SLO once 25 ms preprocessing and
 # │       10 ms postprocessing are included; a 99:1 majority class yields 99%
-# │       accuracy from a trivial always-majority predictor; MNIST remains far
-# │       below dense-GPU roofline ridge points.
+# │       accuracy from a trivial always-majority predictor; MNIST intensity
+# │       provides a workload value to compare with a matching ridge point.
 # │ How: Sum pipeline latencies, compute the majority-class baseline, and
 # │      locally recompute MNIST arithmetic intensity and memory ratio.
 # │ Scope: chapter-anchor
@@ -5587,7 +5619,8 @@ class FallacyQuantExamples:
     mnist_total_flops = (2 * sum(mnist_weights) * mnist_batch_size) + (2 * sum(mnist_biases) * mnist_batch_size)
     mnist_param_mem = memory_from_params(mnist_total_params * param, bytes_per_element / param)
     mnist_batch_act = mnist_batch_size * sum(mnist_dims) * bytes_per_element
-    mnist_batch_inference_total = mnist_param_mem + mnist_batch_act
+    mnist_batch_traffic = mnist_batch_size * (mnist_dims[0] + 2 * mnist_dims[1] + 2 * mnist_dims[2] + mnist_dims[3]) * bytes_per_element
+    mnist_batch_inference_total = mnist_param_mem + mnist_batch_traffic
     mnist_inference_peak_act = (
         mnist_batch_size
         * max(
@@ -5601,14 +5634,11 @@ class FallacyQuantExamples:
     mnist_training_total = mnist_param_mem + mnist_batch_act + mnist_param_mem + (2 * mnist_param_mem)
     mnist_arith_intensity = ((mnist_total_flops * flop) / mnist_batch_inference_total).to(flop / byte).magnitude
     training_ratio = (mnist_training_total / mnist_inference_memory_total).to_base_units().magnitude
-    a100_ridge = (Hardware.Cloud.A100.compute.peak_flops / Hardware.Cloud.A100.memory.bandwidth).to(flop / byte).magnitude
-    h100_ridge = (Hardware.Cloud.H100.compute.peak_flops / Hardware.Cloud.H100.memory.bandwidth).to(flop / byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(pipeline_total > latency_budget, "Pipeline example should miss the latency SLO.")
     check(imbalance_majority_acc == 99, f"Expected 99% majority baseline, got {imbalance_majority_acc}")
     check(11 < mnist_arith_intensity < 13, f"Expected batch-32 MNIST arithmetic intensity near 12 FLOP/byte, got {mnist_arith_intensity:.1f}")
-    check(a100_ridge > 100 and h100_ridge > a100_ridge, "GPU ridge points should be in the hundreds of FLOP/byte.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_latency_ms_str = fmt_time(model_latency, 'millisecond', precision=0, commas=False)
@@ -5682,7 +5712,7 @@ Production adds constraints absent from research: latency budgets (50–100 ms e
 
 **Fallacy**: *More compute automatically means faster training.*
 
-Teams purchase expensive GPUs expecting proportional speedups, but memory traffic or launch overhead may bind performance instead. Arithmetic intensity\index{Arithmetic intensity!GPU utilization} helps test the bandwidth hypothesis against the machine's ridge point. Under a simple traffic model that reads the parameters once and moves each batch activation once, the MNIST forward pass in @tbl-nn-computation-mnist-flops reaches approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str` at batch 32 and still less at batch 1. This lies far below the ridge points of many high-throughput accelerators. The ridge point\index{Ridge point!machine balance ratio} $\PeakRate/\Bandwidth$ introduced with the iron law (peak compute in FLOP/s divided by peak memory bandwidth in bytes/s) is the minimum arithmetic intensity needed to saturate the compute units. For modern server accelerators such as NVIDIA's A100 and H100 data center GPUs, this ridge point sits between $150$ and $300+$ FLOP/byte. Because MNIST's `{python} FallacyQuantExamples.mnist_arith_intensity_str` is more than an order of magnitude below that threshold, this traffic model predicts a bandwidth ceiling below peak compute. Actual small-kernel execution may instead be limited by launch overhead or insufficient parallel work, and cache reuse changes traffic at the measured memory tier. The Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 explains why additional peak FLOP/s cannot help until the workload supplies enough reusable work per byte. Caches, fusion, vectorization, and launch cost make measured speedup the final test.
+Teams purchase expensive GPUs expecting proportional speedups, but memory traffic or launch overhead may bind performance instead. Arithmetic intensity\index{Arithmetic intensity!GPU utilization} helps test the bandwidth hypothesis against the machine's ridge point. Under the separate-layer FP32 traffic model of notebook \ref{nbk-nn-computation-counting-ops-forward-pass}, which reads parameters once, reads the input, writes the final output, and writes then reads each hidden tensor, the MNIST forward pass in @tbl-nn-computation-mnist-flops reaches approximately `{python} FallacyQuantExamples.mnist_arith_intensity_str` at batch 32 and still less at batch 1. That intensity alone cannot establish the bottleneck without the matching machine balance. The ridge point\index{Ridge point!machine balance ratio} $\PeakRate/\Bandwidth$ introduced with the iron law (peak compute in FLOP/s divided by peak memory bandwidth in bytes/s) is the minimum arithmetic intensity needed to saturate the compute units. For this FP32 workload, compare the peak rate for the actual FP32 execution mode with bandwidth at the memory tier supplying its operands. A reduced-precision matrix-engine peak divided by off-chip bandwidth describes a different execution regime. If the matching ridge point exceeds `{python} FallacyQuantExamples.mnist_arith_intensity_str`, this traffic model predicts a bandwidth ceiling below that mode's peak compute. Actual small-kernel execution may instead be limited by launch overhead or insufficient parallel work, and cache reuse changes traffic at the measured memory tier. The Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 explains why additional peak FLOP/s cannot help until the workload supplies enough reusable work per byte. Caches, fusion, vectorization, and launch cost make measured speedup the final test.
 :::
 
 ::: {.fallacy-pitfall}
