@@ -77,11 +77,11 @@ def _is_chapter_qmd(path) -> bool:
 # finished. For them, notation rows must be used by a chapter (not only by the
 # notation chapter's own notes), and no chapter may use two different symbols
 # that render alike. Add a volume here when its conversion lands.
-STRICT_CONVERTED_VOLUMES: set = {"vol1"}
+STRICT_CONVERTED_VOLUMES: set = {"vol1", "vol2"}
 # Volumes whose chapters are held to one letter, one meaning (check notation
 # --scope collisions). Separate from conversion: resolving a collision changes
 # what readers see, so each volume joins after an editorial pass.
-COLLISION_CHECKED_VOLUMES: set = {"vol1"}
+COLLISION_CHECKED_VOLUMES: set = {"vol1", "vol2"}
 # Iron-law rows every volume's notation chapter must carry, used or not.
 CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
 
@@ -13223,8 +13223,8 @@ class ValidateCommand:
             rel = f.relative_to(repo)
             if len(rel.parts) < 2 or rel.parts[1] not in COLLISION_CHECKED_VOLUMES:
                 continue
-            if rel.as_posix().endswith("frontmatter/notation.qmd"):
-                continue        # the notation chapter lists every meaning by design
+            if rel.as_posix().endswith(("frontmatter/notation.qmd", "glossary/glossary.qmd")):
+                continue        # notation chapter and glossary: independent entries, every meaning by design
             checked += 1
             for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg):
                 issues.append(ValidationIssue(

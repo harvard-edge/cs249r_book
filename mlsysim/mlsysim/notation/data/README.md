@@ -156,6 +156,15 @@ A macro may carry, without becoming a new symbol:
 - **`*`** for the optimal value (`\RetrainingInterval^*`);
 - a **prime** on a function, meaning its derivative (`\ActivationFunction'`).
 
+When the macro's LaTeX already carries a subscript (`p_{\text{gate}}`), group it
+before adding an index: `{\RouterGateProbability}_{ij}`. Written bare,
+`\RouterGateProbability_{ij}` is a double subscript, which LaTeX refuses; the
+check reports it. The same holds for a power on a macro that already carries a
+superscript.
+A macro used as a subscript or superscript is always braced: `2^{\AttributionFeatureCount}`,
+`\sup_{\MonitoredFeatureLevel}`. Unbraced, LaTeX takes only the first token of
+its LaTeX, so a label lands on the base or the build stops.
+
 Any other decoration, above all a text label (`\Bandwidth_{\text{bisect}}`,
 `\SoftmaxRowMaximum^{\text{new}}`), or a prime on a quantity, makes a new
 symbol, which needs its own entry.

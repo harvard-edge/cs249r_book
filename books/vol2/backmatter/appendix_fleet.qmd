@@ -1,5 +1,6 @@
 ---
 engine: jupyter
+notation-local: [\RealizedDeviceComputeRate]
 ---
 
 # Fleet Foundations {#sec-appdx-fleet-foundations}
@@ -92,11 +93,11 @@ class FleetStateRule:
 
 Five single-machine models reappear throughout the distributed chapters, each extended by a fleet-scale term. @Sec-appdx-dam-taxonomy states the single-machine forms; the list below records only what changes at scale.
 
-- **Iron law** ($T \approx \DataVolume/\Bandwidth + O/(\PeakRate \cdot \EfficiencyHw) + \Latency$, @sec-appdx-dam-taxonomy-iron-law-mapping): At fleet scale, the data-movement term expands to include inter-node communication, and the Fleet Law replaces the single-machine sum.
+- **Iron law** ($\Time\approx \DataVolume/\Bandwidth + \Operations/(\PeakRate \cdot \EfficiencyHw) + \Latency$, @sec-appdx-dam-taxonomy-iron-law-mapping): At fleet scale, the data-movement term expands to include inter-node communication, and the Fleet Law replaces the single-machine sum.
 - **Roofline model** (@sec-appdx-dam-taxonomy-roofline): At fleet scale, a third ceiling appears. **Network-bound**\index{Network-bound workload} workloads are limited by inter-node bandwidth, which the communication-computation ratio in @sec-appdx-fleet-foundations-comm-compute-ratio measures.
-- **Amdahl's Law**: Caps strong-scaling speedup at $1/s$ for serial fraction $s$ [@amdahl1967]. At fleet scale, the serial fraction includes synchronization barriers, exposed collective communication, and pipeline bubbles (@sec-appdx-fleet-foundations-amdahls-fleet).
+- **Amdahl's Law**: Caps strong-scaling speedup at $1/\SerialFraction$ for serial fraction $\SerialFraction$ [@amdahl1967]. At fleet scale, the serial fraction includes synchronization barriers, exposed collective communication, and pipeline bubbles (@sec-appdx-fleet-foundations-amdahls-fleet).
 - **Training state rule** (@sec-appdx-dam-taxonomy-training-memory): Mixed-precision training with the Adaptive Moment Estimation (Adam) optimizer holds about `{python} FleetStateRule.state_bpp_str` bytes per parameter during training and about `{python} FleetStateRule.ckpt_bpp_str` bytes per parameter in a resumable checkpoint, before activations and framework metadata. At fleet scale, this footprint determines how model state is partitioned across devices (ZeRO, tensor parallelism, pipeline parallelism).
-- **Little's Law** ($\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$) [@little1961]: Relates in-flight requests to arrival rate and time in system. At fleet scale, it sizes the number of serving replicas behind a load balancer (@sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0).
+- **Little's Law** ($\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$) [@little1961]: Relates in-flight requests to arrival rate and time in system. At fleet scale, it sizes the number of serving replicas behind a load balancer (@sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0).
 
 The transition from single-machine to fleet-scale reasoning requires extending these models with new dimensions: network topology, failure probability, and coordination overhead. The numbers in the next section provide the quantitative foundation for that extension.
 
@@ -151,7 +152,7 @@ class FleetNumbersHighlights:
 ::: {#psp-appendix-fleet-three-numbers .callout-perspective title="Three fleet numbers that matter most"}
 
 * **Bandwidth gap**: NVLink per-direction bandwidth within a node is ~`{python} FleetNumbersHighlights.nvlink_to_ib_ratio_mult_str` faster than an InfiniBand NDR port between nodes. This ratio determines where parallelism boundaries belong, with model parallelism within a node and data parallelism across nodes.
-* **MTBF scaling**: A cluster's mean time between failures is the single-component MTBF divided by the number of components ($1/N$ scaling). At `{python} FleetNumbersHighlights.cl_mega_str` GPUs, expect a failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`.
+* **MTBF scaling**: A cluster's mean time between failures is the single-component MTBF divided by the number of components ($1/\RequiredComponentCount$ scaling). At `{python} FleetNumbersHighlights.cl_mega_str` GPUs, expect a failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`.
 * **Effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a cluster with `{python} FleetNumbersHighlights.cluster_1024_gpus_str` delivers roughly `{python} FleetNumbersHighlights.eff_fraction_pct_str` of its peak FLOP/s as useful training work.
 
 :::
@@ -248,15 +249,15 @@ Currently, NVLink 4.0 provides `{python} FleetInvariantNumbers.nvlink_to_ib_rati
 
 #### Failure scaling law {.unnumbered}
 
-For $N$ independent components under a constant-failure-rate assumption, system MTBF (@eq-fleet-mtbf-system) scales inversely with component count:
+For $\RequiredComponentCount$ independent components under a constant-failure-rate assumption, system MTBF (@eq-fleet-mtbf-system) scales inversely with component count:
 
-$$ \MeanTimeBetweenFailures_{\text{system}} = \frac{\MeanTimeToFailure_{\text{component}}}{N} $$ {#eq-fleet-mtbf-system}
+$$ \SystemMtbf = \frac{\ComponentMttf}{\RequiredComponentCount} $$ {#eq-fleet-mtbf-system}
 
 Under this model the relation is exact rather than approximate. Doubling the cluster size halves the time between failures. At `{python} FleetNumbersHighlights.cl_mega_str` GPUs with a per-GPU mean time to failure (MTTF) of `{python} FleetInvariantNumbers.gpu_mttf_hours_str`, the cluster experiences a GPU failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`. No fault tolerance strategy can avoid this; the question is how quickly the system recovers.
 
 #### AllReduce overhead scaling {.unnumbered}
 
-The bandwidth-optimal Ring AllReduce algorithm transfers $2(N-1)M/N$ bytes per participant, where $M$ is the collective payload size and $N$ is the number of participants [@patarasuk2009]. As $N$ grows large, this approaches $2M$ per GPU, so the per-GPU bandwidth term is nearly independent of the number of GPUs; aggregate cluster traffic still grows with the number of participants. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(N-1) \times \alpha$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
+The bandwidth-optimal Ring AllReduce algorithm transfers $2(\AcceleratorCount-1)\CollectivePayloadSize/\AcceleratorCount$ bytes per participant, where $\CollectivePayloadSize$ is the collective payload size and $\AcceleratorCount$ is the number of participating GPUs [@patarasuk2009]. As $\AcceleratorCount$ grows large, this approaches $2\CollectivePayloadSize$ per GPU, so the per-GPU bandwidth term is nearly independent of the number of GPUs; aggregate cluster traffic still grows with the number of participants. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(\AcceleratorCount-1) \times \MessageStartupLatency$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
 
 ### Communication numbers {.unnumbered}
 
@@ -433,7 +434,7 @@ class FleetMtbfTable:
 | **`{python} FleetMtbfTable.n_8192_str` GPUs** | `{python} FleetMtbfTable.mtbf_8192_hours_str` | `{python} FleetMtbfTable.mtbf_8192_min_str` | `{python} FleetMtbfTable.pfail_8192_str` |
 | **`{python} FleetMtbfTable.n_100k_str` GPUs** | `{python} FleetMtbfTable.mtbf_100k_hours_str` | `{python} FleetMtbfTable.mtbf_100k_min_str` | `{python} FleetMtbfTable.pfail_100k_str` |
 
-: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of `{python} FleetMtbfTable.gpu_mttf_hours_str`. Real clusters also experience NIC, PSU, cable, and switch failures, so these GPU-only intervals overstate the true cluster MTBF. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-t/\MeanTimeBetweenFailures}$ for $t = 24$ hours. {#tbl-fleet-mtbf}
+: **MTBF and Failure Probability by Cluster Size**: GPU-only failure model with per-GPU MTTF of `{python} FleetMtbfTable.gpu_mttf_hours_str`. Real clusters also experience NIC, PSU, cable, and switch failures, so these GPU-only intervals overstate the true cluster MTBF. The probability column uses $\Pr(\geq 1\ \text{failure}) = 1 - e^{-\TimeInstant/\MeanTimeBetweenFailures}$ for $\TimeInstant= 24$ hours. {#tbl-fleet-mtbf}
 
 Failure is no longer an edge case at `{python} FleetMtbfTable.n_8192_str` GPUs and above. GPU-only MTBF is about `{python} FleetMtbfTable.mtbf_8192_min_str` at `{python} FleetMtbfTable.n_8192_str` GPUs, and the probability of at least one GPU failure within 24 hours is `{python} FleetMtbfTable.pfail_8192_prose_str`. Fault tolerance is not optional at fleet scale; it is a prerequisite for completing any long-running training job. @Sec-fault-tolerance-reliability covers the mechanisms in detail.
 
@@ -692,7 +693,7 @@ class FleetRoofline:
     ridge_str = fmt_arithmetic_intensity(ridge_q, unit=flop / byte, precision=1, commas=False)
 ```
 
-Fleet performance rests on per-accelerator performance. @Sec-appdx-dam-taxonomy-roofline states the single-accelerator roofline, $\AttainableComputeRate = \min(\PeakRate, I \times \Bandwidth)$, and its ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$, which is about `{python} FleetRoofline.ridge_str` for an H100. A kernel below the ridge is memory bound, and a kernel above it is compute bound.
+Fleet performance rests on per-accelerator performance. @Sec-appdx-dam-taxonomy-roofline states the single-accelerator roofline, $\AttainableComputeRate = \min(\PeakRate, \ArithmeticIntensity\times \Bandwidth)$, and its ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$, which is about `{python} FleetRoofline.ridge_str` for an H100. A kernel below the ridge is memory bound, and a kernel above it is compute bound.
 
 The roofline is a single-accelerator law, but its logic is what scales. At fleet level the binding bandwidth is no longer HBM but the interconnect, and the bytes moved are the gradients and activations crossing the network. The ratio of network time to local arithmetic time is the communication-computation ratio (@sec-appdx-fleet-foundations-comm-compute-ratio), the roofline of the fleet and the lens the rest of this section applies.
 
@@ -715,7 +716,7 @@ A training job provisioned with `{python} FleetScalingCalloutRecap.scaling_callo
 
 ### Amdahl's Law at fleet scale {#sec-appdx-fleet-foundations-amdahls-fleet}
 
-Amdahl's Law establishes that the maximum speedup of a parallel system is limited by its serial fraction $s$. At fleet scale, the "serial fraction" includes more than sequential code. It covers every operation that forces all $N$ GPUs to wait:
+Amdahl's Law establishes that the maximum speedup of a parallel system is limited by its serial fraction $\SerialFraction$. At fleet scale, the "serial fraction" includes more than sequential code. It covers every operation that forces all $\DeviceCount$ GPUs to wait:
 
 - **AllReduce synchronization**: All GPUs must complete their gradient computation before any can proceed.
 - **Pipeline bubbles**: The warmup and cooldown phases of pipeline parallelism leave stages idle.
@@ -772,7 +773,7 @@ To see the fleet-scale implications, consider a training workload where `{python
 - With 256 GPUs: `{python} FleetAmdahlExample.speedup_256_mult_str` speedup (diminishing returns begin)
 - With 1,024 GPUs: `{python} FleetAmdahlExample.speedup_1024_mult_str` speedup (approaching the ceiling)
 - With 8,192 GPUs: `{python} FleetAmdahlExample.speedup_8192_mult_str` speedup (nearly at the Amdahl limit)
-- With $N \to \infty$: capped at `{python} FleetAmdahlExample.max_speedup_mult_str`
+- With $\DeviceCount\to \infty$: capped at `{python} FleetAmdahlExample.max_speedup_mult_str`
 
 With just `{python} FleetAmdahlExample.s_fleet_pct_str` serial overhead, no amount of hardware can deliver more than `{python} FleetAmdahlExample.max_speedup_mult_str` speedup on this fixed workload. This is why fleet-scale training does not simply add more GPUs to the same problem; it scales the problem (weak scaling) to keep the serial fraction small relative to the total work.
 
@@ -796,17 +797,17 @@ The `{python} FleetAmdahlExample.s_fleet_pct_str` serial fraction above is optim
 
 ### The communication-computation ratio {#sec-appdx-fleet-foundations-comm-compute-ratio}
 
-Any distributed training strategy must determine whether computation between synchronization points takes long enough to hide the communication. @Eq-comm-compute-ratio defines the **communication-computation ratio** ($\rho$) that answers this directly:
+Any distributed training strategy must determine whether computation between synchronization points takes long enough to hide the communication. @Eq-comm-compute-ratio defines the **communication-computation ratio** ($\CommunicationComputeRatio$) that answers this directly:
 
-$$ \rho = \frac{\CommunicationTime(\DeviceCount)}{\IronlawTermTimesCompute/N} $$ {#eq-comm-compute-ratio}
+$$ \CommunicationComputeRatio= \frac{\CommunicationTime(\DeviceCount)}{\IronLawComputeTime/\DeviceCount} $$ {#eq-comm-compute-ratio}
 
-When $\rho < 1$, computation takes longer than communication; hiding that communication still requires independent work and sufficient resources. When $\rho > 1$, the system is **Communication-Bound**\index{Communication-bound workload}, and GPUs spend more time waiting for data than computing on it.
+When $\CommunicationComputeRatio< 1$, computation takes longer than communication; hiding that communication still requires independent work and sufficient resources. When $\CommunicationComputeRatio> 1$, the system is **Communication-Bound**\index{Communication-bound workload}, and GPUs spend more time waiting for data than computing on it.
 
-The ratio is the time-domain form of the **communication intensity** (CI)\index{Communication intensity!appendix refresher} defined in @sec-vol2-introduction-ci-ratio, the bytes a step moves across the network per FLOP it executes locally. If each device moves $M$ bytes across the network per step at effective network bandwidth $\Bandwidth_{\text{network}}$ and executes its $O$ local FLOPs at realized rate $R$, then in the bandwidth-dominated regime
+The ratio is the time-domain form of the **communication intensity** (CI)\index{Communication intensity!appendix refresher} defined in @sec-vol2-introduction-ci-ratio, the bytes a step moves across the network per FLOP it executes locally. If each device moves $\NetworkTrafficVolume$ bytes across the network per step at effective network bandwidth $\NetworkBandwidth$ and executes its $\Operations$ local FLOPs at realized rate $\RealizedDeviceComputeRate$, then in the bandwidth-dominated regime
 
-$$ \rho \approx \frac{M/\Bandwidth_{\text{network}}}{O/R} = \CommunicationIntensity \times \frac{R}{\Bandwidth_{\text{network}}}, \qquad \CommunicationIntensity = \frac{M}{O} $$ {#eq-fleet-ci-rho}
+$$ \CommunicationComputeRatio\approx \frac{\NetworkTrafficVolume/\NetworkBandwidth}{\Operations/\RealizedDeviceComputeRate} = \CommunicationIntensity \times \frac{\RealizedDeviceComputeRate}{\NetworkBandwidth}, \qquad \CommunicationIntensity = \frac{\NetworkTrafficVolume}{\Operations} $$ {#eq-fleet-ci-rho}
 
-@Eq-fleet-ci-rho shows that exposed communication begins when $\CommunicationIntensity$ exceeds $\Bandwidth_{\text{network}}/R$, the network counterpart of the roofline ridge point. Because a device executes far more FLOP/s than its network link moves bytes per second, that threshold is a small fraction of a byte per FLOP, and a faster accelerator lowers it further. An accelerator upgrade alone can therefore turn a compute-bound job into a communication-bound one.
+@Eq-fleet-ci-rho shows that exposed communication begins when $\CommunicationIntensity$ exceeds $\NetworkBandwidth/\RealizedDeviceComputeRate$, the network counterpart of the roofline ridge point. Because a device executes far more FLOP/s than its network link moves bytes per second, that threshold is a small fraction of a byte per FLOP, and a faster accelerator lowers it further. An accelerator upgrade alone can therefore turn a compute-bound job into a communication-bound one.
 
 ```{python}
 #| echo: false
@@ -885,23 +886,23 @@ class FleetCommCompRatio:
 
 Communication-to-computation ratios across representative scenarios (@tbl-fleet-comm-comp) reveal why parallelism strategy must match the workload.
 
-| **Scenario**                                                                                                                   | **$\CommunicationTime(\DeviceCount)$**                                                      |                  **$\IronlawTermTimesCompute/N$**                 |                       **$\rho$**                      |
+| **Scenario**                                                                                                                   | **$\CommunicationTime(\DeviceCount)$**                                                      |               **$\IronLawComputeTime/\DeviceCount$**              |            **$\CommunicationComputeRatio$**           |
 |:-------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|:-----------------------------------------------------------------:|:-----------------------------------------------------:|
 | **Data parallel, `{python} FleetCommCompRatio.params_7b_b_str` model, `{python} FleetCommCompRatio.dp_gpu_count_str` GPUs**    | `{python} FleetCommCompRatio.ar_7b_ms_str` (AllReduce over IB NDR)                          |    ~`{python} FleetCommCompRatio.comp_time_7b_s_str` (fwd+bwd)    |        `{python} FleetCommCompRatio.rho_7b_str`       |
 | **Data parallel, `{python} FleetCommCompRatio.params_small_m_str` model, `{python} FleetCommCompRatio.dp_gpu_count_str` GPUs** | `{python} FleetCommCompRatio.ar_350m_ms_str` (AllReduce over IB NDR)                        |   ~`{python} FleetCommCompRatio.comp_time_350m_ms_str` (fwd+bwd)  |       `{python} FleetCommCompRatio.rho_350m_str`      |
 | **Ideal one-way `{python} FleetCommCompRatio.act_payload_mb_str` transfer (NVLink)**                                           | ~`{python} FleetCommCompRatio.act_transfer_lower_bound_ms_str` (bandwidth-only lower bound) | ~`{python} FleetCommCompRatio.comp_time_layer_ms_str` (one layer) | `{python} FleetCommCompRatio.rho_p2p_lower_bound_str` |
 
-: **Communication-Computation Ratio ($\rho$)**: When $\rho \ll 1$, communication can potentially be hidden if dependencies permit. When $\rho \gg 1$, the system is communication-bound and GPUs sit idle waiting for data. The NVLink row is a bandwidth-only point-to-point lower bound; a tensor-parallel collective also incurs topology, latency, and contention costs. {#tbl-fleet-comm-comp}
+: **Communication-Computation Ratio ($\CommunicationComputeRatio$)**: When $\CommunicationComputeRatio\ll 1$, communication can potentially be hidden if dependencies permit. When $\CommunicationComputeRatio\gg 1$, the system is communication-bound and GPUs sit idle waiting for data. The NVLink row is a bandwidth-only point-to-point lower bound; a tensor-parallel collective also incurs topology, latency, and contention costs. {#tbl-fleet-comm-comp}
 
-The `{python} FleetCommCompRatio.params_7b_b_str` model on `{python} FleetCommCompRatio.dp_gpu_count_str` GPUs achieves $\rho =$ `{python} FleetCommCompRatio.rho_7b_str`, so communication takes about `{python} FleetCommCompRatio.rho_7b_pct_str` as long as computation, which can be partially overlapped. The `{python} FleetCommCompRatio.params_small_m_str` model on the same cluster has $\rho =$ `{python} FleetCommCompRatio.rho_350m_str`. Communication dominates, which makes this configuration communication-bound. The solution is either to use fewer GPUs (reduce $N$ in the AllReduce) or to increase the computation per step (larger batch size, gradient accumulation).
+The `{python} FleetCommCompRatio.params_7b_b_str` model on `{python} FleetCommCompRatio.dp_gpu_count_str` GPUs achieves $\CommunicationComputeRatio=$ `{python} FleetCommCompRatio.rho_7b_str`, so communication takes about `{python} FleetCommCompRatio.rho_7b_pct_str` as long as computation, which can be partially overlapped. The `{python} FleetCommCompRatio.params_small_m_str` model on the same cluster has $\CommunicationComputeRatio=$ `{python} FleetCommCompRatio.rho_350m_str`. Communication dominates, which makes this configuration communication-bound. The solution is either to use fewer GPUs (reduce $\DeviceCount$ in the AllReduce) or to increase the computation per step (larger batch size, gradient accumulation).
 
-For the single `{python} FleetCommCompRatio.act_payload_mb_str` point-to-point payload, the ideal bandwidth-only lower bound is $\rho =$ `{python} FleetCommCompRatio.rho_p2p_lower_bound_str`. This is not a tensor-parallel collective model and cannot by itself establish whether an implementation is compute-bound.
+For the single `{python} FleetCommCompRatio.act_payload_mb_str` point-to-point payload, the ideal bandwidth-only lower bound is $\CommunicationComputeRatio=$ `{python} FleetCommCompRatio.rho_p2p_lower_bound_str`. This is not a tensor-parallel collective model and cannot by itself establish whether an implementation is compute-bound.
 
 ### Weak scaling at fleet scale {#sec-appdx-fleet-foundations-weak-scaling-fleet}
 
 Amdahl's Law paints a pessimistic picture because it assumes a fixed problem size. In practice, fleet-scale training often follows **Weak Scaling**\index{Weak scaling!fleet scale}: the problem size (tokens, data, model parameters) grows proportionally with the number of GPUs. Gustafson's Law captures this more optimistic view [@gustafson1988].
 
-The key insight for fleet-scale ML is that weak scaling reflects how fleets are actually used, not merely a mathematical convenience. Engineers do not use 8,192 GPUs to train a 7B model faster; they use them to train a 70B or 700B model in reasonable time. As models and training batches grow, engineers often increase the compute performed between synchronization points. For dense Transformers, compute is commonly estimated as about 6$\times$ parameters $\times$ tokens, while gradient communication scales with parameter bytes, so the communication-computation ratio $\rho$ depends on batch size, sequence length, accumulation, and parallelism layout rather than on parameter count alone.
+The key insight for fleet-scale ML is that weak scaling reflects how fleets are actually used, not merely a mathematical convenience. Engineers do not use 8,192 GPUs to train a 7B model faster; they use them to train a 70B or 700B model in reasonable time. As models and training batches grow, engineers often increase the compute performed between synchronization points. For dense Transformers, compute is commonly estimated as about 6$\times$ parameters $\times$ tokens, while gradient communication scales with parameter bytes, so the communication-computation ratio $\CommunicationComputeRatio$ depends on batch size, sequence length, accumulation, and parallelism layout rather than on parameter count alone.
 
 ```{python}
 #| echo: false
@@ -961,7 +962,7 @@ class FleetEffectiveFlops:
 
 A `{python} FleetEffectiveFlops.n_gpus_str`-GPU H100 cluster has a peak aggregate throughput of `{python} FleetEffectiveFlops.peak_tflop_per_s_str`. This illustrative decomposition keeps the factors disjoint: MFU represents per-device kernel and memory efficiency, scaling efficiency represents distributed communication and pipeline losses, and operational goodput represents checkpointing, failure recovery, and maintenance. The effective throughput is:
 
-$$\EffectiveFleetThroughput = N \PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency \times \GoodputRatio$$
+$$\EffectiveFleetThroughput = \DeviceCount\PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency \times \GoodputRatio$$
 
 `{python} FleetEffectiveFlops.effective_eq_math`
 
@@ -1102,6 +1103,6 @@ class FleetSummaryRecap:
 
 ## Summary {.unnumbered}
 
-Fleet scale changes every constraint a single machine imposes. ML fleets combine the tight coupling of high-performance computing for training with the elastic fault tolerance of warehouse-scale computing for serving, and they cannot adopt either tradition wholesale. NVLink provides about `{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than an InfiniBand NDR port, which is why bandwidth-hungry parallelism stays inside the node. Cluster MTBF scales as $1/N$, so at `{python} FleetSummaryRecap.n_8192_str` GPUs a GPU fails about every `{python} FleetSummaryRecap.mtbf_8192_min_str`, with `{python} FleetSummaryRecap.pfail_8192_str` probability of at least one failure in 24 hours. After disjoint factors for MFU (about `{python} FleetSummaryRecap.mfu_pct_str`), scaling efficiency (about `{python} FleetSummaryRecap.scaling_pct_str`), and operational goodput (about `{python} FleetSummaryRecap.operational_pct_str`), a `{python} FleetSummaryRecap.n_ref_gpus_str`-GPU cluster delivers about `{python} FleetSummaryRecap.eff_pct_str` of peak FLOP/s as useful work.
+Fleet scale changes every constraint a single machine imposes. ML fleets combine the tight coupling of high-performance computing for training with the elastic fault tolerance of warehouse-scale computing for serving, and they cannot adopt either tradition wholesale. NVLink provides about `{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than an InfiniBand NDR port, which is why bandwidth-hungry parallelism stays inside the node. Cluster MTBF scales as $1/\RequiredComponentCount$, so at `{python} FleetSummaryRecap.n_8192_str` GPUs a GPU fails about every `{python} FleetSummaryRecap.mtbf_8192_min_str`, with `{python} FleetSummaryRecap.pfail_8192_str` probability of at least one failure in 24 hours. After disjoint factors for MFU (about `{python} FleetSummaryRecap.mfu_pct_str`), scaling efficiency (about `{python} FleetSummaryRecap.scaling_pct_str`), and operational goodput (about `{python} FleetSummaryRecap.operational_pct_str`), a `{python} FleetSummaryRecap.n_ref_gpus_str`-GPU cluster delivers about `{python} FleetSummaryRecap.eff_pct_str` of peak FLOP/s as useful work.
 
-Three considerations govern the design response. The communication-computation ratio $\rho$ indicates the potential for overlap and the pressure from communication; dependencies and available resources determine how much communication can be hidden behind computation. Weak scaling, which grows the problem with the fleet, preserves useful work per device, while strong scaling remains the right choice when the goal is to finish fixed work sooner. Rack power density, about `{python} FleetSummaryRecap.rack_ratio_mult_str` the traditional reference for current AI racks, determines the cooling design, subject to the installed heat-removal capacity rather than a universal threshold.
+Three considerations govern the design response. The communication-computation ratio $\CommunicationComputeRatio$ indicates the potential for overlap and the pressure from communication; dependencies and available resources determine how much communication can be hidden behind computation. Weak scaling, which grows the problem with the fleet, preserves useful work per device, while strong scaling remains the right choice when the goal is to finish fixed work sooner. Rack power density, about `{python} FleetSummaryRecap.rack_ratio_mult_str` the traditional reference for current AI racks, determines the cooling design, subject to the installed heat-removal capacity rather than a universal threshold.
