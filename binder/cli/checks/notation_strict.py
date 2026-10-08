@@ -856,13 +856,48 @@ def assign_from_glossary(package: Dict, glossary: Dict, registry: Registry) -> D
                 macro = registry.canonical(site["raw"].lstrip("\\"))
                 out["assignments"].append(dict(site, macro=macro, via="alias"))
                 continue
-            hits = [r for r in rows if r.get("glyph") == site["raw"] and site["line"] in r.get("lines", [])]
+            def matches(r: Dict) -> bool:
+                if (r.get("symbol") or r.get("glyph")) != site["raw"]:
+                    return False
+                keys = {(x["line"], x["col"], x["token_start"]) for x in r.get("sites", [])}
+                if (site["line"], site["col"], site["token_start"]) in keys:
+                    return True
+                return site["line"] in r.get("lines", [])
+
+            exact = [r for r in rows if (site["line"], site["col"], site["token_start"])
+                     in {(x["line"], x["col"], x["token_start"]) for x in r.get("sites", [])}
+                     and (r.get("symbol") or r.get("glyph")) == site["raw"]]
+            hits = exact or [r for r in rows if matches(r)]
             if len(hits) == 1:
                 out["assignments"].append(dict(site, macro=hits[0]["macro"], via="glossary", meaning=hits[0].get("meaning", "")))
             elif not hits:
                 out["unresolved"].append(site)
             else:
                 out["ambiguous"].append(dict(site, options=[h["macro"] for h in hits]))
+    return out
+
+
+def concordance(repo: Path, macro: str, registry: Registry, width: int = 220) -> List[Dict]:
+    """Every use of one macro in the book, with the sentence around it.
+
+    The reader sees in one place whether all uses mean what the registry says;
+    this is how a macro reused for the wrong meaning gets caught.
+    """
+    name = registry.canonical(macro.lstrip("\\"))
+    names = {name} | {a for a, c in registry.aliases.items() if c == name}
+    pat = re.compile(r"\\(%s)(?![A-Za-z])" % "|".join(map(re.escape, sorted(names))))
+    out: List[Dict] = []
+    for path in sorted((repo / "books").glob("vol*/**/*.qmd")):
+        if "_build" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for span in extract_math(text):
+            if not pat.search(span.text):
+                continue
+            line = text.split("\n")[span.line - 1]
+            pos = max(0, span.col - 1 - width // 2)
+            out.append({"file": str(path.relative_to(repo)), "line": span.line,
+                        "context": line[pos:pos + width].strip(), "math": span.text.strip()[:160]})
     return out
 
 
@@ -903,6 +938,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--verify-rendering", metavar="REF", help="compare each file's rendered math with REF")
     ap.add_argument("--apply", metavar="ASSIGNMENTS_JSON", help="apply assignments to the single path given")
     ap.add_argument("--assign", metavar="GLOSSARY_JSON", help="derive exact edits for the single path from a glossary")
+    ap.add_argument("--concordance", metavar="MACRO", help="every use of one macro in the book, in context")
     args = ap.parse_args(argv)
     repo = Path(args.repo).resolve()
     reg = Registry.load(repo)
@@ -919,6 +955,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for e in hits[:25]:
             print(f"\\{e.macro:<34} {e.latex:<26} {e.kind:<9} {e.domain:<12} {e.meaning}")
         print(f"{len(hits)} match(es)" + (" (first 25; matches on every word come first)" if len(hits) > 25 else ""))
+        return 0
+
+    if args.concordance:
+        name = reg.canonical(args.concordance.lstrip("\\"))
+        e = reg.entries.get(name)
+        uses = concordance(repo, name, reg)
+        if args.json:
+            print(json.dumps({"macro": name, "meaning": e.meaning if e else "", "uses": uses}, indent=1))
+        else:
+            print(f"\\{name} = {e.meaning if e else '(not registered)'}  [{len(uses)} uses]")
+            for u in uses:
+                print(f"  {u['file']}:{u['line']}: {u['context']}")
         return 0
 
     if args.assign:

@@ -945,6 +945,7 @@ class MLSysBookCLI:
         ./binder/binder notation find "link bandwidth" search the registry by meaning
         ./binder/binder notation verify <REF> <files>  prove rendering is unchanged since REF
         ./binder/binder notation assign <glossary.json> <file>   exact edits from a chapter glossary
+        ./binder/binder notation concordance <Macro> [--json]  every use of one macro, in context
         ./binder/binder notation apply <assignments.json> <file>
         """
         from cli.checks import notation_strict as ns
@@ -958,6 +959,8 @@ class MLSysBookCLI:
             return ns.main(["--find", " ".join(rest)]) == 0
         if sub == "verify" and rest:
             return ns.main(["--verify-rendering", rest[0], *rest[1:]]) == 0
+        if sub == "concordance" and rest:
+            return ns.main(["--concordance", *rest]) == 0
         if sub == "assign" and len(rest) == 2:
             return ns.main(["--assign", rest[0], rest[1]]) == 0
         if sub == "apply" and len(rest) == 2:
