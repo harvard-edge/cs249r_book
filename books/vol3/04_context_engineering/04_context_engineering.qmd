@@ -62,7 +62,7 @@ The token accounting of @sec-vol3-foundation-model-tokenization settles two ques
 ↩ The quadratic input cost of resending an append-only history on every call is established in @sec-vol3-foundation-model-trajectory-cost-accumulation.
 :::
 
-This chapter develops the agent's *working context*: the runtime subsystem that decides what each model call receives. Rather than treating context as a passive transcript, this subsystem constructs a bounded working set tailored to a single decision. It establishes token budgets for each distinct role in the prompt, arranges data layouts so unchanged prefixes can be reused across turns, compacts historical evidence without corrupting its factual validity, maintains structured progress records that resist summarization drift, and enforces invalidation rules whenever external actions alter environment state. All of these mechanisms run as deterministic host software. The foundation model reasons over the assembled working context, but the host runtime remains solely responsible for managing it.
+This chapter develops the agent's *working context*: the runtime subsystem that decides what each model call receives. Rather than treating context as a passive transcript, this subsystem constructs a bounded working set tailored to a single decision. It establishes token budgets for each distinct role in the prompt, arranges data layouts so unchanged prefixes can be reused across turns, compacts historical evidence without corrupting its factual validity, maintains structured progress records that resist summarization drift, and enforces invalidation rules whenever external actions alter environment state. The host runtime owns assembly, token budgets, records, and execution gates. Selection and compaction can use heuristics or model-generated candidates, which the runtime must check against the task's requirements and retained evidence before admission.
 
 The chapter follows the repair agent through its next decision, and each section answers the question the previous one leaves open. The runtime first decides which evidence the next step needs and how the input allowance divides among competing roles (@sec-vol3-context-engineering-decision). Admitting that evidence does not mean the model can use it, so @sec-vol3-context-engineering-physics separates the window an interface accepts from the context a model reliably acts on. The selected items then need a layout that keeps their sources distinct and their stable prefix reusable across turns (@sec-vol3-context-engineering-staging). When history outgrows the budget, compaction (@sec-vol3-context-engineering-compaction) and audited progress records (@sec-vol3-context-engineering-summarization) shorten it without erasing causal evidence or refuted hypotheses. When the agent's own edits change the workspace, invalidation (@sec-vol3-context-engineering-context-rot) withdraws the observations that no longer describe it. Evaluation (@sec-vol3-context-engineering-evaluation) then asks how to show that a complete policy lowers the cost per accepted task.
 
@@ -743,7 +743,7 @@ Suppose a candidate record claims that the entire regression test suite passed o
 
 Version tracking is how the audit enforces the scope rule. A historical finding may name `r17`, but a claim about the current pool needs evidence recorded against `r18`. The audit distinguishes cleanly between a missing historical payload, a valid historical observation, and an unverified assertion about current code. Treating all three indiscriminately as version mismatches would discard valuable diagnostic context while failing to confirm whether the present codebase actually functions.
 
-@Lst-vol3-progress-audit collects these checks into one host-side function. It runs as ordinary code outside the model, and every value it compares comes from a source the candidate record did not write: the runtime-owned inventory, the recorded tool events, and the current workspace.
+@Lst-vol3-progress-audit collects these checks into one host-side function. It runs as ordinary code outside the model, and every value it compares comes from a source the candidate record did not write: the runtime-owned inventory, the recorded tool events, and the current workspace. Each observation claim names its event, target artifact, revision, and execution scope, including the selected test and its recorded configuration. Current-state claims receive the same evidence check as historical milestones before their applicability to the present workspace is checked.
 
 ::: {#lst-vol3-progress-audit lst-cap="**Auditing a candidate progress record**: Every comparison uses evidence the summarizer did not produce. An empty result permits replacement; any finding rejects the candidate."}
 ```python
@@ -756,14 +756,15 @@ def audit_record(record, inventory, events, workspace):
         if record.value_of(field.name) != field.value:
             findings.append(("missing_or_altered", field.name))
 
-    # 2. Claimed progress: operation, result, and artifact version must all
-    #    match the recorded event, not only its exit status.
-    for claim in record.milestones:
+    # 2. Historical and current claims must match recorded evidence.
+    for claim in (*record.milestones, *record.current_state_claims):
         event = events.get(claim.event_id)
         if event is None:
             findings.append(("no_evidence", claim))
-        elif (claim.operation, claim.result, claim.artifact_version) != \
-             (event.operation, event.result, event.artifact_version):
+        elif (claim.operation, claim.result, claim.artifact,
+              claim.artifact_version, claim.scope) != \
+             (event.operation, event.result, event.artifact,
+              event.artifact_version, event.scope):
             findings.append(("contradicts_event", claim))
 
     # 3. Scope: history may name r17; a current-state claim needs support
@@ -776,7 +777,7 @@ def audit_record(record, inventory, events, workspace):
 ```
 :::
 
-When applied to our candidate record, Check 2 rejects the assertion that the full regression suite passed on `r18` because the event log documents only a single test execution. Check 1 catches any omission of the no-deployment constraint or the controlled test schedule. Check 3 allows the `r17` failure to persist as an immutable historical observation while preventing the model from presenting that diagnostic failure as a description of the current `r18` workspace.
+When applied to our candidate record, Check 2 rejects the assertion that the full regression suite passed on `r18` because the event log documents only a single test execution. It also rejects a current-version claim with no corresponding event or with a different artifact or execution scope. Check 1 catches any omission of the no-deployment constraint or the controlled test schedule. Check 3 allows the `r17` failure to persist as an immutable historical observation while preventing the model from presenting that diagnostic failure as a description of the current `r18` workspace.
 
 The runtime retains all raw tool logs and source diffs until the candidate record is either validated or rejected; pruning conversational turns from the prompt context does not imply purging raw payloads from backing storage. If the audit flags discrepancies, the runtime can supply the specific failure diagnostics back to the model for a targeted correction attempt, or it can bypass the model and synthesize a minimal, verified record directly from known-good state. Because iterative repair calls consume both token budgets and wall-clock latency, the system enforces a strict retry policy capping correction attempts, tool retrievals, and execution time rather than retrying indefinitely until a model output happens to pass. If repeated retries fail to yield a verified summary, the runtime must retain a larger slice of raw context (if token capacity allows), fetch essential artifacts on demand, or abort with an explicit handoff exception. Blindly accepting an unverified summary is unacceptable in production systems, and exhausting a retry budget establishes neither factual accuracy nor operational success.
 
