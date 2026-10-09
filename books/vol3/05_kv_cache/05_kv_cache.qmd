@@ -198,7 +198,7 @@ Subtracting model parameters and runtime buffers isolates the usable capacity: `
 
 : **Payload and resident fit**: Each sequence stores its own full-attention state; the calculation excludes allocator overhead and additional headroom. {#tbl-vol3-kv-payload-fit tbl-colwidths="[28,38,34]"}
 
-**Systems insight**: Resident capacity scales inversely with retained context length. Because model weights occupy a fixed memory slice regardless of context, expanding sequence length directly cannibalizes the cache pool. Each fourfold increase in sequence length (from `{python} KvGeometry.ctx_short_str` to `{python} KvGeometry.ctx_agent_str`, and onward to `{python} KvGeometry.ctx_long_str` tokens) reduces the resident sequence capacity by roughly 75 percent. Retained context length is the primary leverage point controlling serving capacity, and the agent runtime directly governs it. Maintaining an active working set rather than accumulating unbounded historical observations (principle \ref{pri-vol3-attention-working-set}) keeps requests operating in the high-density rows of @tbl-vol3-kv-payload-fit. These figures are raw tensor payloads; physical memory allocators, page fragmentation, and safety headroom further reduce actual capacity, while translating instantaneous resident capacity into sustainable request throughput requires analyzing sequence residence times (@sec-vol3-kv-workload-dynamics).
+**Systems insight**: Resident capacity scales inversely with retained context length. Because model weights occupy a fixed memory slice regardless of context, expanding sequence length directly cannibalizes the cache pool. Each fourfold increase in sequence length (from `{python} KvGeometry.ctx_short_str` to `{python} KvGeometry.ctx_agent_str`, and onward to `{python} KvGeometry.ctx_long_str` tokens) reduces the resident sequence capacity by roughly 75 percent. Retained context length is the primary control lever governing serving capacity, and the agent runtime directly governs it. Maintaining an active working set rather than accumulating unbounded historical observations (principle \ref{pri-vol3-attention-working-set}) keeps requests operating in the high-density rows of @tbl-vol3-kv-payload-fit. These figures are raw tensor payloads; physical memory allocators, page fragmentation, and safety headroom further reduce actual capacity, while translating instantaneous resident capacity into sustainable request throughput requires analyzing sequence residence times (@sec-vol3-kv-workload-dynamics).
 
 :::
 
@@ -508,9 +508,9 @@ When an agent discards an unpromising candidate trajectory, the engine decrement
 The allocation policy must preserve each sequence's state while managing capacity shared by many requests.
 
 - [ ] **Reservation estimate**: If the hypothetical mean final length doubled to `{python} StaticReservation.mean_doubled_str` tokens under the same `{python} StaticReservation.s_max_str`-token cap, what fraction of each static reservation would be populated at completion, and would static reservation admit any more sequences?
-- [ ] **External fragmentation**: Can you identify why the three free extents in the example cannot satisfy its contiguous request, and why a fixed-size block pool changes that condition?
-- [ ] **Tail ownership**: Can you trace a private append to a shared partial tail and distinguish it from an append at a full-block boundary?
-- [ ] **Reclamation**: Can you explain why ending an active request does not always make its blocks immediately reusable?
+- [ ] **External fragmentation**: Identify why the three free extents in the example cannot satisfy its contiguous request, and why a fixed-size block pool changes that condition.
+- [ ] **Tail ownership**: Trace a private append to a shared partial tail and distinguish it from an append at a full-block boundary.
+- [ ] **Reclamation**: Explain why ending an active request does not always make its blocks immediately reusable.
 
 :::
 
@@ -642,7 +642,7 @@ The concrete computational value of a prefix hit follows directly from prefill a
 
 Although @eq-hprefix measures the computational work avoided during prefill, end-to-end request latency also includes novel suffix prefill, autoregressive token generation, batch scheduling delays, and memory transfers. Once a hit eliminates prefix compute, any of these can dominate total response time. When monitoring production clusters, a declining prefix hit rate warrants investigating both sides of the client-service interface. On the client side, minor modifications in prompt serialization—such as altered whitespace, injected timestamps, or reordered JSON schema keys—prematurely truncate prefix matches. On the server side, heightened memory pressure, poor cross-node routing, or mismatched runtime configurations can render compatible state unavailable or physically inaccessible.
 
-When utilizing hosted model APIs, application developers require an explicit reuse contract rather than relying on unverified assumptions about the provider's internal memory allocator. This contract must clearly define eligible token inputs, compatible execution configurations, tenant isolation boundaries, and supported retention lifetimes. In agentic workflows, cache expiration tightly couples this reuse contract to tool execution latency. If an external tool call blocks longer than the provider's idle eviction threshold, the subsequent turn discovers that its cached prefix has been purged and incurs a full prefill penalty, the remote equivalent of the drop-and-recompute policy described in @sec-vol3-kvcache-swapping. An agent harness aware of these eviction horizons can anticipate cache misses during long tool waits rather than absorbing unexpected latency spikes. The cached-token metric returned in API usage records is the client's primary telemetry signal, though interpreting it requires understanding its precise operational scope.
+When using hosted model APIs, application developers require an explicit reuse contract rather than relying on unverified assumptions about the provider's internal memory allocator. This contract must clearly define eligible token inputs, compatible execution configurations, tenant isolation boundaries, and supported retention lifetimes. In agentic workflows, cache expiration tightly couples this reuse contract to tool execution latency. If an external tool call blocks longer than the provider's idle eviction threshold, the subsequent turn discovers that its cached prefix has been purged and incurs a full prefill penalty, the remote equivalent of the drop-and-recompute policy described in @sec-vol3-kvcache-swapping. An agent harness aware of these eviction horizons can anticipate cache misses during long tool waits rather than absorbing unexpected latency spikes. The cached-token metric returned in API usage records is the client's primary telemetry signal, though interpreting it requires understanding its precise operational scope.
 
 ::: {#psp-05-reading-a-cached-token-count .callout-perspective title="Reading a cached-token count"}
 
@@ -1173,7 +1173,7 @@ Rearranging the relation as $\ArrivalRate = \MeanSlotOccupancy/\MeanHoldTime$ ex
 ::: {.column-margin}
 ![](images/svg/kv_residency_tax_margin.svg){width="100%" fig-alt="A bracket labeled slot held 50 s spans one bar made of a short blue segment labeled generate 5 s and a long gray segment labeled tool wait 45 s, above the note rate divided by 10."}
 
-*A kept slot is paid for across the whole cycle, not only while it generates.*
+*A kept slot is paid for across the whole cycle, rather than only while it generates.*
 :::
 
 The turn rate calculated from releasing slots is an ideal upper bound imposed strictly by memory capacity. In practice, prefill computation, state restoration bandwidth, PCIe bus contention, and scheduling queues introduce additional bottlenecks; compute throughput or interconnect bandwidth often saturates before memory is fully exhausted. Furthermore, if multiple trajectories share prefix blocks, those blocks remain pinned in memory even if one trajectory enters an idle wait.
@@ -1312,7 +1312,7 @@ By coupling resident-fit bounds with precise telemetry across physical block sta
 
 Two runs report the same occupied fraction, but one holds mostly dormant prefixes and the other holds mostly active state.
 
-- [ ] **Physical ownership**: Can you explain why their immediate admission options differ and how a shared block should be counted?
+- [ ] **Physical ownership**: Explain why their immediate admission options differ and how a shared block should be counted.
 - [ ] **Sharing estimate**: If the common prefix in the notebook shrank to `{python} AgentCapacity.common_half_str` tokens, estimate the shared fraction $\SharedPrefixFraction$ and the sharing gain from $1/(1-\SharedPrefixFraction)$. Would sharing still more than double the resident-fit bound?
 - [ ] **Residency tax**: If the hypothetical wait doubles while generation residence stays fixed, by what factor does the retained-slot rate constraint fall, and does the case for moving state get stronger or weaker?
 - [ ] **Policy evidence**: Which workload, restoration, and latency measurements would distinguish useful eviction from repeated churn?
