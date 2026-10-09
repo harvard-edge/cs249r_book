@@ -154,7 +154,7 @@ An admitted request passes through routing, preprocessing, queueing, batch forma
 ↩ The prefill-decode decomposition, with prefill's high arithmetic intensity and decode's weight-streaming regime, is established in @sec-performance-engineering-prefill-decode.
 :::
 
-::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-end inference pipeline**: One language-model request crosses between CPU and GPU twice. The load balancer routes and admits it and the CPU tokenizes it; prefill then processes the whole prompt in one pass and writes its keys and values to the KV cache, and decode reads and appends that cache one token per step before the CPU detokenizes the stream. The strip orders one request's latency, with illustrative segment widths. Everything up to the end of prefill counts against time to first token, and the routing and CPU segments are serving-tax work that spends latency budget outside GPU compute." fig-alt="Two regions labeled CPU and GPU. In the CPU region, requests flow down through a load balancer and a tokenizer. Token IDs pass right to a prefill box in the GPU region, which writes to a KV cache box. A decode box reads from and appends to the KV cache, loops on itself, and sends generated token IDs left to a detokenize box that feeds a response stream. Below, a horizontal strip divides one request's latency into route, pre, prefill, decode steps, and post segments, with brackets marking time to first token and TPOT times output tokens."}
+::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-end inference pipeline**: One language-model request crosses between CPU and GPU twice. The load balancer routes and admits it and the CPU tokenizes it; prefill then processes the whole prompt in one pass and writes its keys and values to the KV cache, and decode reads and appends that cache one token per step before the CPU detokenizes the stream. The strip orders one request's latency, with illustrative segment widths. Everything up to the end of prefill counts against time to first token, and the routing and CPU segments are serving-tax work that spends latency budget outside GPU compute." fig-alt="Two regions labeled CPU and GPU. In the CPU region, requests flow down through a load balancer and a tokenizer. Token IDs pass right to a prefill box in the GPU region, which writes to a KV cache box. A decode box reads from and appends to the KV cache, loops on itself, and sends generated token IDs left to a detokenize box that feeds a response stream. Below, a horizontal strip divides one request's latency into route, pre, prefill, decode steps, and post segments, the decode segment ticked into per-token steps, with brackets marking time to first token and TPOT times output tokens."}
 ![](images/svg/serving-pipeline.svg)
 
 <!--
@@ -633,7 +633,7 @@ The same leverage can hold across application categories with different cost str
 
 The cost structure motivates serving optimization: a reduction in cost per completed request yields recurring savings if workload volume and service quality remain fixed. Lower latency alone does not ensure that billed capacity or other costs fall. @Fig-serving-cost-curve uses constructed cost curves to illustrate how unit cost can change with daily request volume. Against its assumed price of \$0.05 per 1,000 tokens, the optimized curve crosses near $2 \times 10^5$ requests per day, while the unbatched single-GPU curve crosses beyond $3 \times 10^7$ requests. These crossings follow from the assumed curves, not measured profitability or guaranteed effects of INT4 and continuous batching. A deployment needs its own token mix, occupied capacity, and complete cost boundary to establish a break-even point.
 
-::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The serving cost curve**: Constructed unit-cost curves cross an assumed price line at different request volumes. The optimized curve crosses earlier under these assumptions; the crossings do not establish measured profitability or guaranteed savings from quantization and batching." fig-alt="Log-log plot of cost per 1000 tokens vs. daily volume for single-GPU, multi-GPU, and optimized serving with break-even line."}
+::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The serving cost curve**: Constructed unit-cost curves cross an assumed price line at different request volumes. The optimized curve crosses earlier under these assumptions; the crossings do not establish measured profitability or guaranteed savings from quantization and batching." fig-alt="Log-log plot of cost per 1000 tokens vs. daily request volume for single-GPU, multi-GPU, and optimized serving, drawn as three gray lines that grow heavier with optimization, the optimized line darkest, each labeled at its right end. A dashed horizontal price line divides a shaded region above it, where cost exceeds price, from a shaded region below it, and an open circle marks where each of the three curves crosses the line."}
 
 ```{python}
 #| echo: false
@@ -653,7 +653,8 @@ The cost structure motivates serving optimization: a reduction in cost per compl
 from binder.tools.figures import style as book_style
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.6, 3.9))
+FS = 10.5  # prints at >= 9 pt when the figure is scaled to 5 in
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 volume = np.logspace(3, 8, 200)
@@ -664,34 +665,56 @@ cost_multi_gpu = 0.08 * (1e6 / volume) ** 0.45
 cost_optimized = 0.02 * (1e6 / volume) ** 0.55
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(volume, cost_single_gpu, color=COLORS['secondary'], linewidth=2.3, label='Single-GPU (naive)')
-ax.plot(volume, cost_multi_gpu, color=COLORS['OrangeLine'], linewidth=2.3, label='Multi-GPU batching')
-ax.plot(volume, cost_optimized, color=COLORS['GreenLine'], linewidth=2.3, label='Fully optimized (INT4, continuous batching)')
+# The three deployments are ordinal (naive -> batched -> optimized), so they
+# share one neutral hue at stepped stroke weight; green and red belong only to
+# the profit and loss regions. Every stroke is opaque so labels stay legible.
+series = (
+    (cost_single_gpu, COLORS['secondary'], 1.3, 'Single-GPU\n(naive)'),
+    (cost_multi_gpu, COLORS['secondary'], 2.3, 'Multi-GPU\nbatching'),
+    (cost_optimized, COLORS['primary'], 2.8, 'Fully\noptimized'),
+)
+for cost, col, lw, _ in series:
+    ax.plot(volume, cost, color=col, linewidth=lw, solid_capstyle='butt')
 
-ax.axhline(y=typical_pricing, color=COLORS['primary'], linestyle='--', linewidth=1.3, alpha=0.85)
+ax.axhline(y=typical_pricing, color=COLORS['primary'], linestyle='--', linewidth=1.1)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+# Regions are defined by the price line alone: above it each request loses
+# money, below it each request is profitable.
+y_lo, y_hi = 1e-3, 3.0
+ax.axhspan(typical_pricing, y_hi, color=COLORS['RedL'], alpha=0.35, lw=0, zorder=0)
+ax.axhspan(y_lo, typical_pricing, color=COLORS['GreenL'], alpha=0.45, lw=0, zorder=0)
 ax.text(
-    2e3,
-    typical_pricing * 1.18,
-    "Typical pricing (break-even)",
-    fontsize=8.5,
+    1.3e3,
+    typical_pricing / 1.2,
+    "Typical price\n(break-even)",
+    fontsize=FS,
+    linespacing=1.05,
     fontweight='bold',
     color=COLORS['primary'],
     ha='left',
-    va='bottom',
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.8),
+    va='top',
 )
-ax.fill_between(volume, 0, typical_pricing, where=(cost_single_gpu > typical_pricing), alpha=0.10, color=COLORS['RedLine'])
-ax.fill_between(volume, 0, typical_pricing, where=(cost_optimized < typical_pricing), alpha=0.10, color=COLORS['GreenLine'])
+ax.text(8e7, 2.3, "cost above price", fontsize=FS, color=COLORS['RedLine'], ha='right', va='top', style='italic')
+ax.text(1.3e3, 1.4e-3, "cost below price", fontsize=FS, color=COLORS['GreenLine'], ha='left', va='bottom', style='italic')
+
+# Break-even point of each curve (where it meets the price line) and a
+# direct label at the curve's right end in place of a legend.
+for cost, col, lw, name in series:
+    idx = np.argmax(cost <= typical_pricing)
+    if cost[idx] <= typical_pricing:
+        ax.plot(volume[idx], typical_pricing, 'o', ms=7, mfc='white', mec=col, mew=2, zorder=5)
+    ax.text(volume[-1] * 1.35, cost[-1], name, fontsize=FS, color=col, fontweight='bold', ha='left', va='center', clip_on=False, linespacing=1.0)
 
 ax.set_xscale('log')
 ax.set_yscale('log')
-ax.set_xlabel('Daily Request Volume')
-ax.set_ylabel('Cost per 1,000 Tokens ($)')
+ax.set_xlabel('Daily request volume', fontsize=FS + 0.5)
+ax.set_ylabel('Cost per 1,000 tokens ($)', fontsize=FS + 0.5)
+ax.tick_params(labelsize=FS)
 ax.set_xlim(1e3, 1e8)
-ax.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1')
+ax.set_ylim(y_lo, y_hi)
 plt.tight_layout()
+fig.subplots_adjust(right=0.80)
 plt.show()
 plt.close()
 ```
@@ -700,7 +723,7 @@ plt.close()
 
 The cost ranges in @tbl-cost-ratios give a static comparison; @fig-serving-cost-crossover instead accumulates assumed monthly serving expense over a 36-month deployment. Its crossover occurs when the serving portion equals the initial training expense, not when total deployment cost first exceeds training cost. In the plotted recommendation scenario, that happens within days; in the 70B LLM scenario, it takes roughly six weeks. These timings follow from the specified expenses, not from model size or user count alone. A larger training expense, lower traffic, or shorter deployment can change which activity dominates. The comparison motivates evaluating serving efficiency early while keeping workload and quality fixed. For generative LLM services, serving-specific designs can improve throughput, cost, and power use [@patel2024].
 
-::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The serving cost crossover**: Cumulative total deployment cost (initial training plus ongoing serving) for three scenarios. Vertical markers (scenarios A and B) indicate when the serving portion equals the one-time training cost. In the two high-traffic scenarios, serving expense matches training expense within weeks or days. In the low-traffic scenario, training expense remains larger over the plotted period. These differences follow from the specified training costs, traffic, and unit serving prices." fig-alt="Area chart showing cumulative total deployment cost over 36 months for three scenarios with crossover points marked"}
+::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The serving cost crossover**: Cumulative total deployment cost (initial training plus ongoing serving) for three scenarios. Vertical markers (scenarios A and B) indicate when the serving portion equals the one-time training cost. In the two high-traffic scenarios, serving expense matches training expense within weeks or days. In the low-traffic scenario, training expense remains larger over the plotted period. These differences follow from the specified training costs, traffic, and unit serving prices." fig-alt="Line chart on a log cost axis showing cumulative total deployment cost over 36 months for three scenarios, drawn as gray lines of different weights and labeled at their right ends with each scenario's training and monthly serving cost. Dotted horizontal lines mark each scenario's training cost, open circles mark where each total reaches twice its training cost, and for scenarios A and B a short dashed vertical segment rises from the training baseline to that circle."}
 
 ```{python}
 #| echo: false
@@ -722,7 +745,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 5.0))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.6, 4.1))
+FS = 10.5  # prints at >= 9 pt when the figure is scaled to 5 in
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 months = np.linspace(0, 36, 500)
@@ -751,68 +775,75 @@ crossover_c = train_c / serve_per_month_c  # ~0.048 months
 # Plot cumulative total cost (training + serving) for each scenario
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(months, cum_a_serve, color=COLORS["BlueLine"], linewidth=2.5, label="A: Small model, low traffic (\\$50K train, \\$5K/mo serve)")
-ax.plot(months, cum_b_serve, color=COLORS["OrangeLine"], linewidth=2.5, label="B: 70B LLM, 1M DAU (\\$2M train, \\$1.5M/mo serve)")
-ax.plot(months, cum_c_serve, color=COLORS["secondary"], linewidth=2.5, label="C: RecSys, 100M DAU (\\$12K train, \\$250K/mo serve)")
+# Scenarios are categories, not resources: one neutral hue at stepped weight
+# (matching the serving cost curve), with direct labels at the right end.
+col_a, lw_a = COLORS["secondary"], 1.4
+col_b, lw_b = COLORS["primary"], 2.6
+col_c, lw_c = COLORS["secondary"], 2.4
+# (curve, training cost, crossover month, color, stroke, label, label y, va)
+scen = (
+    (cum_a_serve, train_a, crossover_a, col_a, lw_a, "A: small model, low traffic\n\\$50K train, \\$5K/mo serve", 0.30, "bottom"),
+    (cum_b_serve, train_b, crossover_b, col_b, lw_b, "B: 70B LLM, 1M DAU\n\\$2M train, \\$1.5M/mo serve", 70, "bottom"),
+    (cum_c_serve, train_c, crossover_c, col_c, lw_c, "C: RecSys, 100M DAU\n\\$12K train, \\$250K/mo serve", 10.5, "bottom"),
+)
+for cum, train, xc, col, lw, name, ly, va in scen:
+    ax.plot(months, cum, color=col, linewidth=lw)
+    # Training cost baseline (flat dotted line): the gap between a baseline
+    # and its curve is the cumulative serving portion.
+    ax.axhline(y=train, color=col, alpha=0.8, linestyle=":", linewidth=1.0)
+    # Crossover point: total cost = 2 x training cost
+    ax.plot(xc, 2 * train, "o", ms=7, mfc="white", mec=col, mew=2, zorder=5, clip_on=False)
+    # Direct label inside the plot, beside the curve's right end.
+    ax.text(35.6, ly, name, fontsize=FS, color=col, ha="right", va=va, linespacing=1.1)
 
-# Plot training cost baselines (flat lines)
-ax.axhline(y=train_a, color=COLORS["BlueLine"], linestyle=":", linewidth=1.0, alpha=0.5)
-ax.axhline(y=train_b, color=COLORS["OrangeLine"], linestyle=":", linewidth=1.0, alpha=0.5)
-
-# Fill regions between training baseline and total cost to show serving portion
-ax.fill_between(months, train_a, cum_a_serve, alpha=0.10, color=COLORS["BlueLine"])
-ax.fill_between(months, train_b, cum_b_serve, alpha=0.10, color=COLORS["OrangeLine"])
-ax.fill_between(months, train_c, cum_c_serve, alpha=0.10, color=COLORS["secondary"])
-
-# Mark crossover points with vertical dashed lines
-ax.axvline(x=crossover_a, color=COLORS["BlueLine"], linestyle="--", linewidth=1.0, alpha=0.6)
-ax.axvline(x=crossover_b, color=COLORS["OrangeLine"], linestyle="--", linewidth=1.0, alpha=0.6)
-
-# Annotations
+# Vertical markers for scenarios A and B: a dashed segment from the training
+# baseline up to the crossover point, where the serving portion has grown to
+# equal the one-time training cost.
+for xc, train, col in ((crossover_a, train_a, col_a), (crossover_b, train_b, col_b)):
+    ax.plot([xc, xc], [train, 2 * train], color=col, linestyle="--", linewidth=1.2)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate(
     "Crossover: month 10",
     xy=(crossover_a, 2 * train_a),
-    fontsize=8,
-    color=COLORS["BlueLine"],
+    fontsize=FS,
+    color=col_a,
     fontweight="bold",
-    ha="center",
-    va="bottom",
-    xytext=(16, 0.25),
-    arrowprops=dict(arrowstyle="->", color=COLORS["BlueLine"], lw=0.75),
+    ha="left",
+    va="center",
+    xytext=(12.0, 0.033),
+    arrowprops=dict(arrowstyle="->", color=col_a, lw=0.9, shrinkB=5),
 )
 
 ax.annotate(
     "LLM: serving exceeds\ntraining in ~6 weeks",
     xy=(crossover_b, 2 * train_b),
-    fontsize=8,
-    color=COLORS["OrangeLine"],
+    fontsize=FS,
+    color=col_b,
     fontweight="bold",
-    ha="center",
-    va="top",
-    xytext=(6, 5),
-    arrowprops=dict(arrowstyle="->", color=COLORS["OrangeLine"], lw=0.75),
+    ha="left",
+    va="center",
+    xytext=(3.0, 110),
+    arrowprops=dict(arrowstyle="->", color=col_b, lw=0.9, shrinkB=5),
 )
 
 ax.annotate(
-    "RecSys: serving\ndominates within days",
+    "RecSys: serving dominates within days",
     xy=(crossover_c, 2 * train_c),
-    fontsize=8,
-    color=COLORS["secondary"],
+    fontsize=FS,
+    color=col_c,
     fontweight="bold",
-    ha="center",
-    va="bottom",
-    xytext=(6, 0.35),
-    arrowprops=dict(arrowstyle="->", color=COLORS["secondary"], lw=0.75),
+    ha="left",
+    va="center",
+    xytext=(2.2, 0.0072),
+    arrowprops=dict(arrowstyle="->", color=col_c, lw=0.9, shrinkB=5),
 )
-
 ax.set_yscale("log")
-ax.set_xlabel("Months Since Deployment")
-ax.set_ylabel("Cumulative Cost ($M)")
-ax.set_xlim(0, 36)
-ax.set_ylim(0.005, 100)
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1')
+ax.set_xlabel("Months since deployment", fontsize=FS + 0.5)
+ax.set_ylabel("Cumulative cost ($M)", fontsize=FS + 0.5)
+ax.tick_params(labelsize=FS)
+ax.set_xlim(-0.8, 36)
+ax.set_ylim(0.005, 300)
 
 plt.tight_layout()
 plt.show()
@@ -1263,7 +1294,7 @@ For LLMs in the decode phase\index{Decode phase!memory bandwidth bound}, small b
 
 For recommendation systems, embedding lookup\index{Recommendation system!embedding lookup bottleneck} can limit throughput before dense computation does. Grouping sparse accesses can improve locality and distribute lookup work across shards, while batching the dense stages can improve matrix multiplication throughput. The serving policy must account for both stages and the communication between them rather than infer the bottleneck from the model category alone.
 
-::: {#fig-gpu-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Decode inherits the bandwidth deficit**: Peak compute and memory bandwidth for four accelerator generations, normalized to the V100. Compute rises 18$\times$ against bandwidth's 8.9$\times$. In weight-bandwidth-bound decode, each iteration loads the active weights and reuses them across its output tokens; at fixed batch size, bandwidth growth constrains the gain. These hardware ratios are not measured workload speedups. Specifications come from the MLSysIM hardware registry." fig-alt="Line chart normalized to the V100 showing peak compute reaching 18 times and memory bandwidth 8.9 times by the B200."}
+::: {#fig-gpu-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Decode inherits the bandwidth deficit**: Peak compute and memory bandwidth for four accelerator generations, normalized to the V100. Compute rises 18$\times$ against bandwidth's 8.9$\times$. In weight-bandwidth-bound decode, each iteration loads the active weights and reuses them across its output tokens; at fixed batch size, bandwidth growth constrains the gain. These hardware ratios are not measured workload speedups. Specifications come from the MLSysIM hardware registry." fig-alt="Line chart normalized to the V100 across V100, A100, H100, and B200, showing peak compute reaching 18 times and memory bandwidth 8.9 times by the B200, with the widening gap between the two lines shaded and labeled bandwidth deficit."}
 
 ```{python}
 #| echo: false
@@ -1275,28 +1306,47 @@ base = data.iloc[0]
 data["Compute"] = data["Peak_TFLOPS"] / base["Peak_TFLOPS"]
 data["Bandwidth"] = data["Memory_Bandwidth_GBps"] / base["Memory_Bandwidth_GBps"]
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.5, 4.2))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.6, 3.7))
+FS = 10.5  # prints at >= 9 pt when the figure is scaled to 5 in
 labels = data["Accelerator"] + "\n" + data["Year"].astype(str)
-ax.plot(labels, data["Compute"], marker="o", color=COLORS["RedLine"], linewidth=2.2, label="Peak compute")
-ax.plot(labels, data["Bandwidth"], marker="s", color=COLORS["BlueLine"], linewidth=2.2, label="Memory bandwidth")
+x = range(len(data))
+# The widening gap between the two curves is the bandwidth deficit decode
+# inherits. It is a gap, not a failure, so it takes a neutral gray wash (red is
+# reserved for danger, orange means compute). Compute is the reference series
+# (dark neutral); memory bandwidth is a GB/s quantity, so it takes violet.
+ax.fill_between(x, data["Bandwidth"], data["Compute"], color=COLORS["grid"], alpha=0.45, lw=0)
+ax.plot(x, data["Compute"], marker="o", color=COLORS["primary"], linewidth=2.2)
+ax.plot(x, data["Bandwidth"], marker="s", color=COLORS["VioletLine"], linewidth=2.6)
 
-for col, colour in [("Compute", COLORS["RedLine"]), ("Bandwidth", COLORS["BlueLine"])]:
+def _mult(v):
+    return f"{v:.1f}".rstrip("0").rstrip(".") + "×"
+
+last = len(data) - 1
+for col, name, colour in [("Compute", "Peak compute", COLORS["primary"]), ("Bandwidth", "Memory\nbandwidth", COLORS["VioletLine"])]:
     ax.annotate(
-        f'{data[col].iloc[-1]:.0f}×',
-        xy=(len(data) - 1, data[col].iloc[-1]),
-        xytext=(8, 0),
+        f"{name}\n{_mult(data[col].iloc[-1])}",
+        xy=(last, data[col].iloc[-1]),
+        xytext=(9, 0),
         textcoords="offset points",
         va="center",
+        ha="left",
         fontweight="bold",
-        fontsize=8.5,
+        fontsize=FS,
         color=colour,
-        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor=colour, lw=0.8),
+        linespacing=1.05,
     )
+# Placed inside the widest part of the wedge, clear of both lines.
+gap_x = last - 0.41
+gap_y = 0.515 * data["Compute"].iloc[-1]
+ax.text(gap_x, gap_y, "bandwidth\ndeficit", ha="center", va="center", fontsize=FS, style="italic", color=COLORS["secondary"])
 
-ax.set_ylabel(f'Growth relative to {base["Accelerator"]} ({int(base["Year"])})')
-ax.set_xlabel("NVIDIA data center accelerator")
-ax.legend(loc="upper left", frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1')
-ax.margins(x=0.14)
+ax.set_xticks(list(x))
+ax.set_xticklabels(labels)
+ax.tick_params(labelsize=FS)
+ax.set_ylabel(f'Growth relative to {base["Accelerator"]} ({int(base["Year"])})', fontsize=FS + 0.5)
+ax.set_xlabel("NVIDIA data center accelerator", fontsize=FS + 0.5)
+ax.set_xlim(-0.3, last + 1.25)
+ax.set_ylim(0, 1.12 * data["Compute"].max())
 fig.tight_layout()
 ```
 
@@ -2510,7 +2560,7 @@ Recommendation systems add the placement of sparse state to this decision. *Spar
 
 Recommendation batching starts by grouping work around embedding locality rather than request shape. @Fig-feature-parallel-pipeline traces this feature-parallel pipeline: an incoming request splits across user, item, and context feature types to query sharded embedding tables concurrently, after which a gather barrier concatenates the retrieved representations for the dense MLP ranking head.
 
-::: {#fig-feature-parallel-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Feature-parallel batching pipeline**: Requests are batched by feature type (Users, Items, Context) and dispatched to specialized embedding servers in parallel. The retrieved embeddings are then concatenated and processed by the dense ranking head. This architecture enables scaling to trillions of parameters by decoupling embedding storage from dense compute." fig-alt="Left to right: a request enters a feature split box, which fans out to user, item, and context embedding boxes labeled sharded tables. Their outputs converge on an amber gather box that concatenates them and feeds a ranking head labeled dense MLP, which produces a ranked output."}
+::: {#fig-feature-parallel-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Feature-parallel batching pipeline**: Requests are batched by feature type (Users, Items, Context) and dispatched to specialized embedding servers in parallel. The retrieved embeddings are then concatenated and processed by the dense ranking head. This architecture enables scaling to trillions of parameters by decoupling embedding storage from dense compute." fig-alt="Left to right: a request enters a feature split box, by type, which fans out to three embedding tables labeled user, item, and context embeddings. Each table is drawn as rows split across two side-by-side shards, shard 0 and shard 1, with the one looked-up row filled solid: the user row in shard 0, the item row in shard 1, and the context row in shard 0. Amber lines labeled gather, concatenate carry the three rows into one stacked vector of segments U, I, and C. The vector feeds a ranking head, dense MLP, drawn as three narrowing layers, which produces a ranked output drawn as four green bars of decreasing length."}
 ![](images/svg/feature-parallel-pipeline.svg)
 
 <!--
@@ -3021,7 +3071,7 @@ class KVCacheWallInputs:
     hbm_gb_str = fmt_memory(hbm, unit=GB, precision=0, commas=False)
 ```
 
-::: {#fig-kv-cache-wall fig-env="figure" fig-pos="H" fig-cap="**The KV cache wall**: Total GPU memory usage for a 4-bit quantized 70B model (`{python} KVCacheWallInputs.weights_gb_str` weights) on an `{python} KVCacheWallInputs.hbm_gb_str` H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (`{python} KVCacheWallInputs.weights_gb_str` + `{python} KVCacheWallInputs.batch_example_kv_gb_str` exceeds `{python} KVCacheWallInputs.hbm_gb_str`), forcing the system to either reduce batch size, change the state representation, or distribute the state across devices." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the capacity line early (~17K tokens)."}
+::: {#fig-kv-cache-wall fig-env="figure" fig-pos="H" fig-cap="**The KV cache wall**: Total GPU memory usage for a 4-bit quantized 70B model (`{python} KVCacheWallInputs.weights_gb_str` weights) on an `{python} KVCacheWallInputs.hbm_gb_str` H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (`{python} KVCacheWallInputs.weights_gb_str` + `{python} KVCacheWallInputs.batch_example_kv_gb_str` exceeds `{python} KVCacheWallInputs.hbm_gb_str`), forcing the system to either reduce batch size, change the state representation, or distribute the state across devices." fig-alt="Memory usage plot against sequence length. A red dashed line at 80 GB marks HBM capacity, with the region above it shaded red. A light blue band at the bottom is the 35 GB of model weights. Sloped lines for batch 1, 2, 4, and 8 rise from the weights line; batches 8, 4, and 2 stop at open circles where they meet the capacity line, batch 8 earliest at about 17K tokens, while batch 1 stays below the line out to 128K tokens."}
 
 ```{python}
 #| echo: false
@@ -3042,7 +3092,8 @@ import numpy as np
 from binder.tools.figures import style as book_style
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.6, 3.7))
+FS = 10.5  # prints at >= 9 pt when the figure is scaled to 5 in
 
 # Llama 2 70B (GQA) inputs from the registry-backed LEGO cell above.
 weights_gb = KVCacheWallInputs.weights_gb
@@ -3053,41 +3104,69 @@ seq_len_k = np.linspace(0, KVCacheWallInputs.long_context_k, 100)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 # Base weights
-ax.fill_between(seq_len_k, 0, weights_gb, color=COLORS['BlueLine'], alpha=0.15, label='Weights (4-bit 70B)')
+ax.fill_between(seq_len_k, 0, weights_gb, color=COLORS['BlueL'], alpha=0.9, lw=0)
 ax.axhline(y=weights_gb, color=COLORS['BlueLine'], linestyle='-', linewidth=1.2)
-
-# Batch sizes with palette colors
-batch_colors = {
-    1: COLORS['GreenLine'],
-    2: COLORS['OrangeLine'],
-    4: COLORS['VioletLine'],
-    8: COLORS['BrownLine'],
-}
-for b in [1, 2, 4, 8]:
-    total_mem = weights_gb + (b * seq_len_k * gb_per_1k_tokens)
-    ax.plot(seq_len_k, total_mem, color=batch_colors[b], linewidth=2.0, label=f'Batch {b}')
-
-# HBM Limit
-ax.axhline(y=hbm_cap_gb, color=COLORS['RedLine'], linestyle='--', linewidth=1.8)
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-# Label sits below the line in the gap between the batch-1 and batch-2 lines,
-# so no sloped KV line crosses the label box.
 ax.text(
-    72,
-    hbm_cap_gb - 6.5,
-    f'HBM Capacity ({KVCacheWallInputs.hbm_gb_str})',
-    color=COLORS['RedLine'],
-    fontsize=8.5,
+    KVCacheWallInputs.long_context_k / 2,
+    weights_gb / 2,
+    f'Model weights ({KVCacheWallInputs.weights_gb_str})',
+    ha='center',
+    va='center',
+    fontsize=FS,
     fontweight='bold',
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor=COLORS['RedLine'], lw=0.8),
+    color=COLORS['BlueLine'],
 )
 
-ax.set_xlabel('Sequence Length (1,000s of Tokens)')
-ax.set_ylabel('Total GPU Memory (GB)')
-ax.set_ylim(0, 110)
+# Above HBM capacity nothing fits: the red wall region.
+y_top = 100
+ax.axhspan(hbm_cap_gb, y_top, color=COLORS['RedL'], alpha=0.45, lw=0, zorder=0)
+ax.axhline(y=hbm_cap_gb, color=COLORS['RedLine'], linestyle='--', linewidth=1.8)
+
+# Each batch line climbs until it meets the wall; the dot marks the
+# longest sequence that batch can hold.
+for b in [1, 2, 4, 8]:
+    total_mem = weights_gb + (b * seq_len_k * gb_per_1k_tokens)
+    fits = total_mem <= hbm_cap_gb
+    x_wall = (hbm_cap_gb - weights_gb) / (b * gb_per_1k_tokens)
+    xs = np.append(seq_len_k[fits], min(x_wall, seq_len_k[-1]))
+    ys = weights_gb + b * xs * gb_per_1k_tokens
+    ax.plot(xs, ys, color=COLORS['primary'], linewidth=2.0)
+    if x_wall <= seq_len_k[-1]:
+        ax.plot(x_wall, hbm_cap_gb, 'o', ms=7, mfc='white', mec=COLORS['RedLine'], mew=2, zorder=5)
+        ax.text(x_wall, hbm_cap_gb + 3, f'batch {b}', ha='center', va='bottom', fontsize=FS, fontweight='bold', color=COLORS['primary'])
+    else:
+        # Label sits well below the line, clear of the stroke and the right spine.
+        x_lab = 0.875 * seq_len_k[-1]
+        y_lab = weights_gb + b * x_lab * gb_per_1k_tokens - 6
+        ax.text(x_lab, y_lab, f'batch {b}', ha='center', va='top', fontsize=FS, fontweight='bold', color=COLORS['primary'])
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(
+    KVCacheWallInputs.long_context_k - 2,
+    hbm_cap_gb + 3,
+    f'HBM capacity ({KVCacheWallInputs.hbm_gb_str})',
+    color=COLORS['RedLine'],
+    fontsize=FS,
+    fontweight='bold',
+    ha='right',
+    va='bottom',
+)
+ax.text(
+    0.75 * KVCacheWallInputs.long_context_k,
+    weights_gb + 10,
+    'KV cache',
+    ha='center',
+    va='center',
+    fontsize=FS,
+    style='italic',
+    color=COLORS['secondary'],
+)
+
+ax.set_xlabel('Sequence length (1,000s of tokens)', fontsize=FS + 0.5)
+ax.set_ylabel('Total GPU memory (GB)', fontsize=FS + 0.5)
+ax.tick_params(labelsize=FS)
+ax.set_ylim(0, y_top)
 ax.set_xlim(0, KVCacheWallInputs.long_context_k)
-ax.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1')
 
 plt.tight_layout()
 plt.show()
@@ -3547,227 +3626,9 @@ Many LLM workloads share common prefixes\index{Prefix Caching!prompt sharing} ac
 
 Prefix caching shares KV cache entries across requests with compatible common prefixes. Reuse requires the same token prefix and the same model computation, including any task-specific weight adapter and other inputs that affect the cached state. The cache key must distinguish those conditions, and the service must restrict sharing to the permitted users or tenants. Matching visible text alone is insufficient. @Fig-prefix-caching diagrams valid block-level sharing: logical tables for independent requests map common prefix tokens to physical blocks B0–B5, skipping their repeated prefill work while storing request-specific suffix state separately.
 
-::: {#fig-prefix-caching fig-env="figure" fig-pos="htb" fig-cap="**Prefix caching via block sharing**: PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the System Prompt is stored in blocks 0-5. Request A and Request B map their first 6 logical pages to these same physical blocks, storing only their unique suffixes in new blocks. This dramatically reduces memory usage and prefill computation for workloads with shared context." fig-alt="Block diagram of three bands. Request A logical pages at top and Request B logical pages at bottom both point to the same six green physical blocks B0 to B5 in the GPU memory band in the middle. Request A private suffix pages map to blue blocks B10 and B11; Request B private suffix pages map to orange blocks B12 to B14."}
+::: {#fig-prefix-caching fig-env="figure" fig-pos="htb" fig-cap="**Prefix caching via block sharing**: PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the System Prompt is stored in blocks 0-5. Request A and Request B map their first 6 logical pages to these same physical blocks, storing only their unique suffixes in new blocks. This dramatically reduces memory usage and prefill computation for workloads with shared context." fig-alt="Three rows. Request A logical pages at top and Request B logical pages at bottom each begin with green shared-prefix pages P0, P1, P2, and P5, separated by an ellipsis, and green arrows from both rows point to the same green physical blocks B0 to B5 in the GPU HBM panel in the middle. Request A's gray suffix pages P6 and P7 point to private blocks B10 and B11, and Request B's gray suffix pages P6 to P8 point to private blocks B12 to B14."}
 
-```{.tikz}
-\providecolor{DarkNavy}{HTML}{1E293B}%
-\providecolor{OceanBlue}{HTML}{2563EB}%
-\providecolor{ForestGreen}{HTML}{166534}%
-\providecolor{AmberStage}{HTML}{D97706}%
-\providecolor{CrimsonSLA}{HTML}{991B1B}%
-\providecolor{SlateGrey}{HTML}{475569}%
-\providecolor{SoftGrey}{HTML}{F8FAFC}%
-\providecolor{SlateTeal}{HTML}{0F766E}%
-\providecolor{BorderGrey}{HTML}{CBD5E1}%
-\providecolor{BorderBlue}{HTML}{2563EB}%
-\providecolor{BorderGreen}{HTML}{166534}%
-\providecolor{BorderAmber}{HTML}{D97706}%
-\providecolor{BorderCrimson}{HTML}{991B1B}%
-\providecolor{Crimson}{HTML}{991B1B}%
-\providecolor{SoftBlue}{HTML}{F0F6FE}%
-\providecolor{SoftGreen}{HTML}{ECFAF0}%
-\providecolor{SoftAmber}{HTML}{FEF8EE}%
-\providecolor{SoftCrimson}{HTML}{FFF1F2}%
-\providecolor{BgCard}{HTML}{FFFFFF}%
-\providecolor{CardBg}{HTML}{FFFFFF}%
-\providecolor{GrayL}{HTML}{E0E0E0}%
-\providecolor{GrayLine}{HTML}{666666}%
-\providecolor{BlueLine}{HTML}{006395}%
-\providecolor{BlueFill}{HTML}{D6EAF8}%
-\providecolor{GreenLine}{HTML}{008F45}%
-\providecolor{GreenFill}{HTML}{D5F5E3}%
-\providecolor{OrangeLine}{HTML}{E67817}%
-\providecolor{OrangeFill}{HTML}{FDEBD0}%
-\providecolor{RedLine}{HTML}{D9534F}%
-\providecolor{RedFill}{HTML}{F2D7D5}%
-\providecolor{TextBlack}{HTML}{333333}%
-\providecolor{VioletLine}{HTML}{7E317B}%
-\providecolor{VioletFill}{RGB}{243,243,255}%
-\colorlet{mlsysblue}{OceanBlue}%
-\colorlet{mlsysgreen}{ForestGreen}%
-\colorlet{mlsysred}{CrimsonSLA}%
-\colorlet{mlsysamber}{AmberStage}%
-\colorlet{mlsysdarkgray}{DarkNavy}%
-\colorlet{mlsysteal}{SlateTeal}%
-\scalebox{0.82}{%
-\begin{tikzpicture}[
-    x=1cm, y=1cm,
-    >=Stealth,
-    font=\small\sffamily
-]
-    % Styles
-    \tikzset{
-        panel/.style={
-            draw=BorderGrey,
-            fill=white,
-            line width=0.7pt,
-            rounded corners=4pt,
-            inner sep=0pt
-        },
-        header_card/.style={
-            draw=BorderGrey,
-            fill=SoftGrey,
-            line width=0.6pt,
-            rounded corners=3pt,
-            inner sep=0pt
-        },
-        blk_shared/.style={
-            draw=BorderGreen,
-            fill=SoftGreen,
-            line width=0.7pt,
-            rounded corners=2pt,
-            font=\scriptsize\bfseries\color{ForestGreen},
-            minimum width=0.92cm,
-            minimum height=0.62cm,
-            align=center
-        },
-        blk_a/.style={
-            draw=BorderBlue,
-            fill=SoftBlue,
-            line width=0.7pt,
-            rounded corners=2pt,
-            font=\scriptsize\bfseries\color{OceanBlue},
-            minimum width=0.92cm,
-            minimum height=0.62cm,
-            align=center
-        },
-        blk_b/.style={
-            draw=BorderAmber,
-            fill=SoftAmber,
-            line width=0.7pt,
-            rounded corners=2pt,
-            font=\scriptsize\bfseries\color{AmberStage},
-            minimum width=0.92cm,
-            minimum height=0.62cm,
-            align=center
-        },
-        callout_box/.style={
-            draw=BorderGreen,
-            fill=white,
-            line width=0.7pt,
-            rounded corners=3pt,
-            inner sep=0pt
-        },
-        pill_chip/.style 2 args={
-            draw=#1,
-            fill=#2,
-            rounded corners=2pt,
-            inner xsep=4pt,
-            inner ysep=1.8pt,
-            font=\fontsize{6.5}{7.5}\bfseries
-        }
-    }
-
-    % =========================================================================
-    % TOP PANEL: REQUEST A (LOGICAL PAGES)
-    % =========================================================================
-    \node[panel, minimum width=14.6cm, minimum height=2.1cm, anchor=north west] (pReqA) at (0, 8.4) {};
-
-    % Header Card (Left column: x = 0.3 to 2.4)
-    \node[header_card, minimum width=2.1cm, minimum height=1.5cm, anchor=west] (hdrA) at (0.3, 7.35) {};
-    \node[anchor=north west, font=\footnotesize\bfseries\color{DarkNavy}] at ([shift={(0.18cm, -0.2cm)}] hdrA.north west) {Request A};
-    \node[anchor=west, font=\fontsize{7}{8.5}\selectfont\color{SlateGrey}] at ([shift={(0.18cm, -0.1cm)}] hdrA.west) {Logical Table};
-    \node[pill_chip={BorderBlue}{SoftBlue}, text=OceanBlue, anchor=south west] at ([shift={(0.18cm, 0.18cm)}] hdrA.south west) {Suffix A};
-
-    % Section Labels above pages
-    \node[font=\scriptsize\bfseries\color{ForestGreen}] at (4.8, 8.0) {Shared System Prompt (Prefix)};
-    \node[font=\scriptsize\bfseries\color{OceanBlue}] at (9.32, 8.0) {Private Suffix A};
-
-    % Request A Logical Pages
-    \node[blk_shared] (la0) at (3.0, 7.15) {P0};
-    \node[blk_shared] (la1) at (4.0, 7.15) {P1};
-    \node[blk_shared] (la2) at (5.0, 7.15) {P2};
-    \node[font=\scriptsize\bfseries\color{SlateGrey}] at (5.8, 7.15) {$\dots$};
-    \node[blk_shared] (la5) at (6.6, 7.15) {P5};
-
-    \node[blk_a] (la6) at (8.8, 7.15) {P6};
-    \node[blk_a] (la7) at (9.85, 7.15) {P7};
-
-    % =========================================================================
-    % MIDDLE PANEL: PHYSICAL MEMORY BLOCKS (GPU HBM)
-    % =========================================================================
-    \node[panel, minimum width=14.6cm, minimum height=3.8cm, anchor=north west, fill=SoftGrey!40] (pPhys) at (0, 5.7) {};
-
-    % Header Card (Left column)
-    \node[header_card, draw=OceanBlue!50, fill=SoftBlue!30, minimum width=2.1cm, minimum height=3.0cm, anchor=west] (hdrPhys) at (0.3, 3.8) {};
-    \node[anchor=north west, font=\footnotesize\bfseries\color{DarkNavy}] at ([shift={(0.18cm, -0.22cm)}] hdrPhys.north west) {GPU HBM};
-    \node[anchor=west, font=\fontsize{7}{8.5}\selectfont\color{SlateGrey}] at ([shift={(0.18cm, 0.65cm)}] hdrPhys.west) {Physical Pool};
-    \node[pill_chip={BorderGreen}{SoftGreen}, text=ForestGreen, anchor=west] at ([shift={(0.18cm, 0.12cm)}] hdrPhys.west) {Prefix Cache};
-    \node[anchor=south west, font=\fontsize{6.2}{7.8}\selectfont\color{SlateGrey}, align=left] at ([shift={(0.18cm, 0.2cm)}] hdrPhys.south west) {Radix Match\\\textcolor{ForestGreen}{\textbf{Blocks $B_0$--$B_5$}}\\\textcolor{SlateGrey}{Zero Duplicate}};
-
-    % Shared Physical Blocks (B0..B5)
-    \node[blk_shared] (pb0) at (3.0, 3.8) {B0};
-    \node[blk_shared] (pb1) at (4.0, 3.8) {B1};
-    \node[blk_shared] (pb2) at (5.0, 3.8) {B2};
-    \node[font=\scriptsize\bfseries\color{SlateGrey}] at (5.8, 3.8) {$\dots$};
-    \node[blk_shared] (pb5) at (6.6, 3.8) {B5};
-
-    % Private Blocks A (B10, B11)
-    \node[blk_a] (pb10) at (8.8, 4.5) {B10};
-    \node[blk_a] (pb11) at (9.85, 4.5) {B11};
-    \node[font=\fontsize{6.5}{8}\bfseries\color{OceanBlue}, align=right, anchor=east] at (8.25, 4.5) {Req A\\Private};
-
-    % Private Blocks B (B12, B13, B14)
-    \node[blk_b] (pb12) at (8.8, 3.1) {B12};
-    \node[blk_b] (pb13) at (9.85, 3.1) {B13};
-    \node[blk_b] (pb14) at (10.9, 3.1) {B14};
-    \node[font=\fontsize{6.5}{8}\bfseries\color{AmberStage}, align=right, anchor=east] at (8.25, 3.1) {Req B\\Private};
-
-    % Callout Box on Right Column (x = 11.55 to 14.3; wide enough for the prefill pill)
-    \node[callout_box, minimum width=2.75cm, minimum height=2.6cm, anchor=west] (callout) at (11.55, 3.8) {};
-    \node[pill_chip={BorderGreen}{SoftGreen}, text=ForestGreen, anchor=north] at ([shift={(0, -0.22cm)}] callout.north) {100\% Prefix Hit};
-    \node[anchor=center, text width=2.05cm, font=\fontsize{6.8}{8.2}\selectfont\color{DarkNavy}, align=center] at ([shift={(0, -0.05cm)}] callout.center) {Both requests share $B_0$--$B_5$ in HBM; zero duplicate KV storage.};
-    \node[pill_chip={BorderAmber}{SoftAmber}, text=AmberStage, anchor=south] at ([shift={(0, 0.2cm)}] callout.south) {Prefix Prefill Skipped};
-
-    % =========================================================================
-    % BOTTOM PANEL: REQUEST B (LOGICAL PAGES)
-    % =========================================================================
-    \node[panel, minimum width=14.6cm, minimum height=2.1cm, anchor=north west] (pReqB) at (0, 1.4) {};
-
-    % Header Card (Left column)
-    \node[header_card, minimum width=2.1cm, minimum height=1.5cm, anchor=west] (hdrB) at (0.3, 0.35) {};
-    \node[anchor=north west, font=\footnotesize\bfseries\color{DarkNavy}] at ([shift={(0.18cm, -0.2cm)}] hdrB.north west) {Request B};
-    \node[anchor=west, font=\fontsize{7}{8.5}\selectfont\color{SlateGrey}] at ([shift={(0.18cm, -0.1cm)}] hdrB.west) {Logical Table};
-    \node[pill_chip={BorderAmber}{SoftAmber}, text=AmberStage, anchor=south west] at ([shift={(0.18cm, 0.18cm)}] hdrB.south west) {Suffix B};
-
-    % Request B Logical Pages
-    \node[blk_shared] (lb0) at (3.0, 0.6) {P0};
-    \node[blk_shared] (lb1) at (4.0, 0.6) {P1};
-    \node[blk_shared] (lb2) at (5.0, 0.6) {P2};
-    \node[font=\scriptsize\bfseries\color{SlateGrey}] at (5.8, 0.6) {$\dots$};
-    \node[blk_shared] (lb5) at (6.6, 0.6) {P5};
-
-    \node[blk_b] (lb6) at (8.8, 0.6) {P6};
-    \node[blk_b] (lb7) at (9.85, 0.6) {P7};
-    \node[blk_b] (lb8) at (10.9, 0.6) {P8};
-
-    % Labels below pages
-    \node[font=\scriptsize\bfseries\color{ForestGreen}] at (4.8, 0.05) {Shared System Prompt (Prefix)};
-    \node[font=\scriptsize\bfseries\color{AmberStage}] at (9.85, 0.05) {Private Suffix B};
-
-    % =========================================================================
-    % MAPPING ARROWS (STRICTLY VERTICAL, ZERO CROSSINGS, MARGINAL CLEARANCE)
-    % =========================================================================
-    % Req A -> Physical
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (la0.south) -- (pb0.north);
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (la1.south) -- (pb1.north);
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (la2.south) -- (pb2.north);
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (la5.south) -- (pb5.north);
-    \draw[->, line width=0.8pt, OceanBlue, shorten >=2pt, shorten <=2pt] (la6.south) -- (pb10.north);
-    \draw[->, line width=0.8pt, OceanBlue, shorten >=2pt, shorten <=2pt] (la7.south) -- (pb11.north);
-
-    % Req B -> Physical
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (lb0.north) -- (pb0.south);
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (lb1.north) -- (pb1.south);
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (lb2.north) -- (pb2.south);
-    \draw[->, line width=0.8pt, ForestGreen, shorten >=2pt, shorten <=2pt] (lb5.north) -- (pb5.south);
-    \draw[->, line width=0.8pt, AmberStage, shorten >=2pt, shorten <=2pt] (lb6.north) -- (pb12.south);
-    \draw[->, line width=0.8pt, AmberStage, shorten >=2pt, shorten <=2pt] (lb7.north) -- (pb13.south);
-    \draw[->, line width=0.8pt, AmberStage, shorten >=2pt, shorten <=2pt] (lb8.north) -- (pb14.south);
-
-\end{tikzpicture}
-}
-```
+![](images/svg/prefix-caching.svg){width="100%"}
 
 :::
 
@@ -4184,7 +4045,7 @@ Chunked prefill keeps prefill and decode on one worker and bounds how much promp
 
 @Fig-disaggregated-serving partitions the serving pipeline into specialized physical tiers. In the illustrated long-prompt, small-decode-batch regime, prefill is compute bound while decode is memory-bandwidth bound. Separate pools can therefore emphasize compute throughput for prefill and memory bandwidth for decode, with a remote direct memory access (RDMA) KV-cache transfer connecting the phases [@zhong2024distserve]. Separation prevents the two phases from competing on the same accelerator and permits independent parallelism and capacity plans. The transfer and queueing at each pool still contribute to request latency, and different batch or context sizes can change which resources bind.
 
-::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**: A long-prompt, small-decode-batch regime separates compute-bound prefill instances from memory-bandwidth-bound decode instances, mediated by RDMA KV-cache transfer. Because prefill sets time to first token and decode sets time per output token, each pool is sized for its own token rate. Other batch and context sizes can change the binding resources." fig-alt="Left to right: a prompt enters a prefill pool of three prefill workers labeled compute-bound, sets TTFT, and sized for prompt tokens per second. An amber KV cache transfer box labeled RDMA connects it to a decode pool of three decode workers labeled bandwidth-bound, sets TPOT, and sized for output tokens per second, which emits a token stream."}
+::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**: A long-prompt, small-decode-batch regime separates compute-bound prefill instances from memory-bandwidth-bound decode instances, mediated by RDMA KV-cache transfer. Because prefill sets time to first token and decode sets time per output token, each pool is sized for its own token rate. Other batch and context sizes can change the binding resources." fig-alt="Left to right: a prompt enters a prefill pool labeled compute-bound, sets TTFT, and sized for prompt tokens per second. Each of its three workers, Prefill 0 to 2, shows its work as two wide solid blocks, each a whole-prompt pass. An amber arrow carrying four small KV-cache page tiles, labeled KV cache transfer (RDMA), crosses to a decode pool labeled bandwidth-bound, sets TPOT, and sized for output tokens per second. Each of its three workers, Decode 0 to 2, shows its work as a row of eight narrow cells, each a one-token decode step. The decode pool emits a token stream. A key below names the wide block a whole-prompt pass and the narrow cell a one-token decode step."}
 ![](images/svg/disaggregated-serving.svg)
 
 <!--
@@ -4984,212 +4845,9 @@ The feed-forward layer (typically two linear transformations with activation) pa
 
 The communication pattern for tensor-parallel inference follows a two-phase synchronization per layer. @Fig-tensor-parallel-flow diagrams this execution flow across two GPU ranks, isolating how column-row GEMM decompositions confine cross-device synchronization to two AllReduce barriers over NVLink, one after the multi-head attention projection and one after the feed-forward layer.
 
-::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism for inference**: Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This partition can reduce latency when saved compute exceeds communication cost. The illustrated two-collective layer uses a fast local interconnect; its NVLink label is aggregate bidirectional bandwidth, not the per-direction transfer rate." fig-alt="Two-column diagram for GPU 0 and GPU 1. Top: Attention layer with heads split across GPUs feeding into AllReduce. Bottom: Feed-forward layer showing column-row split pattern with final AllReduce synchronization."}
+::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism for inference**: Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This partition can reduce latency when saved compute exceeds communication cost. The illustrated two-collective layer uses a fast local interconnect; its NVLink label is aggregate bidirectional bandwidth, not the per-direction transfer rate." fig-alt="Two columns labeled GPU 0 and GPU 1, separated by a dashed divider. In the attention stage, each GPU shows eight head tiles: GPU 0 holds the first four as solid tiles and draws the other four dashed, and GPU 1 holds the second four. From the bottom of each GPU's solid head tiles, labeled first or second half of heads, an amber arrow carries a partial output down into an AllReduce over NVLink bar. In the feed-forward stage, each GPU draws the matrix W1 split down the middle into columns, with its own column slice solid and the other dashed, labeled column slice of W1 plus activation. The matrix W2 is split across the middle into rows, with GPU 0 holding the top rows and GPU 1 the bottom rows, labeled row slice of W2 partial sum; on each GPU a blue arrow marked no communication runs from its column slice of W1 to the row slice of W2 it holds, GPU 1's arrow routing around the dashed top rows to enter its bottom rows from the side. Both partial sums feed a second AllReduce bar that leads to the next layer. A key reads held on this GPU for solid tiles and held on the other GPU for dashed tiles."}
 
-```{.tikz}
-\providecolor{DarkNavy}{HTML}{1E293B}%
-\providecolor{OceanBlue}{HTML}{2563EB}%
-\providecolor{ForestGreen}{HTML}{166534}%
-\providecolor{AmberStage}{HTML}{D97706}%
-\providecolor{CrimsonSLA}{HTML}{991B1B}%
-\providecolor{SlateGrey}{HTML}{475569}%
-\providecolor{SoftGrey}{HTML}{F8FAFC}%
-\providecolor{SlateTeal}{HTML}{0F766E}%
-\providecolor{BorderGrey}{HTML}{CBD5E1}%
-\providecolor{BorderBlue}{HTML}{2563EB}%
-\providecolor{BorderGreen}{HTML}{166534}%
-\providecolor{BorderAmber}{HTML}{D97706}%
-\providecolor{BorderCrimson}{HTML}{991B1B}%
-\providecolor{Crimson}{HTML}{991B1B}%
-\providecolor{SoftBlue}{HTML}{F0F6FE}%
-\providecolor{SoftGreen}{HTML}{ECFAF0}%
-\providecolor{SoftAmber}{HTML}{FEF8EE}%
-\providecolor{SoftCrimson}{HTML}{FFF1F2}%
-\providecolor{BgCard}{HTML}{FFFFFF}%
-\providecolor{CardBg}{HTML}{FFFFFF}%
-\providecolor{GrayL}{HTML}{E0E0E0}%
-\providecolor{GrayLine}{HTML}{666666}%
-\providecolor{BlueLine}{HTML}{006395}%
-\providecolor{BlueFill}{HTML}{D6EAF8}%
-\providecolor{GreenLine}{HTML}{008F45}%
-\providecolor{GreenFill}{HTML}{D5F5E3}%
-\providecolor{OrangeLine}{HTML}{E67817}%
-\providecolor{OrangeFill}{HTML}{FDEBD0}%
-\providecolor{RedLine}{HTML}{D9534F}%
-\providecolor{RedFill}{HTML}{F2D7D5}%
-\providecolor{TextBlack}{HTML}{333333}%
-\providecolor{VioletLine}{HTML}{7E317B}%
-\providecolor{VioletFill}{RGB}{243,243,255}%
-\colorlet{mlsysblue}{OceanBlue}%
-\colorlet{mlsysgreen}{ForestGreen}%
-\colorlet{mlsysred}{CrimsonSLA}%
-\colorlet{mlsysamber}{AmberStage}%
-\colorlet{mlsysdarkgray}{DarkNavy}%
-\colorlet{mlsysteal}{SlateTeal}%
-\scalebox{0.88}{%
-\begin{tikzpicture}[
-    x=1cm, y=1cm,
-    >=Stealth,
-    font=\small\sffamily
-]
-\tikzset{
-    stage_container/.style={
-        draw=BorderGrey,
-        fill=SoftGrey!40,
-        line width=0.7pt,
-        rounded corners=4pt,
-        inner sep=0pt
-    },
-    gpu_header/.style={
-        draw=BorderBlue,
-        fill=SoftBlue,
-        line width=0.6pt,
-        rounded corners=2pt,
-        font=\footnotesize\bfseries\color{OceanBlue},
-        inner xsep=12pt,
-        inner ysep=3.5pt
-    },
-    opbox/.style={
-        draw=BorderBlue,
-        fill=white,
-        line width=0.7pt,
-        rounded corners=3pt,
-        text=DarkNavy,
-        font=\small,
-        text width=4.6cm,
-        inner sep=5pt,
-        align=center
-    },
-    syncbox/.style={
-        draw=BorderAmber,
-        fill=SoftAmber,
-        line width=0.75pt,
-        rounded corners=3pt,
-        text=AmberStage!95!black,
-        font=\small,
-        text width=10.2cm,
-        inner sep=6pt,
-        align=center
-    },
-    pill_blue/.style={
-        draw=BorderBlue,
-        fill=white,
-        rounded corners=2pt,
-        inner xsep=5pt,
-        inner ysep=2pt,
-        text=DarkNavy,
-        font=\fontsize{6.5}{7.5}\selectfont\bfseries
-    },
-    pill_amber/.style={
-        draw=BorderAmber,
-        fill=white,
-        rounded corners=2pt,
-        inner xsep=5pt,
-        inner ysep=2pt,
-        text=AmberStage,
-        font=\fontsize{6.5}{7.5}\selectfont\bfseries
-    }
-}
-
-    % GPU Column Headers at Top
-    \node[gpu_header] (hdrGPU0) at (2.6, 10.05) {GPU Rank 0};
-    \node[gpu_header] (hdrGPU1) at (8.0, 10.05) {GPU Rank 1};
-
-    % =========================================================================
-    % STAGE 1: SELF-ATTENTION LAYER
-    % =========================================================================
-    \node[stage_container, minimum width=11.2cm, minimum height=2.9cm, anchor=north] (stage1_bg) at (5.3, 9.65) {};
-
-    % Stage 1 Header Badge
-    \node[pill_blue, anchor=north west] at ([shift={(0.3cm, -0.22cm)}] stage1_bg.north west) {
-        Stage 1: Multi-Head Attention (Column-Parallel $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ $\to$ Row-Parallel $\mathbf{W}_O$)
-    };
-
-    % GPU 0 Attention
-    \node[opbox, minimum height=1.5cm] (att0) at (2.6, 7.95) {
-        \textbf{\textcolor{DarkNavy}{Heads $1 \dots {N_{\text{heads}}}/2$}}\\[3pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{Q}, \mathbf{K}, \mathbf{V}$ Projections $\to$ Head Concat}}\\[1pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{W}_O$ Row Partition}}
-    };
-
-    % GPU 1 Attention
-    \node[opbox, minimum height=1.5cm] (att1) at (8.0, 7.95) {
-        \textbf{\textcolor{DarkNavy}{Heads ${N_{\text{heads}}}/2+1 \dots {N_{\text{heads}}}$}}\\[3pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{Q}, \mathbf{K}, \mathbf{V}$ Projections $\to$ Head Concat}}\\[1pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{W}_O$ Row Partition}}
-    };
-
-    % =========================================================================
-    % SYNCHRONIZATION 1: ALL-REDUCE (ATTENTION)
-    % =========================================================================
-    \node[syncbox, minimum height=1.35cm] (ar1) at (5.3, 5.85) {
-        \textbf{\textcolor{AmberStage}{AllReduce (Sum)}}\\[2pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{DarkNavy}{Synchronize partial attention head outputs across NVLink crossbar ($900\text{ GB/s}$)}}
-    };
-    \node[pill_amber, anchor=north east] at ([shift={(-0.25cm, -0.2cm)}] ar1.north east) {NVLink Barrier};
-
-    % Connectors Stage 1 -> AllReduce 1
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (att0.south) -- (att0.south |- ar1.north);
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (att1.south) -- (att1.south |- ar1.north);
-
-    % =========================================================================
-    % STAGE 2: FEED-FORWARD (MLP) LAYER
-    % =========================================================================
-    \node[stage_container, minimum width=11.2cm, minimum height=5.0cm, anchor=north] (stage2_bg) at (5.3, 5.05) {};
-
-    % Stage 2 Header Badge
-    \node[pill_blue, anchor=north] at ([shift={(0cm, -0.22cm)}] stage2_bg.north) {
-        Stage 2: MLP (Column $\mathbf{W}_1$ $\to$ Row $\mathbf{W}_2$)
-    };
-
-    % GPU 0 Column GEMM
-    \node[opbox, minimum height=1.35cm] (mlp0_col) at (2.6, 3.4) {
-        \textbf{\textcolor{DarkNavy}{Column-Parallel GEMM ($\mathbf{W}_1$)}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{Partition $(4d / 2)$ + GELU Activation}}
-    };
-    % GPU 1 Column GEMM
-    \node[opbox, minimum height=1.35cm] (mlp1_col) at (8.0, 3.4) {
-        \textbf{\textcolor{DarkNavy}{Column-Parallel GEMM ($\mathbf{W}_1$)}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{Partition $(4d / 2)$ + GELU Activation}}
-    };
-
-    % Connectors AllReduce 1 -> Column GEMM
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (ar1.south -| mlp0_col.north) -- (mlp0_col.north);
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (ar1.south -| mlp1_col.north) -- (mlp1_col.north);
-
-    % GPU 0 Row GEMM
-    \node[opbox, minimum height=1.35cm] (mlp0_row) at (2.6, 1.35) {
-        \textbf{\textcolor{DarkNavy}{Row-Parallel GEMM ($\mathbf{W}_2$)}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{Partition $(2d \times d) \to$ Partial Sum Slice}}
-    };
-    % GPU 1 Row GEMM
-    \node[opbox, minimum height=1.35cm] (mlp1_row) at (8.0, 1.35) {
-        \textbf{\textcolor{DarkNavy}{Row-Parallel GEMM ($\mathbf{W}_2$)}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{Partition $(2d \times d) \to$ Partial Sum Slice}}
-    };
-
-    % Connectors Column GEMM -> Row GEMM (Local GPU memory, zero cross-GPU traffic)
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (mlp0_col.south) -- (mlp0_row.north)
-        node[midway, right, font=\fontsize{6.5}{7.5}\selectfont\color{ForestGreen}] {Local (No Comm)};
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (mlp1_col.south) -- (mlp1_row.north)
-        node[midway, right, font=\fontsize{6.5}{7.5}\selectfont\color{ForestGreen}] {Local (No Comm)};
-
-    % =========================================================================
-    % SYNCHRONIZATION 2: ALL-REDUCE (MLP OUTPUT)
-    % =========================================================================
-    \node[syncbox, minimum height=1.35cm] (ar2) at (5.3, -1.0) {
-        \textbf{\textcolor{AmberStage}{AllReduce (Sum)}}\\[2pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{DarkNavy}{Combine partial MLP outputs $\to$ Full layer output $\mathbf{Y}$ (Feed to Next Layer)}}
-    };
-    \node[pill_amber, anchor=north east] at ([shift={(-0.25cm, -0.2cm)}] ar2.north east) {NVLink Barrier};
-
-    % Connectors Row GEMM -> AllReduce 2
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (mlp0_row.south) -- (mlp0_row.south |- ar2.north);
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (mlp1_row.south) -- (mlp1_row.south |- ar2.north);
-
-\end{tikzpicture}
-}
-```
+![](images/svg/tensor-parallel-flow.svg){width="100%"}
 
 :::
 
@@ -5710,199 +5368,9 @@ $$\text{Output} = \sum_{i \in \text{top-}k} {\RouterGateProbability}_i \cdot \te
 
 An even expert placement assigns each device $\ExpertCount/\DeviceCount$ experts, where $\DeviceCount$ is the number of expert-parallel devices. @Fig-moe-routing traces the path for a token: a top-2 softmax gating router selects expert destinations, an AllToAll dispatch sends the token representations to those ranks, and an AllToAll gather returns outputs for weighted recombination. An expert not selected by this token may process another token in the batch, so the illustration does not imply that every unselected device is idle.
 
-::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) routing**: Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-$\RoutedExpertCount$ experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts, the selected experts process the tokens in parallel while experts unselected by this token may serve other tokens, and a second AllToAll step gathers the results for the weighted sum. The idle label refers only to the illustrated token; an unselected expert can still process other tokens in the batch. Distributed expert capacity adds all-to-all communication overhead." fig-alt="Diagram of MoE token routing. A gating router selects the top-2 experts. Orange arrows labeled All-to-All Dispatch carry the token to Expert A on device 0 and Expert B on device 2, while Expert C on device 1 is shown dashed because this token does not select it. Blue arrows labeled All-to-All Gather return the expert outputs to a weighted sum that produces the output vector."}
+::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) routing**: Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-$\RoutedExpertCount$ experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts, the selected experts process the tokens in parallel while experts unselected by this token may serve other tokens, and a second AllToAll step gathers the results for the weighted sum. Distributed expert capacity adds all-to-all communication overhead." fig-alt="Diagram of MoE token routing for a batch of four tokens, t1 to t4, with t1 drawn solid as the traced token. The batch enters a gate that selects the top two experts per token. Amber lines labeled AllToAll dispatch fan out to three expert cards, one per device: Expert A on device 0 receives t1 and t2, Expert B on device 1 receives t1, t3, and t4, and Expert C on device 2 receives t2, t3, and t4 but not t1. The lines on t1's path, to Experts A and B, are drawn heavier than the thin line to Expert C. Amber lines labeled AllToAll gather return the expert outputs to a weighted-sum box that applies the gate weights and produces the output."}
 
-```{.tikz}
-\providecolor{DarkNavy}{HTML}{1E293B}%
-\providecolor{OceanBlue}{HTML}{2563EB}%
-\providecolor{ForestGreen}{HTML}{166534}%
-\providecolor{AmberStage}{HTML}{D97706}%
-\providecolor{CrimsonSLA}{HTML}{991B1B}%
-\providecolor{SlateGrey}{HTML}{475569}%
-\providecolor{SoftGrey}{HTML}{F8FAFC}%
-\providecolor{SlateTeal}{HTML}{0F766E}%
-\providecolor{BorderGrey}{HTML}{CBD5E1}%
-\providecolor{BorderBlue}{HTML}{2563EB}%
-\providecolor{BorderGreen}{HTML}{166534}%
-\providecolor{BorderAmber}{HTML}{D97706}%
-\providecolor{BorderCrimson}{HTML}{991B1B}%
-\providecolor{Crimson}{HTML}{991B1B}%
-\providecolor{SoftBlue}{HTML}{F0F6FE}%
-\providecolor{SoftGreen}{HTML}{ECFAF0}%
-\providecolor{SoftAmber}{HTML}{FEF8EE}%
-\providecolor{SoftCrimson}{HTML}{FFF1F2}%
-\providecolor{BgCard}{HTML}{FFFFFF}%
-\providecolor{CardBg}{HTML}{FFFFFF}%
-\providecolor{GrayL}{HTML}{E0E0E0}%
-\providecolor{GrayLine}{HTML}{666666}%
-\providecolor{BlueLine}{HTML}{006395}%
-\providecolor{BlueFill}{HTML}{D6EAF8}%
-\providecolor{GreenLine}{HTML}{008F45}%
-\providecolor{GreenFill}{HTML}{D5F5E3}%
-\providecolor{OrangeLine}{HTML}{E67817}%
-\providecolor{OrangeFill}{HTML}{FDEBD0}%
-\providecolor{RedLine}{HTML}{D9534F}%
-\providecolor{RedFill}{HTML}{F2D7D5}%
-\providecolor{TextBlack}{HTML}{333333}%
-\providecolor{VioletLine}{HTML}{7E317B}%
-\providecolor{VioletFill}{RGB}{243,243,255}%
-\colorlet{mlsysblue}{OceanBlue}%
-\colorlet{mlsysgreen}{ForestGreen}%
-\colorlet{mlsysred}{CrimsonSLA}%
-\colorlet{mlsysamber}{AmberStage}%
-\colorlet{mlsysdarkgray}{DarkNavy}%
-\colorlet{mlsysteal}{SlateTeal}%
-\scalebox{0.85}{%
-\begin{tikzpicture}[
-    x=1cm, y=1cm,
-    font=\small\sffamily,
-    >=Stealth
-]
-\tikzset{
-    card/.style={
-        draw=BorderGrey,
-        fill=white,
-        line width=0.7pt,
-        rounded corners=3pt,
-        minimum height=0.95cm,
-        minimum width=2.4cm,
-        align=center
-    },
-    expcard/.style={
-        draw=BorderGreen,
-        fill=SoftGreen,
-        line width=0.75pt,
-        rounded corners=3pt,
-        minimum height=1.05cm,
-        minimum width=2.6cm,
-        align=center
-    },
-    idlecard/.style={
-        draw=BorderGrey,
-        fill=SoftGrey,
-        dashed,
-        line width=0.7pt,
-        rounded corners=3pt,
-        minimum height=1.05cm,
-        minimum width=2.6cm,
-        align=center
-    },
-    gatecard/.style={
-        draw=BorderBlue,
-        fill=SoftBlue,
-        line width=0.75pt,
-        rounded corners=3pt,
-        minimum height=1.15cm,
-        minimum width=2.4cm,
-        align=center
-    },
-    badge_amber/.style={
-        draw=BorderAmber,
-        fill=SoftAmber,
-        line width=0.6pt,
-        rounded corners=2pt,
-        font=\fontsize{6.5}{7.5}\selectfont\bfseries,
-        text=AmberStage,
-        inner xsep=5pt,
-        inner ysep=2pt
-    },
-    badge_blue/.style={
-        draw=BorderBlue,
-        fill=SoftBlue,
-        line width=0.6pt,
-        rounded corners=2pt,
-        font=\fontsize{6.5}{7.5}\selectfont\bfseries,
-        text=OceanBlue,
-        inner xsep=5pt,
-        inner ysep=2pt
-    },
-    badge_green/.style={
-        draw=BorderGreen,
-        fill=SoftGreen,
-        line width=0.6pt,
-        rounded corners=2pt,
-        font=\fontsize{6.5}{7.5}\selectfont\bfseries,
-        text=ForestGreen,
-        inner xsep=4pt,
-        inner ysep=1.5pt
-    }
-}
-
-    % 1. Input & Gating
-    \node[card, draw=BorderGrey, fill=SoftGrey] (token) at (0, 3.4) {
-        \textbf{\textcolor{DarkNavy}{Input Token}}\\[2pt]
-        {\fontsize{7}{8}\selectfont\textcolor{SlateGrey}{Vector $x \in \mathbb{R}^d$}}
-    };
-
-    \node[gatecard] (gating) at (0, 1.5) {
-        \textbf{\textcolor{DarkNavy}{Gating Router}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{OceanBlue}{\textbf{Top-2 Softmax}}}\\
-        {\fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Weights $g_A, g_B$}}
-    };
-
-    \draw[->, line width=0.85pt, DarkNavy, shorten >=2pt, shorten <=2pt] (token.south) -- (gating.north);
-
-    % 2. Expert Devices (Middle Column: x = 6.2)
-    \node[expcard] (exp1) at (6.2, 3.1) {
-        \textbf{\textcolor{ForestGreen}{Device 0 (Rank 0)}}\\[2pt]
-        {\fontsize{7.5}{9}\selectfont\textbf{\textcolor{DarkNavy}{Expert A}} \textcolor{SlateGrey}{($\mathbf{W}_1, \mathbf{W}_2$)}}\\[3pt]
-        \colorbox{SoftGreen}{\fontsize{6.5}{7.5}\selectfont\bfseries\textcolor{ForestGreen}{Active: Weight $g_A$}}
-    };
-
-    \node[idlecard] (exp3) at (6.2, 1.5) {
-        \textbf{\textcolor{SlateGrey}{Device 1 (Rank 1)}}\\[2pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{SlateGrey}{Expert C}}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Idle / Computation Skipped}}
-    };
-
-    \node[expcard] (exp2) at (6.2, -0.1) {
-        \textbf{\textcolor{ForestGreen}{Device 2 (Rank 2)}}\\[2pt]
-        {\fontsize{7.5}{9}\selectfont\textbf{\textcolor{DarkNavy}{Expert B}} \textcolor{SlateGrey}{($\mathbf{W}_1, \mathbf{W}_2$)}}\\[3pt]
-        \colorbox{SoftGreen}{\fontsize{6.5}{7.5}\selectfont\bfseries\textcolor{ForestGreen}{Active: Weight $g_B$}}
-    };
-
-    % 3. Dispatch communication (Orthogonal bus routing)
-    \node[badge_amber] (b_disp) at (2.85, 1.5) {All-to-All Dispatch};
-
-    % Orthogonal routing: Gating -> Expert A
-    \draw[->, line width=0.85pt, AmberStage, shorten >=2pt, shorten <=2pt]
-        ([yshift=8pt]gating.east) -- ++(1.4, 0) |- (exp1.west)
-        node[pos=0.75, above, font=\fontsize{6.5}{7.5}\selectfont\color{AmberStage}] {Token $x$};
-
-    % Orthogonal routing: Gating -> Expert B
-    \draw[->, line width=0.85pt, AmberStage, shorten >=2pt, shorten <=2pt]
-        ([yshift=-8pt]gating.east) -- ++(1.4, 0) |- (exp2.west)
-        node[pos=0.75, below, font=\fontsize{6.5}{7.5}\selectfont\color{AmberStage}] {Token $x$};
-
-    % 4. Gather & Aggregation (Orthogonal bus routing)
-    \node[card, draw=BorderBlue, fill=white, minimum width=2.6cm, minimum height=1.15cm] (agg) at (11.8, 1.5) {
-        \textbf{\textcolor{DarkNavy}{Weighted Sum}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{OceanBlue}{$y = \sum_{i \in \{A, B\}} g_i E_i(x)$}}\\[1pt]
-        {\fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Token Recombination}}
-    };
-
-    \node[badge_amber] (b_gath) at (9.25, 1.5) {All-to-All Gather};
-
-    % Orthogonal routing: Expert A -> Weighted Sum
-    \draw[->, line width=0.85pt, AmberStage, shorten >=2pt, shorten <=2pt]
-        (exp1.east) -- ++(1.3, 0) |- ([yshift=8pt]agg.west)
-        node[pos=0.25, above, font=\fontsize{6.5}{7.5}\selectfont\color{AmberStage}] {$E_A(x)$};
-
-    % Orthogonal routing: Expert B -> Weighted Sum
-    \draw[->, line width=0.85pt, AmberStage, shorten >=2pt, shorten <=2pt]
-        (exp2.east) -- ++(1.3, 0) |- ([yshift=-8pt]agg.west)
-        node[pos=0.25, below, font=\fontsize{6.5}{7.5}\selectfont\color{AmberStage}] {$E_B(x)$};
-
-    % 5. Output
-    \node[card, draw=BorderGreen, fill=SoftGreen, minimum width=2.0cm, minimum height=0.95cm] (out) at (14.6, 1.5) {
-        \textbf{\textcolor{ForestGreen}{Output}}\\[2pt]
-        {\fontsize{7}{8}\selectfont\textcolor{DarkNavy}{Vector $y \in \mathbb{R}^d$}}
-    };
-    \draw[->, line width=0.85pt, ForestGreen, shorten >=2pt, shorten <=2pt] (agg.east) -- (out.west);
-
-\end{tikzpicture}
-}
-```
+![](images/svg/moe-routing.svg){width="100%"}
 
 :::
 
@@ -5995,246 +5463,9 @@ Each device stores a slice of every embedding. Hybrid sharding\index{Embedding s
 
 The trade-off is locality against load balance. Row-wise sharding keeps each embedding vector whole on one device, while column-wise sharding spreads its dimensions across devices. Both require returning the pieces needed by the consuming request, but placement alone does not prescribe a collective: the runtime can use shard RPCs or collectives according to where inputs and outputs reside. @Fig-embedding-sharding illustrates AllToAll and AllGather realizations of these layouts. Hybrid placement can replicate or column-partition hot embeddings while row-sharding the cold tail, trading additional storage and communication against concentrated lookup load.
 
-::: {#fig-embedding-sharding fig-env="figure" fig-pos="H" fig-cap="**Embedding sharding strategies**: Row-wise sharding places complete embedding vectors on specific servers based on entity ID, requiring a network gather for lookup. Column-wise sharding splits each vector across all servers, allowing parallel local lookups followed by an AllGather, which is efficient for popular \"hot\" embeddings. Hybrid sharding combines these approaches, using replication or column sharding for hot items and row sharding for the \"cold\" long tail to balance load and memory." fig-alt="Three-panel diagram. A: Row-wise sharding splits users across servers by ID. B: Column-wise sharding splits embedding dimensions across servers. C: Hybrid combines both, with hot items replicated or column-sharded and cold items row-sharded."}
+::: {#fig-embedding-sharding fig-env="figure" fig-pos="H" fig-cap="**Embedding sharding strategies**: Row-wise sharding places complete embedding vectors on specific servers based on entity ID, requiring a network gather for lookup. Column-wise sharding splits each vector across all servers, allowing parallel local lookups followed by an AllGather, which is efficient for popular \"hot\" embeddings. Hybrid sharding combines these approaches, using replication or column sharding for hot items and row sharding for the \"cold\" long tail to balance load and memory." fig-alt="Three panels, each drawing an embedding table as a grid of rows (one row per ID, numbered 0 to 7 at the left) and columns (dimensions). Panel a, row-wise: server 1 holds whole rows 0 to 3 and server 2 holds whole rows 4 to 7, labeled IDs split, AllToAll, whole vectors. Panel b, column-wise: server 1 and server 2 each hold a tall block of columns spanning all rows 0 to 7, labeled dimensions split, AllGather, slices of each vector. Panel c, hybrid: both servers hold the same shaded hot rows 0 and 1, while server 1 holds cold rows 2 to 4 and server 2 holds cold rows 5 to 7, labeled hot rows replicated, AllToAll, cold tail only."}
 
-```{.tikz}
-\providecolor{DarkNavy}{HTML}{1E293B}%
-\providecolor{OceanBlue}{HTML}{2563EB}%
-\providecolor{ForestGreen}{HTML}{166534}%
-\providecolor{AmberStage}{HTML}{D97706}%
-\providecolor{CrimsonSLA}{HTML}{991B1B}%
-\providecolor{SlateGrey}{HTML}{475569}%
-\providecolor{SoftGrey}{HTML}{F8FAFC}%
-\providecolor{SlateTeal}{HTML}{0F766E}%
-\providecolor{BorderGrey}{HTML}{CBD5E1}%
-\providecolor{BorderBlue}{HTML}{2563EB}%
-\providecolor{BorderGreen}{HTML}{166534}%
-\providecolor{BorderAmber}{HTML}{D97706}%
-\providecolor{BorderCrimson}{HTML}{991B1B}%
-\providecolor{Crimson}{HTML}{991B1B}%
-\providecolor{SoftBlue}{HTML}{F0F6FE}%
-\providecolor{SoftGreen}{HTML}{ECFAF0}%
-\providecolor{SoftAmber}{HTML}{FEF8EE}%
-\providecolor{SoftCrimson}{HTML}{FFF1F2}%
-\providecolor{BgCard}{HTML}{FFFFFF}%
-\providecolor{CardBg}{HTML}{FFFFFF}%
-\providecolor{GrayL}{HTML}{E0E0E0}%
-\providecolor{GrayLine}{HTML}{666666}%
-\providecolor{BlueLine}{HTML}{006395}%
-\providecolor{BlueFill}{HTML}{D6EAF8}%
-\providecolor{GreenLine}{HTML}{008F45}%
-\providecolor{GreenFill}{HTML}{D5F5E3}%
-\providecolor{OrangeLine}{HTML}{E67817}%
-\providecolor{OrangeFill}{HTML}{FDEBD0}%
-\providecolor{RedLine}{HTML}{D9534F}%
-\providecolor{RedFill}{HTML}{F2D7D5}%
-\providecolor{TextBlack}{HTML}{333333}%
-\providecolor{VioletLine}{HTML}{7E317B}%
-\providecolor{VioletFill}{RGB}{243,243,255}%
-\colorlet{mlsysblue}{OceanBlue}%
-\colorlet{mlsysgreen}{ForestGreen}%
-\colorlet{mlsysred}{CrimsonSLA}%
-\colorlet{mlsysamber}{AmberStage}%
-\colorlet{mlsysdarkgray}{DarkNavy}%
-\colorlet{mlsysteal}{SlateTeal}%
-\scalebox{0.82}{%
-\begin{tikzpicture}[
-    x=1cm, y=1cm,
-    >=Stealth,
-    font=\small\sffamily
-]
-\tikzset{
-    panel/.style={
-        draw=BorderGrey,
-        fill=white,
-        line width=0.7pt,
-        rounded corners=4pt,
-        inner sep=0pt
-    },
-    panelheader/.style={
-        fill=SoftBlue!80,
-        draw=BorderBlue,
-        rounded corners=3pt,
-        line width=0.6pt,
-        text=DarkNavy,
-        font=\footnotesize\bfseries,
-        inner xsep=6pt,
-        inner ysep=2.5pt
-    },
-    box_table/.style={
-        draw=BorderBlue,
-        fill=SoftBlue!50,
-        line width=0.7pt,
-        rounded corners=3pt,
-        font=\scriptsize\color{DarkNavy},
-        align=center
-    },
-    box_amber/.style={
-        draw=BorderAmber,
-        fill=SoftAmber,
-        line width=0.7pt,
-        rounded corners=3pt,
-        font=\scriptsize\color{AmberStage!95!black},
-        align=center
-    },
-    box_green/.style={
-        draw=BorderGreen,
-        fill=SoftGreen,
-        line width=0.7pt,
-        rounded corners=3pt,
-        font=\scriptsize\color{ForestGreen},
-        align=center
-    },
-    box_crimson/.style={
-        draw=VioletLine,
-        fill=VioletFill,
-        line width=0.7pt,
-        rounded corners=3pt,
-        font=\scriptsize\color{VioletLine},
-        align=center
-    },
-    bottom_amber/.style={
-        draw=BorderAmber,
-        fill=SoftAmber,
-        line width=0.65pt,
-        rounded corners=3pt,
-        inner xsep=6pt,
-        inner ysep=5pt,
-        text width=4.3cm,
-        align=center
-    },
-    bottom_green/.style={
-        draw=BorderGreen,
-        fill=SoftGreen,
-        line width=0.65pt,
-        rounded corners=3pt,
-        inner xsep=6pt,
-        inner ysep=5pt,
-        text width=4.3cm,
-        align=center
-    },
-    bottom_crimson/.style={
-        draw=VioletLine,
-        fill=VioletFill,
-        line width=0.65pt,
-        rounded corners=3pt,
-        inner xsep=6pt,
-        inner ysep=5pt,
-        text width=4.3cm,
-        align=center
-    }
-}
-
-    % =========================================================================
-    % PANEL (a): ROW-WISE SHARDING
-    % =========================================================================
-    \node[panel, minimum width=5.2cm, minimum height=6.4cm, anchor=north west] (pA) at (0, 0) {};
-    \node[panelheader, anchor=north west] (pA_tag) at ([shift={(0.25cm, -0.25cm)}] pA.north west) {(a) Row-Wise};
-    \node[anchor=west, font=\fontsize{7}{8}\selectfont\color{SlateGrey}] at ([shift={(0.15cm, 0)}] pA_tag.east) {By Entity ID};
-
-    % Full table
-    \node[box_table, minimum width=1.35cm, minimum height=2.5cm] (tab_a) at (1.1, -2.4) {
-        \textbf{Table}\\[3pt]
-        {\fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Users}}\\[1pt]
-        {\fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{$0 \dots U$}}
-    };
-
-    % Target Shards (Servers)
-    \node[box_amber, minimum width=1.85cm, minimum height=1.1cm] (svr1_a) at (3.8, -1.65) {
-        \textbf{Server 1}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont Users $0 \dots K$}
-    };
-    \node[box_amber, minimum width=1.85cm, minimum height=1.1cm] (svr2_a) at (3.8, -3.15) {
-        \textbf{Server 2}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont Users $K+1 \dots U$}
-    };
-
-    % Orthogonal split routing
-    \draw[line width=0.85pt, DarkNavy] (tab_a.east) -- ++(0.5, 0) coordinate (splita);
-    \draw[->, line width=0.85pt, AmberStage, shorten >=2pt] (splita) |- (svr1_a.west);
-    \draw[->, line width=0.85pt, AmberStage, shorten >=2pt] (splita) |- (svr2_a.west);
-
-    % Bottom badge
-    \node[bottom_amber] at (2.6, -5.25) {
-        \textbf{\textcolor{AmberStage}{AllToAll Gather}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{DarkNavy}{Local lookup on shard, network gather; uniform load balancing.}}
-    };
-
-    % =========================================================================
-    % PANEL (b): COLUMN-WISE SHARDING
-    % =========================================================================
-    \node[panel, minimum width=5.2cm, minimum height=6.4cm, anchor=north west] (pB) at (5.5, 0) {};
-    \node[panelheader, anchor=north west] (pB_tag) at ([shift={(0.25cm, -0.25cm)}] pB.north west) {(b) Column-Wise};
-    \node[anchor=west, font=\fontsize{7}{8}\selectfont\color{SlateGrey}] at ([shift={(0.15cm, 0)}] pB_tag.east) {By Dimension};
-
-    % Full table
-    \node[box_table, minimum width=1.35cm, minimum height=2.5cm] (tab_b) at (6.6, -2.4) {
-        \textbf{Table}\\[3pt]
-        {\fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Dims}}\\[1pt]
-        {\fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{$0 \dots D$}}
-    };
-
-    % Target Shards (Servers)
-    \node[box_green, minimum width=1.85cm, minimum height=1.1cm] (svr1_b) at (9.3, -1.65) {
-        \textbf{Server 1}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont Dims $0 \dots \frac{D}{2}$}
-    };
-    \node[box_green, minimum width=1.85cm, minimum height=1.1cm] (svr2_b) at (9.3, -3.15) {
-        \textbf{Server 2}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont Dims $\frac{D}{2} \dots D$}
-    };
-
-    % Orthogonal split routing
-    \draw[line width=0.85pt, DarkNavy] (tab_b.east) -- ++(0.5, 0) coordinate (splitb);
-    \draw[->, line width=0.85pt, ForestGreen, shorten >=2pt] (splitb) |- (svr1_b.west);
-    \draw[->, line width=0.85pt, ForestGreen, shorten >=2pt] (splitb) |- (svr2_b.west);
-
-    % Bottom badge
-    \node[bottom_green] at (8.1, -5.25) {
-        \textbf{\textcolor{ForestGreen}{AllGather Collective}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{DarkNavy}{Parallel partial lookup, dimension gather; ideal for hot items.}}
-    };
-
-    % =========================================================================
-    % PANEL (c): HYBRID SHARDING
-    % =========================================================================
-    \node[panel, minimum width=5.2cm, minimum height=6.4cm, anchor=north west] (pC) at (11.0, 0) {};
-    \node[panelheader, anchor=north west] (pC_tag) at ([shift={(0.25cm, -0.25cm)}] pC.north west) {(c) Hybrid};
-    \node[anchor=west, font=\fontsize{7}{8}\selectfont\color{SlateGrey}] at ([shift={(0.15cm, 0)}] pC_tag.east) {By Access Rate};
-
-    % Split table (Hot / Cold)
-    \node[box_crimson, minimum width=1.35cm, minimum height=1.05cm] (tab_c_hot) at (12.1, -1.65) {
-        \textbf{Hot}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont Top 1\%}
-    };
-    \node[box_table, minimum width=1.35cm, minimum height=1.25cm] (tab_c_cold) at (12.1, -3.15) {
-        \textbf{Cold}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont Tail 99\%}
-    };
-
-    % Targets
-    \node[box_crimson, minimum width=2.0cm, minimum height=1.05cm] (tgt_hot) at (14.8, -1.65) {
-        \textbf{Replicated}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont or Column-wise}
-    };
-    \node[box_table, minimum width=2.0cm, minimum height=1.25cm] (tgt_cold) at (14.8, -3.15) {
-        \textbf{Row Sharded}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont Tail partitioned}
-    };
-
-    % Direct orthogonal arrows
-    \draw[->, line width=0.85pt, VioletLine, shorten >=2pt, shorten <=2pt] (tab_c_hot.east) -- (tgt_hot.west);
-    \draw[->, line width=0.85pt, OceanBlue, shorten >=2pt, shorten <=2pt] (tab_c_cold.east) -- (tgt_cold.west);
-
-    % Bottom badge
-    \node[bottom_crimson] at (13.6, -5.25) {
-        \textbf{\textcolor{VioletLine}{Adaptive Placement}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{DarkNavy}{Balances memory capacity and cross-node network bandwidth.}}
-    };
-
-\end{tikzpicture}
-}
-```
+![](images/svg/embedding-sharding.svg){width="100%"}
 
 :::
 
@@ -6814,7 +6045,7 @@ A sharded replica is one routing destination even though several devices execute
 
 @Fig-shard-group-scaling diagrams this two-tier scaling topology: an external load balancer distributes incoming queries across independent multi-GPU shard groups using round-robin, two-choice, or session-affinity policies, while intra-node NVLink AllReduce synchronization remains strictly encapsulated within each replica node.
 
-::: {#fig-shard-group-scaling fig-env="figure" fig-pos="htb" fig-cap="**Horizontal scaling with shard groups**: The load balancer treats each shard group as a single logical inference server and chooses among groups by round-robin, two-choice, or session-affinity routing. Within a group, eight GPUs hold the tensor-parallel weight shards and join partial results with an NVLink AllReduce inside every layer, which the router never sees. Adding ready groups raises aggregate capacity; the group's internal parallelism affects per-request latency." fig-alt="Requests 1, 2, through N feed a violet Load balancer box listing round-robin, two-choice, or session affinity. Its arrows fan out to three cards, Shard group 0, 1, and N, each labeled one replica, TP = 8, one node. Each card contains a strip of eight numbered GPU cells above an amber bar reading NVLink AllReduce inside every layer. An arrow along the bottom reads add shard groups to scale throughput; the router never sees the AllReduce."}
+::: {#fig-shard-group-scaling fig-env="figure" fig-pos="htb" fig-cap="**Horizontal scaling with shard groups**: The load balancer treats each shard group as a single logical inference server and chooses among groups by round-robin, two-choice, or session-affinity routing. Within a group, eight GPUs hold the tensor-parallel weight shards and join partial results with an NVLink AllReduce inside every layer, which the router never sees. Adding ready groups raises aggregate capacity; the group's internal parallelism affects per-request latency." fig-alt="Requests 1, 2, through N feed a violet Load balancer box listing round-robin, two-choice, or session affinity. One arrow per group fans out to Shard group 0, drawn in full detail, and to lighter dashed outlines for Shard groups 1 through N. Shard group 0, labeled one replica, TP = 8, one node, shows eight numbered GPU tiles, each attached by a short link to an amber ring labeled NVLink AllReduce every layer; the other groups repeat the same ring in miniature. Beneath group 0 a note reads TP inside the group sets latency, and an arrow beneath the other groups reads add groups: more aggregate throughput."}
 ![](images/svg/shard-group-scaling.svg)
 
 <!--
@@ -7106,7 +6337,7 @@ When a GPU inference server slows down, routing more requests to it can turn a l
 
 The circuit breaker pattern\index{Circuit Breaker!circuit breaker pattern} [@nygard2007releaseit] limits repeated work sent to an unhealthy destination. In the closed state, the server receives normal traffic. When the configured error, timeout, or latency threshold is exceeded, the breaker opens and requests fail fast or become candidates for rerouting. After a recovery interval, a half-open state admits limited probes, closing on recovery or reopening on failure. @Fig-circuit-breaker shows these transitions. Opening a breaker does not create replacement capacity: rerouting must respect admission limits and retry budgets or it can overload the surviving replicas.
 
-::: {#fig-circuit-breaker fig-env="figure" fig-pos="htb" fig-cap="**Circuit breaker states**: The circuit breaker protects the system from cascading failure. Closed: normal operation. Open: error threshold exceeded; all requests fail fast to prevent resource exhaustion. Half-open: after a timeout, a limited number of requests are allowed through to probe the dependency's health. Success resets to closed; failure returns to open." fig-alt="State diagram with three rectangular state blocks. The green closed state transitions to the red open state when failures exceed a threshold. After a timeout, open transitions to the orange half-open state, which returns to closed after a successful probe or to open after a failed probe."}
+::: {#fig-circuit-breaker fig-env="figure" fig-pos="htb" fig-cap="**Circuit breaker states**: The circuit breaker protects the system from cascading failure. Closed: normal operation. Open: error threshold exceeded; all requests fail fast to prevent resource exhaustion. Half-open: after a timeout, a limited number of requests are allowed through to probe the dependency's health. Success resets to closed; failure returns to open." fig-alt="State diagram with three rectangular state blocks, each dominated by a switch drawn as a thick hinged blade between two ring terminals, on a wire from the caller to a dependency box. The green closed state, normal traffic, shows the blade closed across both terminals, with two requests arriving and a third crossing the blade toward the dependency. It transitions to the red open state, requests fail fast, when an error, timeout, or latency threshold is exceeded; the open state shows the blade raised, an x mark in the gap, and a single arriving request turned straight back by a red arrow toward the caller, with nothing queued and nothing reaching the dependency. After a timeout, open transitions to the gray half-open state, limited probes, whose blade is closed but whose wire carries a probe limit bar: two requests wait behind the bar while a single probe crosses the switch toward the dependency. Half-open returns to closed when the probe succeeds or to open when the probe fails. A key identifies the dot as a request, the bar as the probe limit, and the small box as the dependency."}
 ![](images/svg/circuit-breaker.svg)
 
 :::
@@ -7298,224 +6529,9 @@ The bulkhead pattern[^fn-bulkhead-service-isolation] [@nygard2007releaseit] part
 
 Dedicated replicas separate more resources than request limits inside one process. @Fig-bulkhead-patterns assigns distinct compute and memory pools to tenant groups, so an engine crash or exhausted local allocation in the standard tier need not stop the gold-tier engines. Shared networking, storage, and control-plane services can still carry interference across that boundary.
 
-::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb" fig-cap="**Bulkhead isolation patterns**: To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. Deployment-level bulkheads (shown) assign dedicated physical replicas to high-priority tenants, separating their compute and memory pools. Request-level bulkheads enforce strict concurrency limits within shared processes. Shared networking, storage, and control-plane dependencies remain possible paths for interference." fig-alt="Two-tier system diagram. Gold tier at top with dedicated load balancer and 2 replicas. Standard tier below with shared load balancer and 3 replicas, one showing failure. Dashed line separates the tiers' dedicated serving resources."}
+::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb" fig-cap="**Bulkhead isolation patterns**: To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. Deployment-level bulkheads (shown) assign dedicated physical replicas to high-priority tenants, separating their compute and memory pools. Request-level bulkheads enforce strict concurrency limits within shared processes. Shared networking, storage, and control-plane dependencies remain possible paths for interference." fig-alt="Two side-by-side compartments, standard tier on the left and gold tier on the right, separated by a thick dark wall labeled bulkhead and both standing on a shared floor band divided into network, storage, and control plane segments. Each tier's traffic enters from above through its own load balancer. Every replica is drawn as a node of four GPU tiles above a memory pool bar. The standard tier has three replicas; the one against the bulkhead is red, crossed out, receives only a dashed line, and is labeled engine crash, and a pale red dashed region marking its blast radius ends flush at the bulkhead wall. The gold tier's two replicas are unaffected and labeled keeps serving. A red dashed line labeled interference path runs from the crashed replica down into the shared floor, passes under the bulkhead, and rises into a gold replica. A key identifies the GPU tile, the memory pool bar, and the blast radius shading."}
 
-```{.tikz}
-\providecolor{DarkNavy}{HTML}{1E293B}%
-\providecolor{OceanBlue}{HTML}{2563EB}%
-\providecolor{ForestGreen}{HTML}{166534}%
-\providecolor{AmberStage}{HTML}{D97706}%
-\providecolor{CrimsonSLA}{HTML}{991B1B}%
-\providecolor{SlateGrey}{HTML}{475569}%
-\providecolor{SoftGrey}{HTML}{F8FAFC}%
-\providecolor{SlateTeal}{HTML}{0F766E}%
-\providecolor{BorderGrey}{HTML}{CBD5E1}%
-\providecolor{BorderBlue}{HTML}{2563EB}%
-\providecolor{BorderGreen}{HTML}{166534}%
-\providecolor{BorderAmber}{HTML}{D97706}%
-\providecolor{BorderCrimson}{HTML}{991B1B}%
-\providecolor{Crimson}{HTML}{991B1B}%
-\providecolor{SoftBlue}{HTML}{F0F6FE}%
-\providecolor{SoftGreen}{HTML}{ECFAF0}%
-\providecolor{SoftAmber}{HTML}{FEF8EE}%
-\providecolor{SoftCrimson}{HTML}{FFF1F2}%
-\providecolor{BgCard}{HTML}{FFFFFF}%
-\providecolor{CardBg}{HTML}{FFFFFF}%
-\providecolor{GrayL}{HTML}{E0E0E0}%
-\providecolor{GrayLine}{HTML}{666666}%
-\providecolor{BlueLine}{HTML}{006395}%
-\providecolor{BlueFill}{HTML}{D6EAF8}%
-\providecolor{GreenLine}{HTML}{008F45}%
-\providecolor{GreenFill}{HTML}{D5F5E3}%
-\providecolor{OrangeLine}{HTML}{E67817}%
-\providecolor{OrangeFill}{HTML}{FDEBD0}%
-\providecolor{RedLine}{HTML}{D9534F}%
-\providecolor{RedFill}{HTML}{F2D7D5}%
-\providecolor{TextBlack}{HTML}{333333}%
-\providecolor{VioletLine}{HTML}{7E317B}%
-\providecolor{VioletFill}{RGB}{243,243,255}%
-\colorlet{mlsysblue}{OceanBlue}%
-\colorlet{mlsysgreen}{ForestGreen}%
-\colorlet{mlsysred}{CrimsonSLA}%
-\colorlet{mlsysamber}{AmberStage}%
-\colorlet{mlsysdarkgray}{DarkNavy}%
-\colorlet{mlsysteal}{SlateTeal}%
-\scalebox{0.75}{%
-\begin{tikzpicture}[
-    x=1cm, y=1cm,
-    font=\sffamily,
-    >=Stealth
-]
-\tikzset{
-    box/.style={
-        draw=BorderGrey,
-        fill=white,
-        line width=0.7pt,
-        rounded corners=3pt,
-        align=center
-    },
-    tierpanel/.style={
-        draw=BorderGrey,
-        fill=SoftGrey!40,
-        line width=0.75pt,
-        rounded corners=4pt
-    },
-    rep_healthy/.style={
-        draw=BorderBlue,
-        fill=white,
-        line width=0.75pt,
-        rounded corners=3pt,
-        text width=5.6cm,
-        align=left,
-        inner xsep=9pt,
-        inner ysep=5.5pt
-    },
-    rep_failed/.style={
-        draw=BorderCrimson,
-        fill=SoftCrimson,
-        line width=0.75pt,
-        rounded corners=3pt,
-        text width=5.6cm,
-        align=left,
-        inner xsep=9pt,
-        inner ysep=5.5pt
-    }
-}
-
-    % =========================================================================
-    % TOP TIER: GOLD TIER (DEDICATED)
-    % =========================================================================
-    \node[tierpanel, draw=BorderAmber, fill=SoftAmber!30, minimum width=21.0cm, minimum height=4.8cm, anchor=north west] (panel_gold) at (0, 0) {};
-
-    % Header & Subtitle
-    \node[draw=BorderAmber, fill=SoftAmber, rounded corners=2pt, font=\small\bfseries\color{AmberStage}, anchor=north west, inner xsep=8pt, inner ysep=3.5pt]
-        (head_gold) at ([xshift=12pt, yshift=-10pt] panel_gold.north west) {Gold Tier (Dedicated / Strict SLA Fleet)};
-
-    \node[anchor=west, font=\fontsize{7.5}{9}\selectfont\color{SlateGrey}] at ([xshift=10pt] head_gold.east) {
-        Dedicated compute \& memory pools; shared network and control-plane dependencies remain
-    };
-
-    % Ingress Client
-    \node[box, draw=BorderAmber, fill=white, minimum width=2.4cm, minimum height=1.7cm] (client_gold) at (1.7, -2.5) {
-        \fontsize{7.5}{9}\selectfont\textbf{\textcolor{DarkNavy}{VIP Clients}}\\[3pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Priority Ingress}\\[1pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{AmberStage}{Strict SLA Target}
-    };
-
-    % Gold Load Balancer
-    \node[box, draw=BorderAmber, fill=SoftAmber, minimum width=2.6cm, minimum height=1.7cm] (lb_gold) at (4.7, -2.5) {
-        \fontsize{7.5}{9}\selectfont\textbf{\textcolor{AmberStage}{Gold LB}}\\[3pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{DarkNavy}{Dedicated Queue}\\[1pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{DarkNavy}{Health-Checked}
-    };
-    \draw[->, line width=0.85pt, color=AmberStage, shorten >=2pt, shorten <=2pt] (client_gold) -- (lb_gold);
-
-    % Gold Replicas (Centers at y = -1.7, -3.3)
-    \node[rep_healthy] (r1) at (10.0, -1.7) {
-        \colorbox{SoftGreen}{\fontsize{6}{7}\selectfont\bfseries\textcolor{ForestGreen}{HEALTHY}}\hspace{6pt}\textbf{\fontsize{7.5}{9}\selectfont\textcolor{DarkNavy}{Replica 1 (Host A)}}\\[2.5pt]
-        \fontsize{6.5}{8}\selectfont\textcolor{SlateGrey}{Utilization: $42\%$ $\mid$ p99: $14.2\text{ ms}$}\\[1pt]
-        \fontsize{6.5}{8}\selectfont\textbf{\textcolor{OceanBlue}{Status:}} \textcolor{DarkNavy}{Active serving; zero queue backlog}
-    };
-
-    \node[rep_healthy] (r2) at (10.0, -3.3) {
-        \colorbox{SoftGreen}{\fontsize{6}{7}\selectfont\bfseries\textcolor{ForestGreen}{HEALTHY}}\hspace{6pt}\textbf{\fontsize{7.5}{9}\selectfont\textcolor{DarkNavy}{Replica 2 (Host B)}}\\[2.5pt]
-        \fontsize{6.5}{8}\selectfont\textcolor{SlateGrey}{Utilization: $45\%$ $\mid$ p99: $15.1\text{ ms}$}\\[1pt]
-        \fontsize{6.5}{8}\selectfont\textbf{\textcolor{OceanBlue}{Status:}} \textcolor{DarkNavy}{Active serving; zero queue backlog}
-    };
-
-    % Orthogonal routing to Gold Replicas
-    \coordinate (gold_bus) at (6.6, -2.5);
-    \draw[line width=0.85pt, color=AmberStage] (lb_gold.east) -- (gold_bus);
-    \draw[line width=0.85pt, color=AmberStage] (gold_bus |- r1.west) -- (gold_bus |- r2.west);
-    \draw[->, line width=0.85pt, color=AmberStage, shorten >=2pt] (gold_bus |- r1.west) -- (r1.west);
-    \draw[->, line width=0.85pt, color=AmberStage, shorten >=2pt] (gold_bus |- r2.west) -- (r2.west);
-
-    % Outcome callout card for Gold
-    \node[box, draw=BorderGreen, fill=SoftGreen, minimum width=4.6cm, text width=4.2cm, align=left, inner sep=9pt] (outcome_gold) at (17.2, -2.5) {
-        \fontsize{7.5}{9}\selectfont\textbf{\textcolor{ForestGreen}{DEDICATED CAPACITY}}\\[4pt]
-        \fontsize{6.5}{8}\selectfont\textcolor{DarkNavy}{The illustrated local OOM does not consume the gold tier's dedicated compute and memory.}
-    };
-
-    \draw[->, line width=0.85pt, color=ForestGreen, shorten >=2pt] (13.0, -2.5) -- (outcome_gold.west)
-        node[midway, above=2pt, draw=BorderGreen, fill=white, rounded corners=2pt, font=\fontsize{6}{7}\selectfont\bfseries\color{ForestGreen}, inner xsep=4pt, inner ysep=1pt] {Verified};
-
-    % =========================================================================
-    % BULKHEAD ISOLATION BARRIER
-    % =========================================================================
-    \node[draw=BorderBlue, fill=SoftBlue, dashed, line width=0.85pt, rounded corners=2.5pt, minimum width=21.0cm, minimum height=0.7cm, anchor=north west]
-        (barrier) at (0, -5.0) {
-        \fontsize{7}{8.5}\selectfont\textbf{\textcolor{OceanBlue}{BULKHEAD ISOLATION BARRIER}} \hspace{10pt}
-        \fontsize{6.5}{7.5}\selectfont\textcolor{DarkNavy}{Disjoint physical GPUs $\cdot$ Independent OS/host daemons $\cdot$ Zero cross-tier buffer or queue sharing}
-    };
-
-    % =========================================================================
-    % BOTTOM TIER: STANDARD TIER (SHARED)
-    % =========================================================================
-    \node[tierpanel, minimum width=21.0cm, minimum height=6.2cm, anchor=north west] (panel_std) at (0, -5.95) {};
-
-    % Header & Subtitle
-    \node[draw=BorderGrey, fill=SoftGrey, rounded corners=2pt, font=\small\bfseries\color{DarkNavy}, anchor=north west, inner xsep=8pt, inner ysep=3.5pt]
-        (head_std) at ([xshift=12pt, yshift=-10pt] panel_std.north west) {Standard Tier (Shared / Best-Effort Multi-Tenant)};
-
-    \node[anchor=west, font=\fontsize{7.5}{9}\selectfont\color{SlateGrey}] at ([xshift=10pt] head_std.east) {
-        Shared multi-tenant pool; elastic scaling; local compute fault contained in this example
-    };
-
-    % Ingress Client
-    \node[box, draw=BorderGrey, fill=white, minimum width=2.4cm, minimum height=1.7cm] (client_std) at (1.7, -9.2) {
-        \fontsize{7.5}{9}\selectfont\textbf{\textcolor{DarkNavy}{Batch Clients}}\\[3pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{General Ingress}\\[1pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Best-Effort Target}
-    };
-
-    % Standard Load Balancer
-    \node[box, draw=BorderGrey, fill=white, minimum width=2.6cm, minimum height=1.7cm] (lb_std) at (4.7, -9.2) {
-        \fontsize{7.5}{9}\selectfont\textbf{\textcolor{DarkNavy}{Standard LB}}\\[3pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{SlateGrey}{Shared Queue}\\[1pt]
-        \fontsize{6.5}{7.5}\selectfont\textcolor{DarkNavy}{Least-Conn Router}
-    };
-    \draw[->, line width=0.85pt, color=DarkNavy, shorten >=2pt, shorten <=2pt] (client_std) -- (lb_std);
-
-    % Standard Replicas (Centers at y = -7.6, -9.2, -10.8)
-    \node[rep_healthy] (r3) at (10.0, -7.6) {
-        \colorbox{SoftGreen}{\fontsize{6}{7}\selectfont\bfseries\textcolor{ForestGreen}{HEALTHY}}\hspace{6pt}\textbf{\fontsize{7.5}{9}\selectfont\textcolor{DarkNavy}{Replica 3 (Host C)}}\\[2.5pt]
-        \fontsize{6.5}{8}\selectfont\textcolor{SlateGrey}{Utilization: $88\%$ $\mid$ p99: $94.5\text{ ms}$}\\[1pt]
-        \fontsize{6.5}{8}\selectfont\textbf{\textcolor{OceanBlue}{Status:}} \textcolor{DarkNavy}{Absorbing re-routed load}
-    };
-
-    \node[rep_failed] (r4) at (10.0, -9.2) {
-        \colorbox{BorderCrimson!30}{\fontsize{6}{7}\selectfont\bfseries\textcolor{CrimsonSLA}{OOM FAULT}}\hspace{6pt}\textbf{\fontsize{7.5}{9}\selectfont\textcolor{CrimsonSLA}{Replica 4 (Host D)}}\\[2.5pt]
-        \fontsize{6.5}{8}\selectfont\textcolor{CrimsonSLA}{CUDA Out-of-Memory $\mid$ Engine Crash}\\[1pt]
-        \fontsize{6.5}{8}\selectfont\textbf{\textcolor{CrimsonSLA}{Status:}} \textcolor{CrimsonSLA}{Drained; marked unhealthy by LB}
-    };
-
-    \node[rep_healthy] (r5) at (10.0, -10.8) {
-        \colorbox{SoftGreen}{\fontsize{6}{7}\selectfont\bfseries\textcolor{ForestGreen}{HEALTHY}}\hspace{6pt}\textbf{\fontsize{7.5}{9}\selectfont\textcolor{DarkNavy}{Replica 5 (Host E)}}\\[2.5pt]
-        \fontsize{6.5}{8}\selectfont\textcolor{SlateGrey}{Utilization: $86\%$ $\mid$ p99: $91.8\text{ ms}$}\\[1pt]
-        \fontsize{6.5}{8}\selectfont\textbf{\textcolor{OceanBlue}{Status:}} \textcolor{DarkNavy}{Absorbing re-routed load}
-    };
-
-    % Orthogonal routing to Standard Replicas
-    \coordinate (std_bus) at (6.6, -9.2);
-    \draw[line width=0.85pt, color=DarkNavy] (lb_std.east) -- (std_bus);
-    \draw[line width=0.85pt, color=DarkNavy] (std_bus |- r3.west) -- (std_bus |- r5.west);
-    \draw[->, line width=0.85pt, color=DarkNavy, shorten >=2pt] (std_bus |- r3.west) -- (r3.west);
-    \draw[->, line width=0.85pt, dashed, color=CrimsonSLA, shorten >=2pt] (std_bus |- r4.west) -- (r4.west)
-        node[pos=0.62, above=2pt, fill=white, inner sep=1pt, font=\fontsize{6}{7}\selectfont\bfseries\color{CrimsonSLA}] {Drop};
-    \draw[->, line width=0.85pt, color=DarkNavy, shorten >=2pt] (std_bus |- r5.west) -- (r5.west);
-
-    % Outcome callout card for Standard
-    \node[box, draw=BorderCrimson, fill=white, minimum width=4.6cm, text width=4.2cm, align=left, inner sep=9pt] (outcome_std) at (17.2, -9.2) {
-        \fontsize{7.5}{9}\selectfont\textbf{\textcolor{CrimsonSLA}{BLAST RADIUS CONTAINED}}\\[4pt]
-        \fontsize{6.5}{8}\selectfont\textcolor{DarkNavy}{The local OOM affects the Standard tier. Surviving replicas need spare capacity to absorb its load.}
-    };
-
-    \draw[->, line width=0.85pt, dashed, color=CrimsonSLA, shorten >=2pt] (r4.east) -- (outcome_std.west)
-        node[midway, above=2pt, draw=BorderCrimson, fill=white, rounded corners=2pt, font=\fontsize{6}{7}\selectfont\bfseries\color{CrimsonSLA}, inner xsep=4pt, inner ysep=1pt] {Isolated};
-
-\end{tikzpicture}
-}
-```
+![](images/svg/bulkhead-patterns.svg){width="100%"}
 
 :::
 
@@ -7638,7 +6654,7 @@ class ColdStartTimeline:
 
 Example \ref{exmp-inference-predictive-scaling-traffic} illustrates the opportunity to prepare capacity before demand arrives. @Fig-predictive-reactive-scaling depicts a forecast that anticipates the surge, while the reactive curve starts later and temporarily lacks capacity. Whether that deficit produces queueing, rejection, or missed deadlines depends on admission and existing headroom. The predictive curve illustrates a successful forecast, not a guarantee that future demand or startup time will match it.
 
-::: {#fig-predictive-reactive-scaling fig-env="figure" fig-pos="htb" fig-cap="**Predictive vs. reactive scaling**: Reactive scaling (red line) responds to traffic spikes after they occur, leaving a capacity deficit during cold start in this scenario. Predictive scaling (blue line) anticipates traffic and begins provisioning capacity before the spike arrives, reducing the startup deficit in the illustrated forecast. Its early ramp does not eliminate every interval when demand exceeds capacity." fig-alt="Time-series plot with traffic curve, reactive capacity lagging behind the spike, and predictive capacity scaling ahead of it."}
+::: {#fig-predictive-reactive-scaling fig-env="figure" fig-pos="htb" fig-cap="**Predictive vs. reactive scaling**: Reactive scaling (gray line) responds to traffic spikes after they occur, leaving a capacity deficit (red region) during cold start in this scenario. Predictive scaling (green line) anticipates traffic and begins provisioning before the spike peaks, shrinking that deficit to a brief, small shortfall at onset in the illustrated forecast. Its early ramp does not eliminate every interval when demand exceeds capacity." fig-alt="Two time-series panels stacked on a shared time axis and a shared vertical axis of normalized demand or capacity, each showing the same dashed demand curve that rises to a spike and falls back. Panel (a), reactive scaling: a gray capacity line stays flat until near the peak, where a dotted marker labeled scale-up begins sits, then ramps up after demand has already risen; the large region where demand exceeds this capacity is shaded red and labeled capacity deficit. Panel (b), predictive scaling: a green capacity line is marked scale-up begins early in the rise and climbs ahead of demand toward the peak; only a thin red sliver at the onset, labeled brief, small shortfall, shows demand briefly above capacity before the ramp overtakes it."}
 
 ```{python}
 #| echo: false
@@ -7646,12 +6662,16 @@ Example \ref{exmp-inference-predictive-scaling-traffic} illustrates the opportun
 from binder.tools.figures import style as book_style
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.6))
+book_style.set_book_style()
+COLORS = book_style.COLORS
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(2, 1, figsize=(5.1, 4.6), sharex=True, sharey=True)
 
 c_dark = COLORS['primary']
-c_blue = COLORS['BlueLine']
+c_pred = COLORS['GreenLine']
+c_react = COLORS['secondary']
 c_red = COLORS['RedLine']
-c_border = '#CBD5E1'
 
 t = np.linspace(0, 9.5, 500)
 traffic = 1.0 + 3.0 * np.exp(-((t - 5.0) ** 2) / (2 * 0.95**2))
@@ -7670,127 +6690,47 @@ predictive = np.piecewise(
     [1.2, lambda t: 1.2 + (4.2 - 1.2) * ((t - 3.2) / 1.1), 4.2],
 )
 
-# Curves
-ax.plot(
-    t,
-    traffic,
-    color=c_dark,
-    linestyle='--',
-    linewidth=2.0,
-    label='Actual Traffic Demand',
-    zorder=4,
-)
-ax.plot(
-    t,
-    predictive,
-    color=c_blue,
-    linewidth=2.2,
-    label='Predictive Capacity (Proactive)',
-    zorder=5,
-)
-ax.plot(
-    t,
-    reactive,
-    color=c_red,
-    linewidth=2.2,
-    label='Reactive Capacity (Lagging)',
-    zorder=5,
-)
+# Small multiples, stacked on one time axis: the same demand spike met by each
+# policy, so the reader compares where provisioning begins against the rise.
+panels = [
+    (axes[0], reactive, c_react, '(a) Reactive scaling', 'reactive capacity', 5.1),
+    (axes[1], predictive, c_pred, '(b) Predictive scaling', 'predictive capacity', 3.2),
+]
+FS = 10.5  # 5.1 in wide: prints at >= 9 pt when scaled to 5 in
+for ax, cap, color, title, cap_label, t_start in panels:
+    deficit = traffic > cap
+    ax.fill_between(t, cap, traffic, where=deficit, color=COLORS['RedL'], lw=0, zorder=1)
+    ax.plot(t, traffic, color=c_dark, linestyle='--', linewidth=1.6, zorder=4)
+    ax.plot(t, cap, color=color, linewidth=2.6, zorder=5)
+    # Where provisioning begins, relative to the demand rise
+    ax.plot([t_start, t_start], [0, 1.2], color=color, linestyle=':', linewidth=1.2, zorder=3)
+    ax.plot([t_start], [1.2], 'o', ms=5.5, mfc='white', mec=color, mew=1.6, zorder=6)
+    ax.text(t_start - 0.1, 0.5, 'scale-up\nbegins', ha='right', va='center', fontsize=FS, color=color, fontweight='bold')
+    ax.text(0.015, 0.95, title, transform=ax.transAxes, ha='left', va='top', fontsize=FS + 0.5, fontweight='bold', color=c_dark)
+    ax.text(7.75, 4.45, cap_label, ha='right', va='bottom', fontsize=FS, fontweight='bold', color=color)
+    ax.text(6.3, 2.75, 'demand', ha='left', va='center', fontsize=FS, fontweight='bold', color=c_dark)
+    ax.set_xlim(1.5, 7.8)
+    ax.set_ylim(0, 5.0)
+    ax.tick_params(labelsize=FS)
 
-# Shaded capacity deficit during startup
-deficit_mask = traffic > reactive
-ax.fill_between(
-    t,
-    reactive,
-    traffic,
-    where=deficit_mask,
-    color=COLORS['RedFill'],
-    edgecolor=c_red,
-    hatch='///',
-    alpha=0.4,
-    label='Capacity Deficit During Startup',
-    zorder=2,
-)
-
-# Shaded proactive safety buffer
-headroom_mask = (predictive > traffic) & (t >= 3.2) & (t <= 6.8)
-ax.fill_between(
-    t,
-    traffic,
-    predictive,
-    where=headroom_mask,
-    color=COLORS['BlueFill'],
-    alpha=0.35,
-    zorder=1,
-)
-
-# Annotations with clean arrow placements
-ax.annotate(
-    'CAPACITY DEFICIT\n(During replica startup)',
-    xy=(4.4, 2.8),
-    xytext=(2.2, 3.6),
-    fontsize=8.0,
+axes[0].text(4.45, 1.9, 'capacity\ndeficit', ha='center', va='center', fontsize=FS, fontweight='bold', color=c_red, zorder=6)
+axes[1].annotate(
+    'brief, small\nshortfall',
+    xy=(3.15, 1.38),
+    xytext=(2.0, 2.7),
+    ha='left',
+    va='center',
+    fontsize=FS,
     fontweight='bold',
     color=c_red,
-    ha='center',
-    bbox=dict(
-        boxstyle='round,pad=0.3',
-        facecolor='white',
-        edgecolor=c_red,
-        lw=0.9,
-    ),
-    arrowprops=dict(arrowstyle='->', color=c_red, lw=1.0),
+    zorder=6,
+    arrowprops=dict(arrowstyle='-', color=c_red, lw=1.0, shrinkA=2, shrinkB=1),
 )
+axes[1].set_xlabel('Time', fontsize=FS)
+axes[1].set_xticks([])
+fig.supylabel('Demand or capacity (normalized)', fontsize=FS)
 
-ax.annotate(
-    'Predictive Scale-Up\n(Earlier capacity ramp)',
-    xy=(3.5, 1.8),
-    xytext=(1.8, 2.0),
-    fontsize=8.0,
-    fontweight='bold',
-    color=c_blue,
-    ha='center',
-    bbox=dict(
-        boxstyle='round,pad=0.3',
-        facecolor='white',
-        edgecolor=c_blue,
-        lw=0.9,
-    ),
-    arrowprops=dict(arrowstyle='->', color=c_blue, lw=1.0),
-)
-
-ax.annotate(
-    'Reactive Detection Lag\n(Late scale-up after traffic onset)',
-    xy=(5.3, 2.4),
-    xytext=(7.4, 2.2),
-    fontsize=8.0,
-    fontweight='bold',
-    color=c_red,
-    ha='center',
-    bbox=dict(
-        boxstyle='round,pad=0.3',
-        facecolor='white',
-        edgecolor=c_red,
-        lw=0.9,
-    ),
-    arrowprops=dict(arrowstyle='->', color=c_red, lw=1.0),
-)
-
-ax.set_xlim(0, 9.5)
-ax.set_ylim(0, 4.8)
-ax.set_xlabel('Time (Arbitrary Units / Minutes)')
-ax.set_ylabel('Load / Serving Capacity (Normalized)')
-
-ax.legend(
-    loc='upper right',
-    frameon=True,
-    facecolor='white',
-    edgecolor=c_border,
-    framealpha=0.95,
-    fontsize=8.0,
-)
-
-plt.tight_layout()
+plt.tight_layout(h_pad=1.0)
 ```
 
 :::
@@ -7859,7 +6799,7 @@ async def handle_spot_termination():
 
 The gateway in @fig-spot-aware-routing separates traffic by its tolerance for capacity revocation. SLO-critical work uses the non-spot pool, while eligible best-effort work can use interruptible capacity. Routing still depends on readiness and available headroom. An eviction notice triggers draining when time permits; requests that cannot finish need a permitted retry, reconstruction, or rejection path.
 
-::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-aware traffic distribution**: The gateway classifies requests by SLO and routes 70 percent of traffic, the SLO-critical share, to on-demand replicas that face no spot reclamation, and 30 percent, the best-effort share, to discounted spot replicas that can be preempted. When a spot worker receives an eviction notice, the gateway stops routing to it while it drains, and best-effort requests tolerate occasional retries. The traffic split is illustrative; cost savings depend on provisioned capacity, discounts, retries, and idle headroom." fig-alt="A Requests box, tagged with an SLO class, feeds a violet Spot-aware gateway box that classifies SLO, watches preemption, and drains. A solid arrow labeled SLO-critical (70%) leads to an On-demand pool with three reserved workers, 0 to 2. A dashed arrow labeled best-effort (30%) leads to a dashed Spot pool with spot workers 3 and 4 and a red dashed Worker 5 marked draining. A red dashed arrow labeled eviction notice runs from Worker 5 back to the gateway."}
+::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-aware traffic distribution**: The gateway classifies requests by SLO and routes 70 percent of traffic, the SLO-critical share, to on-demand replicas that face no spot reclamation, and 30 percent, the best-effort share, to discounted spot replicas that can be preempted. When a spot worker receives an eviction notice, the gateway stops routing to it while it drains, and best-effort requests tolerate occasional retries. The traffic split is illustrative; cost savings depend on provisioned capacity, discounts, retries, and idle headroom." fig-alt="A Requests box, tagged with an SLO class, feeds a violet Spot-aware gateway box that classifies SLO, watches preemption, and drains. Below it, traffic leaves the gateway as pale gray lanes, each from its own exit point along the gateway's lower edge and ending in an arrowhead at a worker, with combined width proportional to each share. Three wider lanes labeled SLO-critical (70%) fan out to the three reserved workers, 0 to 2, of an On-demand pool with no spot reclamation. Two thinner lanes labeled best-effort (30%) reach spot workers 3 and 4 of a dashed Spot pool, discounted and preemptible; Worker 5, drawn red and dashed and marked draining, receives no lane. A red dashed arrow labeled eviction notice runs from Worker 5 back to the gateway."}
 ![](images/svg/spot-aware-routing.svg)
 
 <!--
@@ -8103,7 +7043,7 @@ Savings under this split depend on provisioned GPU-hours, discounts, retries, an
 
 A fleet confined to one region can batch, shard, route, isolate, and autoscale well, yet a user in Sydney still pays roughly a 200 ms round trip to a US-East deployment before any of that machinery acts, and a regional outage removes every replica at once. Extending resource isolation and failure boundaries beyond one data center introduces placement decisions at geographic scale. Distance, regional failures, and data-placement requirements can motivate regional replicas, caches, or a centralized service with an explicit network budget. @Fig-serving-deployment-stack illustrates three tiers: edge points of presence for reusable responses, regional gateways for authentication and routing, and GPU clusters for model execution. Its 10 ms, 50 ms, and 2 s budgets are scenario targets, not measured performance or universal deadlines. The application must define whether its execution budget governs first response, individual tokens, or completion of the entire request.
 
-::: {#fig-serving-deployment-stack fig-env="figure" fig-pos="htb" fig-cap="**Serving deployment stack**: A cache miss crosses three tiers before reaching a model replica. Tier 1 edge points of presence (PoPs) enforce authorization and reuse eligibility before answering repeated requests from cache; a miss passes to Tier 2, where the gateway applies rate limits and authentication and the router picks a destination; Tier 3 GPU workers run prefill and decode while an autoscaler sizes the fleet from queue depth and KV cache use. Tokens stream back up the same path. The per-tier latency budgets on the right are illustrative." fig-alt="Three stacked tiers. Tier 1, edge cache: authorize, then check edge cache; three Edge PoP cards hold cached responses. Tier 2, gateway and router: rate limiter, auth, model router and telemetry cards. Tier 3, model serving cluster: three GPU workers, each with prefill and decode boxes, plus an autoscaler card driven by queue depth and KV use. Down arrows labeled cache miss and dispatch and up arrows labeled streamed response and token stream join the tiers. A right column gives illustrative latency budgets of under 10 ms, under 50 ms and under 2 s."}
+::: {#fig-serving-deployment-stack fig-env="figure" fig-pos="htb" fig-cap="**Serving deployment stack**: A cache miss crosses three tiers before reaching a model replica. Tier 1 edge points of presence (PoPs) enforce authorization and reuse eligibility before answering repeated requests from cache; a miss passes to Tier 2, where the gateway applies rate limits and authentication and the router picks a destination; Tier 3 GPU workers run prefill and decode while an autoscaler sizes the fleet from queue depth and KV cache use. Tokens stream back up through the tiers to the client. The per-tier latency budgets on the right, drawn on a log scale, are illustrative." fig-alt="Three pale stacked bands labeled Tier 1 edge cache, Tier 2 gateway and router, and Tier 3 model serving, with a client bar above them. A thick blue path traces one request: from the client into authorize, then into an Edge PoP, where it is marked cache miss and drops into Tier 2 through rate limit, auth, and router, then is marked dispatch and drops into a GPU worker in Tier 3, through prefill to decode. A thick green line labeled token stream rises from decode straight back up through all three tiers to the client. Supporting elements are drawn lighter: two dashed sibling PoPs in Tier 1, a telemetry card in Tier 2, and in Tier 3 two dashed sibling workers fed by a dashed arrow from an autoscaler card driven by queue depth and KV use. On the right, a latency budget column draws one bar per tier on a log scale, labeled under 10 ms, under 50 ms, and under 2 s, so the Tier 3 bar is longest."}
 ![](images/svg/serving-hierarchy.svg)
 
 <!--
@@ -8463,7 +7403,7 @@ Network delays compound when a request makes sequential calls across the distant
 
 In @fig-global-inference-multiregion, a global load balancer\index{Global load balancing!regional replicas} selects among regions that satisfy placement policy, readiness, and capacity requirements. Measured network latency helps choose among those eligible destinations; geographic proximity alone does not determine completion time. A shared registry supplies versioned artifacts to the independent regional replicas.
 
-::: {#fig-global-inference-multiregion fig-env="figure" fig-pos="htb" fig-cap="**Global load balancing across inference regions**: A global load balancer routes each user to an eligible region with suitable latency and ready capacity (@tbl-rtt-by-user-location gives the round-trip times this avoids). Each region (US-East, EU-West, Asia-Pacific) runs independent replicas of the same model, and EU requests can stay in the EU to meet data-residency rules. A shared model registry supplies versioned weights to every region. If a region fails, the load balancer reroutes its users only to destinations that still satisfy placement, readiness, and capacity requirements." fig-alt="A Global load balancer box at the top fans out through a bus to three region frames, US-East, EU-West, and Asia-Pacific. Each frame has a one-line role, such as EU data stays in region, and two replica boxes labeled Replica 0 and Replica 1, GPU server. Below, a wide Model registry box, versioned weights for every region, sends dashed green sync arrows up to each region."}
+::: {#fig-global-inference-multiregion fig-env="figure" fig-pos="htb" fig-cap="**Global load balancing across inference regions**: A global load balancer routes each user to an eligible region with suitable latency and ready capacity (@tbl-rtt-by-user-location gives the round-trip times this avoids). Each region (US-East, EU-West, Asia-Pacific) runs independent replicas of the same model, and EU requests can stay in the EU to meet data-residency rules. A shared model registry supplies versioned weights to every region. If a region fails, the load balancer reroutes its users only to destinations that still satisfy placement, readiness, and capacity requirements." fig-alt="Three user populations across the top, users in North America, users in the EU, and users in Asia and Oceania, each drawn as a row of dots, send arrows down into a wide violet Global load balancer bar that routes each user to an eligible, ready region. Arrows continue straight down to three region frames, US-East, EU-West, and Asia-Pacific, each with a one-line role and two replicas, each drawn as a server of four GPU tiles. A pale indigo column labeled EU data-residency zone runs behind the EU users, their heavier blue path through the shared load balancer, and the EU-West region, whose role reads EU data stays in region. Below, a wide Model registry box, versioned weights for every region, sends dashed green sync arrows up to each region."}
 ![](images/svg/global-inference-multiregion.svg)
 
 <!--
@@ -9085,159 +8025,9 @@ The operational scale motivates a cascade architecture: the system must process 
 
 To meet this latency budget while evaluating thousands of documents, the ranking cascade diagrammed in @fig-ranking-cascade screens candidate pools across four progressively expressive tiers: early lexical and approximate-nearest-neighbor (ANN) embedding retrievers discard 99 percent of candidates within a 10 ms budget, reserving compute-intensive cross-attention transformers for the final top 100 items. This saving creates a recall constraint. A relevant document discarded upstream cannot be recovered by a more accurate downstream ranker, so each stage's candidate budget must be evaluated for retained relevant items as well as latency.
 
-::: {#fig-ranking-cascade fig-env="figure" fig-pos="htb" fig-cap="**Ranking cascade architecture**: To optimize latency and cost, search and recommendation systems use a cascade of increasingly complex models. Early stages (Retrieval) filter millions of candidates down to thousands using fast, cheap heuristics. Later stages use expensive, high-precision models only on the most promising candidates." fig-alt="Funnel diagram with four stages narrowing from retrieval of one million items to final ranking of ten items."}
+::: {#fig-ranking-cascade fig-env="figure" fig-pos="htb" fig-cap="**Ranking cascade architecture**: To optimize latency and cost, search and recommendation systems use a cascade of increasingly complex models. Early stages (Retrieval) filter millions of candidates down to thousands using fast, cheap heuristics. Later stages use expensive, high-precision models only on the most promising candidates." fig-alt="A funnel of four stacked trapezoid bands that narrow from top to bottom and deepen in blue, with band widths proportional to the logarithm of the candidate count. Retrieval, using lexical and ANN embeddings, cuts 1,000,000 candidates to 10,000; first-stage ranking, using two-tower models and GBDTs, cuts 10,000 to 1,000; second-stage scoring, using deep MLPs and DLRM, cuts 1,000 to 100; and final re-ranking, using a cross-attention transformer, cuts 100 to 10. A separate column of horizontal bars, with length proportional to the latency budget, grows downward as the funnel shrinks: at most 10 ms, about 20 ms, about 50 ms, and about 100 ms."}
 
-```{.tikz}
-\providecolor{DarkNavy}{HTML}{1E293B}%
-\providecolor{OceanBlue}{HTML}{2563EB}%
-\providecolor{ForestGreen}{HTML}{166534}%
-\providecolor{AmberStage}{HTML}{D97706}%
-\providecolor{CrimsonSLA}{HTML}{991B1B}%
-\providecolor{SlateGrey}{HTML}{475569}%
-\providecolor{SoftGrey}{HTML}{F8FAFC}%
-\providecolor{SlateTeal}{HTML}{0F766E}%
-\providecolor{BorderGrey}{HTML}{CBD5E1}%
-\providecolor{BorderBlue}{HTML}{2563EB}%
-\providecolor{BorderGreen}{HTML}{166534}%
-\providecolor{BorderAmber}{HTML}{D97706}%
-\providecolor{BorderCrimson}{HTML}{991B1B}%
-\providecolor{Crimson}{HTML}{991B1B}%
-\providecolor{SoftBlue}{HTML}{F0F6FE}%
-\providecolor{SoftGreen}{HTML}{ECFAF0}%
-\providecolor{SoftAmber}{HTML}{FEF8EE}%
-\providecolor{SoftCrimson}{HTML}{FFF1F2}%
-\providecolor{BgCard}{HTML}{FFFFFF}%
-\providecolor{CardBg}{HTML}{FFFFFF}%
-\providecolor{GrayL}{HTML}{E0E0E0}%
-\providecolor{GrayLine}{HTML}{666666}%
-\providecolor{BlueLine}{HTML}{006395}%
-\providecolor{BlueFill}{HTML}{D6EAF8}%
-\providecolor{GreenLine}{HTML}{008F45}%
-\providecolor{GreenFill}{HTML}{D5F5E3}%
-\providecolor{OrangeLine}{HTML}{E67817}%
-\providecolor{OrangeFill}{HTML}{FDEBD0}%
-\providecolor{RedLine}{HTML}{D9534F}%
-\providecolor{RedFill}{HTML}{F2D7D5}%
-\providecolor{TextBlack}{HTML}{333333}%
-\providecolor{VioletLine}{HTML}{7E317B}%
-\providecolor{VioletFill}{RGB}{243,243,255}%
-\colorlet{mlsysblue}{OceanBlue}%
-\colorlet{mlsysgreen}{ForestGreen}%
-\colorlet{mlsysred}{CrimsonSLA}%
-\colorlet{mlsysamber}{AmberStage}%
-\colorlet{mlsysdarkgray}{DarkNavy}%
-\colorlet{mlsysteal}{SlateTeal}%
-\scalebox{0.86}{%
-\begin{tikzpicture}[
-    x=1cm, y=1cm,
-    >=Stealth,
-    font=\small\sffamily
-]
-
-    % Styles
-    \tikzset{
-        stagecard/.style={
-            rounded corners=3.5pt,
-            line width=0.7pt,
-            inner sep=5pt,
-            align=center,
-            minimum height=1.1cm
-        },
-        flowarrow/.style={
-            ->,
-            line width=1.0pt,
-            DarkNavy!70,
-            shorten >=2pt,
-            shorten <=2pt
-        }
-    }
-
-    % =========================================================================
-    % CENTER: 4-STAGE FUNNEL CASCADE
-    % =========================================================================
-
-    % Stage 0: Retrieval (L0)
-    \node[stagecard, draw=SlateTeal!70, fill=white, minimum width=10.0cm] (L0) at (0, 0) {
-        \textbf{\textcolor{SlateTeal}{Retrieval (L0):}}\hspace{8pt}\textbf{\textcolor{DarkNavy}{1,000,000 $\boldsymbol{\longrightarrow}$ 10,000 Candidates}}\\[2.5pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{SlateGrey}{Dual-Encoder ANN (HNSW / ScaNN), Lexical BM25 $\;\cdot\;$ Memory-Bound $\;\cdot\;$ Budget $\le \mathbf{10\text{ ms}}$}}
-    };
-
-    % Stage 1: Coarse Ranking (L1)
-    \node[stagecard, draw=OceanBlue!70, fill=OceanBlue!3, minimum width=8.2cm] (L1) at (0, -1.8) {
-        \textbf{\textcolor{OceanBlue}{First-Stage Ranking (L1):}}\hspace{8pt}\textbf{\textcolor{DarkNavy}{10,000 $\boldsymbol{\longrightarrow}$ 1,000 Candidates}}\\[2.5pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{SlateGrey}{Two-Tower Models, GBDTs $\;\cdot\;$ Pointwise Scoring $\;\cdot\;$ Budget $\approx \mathbf{20\text{ ms}}$}}
-    };
-
-    % Stage 2: Fine Scoring (L2)
-    \node[stagecard, draw=AmberStage!70, fill=AmberStage!3, minimum width=6.6cm] (L2) at (0, -3.6) {
-        \textbf{\textcolor{AmberStage}{Second-Stage Scoring (L2):}}\hspace{8pt}\textbf{\textcolor{DarkNavy}{1,000 $\boldsymbol{\longrightarrow}$ 100 Candidates}}\\[2.5pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{SlateGrey}{Deep MLPs, DLRM with dense cross-features $\;\cdot\;$ Budget $\approx \mathbf{50\text{ ms}}$}}
-    };
-
-    % Stage 3: Re-Ranking (L3)
-    \node[stagecard, draw=ForestGreen!70, fill=ForestGreen!3, minimum width=5.0cm] (L3) at (0, -5.4) {
-        \textbf{\textcolor{ForestGreen}{Final Re-Ranking (L3):}}\hspace{8pt}\textbf{\textcolor{DarkNavy}{100 $\boldsymbol{\longrightarrow}$ 10 Items}}\\[2.5pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{SlateGrey}{Cross-Attention Transformer $\;\cdot\;$ Diversity SLA $\;\cdot\;$ Budget $\approx \mathbf{100\text{ ms}}$}}
-    };
-
-    % Connecting Downward Transition Arrows
-    \draw[flowarrow] (L0.south) -- (L1.north);
-    \node[fill=SoftGrey, draw=DarkNavy!25, rounded corners=2pt, font=\fontsize{6.5}{7.5}\selectfont\bfseries\color{DarkNavy}, inner sep=2pt] at (1.3, -0.9) {$100\times$ discard};
-
-    \draw[flowarrow] (L1.south) -- (L2.north);
-    \node[fill=SoftGrey, draw=DarkNavy!25, rounded corners=2pt, font=\fontsize{6.5}{7.5}\selectfont\bfseries\color{DarkNavy}, inner sep=2pt] at (1.2, -2.7) {$10\times$ discard};
-
-    \draw[flowarrow] (L2.south) -- (L3.north);
-    \node[fill=SoftGrey, draw=DarkNavy!25, rounded corners=2pt, font=\fontsize{6.5}{7.5}\selectfont\bfseries\color{DarkNavy}, inner sep=2pt] at (1.1, -4.5) {$10\times$ discard};
-
-    % Subtle Funnel Contour Guidelines (Dashed Gray)
-    \draw[SlateGrey!30, line width=0.6pt, dashed] (L0.north west) -- (L1.north west) -- (L2.north west) -- (L3.north west) -- (L3.south west);
-    \draw[SlateGrey!30, line width=0.6pt, dashed] (L0.north east) -- (L1.north east) -- (L2.north east) -- (L3.north east) -- (L3.south east);
-
-    % =========================================================================
-    % LEFT FLANK: CANDIDATE REDUCTION & SLA
-    % =========================================================================
-    \draw[->, line width=1.1pt, DarkNavy!65] (-6.2, 0.4) -- (-6.2, -5.8);
-
-    \node[anchor=east, align=right, inner sep=4pt] at (-6.4, -2.7) {
-        \textbf{\textcolor{DarkNavy}{\fontsize{8.5}{10.5}\selectfont Candidate Set Narrowing}}\\[3pt]
-        {\fontsize{7.5}{9}\selectfont\textcolor{DarkNavy}{\textbf{1,000,000} $\boldsymbol{\longrightarrow}$ \textbf{10} items}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{$\mathbf{10^5\times}$ overall reduction}}\\[5pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{CrimsonSLA}{\textbf{Cumulative SLA: $\approx$180 ms}}}
-    };
-
-    % =========================================================================
-    % RIGHT FLANK: ACCURACY VS COMPUTE SPECTRUM
-    % =========================================================================
-    \node[draw=AmberStage!60, fill=AmberStage!4, rounded corners=3pt, line width=0.65pt, inner sep=5pt, align=center, text width=3.4cm] (R_top) at (7.6, 0.0) {
-        \textbf{\fontsize{8}{9.5}\selectfont\textcolor{AmberStage}{High Recall, Low Precision}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{Dot-product \& ANN search}}\\[1.5pt]
-        {\fontsize{6.5}{8}\selectfont\textcolor{DarkNavy}{$\approx 1\,\mu\text{s}$ compute per item}}
-    };
-
-    \node[draw=ForestGreen!60, fill=ForestGreen!4, rounded corners=3pt, line width=0.65pt, inner sep=5pt, align=center, text width=3.4cm] (R_bot) at (7.6, -5.4) {
-        \textbf{\fontsize{8}{9.5}\selectfont\textcolor{ForestGreen}{High Precision \& Relevance}}\\[2pt]
-        {\fontsize{7}{8.5}\selectfont\textcolor{SlateGrey}{Cross-attention Transformer}}\\[1.5pt]
-        {\fontsize{6.5}{8}\selectfont\textcolor{DarkNavy}{$\approx 1\text{ ms}$ compute per item}}
-    };
-
-    \draw[->, line width=1.1pt, ForestGreen!80] (R_top.south) -- (R_bot.north)
-        node[midway, right=6pt, font=\fontsize{7.5}{9.5}\selectfont\bfseries\color{ForestGreen!90!black}, align=left] {
-            Model Expressiveness\\[2pt]
-            \& Compute Cost per Item $\boldsymbol{\uparrow}$
-        };
-
-    % =========================================================================
-    % BOTTOM SUMMARY CARD: CASCADE PRINCIPLE
-    % =========================================================================
-    \node[draw=DarkNavy!25, fill=SoftGrey, rounded corners=3.5pt, line width=0.6pt, anchor=north, text width=18.2cm, inner sep=5pt] at (0.2, -6.6) {
-        \centering\fontsize{7.5}{9.5}\selectfont
-        \textbf{\textcolor{DarkNavy}{The Cascade Principle:}} \textcolor{SlateGrey}{Early stages discard $\mathbf{99\%}$ of candidates within a small retrieval-stage budget ($\le 10\text{ ms}$), enabling late stages to deploy deep non-linear scoring and all-to-all cross-attention over high-probability candidates without violating interactive SLA limits ($\le 200\text{ ms}$).}
-    };
-
-\end{tikzpicture}
-}
-```
+![](images/svg/ranking-cascade.svg){width="100%"}
 
 :::
 

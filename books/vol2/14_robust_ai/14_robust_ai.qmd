@@ -312,7 +312,7 @@ class SilentErrorProbability:
 ```
 @Sec-ft-sdc-verification establishes that per-device silent corruption compounds across a fleet of $\DeviceCount$ devices\index{Silent Data Corruption!cluster-scale probability} as $\Pr(\geq 1) = 1 - (1 - \DeviceSilentCorruptionProbability)^\DeviceCount$ when each device has independent residual-error probability $\DeviceSilentCorruptionProbability$ over the same observation interval. A high fleet-level probability follows only for a specified device count, interval, and residual-error model; raw bit flips corrected by hardware are not silent errors. @Fig-silent-error-probability charts how this compounding risk scales across fleet sizes up to $10^5$ accelerators under three illustrative per-device error probabilities for the same observation interval. The plotted reference bands distinguish moderate from high fleet-level probability; they do not establish a measured device failure rate. With an illustrative residual-error probability of `{python} SilentErrorProbability.p_per_hr_prose_str` per device over one hour, a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster incurs an hourly corruption probability of `{python} SilentErrorProbability.p_total_large_str` (marked at 10K GPUs), with failure becoming nearly certain at roughly `{python} SilentErrorProbability.n_gpus_certain_str` devices. Meta's SDC report confirms corruption at observable fleet scale [@dixit2021silent].
 
-::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three illustrative per-device error rates. The curves are analytical, $\Pr(\geq 1) = 1 - (1-\DeviceSilentCorruptionProbability)^\DeviceCount$, and show how quickly cluster-scale probabilities compound as per-device rates increase; fleet observations of silent corruption [@dixit2021silent] motivate stress-testing at rates above soft-error predictions." fig-alt="Semilog plot showing three S-curves for per-device SDC rates of 1e-3, 1e-4, and 1e-5. The 1e-3 and 1e-4 curves approach probability 1.0 by 100000 devices; the 1e-5 curve rises to about 0.63."}
+::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three illustrative per-device error rates. The curves are analytical, $\Pr(\geq 1) = 1 - (1-\DeviceSilentCorruptionProbability)^\DeviceCount$, and show how quickly cluster-scale probabilities compound as per-device rates increase; fleet observations of silent corruption [@dixit2021silent] motivate stress-testing at rates above soft-error predictions." fig-alt="Semilog plot showing three S-curves, solid, dashed, and dotted, labeled with per-device SDC rates of 1e-3, 1e-4, and 1e-5. A red band above probability 0.95 is labeled effectively certain, and a dashed line at 0.5 is labeled more likely than not. The 1e-3 and 1e-4 curves enter the red band and approach probability 1.0 by 100000 devices, with a dot marking 0.63 at 10K on the 1e-4 curve; the 1e-5 curve rises to about 0.63."}
 
 ```{python}
 #| echo: false
@@ -333,63 +333,60 @@ import numpy as np
 import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.6, 3.3))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 N = np.logspace(0, 5, 500)  # 1 to 100,000 devices
 
-# Three per-device SDC probabilities per hour
+# Three per-device SDC probabilities per hour. The rates are an ordered
+# severity sweep, not resources: one neutral ink, distinguished by line style
+# and labeled directly on each curve. Red is kept for the danger band only.
 rates = [
-    (1e-3, COLORS['RedLine'], '$p = 10^{-3}$ per device per hour'),
-    (1e-4, COLORS['OrangeLine'], '$p = 10^{-4}$ per device per hour'),
-    (1e-5, COLORS['BlueLine'], '$p = 10^{-5}$ per device per hour'),
+    (1e-3, '-', '$p = 10^{-3}$'),
+    (1e-4, '--', '$p = 10^{-4}$'),
+    (1e-5, ':', '$p = 10^{-5}$'),
 ]
+label_prob = 0.30  # height at which each curve carries its direct label
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-for p, color, label in rates:
-    P_at_least_one = 1 - (1 - p) ** N
-    ax.plot(N, P_at_least_one, color=color, linewidth=2, label=label, zorder=3)
+# Danger band: fleet-level corruption is effectively certain (Pr >= 0.95).
+ax.axhspan(0.95, 1.02, color=COLORS['RedL'], alpha=0.6, lw=0, zorder=0)
+ax.axhline(y=0.95, color=COLORS['RedLine'], linewidth=0.8, alpha=0.8, zorder=1)
 
-# Shade "Effectively Certain" region
-ax.axhspan(0.95, 1.02, alpha=0.12, color=COLORS['RedFill'], zorder=0)
+for p, style, label in rates:
+    P_at_least_one = 1 - (1 - p) ** N
+    ax.plot(N, P_at_least_one, color=COLORS['primary'], linestyle=style, linewidth=1.8, zorder=3)
+    n_label = np.log(1 - label_prob) / np.log(1 - p)  # where the curve crosses label_prob
+    ax.text(n_label / 1.15, label_prob, label, fontsize=9, ha='right', va='center', color=COLORS['primary'])
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(1.5, 0.97, 'Effectively certain', fontsize=8.5, color=COLORS['RedLine'], va='bottom', fontweight='bold')
+ax.text(13, 0.985, 'effectively certain', fontsize=9, color=COLORS['RedLine'], va='center')
 
 # "More likely than not" reference line
-ax.axhline(y=0.5, color='#64748B', linestyle='--', linewidth=1, alpha=0.6)
-ax.text(1.5, 0.51, 'More likely than not', fontsize=8, color='#64748B', va='bottom')
+ax.axhline(y=0.5, color=COLORS['secondary'], linestyle=(0, (4, 3)), linewidth=0.8, zorder=1)
+ax.text(13, 0.515, 'more likely than not', fontsize=9, color=COLORS['secondary'], va='bottom')
 
 annot_p = SilentErrorProbability.p_per_hr_illustrative
 annot_n = SilentErrorProbability.n_gpus_large
 annot_prob = 1 - (1 - annot_p) ** annot_n
-ax.plot([annot_n], [annot_prob], marker='o', markersize=5, color=COLORS['OrangeLine'], zorder=4)
+ax.plot([annot_n], [annot_prob], marker='o', markersize=5, color=COLORS['primary'], zorder=4)
 ax.text(
     annot_n / 1.25,
     annot_prob,
     f'{annot_prob:.2f} at {annot_n // 1000:.0f}K',
-    fontsize=8,
+    fontsize=9,
     ha='right',
     va='center',
-    color=COLORS['OrangeLine'],
+    color=COLORS['primary'],
 )
 
 ax.set_xscale('log')
 ax.set_xlabel('Cluster size (number of GPUs)')
 ax.set_ylabel('$\\Pr$(at least one SDC per hour)')
-ax.set_xlim(1, 1e5)
+ax.set_xlim(10, 1e5)
 ax.set_ylim(0, 1.02)
-plt.legend(
-    loc='center left',
-    bbox_to_anchor=(0, 0.80),
-    fontsize=8,
-    frameon=True,
-    facecolor='white',
-    framealpha=0.95,
-    edgecolor='#CBD5E1',
-    labelspacing=0.1,
-    borderpad=0.6,
-)
+ax.grid(True, which='major', alpha=0.4)
+ax.grid(False, which='minor')
 plt.show()
 plt.close()
 ```
@@ -402,7 +399,7 @@ At cluster scale a per-device reliability number therefore becomes a coordinatio
 
 The unified framework helps engineers decide which failure signal they are seeing before they choose a defense. What this section adds to the three pillars named at the start of the chapter is their decomposition into concrete failure subtypes, each paired with the defense that targets it (@fig-robustness-taxonomy).
 
-::: {#fig-robustness-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The Robustness Taxonomy**: Environmental shifts, input-level attacks, and system-level faults decomposed into concrete failure subtypes, each paired with its principal defense (green). Software and pipeline defects originate in the system layer, but they are drawn as a cross-cutting layer beneath all three pillars because their symptoms can amplify or imitate any of them." fig-alt="Three columns of four cards. Environmental shifts: covariate shift, concept drift, label shift, domain shift. Input-level attacks: evasion (FGSM, PGD), C and W and boundary attacks, data and backdoor poisoning, physical perturbations. System-level faults: silent data corruption, memory and weight bit flips, underflow overflow and NaN, distributed training desync. Each card names a defense in green. A dashed bar beneath all three columns reads software and pipeline defects cut across all three pillars."}
+::: {#fig-robustness-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The Robustness Taxonomy**: Environmental shifts, input-level attacks, and system-level faults decomposed into concrete failure subtypes (dark), each paired with its principal defense (green). Each pillar descends onto a defense wall at the point where it enters the ML pipeline, the data stream, the model's inputs and training data, or the weights and accelerators. Software and pipeline defects originate in the system layer, but they are drawn as the cross-cutting pipeline rail on which all three walls sit because their symptoms can amplify or imitate any of the pillars." fig-alt="Three side-by-side pillar columns sit above one horizontal dashed pipeline band that runs left to right from data in to output and is labeled software and pipeline defects, cross-cutting; inside the band, a labeled icon sits centered under each column. Each column holds four white failure chips, each naming a failure in dark text and its defense in green. A red arrow from each column's chips ends on a solid green wall bar resting on the pipeline band, directly above the component that pillar strikes: a data stream of sample dots under environmental shifts, a grid of input and training data tiles under input-level attacks, and an accelerator chip holding weight cells under system-level faults. Environmental shifts: covariate shift to importance weighting, concept drift to retraining on fresh labels, label shift to prior re-estimation and recalibration, domain shift to domain adaptation and fine-tuning. Input-level attacks: evasion (FGSM, PGD) to adversarial training, C and W and boundary attacks to certified defenses, data and backdoor poisoning to provenance and spectral filtering, physical perturbations to transformation-robust training. System-level faults: silent data corruption to redundant execution and fleet screening, memory and weight bit flips to ECC and weight range checks, underflow overflow and NaN to loss scaling and NaN guards, distributed training desync to checkpoint rollback and watchdogs."}
 ![](images/svg/robustness-taxonomy.svg)
 :::
 
@@ -428,7 +425,7 @@ Graceful degradation turns detection into a bounded operating mode instead of a 
 
 Adaptive response completes the loop by changing system behavior when the signal persists. Adaptation might involve activating error correction mechanisms, applying input preprocessing techniques, or dynamically adjusting model parameters. Robustness therefore requires ongoing adjustment rather than a one-time configuration.
 
-Detection, degradation, and adaptation extend beyond fault recovery to form a systematic performance adaptation strategy that appears throughout ML system design. The defense mechanisms mapped across the columns of @fig-robustness-taxonomy instantiate this pattern: hardware ECC and redundant execution detect faults, weight range checks and checkpoint rollbacks contain the damage, and retraining or adversarial training adapts the model. Because each pillar needs its own version of all three mechanisms, no single defense covers the taxonomy.
+Detection, degradation, and adaptation extend beyond fault recovery to form a systematic performance adaptation strategy that appears throughout ML system design. The defense mechanisms mapped across the three pillars of @fig-robustness-taxonomy instantiate this pattern: hardware ECC and redundant execution detect faults, weight range checks and checkpoint rollbacks contain the damage, and retraining or adversarial training adapts the model. Because each pillar needs its own version of all three mechanisms, no single defense covers the taxonomy.
 
 The evaluation plan must preserve those distinctions. One row of it is not a pillar at all. Population monitors ask whether traffic as a whole has changed, while a serving system must also decide, request by request, whether this particular input lies inside the model's demonstrated competence. The tools for that per-request decision, namely calibration, out-of-distribution (OOD) scores, and selective prediction with its risk-coverage curve, are developed in @sec-robust-ai-selective-prediction, after the drift statistics they complement. @Tbl-robust-ai-evaluation-matrix\index{Stress Testing!evaluation matrix} defines the minimum evidence for each failure class and prevents a passed test in one column from becoming a robustness claim about another. On a first reading the table is a map rather than a lesson. Near-OOD inputs resemble the training data but fall outside its classes or conditions, while far-OOD inputs come from unrelated sources; robust and certified accuracy are developed with the adversarial defenses (@sec-robust-ai-certified-defenses), and sybil and Byzantine contributors with data poisoning (@sec-robust-ai-data-poisoning-4b55). The chapter returns to each row as its evidence is taught.
 
@@ -484,7 +481,7 @@ Consider a medical diagnosis model trained on X-ray images from one hospital and
 
 @Fig-shift-types partitions distribution shift into three geometric and statistical regimes: inputs can migrate to an unfamiliar region of feature space (panel a), label priors can skew (panel b), or the underlying mapping itself can invert (panel c). Here, $\ModelInput$ denotes an input and $\ExampleLabel$ its outcome label. Input-only monitors can detect changes in $\ProbabilityFunction(\ModelInput)$; distinguishing changes in label frequencies or in $\ProbabilityFunction(\ExampleLabel\mid \ModelInput)$ generally requires outcome evidence or additional assumptions.
 
-::: {#fig-shift-types fig-env="figure" fig-pos="htb" fig-cap="**Types of Distribution Shift**: (a) Under covariate shift, deployment inputs move to a new region of feature space while the labeling rule, and so the correct boundary, stays fixed. (b) Under label shift, class frequencies change while each class's inputs look the same; the bar heights are illustrative. (c) Under concept drift, the same inputs acquire new labels, so points between the old and new boundaries become errors. Covariate shift changes $\ProbabilityFunction(\ModelInput)$ with $\ProbabilityFunction(\ExampleLabel \mid \ModelInput)$ fixed, label shift changes $\ProbabilityFunction(\ExampleLabel)$ with $\ProbabilityFunction(\ModelInput \mid \ExampleLabel)$ fixed, and concept drift changes $\ProbabilityFunction(\ExampleLabel \mid \ModelInput)$; the distinction determines whether reweighting, recalibration, or model adaptation is appropriate." fig-alt="Three panels. Panel a, covariate shift: blue training points of two classes sit on either side of a dashed boundary, and an arrow points to amber deployment points of the same two classes in a new region, still on the correct sides of the unchanged boundary. Panel b, label shift: paired bars for y equals 0 and y equals 1; training bars are equal, and the deployment bar for y equals 1 is much taller than for y equals 0. Panel c, concept drift: the same points with a dashed old boundary and a solid green new boundary crossing it; points between the two boundaries are red to mark changed labels."}
+::: {#fig-shift-types fig-env="figure" fig-pos="htb" fig-cap="**Types of Distribution Shift**: (a) Under covariate shift, deployment inputs move to a new region of feature space while the labeling rule, and so the correct boundary, stays fixed. (b) Under label shift, class frequencies change while each class's inputs look the same; the bar heights are illustrative. (c) Under concept drift, the same inputs acquire new labels, so points between the old and new boundaries become errors. Covariate shift changes $\ProbabilityFunction(\ModelInput)$ with $\ProbabilityFunction(\ExampleLabel \mid \ModelInput)$ fixed, label shift changes $\ProbabilityFunction(\ExampleLabel)$ with $\ProbabilityFunction(\ModelInput \mid \ExampleLabel)$ fixed, and concept drift changes $\ProbabilityFunction(\ExampleLabel \mid \ModelInput)$; the distinction determines whether reweighting, recalibration, or model adaptation is appropriate." fig-alt="Three panels with a shared key for class 0 (filled) and class 1 (open) points and red label-changed points. Panel a, covariate shift: blue training points labeled train, of two classes, sit on either side of a dashed boundary, and an arrow points to amber deployment points labeled deploy, of the same two classes in a new region, still on the correct sides of the unchanged boundary. Panel b, label shift: paired blue train and amber deploy bars for y equals 0 and y equals 1; training bars are equal, and the deployment bar for y equals 1 is much taller than for y equals 0. Panel c, concept drift: the same points with a dashed boundary labeled old and a solid green boundary labeled new crossing it; points between the two boundaries are red to mark changed labels."}
 ![](images/svg/shift-types.svg)
 :::
 
@@ -540,7 +537,7 @@ Several implementation choices determine whether PSI is sensitive enough to be u
 
 When a bin has zero observations in either distribution, adding a smoothing constant\index{Population Stability Index!smoothing constant} $\PopulationStabilitySmoothingConstant$ and renormalizing the bin probabilities prevents undefined logarithms. The choice can materially change PSI when bins are empty or sparsely populated, so the monitoring configuration must record the smoothing convention and check sensitivity to it. Monitoring population stability index over time as plotted in @fig-distribution-shift-detector reveals when the input population moves from the stable band into the warning band and then the major-shift band, triggering an escalation path that may lead to retraining after performance correlation. At week 41, the service approves and versions a new input reference after validating the changed operating population. The lower PSI thereafter compares traffic with that new reference, not the original one. Changing model weights alone would not reduce input PSI against a fixed reference, and the discontinuity does not establish improved predictions.
 
-::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**A Calibrated Distribution-Shift Workflow**: In this synthetic service, PSI enters the warning zone as user behavior shifts and crosses the service's escalation threshold at week 32. Following investigation and validation of the changed operating population, the service versions a new input reference at week 41. Values on either side of that reference change use different comparison populations; the drop is not evidence of model recovery." fig-alt="Line plot of weekly PSI over 52 weeks with service-calibrated green, orange, and red alert zones. Drift crosses the escalation threshold at week 32. A discontinuity at week 41 marks an approved input-reference change, after which PSI uses the new reference."}
+::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**A Calibrated Distribution-Shift Workflow**: In this synthetic service, PSI enters the warning zone as user behavior shifts and crosses the service's escalation threshold at week 32. Following investigation and validation of the changed operating population, the service versions a new input reference at week 41. Values on either side of that reference change use different comparison populations; the drop is not evidence of model recovery." fig-alt="Line plot of weekly PSI over 52 weeks with service-calibrated green, orange, and red alert zones labeled stable, warning, and major shift. Drift crosses the escalation threshold at week 32. A gray band from week 32 to week 41 is labeled investigation and validation, and a discontinuity at week 41 is labeled approved reference change, after which PSI uses the new reference."}
 
 ```{python}
 #| echo: false
@@ -561,58 +558,82 @@ psi_values.extend(np.random.normal(0.32, 0.02, 5))
 psi_values.extend(np.random.normal(0.04, 0.01, 12))
 psi_values = np.array(psi_values)
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9.2, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.4))
 
 thresh_warning = Ops.Monitoring.PsiWarnThreshold
 thresh_critical = Ops.Monitoring.PsiCriticalThreshold
+y_top = 0.40
 
-ax.axhspan(0, thresh_warning, color=COLORS['GreenFill'], alpha=0.35, label=f'Stable (PSI < {thresh_warning:.1f})')
-ax.axhspan(
-    thresh_warning, thresh_critical, color=COLORS['OrangeL'], alpha=0.35, label=f'Warning zone ({thresh_warning:.1f} ≤ PSI < {thresh_critical:.2f})'
+# Alert zones, labeled in place rather than in a legend.
+ax.axhspan(0, thresh_warning, color=COLORS['GreenFill'], alpha=0.45, lw=0, zorder=0)
+ax.axhspan(thresh_warning, thresh_critical, color=COLORS['OrangeL'], alpha=0.45, lw=0, zorder=0)
+ax.axhspan(thresh_critical, y_top, color=COLORS['RedL'], alpha=0.45, lw=0, zorder=0)
+ax.axhline(thresh_warning, color=COLORS['OrangeLine'], linestyle='--', linewidth=1.0, zorder=1)
+ax.axhline(thresh_critical, color=COLORS['RedLine'], linestyle='--', linewidth=1.0, zorder=1)
+
+zone_kw = dict(fontsize=9, va='center')
+ax.text(9, 0.083, f'stable (PSI$<${thresh_warning:.1f})', ha='left', color=COLORS['GreenLine'], **zone_kw)
+ax.text(
+    2,
+    (thresh_warning + thresh_critical) / 2,
+    f'warning ({thresh_warning:.1f}$\\leq$PSI$<${thresh_critical:.2f})',
+    ha='left',
+    color=COLORS['OrangeLine'],
+    **zone_kw,
 )
-ax.axhspan(thresh_critical, 0.45, color=COLORS['RedFill'], alpha=0.35, label=f'Major shift (PSI ≥ {thresh_critical:.2f})')
-
-ax.axhline(thresh_warning, color=COLORS['OrangeLine'], linestyle='--', linewidth=1.2, alpha=0.85)
-ax.axhline(thresh_critical, color=COLORS['RedLine'], linestyle='--', linewidth=1.2, alpha=0.85)
-
-ax.plot(weeks[:40], psi_values[:40], color=COLORS['primary'], linewidth=2.0, marker='o', markersize=5, label='Weekly PSI', zorder=3)
-ax.plot(weeks[40:], psi_values[40:], color=COLORS['primary'], linewidth=2.0, marker='o', markersize=5, zorder=3)
+ax.text(2, (thresh_critical + y_top) / 2, f'major shift (PSI$\\geq${thresh_critical:.2f})', ha='left', color=COLORS['RedLine'], **zone_kw)
 
 shift_idx = np.where(psi_values >= thresh_critical)[0][0]
-ax.annotate(
-    f'Major Shift Detected\n(PSI ≥ {thresh_critical:.2f})',
-    xy=(weeks[shift_idx], psi_values[shift_idx]),
-    xytext=(weeks[shift_idx] - 2, psi_values[shift_idx] + 0.08),
-    fontsize=8.5,
-    fontweight='bold',
+retrain_idx = np.where((weeks > weeks[shift_idx]) & (psi_values < thresh_warning))[0][0]
+w_shift, w_restore = weeks[shift_idx], weeks[retrain_idx]
+
+# Investigation window between escalation and the approved reference change.
+ax.axvspan(w_shift, w_restore, color=COLORS['primary'], alpha=0.06, lw=0, zorder=1)
+ax.text(
+    (w_shift + w_restore) / 2,
+    y_top - 0.015,
+    'investigation,\nvalidation',
+    fontsize=9,
+    linespacing=1.2,
     ha='center',
-    va='bottom',
+    va='top',
+    color=COLORS['primary'],
+)
+
+# Week 41 versions a new input reference, so the two segments use different
+# comparison populations and are not joined.
+_line_kw = dict(color=COLORS['primary'], linewidth=1.6, marker='o', markersize=3.5, zorder=3)
+ax.plot(weeks[:retrain_idx], psi_values[:retrain_idx], **_line_kw)
+ax.plot(weeks[retrain_idx:], psi_values[retrain_idx:], **_line_kw)
+
+ax.annotate(
+    f'escalation, week {w_shift}',
+    xy=(w_shift, psi_values[shift_idx]),
+    xytext=(w_shift - 1.5, psi_values[shift_idx] + 0.07),
+    fontsize=9,
+    ha='right',
+    va='center',
     color=COLORS['RedLine'],
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=COLORS['RedLine'], lw=0.8),
-    arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=1.0),
+    arrowprops=dict(arrowstyle='-', color=COLORS['RedLine'], lw=0.8, shrinkA=2, shrinkB=4),
     zorder=4,
 )
-
-reference_idx = 40  # week 41 changes the input reference, not the model's measured quality
 ax.annotate(
-    'Approved Reference Change\n(New Comparison Baseline)',
-    xy=(weeks[reference_idx], psi_values[reference_idx]),
-    xytext=(weeks[reference_idx] + 3, psi_values[reference_idx] + 0.08),
-    fontsize=8.5,
-    fontweight='bold',
-    ha='center',
-    va='bottom',
+    f'approved reference\nchange, week {w_restore}',
+    xy=(w_restore, psi_values[retrain_idx]),
+    xytext=(52, 0.175),
+    fontsize=9,
+    ha='right',
+    va='center',
     color=COLORS['GreenLine'],
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=COLORS['GreenLine'], lw=0.8),
-    arrowprops=dict(arrowstyle='->', color=COLORS['GreenLine'], lw=1.0),
+    arrowprops=dict(arrowstyle='-', color=COLORS['GreenLine'], lw=0.8, shrinkA=2, shrinkB=4),
     zorder=4,
 )
 
+ax.grid(False, axis='x')
 ax.set_xlabel('Week')
-ax.set_ylabel('Population Stability Index (PSI)')
-ax.set_xlim(1, 52)
-ax.set_ylim(0, 0.45)
-ax.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1', fontsize=8)
+ax.set_ylabel('Population stability index (PSI)')
+ax.set_xlim(0.5, 52.5)
+ax.set_ylim(0, y_top)
 
 plt.tight_layout()
 plt.show()
@@ -1206,7 +1227,7 @@ In this formulation, $\ModelInput$ denotes the original input, $\AdversarialExam
 
 @Fig-gradient-attack geometricizes this single-step perturbation within the $\ell_\infty$ budget $\AdversarialPerturbationBudget$: moving along the sign vector of $\nabla_\ModelInput\LossFunction(\ModelParameters, \ModelInput, \ExampleLabel)$ propels input $\ModelInput$ to a corner of the bounding cube, producing $\AdversarialExample$ and crossing the decision boundary into the adjacent class region in this illustration. A different boundary or gradient need not produce a successful attack within the same budget.
 
-::: {#fig-gradient-attack fig-env="figure" fig-pos="htb" fig-cap="**Gradient-Based Attack Geometry**: Around a correctly classified input $\ModelInput$, the dashed square marks every perturbation allowed by the $\ell_\infty$ budget $\AdversarialPerturbationBudget$. FGSM moves each coordinate by the full budget in the sign direction of the loss gradient $\nabla_\ModelInput \LossFunction(\ModelParameters, \ModelInput, \ExampleLabel)$, which lands $\AdversarialExample$ on a corner of that square, the allowed point that maximizes the first-order increase in loss. A step no larger than $\AdversarialPerturbationBudget$ in any coordinate therefore carries the input across the decision boundary. The class labels are illustrative." fig-alt="Two-dimensional input space divided by a dashed diagonal decision boundary into a true-class region and an other-class region. A clean input x sits inside a dashed square labeled allowed set. A short blue arrow labeled gradient of L points up and to the left from x; a longer red arrow runs from x to the square's upper-left corner, marked x adv equals x plus epsilon times sign of the gradient, which lies across the boundary. A bracket under the square marks its half-width epsilon adv."}
+::: {#fig-gradient-attack fig-env="figure" fig-pos="htb" fig-cap="**Gradient-Based Attack Geometry**: Around a correctly classified input $\ModelInput$, the dashed square marks every perturbation allowed by the $\ell_\infty$ budget $\AdversarialPerturbationBudget$. FGSM moves each coordinate by the full budget in the sign direction of the loss gradient $\nabla_\ModelInput \LossFunction(\ModelParameters, \ModelInput, \ExampleLabel)$, which lands $\AdversarialExample$ on a corner of that square, the allowed point that maximizes the first-order increase in loss. A step no larger than $\AdversarialPerturbationBudget$ in any coordinate therefore carries the input across the decision boundary. The class labels are illustrative." fig-alt="Two-dimensional input space divided by a solid diagonal decision boundary into a true-class region and an other-class region. A clean input x sits inside a dashed square labeled allowed set. A short blue arrow labeled gradient of L points up and to the left from x; a longer red arrow runs from x to the square's upper-left corner, marked x adv equals x plus epsilon times sign of the gradient, which lies across the boundary. A bracket under the square marks its half-width epsilon adv."}
 ![](images/svg/gradient-attack.svg)
 :::
 
@@ -1326,7 +1347,7 @@ Distributed and federated training adds a contributor axis to the same threat. A
 
 The four categories above describe an attacker's *objective*; the attack *mechanism* depends on the attacker's access to the system and knowledge of the data pipeline. As diagrammed in @fig-poisoning-impact, all of them share a common shape: a poisoned record enters the training pipeline alongside clean data and attempts to alter the resulting model’s behavior. The most direct mechanism is label modification, where an attacker selects a subset of training samples and alters their labels, flipping $\ExampleLabel= 1$ to $\ExampleLabel= 0$ or reassigning categories in multi-class settings. Even small-scale label corruption can shift decision boundaries significantly.
 
-::: {#fig-poisoning-impact fig-env="figure" fig-pos="htb" fig-cap="**Data Poisoning Impact**: A nominal pipeline (top) and a poisoned pipeline (bottom) pass through the same four stages. In the illustrated successful attack, a poisoned record admitted at ingestion contaminates the training corpus, pulls the optimizer's gradients toward the attacker's trigger, and yields a backdoored model whose clean accuracy can remain intact, so aggregate validation alone can miss it." fig-alt="Two rows of four boxes joined by arrows: ingestion, training corpus, optimization, and trained model. In the top row, ingestion holds three clean records and the later stages read verified records, gradients follow clean loss, and nominal decision boundary. In the bottom row, the middle record is a red poisoned record, and the later stages are red and read one poisoned record inside, gradients pulled toward trigger, and backdoored model with clean accuracy intact."}
+::: {#fig-poisoning-impact fig-env="figure" fig-pos="htb" fig-cap="**Data Poisoning Impact**: A nominal pipeline (top) and a poisoned pipeline (bottom) pass through the same four stages. In the illustrated successful attack, a poisoned record admitted at ingestion contaminates the training corpus, pulls the optimizer's gradients toward the attacker's trigger, and yields a backdoored model whose clean accuracy can remain intact, so aggregate validation alone can miss it." fig-alt="Two rows of four panels under the headings ingestion, training corpus, optimization, and trained model, joined by arrows. In the nominal row, three green clean records arrive, the corpus is a grid of green record tiles, a gray step descends into the minimum of a set of loss contours, and a straight decision boundary separates hollow and filled points. In the poisoned row, the middle arriving record is red, one tile of the corpus grid is red, a red step bends away from the contour minimum toward a red trigger diamond while a dashed gray path shows the clean direction, and the same decision boundary now has a small red dashed pocket around a trigger diamond on the filled side, labeled backdoor pocket and clean accuracy intact. The arrows in the poisoned row are red."}
 ![](images/svg/poisoning-impact.svg)
 :::
 
@@ -1334,7 +1355,7 @@ After label modification, the attacker can keep the label intact and corrupt the
 
 Whether those examples become poisoning depends on the data boundary. Web scraping, social media feeds, crowdsourced annotation, and untrusted user submissions all allow poisoned records to enter upstream and pass through weak cleaning checks in a "trusted" form. Physical systems add a second path: a sticker on a road sign is an inference-time adversarial attack when the car sees it, but harvesting that image into a training corpus creates a potential poisoning path only if the contribution serves an attack on the learner. Correctly labeled examples of such inputs can instead help train resistance to them. Online learning systems tighten the feedback loop further, allowing an attacker to introduce small increments of malicious data until model behavior drifts without a single obvious anomaly. As diagrammed in @fig-poisoning-attack-example, collaborative settings widen the boundary again: when many clients each contribute model updates to a central aggregator, a single malicious participant can poison the shared global model that aggregation produces.
 
-::: {#fig-poisoning-attack-example fig-env="figure" fig-pos="htb" fig-cap="**Collaborative Poisoning via Aggregation**: In a collaborative learning setting, multiple clients each train on local data and contribute model updates to a central server that aggregates them into a shared global model. A single malicious participant can inject poisoned updates that the server folds into the aggregated model, so the corruption spreads to every client without any one obvious anomaly. This attack surface differs from adversarial examples because it targets the model during *training* rather than at *inference*." fig-alt="An aggregation server at the top computes the weighted mean w t plus 1 equals w t plus the sum over k of n k over n times delta w k. A benign client on the left sends an amber update delta w 1 and a malicious client on the right sends a red poisoned update delta w 2. Dashed red arrows carry the poisoned w t plus 1 back down to the benign client, the malicious client, and a box for clients 3 through N."}
+::: {#fig-poisoning-attack-example fig-env="figure" fig-pos="htb" fig-cap="**Collaborative Poisoning via Aggregation**: In a collaborative learning setting, multiple clients each train on local data and contribute model updates to a central server that aggregates them into a shared global model. A single malicious participant can inject poisoned updates that the server folds into the aggregated model, so the corruption spreads to every client without any one obvious anomaly. This attack surface differs from adversarial examples because it targets the model during *training* rather than at *inference*." fig-alt="A violet aggregation server box at the top shows the weighted mean w t plus 1 equals w t plus the sum over k of n k over n times delta w k, and an inset plot of update vectors drawn from the point w t: three amber honest updates point steeply upward in a narrow fan, one red update delta w 2 points nearly sideways, and a thicker violet aggregate arrow sits between them, tilted away from the honest fan. A row of clients sits below: client 1, a red malicious client 2, client 3, an ellipsis, and client N, each holding a row of small green data tiles, with two red tiles in client 2. Each benign client sends an amber update arrow, delta w 1, delta w 3, and delta w N, up to the server, while client 2 sends a red update delta w 2 marked poisoned. Dashed red arrows labeled w t plus 1 run from the server down to each client."}
 ![](images/svg/poisoning-attack.svg)
 :::
 
@@ -1649,7 +1670,7 @@ Each layer covers a distinct point along the data path, and no single detector c
 
 For the recommendation system, the interception layer in @fig-adversarial-attack-injection examines contributed ratings before they reach training. Its decisions must preserve provenance so later model failures can be traced back to the accepted records.
 
-::: {#fig-adversarial-attack-injection fig-env="figure" fig-pos="htb" fig-cap="**Data Poisoning and Interception Workflow**: Adversaries inject malicious rows into a user-item rating matrix to manipulate model behavior. A defense layer analyzes contributed data and removes suspected malicious records before training. This can reduce poisoning risk but does not guarantee an uncorrupted model." fig-alt="A rating matrix with four user rows and two red sybil rows that rate item 3 as 1 and item 4 as 5. A dashed red arrow labeled no filter runs from the matrix to a red compromised model box in which item 3 is buried and item 4 boosted. A second arrow runs from the matrix into a green interception box listing spectral scores, influence audit, and quarantine suspects, and a green arrow labeled filtered continues to a candidate model box marked validate before release."}
+::: {#fig-adversarial-attack-injection fig-env="figure" fig-pos="htb" fig-cap="**Data Poisoning and Interception Workflow**: Adversaries inject malicious rows into a user-item rating matrix to manipulate model behavior. A defense layer analyzes contributed data and removes suspected malicious records before training. This can reduce poisoning risk but does not guarantee an uncorrupted model." fig-alt="A rating matrix with four user rows and two red sybil rows that rate item 3 as 1 and item 4 as 5. A gray bracket spans every row of the matrix, and a single line leaves its midpoint and forks. The upper branch, a dashed red arrow labeled no filter, reaches a red compromised model box in which item 3 is buried and item 4 boosted. The lower branch, a gray arrow, enters a green interception box labeled spectral scores, influence audit. Inside it, six scored rows drawn as small cell strips split: four plain rows pass to a kept stack, and the two red rows are diverted into a dashed red quarantine tray. A green arrow labeled filtered carries the kept rows to a candidate model box marked validate before release."}
 ![](images/svg/poisoning-interception.svg)
 :::
 
@@ -1663,7 +1684,7 @@ After the source boundary, anomaly detection asks whether a candidate training e
 
 More coordinated attacks require structure-aware checks. Clustering methods such as K-means, DBSCAN, and hierarchical clustering look for anomalous groups or isolated points rather than single extreme values. The autoencoder ingestion gate diagrammed in @fig-autoencoder adds a learned representation to the screening pipeline: the model compresses inputs through a bottleneck layer $\EncoderLatentRepresentation$, accepting records whose reconstruction error $\AutoencoderReconstructionError$ falls below threshold $\ResponseThreshold$ and quarantining anomalous outliers. Each method has a failure mode. Clean-label poisons need not be statistical outliers. Clustering depends on the representation, and autoencoders can reconstruct unfamiliar inputs well or learn an attack pattern from a contaminated reference corpus. Each gate therefore needs evaluation on both poisons and legitimate rare examples.
 
-::: {#fig-autoencoder fig-env="figure" fig-pos="htb" fig-cap="**Autoencoder Ingestion Gate**: An autoencoder trained on trusted data learns to compress inputs through a narrow latent layer $\EncoderLatentRepresentation$ and reconstruct them. Reconstruction error supplies an anomaly score, not proof that an input is poisoned. The gate accepts records whose reconstruction error $\AutoencoderReconstructionError$ stays at or below a threshold $\ResponseThreshold$ calibrated on held-out clean data and quarantines the rest." fig-alt="Symmetric hourglass network: an encoder narrows seven input units through five and three hidden units to a two-unit latent layer, and a decoder expands back to seven reconstructed outputs. An arrow from the output leads to a reconstruction error box, L rec equals the squared norm of x minus x hat, which branches to a green accept box for L rec at most tau and a red quarantine box for L rec greater than tau."}
+::: {#fig-autoencoder fig-env="figure" fig-pos="htb" fig-cap="**Autoencoder Ingestion Gate**: An autoencoder trained on trusted data learns to compress inputs through a narrow latent layer $\EncoderLatentRepresentation$ and reconstruct them. Reconstruction error supplies an anomaly score, not proof that an input is poisoned. The gate accepts records whose reconstruction error $\AutoencoderReconstructionError$ stays at or below a threshold $\ResponseThreshold$ calibrated on held-out clean data and quarantines the rest." fig-alt="Symmetric hourglass network: an encoder narrows seven input units through five and three hidden units to a two-unit latent layer, and a decoder expands back to seven reconstructed outputs. An arrow from the output leads to a reconstruction error panel, L rec equals the squared norm of x minus x hat, containing a horizontal score axis labeled L rec at its arrow end and split by a dashed threshold tau. Left of tau is a green accept zone, L rec at most tau, holding a stacked cluster of green record dots at low scores; right of tau is a red quarantine zone, L rec greater than tau, holding two red record dots at high scores."}
 ![](images/svg/autoencoder.svg)
 :::
 

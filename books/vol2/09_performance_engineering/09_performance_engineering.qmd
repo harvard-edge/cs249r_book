@@ -170,7 +170,7 @@ Verify understanding of system-level performance diagnosis:
 
 Triage starts outside the kernel. A missed latency or throughput target with low accelerator utilization points first to input, host, or communication stalls, because no kernel optimization helps an accelerator that is waiting for work. Only once the device is busy does the question become whether its kernels are compute-bound or memory-bound (@fig-iron-law-flowchart). A busy GPU running a workload whose arithmetic intensity sits below the machine's ridge point, the intensity at which its bandwidth and compute bounds meet (@sec-performance-engineering-roofline), routes to memory-bound remedies such as operator fusion or weight quantization.
 
-::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron law diagnostic flowchart**: A troubleshooting flow that starts from a missed step-time or token-latency target and low accelerator utilization, branches through I/O, CPU, and communication-overhead checks, and classifies the workload as compute-bound or memory-bound at the leaves. Compute-bound paths point to lower-precision arithmetic and to reductions in active work such as MoE routing, whose saving becomes weight bytes rather than arithmetic in batch-one decode (@sec-performance-engineering-moe); memory-bound paths point to operator fusion, tiling, weight quantization, and speculative decoding. Overhead-bound symptoms (data loading, preprocessing, communication) are surfaced earlier in the flow and addressed before the final compute/memory classification." fig-alt="Troubleshooting flowchart starting from a box reading Target is missed. A GPU-utilization check branches right through I/O-bound and CPU-bound checks, whose yes branches lead to data-pipeline remedies and whose final no branch leads to communication overhead. Its no branch leads down to an intensity-versus-ridge check that splits into compute-bound, with FP8 math and MoE routing below it, and memory-bound, with operator fusion and INT4 or speculative decoding below it. Every remedy joins a bus into a Re-profile workload box, and a dashed loop returns to the start."}
+::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron law diagnostic flowchart**: A troubleshooting flow that starts from a missed step-time or token-latency target and low accelerator utilization, branches through I/O, CPU, and communication-overhead checks, and classifies the workload as compute-bound or memory-bound at the leaves. Compute-bound paths point to lower-precision arithmetic and to reductions in active work such as MoE routing, whose saving becomes weight bytes rather than arithmetic in batch-one decode (@sec-performance-engineering-moe); memory-bound paths point to operator fusion, tiling, weight quantization, and speculative decoding. Overhead-bound symptoms (data loading, preprocessing, communication) are surfaced earlier in the flow and addressed before the final compute/memory classification." fig-alt="Troubleshooting flowchart starting from a box reading Target is missed. A GPU-utilization check sends its yes branch right along an overhead lane: an I/O-bound check whose yes branch leads to a green More DL workers box, then a CPU-bound check whose yes branch leads to a green Offload preprocessing box, and whose no branch ends at a violet Comm overhead box. The utilization check's no branch leads down into a panel titled Intensity greater than ridge, which draws a small roofline: a blue rising slope over a blue memory-bound region meets a flat orange ceiling over an orange compute-bound region at a dot marked ridge. Below the blue region, a blue group holds operator fusion and INT4 or speculative decoding; below the orange region, an orange group holds FP8 math and MoE routing. Every remedy joins a bus into a Re-profile workload box, and a dashed loop labeled iterate until the target is met returns to the start."}
 ![](images/svg/diagnostic-flow.svg)
 
 <!--
@@ -473,12 +473,12 @@ class MemoryWallScenario:
     check(250 * nanosecond <= hbm_latency <= 350 * nanosecond, "HBM3 access latency should be ~300 ns")
     check(smem_tier.latency_cycles < l2_tier.latency_cycles, "Shared memory must be faster than L2")
     check(20 * ms < full_read_time < 30 * ms, "Full-HBM read should take tens of ms, far above inference latency targets")
-    # The TikZ roofline in @fig-roofline-model is static: its labels read
-    # "FP16 peak: 989 TFLOP/s", "3.35 TB/s", and "ridge ~295 FLOP/B". Guard them here.
+    # @fig-roofline-model draws these values from the registry, but its fig-alt
+    # text reads "989 TFLOP/s", "3.35 TB/s", and "near 295 FLOP per byte". Guard them here.
     fp16_peak_tflop_per_s = Hardware.Cloud.H100.compute.peak_flops.to(TFLOP / second).magnitude
-    check(abs(fp16_peak_tflop_per_s - 989) / 989 < 0.02, "TikZ roofline FP16 ceiling label (989 TFLOP/s) drifted")
-    check(abs(bw.to(TB / second).magnitude - 3.35) < 0.005, "TikZ roofline slope label (3.35 TB/s) drifted")
-    check(285 < fp16_peak_tflop_per_s / bw.to(TB / second).magnitude < 305, "TikZ roofline ridge label (~295 FLOP/B) drifted")
+    check(abs(fp16_peak_tflop_per_s - 989) / 989 < 0.02, "Roofline alt-text FP16 ceiling (989 TFLOP/s) drifted")
+    check(abs(bw.to(TB / second).magnitude - 3.35) < 0.005, "Roofline alt-text slope (3.35 TB/s) drifted")
+    check(285 < fp16_peak_tflop_per_s / bw.to(TB / second).magnitude < 305, "Roofline alt-text ridge (~295 FLOP/B) drifted")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp8_tflop_per_s_str = fmt_qty_int(flops_fp8, TFLOP / second, commas=False)
@@ -717,7 +717,7 @@ class WorkloadIntensityCalc:
         "Attention should be memory-bound unfused and in decode, compute-bound when tiled",
     )
     check(attn_decode_gqa_intensity < h100_ridge / 10, "GQA decode attention should stay far below the ridge")
-    # The TikZ roofline in @fig-roofline-model places static markers at these intensities.
+    # @fig-roofline-model plots these intensities; its prose and alt text name them. Guard the ranges.
     check(1300 < gemm_intensity < 1430, "Roofline GEMM marker (~1,365 FLOP/B) drifted")
     check(55 < attn_unfused_intensity < 66, "Roofline unfused-attention marker (~60 FLOP/B) drifted")
     check(1000 < attn_tiled_intensity < 1050, "Roofline tiled-attention marker (~1,024 FLOP/B) drifted")
@@ -769,112 +769,160 @@ Under these traffic assumptions, only batched GEMM and tiled prefill attention e
 The operations this chapter optimizes fall on both sides of the H100's FP16 ridge (@fig-roofline-model). Batch-one decode and unfused attention prefill sit on the HBM bandwidth slope, while tiled prefill and large GEMM operations reach the Tensor Core ceiling. Each position identifies the tighter ideal bound, not measured performance at that bound; a kernel that runs below the envelope may first need better scheduling, locality, or parallelism before either peak resource rate becomes limiting.
 
 ::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The roofline model**: Attainable throughput versus arithmetic intensity on log-log axes for an H100. The blue slope is the HBM bandwidth bound (`{python} WideningGap.h100_bw_str`) and the orange ceiling is FP16 Tensor Core peak (`{python} WideningGap.h100_peak_flops_str`); they meet at the ridge point, roughly `{python} WideningGap.h100_ridge_str` FLOP/byte. Markers place four operations from the workload comparison at their FP16 intensities: batch-1 decode and unfused attention prefill sit on the slope, while tiled attention prefill and a large GEMM reach the ceiling. Markers show ideal bounds at the stated FP16 intensities, not achieved throughput." fig-alt="Log-log roofline plot. A blue diagonal memory-bandwidth line labeled 3.35 TB/s rises to a ridge point near 295 FLOP per byte, where it meets an orange horizontal compute ceiling labeled FP16 peak 989 TFLOP/s. The region left of the ridge is labeled memory-bound and the region right of it compute-bound. Four markers: LLM decode at batch 1 and unfused attention prefill on the blue slope; tiled attention prefill and a 4096 by 4096 GEMM on the orange ceiling."}
-```{.tikz}
-\begin{tikzpicture}[
-    >=Stealth,
-    font=\small
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ H100 ROOFLINE WITH WORKLOAD MARKERS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-roofline-model
+# │
+# │ Goal: Place the operations of @tbl-arithmetic-intensity on the H100 FP16
+# │       roofline so the reader sees which side of the ridge each one falls on.
+# │ Show: Blue HBM slope, orange FP16 ceiling, ridge dot and dropline, four
+# │       neutral markers at their ideal bounds.
+# │ How: Peak and bandwidth from WideningGap.h100 (registry); intensities from
+# │      WorkloadIntensityCalc; attainable = min(peak, bandwidth x intensity).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6, 3.7))
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+_peak = WideningGap.h100.compute.peak_flops.to(TFLOP / second).magnitude
+_bw = WideningGap.h100.memory.bandwidth.to(TB / second).magnitude  # TFLOP/s per FLOP/byte
+_ridge = WideningGap.h100_ridge
+_x_lo, _x_hi, _y_lo, _y_hi = 0.1, 1e5, 0.1, 2e4
+
+def _bound(i):
+    return min(_peak, _bw * i)
+
+def _backing(key, alpha):
+    # Label backing in the region's own blended tint, so gridlines never cross text.
+    rgb = np.array([int(COLORS[key][k : k + 2], 16) for k in (1, 3, 5)]) / 255
+    return dict(boxstyle='square,pad=0.15', fc=1 - alpha * (1 - rgb), ec='none')
+
+_mem_bg, _cmp_bg = _backing('BlueL', 0.35), _backing('OrangeL', 0.45)
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.axvspan(_x_lo, _ridge, color=COLORS['BlueL'], alpha=0.35, lw=0, zorder=0)
+ax.axvspan(_ridge, _x_hi, color=COLORS['OrangeL'], alpha=0.45, lw=0, zorder=0)
+ax.plot([_x_lo, _ridge], [_bw * _x_lo, _peak], color=COLORS['BlueLine'], lw=2.4, solid_capstyle='butt', zorder=3)
+ax.plot([_ridge, _x_hi], [_peak, _peak], color=COLORS['OrangeLine'], lw=2.4, solid_capstyle='butt', zorder=3)
+ax.plot([_ridge, _ridge], [_y_lo, _peak], color=COLORS['secondary'], lw=1.0, ls=(0, (4, 3)), zorder=2)
+ax.plot(_ridge, _peak, 'o', ms=7, color=COLORS['primary'], zorder=5)
+
+# Workload markers sit on the envelope: (intensity, label, text offset in points, alignment).
+_ops = [
+    (WorkloadIntensityCalc.decode_intensity_val, 'LLM decode, batch 1', (9, -9), 'left', 'top', None),
+    (WorkloadIntensityCalc.attn_unfused_intensity, 'Attention prefill, unfused', (-6, 6), 'right', 'bottom', None),
+    (WorkloadIntensityCalc.gemm_intensity, 'GEMM 4096×4096', (6, -16), 'left', 'top', (0, 1)),
+    (WorkloadIntensityCalc.attn_tiled_intensity, 'Attention prefill, tiled', (24, -44), 'center', 'top', (0.27, 1)),
 ]
+for _i, _name, _off, _ha, _va, _lead in _ops:
+    _y = _bound(_i)
+    ax.plot(_i, _y, 'o', ms=7, color='white', mec=COLORS['primary'], mew=1.6, zorder=6)
+    _arrow = None
+    if _lead is not None:
+        _arrow = dict(arrowstyle='-', color=COLORS['secondary'], lw=0.7, shrinkA=0, shrinkB=4.5, relpos=_lead)
+    ax.annotate(
+        _name,
+        xy=(_i, _y),
+        xytext=_off,
+        textcoords='offset points',
+        ha=_ha,
+        va=_va,
+        fontsize=11,
+        color=COLORS['primary'],
+        arrowprops=_arrow,
+        zorder=7,
+        bbox=_mem_bg if _i < _ridge else _cmp_bg,
+    )
 
-    % Semantic roofline palette: blue = memory-bound slope, orange = compute ceiling
-    \providecolor{BlueLine}{HTML}{006395}
-    \providecolor{OrangeLine}{HTML}{E67817}
-    \providecolor{SlateGrey}{RGB}{112,128,144}
-    \providecolor{BorderGrey}{RGB}{203,213,225}
+# Slope label rotated to the line's on-screen angle (axes fixed first).
+_xl = 3.0
+ax.set_xscale('log')
+ax.set_yscale('log')
+ax.set_xlim(_x_lo, _x_hi)
+ax.set_ylim(_y_lo, _y_hi)
+fig.canvas.draw()
+_p0 = ax.transData.transform((_xl, _bw * _xl))
+_p1 = ax.transData.transform((_xl * 10, _bw * _xl * 10))
+_angle = np.degrees(np.arctan2(_p1[1] - _p0[1], _p1[0] - _p0[0]))
+ax.annotate(
+    f'HBM3: {WideningGap.h100_bw_str}',
+    xy=(_xl, _bw * _xl),
+    xytext=(4, -10),
+    textcoords='offset points',
+    rotation=_angle,
+    rotation_mode='anchor',
+    ha='left',
+    va='top',
+    fontsize=11,
+    fontweight='bold',
+    color=COLORS['BlueLine'],
+)
+ax.annotate(
+    f'FP16 peak: {WideningGap.h100_peak_flops_str}',
+    xy=(_x_hi, _peak),
+    xytext=(-6, 6),
+    textcoords='offset points',
+    ha='right',
+    va='bottom',
+    fontsize=11,
+    fontweight='bold',
+    color=COLORS['OrangeLine'],
+    bbox=_cmp_bg,
+)
+ax.annotate(
+    f'Ridge ≈ {WideningGap.h100_ridge_str} FLOP/byte',
+    xy=(_ridge, _y_lo),
+    xytext=(-6, 8),
+    textcoords='offset points',
+    ha='right',
+    va='bottom',
+    fontsize=11,
+    color=COLORS['primary'],
+    bbox=_mem_bg,
+)
+ax.text(
+    np.sqrt(_x_lo * _ridge),
+    _y_hi * 0.7,
+    'Memory-bound',
+    ha='center',
+    va='top',
+    fontsize=11,
+    fontweight='bold',
+    color=COLORS['BlueLine'],
+    bbox=_mem_bg,
+)
+ax.text(
+    np.sqrt(_ridge * _x_hi),
+    _y_hi * 0.7,
+    'Compute-bound',
+    ha='center',
+    va='top',
+    fontsize=11,
+    fontweight='bold',
+    color=COLORS['OrangeLine'],
+    bbox=_cmp_bg,
+)
 
-    % =========================================================================
-    % COORDINATE MAPPING (log-log)
-    % x_canvas = 2.0 * (log10(x) + 1)   for x in [0.1, 10^4] FLOP/byte
-    % y_canvas = 1.1 * (log10(y) + 1)   for y in TFLOP/s
-    % Slope: y = 3.35 x (H100 HBM3); ceiling: 989 TFLOP/s FP16.
-    % Ridge: x = 295.2 -> x_c = 6.940; y = 989 -> y_c = 4.395
-    % Workload markers use the FP16 intensities of @tbl-arithmetic-intensity
-    % (guarded in the workload-intensity-calc cell):
-    %   decode B=1 ~1 (x_c 2.00), unfused attention prefill ~60 (x_c 5.56),
-    %   tiled attention prefill ~1,024 (x_c 8.02), GEMM 4096^2 ~1,365 (x_c 8.27)
-    % =========================================================================
-
-    % Regime shading
-    \fill[BlueLine!5!white] (0, 0) rectangle (6.940, 5.35);
-    \fill[OrangeLine!7!white] (6.940, 0) rectangle (10.2, 5.35);
-
-    % Grid lines (subtle, one per decade)
-    \foreach \x in {2, 4, 6, 8, 10} {
-        \draw[BorderGrey!60, line width=0.4pt] (\x, 0) -- (\x, 5.35);
-    }
-    \foreach \y in {1.1, 2.2, 3.3, 4.4} {
-        \draw[BorderGrey!60, line width=0.4pt] (0, \y) -- (10.2, \y);
-    }
-
-    % Region labels
-    \node[draw=BlueLine!60, fill=white, rounded corners=4pt, line width=0.7pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{BlueLine}]
-        at (3.0, 5.75) {MEMORY-BOUND};
-    \node[draw=OrangeLine!70, fill=white, rounded corners=4pt, line width=0.7pt,
-          inner sep=3.5pt, font=\scriptsize\bfseries\color{OrangeLine!85!black}]
-        at (8.87, 5.75) {COMPUTE-BOUND};
-
-    % Ridge vertical dashed line
-    \draw[SlateGrey!80, line width=0.8pt, dash pattern=on 4pt off 3pt]
-        (6.940, 0) -- (6.940, 4.395);
-
-    % Memory-bandwidth slope and compute ceiling
-    \draw[BlueLine, line width=1.8pt] (0, 0.578) -- (6.940, 4.395);
-    \draw[OrangeLine, line width=1.8pt] (6.940, 4.395) -- (10.2, 4.395);
-    \fill[black!75] (6.940, 4.395) circle (2.4pt);
-
-    % Slope and ceiling labels
-    \node[font=\scriptsize\bfseries\color{BlueLine}, rotate=28.8, anchor=south]
-        at (3.2, 2.50) {HBM3 bandwidth: 3.35 TB/s};
-    \node[font=\scriptsize\bfseries\color{OrangeLine!85!black}, anchor=south east]
-        at (10.2, 4.465) {FP16 peak: 989 TFLOP/s};
-    \node[font=\scriptsize\bfseries\color{black!75}, anchor=south east]
-        at (6.840, 0.18) {ridge $\approx$ 295 FLOP/B};
-
-    % =========================================================================
-    % WORKLOAD POINTS (attainable bound at each intensity)
-    % =========================================================================
-    % 1. LLM decode, batch 1 (~1 FLOP/B)
-    \fill[black!75] (2.00, 1.678) circle (2.6pt);
-    \node[font=\scriptsize\color{black!85}, anchor=north west, align=left]
-        at (2.12, 1.55) {LLM decode\\[-1pt]{\tiny\color{black!65}batch 1}};
-
-    % 2. Attention prefill, unfused (~60 FLOP/B)
-    \fill[black!75] (5.56, 3.635) circle (2.6pt);
-    \node[font=\scriptsize\color{black!85}, anchor=north west, align=left]
-        at (5.68, 3.50) {Attention prefill\\[-1pt]{\tiny\color{black!65}unfused}};
-
-    % 3. Attention prefill, tiled (~1,024 FLOP/B)
-    \fill[black!75] (8.02, 4.395) circle (2.6pt);
-    \draw[black!50, line width=0.5pt] (8.02, 4.295) -- (8.02, 3.95);
-    \node[font=\scriptsize\color{black!85}, anchor=north, align=center]
-        at (8.02, 3.92) {Attention prefill\\[-1pt]{\tiny\color{black!65}tiled}};
-
-    % 4. GEMM 4096 x 4096 (~1,365 FLOP/B)
-    \fill[black!75] (8.27, 4.395) circle (2.6pt);
-    \draw[black!50, line width=0.5pt] (8.27, 4.295) -- (8.27, 4.065) -- (9.05, 4.065) -- (9.05, 3.20);
-    \node[font=\scriptsize\color{black!85}, anchor=north, align=center]
-        at (9.05, 3.17) {GEMM\\[-1pt]{\tiny\color{black!65}4096$\times$4096}};
-
-    % =========================================================================
-    % AXES
-    % =========================================================================
-    \draw[->, SlateGrey!90!black, line width=0.9pt] (0, 0) -- (10.5, 0);
-    \draw[->, SlateGrey!90!black, line width=0.9pt] (0, 0) -- (0, 5.5);
-
-    \foreach \y/\val in {0/0.1, 1.1/1, 2.2/10, 3.3/100, 4.4/1{,}000} {
-        \draw[SlateGrey!90!black, line width=0.7pt] (0, \y) -- (-0.1, \y);
-        \node[font=\scriptsize\color{black!85}, anchor=east] at (-0.14, \y) {\val};
-    }
-    \foreach \x/\val in {0/0.1, 2/1, 4/10, 6/100, 8/1{,}000, 10/10{,}000} {
-        \draw[SlateGrey!90!black, line width=0.7pt] (\x, 0) -- (\x, -0.1);
-        \node[font=\scriptsize\color{black!85}, anchor=north] at (\x, -0.14) {\val};
-    }
-
-    % Axis titles
-    \node[font=\small\bfseries\color{black!90}, rotate=90] at (-1.05, 2.7) {Attainable throughput (TFLOP/s)};
-    \node[font=\small\bfseries\color{black!90}] at (5.1, -0.8) {Arithmetic intensity (FLOP/byte)};
-
-\end{tikzpicture}
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_xticks([0.1, 1, 10, 100, 1000, 10000, 100000])
+ax.set_xticklabels(['0.1', '1', '10', '100', '1,000', '10,000', '100,000'])
+ax.set_yticks([0.1, 1, 10, 100, 1000])
+ax.set_yticklabels(['0.1', '1', '10', '100', '1,000'])
+ax.minorticks_off()
+ax.grid(True, which='major', lw=0.6)
+ax.tick_params(labelsize=11)
+ax.set_xlabel('Arithmetic intensity (FLOP/byte)', fontsize=11.5)
+ax.set_ylabel('Attainable throughput (TFLOP/s)', fontsize=11.5)
+plt.tight_layout()
+plt.show()
+plt.close()
 ```
 :::
 
@@ -1195,7 +1243,7 @@ The cost must be measured for the selected workload and collection settings. The
 
 Profiling levels are useful only if they guide the drill-down from symptom to intervention. ML system profiling partitions observability across four tiers, trading observational breadth for diagnostic detail. @Fig-optimization-hierarchy structures this descent from top-level application symptoms down to hardware root causes, tracing how diagnostic scope narrows from fleet-wide metrics over hours to streaming multiprocessor counters over microseconds.
 
-::: {#fig-optimization-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The profiling hierarchy**: Diagnosis descends from the application symptom to the hardware root cause. Each rung names the evidence that level exposes and a representative tool; the right column gives the scope and time scale one sample covers. Each lower level trades breadth for the detail needed to isolate a root cause." fig-alt="Four stacked level cards that narrow from top to bottom, joined by short vertical lines. Level 4, application and fleet: TTFT, ITL, tokens per second, MFU, with Prometheus and OpenTelemetry. Level 3, framework and distributed traces: operator time, collectives, stragglers, with PyTorch Profiler. Level 2, kernel timeline: launch gaps, stream overlap, with Nsight Systems. Level 1, hardware counters: bandwidth, occupancy, stalls, with Nsight Compute. A left arrow runs from symptom at the top to root cause at the bottom. A right column lists scope and time scale per level: fleet over hours, rank over steps, stream over milliseconds, SM over microseconds."}
+::: {#fig-optimization-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The profiling hierarchy**: Diagnosis descends from the application symptom to the hardware root cause. Each rung names the evidence that level exposes and a representative tool; the navy label under each tool gives the scope and time scale one sample covers, and each highlighted window expands into the trace below it. Each lower level trades breadth for the detail needed to isolate a root cause." fig-alt="Four numbered levels stacked from 4 at the top to 1 at the bottom, each with a name, its evidence, and a tool on the left and a small illustrative trace on the right. Level 4, application and fleet, with Prometheus and OpenTelemetry: a latency line over hours that spikes above a dashed red SLO line. Level 3, framework and distributed traces, with PyTorch Profiler: bars for three ranks across three steps separated by dashed barriers, one rank's bar in the last step long and red, labeled straggler. Level 2, kernel timeline, with Nsight Systems: orange kernels on a compute stream and violet blocks on a comm stream, with a red-shaded launch gap between two kernels. Level 1, hardware counters, with Nsight Compute: gauges for bandwidth, occupancy, and stalls, the stalls gauge in red. A navy window in each of the upper three traces opens through a shaded wedge into the full trace below it. A navy label under each tool reads fleet hours, rank steps, stream milliseconds, or SM microseconds."}
 ![](images/svg/profiling-hierarchy.svg)
 :::
 
@@ -1762,7 +1810,7 @@ class FusionTrafficCalc:
 
 Intermediate tensors $\FusionIntermediateTensor_1$ and $\FusionIntermediateTensor_2$ each occupy the same memory as the output $\FusionOutputTensor$.\index{Intermediate tensor!materialization overhead} For the Llama 2 70B shape (hidden dimension `{python} FusionTrafficCalc.hidden_dim_str`) at a batch of `{python} FusionTrafficCalc.batch_size_str` tokens in FP16, each intermediate tensor is `{python} FusionTrafficCalc.tensor_mb_str`. The unfused execution materializes `{python} FusionTrafficCalc.materialized_mb_str` of intermediate tensors, corresponding to `{python} FusionTrafficCalc.traffic_mb_str` of HBM traffic if each write and reread reaches that boundary. A fused kernel can avoid these transfers by keeping the needed tiles of $\FusionIntermediateTensor_1$ and $\FusionIntermediateTensor_2$ in registers or shared memory within the SM. @Fig-fusion-before-after illustrates this idealized contrast; it does not require the complete intermediate tensors to fit on chip at once.
 
-::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator fusion before and after**: The diagram counts activation transfers. Separate kernels write and reread the intermediates $\FusionIntermediateTensor_1$ and $\FusionIntermediateTensor_2$ (red), while the fused kernel passes them between stages on chip, leaving only the read of $\FusionInputTensor$ and the write of $\FusionOutputTensor$. Weight reads and small parameter vectors are not drawn. Transfer counts alone do not determine total byte savings when tensors differ in size." fig-alt="Two stacked panels, each below an HBM bar. Top, unfused: Linear, GELU, and LayerNorm run as kernels 1 to 3, with six arrows to and from HBM: read X, write Z1, read Z1, write Z2, read Z2, and write Y, the four Z arrows drawn in red. Bottom, fused: one kernel box contains Linear, GELU, and LayerNorm joined by arrows labeled Z1 and Z2, with only read X and write Y crossing to HBM."}
+::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator fusion before and after**: The diagram counts activation transfers. Separate kernels write and reread the intermediates $\FusionIntermediateTensor_1$ and $\FusionIntermediateTensor_2$ (red), while the fused kernel passes them between stages on chip, leaving only the read of $\FusionInputTensor$ and the write of $\FusionOutputTensor$. Weight reads and small parameter vectors are not drawn. Transfer counts alone do not determine total byte savings when tensors differ in size." fig-alt="Two stacked panels laid out left to right in execution order, each with an HBM band above an on-chip SM row. Top, unfused, 6 activation transfers: HBM holds bars for X, Z1, Z2, and Y, with Z1 and Z2 shaded red and each spanning from the write that creates it to the read that consumes it. Linear, GELU, and LayerNorm run as kernels 1 to 3, and vertical arrows read X, write Z1, read Z1, write Z2, read Z2, and write Y, the four Z arrows red, forming a sawtooth between the kernels and HBM. Bottom, fused, 2 activation transfers: HBM keeps only X and Y, with dashed empty outlines reading no Z1 in HBM and no Z2 in HBM. One fused kernel box contains Linear, GELU, and LayerNorm joined by green arrows labeled Z1 and Z2, and only the read of X and the write of Y cross to HBM."}
 ![](images/svg/operator-fusion.svg)
 
 :::
@@ -1936,7 +1984,7 @@ class FlashAttentionTiling:
 
 FlashAttention achieves this traffic reduction by staging matrix blocks across the memory hierarchy, as mapped in @fig-performance-engineering-flashattention-tiling: instead of materializing the quadratic $\SequenceLength{\times}\SequenceLength$ score matrix in off-chip HBM, the kernel streams $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ tiles into on-chip storage and evaluates softmax statistics online. Consider illustrative $128{\times}128$ tiles. The input payload includes a block of $\AttentionQueryMatrix$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), a block of $\AttentionKeyMatrix$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), and a block of $\AttentionValuesMatrix$ (`{python} FlashAttentionTiling.block_kb_str`), totaling approximately `{python} FlashAttentionTiling.total_kb_str`. This input payload is smaller than the H100's `{python} FlashAttentionTiling.shared_kb_str` of shared memory per SM, but it is not the complete kernel working set: accumulators, softmax state, and buffering also consume registers or shared memory. The tile score $\AttentionScoreTile= \AttentionQueryMatrix_i \AttentionKeyMatrix_j^T$ is computed and consumed on chip;\index{Tiling!on-chip SRAM blocks} it is never materialized as a full HBM tensor. The illustrative schedule iterates over $8192/128 =$ `{python} FlashAttentionTiling.tiles_per_dim_str` column tiles for each of `{python} FlashAttentionTiling.tiles_per_dim_str` row tiles, reloading tiles as required. The quadratic $\SequenceLength{\times}\SequenceLength$ score and probability matrices are never materialized: the persistent per-head tensors are $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, $\AttentionValuesMatrix$, $\AttentionHeadOutput$, and $\mathcal{O}(\SequenceLength)$ softmax statistics.
 
-::: {#fig-performance-engineering-flashattention-tiling fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory hierarchy tiling**: Block-by-block scheduling of Q, K, and V matrices loaded into on-chip shared memory (SRAM). Attention scores are computed and rescaled online without materializing the quadratic $\SequenceLength \times \SequenceLength$ intermediate matrix in off-chip HBM, keeping persistent attention workspace linear in sequence length for fixed head dimension. HBM traffic still depends on SRAM capacity and tile reloads." fig-alt="Two horizontal bands. The upper HBM band holds Q, K, and V matrices of size S by d, a dashed red box for the S by S score matrix labeled never written, 134 MB per head at S = 8,192, and a green output matrix O. Arrows load Q, K, and V tiles down into the lower SRAM band, where Q and K tiles feed a score tile, and the V tile joins the online softmax box that keeps a running max and sum; a green arrow writes O tiles back up to HBM."}
+::: {#fig-performance-engineering-flashattention-tiling fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory hierarchy tiling**: Block-by-block scheduling of Q, K, and V matrices loaded into on-chip shared memory (SRAM). Attention scores are computed and rescaled online without materializing the quadratic $\SequenceLength \times \SequenceLength$ intermediate matrix in off-chip HBM, keeping persistent attention workspace linear in sequence length for fixed head dimension. HBM traffic still depends on SRAM capacity and tile reloads." fig-alt="Two side-by-side regions. The left HBM region, labeled 3.35 TB/s, draws the attention operands as strips around a six-by-six grid: Q as a vertical strip of row blocks on the left, K transpose as a horizontal strip of column blocks above, V as a strip of blocks below, and O as a vertical strip on the right. The grid is the S by S score matrix, drawn with dashed red lines and labeled never written, 134 MB per head at S = 8,192. Block Q i, block K j, and block V j are filled dark blue; in grid row i, two tiles are shaded gray as already processed, tile S i j is orange, and an orange arrow runs along the rest of the row; block O i is green. A blue arrow labeled load Q i, K j, V j enters the right SRAM region, labeled on chip, about 228 KB per SM, which holds the three dark blue tiles feeding an orange score tile, S i j equals Q i K j transpose, then an online softmax box with running max and sum, then a green accumulate O i box that V j also feeds. A green arrow labeled write O i returns to HBM."}
 ![](images/svg/flashattention-tiling.svg)
 
 <!--
@@ -2159,7 +2207,7 @@ The original breakthrough made memory movement part of the algorithmic cost mode
 
 The `{python} FlashAttentionSavings.savings_mult_str` ratio measures traffic, the bytes moved through HBM. Eliminating the quadratic intermediate also frees capacity, the bytes that must be resident at once, and that second quantity grows differently with sequence length. Standard attention's workspace rises as $\mathcal{O}(\SequenceLength^2)$ while FlashAttention's rises as $\mathcal{O}(\SequenceLength)$, so the gap widens with every doubling of context (@fig-flashattention-memory-savings); the much larger ratios on that plot are capacity ratios and should not be read as traffic or speed. The freed capacity matters for serving because prefill and decode often share a replica. While a long prompt is being prefilled, its score workspace occupies HBM alongside the KV cache of every request already decoding, so removing that workspace leaves room for the scheduler to admit more concurrent requests.
 
-::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory savings**: Attention workspace for 32 FP16 heads grows as $\mathcal{O}(\SequenceLength^2)$ when standard attention materializes the $\SequenceLength{\times}\SequenceLength$ score matrix in HBM, but only as $\mathcal{O}(\SequenceLength)$ when FlashAttention keeps running softmax statistics instead. The green gap is memory freed for KV cache, activations, or larger batches, and it widens with every doubling of context. Its ratios compare resident workspace (capacity), not the HBM traffic ratio quoted in the text." fig-alt="Log-log plot of attention workspace in gigabytes versus sequence length from 512 to 128K tokens. A red standard-attention line rises steeply; a blue FlashAttention line rises slowly; the region between them is shaded green. Dashed vertical lines mark 8K and 65K contexts, with callouts reading 4,096 times smaller and 32,768 times smaller."}
+::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory savings**: Attention workspace for 32 FP16 heads grows as $\mathcal{O}(\SequenceLength^2)$ when standard attention materializes the $\SequenceLength{\times}\SequenceLength$ score matrix in HBM, but only as $\mathcal{O}(\SequenceLength)$ when FlashAttention keeps running softmax statistics instead. The green gap is memory freed for KV cache, activations, or larger batches, and it widens with every doubling of context. Its ratios compare resident workspace (capacity), not the HBM traffic ratio quoted in the text." fig-alt="Log-log plot of attention workspace in gigabytes versus sequence length from 512 to 128K tokens. A red line labeled standard attention, order S squared, rises steeply; a blue line labeled FlashAttention, order S, rises slowly; the region between them is shaded green and labeled memory freed. Dashed vertical lines mark 8K and 64K contexts; at each, a double arrow spans the gap between the lines, labeled 4,096 times smaller and 32,768 times smaller."}
 
 ```{python}
 #| echo: false
@@ -2179,7 +2227,7 @@ The `{python} FlashAttentionSavings.savings_mult_str` ratio measures traffic, th
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6, 3.6))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 S_vals = np.logspace(np.log2(512), np.log2(131072), num=200, base=2.0)
@@ -2202,34 +2250,74 @@ ax.set_xscale('log', base=2)
 ax.set_yscale('log')
 ax.set_xticks([512, 2048, 8192, 32768, 131072])
 ax.set_xticklabels(['512', '2K', '8K', '32K', '128K'])
-ax.set_xlabel('Sequence length $S$ (tokens)')
-ax.set_ylabel('Attention workspace (GB, 32 heads, FP16)')
+ax.tick_params(labelsize=11)
+ax.set_xlabel('Sequence length $S$ (tokens)', fontsize=11.5)
+ax.set_ylabel('Attention workspace (GB)', fontsize=11.5)
 y_top = 8e3
 ax.set_ylim(3e-5, y_top)
 
-for n_val, name in [(8192, '8K context'), (65536, '65K context')]:
-    ax.axvline(x=n_val, color=COLORS['primary'], linestyle='--', linewidth=1.0, alpha=0.7)
-    ax.text(n_val * 0.93, y_top * 0.55, name, ha='right', va='top', fontsize=9, color=COLORS['primary'])
+for n_val, name in [(8192, '8K context'), (65536, '64K context')]:
+    ax.axvline(x=n_val, color=COLORS['secondary'], linestyle=(0, (4, 3)), linewidth=0.9, zorder=1)
+    ax.text(n_val * 0.93, y_top * 0.55, name, ha='right', va='top', fontsize=11, color=COLORS['primary'])
+
+# Label backing matches the shaded gap (GreenFill at alpha 0.8 over white).
+_gap_rgb = np.array([int(COLORS['GreenFill'][k : k + 2], 16) for k in (1, 3, 5)]) / 255
+_gap_tint = 1 - 0.8 * (1 - _gap_rgb)
 
 def annotate_ratio(n_val):
+    # The ratio spans the green gap: a double arrow from the linear to the quadratic line.
     ratio = n_val * bytes_per_element_fp16 / 4
     mem_val = (n_val**2 * bytes_per_element_fp16 * num_heads * byte).to(GB).magnitude
+    flash_val = (n_val * 4 * num_heads * byte).to(GB).magnitude
     ax.annotate(
+        '', xy=(n_val, mem_val), xytext=(n_val, flash_val), arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.1, shrinkA=2, shrinkB=2)
+    )
+    ax.text(
+        n_val / 1.08,
+        np.sqrt(mem_val * flash_val),
         f'{int(ratio):,}$\\times$ smaller',
-        xy=(n_val, mem_val),
-        xytext=(n_val, mem_val * 0.02),
-        arrowprops=dict(arrowstyle='->', color=COLORS['primary'], lw=1.0),
-        ha='center',
-        va='top',
-        fontsize=9,
-        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=COLORS['grid'], lw=0.6),
+        ha='right',
+        va='center',
+        fontsize=11,
+        color=COLORS['primary'],
+        bbox=dict(boxstyle='square,pad=0.2', fc=_gap_tint, ec='none'),
     )
 
 annotate_ratio(8192)
 annotate_ratio(65536)
 
-ax.legend(loc='upper left', fontsize=9, frameon=True, facecolor='white', framealpha=0.95, edgecolor=COLORS['grid'])
+# Direct labels replace the legend: each series is named along its own line,
+# rotated to the line's on-screen slope, and the gap is named inside itself.
 plt.tight_layout()
+fig.canvas.draw()
+
+def label_along(x_at, y_fn, text, color, offset_pts):
+    p0 = ax.transData.transform((x_at, y_fn(x_at)))
+    p1 = ax.transData.transform((x_at * 1.5, y_fn(x_at * 1.5)))
+    angle = np.degrees(np.arctan2(p1[1] - p0[1], p1[0] - p0[0]))
+    ax.annotate(
+        text,
+        xy=(x_at, y_fn(x_at)),
+        xytext=(0, offset_pts),
+        textcoords='offset points',
+        rotation=angle,
+        rotation_mode='anchor',
+        ha='left',
+        va='center',
+        fontsize=11,
+        fontweight='bold',
+        color=color,
+    )
+
+def _std(s_val):
+    return (s_val**2 * bytes_per_element_fp16 * num_heads * byte).to(GB).magnitude
+
+def _flash(s_val):
+    return (s_val * 4 * num_heads * byte).to(GB).magnitude
+
+label_along(700, _std, r'Standard attention, $\mathcal{O}(S^2)$', COLORS['RedLine'], 10)
+label_along(10000, _flash, r'FlashAttention, $\mathcal{O}(S)$', COLORS['BlueLine'], -12)
+ax.text(1600, 2.5e-3, 'memory freed', ha='center', va='center', fontsize=11, fontweight='bold', color=COLORS['GreenLine'])
 plt.show()
 plt.close()
 
@@ -2716,7 +2804,7 @@ Compilation also determines where values live and which execution units perform 
 
 A graph compiler\index{Graph Compilation!pipeline stages} transforms high-level model definitions into optimized hardware instructions across four progressive tiers: graph capture, graph-level optimization, target-aware operator fusion, and code generation. The transformer feed-forward network block in @fig-performance-engineering-compilation-pipeline traces one lowering through PyTorch's compiler, `torch.compile`, whose three components @sec-performance-engineering-torch-compile introduces. Its capture front end, TorchDynamo, records the subgraph; a decomposition step (AOTAutograd) exposes GEMM-bias primitives; and its code generator, TorchInductor, groups the first GEMM with GELU and selects a fused epilogue alongside separate GEMM and normalization kernels. The four-operation, three-kernel path is one illustrative outcome, and the trace shows the counts a real model and backend produce.
 
-::: {#fig-performance-engineering-compilation-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Deep learning compilation pipeline**: The four-stage lowering flow from eager Python bytecode through graph capture (TorchDynamo), graph-level optimization (AOTAutograd decomposition and FX passes), target-aware operator fusion (TorchInductor), and code generation with autotuned GPU kernels (Triton and cuBLAS). Each column traces the same feed-forward block: bias additions fold into the GEMMs, GELU fuses into the first GEMM as an epilogue, and four captured operations lower to three kernels." fig-alt="Four stage header cards joined by arrows: graph capture with TorchDynamo, graph optimization with AOTAutograd and FX passes, operator fusion with TorchInductor, and code generation with Triton and cuBLAS. Below each header, a vertical chain traces one feed-forward block. Stage 1 shows Linear, GELU, Linear, LayerNorm. Stage 2 shows GEMM plus bias, GELU, GEMM plus bias, LayerNorm. Stage 3 encloses the first GEMM plus bias and GELU in a dashed group above GEMM plus bias and LayerNorm. Stage 4 shows three kernels: GEMM plus GELU as a CUTLASS epilogue, GEMM with cuBLAS, and LayerNorm as a Triton kernel. Counts under the columns read 4 ops, 4 ops, 3 groups, and 3 kernels."}
+::: {#fig-performance-engineering-compilation-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Deep learning compilation pipeline**: The four-stage lowering flow from eager Python bytecode through graph capture (TorchDynamo), graph-level optimization (AOTAutograd decomposition and FX passes), target-aware operator fusion (TorchInductor), and code generation with autotuned GPU kernels (Triton and cuBLAS). Each column traces the same feed-forward block: bias additions fold into the GEMMs, GELU fuses into the first GEMM as an epilogue, and four captured operations lower to three kernels. Orange marks the compute-heavy GEMMs and blue the element-wise and normalization operations whose cost is memory traffic, so fusion folds a blue operation into an orange kernel as its epilogue." fig-alt="Four numbered stage headings across the top: graph capture with TorchDynamo, graph optimization with AOTAutograd and FX passes, operator fusion with TorchInductor, and code generation with Triton and cuBLAS. Below each heading, a vertical chain traces one feed-forward block on four aligned rows, with dotted lines linking each operation to its counterpart in the next stage. GEMM and Linear boxes are orange; GELU and LayerNorm boxes are blue. Stage 1 shows Linear, GELU, Linear, LayerNorm. Stage 2 shows GEMM plus bias, GELU, GEMM plus bias, LayerNorm. Stage 3 encloses the first GEMM plus bias and GELU in a dashed group. Stage 4 shows three kernels: one tall orange GEMM plus GELU kernel with a blue fused epilogue band inside it, into which both upper rows converge, then GEMM with cuBLAS and LayerNorm as a Triton kernel. Counts under the columns read 4 ops, 4 ops, 3 groups, and 3 kernels."}
 ![](images/svg/compilation-pipeline.svg)
 
 <!--
@@ -3242,57 +3330,9 @@ Speculative decoding\index{Speculative Decoding!bandwidth optimization}\index{Sp
 
 The transformation is useful only when the draft model is accurate enough and cheap enough. If too many draft tokens are rejected, the target model still loads its weights but accepts little useful work. If the draft model is too expensive, its own sequential passes consume the time that one-pass verification saved. Batching changes the calculation as well: at large batch sizes the decode phase is already closer to compute-bound, so the marginal benefit of speculation shrinks. This chapter uses speculative decoding to show how an algorithm can alter the performance equation; @sec-inference-scale-speculative-decoding-c438 treats it as a serving policy with admission control and service level agreement (SLA) consequences.
 
-::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Speculative decoding process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $\SpeculativeDraftLength$ tokens. The target model verifies all $\SpeculativeDraftLength$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Two timelines on a shared time axis. Top: standard decoding with four sequential target-model passes, one per token T1 to T4. Bottom: speculative decoding with a short draft step for T1 to T4 and one target-model verify pass. Below it, tokens T1 to T3 are marked accepted in green, draft T4 is crossed out in pink and replaced by a resampled token T4 prime. A double arrow between the lanes marks the time saved."}
+::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Speculative decoding process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $\SpeculativeDraftLength$ tokens. The target model verifies all $\SpeculativeDraftLength$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Two timelines above a shared time axis. Top lane, standard decoding: four equal-width target passes in sequence, each emitting one green token, T1 to T4, at its end. Bottom lane, speculative decoding: four narrow gray draft steps labeled T1 to T4 followed by one target pass that verifies T1 to T4. Beneath the verify pass, green tokens T1 to T3 are marked accepted, draft T4 is crossed out in red and marked rejected, and a resampled token T4 prime sits below it. Dashed guides and ticks on the time axis, labeled speculative and standard, mark where each lane has four tokens, and a green double arrow between them marks the time saved for the same four tokens."}
 
-```{.tikz}
-\begin{tikzpicture}[font=\small\sffamily]
-  \definecolor{DraftColor}{HTML}{FCE4CC}
-  \definecolor{VerifyColor}{HTML}{D1E6F3}
-  \definecolor{AcceptColor}{HTML}{D4EFDF}
-  \definecolor{RejectColor}{HTML}{F5D2D5}
-
-  \tikzset{
-     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.75cm, inner sep=2pt,
-                     font=\scriptsize\sffamily, align=center, anchor=south west},
-     tokbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.55cm, minimum width=0.62cm,
-                    inner sep=1pt, font=\scriptsize\sffamily, anchor=south west}
-  }
-
-  % ---------------------------------------------------------------- Standard
-  \node[anchor=west, font=\small\bfseries\sffamily] at (0, 4.55) {Standard decoding};
-  \node[anchor=west, font=\scriptsize\sffamily\color{black!65}] at (3.05, 4.55) {one token per target-model pass};
-  \foreach \i in {1,...,4} {
-    \node[stepbox, fill=VerifyColor, minimum width=2.1cm] at ({(\i-1)*2.2}, 3.35) {Target model\\token T\i};
-  }
-  \draw[->, black!60] (0, 3.25) -- (9.6, 3.25) node[right, font=\scriptsize\sffamily] {time};
-
-  % ------------------------------------------------------------- Speculative
-  \node[anchor=west, font=\small\bfseries\sffamily] at (0, 2.15) {Speculative decoding};
-  \node[anchor=west, font=\scriptsize\sffamily\color{black!65}] at (3.6, 2.15) {draft four tokens, verify them in one pass};
-  \node[stepbox, fill=DraftColor, minimum width=1.3cm] (draft) at (0, 0.95) {Draft\\T1--T4};
-  \node[stepbox, fill=VerifyColor, minimum width=2.1cm] (verify) at (1.4, 0.95) {Target model\\verify T1--T4};
-  \draw[->, black!60] (0, 0.85) -- (9.6, 0.85) node[right, font=\scriptsize\sffamily] {time};
-
-  % Emitted tokens, shown below the axis at the end of the verify pass
-  \node[anchor=east, font=\tiny\sffamily\color{black!70}] at (1.35, 0.33) {emitted};
-  \node[tokbox, fill=AcceptColor] (a1) at (1.45, 0.05) {T1};
-  \node[tokbox, fill=AcceptColor] (a2) at (2.15, 0.05) {T2};
-  \node[tokbox, fill=AcceptColor] (a3) at (2.85, 0.05) {T3};
-  \node[tokbox, fill=RejectColor] (r4) at (3.75, 0.05) {T4};
-  \draw[black!70, line width=0.7pt] ($(r4.south west)+(0.08,0.08)$) -- ($(r4.north east)+(-0.08,-0.08)$);
-  \node[tokbox, fill=VerifyColor] (c4) at (4.75, 0.05) {T4$'$};
-  \draw[->, black!55] (r4.east) -- (c4.west);
-  \node[anchor=north, font=\tiny\sffamily\color{black!70}] at ($(a2.south)+(0,-0.05)$) {accepted};
-  \node[anchor=north, font=\tiny\sffamily\color{black!70}] at ($(r4.south)!0.5!(c4.south)+(0,-0.05)$) {rejected, then resampled};
-
-  % --------------------------------------------------------------- Time saved
-  \draw[black!45, dash pattern=on 2pt off 2pt] (3.5, 0.85) -- (3.5, 3.25);
-  \draw[black!45, dash pattern=on 2pt off 2pt] (8.7, 0.85) -- (8.7, 3.25);
-  \draw[<->, black!75, line width=0.6pt] (3.5, 2.75) -- (8.7, 2.75)
-      node[midway, fill=white, inner sep=2pt, font=\scriptsize\sffamily\color{black!85}] {time saved for the same four tokens};
-
-\end{tikzpicture}
-```
+![](images/svg/speculative-decoding.svg){width="100%"}
 
 :::
 
@@ -3651,7 +3691,7 @@ Consider an 8-billion-parameter model trained on `{python} OverlapCalc.num_gpus_
 
 Without overlap, the modeled timing window requires `{python} OverlapCalc.step_no_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str` + `{python} OverlapCalc.allreduce_ms_str`). Under ideal overlap, with gradient buckets ready early enough and no resource interference, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing that window to `{python} OverlapCalc.step_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str`), a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. Sufficient independent backward work provides the time in which communication can be hidden. The separate normalized scenario in @fig-overlap-budget holds computation at 100 units while increasing assumed communication cost as GPU count rises from 8 to 1,024. Its hidden fraction falls from roughly 90 percent to roughly 18 percent, and the exposed communication makes the modeled window roughly five times longer. These are constructed operating points, and the payload need not grow for the window to close. Slower effective communication, whether from topology, contention, or a lower-bandwidth link such as PCIe Gen5 at `{python} OverlapCalc.pcie_bw_gb_per_s_str` per direction instead of NVLink at `{python} OverlapCalc.per_dir_bw_gb_per_s_str`, can exhaust the overlap window even when the payload is unchanged.
 
-::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The overlap budget**: This illustrative normalized scenario holds the computation budget at 100 units as GPU count increases from 8 to 1,024. Communication overhead grows with scale, leaving more communication exposed above the fixed compute budget. The black line reports the fraction of communication hidden behind computation, which falls from roughly 90 percent to roughly 18 percent." fig-alt="Stacked bar chart of normalized step-time contribution versus GPU count. Overlapped communication and pure computation fill a fixed 100-unit compute budget, while exposed communication grows above it. A black line shows overlap efficiency falling from roughly 90 percent to roughly 18 percent."}
+::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The overlap budget**: This illustrative normalized scenario holds the computation budget at 100 units as GPU count increases from 8 to 1,024. Communication overhead grows with scale, leaving more communication exposed above the fixed compute budget. The row of percentages above the bars reports the fraction of communication hidden behind computation, which falls from roughly 90 percent to roughly 18 percent." fig-alt="Stacked bar chart of normalized step-time contribution versus GPU count from 8 to 1,024. In each bar, violet overlapped communication and orange pure computation fill a fixed 100-unit compute budget marked by a dashed horizontal line, and red hatched exposed communication grows above it, tallest at 1,024 GPUs. Direct labels with leader lines name pure compute on the 32-GPU bar, overlapped comm on the 128-GPU bar, and exposed comm on the 1,024-GPU bar, and the dashed line is labeled compute budget at its right end. A row of percentages above the bars, titled share of communication hidden behind computation, falls from 92 percent at 8 GPUs to 18 percent at 1,024. A dashed divider labeled NVLink and InfiniBand separates the 8-GPU intra-node bar from the inter-node bars."}
 
 ```{python}
 #| echo: false
@@ -3671,7 +3711,7 @@ Without overlap, the modeled timing window requires `{python} OverlapCalc.step_n
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.8))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 gpus = np.array([8, 16, 32, 64, 128, 256, 512, 1024])
@@ -3698,43 +3738,87 @@ c_overlap = COLORS['VioletLine']
 c_exposed = COLORS['RedLine']
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-p1 = ax1.bar(x, comp_overlapped, label='Overlapped communication', color=c_overlap, alpha=0.8, edgecolor='white')
-p2 = ax1.bar(x, comp_pure, bottom=comp_overlapped, label='Pure computation', color=c_pure, alpha=0.7, edgecolor='white')
+# Light role tints with same-family edges; exposed communication (the pathology)
+# keeps red, hatched so it reads without color.
+_w = 0.84
+p1 = ax1.bar(x, comp_overlapped, width=_w, label='Overlapped communication', color=COLORS['VioletL'], edgecolor=c_overlap, linewidth=1.0)
+p2 = ax1.bar(x, comp_pure, width=_w, bottom=comp_overlapped, label='Pure computation', color=COLORS['OrangeL'], edgecolor=c_pure, linewidth=1.0)
 p3 = ax1.bar(
-    x, comm_exposed, bottom=comp_overlapped + comp_pure, label='Exposed communication', color=c_exposed, alpha=0.8, hatch='//', edgecolor='white'
+    x,
+    comm_exposed,
+    width=_w,
+    bottom=comp_overlapped + comp_pure,
+    label='Exposed communication',
+    color=COLORS['RedL'],
+    edgecolor=c_exposed,
+    linewidth=1.0,
+    hatch='///',
 )
 
-ax2 = ax1.twinx()
-line = ax2.plot(x, realized_efficiency * 100, color='black', marker='o', linewidth=2, linestyle='--', label='Overlap efficiency')
-ax2.set_ylabel('Overlap efficiency (%)', color='black', fontsize=12, labelpad=10)
-ax2.set_ylim(0, 110)
-ax2.grid(False)
+# The fixed compute budget is the reference the exposed communication climbs above.
+ax1.hlines(compute_budget, -0.65, len(gpus) - 0.5, color=COLORS['primary'], linestyle=(0, (4, 3)), linewidth=1.0, zorder=4)
+ax1.text(len(gpus) - 0.38, compute_budget, 'compute\nbudget', ha='left', va='center', fontsize=11, color=COLORS['primary'])
 
-ax1.set_xlabel('Number of GPUs', fontsize=12)
-ax1.set_ylabel('Step-time contribution (normalized)', fontsize=12)
+# Direct labels replace the legend. Bars are too narrow at print width for
+# in-bar text, so the two lower segments are named from the open space above
+# and reached by elbow leaders that drop down the gaps between bars.
+def _seg_label(text, xy, xytext, color):
+    ax1.annotate(
+        text,
+        xy=xy,
+        xytext=xytext,
+        textcoords='data',
+        ha='center',
+        va='bottom',
+        fontsize=11,
+        fontweight='bold',
+        color=color,
+        zorder=6,
+        arrowprops=dict(arrowstyle='-', color=COLORS['primary'], lw=0.8, shrinkA=2, shrinkB=0, connectionstyle='angle,angleA=90,angleB=0,rad=0'),
+    )
+
+_seg_label('pure compute', (2.3, 79), (2.5, 235), c_pure)
+_seg_label('overlapped\ncomm', (4.3, 50), (4.5, 290), c_overlap)
+_top = len(gpus) - 1
+ax1.annotate(
+    'exposed\ncomm',
+    xy=(_top - 0.42, 470),
+    xytext=(_top - 1.25, 470),
+    ha='center',
+    va='center',
+    fontsize=11,
+    fontweight='bold',
+    color=c_exposed,
+    zorder=5,
+    arrowprops=dict(arrowstyle='-', color=COLORS['primary'], lw=0.8, shrinkA=3, shrinkB=0),
+)
+
+# Hidden fraction as a labeled row above the bars (replaces a second y-axis).
+_row_y = 610
+ax1.text(
+    (len(gpus) - 1) / 2,
+    _row_y + 52,
+    'share of communication hidden behind computation',
+    ha='center',
+    va='center',
+    fontsize=11,
+    color=COLORS['primary'],
+)
+for _xi, _eff in zip(x, realized_efficiency):
+    ax1.text(_xi, _row_y, f'{_eff * 100:.0f}%', ha='center', va='center', fontsize=11, fontweight='bold', color=COLORS['VioletLine'])
+
+ax1.tick_params(labelsize=11)
+ax1.set_xlabel('Number of GPUs', fontsize=11.5)
+ax1.set_ylabel('Step-time contribution\n(normalized)', fontsize=11.5)
 ax1.set_xticks(x)
 ax1.set_xticklabels([f'{g:,}' for g in gpus])
+ax1.set_xlim(-0.6, len(gpus) + 0.85)
+ax1.set_ylim(0, 700)
+ax1.set_yticks([0, 100, 200, 300, 400, 500])
 
-lines, labels = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(
-    lines + lines2,
-    labels + labels2,
-    loc='lower center',
-    bbox_to_anchor=(0.5, 1.01),
-    ncol=4,
-    fontsize=9,
-    frameon=True,
-    facecolor='white',
-    framealpha=0.95,
-    edgecolor='gray',
-    fancybox=True,
-    borderpad=0.6,
-)
-
-ax1.text(0, compute_budget + 9, 'NVLink\nIntra-node', ha='center', fontsize=9, color='#555')
-ax1.axvline(x=0.5, color=COLORS['primary'], linestyle=':', linewidth=1.0, alpha=0.6)
-ax1.text(1.0, compute_budget + 25, 'InfiniBand\nInter-node', ha='center', fontsize=9, color='#555')
+ax1.text(0.4, 205, 'NVLink', ha='right', va='center', fontsize=11, color=COLORS['secondary'])
+ax1.axvline(x=0.5, ymax=0.33, color=COLORS['secondary'], linestyle=(0, (4, 3)), linewidth=0.9)
+ax1.text(0.6, 205, 'InfiniBand', ha='left', va='center', fontsize=11, color=COLORS['secondary'])
 
 plt.tight_layout()
 plt.show()
