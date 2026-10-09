@@ -524,7 +524,7 @@ def takeover_strip(scenario, speed=None):
         spans.append(Span(f"{name} {d:.0f}", t, t + d, role, lane))
         t += d
     total = t
-    events = [Event(0, "request", "neutral", 0), Event(total, "commit", "structural", 0)]
+    events = [Event(0, "request", "neutral", 0), Event(total, "commit notification", "structural", 0)]
     brackets = [Bracket(0, total, f"in-loop takeover {total:.0f} ms", "authority", "time", 0),
                 Bracket(0, total, f"{v * total:.0f} mm", "consequence", "distance", 0)]
     return TimingStrip(
