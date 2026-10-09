@@ -77,11 +77,11 @@ def _is_chapter_qmd(path) -> bool:
 # finished. For them, notation rows must be used by a chapter (not only by the
 # notation chapter's own notes), and no chapter may use two different symbols
 # that render alike. Add a volume here when its conversion lands.
-STRICT_CONVERTED_VOLUMES: set = {"vol1", "vol2", "vol3"}
+STRICT_CONVERTED_VOLUMES: set = {"vol1", "vol2", "vol3", "vol4"}
 # Volumes whose chapters are held to one letter, one meaning (check notation
 # --scope collisions). Separate from conversion: resolving a collision changes
 # what readers see, so each volume joins after an editorial pass.
-COLLISION_CHECKED_VOLUMES: set = {"vol1", "vol2", "vol3"}
+COLLISION_CHECKED_VOLUMES: set = {"vol1", "vol2", "vol3", "vol4"}
 # Iron-law rows every volume's notation chapter must carry, used or not.
 CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
 
@@ -12781,11 +12781,19 @@ class ValidateCommand:
 
             not_text = not_file.read_text(encoding="utf-8")
             table_macros: Dict[str, int] = {}
+            sym_col = 0     # the column a table's header names "Symbol" (first by default)
             for lineno, line in enumerate(not_text.splitlines(), 1):
-                if line.startswith("|") and not line.startswith("|---") and not line.startswith("| Symbol"):
-                    parts = [c.strip() for c in line.strip("|").split("|")]
-                    if parts:
-                        for m in re.finditer(r"\\([A-Za-z]+)", parts[0]):
+                if not line.startswith("|"):
+                    sym_col = 0
+                    continue
+                parts = [c.strip() for c in line.strip("|").split("|")]
+                heads = [re.sub(r"[*\s]", "", c).lower() for c in parts]
+                if "symbol" in heads and not any("$" in c for c in parts):
+                    sym_col = heads.index("symbol")
+                    continue
+                if not line.startswith("|---") and not line.startswith("|:-") and not line.startswith("| Symbol"):
+                    if len(parts) > sym_col:
+                        for m in re.finditer(r"\\([A-Za-z]+)", parts[sym_col]):
                             macro_name = "\\" + m.group(1)
                             canon = macro_aliases.get(macro_name, macro_name)
                             if canon in all_macros or not all_macros:

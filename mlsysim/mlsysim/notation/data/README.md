@@ -161,6 +161,9 @@ before adding an index: `{\RouterGateProbability}_{ij}`. Written bare,
 `\RouterGateProbability_{ij}` is a double subscript, which LaTeX refuses; the
 check reports it. The same holds for a power on a macro that already carries a
 superscript.
+An accented macro that carries a subscript (`\dot{\theta}_{\text{enc}}`) takes its index as
+`{\EncoderVelocityEstimate{}}_k`: TeX unwraps braces around a single accent and would again
+report a double subscript.
 A macro used as a subscript or superscript is always braced: `2^{\AttributionFeatureCount}`,
 `\sup_{\MonitoredFeatureLevel}`. Unbraced, LaTeX takes only the first token of
 its LaTeX, so a label lands on the base or the build stops.
