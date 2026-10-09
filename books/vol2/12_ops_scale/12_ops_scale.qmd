@@ -4631,7 +4631,7 @@ Here, $\TrainingCost$ is the initial training and evaluation cost, $\InferenceCo
 
 Budget projections that count GPU compute and storage can omit substantial operational work. In the illustrative budget of @fig-tco-iceberg, engineering labor (20 percent), pipeline maintenance (10 percent), continuous retraining, monitoring, incident response, and governance together equal the visible infrastructure spend. The example shows what an incomplete ledger can miss; its proportions are not universal cost shares. Each organization must measure these obligations within the same accounting horizon as its infrastructure costs.
 
-::: {#fig-tco-iceberg fig-env="figure" fig-pos="htb" fig-cap="**The TCO iceberg**: The analysis separates visible infrastructure costs from operational costs that are easier to omit. In this illustrative budget, the hidden operational costs (engineering labor, pipeline maintenance, retraining, monitoring, incident response, and compliance) together constitute half of total cost." fig-alt="A ten-by-ten grid of square cells, each 1 percent of total cost of ownership, filled row by row from the top. Each category is a rectangular block labeled inside with its name and share, the label sitting on a solid strip where the cells beneath it merge. Blocks are separated by wide white gutters, and color encodes only visible versus hidden. The top five rows are pale blue: four rows of GPU cloud compute, 40 percent, and one row of object storage, 10 percent, together labeled visible infrastructure, 50 percent of TCO. A dashed waterline separates them from the bottom five rows, all in a darker gray: two rows of engineering labor, 20 percent, one row of data pipeline maintenance, 10 percent, and two rows split in half among retraining compute, monitoring and observability, incident response, and compliance and governance, 5 percent each, together labeled hidden operational costs, 50 percent of TCO."}
+::: {#fig-tco-iceberg fig-env="figure" fig-pos="htb" fig-cap="**The TCO iceberg**: The analysis separates visible infrastructure costs from operational costs that are easier to omit. In this illustrative budget, the hidden operational costs (engineering labor, pipeline maintenance, retraining, monitoring, incident response, and compliance) together constitute half of total cost." fig-alt="A ten-by-ten grid of square cells, each 1 percent of total cost of ownership, filled row by row from the top. Each category is a rectangular block labeled inside with its name and share, the label sitting on a solid strip of merged cells centered in the block, six cells wide in full-row blocks and three in half-row blocks. All cells are equal squares; blocks are separated by wider white gutters added between cells, and color encodes only visible versus hidden. The top five rows are pale blue: four rows of GPU cloud compute, 40 percent, and one row of object storage, 10 percent, together labeled visible infrastructure, 50 percent of TCO. A dashed waterline separates them from the bottom five rows, all in a darker gray: two rows of engineering labor, 20 percent, one row of data pipeline maintenance, 10 percent, and two rows split in half among retraining, monitoring, incidents, and compliance, 5 percent each, together labeled hidden operational costs, 50 percent of TCO."}
 
 ```{python}
 #| echo: false
@@ -4651,20 +4651,20 @@ Budget projections that count GPU compute and storage can omit substantial opera
 from binder.tools.figures import style as book_style
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.8, 4.6))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.0, 5.2))
 from matplotlib.patches import Rectangle
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-# Labels are drawn inside each block; split-row labels break onto two lines.
+# Labels are drawn inside each block; half-row blocks carry short one-line labels.
 categories = [
     'GPU cloud compute',
     'Object storage',
     'Engineering labor',
     'Data pipeline maintenance',
-    'Retraining\ncompute',
-    'Monitoring and\nobservability',
-    'Incident\nresponse',
-    'Compliance and\ngovernance',
+    'Retraining',
+    'Monitoring',
+    'Incidents',
+    'Compliance',
 ]
 values = [40, 10, 20, 10, 5, 5, 5, 5]
 n_visible = 2
@@ -4675,43 +4675,80 @@ fills = ['BlueL'] * n_visible + ['secondary'] * (len(categories) - n_visible)
 dark_fills = {'secondary'}
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-# A 10 x 10 waffle: each cell is 1% of TCO, filled row by row from the top,
-# so area is proportional to cost and the waterline falls where the visible share ends.
-# Labels are placed first; cells are drawn after layout so the cells under each
-# label merge into one solid strip (no vertical gutters run through the text).
-ncols, gap = 10, 0.04
+# A 10 x 10 waffle: each cell is 1% of TCO, filled row by row from the top.
+# Every cell is an identical unit square separated by a uniform thin gap; block
+# gutters are ADDED spacing between cells (never carved out of them), so equal
+# percentages always get equal area.
+ncols, nrows = 10, 10
+gap, gutter = 0.1, 0.34
+owner = {}
+cell = 0
+for b, val in enumerate(values):
+    for k in range(val):
+        owner[cell + k] = b
+    cell += val
+
+# Row origins: an extra gutter wherever any block boundary runs between rows.
+row_y, y = [], 0.0
+for r in range(nrows):
+    row_y.append(y)
+    if r < nrows - 1:
+        split = any(owner[r * ncols + q] != owner[(r + 1) * ncols + q] for q in range(ncols))
+        y += 1 + (gutter if split else gap)
+grid_h = row_y[-1] + 1
+
+# Column origins per row: an in-row block boundary gets the wide gutter, and the
+# extra width is taken out of that row's other gaps, so every row is exactly
+# grid_w wide and its outer edges sit flush with the full rows above.
+grid_w = ncols + (ncols - 1) * gap
+col_x = []
+for r in range(nrows):
+    bounds = [owner[r * ncols + q] != owner[r * ncols + q + 1] for q in range(ncols - 1)]
+    nb = sum(bounds)
+    thin = ((ncols - 1) * gap - nb * gutter) / (ncols - 1 - nb)
+    xs, x = [], 0.0
+    for q in range(ncols):
+        xs.append(x)
+        if q < ncols - 1:
+            x += 1 + (gutter if bounds[q] else thin)
+    col_x.append(xs)
+
 blocks = []
 cell = 0
 for name, val, key in zip(categories, values, fills):
-    col = COLORS[key]
-    cells = [(cell + k) for k in range(val)]
+    cells = list(range(cell, cell + val))
     rows = sorted({c // ncols for c in cells})
     cols = sorted({c % ncols for c in cells})
-    x_mid = (cols[0] + cols[-1] + 1) / 2
-    # Center the label on a row (not on a gap) so it sits on solid color.
-    y_mid = rows[(len(rows) - 1) // 2] + 0.5 if len(rows) % 2 == 0 else (rows[0] + rows[-1] + 1) / 2
+    # Label on the middle row (upper-middle for an even count) so it sits on solid color.
+    lab_row = rows[(len(rows) - 1) // 2]
+    x_mid = (col_x[lab_row][cols[0]] + col_x[lab_row][cols[-1]] + 1) / 2
     txt_col = 'white' if key in dark_fills else COLORS['primary']
-    t = ax.text(x_mid, y_mid, f'{name} {val}%', ha='center', va='center', fontsize=10, linespacing=1.05, color=txt_col, zorder=6)
-    blocks.append((cells, rows, cols, col, t))
+    t = ax.text(x_mid, row_y[lab_row] + 0.5, f'{name} {val}%', ha='center', va='center', fontsize=10, color=txt_col, zorder=6)
+    blocks.append((cells, lab_row, cols, COLORS[key], t))
     cell += val
 
 visible_total = sum(values[:n_visible])
 hidden_total = sum(values[n_visible:])
-waterline_y = visible_total / ncols
-# The waterline sits on the storage/labor boundary: a white underlay clears the
-# two block outlines so the heavier dashed line reads as its own mark, and it
-# overhangs both grid edges.
-ax.plot([-0.25, ncols + 0.25], [waterline_y, waterline_y], color='white', linewidth=4.0, solid_capstyle='butt', zorder=7)
-ax.plot([-0.25, ncols + 0.25], [waterline_y, waterline_y], color=COLORS['primary'], linestyle=(0, (4, 2.5)), linewidth=1.6, zorder=8)
+# Waterline: centered in the gutter between the last visible and first hidden row.
+vis_last_row = (visible_total - 1) // ncols
+waterline_y = (row_y[vis_last_row] + 1 + row_y[vis_last_row + 1]) / 2
+ax.plot([-0.45, grid_w + 0.45], [waterline_y, waterline_y], color=COLORS['primary'], linestyle=(0, (4, 2.5)), linewidth=1.6, zorder=8)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(ncols + 0.35, waterline_y, 'waterline', ha='left', va='center', fontsize=10, style='italic', color=COLORS['secondary'])
+tx = grid_w + 0.6
+ax.text(tx, waterline_y, 'waterline', ha='left', va='center', fontsize=10, style='italic', color=COLORS['secondary'])
 ax.text(
-    ncols + 0.35, waterline_y / 2, f'Visible\ninfrastructure\n{visible_total}% of TCO', ha='left', va='center', fontsize=10, color=COLORS['BlueLine']
+    tx,
+    (row_y[0] + row_y[vis_last_row] + 1) / 2,
+    f'Visible\ninfrastructure\n{visible_total}% of TCO',
+    ha='left',
+    va='center',
+    fontsize=10,
+    color=COLORS['BlueLine'],
 )
 ax.text(
-    ncols + 0.35,
-    waterline_y + (ncols - waterline_y) / 2,
+    tx,
+    (row_y[vis_last_row + 1] + grid_h) / 2,
     f'Hidden\noperational\ncosts\n{hidden_total}% of TCO',
     ha='left',
     va='center',
@@ -4719,10 +4756,10 @@ ax.text(
     fontweight='bold',
     color=COLORS['primary'],
 )
-ax.text(0, ncols + 0.55, 'one cell = 1% of total cost of ownership', ha='left', va='top', fontsize=10, color=COLORS['secondary'])
+ax.text(0, grid_h + 0.45, 'one cell = 1% of total cost of ownership', ha='left', va='top', fontsize=10, color=COLORS['secondary'])
 
-ax.set_xlim(-0.3, ncols + 3.3)
-ax.set_ylim(ncols + 1.0, -0.2)
+ax.set_xlim(-0.5, grid_w + 3.55)
+ax.set_ylim(grid_h + 1.15, -0.25)
 ax.set_aspect('equal')
 ax.axis('off')
 
@@ -4730,23 +4767,31 @@ plt.tight_layout()
 fig.canvas.draw()
 inv = ax.transData.inverted()
 renderer = fig.canvas.get_renderer()
-for cells, rows, cols, col, t in blocks:
-    # Columns the label covers (plus a small pad) on its row become one strip.
-    bb = inv.transform(t.get_window_extent(renderer).expanded(1.0, 1.0).get_points())
-    x0, x1 = min(bb[:, 0]) - 0.1, max(bb[:, 0]) + 0.1
-    lab_row = int(t.get_position()[1])
-    span = [q for q in cols if q + 1 > x0 and q < x1]
+# Each label sits on a strip of merged cells. The strip is a fixed whole-cell
+# span centered in its block: one span for all full-width blocks (even, so it
+# centers on 10 columns) and one for all half-row blocks (odd, centers on 5),
+# each the smallest that fits the widest label of its class.
+need = {}
+for cells, lab_row, cols, col, t in blocks:
+    bb = inv.transform(t.get_window_extent(renderer).get_points())
+    w = max(bb[:, 0]) - min(bb[:, 0]) + 0.3
+    n = len(cols)
+    k = n % 2 or 2
+    while k < n and k + (k - 1) * gap < w:
+        k += 2
+    need[n] = max(need.get(n, 0), k)
+for cells, lab_row, cols, col, t in blocks:
+    k = need[len(cols)]
+    lo = (len(cols) - k) // 2
+    span = cols[lo : lo + k]
+    xs = col_x[lab_row]
+    t.set_x((xs[span[0]] + xs[span[-1]] + 1) / 2)
     for c in cells:
         r, q = divmod(c, ncols)
         if r == lab_row and q in span:
             continue
-        ax.add_patch(Rectangle((q + gap / 2, r + gap / 2), 1 - gap, 1 - gap, facecolor=col, edgecolor='none', zorder=3))
-    ax.add_patch(Rectangle((span[0] + gap / 2, lab_row + gap / 2), span[-1] - span[0] + 1 - gap, 1 - gap, facecolor=col, edgecolor='none', zorder=3))
-    # Every block is a rectangle; a wide white gutter on its boundary separates
-    # adjacent categories that share a tone.
-    ax.add_patch(
-        Rectangle((cols[0], rows[0]), cols[-1] - cols[0] + 1, rows[-1] - rows[0] + 1, facecolor='none', edgecolor='white', linewidth=5.0, zorder=4)
-    )
+        ax.add_patch(Rectangle((col_x[r][q], row_y[r]), 1, 1, facecolor=col, edgecolor='none', zorder=3))
+    ax.add_patch(Rectangle((xs[span[0]], row_y[lab_row]), xs[span[-1]] + 1 - xs[span[0]], 1, facecolor=col, edgecolor='none', zorder=3))
 
 plt.show()
 plt.close()

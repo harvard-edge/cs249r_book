@@ -3441,7 +3441,7 @@ Combining these observability streams helps detect recurring optimization pathol
 
 A training-loss signature is useful because it narrows the hypotheses that recovery must test. The trajectories in @fig-training-failure-signatures illustrate symptoms, including nonfinite values that need not crash the process. @Tbl-training-failure-response-map pairs spike, plateau, and divergence patterns, plus the silent hang a loss curve cannot show, with a candidate cause and a first response. That pairing guides investigation without treating the curve as a unique diagnosis.
 
-::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Four loss-versus-steps panels in a two-by-two grid on a shared loss axis. (A) Normal training: a green curve descending smoothly. Panels B to D repeat that healthy curve as a faint green reference line behind each pathology. (B) Gradient explosion: a descending curve with a red spike segment midway that then rejoins the healthy reference, labeled healthy. (C) Loss plateau: a curve that flattens early, with the gap between it and the healthy reference shaded red and labeled gap to healthy. (D) NaN divergence: an oscillating curve that ends at a red X labeled NaN check halts run."}
+::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Four loss-versus-steps panels in a two-by-two grid on a shared loss axis. (A) Normal training: a green curve descending smoothly. Panels B to D repeat that healthy curve as a faint green reference line behind each pathology. (B) Gradient explosion: a descending curve with a red spike segment midway that then rejoins the healthy reference, labeled healthy. (C) Loss plateau: a curve that flattens early, with the gap between it and the healthy reference shaded red and labeled gap to healthy. (D) NaN divergence: a curve that pulls away above the healthy reference, oscillating with growing amplitude, then climbs steeply to a red X labeled NaN check halts run."}
 ```{python}
 #| echo: false
 from binder.tools.figures import style as book_style
@@ -3467,8 +3467,10 @@ loss_a = 2.4 * np.exp(-0.035 * steps) + 0.35 + noise
 loss_b = 2.4 * np.exp(-0.035 * steps) + 0.35 + np.random.normal(0, 0.02, len(steps))
 spike_idx = 90
 loss_b[spike_idx : spike_idx + 15] += np.linspace(0, 1.7, 15)
-# Recovery ramp ends on the curve's own healthy baseline, so the spike rejoins it smoothly.
-loss_b[spike_idx + 15 : spike_idx + 35] = np.linspace(loss_b[spike_idx + 14], loss_b[spike_idx + 35], 21)[:-1]
+# Recovery: the excess decays smoothly back onto the healthy baseline and carries
+# the same measurement noise as the rest of the trace.
+decay_k = np.arange(1, 21)
+loss_b[spike_idx + 15 : spike_idx + 35] += 1.7 * np.exp(-decay_k / 4.5)
 
 # PANEL C: Loss Plateau
 loss_c = np.copy(loss_a)
@@ -3477,10 +3479,16 @@ loss_c[plateau_idx:] = loss_c[plateau_idx] + np.random.normal(0, 0.015, len(step
 
 # PANEL D: NaN Divergence
 nan_steps = steps[:140]
-osc = np.sin(nan_steps * 0.4) * np.exp(0.022 * nan_steps) * 0.22
-loss_d = 1.9 * np.exp(-0.02 * nan_steps) + 0.65 + osc
-loss_d = np.clip(loss_d, 0.50, 2.95)
-loss_d[-1] = 2.85
+# The run tracks healthy training at first, then its baseline drifts upward and a
+# one-sided oscillation of growing amplitude rides on top, so even its troughs sit
+# above the healthy curve. The last few steps climb steeply before the halt.
+healthy_d = 2.4 * np.exp(-0.035 * nan_steps) + 0.35
+drift = 1.25 * (nan_steps / nan_steps[-1]) ** 1.6
+amp = 0.06 * np.exp(0.034 * nan_steps)
+osc = amp * (0.5 + 0.5 * np.sin(nan_steps * 0.4))
+loss_d = healthy_d + drift + osc + np.random.normal(0, 0.012, len(nan_steps)).clip(0)
+n_ramp = 12
+loss_d[-n_ramp:] += np.linspace(0, 1, n_ramp) ** 2.2 * (2.85 - loss_d[-1])
 
 ax_a, ax_b, ax_c, ax_d = axes
 lw = 1.8
