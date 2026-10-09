@@ -951,6 +951,10 @@ $\mathbf{h}^{(\ell)}$ represents the layer $\ell$ output, $\mathbf{h}^{(\ell-1)}
 
 The dimensions of these operations reveal the computational scale of dense pattern processing. The input vector $\mathbf{h}^{(0)} \in \mathbb{R}^{d_{\text{in}}}$ (treated as a row vector in this formulation) represents all potential input features. Weight matrices $\mathbf{W}^{(\ell)} \in \mathbb{R}^{d_{\text{in}} \times d_{\text{out}}}$ capture all possible input-output relationships. The output vector $\mathbf{h}^{(\ell)} \in \mathbb{R}^{d_{\text{out}}}$ produces transformed representations. A four-pixel example turns this bookkeeping into arithmetic.
 
+The MNIST example makes this scale concrete. The 784-dimensional input connects to every neuron in the first hidden layer. A hidden layer with 100 neurons requires a $784{\times}100$ weight matrix (78,400 parameters), where each weight represents a learnable relationship between an input pixel and a hidden feature. This single layer anchors the computational analysis throughout this chapter.
+
+This algorithmic structure enables arbitrary feature relationships while creating specific computational patterns that computer systems must accommodate. Dense connectivity provides the universal approximation capability established earlier but introduces computational redundancy: while the theoretical universality of MLPs enables modeling of any continuous function given sufficient width, this flexibility requires numerous parameters to learn relatively simple patterns. Every input feature influences every output, yielding maximum expressiveness at the cost of maximum computational expense. These trade-offs motivate later compression strategies that reduce computational demands while preserving model capability, and @sec-hardware-acceleration explores hardware-specific implementations that exploit regular matrix operation structure.
+
 ::: {#exmp-nn-architectures-concrete-computation-example .callout-example title="Concrete computation example"}
 
 Consider a simplified 4-pixel image processed by a 3-neuron hidden layer:
@@ -981,10 +985,6 @@ $$
 **Systems insight**: Each hidden neuron combines all input pixels with different weights, demonstrating unrestricted feature interaction. Dense layers buy generality by paying the maximum connectivity cost.
 
 :::
-
-The MNIST example makes this scale concrete. The 784-dimensional input connects to every neuron in the first hidden layer. A hidden layer with 100 neurons requires a $784{\times}100$ weight matrix (78,400 parameters), where each weight represents a learnable relationship between an input pixel and a hidden feature. This single layer anchors the computational analysis throughout this chapter.
-
-This algorithmic structure enables arbitrary feature relationships while creating specific computational patterns that computer systems must accommodate. Dense connectivity provides the universal approximation capability established earlier but introduces computational redundancy: while the theoretical universality of MLPs enables modeling of any continuous function given sufficient width, this flexibility requires numerous parameters to learn relatively simple patterns. Every input feature influences every output, yielding maximum expressiveness at the cost of maximum computational expense. These trade-offs motivate later compression strategies that reduce computational demands while preserving model capability, and @sec-hardware-acceleration explores hardware-specific implementations that exploit regular matrix operation structure.
 
 ### Computational mapping {#sec-network-architectures-computational-mapping-cf30}
 
@@ -1149,9 +1149,6 @@ $$ {#eq-dense-intensity}
 On accelerators with ridge points in the hundreds of FLOP/byte, this batch-one FP32 layer is memory-bandwidth bound. Batching can raise intensity by amortizing weight traffic, but the crossover depends on matrix shape, precision, implementation, and hardware. Specifically, increasing batch size to $B$ scales arithmetic to $2 \cdot B \cdot M \cdot N$ FLOPs while loading the weight matrix once ($4 \cdot M \cdot N$ bytes), driving weight-bound arithmetic intensity up to $\text{Intensity} \approx 0.5 B \text{ FLOP/byte}$ until input and activation traffic begin to dominate. This is why fully connected layers can become inference bottlenecks despite performing fewer total FLOPs than convolutional layers.
 
 ::: {.column-margin}
-```{=latex}
-\vspace*{-30mm}
-```
 ![](images/svg/vol1_nn_architectures_margin_001.svg){width="100%" fig-alt="Two horizontal log-scale parameter-count bars labeled FC 205M and Conv 37K, with the fully connected bar much longer."}
 
 *Weight sharing spares convolution the fully-connected parameter explosion.*
@@ -1526,7 +1523,7 @@ confirming translation equivariance up to boundary conditions: $f(\mathcal{T}_v 
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.2}
+\renewcommand{\arraystretch}{1.15}
 ```
 **Setup**: Consider a $7{\times}7$ image with a vertical edge at column 3:
 $$
@@ -1662,6 +1659,9 @@ $$
 f(g \cdot \mathbf{x}) = g \cdot f(\mathbf{x}) \quad \forall g \in G, \mathbf{x} \in X
 $$
 
+```{=latex}
+\vspace*{-1.25ex}
+```
 Standard CNNs are translation-equivariant, while rotation-equivariant networks extend this to rotation groups. The architectural principle generalizes: data symmetries should be embedded as equivariances in the architecture. For systems engineering, identifying data symmetries directly informs architecture choice: more constrained architectures with stronger symmetries often produce smaller models, and specialized equivariances may require custom operations like rotation convolutions that need either hardware support or efficient software implementations.
 
 :::
@@ -1704,12 +1704,15 @@ def conv_layer_spatial(input, kernel, bias):
 
 To expose the mechanics that the framework abstraction conceals, @lst-conv_layer_compute details the canonical seven-deep loop nest required to evaluate a direct 2D convolution. These loops partition into three structural tiers: batch iteration across samples, spatial traversal over feature map coordinates $(y, x)$, and channel accumulation over input and output dimensions $(C_{\text{in}}, C_{\text{out}})$ coupled with kernel offsets $(k_y, k_x)$. Traversing spatial coordinates and output channels defines the grid of independent output activations.
 
+The inner three loops execute the kernel dot product at each spatial site. For each output activation, the kernel evaluates a local $3{\times}3$ input patch across all input channels. Executing this direct loop nest on modern hardware yields poor cache locality and uncoalesced memory accesses because neighboring spatial iterations access overlapping input patches through strided offsets.
+
 ::: {#lst-conv_layer_compute lst-cap="**Logical Convolution Computation**: Seven nested loops expose $\mathcal{O}(B \times H_{\text{img}} \times W_{\text{img}} \times C_{\text{out}} \times K_h \times K_w \times C_{\text{in}})$ complexity. While logically sound, this pattern is inefficient on hardware; production systems transform this into tiled matrix multiplications."}
 
 ```{.python}
 def conv_layer_compute(input, kernel, bias):
     # Logical view of convolution (usually implemented via im2col +
     # GEMM)
+
     # Loop 1: Process each image in batch
     for image in range(batch_size):
         # Loop 2&3: Move across image spatially
@@ -1728,7 +1731,6 @@ def conv_layer_compute(input, kernel, bias):
 
 :::
 
-The inner three loops execute the kernel dot product at each spatial site. For each output activation, the kernel evaluates a local $3{\times}3$ input patch across all input channels. Executing this direct loop nest on modern hardware yields poor cache locality and uncoalesced memory accesses because neighboring spatial iterations access overlapping input patches through strided offsets.
 
 To avoid strided memory access, production libraries like cuDNN and oneDNN typically lower convolutions via the **im2col**\index{im2col} (image-to-column) transformation. By rearranging each receptive-field patch into a contiguous column of an input matrix, im2col recasts the entire convolution as a dense general matrix multiply (GEMM). This conversion trades memory footprint—duplicating overlapping input pixels up to $K^2$ times in DRAM or SRAM—for the structural regularity of GEMM kernels that saturate tensor cores and systolic arrays. Alternatively, implicit GEMM techniques generate these matrix coordinates on the fly in register files without materializing the duplicated buffer in memory. With $3{\times}3$ filters and 32 output channels, each output coordinate requires only 9 MAC operations per input channel, compared to 784 MACs in the reference MLP layer. While reducing operations per activation, the sliding window introduces distinct data reuse profiles that dictate memory staging.
 
@@ -1875,11 +1877,6 @@ These memory, compute, and data-movement patterns converge in one model that ser
 
 **Why it matters**: ResNet-50 is a reference point for regular, convolution-heavy vision workloads. Its architecture consists almost entirely of dense convolutional layers, making it highly regular and efficient on GPUs. Under batched execution with good data reuse, ResNet-50 performance is typically limited by floating-point throughput (FLOP/s), making it a useful lighthouse for explaining data parallelism, quantization, and batching strategies. @Tbl-nn-architectures-resnet50-profile summarizes the quantitative properties and their system consequences:
 
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.2}
-```
-
 | **Property**    | **Value**                                                           | **System Implication**                                                                                                                     |
 |:----------------|:--------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|
 | **Parameters**  | `{python} CNNLighthouseProfile.resnet_params_m_str`                 | `{python} CNNLighthouseProfile.resnet_fp32_mb_str` model size at FP32; fits comfortably in GPU memory.                                     |
@@ -1891,7 +1888,6 @@ These memory, compute, and data-movement patterns converge in one model that ser
 : **ResNet-50 Systems Profile**: Quantitative properties of the vision lighthouse and their system consequences. Under batched convolutional reuse, ResNet-50 has high effective arithmetic intensity and is typically compute-bound, so peak FP throughput on Tensor Cores often sets the ceiling before memory bandwidth does. {#tbl-nn-architectures-resnet50-profile tbl-colwidths="[14,22,64]"}
 
 ```{=latex}
-\endgroup
 \vspace*{-2ex}
 ```
 :::
@@ -2007,14 +2003,14 @@ where $\mathbf{h}_t$ denotes the hidden state at time $t$, $\mathbf{x}_t$ denote
 Line/.style={line width=0.95pt,black!60,text=black}
 }
 \def\radius{7mm}
-\def\di{1.4}
+\def\di{1.34}
 \foreach \x/\i/\f in {0/1/$\mathbf{h}$,5/2/$\mathbf{h}_{t-1}$,9/3/$\mathbf{h}_t$,13/4/$\mathbf{h}_{t+1}$}{
 \coordinate (2ball-\i) at  (\di*\x,0);
 \fill[fill=mygreen!50] (\di*\x,0) circle (\radius)node[]{\f};
 }
 
 \def\radiuss{6.0mm}
-\def\du{3.1}
+\def\du{3.3}
 \foreach \x/\i/\f in {0/1/$\mathbf{y}$,5/2/$\mathbf{y}_{t-1}$,9/3/$\mathbf{y}_t$,13/4/$\mathbf{y}_{t+1}$}{
 \coordinate (1ball-\i) at  (\di*\x,\du);
 \fill[fill=myorange!50] (\di*\x,\du) circle (\radiuss)node[]{\f};
@@ -2163,6 +2159,7 @@ def rnn_layer_compute(x_t, h_prev, W_hh, W_hx, b):
 
     # Loop 1: Process each sequence in the batch
     for batch in range(batch_size):
+
         # Loop 2: Compute recurrent contribution (h_prev × W_hh)
         for i in range(hidden_dim):
             for j in range(hidden_dim):
@@ -2203,6 +2200,10 @@ Recurrent networks serialize execution along the sequence dimension and compress
 Attention mechanisms[^fn-bahdanau-dynamic-attention] address this limitation [@bahdanau2015neural] by introducing dynamic connectivity patterns that adapt to input content. Rather than forcing all context through a single fixed-capacity state vector, encoder-decoder attention computes similarity scores between each decoder state and all encoder input positions, routing information dynamically across the sequence.
 
 [^fn-bahdanau-dynamic-attention]: **Bahdanau attention**\index{Attention mechanism!Bahdanau}: This approach broke the "fixed-length vector" bottleneck of prior sequence-to-sequence models by allowing a decoder to dynamically query all input elements at each output step, creating the adaptive connectivity described. This replaced the structural constraint of a fixed-capacity channel with a learned, content-based weighting system. The core trade-off was accepting a linear, $\mathcal{O}(S)$ memory cost to store all input states in exchange for overcoming the information loss inherent in a single vector\index{Attention mechanism!information bottleneck}.
+
+While attention mechanisms were initially used as components within recurrent architectures, their ability to connect any position to any other made the recurrent structure unnecessary for many sequence tasks. The transformer[^fn-transformer-parallel-attention] architecture [@vaswani2017] combined attention with feed-forward layers, residual connections, normalization, and positional information without recurrence. This architectural shift traded the RNN's $\mathcal{O}(S)$ sequential path for constant path length between positions within one attention layer, enabling parallelization across sequence positions on high-throughput accelerators.
+
+[^fn-transformer-parallel-attention]: **Transformer**\index{Transformer!etymology}\index{Transformer!architectural shift}: The founding paper, "Attention Is All You Need," made the explicit systems claim that a parallel attention mechanism could fully replace sequential recurrent processing. This architectural trade eliminates an RNN's $\mathcal{O}(S)$ path length constraint on parallelism but introduces $\mathcal{O}(S^2)$ dense score computation; naive implementations also materialize $\mathcal{O}(S^2)$ score storage. This quadratic computation continues to shape context-window engineering.
 
 ```{python}
 #| echo: false
@@ -2253,10 +2254,6 @@ class AttentionDefinitionCosts:
 
 :::
 
-While attention mechanisms were initially used as components within recurrent architectures, their ability to connect any position to any other made the recurrent structure unnecessary for many sequence tasks. The transformer[^fn-transformer-parallel-attention] architecture [@vaswani2017] combined attention with feed-forward layers, residual connections, normalization, and positional information without recurrence. This architectural shift traded the RNN's $\mathcal{O}(S)$ sequential path for constant path length between positions within one attention layer, enabling parallelization across sequence positions on high-throughput accelerators.
-
-[^fn-transformer-parallel-attention]: **Transformer**\index{Transformer!etymology}\index{Transformer!architectural shift}: The founding paper, "Attention Is All You Need," made the explicit systems claim that a parallel attention mechanism could fully replace sequential recurrent processing. This architectural trade eliminates an RNN's $\mathcal{O}(S)$ path length constraint on parallelism but introduces $\mathcal{O}(S^2)$ dense score computation; naive implementations also materialize $\mathcal{O}(S^2)$ score storage. This quadratic computation continues to shape context-window engineering.
-
 The transformer architecture (@sec-network-architectures-transformers-attentiononly-architecture-1b56) inherits its core systems properties from attention: content-dependent routing, parallel sequence execution, and quadratic score scaling. Analyzing the systems implications of this architectural class begins with the underlying pattern-processing problem attention solves.
 
 ### Pattern processing needs {#sec-network-architectures-pattern-processing-needs-4b64}
@@ -2266,7 +2263,7 @@ Dynamic pattern processing addresses scenarios where relationships between eleme
 ::: {#fig-transformer-attention-visualized fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Attention Pattern**: A schematic attention pattern for the pronoun \"they.\" Line thickness represents hypothetical attention-weight magnitude, with stronger links to \"student,\" \"finish,\" and \"homework.\" One attention layer connects all positions directly and can compute their dense interactions in parallel." fig-alt="Illustrative self-attention schematic labeled Layer 4 Head 2 for the sentence 'The student did not finish all the homework because they were tired.' Tokens are listed vertically in two columns. Cyan lines connect the highlighted pronoun they on the right to all tokens on the left, with thicker example lines to student, finish, and homework."}
 
 ```{.tikz}
-\scalebox{0.9}{%
+\scalebox{0.85}{%
 \begin{tikzpicture}[line join=round,font=\small\sffamily]
 \tikzset{
   token/.style={rectangle, text width=24mm,minimum width=25mm, minimum height=6mm, draw=none, fill=cyan!50},
@@ -2334,7 +2331,7 @@ The inputs $\mathbf{Q}$ (queries), $\mathbf{K}$ (keys), and $\mathbf{V}$ (values
 ::: {#fig-attention fig-env="figure" fig-pos="htb" fig-cap="**Query-Key-Value Attention Mechanism**: For a 6-token sequence, queries (cyan) match against keys (red) to produce a $6{\times}6$ attention matrix with $\mathcal{O}(S^2)$ entries. Cell color runs from blue to red across the grid as an illustrative gradient rather than as computed weights. Each output position aggregates information from all values (green) weighted by its own row of that matrix. The matrix structure reveals both the computational pattern (thirty-six similarity computations) and the naive memory bottleneck (storing $S^2$ attention weights). Source: Transformer Explainer [@cho2025]." fig-alt="6-by-6 attention matrix with an illustrative gradient coloring from blue to red across the grid. Cyan query vectors enter from left, red key vectors from top, green value vectors from below. Output vectors exit right, showing weighted aggregation pattern."}
 
 ```{.tikz}
-\scalebox{0.8}{%
+\scalebox{0.75}{%
 \begin{tikzpicture}[line join=round,font=\sffamily\small]
 \tikzset{%
    Line/.style={line width=1.1pt,BrownLine,text=black},
@@ -2943,7 +2940,7 @@ The transformer architecture applies this self-attention mechanism within a broa
 ::: {#fig-transformer fig-env="figure" fig-pos="htb" fig-cap="**Transformer Architecture (Encoder-Decoder)**: Complete architecture. The encoder (left, repeated $N_L$ times) consists of multi-head attention followed by feed-forward layers, each with residual connections (arrows bypassing blocks) and layer normalization. The decoder (right) adds masked attention to prevent attending to future tokens during autoregressive generation. Positional encodings (sine waves) inject sequence order information absent from the permutation-invariant attention operation. This design enables training parallelism across all positions while the decoder maintains autoregressive causality during inference. Source: [@vaswani2017]." fig-alt="Encoder-decoder architecture. Encoder: multi-head attention, add-norm, feed-forward, add-norm, repeated N_L times. Decoder adds masked attention. Positional encoding sine waves at inputs. Skip connections bypass sublayers. Linear and softmax at top."}
 
 ```{.tikz}
-\scalebox{0.8}{%
+\scalebox{0.83}{%
 \begin{tikzpicture}[font=\small\sffamily]
 \tikzset{%
   do path picture/.style={%
@@ -3192,6 +3189,16 @@ plt.close()
 
 @Lst-self_attention_layer presents a typical implementation, showing how self-attention derives queries, keys, and values from the same input sequence.
 
+Parallel sequence processing shifts fundamentally during autoregressive inference: generating output tokens step-by-step reintroduces sequential serialization and converts compute-bound matrix multiplications into memory-bandwidth-bound matrix-vector operations, as quantified in @sec-network-architectures-system-implications-77ac via the GPT-2 XL lighthouse.
+
+### System implications {#sec-network-architectures-system-implications-77ac}
+
+The quadratic bottleneck analyzed in @sec-network-architectures-system-implications-05a3 manifests differently across execution regimes. Full-sequence training and prefill compute all token positions concurrently, whereas autoregressive decoding generates one token at a time. Consequently, the operational bottleneck shifts from compute-bound matrix multiplications to memory-bandwidth-bound weight and state retrieval, governed by sequence length, batch size, and memory hierarchy limits.
+
+#### Training: The quadratic compute wall {#sec-network-architectures-training-quadratic-compute-wall-de9d}
+
+During training and prompt prefill, all token positions are processed in parallel, allowing accelerator tensor cores to achieve high floating-point utilization. However, dense attention's score computation grows as $\mathcal{O}(S^2)$ with sequence length $S$. For long sequences (for example, 32k tokens), materializing the $32k{\times}32k$ attention matrix requires gigabytes of activation storage per layer across multiple heads. Writing this quadratic intermediate matrix out to accelerator HBM and reading it back for softmax creates an extreme memory-bandwidth bottleneck. This physical constraint motivates I/O-aware kernel tiling (such as FlashAttention [@dao2022]), which fuses dot-product, softmax, and value-weighting steps into fast on-chip SRAM tiles, bypassing HBM round-trips for the intermediate $\mathcal{O}(S^2)$ matrix. The hardware memory hierarchies (HBM, SRAM, register files) that make such tiling effective are detailed in @sec-hardware-acceleration.
+
 ::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from the same input $\mathbf{X}$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $N_{\text{heads}}$ parallel attention heads with dimension $d_k = d_{\text{model}}/N_{\text{heads}}$, then concatenates and projects. For GPT-2 (768-dim, 12 heads), each head operates on 64 dimensions, partitioning the projected feature dimension across heads while enabling diverse relationship patterns."}
 
 ```{.python}
@@ -3224,16 +3231,6 @@ def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
 ```
 
 :::
-
-Parallel sequence processing shifts fundamentally during autoregressive inference: generating output tokens step-by-step reintroduces sequential serialization and converts compute-bound matrix multiplications into memory-bandwidth-bound matrix-vector operations, as quantified in @sec-network-architectures-system-implications-77ac via the GPT-2 XL lighthouse.
-
-### System implications {#sec-network-architectures-system-implications-77ac}
-
-The quadratic bottleneck analyzed in @sec-network-architectures-system-implications-05a3 manifests differently across execution regimes. Full-sequence training and prefill compute all token positions concurrently, whereas autoregressive decoding generates one token at a time. Consequently, the operational bottleneck shifts from compute-bound matrix multiplications to memory-bandwidth-bound weight and state retrieval, governed by sequence length, batch size, and memory hierarchy limits.
-
-#### Training: The quadratic compute wall {#sec-network-architectures-training-quadratic-compute-wall-de9d}
-
-During training and prompt prefill, all token positions are processed in parallel, allowing accelerator tensor cores to achieve high floating-point utilization. However, dense attention's score computation grows as $\mathcal{O}(S^2)$ with sequence length $S$. For long sequences (for example, 32k tokens), materializing the $32k{\times}32k$ attention matrix requires gigabytes of activation storage per layer across multiple heads. Writing this quadratic intermediate matrix out to accelerator HBM and reading it back for softmax creates an extreme memory-bandwidth bottleneck. This physical constraint motivates I/O-aware kernel tiling (such as FlashAttention [@dao2022]), which fuses dot-product, softmax, and value-weighting steps into fast on-chip SRAM tiles, bypassing HBM round-trips for the intermediate $\mathcal{O}(S^2)$ matrix. The hardware memory hierarchies (HBM, SRAM, register files) that make such tiling effective are detailed in @sec-hardware-acceleration.
 
 #### Small-batch autoregressive decoding: The memory bandwidth wall {#sec-network-architectures-inference-memory-bandwidth-wall-98d1}
 
@@ -3304,6 +3301,10 @@ class KVCacheSizing:
 The **KV cache**\index{KV cache!definition}\index{KV cache!linear growth}[^fn-kv-cache-depth] grows linearly with sequence length ($\mathcal{O}(N_L \times 2 \times N_{\text{heads}} \times S \times d_{\text{head}})$ per request, distinct from the $\mathcal{O}(S^2)$ attention score matrix during training), storing the key and value vectors for all previous tokens to avoid recomputing them [@pope2023efficiently; @kwon2023]. Keys and values from past tokens are retained because the newly generated token's query ($q_{t}$) must attend across all historical context ($k_1 \dots k_{t-1}$ and $v_1 \dots v_{t-1}$) to compute its next representation. Prior queries ($q_1 \dots q_{t-1}$) are safely discarded because past tokens never attend forward to future tokens, while caching past keys and values avoids re-running the entire model forward pass over the full prompt at every generated token. For long contexts, this cache can become massive (for example, 100+ GB), and each decoding step reads prior keys and values. The resulting bandwidth pressure depends on context length, batching, attention architecture, cache layout, and hardware.
 
 [^fn-kv-cache-depth]: **KV cache memory scaling**\index{KV cache!memory scaling}: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB; a single request's cache requires `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions $\times$ `{python} KVCacheSizing.head_dim_str` dimensions $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes, or about `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, the cache is ~`{python} KVCacheSizing.concurrent_8_gb_str`, a substantial addition to the weights. Because the cache grows linearly with context and concurrency, scaling throughput forces choices such as grouped-query attention [@ainslie2023], shorter contexts, or KV paging and offloading [@kwon2023]. Paging and offloading preserve model outputs, whereas grouped-query attention changes the architecture and shorter contexts truncate historical context.
+
+Across training and inference, transformers exhibit distinct operational signatures: unconstrained parallel execution across token positions during training, quadratic arithmetic complexity in context length, and bandwidth-bound weight streaming during autoregressive decoding.
+
+Yet dense and spatial models do not encompass the full spectrum of production workloads. Large-scale recommendation systems depart from standard arithmetic-dominated pipelines by coupling sparse embedding lookups—where memory capacity and irregular access distributions govern throughput—with downstream dense interaction layers. This hybrid matters at production scale: Meta reported that recommendation models accounted for most of its AI inference cycles [@gupta2020architectural], even though such workloads receive less academic attention than language or vision models. @Sec-network-architectures-sparse-architectures-recommendation-systems-5d19 examines recommendation as the chapter's final paradigm.
 
 ```{python}
 #| echo: false
@@ -3376,10 +3377,6 @@ class GPT2BandwidthProfile:
 \vspace*{-2ex}
 ```
 :::
-
-Across training and inference, transformers exhibit distinct operational signatures: unconstrained parallel execution across token positions during training, quadratic arithmetic complexity in context length, and bandwidth-bound weight streaming during autoregressive decoding.
-
-Yet dense and spatial models do not encompass the full spectrum of production workloads. Large-scale recommendation systems depart from standard arithmetic-dominated pipelines by coupling sparse embedding lookups—where memory capacity and irregular access distributions govern throughput—with downstream dense interaction layers. This hybrid matters at production scale: Meta reported that recommendation models accounted for most of its AI inference cycles [@gupta2020architectural], even though such workloads receive less academic attention than language or vision models. @Sec-network-architectures-sparse-architectures-recommendation-systems-5d19 examines recommendation as the chapter's final paradigm.
 
 ## Sparse Architectures: RecSys {#sec-network-architectures-sparse-architectures-recommendation-systems-5d19}
 
@@ -4064,7 +4061,7 @@ Production architectures combine these execution paths. A transformer block uses
 
 ### Memory access primitives {#sec-network-architectures-memory-access-primitives-5e8b}
 
-Memory access speed and predictability determine accelerator utilization. Even a matrix-multiplication engine capable of hundreds of teraFLOPs stalls if data cannot traverse the memory hierarchy fast enough. While an on-chip arithmetic operation completes in single-digit clock cycles, fetching an operand from off-chip DRAM requires hundreds of cycles.
+Memory access speed and predictability determine accelerator utilization. Even a matrix-multipli&shy;ca&shy;tion engine capable of hundreds of teraFLOPs stalls if data cannot traverse the memory hierarchy fast enough. While an on-chip arithmetic operation completes in single-digit clock cycles, fetching an operand from off-chip DRAM requires hundreds of cycles.
 
 Memory access patterns fall into three categories—sequential access\index{Memory access!sequential}, strided access\index{Memory access!strided}, and random access\index{Memory access!random}—governing how effectively hardware can prefetch, cache, and coalesce memory requests. Because transferring data across packaging boundaries consumes far more power than ALU operations, memory access patterns dictate energy budgets alongside execution latency.
 
@@ -4115,6 +4112,9 @@ Working set size\index{Working set size}—the volume of data required concurren
 
 While @tbl-arch-complexity defines memory scaling, @tbl-computational-complexity contrasts the resulting arithmetic demands, parallelization structures, and primary hardware bottlenecks across the four reference architectures.
 
+Memory access primitives govern how efficiently a single execution core pulls data from its local memory hierarchy. However, executing neural networks at scale requires coordinating data streams across multiple cores, on-chip caches, and discrete accelerators.
+
+
 | **Architecture** | **Parameters**                                                                                                            | **Forward Pass**                                                                                          | **Memory**                                                                                                              | **Parallelization**                     | **Bottleneck**                                                         |
 |:-----------------|:--------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------|
 | **MLPs**         | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                                              | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                              | $\mathcal{O}(d_{\text{in}}d_{\text{out}})$ weights $\mathcal{O}(B d_{\text{out}})$ activations                          | Excellent Matrix ops parallel           | Memory bandwidth                                                       |
@@ -4123,8 +4123,6 @@ While @tbl-arch-complexity defines memory scaling, @tbl-computational-complexity
 | **Transformers** | $\mathcal{O}(d_{\text{model}}^2)$ QKV/O projections plus $\mathcal{O}(d_{\text{model}}d_{\text{ff}})$ feed-forward layers | $\mathcal{O}(S^2 \times d_{\text{model}} + S \times d_{\text{model}}^2)$ per layer                        | $\mathcal{O}(S^2)$ attention $\mathcal{O}(S \times d_{\text{model}})$ sequences                                         | Excellent (positions) Limited by memory | Memory $(S^2)$                                                         |
 
 : **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d_{\text{in}}$ = input dimension, $d_{\text{out}}$ = output dimension, $d_{\text{model}}$ = transformer model dimension, $d_{\text{hidden}}$ = RNN hidden-state dimension, $k$ = kernel size, $c$ = channels, $H_{\text{img}}, W_{\text{img}}$ = spatial dimensions, $S$ = sequence length (time steps), $B$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. For transformers, the $\mathcal{O}(S^2)$ memory term assumes materialized attention scores; tiled exact-attention kernels can avoid retaining that full matrix. {#tbl-computational-complexity tbl-colwidths="[12,18,16,20,18,16]"}
-
-Memory access primitives govern how efficiently a single execution core pulls data from its local memory hierarchy. However, executing neural networks at scale requires coordinating data streams across multiple cores, on-chip caches, and discrete accelerators.
 
 ### Data movement primitives {#sec-network-architectures-data-movement-primitives-5b39}
 
@@ -4334,18 +4332,6 @@ Interconnect architectures reflect data movement primitives. To sustain the high
 
 @Tbl-sys-design-implications summarizes this hardware-software co-design, mapping each computational, memory, and communication primitive to its dedicated hardware acceleration, compiler optimization, and primary physical bottleneck.
 
-| **Primitive**                                      | **Hardware Impact**       | **Software Optimization** | **Key Challenges**         |
-|:---------------------------------------------------|:--------------------------|:--------------------------|:---------------------------|
-| **Matrix Multiplication**                          | Tensor Cores              | Batching, GEMM libraries  | Parallelization, precision |
-| **Sliding Window**                                 | Specialized datapaths     | Data layout optimization  | Stride handling            |
-| **Dynamic computation**\index{Dynamic computation} | Flexible routing          | Dynamic graph execution   | Load balancing             |
-| **Sequential Access**                              | Burst mode DRAM           | Contiguous allocation     | Access latency             |
-| **Random Access**                                  | Large caches              | Memory-aware scheduling   | Cache misses               |
-| **Broadcast**                                      | Specialized interconnects | Operation fusion          | Bandwidth                  |
-| **Gather/Scatter**                                 | High-bandwidth memory     | Work distribution         | Load balancing             |
-
-: **Primitive-Hardware Co-Design**: Efficient machine learning systems require tight integration between algorithmic primitives and underlying hardware. Common primitives map to specific hardware accelerations and software optimizations, each presenting distinct implementation challenges. Specialized hardware such as Tensor Cores addresses computational demands of matrix multiplication and sliding windows, while software techniques like batching and dynamic graph execution further enhance performance. {#tbl-sys-design-implications tbl-colwidths="[22,26,26,26]"}
-
 These primitive mappings govern system energy consumption. As established in the following analysis, the physical energy cost of moving an operand across memory packaging exceeds arithmetic energy by orders of magnitude.
 
 ```{python}
@@ -4396,6 +4382,18 @@ class EnergyConsumptionAnalysis:
 :::
 
 Large batched GEMMs in MLPs achieve high arithmetic intensity, amortizing weight loads across many inputs. In contrast, small-batch MLP inference exhibits minimal reuse and spends most of its energy moving weights from off-chip DRAM. A reference FP32 multiply costs approximately `{python} EnergyConsumptionAnalysis.energy_multiply_pj_str`, while fetching a single 32-bit operand from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str` [@horowitz2014]—an energy disparity of `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str`. While total workload energy depends on operation counts and reuse factors, low-reuse operations remain overwhelmingly energy-dominated by DRAM transfers. This physical reality drives accelerator architects to allocate large on-chip SRAM pools and adopt wafer-scale or multi-die packaging to keep active working sets on-chip.
+
+| **Primitive**                                      | **Hardware Impact**       | **Software Optimization** | **Key Challenges**         |
+|:---------------------------------------------------|:--------------------------|:--------------------------|:---------------------------|
+| **Matrix Multiplication**                          | Tensor Cores              | Batching, GEMM libraries  | Parallelization, precision |
+| **Sliding Window**                                 | Specialized datapaths     | Data layout optimization  | Stride handling            |
+| **Dynamic computation**\index{Dynamic computation} | Flexible routing          | Dynamic graph execution   | Load balancing             |
+| **Sequential Access**                              | Burst mode DRAM           | Contiguous allocation     | Access latency             |
+| **Random Access**                                  | Large caches              | Memory-aware scheduling   | Cache misses               |
+| **Broadcast**                                      | Specialized interconnects | Operation fusion          | Bandwidth                  |
+| **Gather/Scatter**                                 | High-bandwidth memory     | Work distribution         | Load balancing             |
+
+: **Primitive-Hardware Co-Design**: Efficient machine learning systems require tight integration between algorithmic primitives and underlying hardware. Common primitives map to specific hardware accelerations and software optimizations, each presenting distinct implementation challenges. Specialized hardware such as Tensor Cores addresses computational demands of matrix multiplication and sliding windows, while software techniques like batching and dynamic graph execution further enhance performance. {#tbl-sys-design-implications tbl-colwidths="[22,26,26,26]"}
 
 Convolutional operations reduce energy per output by reusing filter weights across $H \times W$ spatial locations. However, implementation details dictate realized energy. While im2col lowering simplifies execution by invoking vendor GEMM libraries, fully materializing the unfolded tensor can inflate temporary memory traffic by up to $K^2$ for stride-1 filters. Direct convolution algorithms and fused sliding-window kernels avoid this intermediate buffer, substantially lowering memory traffic and package energy dissipation.
 

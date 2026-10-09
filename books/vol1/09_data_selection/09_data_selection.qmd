@@ -139,7 +139,7 @@ class ScalingAsymmetry:
 | **Labeled Data**        | ~`{python} ScalingAsymmetry.label_data_growth_mult_str` / `{python} ScalingAsymmetry.label_data_period_years_str` | Human annotation throughput is inherently bounded                                 |
 | **Synthetic Data**      |                                                                                                 Potentially large | Bounded by generator quality (models trained on model-generated data can degrade) |
 
-: **Scaling Asymmetry in ML Resources**: In the illustrated scaling regime, compute grows faster than high-quality data supply, creating a compute-to-data imbalance that makes data selection valuable. {#tbl-scaling-asymmetry .striped .hover tbl-colwidths="[16,13,71]"}
+: **Scaling Asymmetry in ML Resources**: In the illustrated scaling regime, compute grows faster than high-quality data supply, creating a compute-to-data imbalance that makes data selection valuable. {#tbl-scaling-asymmetry .striped .hover tbl-colwidths="[22,18,60]"}
 
 [^fn-data-wall-scaling]: **Data wall**\index{Data wall!scaling constraint}: Unlike compute (which scales with capital expenditure) or algorithms (which improve through research), the stock of high-quality human-generated text grows slowly; Epoch AI's updated projections estimated that, under the paper's modeled consumption assumptions, models could use datasets roughly equal in size to the stock of public human-generated text between 2026 and 2032 [@villalobos2022will]. The point for systems design is not a fixed calendar deadline; it is that data can become a supply constraint rather than merely an economic one. This constraint directly affects the total operations $(O)$ term: when quality data becomes scarce, additional compute yields diminishing returns regardless of hardware throughput.
 
@@ -352,15 +352,6 @@ The data wall dictates the physical limits of scaling uncurated datasets; a syst
 
 A data-selection *systems framing*\index{Data selection!systems vs. ML framing} asks instead how to minimize the total resource cost of achieving target accuracy across the entire ML lifecycle. This framing shifts attention from theoretical sample efficiency to concrete resource consumption, as @tbl-ml-vs-systems-framing illustrates.
 
-| **ML Framing**                        |                         **Systems Framing** |
-|:--------------------------------------|--------------------------------------------:|
-| **"Fewer samples for same accuracy"** |             "Fewer FLOPs for same accuracy" |
-| **"Better generalization"**           | "Lower training cost (time, money, energy)" |
-| **"Sample complexity bounds"**        |            "End-to-end resource efficiency" |
-| **"Learning theory"**                 |                          "Cost engineering" |
-
-: **ML vs. Systems Perspectives on Data Selection**: The ML framing optimizes sample complexity; the systems framing optimizes total resource cost across the pipeline. {#tbl-ml-vs-systems-framing .striped .hover}
-
 This framing reveals optimization leverage across the execution stack. In the D·A·M taxonomy, data selection operates at the data layer to eliminate physical work before algorithmic and hardware optimizations execute it, as formalized by the iron law of ML systems (@sec-introduction-iron-law-ml-systems-c32a).
 
 ```{python}
@@ -421,6 +412,20 @@ class IronLawSavings:
     additive_sum_mult_str = fmt_multiple(round(additive_sum), precision=0, commas=False)
 ```
 
+Holding epoch count, batch size, and per-sample work fixed, a `{python} IronLawSavings.dataset_reduction_pct_str` reduction in dataset size directly halves the required forward passes, backward passes, and gradient updates. For the `{python} IronLawSavings.training_cost_m_str` scenario, this reduction yields `{python} IronLawSavings.compute_savings_m_str` in direct compute savings, provided the training schedule does not compensate by adding optimization steps.
+
+| **ML Framing**                        |                         **Systems Framing** |
+|:--------------------------------------|--------------------------------------------:|
+| **"Fewer samples for same accuracy"** |             "Fewer FLOPs for same accuracy" |
+| **"Better generalization"**           | "Lower training cost (time, money, energy)" |
+| **"Sample complexity bounds"**        |            "End-to-end resource efficiency" |
+| **"Learning theory"**                 |                          "Cost engineering" |
+
+: **ML vs. Systems Perspectives on Data Selection**: The ML framing optimizes sample complexity; the systems framing optimizes total resource cost across the pipeline. {#tbl-ml-vs-systems-framing .striped .hover}
+
+
+These compute savings propagate throughout the hardware hierarchy. By decreasing total data volume ($D_{\text{vol}}$), deduplication\index{Deduplication!storage and I/O cost reduction} and coreset selection alleviate storage bandwidth demands, network fabric ingress, and host-to-accelerator PCIe transfers that otherwise stall tensor cores in I/O wait states. Upstream, active learning\index{Active learning!labeling cost reduction} curbs annotation budgets by directing human labeling exclusively to high-entropy or high-gradient samples.
+
 ::: {#psp-data-selection-data-selection-iron-law .callout-perspective title="Data selection and the iron law"}
 
 In the iron law of ML systems $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, data selection reduces the number of examples or tokens that enter the workload. Later model-level optimizations reduce operations per forward/backward pass, and machine-level optimizations increase $R_{\text{peak}}$ (peak throughput) and $\eta_{\text{hw}}$ (utilization). Selection removes work before those downstream optimizations execute it.
@@ -428,10 +433,6 @@ In the iron law of ML systems $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{
 This makes data selection multiplicatively valuable in the iron law\index{Iron law of ML systems!multiplicative savings from data selection}: when all three optimization layers act on the same bottleneck, a `{python} IronLawSavings.factor_data_mult_str` reduction in dataset size with `{python} IronLawSavings.factor_model_mult_str` fewer operations per sample and `{python} IronLawSavings.factor_hw_mult_str` higher effective throughput yields `{python} IronLawSavings.combined_factor_mult_str` total cost reduction, not `{python} IronLawSavings.additive_sum_mult_str`.
 
 :::
-
-Holding epoch count, batch size, and per-sample work fixed, a `{python} IronLawSavings.dataset_reduction_pct_str` reduction in dataset size directly halves the required forward passes, backward passes, and gradient updates. For the `{python} IronLawSavings.training_cost_m_str` scenario, this reduction yields `{python} IronLawSavings.compute_savings_m_str` in direct compute savings, provided the training schedule does not compensate by adding optimization steps.
-
-These compute savings propagate throughout the hardware hierarchy. By decreasing total data volume ($D_{\text{vol}}$), deduplication\index{Deduplication!storage and I/O cost reduction} and coreset selection alleviate storage bandwidth demands, network fabric ingress, and host-to-accelerator PCIe transfers that otherwise stall tensor cores in I/O wait states. Upstream, active learning\index{Active learning!labeling cost reduction} curbs annotation budgets by directing human labeling exclusively to high-entropy or high-gradient samples.
 
 Yet selection is not free: every selection strategy incurs its own runtime overhead to score, filter, shuffle, or coordinate samples. An online selection algorithm that executes additional forward passes to rank sample difficulty can easily consume more accelerator cycles than it saves if its selection overhead exceeds the subsequent reduction in training time. A data selection pipeline earns its place only when the end-to-end cost of filtering plus training on the curated subset remains strictly lower than training on the uncurated whole.
 
@@ -1489,12 +1490,6 @@ Curriculum learning optimizes the order in which samples are presented but assum
 
 Active learning transforms data acquisition from static collection into an iterative query process. Trace the circular flow path in @fig-active-learning-loop, following how model uncertainty metrics select high-value unlabeled samples for expert annotation.
 
-The effectiveness of active learning depends critically on the query strategy used to select samples for annotation [@settles2009active; @settles2012; @ren2021]. The simplest approach, uncertainty sampling\index{Uncertainty sampling!active learning query strategy}, selects samples where the model is least confident, such as predictions near 0.5 probability for binary classification. It is inexpensive to score with one model but can overconcentrate queries near one ambiguous region. Query-by-committee\index{Query-by-committee!active learning strategy} extends this idea by training multiple models and selecting samples where they disagree most, capturing epistemic uncertainty that a single model might miss.
-
-For practitioners willing to invest more compute, expected model change\index{Expected Model Change!active learning query strategy} selects samples that would cause the largest gradient update if labeled. This approach provides a theoretically grounded but expensive alternative. Diversity sampling\index{Diversity Sampling!active learning query strategy} complements uncertainty-based methods by selecting samples dissimilar from currently labeled data, improving coverage rather than clustering every query around the same ambiguous region.
-
-Active learning is particularly valuable in domains where labeling requires expertise. In medical imaging, for instance, an AI system diagnosing diseases from X-rays may be confident on common conditions but uncertain about rarer cases. By focusing human annotation on these ambiguous cases, active learning optimizes the use of expensive expert time while accelerating model improvement.
-
 ::: {#fig-active-learning-loop fig-cap="**The Active Learning Closed Loop**: The selection cycle trades proxy-scoring compute for queries chosen from an unlabeled pool for oracle annotation. Uncertainty, diversity, and coverage criteria seek more useful information per annotation than undirected sampling." fig-alt="Five-box cycle: Unlabeled Pool points right to Selection Strategy with Query, then down to Oracle (Human) with Uncertainty, down to Training Set with Labels, left to Model with Train, and back up to Unlabeled Pool with a dashed Update arrow."}
 ```{.tikz}
 \scalebox{0.9}{\begin{tikzpicture}[font=\small\sffamily]
@@ -1752,6 +1747,12 @@ scale=1.3, every node/.append style={transform shape}]
 ```
 :::
 
+The effectiveness of active learning depends critically on the query strategy used to select samples for annotation [@settles2009active; @settles2012; @ren2021]. The simplest approach, uncertainty sampling\index{Uncertainty sampling!active learning query strategy}, selects samples where the model is least confident, such as predictions near 0.5 probability for binary classification. It is inexpensive to score with one model but can overconcentrate queries near one ambiguous region. Query-by-committee\index{Query-by-committee!active learning strategy} extends this idea by training multiple models and selecting samples where they disagree most, capturing epistemic uncertainty that a single model might miss.
+
+For practitioners willing to invest more compute, expected model change\index{Expected Model Change!active learning query strategy} selects samples that would cause the largest gradient update if labeled. This approach provides a theoretically grounded but expensive alternative. Diversity sampling\index{Diversity Sampling!active learning query strategy} complements uncertainty-based methods by selecting samples dissimilar from currently labeled data, improving coverage rather than clustering every query around the same ambiguous region.
+
+Active learning is particularly valuable in domains where labeling requires expertise. In medical imaging, for instance, an AI system diagnosing diseases from X-rays may be confident on common conditions but uncertain about rarer cases. By focusing human annotation on these ambiguous cases, active learning optimizes the use of expensive expert time while accelerating model improvement.
+
 The economic implications can be substantial in specialist domains, where annotation cost and turnaround may dominate the compute used to score candidates. These query strategies drive each iteration of the active learning loop in @fig-active-learning-loop, and a simple budget comparison shows how active learning can reduce labeling cost and training work under stated assumptions.
 
 ```{python}
@@ -1860,7 +1861,7 @@ class ActiveLearningRoi:
 
 Targeted sample selection can reduce the annotation volume required to reach a target metric. Compare the two illustrative accuracy trajectories in @fig-active-learning-multiplier, noting the horizontal gap between active uncertainty sampling and baseline random selection as sample counts scale.
 
-::: {#fig-active-learning-multiplier fig-env="figure" fig-pos="htb" fig-cap="**The Active Learning Multiplier**: Model accuracy is plotted against labeled samples on a logarithmic axis. In this illustrative scenario, active learning (green solid) reaches the same accuracy with fewer labels than random sampling (gray dashed); the arrow marks an approximately 4$\times$ label-efficiency gap near 90 percent accuracy." fig-alt="Line chart with labeled samples from 100 to 10,000 on a logarithmic x-axis and accuracy on the y-axis. A green active-learning curve rises above a gray dashed random-sampling curve, the area between them is shaded green, and a horizontal arrow near 90 percent accuracy is labeled 4 times data efficiency."}
+::: {#fig-active-learning-multiplier fig-env="figure" fig-pos="H" fig-cap="**The Active Learning Multiplier**: Model accuracy is plotted against labeled samples on a logarithmic axis. In this illustrative scenario, active learning (green solid) reaches the same accuracy with fewer labels than random sampling (gray dashed); the arrow marks an approximately 4$\times$ label-efficiency gap near 90 percent accuracy." fig-alt="Line chart with labeled samples from 100 to 10,000 on a logarithmic x-axis and accuracy on the y-axis. A green active-learning curve rises above a gray dashed random-sampling curve, the area between them is shaded green, and a horizontal arrow near 90 percent accuracy is labeled 4 times data efficiency."}
 
 ```{python}
 #| echo: false
@@ -1880,7 +1881,7 @@ Targeted sample selection can reduce the annotation volume required to reach a t
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.1))
 # —Plot: Active Learning vs Random Sampling ---
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
@@ -2188,6 +2189,11 @@ GPT was trained to predict the next token in a sequence. BERT was trained to fil
 
 Labels are one form of supervision; a pretext task can also derive a learning signal from the structure of the data, as @tbl-self-supervised-tasks summarizes.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Modality**    | **Self-Supervised Task** |                      **Supervision Signal** |
 |:----------------|:-------------------------|--------------------------------------------:|
 | **Text**        | Masked language modeling |                 Predict [MASK] from context |
@@ -2210,6 +2216,10 @@ The centrality of self-supervised learning to foundation-model workflows stems d
 | **Fine-tune foundation model** | 100–1K labeled      | 1–5% of full training | Reuse pretraining corpus |
 
 : **Illustrative Foundation-Model Amortization**: The label and compute ranges are scenario assumptions. They illustrate why reuse can lower marginal task cost when representations transfer, not a universal fine-tuning ratio. {#tbl-cost-amortization .striped .hover}
+
+```{=latex}
+\endgroup
+```
 
 ```{python}
 #| echo: false
@@ -2385,7 +2395,7 @@ Real-world data collection encounters physical and legal boundaries: autonomous 
 
 Data augmentation\index{Data augmentation!definition} is the lowest-overhead form of synthetic generation: it expands the effective training distribution by transforming existing samples dynamically during ingestion. Because label-preserving transformations generate novel inputs without expanding durable storage, augmentation multiplies dataset diversity with zero additional data acquisition cost. In an accelerator-based training pipeline, however, augmentation shifts the computational bottleneck between the host CPU and the accelerator. When executed on host CPU worker threads, intensive decoding and spatial transformations can saturate host cores, starving the accelerator across the PCIe bus. Offloading transformations directly to accelerator kernels eliminates host-to-device transfer bubbles, but consumes High Bandwidth Memory (HBM) and compute cycles that would otherwise perform gradient updates.
 
-For image data, transformation pipelines enforce the inductive invariances required at deployment [@shorten2019]. Geometric operations (rotation, horizontal flipping, random cropping, and scaling) enforce viewpoint invariance, while photometric adjustments (brightness, contrast, and color jitter) simulate sensor noise and varying illumination. More aggressive strategies alter input topology directly: Cutout\index{Cutout!image augmentation}[^fn-cutout-data-augmentation] applies random rectangular zero-masks to prevent reliance on localized features; MixUp\index{MixUp!image augmentation} [@zhang2018mixup] constructs virtual samples by taking linear combinations of image pairs and their one-hot labels ($\tilde{x} = \lambda x_i + (1 - \lambda) x_j$); and CutMix\index{CutMix!image augmentation}[^fn-cutmix-data-augmentation] pastes rectangular patches from one image into another while blending labels proportionally to the patch area. Because CutMix and MixUp operate via tensor linear combinations and block memory copies directly in device memory, they provide strong data-space regularization with negligible FLOP overhead.
+For image data, transformation pipelines enforce the inductive invariances required at deployment [@shorten2019]. Geometric operations (rotation, horizontal flipping, random cropping, and scaling) enforce viewpoint invariance, while photometric adjustments (brightness, contrast, and color jitter) simulate sensor noise and varying illumination. More aggressive strategies alter input topology directly: Cutout\index{Cutout!image augmentation}[^fn-cutout-data-augmentation] applies random rectangular zero-masks to prevent reliance on localized features; MixUp\index{MixUp!image augmentation} [@zhang2018mixup] constructs virtual samples by taking linear combinations of image pairs and their one-hot labels ($\tilde{x} = \lambda x_i + (1 - \lambda) x_j$); and CutMix\index{CutMix!image augmentation}[^fn-cutmix-data-augmentation] pastes rectangular patches from one image into another while blending labels proportionally to the patch area. Because&nbsp;CutMix and MixUp operate via tensor linear combinations and block memory copies directly in device memory, they provide strong data-space regularization with negligible FLOP overhead.
 
 [^fn-cutout-data-augmentation]: **Cutout**\index{Cutout!augmentation efficiency}: Randomly masks square regions of input images during training, forcing the model to recognize objects from partial information rather than relying on any single discriminative region [@devries2017cutout]. Unlike dropout (which zeroes *neurons* in feature space), Cutout operates in input space. The original Cutout experiments produced 0.3--2.0 percentage-point gains across CIFAR-10/100 and SVHN with negligible compute overhead, making it a high-ICR augmentation technique when occlusion-style invariance matches the task: more information per sample at near-zero additional cost to the pipeline.
 
@@ -2787,11 +2797,6 @@ class SelectionBottleneckAnchor:
 
 Dynamic data selection introduces a new bottleneck: selection latency\index{Latency!selection, dynamic selection bottleneck}. A conventional loader follows a predetermined sampling plan, whereas active learning or adaptive curricula may evaluate a selection function $f(x)$ over a large candidate pool before forming later batches. Concretely, scoring a `{python} SelectionBottleneckAnchor.dataset_size_str` dataset with a large model can take `{python} SelectionBottleneckAnchor.scoring_time_hours_str`, potentially negating the savings from a `{python} SelectionBottleneckAnchor.coreset_pct_str` coreset if not performed with a smaller proxy model. The systems trade-off requires that selection cost remain below the training work the subset saves; otherwise, sample counts fall while end-to-end cost rises.
 
-At a fixed target metric, selection plus subset training must cost less than full-data training. Let $T_{\text{selection}}$ be wall-clock time spent scoring the pool, $T_{\text{train}}(D)$ be wall-clock training time for a dataset of size $D$, and $D_{\text{subset}}$ and $D_{\text{total}}$ be the retained and full sample counts. @Eq-selection-inequality expresses this break-even condition, the **selection inequality**\index{Selection inequality!definition}.
-$$ T_{\text{selection}} + T_{\text{train}}(D_{\text{subset}}) < T_{\text{train}}(D_{\text{total}}) $$ {#eq-selection-inequality}
-
-Equivalently, isolating the allowable selection overhead yields $T_{\text{selection}} < T_{\text{train}}(D_{\text{total}}) - T_{\text{train}}(D_{\text{subset}})$. The upper bound on selection latency depends strictly on how much training execution the subset eliminates; no arbitrary overhead fraction applies across workloads. When $f(x)$ repeatedly evaluates the candidate pool using the primary model architecture, recurring scoring passes and distributed coordination can consume the saved training cycles, turning data selection into a net throughput penalty.
-
 ```{python}
 #| echo: false
 #| label: selection-inequality-calc
@@ -2890,6 +2895,11 @@ class SelectionInequalityCalc:
 
 :::
 
+At a fixed target metric, selection plus subset training must cost less than full-data training. Let $T_{\text{selection}}$ be wall-clock time spent scoring the pool, $T_{\text{train}}(D)$ be wall-clock training time for a dataset of size $D$, and $D_{\text{subset}}$ and $D_{\text{total}}$ be the retained and full sample counts. @Eq-selection-inequality expresses this break-even condition, the **selection inequality**\index{Selection inequality!definition}.
+$$ T_{\text{selection}} + T_{\text{train}}(D_{\text{subset}}) < T_{\text{train}}(D_{\text{total}}) $$ {#eq-selection-inequality}
+
+Equivalently, isolating the allowable selection overhead yields $T_{\text{selection}} < T_{\text{train}}(D_{\text{total}}) - T_{\text{train}}(D_{\text{subset}})$. The upper bound on selection latency depends strictly on how much training execution the subset eliminates; no arbitrary overhead fraction applies across workloads. When $f(x)$ repeatedly evaluates the candidate pool using the primary model architecture, recurring scoring passes and distributed coordination can consume the saved training cycles, turning data selection into a net throughput penalty.
+
 End-to-end wall-clock time divides into selection overhead and subset training. In @fig-selection-inequality, stacked time bars compare baseline full-dataset training against efficient and expensive selection regimes.
 
 ::: {#fig-selection-inequality fig-env="figure" fig-pos="htb" fig-cap="**The Selection Inequality**: Data selection only improves end-to-end efficiency if the overhead of selection plus training on the subset is less than training on the full dataset. A lightweight selection function (proxy model, cached embeddings) keeps selection overhead low; an expensive selection function (full model forward pass) can negate the savings." fig-alt="Stacked bar chart comparing three approaches: Baseline shows a single tall bar (100) for full training; Efficient Selection shows two short stacked bars (5 selection overhead plus 40 subset training) totaling 45 with a 55 percent savings annotation; Expensive Selection shows two stacked bars (60 selection overhead plus 40 subset training) totaling 100 with a No savings annotation."}
@@ -2982,6 +2992,8 @@ Engineering pipelines manage selection overhead through proxy models, cached emb
 
 The selection inequality addresses compute overhead, but selection algorithms also reshape physical I/O patterns. Index-driven sampling turns large sequential shard transfers into scattered, nonsequential reads, forfeiting the throughput benefits of hardware readahead, OS page caching, and bulk controller prefetching. Because disk heads must physically seek and flash controllers must execute random block lookups, equal-sized subsets can produce starkly different wall-clock training times depending on access locality. @Tbl-io-performance quantifies this small-read penalty across storage tiers for 4 KB transfers.
 
+Data loaders\index{Data loading!shard-based sequential I/O} resolve this conflict through data-machine co-design. Sharded dataset formats, such as WebDataset and FFCV, pack thousands of individual examples into contiguous, sequentially readable archive chunks. Rather than fetching scattered individual samples from disk, the loader streams large sequential shards into host memory and populates a **shuffle buffer**\index{Shuffle buffer!approximate random sampling}. The training loop samples pseudo-randomly from this in-memory buffer, preserving peak storage read bandwidth while satisfying the statistical requirement of randomized mini-batches. In distributed training across multiple accelerators, each worker maintains an independent shuffle buffer over a non-overlapping shard. Because randomization is local to each worker's memory buffer rather than global across the corpus, rare classes or boundary cases concentrated in specific shards receive uneven exposure across workers unless the dataset is stratified and shards are balanced prior to distribution.
+
 ```{python}
 #| echo: false
 #| label: random-access-penalty-calc
@@ -3055,7 +3067,6 @@ class RandomAccessPenalty:
 
 : **Illustrative Small-Read Penalty**: Registry device anchors compare sequential bandwidth with random 4 KB reads under a simplified IOPS conversion. Real throughput depends on request size, queue depth, concurrency, caching, and service configuration; the cloud row is only a qualitative scenario. {#tbl-io-performance .striped .hover tbl-colwidths="[11,25,20,24,20]"}
 
-Data loaders\index{Data loading!shard-based sequential I/O} resolve this conflict through data-machine co-design. Sharded dataset formats, such as WebDataset and FFCV, pack thousands of individual examples into contiguous, sequentially readable archive chunks. Rather than fetching scattered individual samples from disk, the loader streams large sequential shards into host memory and populates a **shuffle buffer**\index{Shuffle buffer!approximate random sampling}. The training loop samples pseudo-randomly from this in-memory buffer, preserving peak storage read bandwidth while satisfying the statistical requirement of randomized mini-batches. In distributed training across multiple accelerators, each worker maintains an independent shuffle buffer over a non-overlapping shard. Because randomization is local to each worker's memory buffer rather than global across the corpus, rare classes or boundary cases concentrated in specific shards receive uneven exposure across workers unless the dataset is stratified and shards are balanced prior to distribution.
 
 ::: {#chk-data-selection-selection-inequality .callout-checkpoint title="The selection inequality"}
 
@@ -4398,7 +4409,6 @@ These evaluation metrics govern the transition point where indiscriminate data c
 
 Data selection techniques implicitly rank sample value, and validating that a curated dataset preserves model quality requires systematic benchmarking across three dimensions. Coverage metrics validate that coreset selection preserved representation across classes and demographic groups. Distribution alignment metrics (such as KL divergence and population stability index, which @sec-appdx-data-foundations-measuring-drift-divergence-a6dd defines) detect whether the curated training set drifted from the deployment distribution. Label quality metrics (inter-annotator agreement, confident learning) validate that active learning did not introduce systematic labeling errors. A 50 percent dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness. @Sec-benchmarking later generalizes these ideas into broader model-and-data evaluation protocols; here, the point is narrower: a curated dataset must be validated against the task distribution rather than against its reduction ratio alone.
 
-The validation target can itself be unreliable. Benchmark accuracy can overstate generalization when test sets fail to capture operational distribution shifts, demanding the same scrutiny for evaluation benchmarks as for curated training sets.
 
 ::: {#exmp-data-selection-benchmark-replication-gap .callout-example title="The benchmark replication gap"}
 
@@ -4409,6 +4419,8 @@ The validation target can itself be unreliable. Benchmark accuracy can overstate
 **Systems lesson**: Evaluation-set construction affects measured generalization. Data-selection pipelines should validate curated subsets on independently collected and deployment-relevant test sets rather than trusting one long-reused benchmark.
 
 :::
+
+The validation target can itself be unreliable. Benchmark accuracy can overstate generalization when test sets fail to capture operational distribution shifts, demanding the same scrutiny for evaluation benchmarks as for curated training sets.
 
 An efficiency gain measured against a single benchmark can evaporate under distribution shift; a curated subset must demonstrate consistent quality across multiple held-out distributions before its reported reduction ratio is trusted.
 
@@ -4621,6 +4633,9 @@ class FpPitfallCalc:
     coreset_size_pct_str = fmt_percent(coreset_size_pct_value / 100, precision=0, commas=False, style='prose')
 ```
 
+```{=latex}
+\vspace*{-0.5ex}
+```
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Selection overhead is too small to change training economics.*
@@ -4629,6 +4644,9 @@ A data selection strategy is viable only if the computational cost of scoring an
 
 :::
 
+```{=latex}
+\vspace*{-0.5ex}
+```
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Pruning rare classes into oblivion.*

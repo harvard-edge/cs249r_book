@@ -67,8 +67,6 @@ The third problem is *hardware abstraction*: targeting diverse hardware from a s
 
 [^fn-eager-execution-tradeoff]: **Eager execution**\index{Eager execution!optimization trade-off}: This mode executes each operation immediately, which enables direct debugging with standard tools but sacrifices the global view needed for graph-level optimizations. Without capturing a larger region of computation, an eager runtime cannot fuse across that region or preplan its memory, leaving workload-dependent optimization opportunities for compilers such as `torch.compile`.
 
-These three problems are tightly coupled: the execution model dictates when differentiation data structures are recorded, while the hardware abstraction layer determines which graph transformations can be lowered to silicon. Unifying execution, differentiation, and hardware abstraction under physical machine constraints requires evaluating frameworks through the governing equation of machine learning performance.
-
 ::: {#psp-frameworks-ml-compiler .callout-perspective title="The ML compiler"}
 
 In the context of the iron law (@sec-introduction-iron-law-ml-systems-c32a), a framework\index{ML framework!compiler for the silicon contract} is a compiler for the silicon contract\index{Silicon contract!framework compilation}.
@@ -82,6 +80,9 @@ The "source code" is the model architecture (the $O$ term). The framework's job 
 Choosing a framework means choosing the compiler that dictates hardware efficiency. Precision matters here: a definition capturing all three responsibilities separates genuine frameworks from numerical libraries that address only one.
 
 :::
+
+These three problems are tightly coupled: the execution model dictates when differentiation data structures are recorded, while the hardware abstraction layer determines which graph transformations can be lowered to silicon. Unifying execution, differentiation, and hardware abstraction under physical machine constraints requires evaluating frameworks through the governing equation of machine learning performance.
+
 
 ::: {#dfn-frameworks-machine-learning-frameworks .callout-definition title="Machine learning frameworks"}
 
@@ -440,6 +441,10 @@ Neither approach dominates; each embodies different trade-offs between *flexibil
 
 Eager execution\index{Eager execution!define-by-run model} evaluates each operation immediately as the program calls it, building the computation graph dynamically\index{Dynamic graph!eager execution} at runtime. A side-by-side comparison shows how this differs from graph-based execution at the code level.
 
+In this define-by-run model, when host code evaluates `y = x * 2`, the runtime dispatches the multiplication kernel immediately to the device command queue and makes the resulting tensor available for subsequent operations without delay.
+
+This provides the flexibility of normal programming: developers can print intermediate values, use conditionals based on computed results, and debug with standard tools. The framework records operations as they happen, constructing a dynamic graph\index{Dynamic graph!definition}\index{Dynamic graph!runtime construction} that reflects the actual execution path taken.
+
 ::: {#exmp-frameworks-eager-vs-graph-execution-code-comparison .callout-example title="Eager vs. graph execution code comparison"}
 
 **PyTorch (eager execution)**:
@@ -469,10 +474,6 @@ with tf.Session() as sess:
 **Systems insight**: Eager execution exposes intermediate values as ordinary runtime state, which makes debugging direct. Static graphs stage computation before execution, which enables whole-graph optimization but changes the debugging model.
 
 :::
-
-In this define-by-run model, when host code evaluates `y = x * 2`, the runtime dispatches the multiplication kernel immediately to the device command queue and makes the resulting tensor available for subsequent operations without delay.
-
-This provides the flexibility of normal programming: developers can print intermediate values, use conditionals based on computed results, and debug with standard tools. The framework records operations as they happen, constructing a dynamic graph\index{Dynamic graph!definition}\index{Dynamic graph!runtime construction} that reflects the actual execution path taken.
 
 For gradient computation, the framework records a history of operations in what is called an autograd tape\index{Autograd tape!definition}\index{Autograd tape!dynamic graph construction},[^fn-autograd-tape-memory] a transient data structure built during execution. Each tensor operation creates a node that records: the operation performed, references to input tensors, and how to compute gradients. These nodes form a DAG that records the actual path taken during forward-pass execution rather than a graph fixed in advance. @Lst-autograd-tape-example shows how PyTorch records operations as they execute in its default eager mode.
 
@@ -1157,17 +1158,19 @@ The eager-vs.-compiled trade-off has a direct iron law consequence. JIT compilat
 
 Historically, PyTorch's TorchScript\index{TorchScript!tracing and scripting} exemplified both strategies [@pytorchTorchScriptDocs]. TorchScript is now deprecated in favor of newer capture and export paths such as `torch.export` [@pytorchTorchScriptDocs; @pytorchExportDocs]; it remains useful here as a concrete illustration of tracing and source-level scripting. Tracing\index{JIT compilation!tracing} executes a function with example inputs and records the tensor operations observed on that path. @Lst-torchscript-trace demonstrates how a traced module could be serialized and executed independently of the Python interpreter.
 
+The critical limitation of tracing reveals the fidelity-generality trade-off concretely. A trace records operations from an observed path rather than preserving arbitrary Python control flow. @Lst-tracing-silent-failure illustrates the resulting correctness risk.
+
+Tracing records the branch executed by the example input. In this example, converting the tensor condition to a Python Boolean commonly produces a `TracerWarning`; the resulting trace can still follow the captured branch for later inputs that require the other branch. Treating trace warnings as correctness failures is therefore essential when data-dependent Python control flow is present.
+
 ::: {#lst-torchscript-trace lst-cap="**TorchScript Tracing**: Captures tensor operations by executing a function with example inputs and recording the execution path into a static computation graph."}
 
 ```{.python}
 import torch
 
-
 def forward(x):
     y = x * 2
     z = y + 1
     return z
-
 
 # Trace the function by running it once
 x_example = torch.tensor([1.0])
@@ -1181,8 +1184,6 @@ traced = torch.jit.trace(forward, x_example)
 
 :::
 
-The critical limitation of tracing reveals the fidelity-generality trade-off concretely. A trace records operations from an observed path rather than preserving arbitrary Python control flow. @Lst-tracing-silent-failure illustrates the resulting correctness risk.
-
 ::: {#lst-tracing-silent-failure lst-cap="**Tracing a Data-Dependent Branch**: Tracing records the path taken by the example input. PyTorch commonly emits a `TracerWarning` when a tensor value is converted to a Python condition because the resulting trace may not generalize."}
 
 ```{.python}
@@ -1192,7 +1193,6 @@ def conditional_forward(x):
     else:
         return x * 3
 
-
 traced = torch.jit.trace(conditional_forward, torch.tensor([1.0]))
 # Tracing captures ONLY the x.sum() > 0 branch
 # If input later has sum <= 0, traced version
@@ -1201,7 +1201,6 @@ traced = torch.jit.trace(conditional_forward, torch.tensor([1.0]))
 
 :::
 
-Tracing records the branch executed by the example input. In this example, converting the tensor condition to a Python Boolean commonly produces a `TracerWarning`; the resulting trace can still follow the captured branch for later inputs that require the other branch. Treating trace warnings as correctness failures is therefore essential when data-dependent Python control flow is present.
 
 TorchScript's historical alternative, scripting\index{JIT compilation!scripting}, analyzed supported Python source directly and compiled it to TorchScript IR without tracing a sample path [@pytorchTorchScriptDocs]. The scripting compiler preserved supported branching structure but accepted only a restricted Python subset. Current projects should follow the supported `torch.export` and target-runtime guidance rather than select between TorchScript tracing and scripting for new deployment pipelines [@pytorchExportDocs]. Within the historical TorchScript workflow, tracing fit feed-forward models whose tensor paths remained stable for the supported inputs, while scripting handled supported data-dependent control flow without a Python interpreter. Scripting's key advantage was its ability to preserve supported conditionals in the IR, as @lst-torchscript-conditional shows.
 
@@ -1215,7 +1214,6 @@ def conditional_forward(x: torch.Tensor) -> torch.Tensor:
     else:
         return x * 3
 
-
 # Both branches preserved in IR
 # Correct branch executes based on runtime input values
 ```
@@ -1226,7 +1224,7 @@ Scripting imposed constraints because TorchScript had to analyze code that Pytho
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.35}
+\renewcommand{\arraystretch}{1.3}
 ```
 
 | **Aspect**            | **Tracing**                  | **Scripting**                 |
@@ -1252,7 +1250,6 @@ To understand what the compiler produces, @lst-torchscript-ir inspects the gener
 @torch.jit.script
 def example(x: torch.Tensor) -> torch.Tensor:
     return x * 2 + 1
-
 
 # Inspect generated IR:
 print(example.graph)
@@ -1387,7 +1384,7 @@ Fusion wins on two fronts at once. Collapsing two launches into one halves the p
 # │ Visualize the dispatch overhead of eager execution.
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.3))
 
 # =============================================================================
 # PLOT: The Python Tax
@@ -1586,7 +1583,7 @@ class CompilationBenchmark:
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.25}
+%\renewcommand{\arraystretch}{1.25}
 ```
 
 | **Model**        | **Eager** **(examples/sec)** | **torch.compile** **(examples/sec)** | **TensorRT** **(examples/sec)** | **Compile Time** **(seconds)** |
@@ -1655,7 +1652,7 @@ These three regimes create distinct regions in the compilation decision space. @
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.2))
 # =============================================================================
 # PLOT: The Compilation Continuum
 # =============================================================================
@@ -2168,7 +2165,7 @@ print(
 
 :::
 
-The inspection exposes the traversal path: `PowBackward0` (from `z = y.pow(2)`) links to `MulBackward0` (from `y = x * 3`), which terminates at `AccumulateGrad` on the leaf parameter tensor `x`. Leaf tensors are graph sinks where accumulated gradients write directly into the `.grad` buffer rather than propagating further. The tuple format `(Function, index)` tracks the specific output index for multi-output operations.
+The inspection exposes the traversal path: `PowBackward0` (from `z = y.pow(2)`) links to`\linebreak`{=latex} `MulBackward0` (from `y = x * 3`), which terminates at `AccumulateGrad` on the leaf parameter tensor `x`. Leaf tensors are graph sinks where accumulated gradients write directly into the `.grad` buffer rather than propagating further. The tuple format `(Function, index)` tracks the specific output index for multi-output operations.
 
 This reverse-linked graph imposes a fundamental memory constraint: the graph topology and all referenced forward tensors must remain resident in device memory until backward traversal executes their respective nodes. While the graph metadata (pointers and node descriptors) occupies minimal memory, the tensor buffers it references can consume gigabytes of accelerator capacity, scaling directly with model depth and batch size.
 
@@ -2576,7 +2573,7 @@ The first step is the data container itself. Framework data structures must sust
 
 #### Tensors {#sec-ml-frameworks-tensors-1cb7}
 
-At the foundation of every framework's data representation lies a single abstraction: the tensor\index{Tensor!n-dimensional arrays}\index{Tensor!etymology}, an n-dimensional array that pairs numerical values with the information needed to interpret and place them.
+At the foundation of every framework's data representation lies a single abstraction: the tensor\index{Tensor!n-dimensional arrays}\index{Tensor!etymology}, an $n$-dimensional array that pairs numerical values with the information needed to interpret and place them.
 
 ```{python}
 #| echo: false
@@ -2746,7 +2743,7 @@ Tensors structure numerical data by adding organizational axes to linear memory 
 ::: {#fig-tensor-data-structure-a fig-env="figure" fig-pos="htb" fig-cap="**Tensor Rank Hierarchy**: Ascending tensor ranks (0 to 3) generalize multi-dimensional indexing from scalars to volume tensors. Each additional rank adds an organizational axis that the framework must linearize into physical memory addresses via strides." fig-alt="Four shapes showing tensor ranks left to right: single box labeled Rank 0, vertical column of numbers labeled Rank 1, 2D grid of numbers labeled Rank 2, and 3D cube labeled Rank 3."}
 
 ```{.tikz}
-\scalebox{0.9}{%
+\scalebox{0.8}{%
 \begin{tikzpicture}[font=\small\sffamily]
 \begin{scope}
 \pgfmathsetmacro{\cubex}{2.5}
@@ -2797,7 +2794,7 @@ In vision applications, raw image inputs map directly onto multi-dimensional ten
 ::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as an RGB Tensor**: Decomposing a 2D color image into stacked height, width, and channel dimensions forms a rank-3 tensor. In ML systems, the ordering of these dimensions (such as channel-first vs. channel-last) determines memory access locality and cache efficiency during convolution operations." fig-alt="Three stacked grids in red, green, and blue representing RGB channels. Dimension labels show width three pixels, height three pixels, and three color channels, forming a rank-3 tensor for image data."}
 
 ```{.tikz}
-\scalebox{0.75}{%
+\scalebox{0.63}{%
 \begin{tikzpicture}[font=\sffamily\Large]
 %
 \tikzset{
@@ -2853,6 +2850,7 @@ Memory layout\index{Memory layout!stride patterns} implementation introduces dis
 ::: {#fig-tensor-memory-layout fig-env="figure" fig-pos="htb" fig-cap="**Tensor Memory Layout**: A $2{\times}3$ tensor can be stored in linear memory using either row-major (C-style) or column-major (Fortran-style) ordering. Strides define the number of elements to skip in each dimension when moving through memory, enabling frameworks to calculate memory addresses for tensor[i,j] as base_address + i $\times$ stride[0] + j $\times$ stride[1]. The choice of memory layout significantly impacts cache performance and computational efficiency." fig-alt="Left: 2×3 tensor grid with values 1–6. Right: two linear arrays showing row-major layout (1,2,3,4,5,6) and column-major layout (1,4,2,5,3,6). Below: stride calculations for row-major [3,1] and column-major [1,2]."}
 
 ```{.tikz}
+\scalebox{0.8}{%
 \begin{tikzpicture}[font=\footnotesize\sffamily]
 % Define colors
 \definecolor{col1}{RGB}{135, 206, 250}
@@ -2893,7 +2891,7 @@ Row-major strides: [3, 1]\\
 Column-major strides: [1, 2]\\
 Element [i,j] offset = i$\times$ stride[0] + j$\times$ stride[1]
 };
-\end{tikzpicture}
+\end{tikzpicture}}
 ```
 
 :::
@@ -3032,15 +3030,13 @@ Without explicit concurrency control, the GPU serializes all operations on a sin
 
 The `non_blocking=True` flag requests an asynchronous copy with respect to the host when the backend supports it. For host-to-device copies, pinned memory\index{Pinned memory!DMA transfer} is generally required to overlap the transfer with other device work; pageable memory may be staged internally, and the call's host-blocking behavior is implementation-dependent. Correct overlap also requires compatible hardware, separate execution resources, and explicit dependency management.
 
-The same synchronization pattern appears when model stages overlap across microbatches. @Lst-pipeline-parallelism-streams shows each stage running on its own stream, with events enforcing only the producer-consumer dependencies needed for correctness.
-
 ::: {#lst-overlap-compute-transfer lst-cap="**Overlapping Computation and Transfer**: Separate streams can overlap eligible copies and computation when dependencies are synchronized correctly. Pinned host memory generally enables host-to-device copies to overlap with other device work."}
 
 ```{.python}
 compute_stream = torch.cuda.Stream()
 transfer_stream = torch.cuda.Stream()
 
-# Transfer next batch while computing
+# Transfer next batch while computing 
 # current batch
 with torch.cuda.stream(transfer_stream):
     next_batch = next_batch_cpu.to("cuda", non_blocking=True)
@@ -3060,6 +3056,9 @@ y_gpu = y_regular.to("cuda", non_blocking=True)
 ```
 
 :::
+
+The same synchronization pattern appears when model stages overlap across microbatches. @Lst-pipeline-parallelism-streams shows each stage running on its own stream, with events enforcing only the producer-consumer dependencies needed for correctness.
+
 
 ::: {#lst-pipeline-parallelism-streams lst-cap="**Stage Overlap with Streams**: Overlap multiple model stages across microbatches using streams and events for inter-stage synchronization."}
 
@@ -3084,7 +3083,7 @@ for mb in range(num_microbatches):
     ):
         with torch.cuda.device(device), torch.cuda.stream(stream):
             if stage_idx > 0:
-                # Wait for previous stage to complete
+                # Wait for previous stage to complete 
                 # this microbatch
                 events[stage_idx - 1][mb].wait()
                 stage_input = outputs[stage_idx - 1][mb].to(
@@ -3130,7 +3129,7 @@ with torch.cuda.stream(stream2):
 
 The performance difference between these approaches is categorical. Full synchronization after every operation converts a concurrent pipeline into a sequential one, entirely negating the hardware parallelism that streams expose. Event-based synchronization preserves the concurrent execution model while enforcing only the dependencies that correctness requires.
 
-This synchronization discipline has one operational trap: debug code often leaves `torch.cuda.synchronize()` in the hot path, turning an overlapped pipeline into a serialized one. When overlap remains poor, profiling must separate scheduling stalls from kernel inefficiency. NVIDIA Nsight Systems\index{Nsight Systems!profiling tool} (`nsys profile`) shows CPU activity, GPU kernels, and memory transfers on one timeline. NVIDIA Nsight Compute\index{Nsight Compute!profiling tool} (`ncu`) then explains kernel behavior with hardware counters.
+This synchronization discipline has one operational trap: debug code often leaves `torch.cuda.` `synchronize()` in the hot path, turning an overlapped pipeline into a serialized one. When overlap remains poor, profiling must separate scheduling stalls from kernel inefficiency. NVIDIA Nsight Systems\index{Nsight Systems!profiling tool} (`nsys profile`) shows CPU activity, GPU kernels, and memory transfers on one timeline. NVIDIA Nsight Compute\index{Nsight Compute!profiling tool} (`ncu`) then explains kernel behavior with hardware counters.
 
 @Tbl-nsight-metrics is the diagnostic map for that second step. SM means streaming multiprocessor, the GPU block that schedules groups of threads; a warp is one scheduled thread group.
 
@@ -3215,6 +3214,8 @@ Once throughput is high enough, worker process management becomes a correctness 
 
 The Dataset choice is another throughput decision because it determines how samples can be scheduled. PyTorch supports two dataset paradigms. *Map-style*\index{Dataset!map-style} datasets implement `__len__` and `__getitem__`, enabling random access to samples by index—this pattern works well for datasets that fit in memory or support efficient random access on disk. *Iterable-style*\index{Dataset!iterable-style} datasets implement `__iter__` instead, yielding samples sequentially for streaming data sources where random access is impractical. Map-style datasets support sampler-based shuffling, while iterable datasets must implement any ordering or buffered shuffling within the iterator or data source.
 
+Batch collation\index{Collation!batch assembly} represents the final stage where representation choices govern throughput. The `collate_fn` parameter determines how individual samples are combined into batches. The default collation stacks tensors along a new batch dimension, which works when all samples have identical shapes. For variable-length data such as text sequences, custom collation handles padding, sorting by length, or creating attention masks—directly affecting both memory usage and training throughput.
+
 ::: {#lst-dataloader-throughput lst-cap="**DataLoader Throughput Configuration**: Each parameter addresses a specific throughput bottleneck. `num_workers` parallelizes I/O and preprocessing across CPU cores, `prefetch_factor` controls pipeline depth, and `pin_memory` enables DMA transfers to the GPU."}
 
 ```{.python}
@@ -3224,12 +3225,10 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
 
 loader = DataLoader(
     dataset,
@@ -3247,8 +3246,6 @@ loader = DataLoader(
 ```
 
 :::
-
-Batch collation\index{Collation!batch assembly} represents the final stage where representation choices govern throughput. The `collate_fn` parameter determines how individual samples are combined into batches. The default collation stacks tensors along a new batch dimension, which works when all samples have identical shapes. For variable-length data such as text sequences, custom collation handles padding, sorting by length, or creating attention masks—directly affecting both memory usage and training throughput.
 
 ```{python}
 #| echo: false
@@ -3306,7 +3303,7 @@ These concepts appear here because they shape framework API design even before t
 ::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Device Placement Dimensions**: A grid of eight accelerator clusters arranged in two rows and four columns, each containing stacked computational units. The braces preview three ways a framework can place work when a model no longer fits one device: across layer groups, across replicated batches, and within very large tensors." fig-alt="Grid of 8 GPU clusters in two rows and four columns. A horizontal brace labels splitting across layer groups, a vertical brace labels replicated batch groups, and a depth brace labels splitting within large tensors."}
 
 ```{.tikz}
-\resizebox{0.6\textwidth}{!}{
+\resizebox{0.7\textwidth}{!}{
 \begin{tikzpicture}[line cap=round,line join=round,font=\small\sffamily]
 \tikzset{
 pics/square/.style = {
@@ -3425,7 +3422,7 @@ When an engineer writes `y = torch.matmul(x, w)`, the distance between Python sy
 },
   Box/.style={align=flush center,
     inner xsep=2pt,
-    node distance=0.15,
+    node distance=0.3,
     draw=BlueLine,
     line width=0.75pt,
     fill=BlueL,
@@ -3668,14 +3665,11 @@ This is a tree traversal problem at its core. PyTorch's `Module.__setattr__` reg
 
 The systems consequence is significant. Automatic parameter discovery gives the optimizer a complete parameter set or parameter groups, enabling grouped, foreach, or fused update paths when the framework and backend support them. The immediate win is correctness and composability: newly attached submodules participate in device moves, serialization, and optimizer construction without a separate manual registry. It also lets optimized update paths operate over parameter collections without per-parameter user code. @Lst-parameter_registration demonstrates the core mechanism: attribute assignment triggers registration, and `.parameters()` returns all discovered tensors.
 
-The distinction between *parameters* and *buffers* illustrates a subtlety of discovery. Registered parameters appear in `.parameters()` whether trainable or frozen; `requires_grad` separately controls whether autograd accumulates a gradient for them. Registered buffers\index{nn.Module!registered buffer} move with the module and can appear in its state dictionary but are excluded from `.parameters()` and ordinary optimizer discovery. Batch-normalization running statistics are a common buffer use case.
-
 ::: {#lst-parameter_registration lst-cap="**Parameter Registration**: Automatic parameter tracking through attribute assignment enables optimizer access to all trainable weights without manual enumeration."}
 
 ```{.python}
 import torch
 import torch.nn as nn
-
 
 class CustomLayer(nn.Module):
     def __init__(self, input_size, output_size):
@@ -3689,7 +3683,6 @@ class CustomLayer(nn.Module):
     def forward(self, x):
         return torch.matmul(x, self.weight.t()) + self.bias
 
-
 layer = CustomLayer(10, 20)
 # Framework discovers both parameters automatically:
 for name, param in layer.named_parameters():
@@ -3697,6 +3690,8 @@ for name, param in layer.named_parameters():
 ```
 
 :::
+
+The distinction between *parameters* and *buffers* illustrates a subtlety of discovery. Registered parameters appear in `.parameters()` whether trainable or frozen; `requires_grad` separately controls whether autograd accumulates a gradient for them. Registered buffers\index{nn.Module!registered buffer} move with the module and can appear in its state dictionary but are excluded from `.parameters()` and ordinary optimizer discovery. Batch-normalization running statistics are a common buffer use case.
 
 @Tbl-frameworks-parameter-discovery-apis shows how the same principle manifests differently across frameworks. Despite syntactic differences, all frameworks solve the same problem: enabling optimizers to discover and update trainable parameters while preserving nontrainable state across forward passes.
 
@@ -3720,54 +3715,6 @@ This principle extends to parameter freezing\index{Parameter freezing!transfer l
 ### Hierarchical composition and serialization {#sec-ml-frameworks-nn-module-hierarchical-composition-6c13}
 
 Complex models compose from reusable submodules\index{nn.Module!hierarchical composition}, creating a tree structure. A ResNet is not implemented as a monolithic block of operations but as a hierarchy: the root module contains a sequence of residual blocks, each block contains convolution layers and normalization layers, and each layer contains parameter tensors. This hierarchical composition must support two critical operations made concrete in @lst-nested_modules: recursive parameter collection for training and **state serialization**\index{Model serialization!state dictionary pattern} for checkpointing and deployment.
-
-::: {#lst-nested_modules lst-cap="**Nested Module Composition**: Hierarchical module composition enables recursive parameter collection and a flat state mapping across the module tree."}
-
-```{.python}
-import torch
-import torch.nn as nn
-
-
-class ResidualBlock(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(channels)
-
-    def forward(self, x):
-        residual = x
-        x = torch.relu(self.bn1(self.conv1(x)))
-        x = self.bn2(self.conv2(x))
-        return torch.relu(x + residual)
-
-
-class ResNet(nn.Module):
-    def __init__(self, num_blocks, channels=64):
-        super().__init__()
-        self.conv_in = nn.Conv2d(3, channels, 7, padding=3)
-        self.blocks = nn.ModuleList(
-            [ResidualBlock(channels) for _ in range(num_blocks)]
-        )
-        self.fc = nn.Linear(channels, 10)
-
-    def forward(self, x):
-        x = self.conv_in(x)
-        for block in self.blocks:
-            x = block(x)
-        x = x.mean(dim=[2, 3])  # Global average pooling
-        return self.fc(x)
-
-
-model = ResNet(num_blocks=4)
-total = sum(p.numel() for p in model.parameters())
-print(f"Total parameters: {total}")
-# state_dict() flattens the tree: 'blocks.0.conv1.weight', etc.
-print(list(model.state_dict().keys())[:4])
-```
-
-:::
 
 Hierarchical composition mirrors the hardware memory hierarchy in a systems-relevant way: each submodule's parameters can be loaded independently, enabling placement across devices. When a model is too large for a single GPU, the framework can assign different subtrees of the module hierarchy to different devices, with the tree structure providing natural partition boundaries.
 
@@ -3797,6 +3744,52 @@ class Module7bCheckpointSize:
 
 The `state_dict()` method produces an ordered mapping whose dotted keys (for example, `blocks.0.conv1.weight`) encode locations in the module hierarchy. A checkpoint for 7 billion FP16 parameters contains approximately `{python} Module7bCheckpointSize.model_7b_fp16_gb_str` of weight payload before metadata or additional state, but the file format and storage path determine how those bytes are serialized. `load_state_dict()` copies matching parameter and buffer values into an already-constructed module and reports missing or unexpected keys according to its strictness setting; it does not reconstruct the module hierarchy. Cross-framework exchange requires a compatible graph and operator representation in addition to weights.
 
+::: {#lst-nested_modules lst-cap="**Nested Module Composition**: Hierarchical module composition enables recursive parameter collection and a flat state mapping across the module tree."}
+
+```{.python}
+import torch
+import torch.nn as nn
+
+class ResidualBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        residual = x
+        x = torch.relu(self.bn1(self.conv1(x)))
+        x = self.bn2(self.conv2(x))
+        return torch.relu(x + residual)
+
+class ResNet(nn.Module):
+    def __init__(self, num_blocks, channels=64):
+        super().__init__()
+        self.conv_in = nn.Conv2d(3, channels, 7, padding=3)
+        self.blocks = nn.ModuleList(
+            [ResidualBlock(channels) for _ in range(num_blocks)]
+        )
+        self.fc = nn.Linear(channels, 10)
+
+    def forward(self, x):
+        x = self.conv_in(x)
+        for block in self.blocks:
+            x = block(x)
+        x = x.mean(dim=[2, 3])  # Global average pooling
+        return self.fc(x)
+
+model = ResNet(num_blocks=4)
+total = sum(p.numel() for p in model.parameters())
+print(f"Total parameters: {total}")
+# state_dict() flattens the tree: 'blocks.0.conv1.weight', etc.
+print(list(model.state_dict().keys())[:4])
+```
+
+:::
+
+
 The hierarchical structure also enables module-level traversal for systematic operations. Methods such as `.named_modules()` iterate the entire tree, supporting bulk transformations such as replacing all BatchNorm layers with GroupNorm or applying Xavier initialization to every Linear layer. These traversal operations depend on the same tree structure that enables parameter discovery, illustrating how a single design decision propagates benefits across multiple use cases.
 
 These three principles, automatic parameter discovery, mode-dependent behavior, and hierarchical composition with serialization, are not PyTorch-specific. Every framework must solve them. Keras layers, JAX's Flax modules, and even functional approaches all address the same problems of parameter management, state tracking, and compositional design. The differences lie not in *what* problems they solve but in *how* they prioritize among competing solutions. Two practical patterns show how the principles become system controls: selective parameter freezing reduces unnecessary gradient work for transfer learning (@lst-parameter_freezing), and module hooks provide noninvasive inspection (@lst-module_hooks).
@@ -3806,8 +3799,7 @@ These three principles, automatic parameter discovery, mode-dependent behavior, 
 ```{.python}
 from torchvision.models import ResNet18_Weights, resnet18
 
-# Freeze all parameters in a pretrained
-# model
+# Freeze all parameters in a pretrained model
 pretrained_model = resnet18(weights=ResNet18_Weights.DEFAULT)
 
 for param in pretrained_model.parameters():
@@ -3816,8 +3808,7 @@ for param in pretrained_model.parameters():
 # Replace final layer with trainable parameters
 pretrained_model.fc = nn.Linear(512, 10)  # New layer is trainable
 
-# Only fc.parameters() will receive
-# gradients during training
+# Only fc.parameters() will receive gradients during training
 optimizer = torch.optim.Adam(
     filter(lambda p: p.requires_grad, pretrained_model.parameters()),
     lr=0.001,
@@ -3828,7 +3819,6 @@ optimizer = torch.optim.Adam(
 
 Module hooks\index{Module hook!forward and backward} are the inspection counterpart to parameter freezing: they intercept intermediate computations without modifying model code, enabling gradient flow diagnosis and activation monitoring. @Lst-module_hooks illustrates both hook types.
 
-Together, these patterns—parameter discovery, freezing, and hooks—demonstrate how the three principles translate into practical APIs. These `nn.Module` patterns illustrate PyTorch's approach to the abstraction problem. PyTorch, however, is only one of several major frameworks, and its choices (mutable state, class inheritance, eager execution by default) are not the only valid design points. TensorFlow centralizes state differently, and JAX avoids mutable state entirely. These are not superficial API differences; they reflect deeply different answers to the chapter's three opening problems.
 
 ::: {#lst-module_hooks lst-cap="**Module Hooks**: Shows forward and backward hooks for inspecting activations and gradients during training."}
 
@@ -3837,7 +3827,6 @@ import torch
 import torch.nn as nn
 
 model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
-
 
 # Forward hook to inspect activations
 def forward_hook(module, input, output):
@@ -3848,11 +3837,9 @@ def forward_hook(module, input, output):
         f"std={output.std():.3f}"
     )
 
-
 # Backward hook to inspect gradients
 def backward_hook(module, grad_input, grad_output):
     print(f"Gradient norm: {grad_output[0].norm():.3f}")
-
 
 # Register hooks on specific layer
 handle_fwd = model[0].register_forward_hook(forward_hook)
@@ -3870,6 +3857,9 @@ handle_bwd.remove()
 ```
 
 :::
+
+Together, these patterns—parameter discovery, freezing, and hooks—demonstrate how the three principles translate into practical APIs. These `nn.Module` patterns illustrate PyTorch's approach to the abstraction problem. PyTorch, however, is only one of several major frameworks, and its choices (mutable state, class inheritance, eager execution by default) are not the only valid design points. TensorFlow centralizes state differently, and JAX avoids mutable state entirely. These are not superficial API differences; they reflect deeply different answers to the chapter's three opening problems.
+
 
 ## Framework Platform Analysis {#sec-ml-frameworks-major-framework-platform-analysis-fe96}
 
@@ -3896,7 +3886,7 @@ Within a captured `tf.function`, TensorFlow can apply graph optimizations such a
 },
   Box/.style={align=flush center,
     inner xsep=4pt,
-    node distance=0.6,
+    node distance=0.42,
     draw=BlueLine,
     line width=0.75pt,
     fill=BlueL,,
@@ -3974,17 +3964,19 @@ JAX's architecture treats differentiation, vectorization, and compilation as tra
 
 JAX's functional paradigm shifts the programming model from "tracking state through objects" to "transforming pure functions." While PyTorch and TensorFlow expose autograd primarily through dynamic tapes or graph-compilation paths, JAX asks users to write pure Python functions and then applies transformations to those functions. Automatic differentiation, vectorization, and JIT compilation are all *program transformations* that can compose. @Lst-jax-transformations demonstrates this approach.
 
+This functional approach requires **pure functions**\index{Pure function!JAX} (no side effects) and **immutable data**\index{Immutable data!JAX} (arrays cannot be modified in place). These constraints may seem restrictive coming from PyTorch's mutable object model, but they enable formal guarantees: the compiler can safely reorder, fuse, and parallelize operations because function outputs depend only on inputs. The restriction is the feature; purity is what makes transformation composition possible.
+
+JAX's power emerges from composition. `jax.grad`\index{JAX!gradient transformation} returns a gradient function; `jax.vmap`\index{JAX!automatic vectorization}\index{Vectorization!automatic batching} can vectorize a compatible function over mapped axes; and `jax.jit`\index{JAX!JIT compilation} can trace and compile a stable transformed function for a particular argument signature. Unlike an iterative Python loop that issues individual operations sequentially with repeated dispatch overhead, `jax.vmap` pushes the batch dimension directly into the underlying primitives—converting per-sample matrix-vector operations into batched matrix-matrix multiplications (GEMM) executed in a single parallel kernel launch. `jax.pmap`\index{JAX!device-parallel mapping} maps a function across devices, but synchronization or gradient aggregation must be expressed with collectives such as `lax.psum` or `lax.pmean`. These transformations compose according to their types and semantics, and different orders can compute different quantities.
+
 ::: {#lst-jax-transformations lst-cap="**JAX Function Transformations**: JAX treats differentiation, vectorization, and compilation as composable function transformations rather than user-authored graph operations."}
 
 ```{.python}
 import jax
 import jax.numpy as jnp
 
-
 def loss_fn(params, x, y):
     pred = jnp.dot(x, params["w"]) + params["b"]
     return jnp.mean((pred - y) ** 2)
-
 
 # Transform: compute gradients
 grad_fn = jax.grad(loss_fn)
@@ -3999,10 +3991,6 @@ fast_batched_grad = jax.jit(batched_grad)
 ```
 
 :::
-
-This functional approach requires **pure functions**\index{Pure function!JAX} (no side effects) and **immutable data**\index{Immutable data!JAX} (arrays cannot be modified in place). These constraints may seem restrictive coming from PyTorch's mutable object model, but they enable formal guarantees: the compiler can safely reorder, fuse, and parallelize operations because function outputs depend only on inputs. The restriction is the feature; purity is what makes transformation composition possible.
-
-JAX's power emerges from composition. `jax.grad`\index{JAX!gradient transformation} returns a gradient function; `jax.vmap`\index{JAX!automatic vectorization}\index{Vectorization!automatic batching} can vectorize a compatible function over mapped axes; and `jax.jit`\index{JAX!JIT compilation} can trace and compile a stable transformed function for a particular argument signature. Unlike an iterative Python loop that issues individual operations sequentially with repeated dispatch overhead, `jax.vmap` pushes the batch dimension directly into the underlying primitives—converting per-sample matrix-vector operations into batched matrix-matrix multiplications (GEMM) executed in a single parallel kernel launch. `jax.pmap`\index{JAX!device-parallel mapping} maps a function across devices, but synchronization or gradient aggregation must be expressed with collectives such as `lax.psum` or `lax.pmean`. These transformations compose according to their types and semantics, and different orders can compute different quantities.
 
 The same minimalist core delegates neural network abstractions to companion libraries (Flax, Haiku, Equinox) and optimization to Optax. This separation reflects the functional philosophy: the core provides transformations, while libraries build conventional abstractions on top. The trade-off is that production readiness depends not only on the transformation model, but also on the maturity of the surrounding libraries, export paths, and operational tooling for the target environment.
 
@@ -4028,24 +4016,11 @@ The measurement implication is straightforward: profile the constraint each fram
 
 The same simple network exposes how each design philosophy shapes the code. @Lst-framework-hello-world implements one neural network, a single linear layer mapping ten inputs to one output, across all three frameworks.
 
-These three implementations solve the same mathematical problem but reveal distinct answers to the three problems. The differences are not cosmetic; they shape debugging workflows, deployment options, and optimization potential.
-
-PyTorch binds state and computation together through class inheritance (`nn.Module`), solving the execution problem through eager evaluation: the graph builds as Python runs, making standard debuggers and control flow work naturally. Without graph capture, an optimizer cannot see the full computation before execution begins.
-
-TensorFlow/Keras also executes eagerly by default in TensorFlow 2, while structured models can be captured with `tf.function` and exported to supported deployment runtimes. Portability still depends on operator coverage and conversion for each target.
-
-JAX treats the model as a pure function[^fn-pure-function-jax] with immutable data and no internal state. In this model, `grad`, `vmap` (automatic vectorization), and `jit` (just-in-time compilation[^fn-jit-compilation-tradeoff]) are composable transformations on stateless functions rather than methods attached to a mutable object system. The cost is explicit parameter management and a programming model that may be unfamiliar to engineers coming from stateful frameworks.
-
-[^fn-jit-compilation-tradeoff]: **Just-in-time (JIT) compilation**\index{JIT compilation!shape specialization}: Traces a function for an argument signature and lowers it to backend-specific executable code; the first call pays tracing and compilation costs; compatible later calls can reuse the cached executable. New shapes, dtypes, devices, or static arguments may trigger another compilation. Both compilation time and cached-call overhead depend on the program, backend, and hardware.
-
-[^fn-pure-function-jax]: **Pure function**\index{Pure function!JIT requirement}: Returns outputs determined by its inputs without relying on untracked side effects; JAX transformations are designed for pure functions. Ordinary Python effects may run during tracing but are not represented in the compiled computation, and impure code can fail or behave unexpectedly. Runtime printing or external effects require supported mechanisms such as `jax.debug.print` or callbacks; random draws require explicitly managed keys.
-
 ::: {#lst-framework-hello-world lst-cap="**Framework Comparison: Hello World**: The same simple neural network implemented in PyTorch (object-oriented), TensorFlow/Keras (declarative), and JAX (functional), illustrating each framework's distinct design philosophy."}
 
 ```{.python}
 # PyTorch - Dynamic, Pythonic
 import torch.nn as nn
-
 
 class SimpleNet(nn.Module):
     def __init__(self):
@@ -4054,7 +4029,6 @@ class SimpleNet(nn.Module):
 
     def forward(self, x):
         return self.fc(x)
-
 
 # TensorFlow/Keras - High-level API
 import tensorflow as tf
@@ -4067,10 +4041,8 @@ model = tf.keras.Sequential(
 import jax.numpy as jnp
 from jax import random
 
-
 def simple_net(params, x):
     return jnp.dot(x, params["w"]) + params["b"]
-
 
 key = random.PRNGKey(0)
 key_w, key_b = random.split(key)
@@ -4081,6 +4053,18 @@ params = {
 ```
 
 :::
+
+These three implementations solve the same mathematical problem but reveal distinct answers to the three problems. The differences are not cosmetic; they shape debugging workflows, deployment options, and optimization potential.
+
+PyTorch binds state and computation together through class inheritance (`nn.Module`), solving the execution problem through eager evaluation: the graph builds as Python runs, making standard debuggers and control flow work naturally. Without graph capture, an optimizer cannot see the full computation before execution begins.
+
+TensorFlow/Keras also executes eagerly by default in TensorFlow 2, while structured models can be captured with `tf.function` and exported to supported deployment runtimes. Portability still depends on operator coverage and conversion for each target.
+
+JAX treats the model as a pure function[^fn-pure-function-jax] with immutable data and no internal state. In this model, `grad`, `vmap` (automatic vectorization), and `jit` (just-in-time compilation[^fn-jit-compilation-tradeoff]) are composable transformations on stateless functions rather than methods attached to a mutable object system. The cost is explicit parameter management and a programming model that may be unfamiliar to engineers coming from stateful frameworks.
+
+[^fn-jit-compilation-tradeoff]: **Just-in-time (JIT) compilation**\index{JIT compilation!shape specialization}: Traces a function for an argument signature and lowers it to backend-specific executable code; the first call pays tracing and compilation costs; compatible later calls can reuse the cached executable. New shapes, dtypes, devices, or static arguments may trigger another compilation. Both compilation time and cached-call overhead depend on the program, backend, and hardware.
+
+[^fn-pure-function-jax]: **Pure function**\index{Pure function!JIT requirement}: Returns outputs determined by its inputs without relying on untracked side effects; JAX transformations are designed for pure functions. Ordinary Python effects may run during tracing but are not represented in the compiled computation, and impure code can fail or behave unexpectedly. Runtime printing or external effects require supported mechanisms such as `jax.debug.print` or callbacks; random draws require explicitly managed keys.
 
 No framework maximizes all three goals simultaneously, and the ten-line program makes the trade visible in source code rather than buried in compiler internals: where state lives, when the graph exists, and what the compiler is allowed to see. The underlying currency is compiler visibility vs. human iteration latency. Graph capture and ahead-of-time compilation can reduce runtime overhead and intermediate data movement; eager evaluation shortens the human iteration loop, outside the iron-law runtime equation, at the cost of compiler visibility until a graph-capture path is used; functional purity gives XLA more freedom to transform a stable traced program. Each philosophy also shapes code syntax, team workflows, debugging practices, and deployment pipelines, so migration costs grow with project-specific integrations and assumptions.
 
@@ -4234,28 +4218,6 @@ The preceding sections evaluated execution, differentiation, and hardware abstra
 
 Execution, differentiation, and hardware abstraction operate simultaneously during model training\index{Training!step, anatomy}. In @lst-training-step-anatomy, a minimal two-layer multilayer perceptron illustrates this convergence across eight executable statements. Tracing each statement through the runtime stack connects the quantitative principles developed in @sec-ml-frameworks-three-problems-every-framework-must-solve-317d to physical execution: tensor allocation, kernel dispatch, dynamic graph recording, gradient computation, and parameter updates.
 
-::: {#lst-training-step-anatomy lst-cap="**Training Step Anatomy**: A minimal training iteration for a two-layer MLP, exercising tensor allocation, kernel dispatch, autograd recording, gradient computation, and parameter updates."}
-
-```{.python}
-# Single training step for a 2-layer MLP
-x = torch.randn(32, 784, device="cuda")  # Input batch
-y = torch.randint(0, 10, (32,), device="cuda")  # Labels
-
-# Forward pass
-optimizer.zero_grad()
-h = torch.relu(x @ W1 + b1)  # Hidden layer
-logits = h @ W2 + b2  # Output layer
-loss = F.cross_entropy(logits, y)
-
-# Backward pass
-loss.backward()
-
-# Parameter update
-optimizer.step()
-```
-
-:::
-
 ```{python}
 #| echo: false
 #| label: training-step-dims
@@ -4299,6 +4261,28 @@ During the forward pass\index{Forward pass!kernel dispatch}, executing `h = torc
 3. Kernel launch: The host thread enqueues the launch descriptor into the GPU command stream, consuming driver launch latency while asynchronous execution allows host execution to proceed without blocking on completion.
 4. GPU execution: The streaming multiprocessors stream `W1` from HBM[^fn-hbm-capacity-constraint] through L2 cache into registers and Tensor Cores, evaluate the matrix product, and write the output activations back to HBM.
 5. Autograd recording: Concurrently on the host, PyTorch's autograd engine instantiates an `MmBackward` node on the dynamic tape, saving references to input tensors `x` and `W1` in device memory for reverse-mode differentiation.
+
+::: {#lst-training-step-anatomy lst-cap="**Training Step Anatomy**: A minimal training iteration for a two-layer MLP, exercising tensor allocation, kernel dispatch, autograd recording, gradient computation, and parameter updates."}
+
+```{.python}
+# Single training step for a 2-layer MLP
+x = torch.randn(32, 784, device="cuda")  # Input batch
+y = torch.randint(0, 10, (32,), device="cuda")  # Labels
+
+# Forward pass
+optimizer.zero_grad()
+h = torch.relu(x @ W1 + b1)  # Hidden layer
+logits = h @ W2 + b2  # Output layer
+loss = F.cross_entropy(logits, y)
+
+# Backward pass
+loss.backward()
+
+# Parameter update
+optimizer.step()
+```
+
+:::
 
 ```{python}
 #| echo: false
@@ -4443,7 +4427,7 @@ class TrainingStepCalc:
 | **Cross-entropy (simplified)**           |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
 | **Backward (assumed 2$\times$ forward)** |                           ~`{python} TrainingStepCalc.train_bwd_mflop_str`                          |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
 
-: **Per-Operation Roofline Analysis**: Analytical work and memory-traffic estimates for a two-layer MLP training step. The cross-entropy row assigns one operation-equivalent each to exponentiation, accumulation, and normalization per logit, while the backward row assumes twice the forward work and three times its memory traffic. These are modeling assumptions rather than measured instruction counts. MatMul operations have much higher arithmetic intensity than element-wise operations, while the simplified ReLU and cross-entropy models remain memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[27,33,18,22]"}
+: **Per-Operation Roofline Analysis**: Analytical work and memory-traffic estimates for a two-layer MLP training step. The cross-entropy row assigns one operation-equivalent each to exponentiation, accumulation, and normalization per logit, while the backward row assumes twice the forward work and three times its memory traffic. These are modeling assumptions rather than measured instruction counts. MatMul operations have much higher arithmetic intensity than element-wise operations, while the simplified ReLU and cross-entropy models remain memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[30,33,15,22]"}
 
 The arithmetic-intensity column reveals the operational regime of each layer. Matrix multiplications exhibit operand reuse that drives intensity toward the compute roofline. Conversely, element-wise ReLU and reduction in cross-entropy perform negligible compute per byte transferred ($0.125$ to $0.375\text{ FLOP/byte}$), remaining strictly bound by memory bandwidth and launch latency. In un-fused eager execution, each element-wise operation incurs a separate kernel dispatch and round-trips intermediate tensors through HBM without saturating compute units.
 
@@ -4529,8 +4513,6 @@ Because $T_{\text{overhead}}$ exceeds $T_{\text{compute}}$ and $T_{\text{memory}
 
 The identical Python script executes across heterogeneous hardware architectures through backend abstraction layers, as @tbl-framework-backends summarizes.
 
-Each backend maps common tensor semantics to silicon-specific primitives. A single `loss.backward()` invocation routes to different execution pipelines depending on device placement. Differences in floating-point summation order, reduction trees, and non-deterministic atomic operations introduce numerical variation across backends, requiring equivalence to be validated against explicit numerical tolerances rather than bitwise identity.
-
 | **Hardware**                                        | **Backend library**                                    | **Execution mechanism**                                           |
 |:----------------------------------------------------|:-------------------------------------------------------|:------------------------------------------------------------------|
 | **CUDA GPU**\index{GPU backend!CUDA implementation} | cuBLAS [@nvidia_cublas; @choquette2021]                | GEMM kernels and CUDA streams for async execution                 |
@@ -4539,6 +4521,8 @@ Each backend maps common tensor semantics to silicon-specific primitives. A sing
 | **Apple Silicon**                                   | Metal Performance Shaders                              | MPS backend                                                       |
 
 : **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[15,44,41]"}
+
+Each backend maps common tensor semantics to silicon-specific primitives. A single `loss.` `backward()` invocation routes to different execution pipelines depending on device placement. Differences in floating-point summation order, reduction trees, and non-deterministic atomic operations introduce numerical variation across backends, requiring equivalence to be validated against explicit numerical tolerances rather than bitwise identity.
 
 Implementation decisions—device placement, batch size, compilation mode—cascade through execution, differentiation, and abstraction layers simultaneously. When systems treat the framework as an opaque mathematical interpreter rather than a hardware-aware scheduler, these interactions trigger launch starvation, memory fragmentation, and throughput collapse.
 

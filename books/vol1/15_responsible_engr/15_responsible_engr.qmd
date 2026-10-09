@@ -88,6 +88,10 @@ Amazon attempted remediation by removing explicit gender indicators and gendered
 
 Effective remediation requires architectural interventions across the full system lifecycle rather than a surface-level data filter. At the evaluation layer, disaggregated testing across demographic subgroups quantifies disparate scoring distributions before deployment. At the algorithm layer, adversarial debiasing—where an auxiliary network attempts to predict protected attributes from intermediate representations while the primary model is penalized for retaining that signal—can suppress sensitive features, though it still requires continuous subgroup validation. At the operational layer, human review for borderline scores provides a safeguard only when reviewers are trained, empowered, and audited rather than used to rubber-stamp model outputs. Finally, at the monitoring layer, tracking downstream hiring outcomes over time detects disparate impact that offline loss metrics conceal. Because retrofitting these defenses onto an existing pipeline proved technically intractable, Amazon scrapped the project [@dastin2018].
 
+The Amazon recruiting tool and the COMPAS risk assessment system[^fn-compas-recidivism-score] illustrate the central thesis of this section: optimization success can coexist with catastrophic system failure. Neither model suffered from a software bug or hardware malfunction. In both cases, the optimization algorithm operated correctly on the objective it was given. The failure was architectural: an incomplete problem specification. When the *technical objective* (minimizing empirical prediction error or achieving statistical calibration) diverges from the *system specification* (fair, defensible outcomes across user populations), high mathematical fidelity to the loss function directly amplifies harm.
+
+[^fn-compas-recidivism-score]: **COMPAS (Correctional Offender Management Profiling for Alternative Sanctions)**\index{COMPAS!calibration and error rates}: In the analyzed data, COMPAS scores were approximately calibrated by race, meaning a given score corresponded to a similar observed re-offense probability across groups. Because recidivism prevalence differed between populations, calibration coexisted with disparate error rates [@chouldechova2017; @kleinberg2016inherent]. Calibration testing alone therefore could not establish error-rate parity or determine whether the allocation of errors was acceptable.
+
 ::: {#ws-responsible-engr-compas-recidivism-algorithm-audit .callout-war-story title="The COMPAS recidivism algorithm audit (2016)"}
 
 **Context**: COMPAS\index{COMPAS!recidivism algorithm audit} is a risk assessment tool used in US courtrooms to predict re-offending for bail and sentencing decisions [@angwin2016].
@@ -101,10 +105,6 @@ Effective remediation requires architectural interventions across the full syste
 **Systems lesson**: The scores were approximately calibrated by race, but they violated equalized odds because false positive and false negative rates did not match across groups. Formal fairness results show that calibration and error-rate parity conflict when base rates differ, showing why engineering responsibility requires explicitly choosing which fairness constraint matters.
 
 :::
-
-The Amazon recruiting tool and the COMPAS risk assessment system[^fn-compas-recidivism-score] illustrate the central thesis of this section: optimization success can coexist with catastrophic system failure. Neither model suffered from a software bug or hardware malfunction. In both cases, the optimization algorithm operated correctly on the objective it was given. The failure was architectural: an incomplete problem specification. When the *technical objective* (minimizing empirical prediction error or achieving statistical calibration) diverges from the *system specification* (fair, defensible outcomes across user populations), high mathematical fidelity to the loss function directly amplifies harm.
-
-[^fn-compas-recidivism-score]: **COMPAS (Correctional Offender Management Profiling for Alternative Sanctions)**\index{COMPAS!calibration and error rates}: In the analyzed data, COMPAS scores were approximately calibrated by race, meaning a given score corresponded to a similar observed re-offense probability across groups. Because recidivism prevalence differed between populations, calibration coexisted with disparate error rates [@chouldechova2017; @kleinberg2016inherent]. Calibration testing alone therefore could not establish error-rate parity or determine whether the allocation of errors was acceptable.
 
 Standard production telemetry cannot detect specification failures. Monitoring pipelines track operational invariants—inference latency, memory utilization, throughput, and aggregate validation loss—all of which remain green while a model systematically misallocates errors across subgroups. A pipeline can satisfy technical verification (conforming strictly to its code and loss function) while completely failing system validation (violating operational and societal requirements). Preventing silent specification failures requires making responsibility metrics part of the primary test harness: verifying whether the loss function acts as a defensible proxy for the true system goal, and enforcing subgroup error-rate parity before deployment.
 
@@ -138,6 +138,9 @@ Responsibility is a system property, not a model property.
 
 Consider a hospital sepsis model that begins recommending aggressive treatments for low-risk patients after an electronic health record (EHR) workflow change alters how vital signs are recorded. As illustrated in the margin, a single upstream modification propagates across the system's blast radius without raising an alert: the model's confidence scores remain high, its inference latency stays within its service level agreement, and all system health checks pass green. The failure is silent: the input data distribution has shifted, but the operational monitoring pipeline has no mechanism to detect distributional drift.
 
+This sepsis scenario illustrates a class of failure that availability-focused monitoring cannot detect. In traditional software systems, catastrophic failures are typically loud: a null pointer exception terminates execution, a segmentation fault halts the process, or an exhausted socket pool returns a network timeout. ML systems introduce statistical failure modes\index{Silent failure!detection challenges} in which corrupted or degraded outputs look indistinguishable from valid predictions. Floating-point tensors continue to flow through matrix multiplication kernels, accelerator execution completes within latency budgets, and downstream services receive structurally well-formed responses.
+
+
 ::: {#dfn-responsible-engr-distribution-shift .callout-definition title="Distribution shift"}
 
 ***Distribution shift***\index{Distribution Shift!responsibility lens}, introduced in @sec-introduction and operationalized for drift detection in @sec-ml-operations, occurs when the deployment distribution differs from the distribution used to develop or evaluate the model. Standard empirical-risk minimization commonly assumes matching training and deployment distributions. Covariate shift\index{Data Drift!definition} changes $p(x)$ while holding $p(y \mid x)$ stable; label shift changes $p(y)$ while holding $p(x \mid y)$ stable; concept drift\index{Concept drift!definition} changes $p(y \mid x)$.
@@ -147,8 +150,6 @@ Consider a hospital sepsis model that begins recommending aggressive treatments 
 3.  **Common pitfall**: Distribution shift is an umbrella term with several overlapping taxonomies. Monitoring only $p(x)$ can detect some covariate changes but cannot establish whether $p(y \mid x)$ remains stable; detecting concept drift generally requires labeled outcomes or justified proxies.
 
 :::
-
-This sepsis scenario illustrates a class of failure that availability-focused monitoring cannot detect. In traditional software systems, catastrophic failures are typically loud: a null pointer exception terminates execution, a segmentation fault halts the process, or an exhausted socket pool returns a network timeout. ML systems introduce statistical failure modes\index{Silent failure!detection challenges} in which corrupted or degraded outputs look indistinguishable from valid predictions. Floating-point tensors continue to flow through matrix multiplication kernels, accelerator execution completes within latency budgets, and downstream services receive structurally well-formed responses.
 
 Distribution shift\index{Distribution shift!causes of model degradation} represents the first major mechanism behind this silent degradation (operational detection and monitoring strategies for drift are detailed in @sec-ml-operations). The failure is environmental: the physical distribution of inputs changed after training, yet the model has no internal telemetry to detect the discrepancy. Retraining on fresh data can partially restore accuracy under distribution shift. However, retraining cannot resolve a second, more fundamental mechanism of silent failure that persists even when the data distribution is perfectly stationary: metric misalignment.
 
@@ -191,7 +192,7 @@ While the D·A·M taxonomy isolates *where* failures originate, operational engi
 
 ```{=latex}
 \begingroup
-%\renewcommand{\arraystretch}{1.25}
+\renewcommand{\arraystretch}{1.25}
 ```
 
 | **Failure Type**            | **Illustrative Detection Time** | **Illustrative Scope** | **Possible Response**          | **Example**                               |
@@ -260,8 +261,6 @@ Traditional software testing evaluates behavior against unambiguous specificatio
 
 Responsible ML properties resist simple formalization. **Fairness**\index{Fairness!mathematical definitions} has multiple mathematical definitions that can conflict under conditions such as unequal base rates and imperfect prediction [@chouldechova2017; @kleinberg2016inherent]. What counts as fair depends on context, values, and trade-offs that technical systems cannot resolve alone. Individual fairness\index{Fairness!individual vs. group} requires that similar individuals receive similar treatment, while group fairness requires equitable outcomes across demographic categories. These criteria can conflict, and choosing between them requires value judgments beyond the scope of optimization.
 
-Fairness constraints and predictive performance can trade off, but the relationship is application-specific. A Pareto frontier represents configurations for which one plotted objective cannot improve without degrading another. @Fig-fairness-frontier visualizes one hypothetical fairness-accuracy frontier\index{Pareto frontier!fairness-accuracy trade-off}\index{Fairness!accuracy trade-off}. Its three points illustrate possible policy choices; they do not imply that unconstrained training always maximizes accuracy at high disparity, that zero disparity must reduce accuracy, or that every application has a sweet spot.
-
 ::: {#fig-fairness-frontier fig-env="figure" fig-pos="htb" fig-cap="**An Illustrative Fairness-Accuracy Pareto Frontier**: A hypothetical relationship between model accuracy and demographic disparity. The x-axis is inverted so lower disparity lies to the right. Points A, B, and C illustrate three possible operating choices along this constructed frontier; the curve is not an empirical or universal law." fig-alt="Hypothetical curve relating accuracy and disparity, with three labeled operating points A, B, and C. The x-axis is inverted so lower disparity lies to the right."}
 
 ```{python}
@@ -282,7 +281,7 @@ Fairness constraints and predictive performance can trade off, but the relations
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.3))
 
 # =============================================================================
 # PLOT: The Fairness-Accuracy Pareto Frontier
@@ -341,6 +340,9 @@ plt.close()
 ```
 
 :::
+
+Fairness constraints and predictive performance can trade off, but the relationship is application-specific. A Pareto frontier represents configurations for which one plotted objective cannot improve without degrading another. @Fig-fairness-frontier visualizes one hypothetical fairness-accuracy frontier\index{Pareto frontier!fairness-accuracy trade-off}\index{Fairness!accuracy trade-off}. Its three points illustrate possible policy choices; they do not imply that unconstrained training always maximizes accuracy at high disparity, that zero disparity must reduce accuracy, or that every application has a sweet spot.
+
 
 ```{python}
 #| label: testing-constraint-anchor-calc
@@ -444,6 +446,7 @@ The frontier tells engineers what trade-off they may need to choose, but it cann
 
 [^fn-gender-shades-audit]: **Gender Shades**\index{Gender Shades!disaggregated evaluation}: A 2018 study by Joy Buolamwini (MIT Media Lab) and Timnit Gebru (Microsoft Research) that audited commercial gender-classification systems from Microsoft, IBM, and Face++ using the Fitzpatrick skin type scale—originally a dermatological classification developed by Thomas Fitzpatrick in 1975 for UV sensitivity and later validated for clinical use [@fitzpatrick1988], repurposed here as a demographic benchmark for algorithmic auditing. The study demonstrated the value of disaggregated evaluation; in the Face++ results reproduced in @tbl-gender-shades-results, the dark-female error rate is `{python} GenderShadesDisparity.disparity_factor_mult_str` the light-male rate. Microsoft's later reported reductions show how public audit results can motivate measurable remediation [@raji2019].
 
+
 | **Demographic Group**     |                      **Error Rate (%)**                     |                   **Relative to Light-Skinned Males**                   |
 |:--------------------------|:-----------------------------------------------------------:|:-----------------------------------------------------------------------:|
 | **Light-skinned males**   |  `{python} GenderShadesDisparity.error_light_male_tbl_str`  |                          Baseline (1.0$\times$)                         |
@@ -475,8 +478,6 @@ Responsible testing strategies complement traditional software testing rather th
 
 By the time Amazon abandoned the recruiting tool, attempted remediation had not provided confidence that it would avoid discriminatory recommendations [@dastin2018]. Earlier design choices can narrow the available fixes. Responsible AI engineering cannot be delegated exclusively to ethics boards or legal departments. These groups provide essential oversight but lack the technical access required to identify problems early in the development process.
 
-Legal or ethics review can identify a problem near deployment, but it cannot recover design options the system has already foreclosed. If the team trained the model without fairness constraints, chose an architecture that cannot support interpretability requirements, or built a data pipeline without the demographic attributes needed for monitoring, review can only accept, reject, or demand expensive redesign. Engineers therefore occupy a critical position in the ML development lifecycle because their choices define the solution space for all subsequent interventions: architecture determines which fairness constraints can apply, the optimization objective determines which patterns the system learns, and the data pipeline determines whether disaggregated evaluation is possible.
-
 ::: {#dfn-responsible-engr-responsible-ai-engineering .callout-definition title="Responsible AI engineering"}
 
 ***Responsible AI engineering***\index{Responsible AI engineering!definition} is the engineering discipline of designing, deploying, and maintaining systems with probabilistic outputs by operationalizing societal and regulatory requirements as testable constraints on the D·A·M axes: permissible data contents, provenance, and composition; allowable model behavior and robustness properties; and infrastructure bounds such as latency, energy, compute budget, carbon emissions, and audit-log retention.
@@ -487,6 +488,8 @@ Legal or ethics review can identify a problem near deployment, but it cannot rec
 
 :::
 
+Legal or ethics review can identify a problem near deployment, but it cannot recover design options the system has already foreclosed. If the team trained the model without fairness constraints, chose an architecture that cannot support interpretability requirements, or built a data pipeline without the demographic attributes needed for monitoring, review can only accept, reject, or demand expensive redesign. Engineers therefore occupy a critical position in the ML development lifecycle because their choices define the solution space for all subsequent interventions: architecture determines which fairness constraints can apply, the optimization objective determines which patterns the system learns, and the data pipeline determines whether disaggregated evaluation is possible.
+
 An engineering-centered approach does not diminish the importance of diverse perspectives in identifying potential harms. Product managers, user researchers, affected communities, and policy experts contribute essential knowledge about how systems fail socially despite technical success. Engineers translate these concerns into measurable requirements and testable properties that can be verified throughout the development lifecycle. Effective responsibility requires engineers who both listen to stakeholder concerns and possess the technical capability to implement appropriate safeguards.
 
 Engineering teams do not operate in isolation. As @fig-governance-layers makes clear, engineering practices are nested within broader organizational, industry, and regulatory governance structures, each layer imposing constraints on the ones inside it. Technical excellence at the innermost layer enables, but does not replace, compliance with requirements flowing inward from external governance.
@@ -494,7 +497,7 @@ Engineering teams do not operate in isolation. As @fig-governance-layers makes c
 ::: {#fig-governance-layers fig-env="figure" fig-pos="htb" fig-cap="**Responsible AI Governance Layers**: Four nested ovals place team-level safeguards at the center, surrounded by organizational safety culture, industry certification and review, and government regulation. The nesting distinguishes implementation at the center from oversight outside it; the annotation states that requirements flow inward and technical practices enable compliance. Adapted from @shneiderman2022human." fig-alt="Four nested ovals labeled, from center outward: Team—Reliable Systems, Organization—Safety culture and organization design, Industry—Trustworthy certification and external reviews, and Government Regulation—laws, executive orders, regulatory agencies. The team layer lists audit trails, verification and bias testing, explainable interfaces, and software-engineering workflows. A bottom annotation reads, “Requirements flow inward; technical practices enable compliance.”"}
 
 ```{.tikz}
-\scalebox{0.9}{%
+\scalebox{0.85}{%
 \begin{tikzpicture}[line join=round,font=\sffamily\small]
 \definecolor{col1}{RGB}{249,240,241}
 \definecolor{col2}{RGB}{246,231,233}
@@ -576,6 +579,11 @@ Beyond ethical imperatives, responsible engineering can deliver business value t
 
 A second mechanism is regulatory compliance\index{Regulatory compliance!business value}, driven by legal requirements that vary by jurisdiction and application risk. The EU AI Act, for example, classifies high-risk AI applications\index{High-risk AI!EU classification} and mandates technical requirements including risk assessment, data governance, transparency, and human oversight. Organizations that build responsibility into engineering practice can demonstrate compliance through existing documentation and monitoring rather than expensive retrofitting; the engineering lesson is that proactive controls are usually cheaper than reconstructing evidence after deployment.
 
+Competitive differentiation\index{Trust!competitive differentiation} completes the business case. Trust can drive enterprise purchasing decisions for ML-powered services, and organizations that can demonstrate systematic responsibility practices through model cards, audit trails, and published evaluation results may qualify for deployments that competitors cannot. Apple's privacy positioning, Microsoft's responsible AI principles, and Anthropic's safety research illustrate responsibility as a strategic investment rather than a purely defensive cost.
+
+The quantization techniques from @sec-model-compression can reduce inference energy when the deployed runtime and hardware exploit the representation and measured workload energy falls. The monitoring infrastructure from @sec-ml-operations can support disaggregated fairness evaluation when the system lawfully collects the necessary outcome and subgroup data. Responsible engineering synthesizes these capabilities into disciplined practice through structured frameworks that translate principles into processes.
+
+
 ::: {#psp-responsible-engr-full-cost-iron-law .callout-perspective title="The full cost of the iron law"}
 
 The iron law of ML systems (principle \ref{pri-iron-law}) established in @sec-introduction-iron-law-ml-systems-c32a holds that system performance depends on the interaction between data, compute, and system overhead. Earlier chapters optimized each term by compressing models (@sec-model-compression), accelerating hardware (@sec-hardware-acceleration), and automating operations (@sec-ml-operations). Yet an optimization can create or shift costs that its benchmark omits.
@@ -583,10 +591,6 @@ The iron law of ML systems (principle \ref{pri-iron-law}) established in @sec-in
 A model quantized for edge deployment consumes less energy, but also produces outputs that may differ across demographic groups. A recommendation system optimized for engagement maximizes a business metric, but may amplify harmful content. Responsible engineering extends this accounting to include broader impacts: the carbon cost of computation, the fairness cost of optimization choices, and the societal cost of deployment at scale. The iron law governs *how fast* systems run; responsible engineering governs *how well* they serve.
 
 :::
-
-Competitive differentiation\index{Trust!competitive differentiation} completes the business case. Trust can drive enterprise purchasing decisions for ML-powered services, and organizations that can demonstrate systematic responsibility practices through model cards, audit trails, and published evaluation results may qualify for deployments that competitors cannot. Apple's privacy positioning, Microsoft's responsible AI principles, and Anthropic's safety research illustrate responsibility as a strategic investment rather than a purely defensive cost.
-
-The quantization techniques from @sec-model-compression can reduce inference energy when the deployed runtime and hardware exploit the representation and measured workload energy falls. The monitoring infrastructure from @sec-ml-operations can support disaggregated fairness evaluation when the system lawfully collects the necessary outcome and subgroup data. Responsible engineering synthesizes these capabilities into disciplined practice through structured frameworks that translate principles into processes.
 
 Systematic processes applied early could have reduced the likelihood or severity of the failures examined in @sec-responsible-engineering-responsibility-systems-engineering-5cfd. Checklists, documentation standards, testing protocols, and monitoring infrastructure translate responsibility principles into repeatable engineering workflows, but they do not guarantee prevention.
 
@@ -608,9 +612,6 @@ Before a loan approval model reaches production, a team must determine the prove
 
 : **Predeployment Assessment Framework**: Critical Path items block deployment until addressed. High Priority items should be completed before or shortly after launch. Systematic coverage of responsibility concerns throughout the ML lifecycle reduces the chance that risks are overlooked. {#tbl-predeployment-assessment tbl-colwidths="[15,15,35,35]"}
 
-Critical Path items are deployment blockers: the system must not go to production until these questions are answered. High Priority items should be addressed but may proceed with documented risk acceptance and a remediation timeline. The distinction enables teams to ship responsibly without requiring perfection on every dimension before initial deployment.
-
-The Evaluation row in @tbl-predeployment-assessment raises the critical concern of whether performance holds across different user groups. Answering this question requires statistically valid test sets for each group, which can create surprisingly stringent data requirements when representation is uneven.
 
 ```{python}
 #| label: representation-stats-calc
@@ -663,6 +664,8 @@ class RepresentationStats:
 *Random sampling barely reaches small subgroups.*
 :::
 
+Critical Path items are deployment blockers: the system must not go to production until these questions are answered. High Priority items should be addressed but may proceed with documented risk acceptance and a remediation timeline. The distinction enables teams to ship responsibly without requiring perfection on every dimension before initial deployment.
+
 :::: {#nbk-responsible-engr-statistics-representation .callout-notebook title="The statistics of representation"}
 
 **Problem**: An engineering team needs to verify that a Face ID model works for a minority group representing `{python} RepresentationStats.repr_group_fraction_pct_str` of the user base. A worst-case binomial margin of error near `{python} RepresentationStats.repr_target_margin_pp_str` at `{python} RepresentationStats.repr_confidence_pct_str` confidence requires roughly `{python} RepresentationStats.repr_target_images_str` for this group.
@@ -674,6 +677,8 @@ $D_{\text{eval,total}}$ = `{python} RepresentationStats.repr_target_images_str` 
 **Systems insight**: Relying on "natural distribution" data for fairness is prohibitively expensive under random sampling. Validating the minority group effectively requires `{python} RepresentationStats.repr_mult_str` more data than the majority group. Fairness requires intentional data engineering\index{Intentional data engineering!fairness evaluation}, not just more data.
 
 ::::
+
+The Evaluation row in @tbl-predeployment-assessment raises the critical concern of whether performance holds across different user groups. Answering this question requires statistically valid test sets for each group, which can create surprisingly stringent data requirements when representation is uneven.
 
 Intentional data engineering addresses *what* the model sees during evaluation, but even a perfectly representative dataset cannot prevent harm at deployment if the system lacks adequate human oversight. The representation cost derived in napkin math \ref{nbk-responsible-engr-statistics-representation} is a predeployment gate; the question that follows is what happens once the model is live and making decisions that affect people.
 
@@ -690,6 +695,7 @@ Intentional data engineering addresses *what* the model sees during evaluation, 
 **Systems lesson**: Adding a human backup creates a new system with its own failure modes. High automation reliability can encourage complacency and reduce vigilance, so an effective fallback requires workload design, attention monitoring, and a safety case for the combined human-machine system.
 
 ::::
+
 
 ::: {.column-margin}
 ```{=latex}
@@ -769,21 +775,14 @@ Systems engineering rarely designs for the "average" case; robust systems are en
 
 The flaw of averages establishes the core testing principle: aggregate metrics conceal tail failures. Translating this principle into an engineering workflow requires determining which population slices and failure modes to isolate. Because a vision classifier fails differently from a recommendation engine or an audio wake-word detector, fairness metrics and evaluation slices must reflect the application domain. In healthcare diagnostics, demographic cohorts such as age and biological sex govern slice definitions. In content moderation, dialect and linguistic context dominate. In financial underwriting, credit regulations mandate auditing legally protected categories.
 
-Operationalizing these evaluations requires four core capabilities in the testing infrastructure. First, stratified evaluation\index{Stratified evaluation!population-based testing} computes performance metrics separately for each cohort to expose error-rate disparities across populations. Second, intersectional analysis\index{Intersectional analysis!combined attribute testing} evaluates combinations of attributes, catching compounding failure modes that remain invisible in single-factor slices. Third, confidence intervals quantify statistical uncertainty when sparse subgroup sample sizes yield noisy point estimates. Fourth, temporal monitoring tracks cohort performance continuously across deployment, detecting distribution drift that degrades minority slices before impacting aggregate health checks.
-
-Tool selection matters only after the engineering team specifies the metrics, subgroup slices, and alerting thresholds. Open-source evaluation suites such as Fairlearn [@bird2020fairlearn], AI Fairness 360 [@bellamy2019], and Google's What-If Tool [@wexler2020whatif] simplify the computation of stratified and intersectional metrics, but software libraries cannot supply domain judgment. They compute whichever metric an engineer queries; they cannot decide which demographic boundaries matter, calibrate paging thresholds for on-call engineers, or select the appropriate legal fairness constraint.
-
-An operational release gate must distinguish absence of evidence from evidence of parity. If a slice lacks sufficient labeled validation data to bound the error rate with statistical confidence, the CI/CD gate must report insufficient data rather than a false pass—triggering targeted data acquisition or restricting deployment scope. Population testing thus enforces a tri-state operational contract: pass, fail, or insufficient evidence.
-
 ::: {#lhs-responsible-engr-fairness-concerns-by-archetype .callout-lighthouse title="Fairness concerns by archetype"}
 
-Fairness risks vary across the workload archetypes in @sec-ml-systems. @Tbl-fairness-archetype maps each to a primary risk and metric.
-
-Architecture alone does not determine fairness; each row identifies a deployment-specific risk to test first, not a universal property of the model family.
-
 ```{=latex}
-\vspace*{-1.5ex}
+\begin{minipage}{1\linewidth}
+\renewcommand{\arraystretch}{1.4}
 ```
+
+Fairness risks vary across the workload archetypes in @sec-ml-systems. @Tbl-fairness-archetype maps each to a primary risk and metric.
 
 | **Archetype**                 | **Primary Fairness Risk**                                                                       | **Key Evaluation Metric**                                                          | **Real-World Example**                                                                                                     |
 |:------------------------------|:------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------|
@@ -795,12 +794,19 @@ Architecture alone does not determine fairness; each row identifies a deployment
 : **Fairness Risk by ML Archetype**: Fairness risks vary by archetype's data source and deployment context. {#tbl-fairness-archetype tbl-colwidths="[11,32,23,34]"}
 
 ```{=latex}
-\vspace*{1.5ex}
+\end{minipage}
 ```
+Architecture alone does not determine fairness; each row identifies a deployment-specific risk to test first, not a universal property of the model family.
 
 **Systems insight**: Fairness evaluation must match each archetype's failure mode. Vision models require stratified demographic accuracy; large language models (LLMs) need toxicity and stereotype probes; recommenders need exposure audits; TinyML needs acoustic-environment tests. The lighthouse keyword spotting (KWS) system introduced in @sec-ml-systems as the Tiny Constraint lighthouse faces exactly this challenge for its DS-CNN, a depthwise-separable convolutional neural network (CNN): trained on clean studio audio, it must perform equitably across accents, background noise levels, and speaker demographics in production homes (a governance challenge addressed in @sec-responsible-engineering-data-governance-compliance-bd1a).
 
 :::
+
+Operationalizing these evaluations requires four core capabilities in the testing infrastructure. First, stratified evaluation\index{Stratified evaluation!population-based testing} computes performance metrics separately for each cohort to expose error-rate disparities across populations. Second, intersectional analysis\index{Intersectional analysis!combined attribute testing} evaluates combinations of attributes, catching compounding failure modes that remain invisible in single-factor slices. Third, confidence intervals quantify statistical uncertainty when sparse subgroup sample sizes yield noisy point estimates. Fourth, temporal monitoring tracks cohort performance continuously across deployment, detecting distribution drift that degrades minority slices before impacting aggregate health checks.
+
+Tool selection matters only after the engineering team specifies the metrics, subgroup slices, and alerting thresholds. Open-source evaluation suites such as Fairlearn [@bird2020fairlearn], AI Fairness 360 [@bellamy2019], and Google's What-If Tool [@wexler2020whatif] simplify the computation of stratified and intersectional metrics, but software libraries cannot supply domain judgment. They compute whichever metric an engineer queries; they cannot decide which demographic boundaries matter, calibrate paging thresholds for on-call engineers, or select the appropriate legal fairness constraint.
+
+An operational release gate must distinguish absence of evidence from evidence of parity. If a slice lacks sufficient labeled validation data to bound the error rate with statistical confidence, the CI/CD gate must report insufficient data rather than a false pass—triggering targeted data acquisition or restricting deployment scope. Population testing thus enforces a tri-state operational contract: pass, fail, or insufficient evidence.
 
 #### Worked example: Fairness analysis in loan approval {#sec-responsible-engineering-worked-example-fairness-analysis-loan-approval-2c72}
 
@@ -900,12 +906,20 @@ class LoanFairness:
 
 A loan approval model\index{Fairness metrics!loan approval case study} reports `{python} LoanFairness.majority_acc_str` accuracy on the majority group and `{python} LoanFairness.overall_acc_str` overall accuracy across the evaluated applicants—numbers that may satisfy a coarse aggregate dashboard. Evaluating the model separately across demographic cohorts exposes how aggregate metrics conceal severe disparities. @Tbl-confusion-group-a details the outcomes for the majority cohort (Group A):
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.35}
+```
 |                        |          **Approved (pred)**          |          **Rejected (pred)**          |
 |:-----------------------|:-------------------------------------:|:-------------------------------------:|
 | **Repaid (actual)**    | `{python} LoanFairness.a_tp_str` (TP) | `{python} LoanFairness.a_fn_str` (FN) |
 | **Defaulted (actual)** | `{python} LoanFairness.a_fp_str` (FP) | `{python} LoanFairness.a_tn_str` (TN) |
 
 : **Confusion Matrix for Group A (Majority)**: In this constructed scenario, loan approval outcomes for `{python} LoanFairness.a_total_str` applicants from the majority demographic group. The `{python} LoanFairness.a_tpr_str` true positive rate (`{python} LoanFairness.a_tp_str` approved of `{python} LoanFairness.a_qualified_str` qualified) and `{python} LoanFairness.a_fpr_str` false positive rate establish the baseline for fairness comparison. {#tbl-confusion-group-a}
+
+```{=latex}
+\endgroup
+```
 
 @Tbl-confusion-group-a establishes the majority-group baseline against which three standard criteria for equitable treatment are evaluated, each capturing a distinct operational objective:[^fn-fairness-metric-incompatibility]
 
@@ -919,6 +933,11 @@ A loan approval model\index{Fairness metrics!loan approval case study} reports `
 
 Evaluating the same model on the minority demographic cohort in @tbl-confusion-group-b exposes how these criteria diverge under unequal error distributions:
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.4}
+```
+
 |                        |          **Approved (pred)**          |          **Rejected (pred)**          |
 |:-----------------------|:-------------------------------------:|:-------------------------------------:|
 | **Repaid (actual)**    | `{python} LoanFairness.b_tp_str` (TP) | `{python} LoanFairness.b_fn_str` (FN) |
@@ -926,11 +945,16 @@ Evaluating the same model on the minority demographic cohort in @tbl-confusion-g
 
 : **Confusion Matrix for Group B (Minority)**: In the same constructed scenario, loan approval outcomes for `{python} LoanFairness.b_total_str` applicants from the minority demographic group. The `{python} LoanFairness.b_tpr_str` true positive rate (`{python} LoanFairness.b_tp_str` approved of `{python} LoanFairness.b_qualified_str` qualified) reveals a `{python} LoanFairness.tpr_disparity_str` disparity compared with Group A; the confusion matrices alone do not identify its cause. {#tbl-confusion-group-b}
 
+```{=latex}
+\endgroup
+```
+
 [^fn-equalized-odds-postprocessing]: **Equalized odds**\index{Equalized odds!postprocessing}: Formalized by @hardt2016equality, requiring that both TPR and FPR be equal across protected groups; the weaker "equal opportunity" relaxes this to TPR alone. Equalized-odds postprocessing may require randomized, group-dependent decisions rather than deterministic thresholds alone. It also requires protected-group information at decision time and must be evaluated under applicable law; for example, US credit regulation generally restricts using protected bases to assess creditworthiness.
 
 These metrics disagree because they encode different policy choices about which error rates matter most. In this scenario, the model rejects qualified applicants from Group B at a much higher rate (`{python} LoanFairness.b_fnr_str` false negative rate\index{False negative rate!fairness impact} vs. `{python} LoanFairness.a_fnr_str`) while maintaining similar false positive rates. These confusion matrices establish an operational disparity, not whether it arose from classification thresholds, labeling bias, omitted features, sampling skew, or historical discrimination.
 
 Where collection and use of protected attributes are lawful and justified, production systems can automate these calculations and trigger review when disparities exceed predefined thresholds. @Lst-fairness-metrics-code makes the failure-handling contract explicit: undefined group rates are reported as insufficient data rather than compared against a threshold.
+
 
 ::: {#lst-fairness-metrics-code lst-cap="**Automated Fairness Monitoring**: The core pattern computes per-group metrics from confusion matrices and alerts when disparities exceed application-specific thresholds. Production use requires sufficient data and lawful, justified handling of group attributes."}
 
@@ -1031,6 +1055,17 @@ circB/.style={draw=blue!70!black, fill=white,line width=2.5pt,circle, minimum si
 
 Mitigating these disparities requires intervening across the D·A·M pipeline, each stage imposing specific systems trade-offs:
 
+::: {#chk-responsible-engr-fairness-criteria .callout-checkpoint title="Fairness criteria"}
+
+Fairness is not a single metric; it is a constrained design choice.
+
+- [ ] **Metric definitions**: can you distinguish demographic parity, equal opportunity, equalized odds, and calibration in terms of which rates must match across groups?
+- [ ] **Impossibility trade-off**: can you explain (at a high level) why base-rate differences make it impossible to satisfy all fairness criteria simultaneously?
+- [ ] **Systems interpretation**: given the confusion matrices in @tbl-confusion-group-a and @tbl-confusion-group-b, can you identify which disparity matters operationally (TPR vs. FPR vs. approval rate) and what kind of harm it represents?
+- [ ] **Engineering decision**: for a concrete high-stakes domain (credit, hiring, criminal justice), can you justify which fairness constraint you would prioritize and why?
+
+:::
+
 Postprocessing via threshold adjustment\index{Threshold adjustment!fairness mitigation} decouples the decision boundary across groups, lowering the approval cutoff for Group B to equalize TPR. The operational trade-off is an increase in false positives within that cohort, admitting applicants who may subsequently default.
 
 Preprocessing via sample reweighting\index{Reweighting!bias mitigation} scales the loss penalty of Group B instances during training, amplifying gradient signal for underrepresented cohorts without discarding data.[^fn-reweighting-sample-bias] The trade-off appears across the broader loss surface, where reweighting can degrade accuracy on majority slices.
@@ -1042,17 +1077,6 @@ Selecting among these interventions requires stakeholder alignment on acceptable
 [^fn-reweighting-sample-bias]: **Reweighting**\index{Reweighting!importance sampling}: A preprocessing technique rooted in importance sampling from statistics: samples from an underrepresented group receive higher loss weights during training, amplifying their influence on gradient updates without removing any data. @kamiran2011 showed that appropriately chosen weights can reduce disparate impact from training data. The systems trade-off is application-specific: reweighting shifts the loss landscape and may reduce performance on other slices, so the cost must be evaluated against the Pareto frontier for the application.
 
 [^fn-adversarial-debiasing-cost]: **Adversarial debiasing**\index{Adversarial debiasing!training cost}: The key differentiating property is representation pressure: the adversary discourages the primary model from encoding protected-attribute information, which can reduce protected-attribute leakage and help satisfy selected fairness criteria under the evaluated distribution [@zhang2018mitigating]; it does not provide a general fairness guarantee under arbitrary deployment shift; guarantees depend on assumptions about invariance, labels, causal structure, and the type of shift. Postprocessing methods such as threshold adjustment may also be appropriate under different assumptions but must be revalidated when deployment demographics or label processes change. The cost is additional training, hyperparameter tuning, and slice-level validation rather than a universal percentage overhead.
-
-::: {#chk-responsible-engr-fairness-criteria .callout-checkpoint title="Fairness criteria"}
-
-Fairness is not a single metric; it is a constrained design choice.
-
-- [ ] **Metric definitions**: can you distinguish demographic parity, equal opportunity, equalized odds, and calibration in terms of which rates must match across groups?
-- [ ] **Impossibility trade-off**: can you explain (at a high level) why base-rate differences make it impossible to satisfy all fairness criteria simultaneously?
-- [ ] **Systems interpretation**: given the confusion matrices in @tbl-confusion-group-a and @tbl-confusion-group-b, can you identify which disparity matters operationally (TPR vs. FPR vs. approval rate) and what kind of harm it represents?
-- [ ] **Engineering decision**: for a concrete high-stakes domain (credit, hiring, criminal justice), can you justify which fairness constraint you would prioritize and why?
-
-:::
 
 #### Quantifying the fairness-accuracy trade-off {#sec-responsible-engineering-quantifying-fairnessaccuracy-tradeoff-ce4a}
 
@@ -1652,9 +1676,6 @@ Telemetry infrastructure provides protection only when coupled with disciplined 
 
 Equitable performance across demographic cohorts addresses only one dimension of responsible engineering. Operational expenditure and physical energy consumption constitute an equally critical constraint. Every training run, inference request, and monitoring pipeline draws electrical power that converts to carbon emissions and operating expenditure. An ML pipeline can exhibit demographic parity while consuming orders of magnitude more compute than the task warrants—imposing an unmonitored environmental footprint and inflating operating costs. Responsible engineering must govern both whom the system serves and the physical resources consumed in serving them.
 
-```{=latex}
-\newpage
-```
 
 ## Environmental and Cost Awareness {#sec-responsible-engineering-environmental-cost-awareness-0f3e}
 
@@ -1788,6 +1809,8 @@ Edge deployment scenarios\index{Edge deployment!power constraints} make these ph
 
 Evaluating candidate architectures against these operating envelopes reveals whether an algorithm fits the target machine without exceeding its thermal dissipation or latency limits. @Tbl-model-efficiency-comparison profiles four vision models across parameter counts, active inference power, and latency against the smartphone and IoT budgets defined in @tbl-edge-deployment-constraints.
 
+For the wearable budget in @tbl-edge-deployment-constraints, the TinyML model leaves a `{python} EdgeEfficiencyCalc.tiny_wear_power_margin_factor_mult_str` power margin, while MobileNetV2 exceeds the same power budget by `{python} EdgeEfficiencyCalc.mv2_wear_power_overage_factor_mult_str` before accounting for sustained thermals. Fitting the device envelope is necessary, but per-inference energy compounds into aggregate emissions and operational cost once deployed at scale. Techniques that lower measured energy per inference reduce environmental impact only when they avoid shifting compute costs upstream into training or unmeasured preprocessing, while cloud and cluster financial savings depend directly on provisioning and hardware utilization.
+
 | **Model**           |                  **Parameters**                 |               **Inference Power**               |                  **Latency**                   |                **Fits Smartphone?**               |                  **Fits IoT?**                  |
 |:--------------------|:-----------------------------------------------:|:-----------------------------------------------:|:----------------------------------------------:|:-------------------------------------------------:|:-----------------------------------------------:|
 | **MobileNetV2**     |  `{python} EdgeEfficiencyCalc.mv2_params_m_str` |  `{python} EdgeEfficiencyCalc.mv2_power_w_str`  | `{python} EdgeEfficiencyCalc.mv2_latency_str`  |  `{python} EdgeEfficiencyCalc.mv2_fits_phone_str` |  `{python} EdgeEfficiencyCalc.mv2_fits_iot_str` |
@@ -1797,7 +1820,6 @@ Evaluating candidate architectures against these operating envelopes reveals whe
 
 : **Model Efficiency Comparison**: Illustrative model profiles under the stated deployment assumptions. Model selection must account for accuracy, latency, power, memory, runtime support, and lifecycle impact; parameter count alone does not determine cost or environmental impact. {#tbl-model-efficiency-comparison tbl-colwidths="[20,15,20,10,25,10]"}
 
-For the wearable budget in @tbl-edge-deployment-constraints, the TinyML model leaves a `{python} EdgeEfficiencyCalc.tiny_wear_power_margin_factor_mult_str` power margin, while MobileNetV2 exceeds the same power budget by `{python} EdgeEfficiencyCalc.mv2_wear_power_overage_factor_mult_str` before accounting for sustained thermals. Fitting the device envelope is necessary, but per-inference energy compounds into aggregate emissions and operational cost once deployed at scale. Techniques that lower measured energy per inference reduce environmental impact only when they avoid shifting compute costs upstream into training or unmeasured preprocessing, while cloud and cluster financial savings depend directly on provisioning and hardware utilization.
 
 ### Total cost of ownership {#sec-responsible-engineering-total-cost-ownership-35c1}
 

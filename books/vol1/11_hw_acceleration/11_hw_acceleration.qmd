@@ -788,7 +788,9 @@ Many important neural-network workloads contain regular tensor operations, subst
 **Diagnosis**: General-purpose CPU server capacity was economically unable to absorb the exponential growth in inference FLOPs, threatening a capital infrastructure bottleneck.
 
 **Systems lesson**: Custom hardware acceleration becomes mandatory when workload volume crosses fleet-level economic thresholds. Aggregate arithmetic intensity and server total cost of ownership drive custom ASIC deployment decisions.
-
+```{=latex}
+\vspace*{-1ex}
+```
 :::
 
 ```{python}
@@ -823,7 +825,7 @@ Machine learning computational requirements reveal limitations in traditional pr
 
 The energy economics of data movement\index{Energy!data movement cost} influence accelerator design. Per event, accessing a 32-bit value from DRAM can consume on the order of $10^2\times$ more energy than one FP32 multiply (exact values vary by technology node and design), making data movement a primary optimization target [@horowitz2014; @sze2017]. This disparity helps explain the progression from repurposed graphics processors to purpose-built neural network accelerators. TPUs and other custom accelerators can sustain high utilization on dense kernels by implementing systolic arrays and other architectures that maximize data reuse while minimizing movement.
 
-Training and inference\index{Training vs. Inference!accelerator design} present different computational profiles that influence accelerator design. Training computes gradients and updates weights: FP32 and FP16 are standardized binary floating-point formats [@ieee_754_2019]\index{FP16!training precision}\index{FP32!gradient computation}, while mixed-precision training uses lower-precision tensor operations with higher-precision accumulation when accuracy permits [@micikevicius2017mixed]. Backpropagation\index{Backpropagation!memory requirements} also retains or recomputes activations (see @sec-model-training-activation-memory-requirements-f44c), increasing memory demand. Inference requires only the forward path and may use INT8 or INT4 when the model and kernels support it. Interactive inference may prioritize tail latency, while offline or batched inference may prioritize throughput, cost, or energy; accelerator choice follows the actual service objective. These profiles often favor high-capacity, throughput-oriented training systems and energy-efficient inference paths, but batch size and service policy can reverse the apparent preference.[^fn-latency-throughput-hw]
+Training and inference\index{Training vs. Inference!accelerator design} present different computational profiles that influence accelerator design. Training computes gradients and updates weights: FP32 and FP16 are standardized binary floating-point formats [@ieee_754_2019]\index{FP16!training precision}\index{FP32!gradient computation}, while mixed-precision training uses lower-precision tensor operations with higher-precision accumulation when accuracy permits [@micikevicius2017mixed]. Backpropagation\index{Backpropagation!memory requirements} also retains or recomputes activations (see @sec-model-training-activation-memory-requirements-f44c), increasing memory&nbsp;demand. Inference requires only the forward path and may use INT8 or INT4 when the model and kernels support it. Interactive inference may prioritize tail latency, while offline or batched inference may prioritize throughput, cost, or energy; accelerator choice follows the actual service objective. These profiles often favor high-capacity, throughput-oriented training systems and energy-efficient inference paths, but batch size and service policy can reverse the apparent preference.[^fn-latency-throughput-hw]
 
 [^fn-latency-throughput-hw]: **Latency vs. throughput in accelerator design**\index{Latency vs. throughput!accelerator design}: Training commonly uses throughput-oriented execution and larger batches to amortize work, while latency-sensitive inference must control single-request and tail latency. This is a service objective, not a universal training/inference divide: batched inference can also be throughput oriented, and small or interactive training loops may care about step latency. Pipeline depth, batching delay, kernel setup, and queueing can make a training-oriented path less suitable for an interactive request even when its peak FLOP/s is higher, so the design must match the workload's actual arrival pattern, batch opportunity, and objective.
 
@@ -1188,6 +1190,8 @@ output = activation(
 
 While graph representations group these steps into coarse tensor operators, execution on physical hardware requires scheduling individual scalar operations. Lowering the matrix multiplication to loop nests (@lst-loop_level_dense) makes the execution structure explicit: three nested iterations traverse the batch, output feature, and reduction dimensions, establishing $\mathcal{O}(B \times d_{\text{in}} \times d_{\text{out}})$ arithmetic complexity.
 
+These nested loops expose three recurring computational patterns: element-wise operations along vectors, matrix-level multiply-accumulate reductions, and nonlinear transformations. Their ubiquity justifies dedicated hardware execution paths: vector pipelines stream independent elements and reductions, matrix engines organize multiply-accumulate grids across spatial tiles, and special-function units approximate nonlinear math. The boundaries between these units are architectural rather than mathematical; an optimizing compiler frequently fuses operations across all three paths within a single kernel invocation to eliminate intermediate memory traffic.
+
 ::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the $\mathcal{O}(B \times d_{\text{in}} \times d_{\text{out}})$ multiply-accumulate operations that accelerators must execute, with `{python} WeightMatrixCalc.wm_batch_macs_m_str` for $B$=`{python} WeightMatrixCalc.wm_batch_str`, $d_{\text{in}}$=`{python} WeightMatrixCalc.wm_in_str`, $d_{\text{out}}$=`{python} WeightMatrixCalc.wm_out_str` configurations."}
 
 ```{.python}
@@ -1204,7 +1208,6 @@ for n in range(batch_size):  # Batch dimension: parallelizable
 
 :::
 
-These nested loops expose three recurring computational patterns: element-wise operations along vectors, matrix-level multiply-accumulate reductions, and nonlinear transformations. Their ubiquity justifies dedicated hardware execution paths: vector pipelines stream independent elements and reductions, matrix engines organize multiply-accumulate grids across spatial tiles, and special-function units approximate nonlinear math. The boundaries between these units are architectural rather than mathematical; an optimizing compiler frequently fuses operations across all three paths within a single kernel invocation to eliminate intermediate memory traffic.
 
 ### Vector operations {#sec-hardware-acceleration-vector-operations-19bf}
 
@@ -1273,13 +1276,17 @@ Matrix multiplication\index{Matrix multiplication!neural network workhorse} acco
 
 Neural network computations decompose into hierarchical matrix operations\index{Matrix operation!hierarchical decomposition}. @Lst-linear_matrix_hierarchy captures this hierarchy through a linear layer that transforms input features into output neurons over a batch.
 
+This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (`{python} WeightMatrixCalc.wm_out_str` total) must process all input features (`{python} WeightMatrixCalc.wm_in_str` total) for every sample in the batch (`{python} WeightMatrixCalc.wm_batch_str` samples). The weight matrix alone contains `{python} WeightMatrixCalc.wm_in_str` $\times$ `{python} WeightMatrixCalc.wm_out_str` = `{python} WeightMatrixCalc.wm_params_str` that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
+
 ::: {#lst-linear_matrix_hierarchy lst-cap="**Linear-Layer Operation Hierarchy**: The example expands a linear layer into a matrix multiply and bias broadcast, then applies element-wise ReLU, separating the matrix and vector work that hardware must execute."}
 
 ```{.python}
 layer = nn.Linear(256, 512)  # Layer transforms 256 inputs to 512 outputs
 output = layer(input_batch)  # Process a batch of 32 samples
 
-# Framework Internal: Core operations (column-batch convention)
+
+# Framework Internal: Core operations 
+# (column-batch convention)
 Z = matmul(weights, input)  # Matrix: transforms [256×32]
 # input to [512×32] output
 Z = Z + bias  # Vector: adds bias to each
@@ -1289,8 +1296,6 @@ output = relu(Z)  # Vector: applies activation to
 ```
 
 :::
-
-This computation demonstrates the scale of matrix operations in neural networks. Each output neuron (`{python} WeightMatrixCalc.wm_out_str` total) must process all input features (`{python} WeightMatrixCalc.wm_in_str` total) for every sample in the batch (`{python} WeightMatrixCalc.wm_batch_str` samples). The weight matrix alone contains `{python} WeightMatrixCalc.wm_in_str` $\times$ `{python} WeightMatrixCalc.wm_out_str` = `{python} WeightMatrixCalc.wm_params_str` that define these transformations, illustrating why efficient matrix multiplication dominates performance considerations.
 
 Neural networks employ matrix operations across architectural patterns beyond simple linear layers. Convolution operations\index{Convolution!matrix multiplication equivalence} transform into matrix multiplications through the im2col technique\index{im2col!convolution to matrix},[^fn-im2col-memory-tradeoff] enabling efficient execution on matrix-optimized hardware. @Lst-matrix_patterns illustrates these applications.
 
@@ -1303,6 +1308,7 @@ hidden = matmul(weights, inputs)
 # weights: [out_dim x in_dim], inputs: [in_dim x batch]
 # Result combines all inputs for each output
 
+
 # Attention Mechanisms - Multiple matrix operations
 Q = matmul(Wq, inputs)
 # Project inputs to query space [query_dim x batch]
@@ -1310,6 +1316,7 @@ K = matmul(Wk, inputs)
 # Project inputs to key space [key_dim x batch]
 attention = matmul(Q.T, K)
 # Compare all query tokens with all key tokens [batch x batch]
+
 
 # Convolutions - Matrix multiply after reshaping
 patches = im2col(input)
@@ -1326,23 +1333,21 @@ These examples differ in tensor shape and reuse pattern, which determines how ef
 
 This pervasive pattern of matrix multiplication has direct implications for hardware design\index{Matrix operation!hardware acceleration}: accelerators need specialized units that can handle these computations at scale. @Lst-matrix_unit demonstrates a representative dedicated matrix unit that processes an entire $16{\times}16$ block at once, illustrating why matrix instructions and Tensor Cores can deliver much higher throughput than scalar or vector-only execution paths [@nvidia_tensors_fp16_2017; @intel2021amx].
 
+The illustrative unit operates on matrix tiles rather than individual elements. A full $16{\times}16{\times}16$ tile product contains $16^3=4{,}096$ multiply-accumulate operations, but the cycles required depend on the actual instruction and architecture. Sustained throughput also depends on the number of matrix units, operand precision, issue rate, pipeline behavior, and whether memory can keep the units fed. Matrix units complement vector execution by accelerating structured many-to-many transformations.
+
+
 ::: {#lst-matrix_unit lst-cap="**Illustrative Matrix-Unit Operation**: Representative load, matrix-multiply-accumulate, and store instructions operate on matrix blocks rather than individual scalar elements."}
 
 ```{.c}
-mload mr1, (weight_ptr)     # Load e.g., 16x16 block of
+mload mr1, (weight_ptr)     # Load e.g., 16x16 block of 
                             # weight matrix
 mload mr2, (input_ptr)      # Load corresponding input block
-matmul.mm mr3, mr1, mr2     # Multiply and accumulate entire
+matmul.mm mr3, mr1, mr2     # Multiply and accumulate entire 
                             # blocks at once
 mstore (output_ptr), mr3    # Store computed output block
 ```
 
 :::
-
-```{=latex}
-\vspace*{-1.5ex}
-```
-The illustrative unit operates on matrix tiles rather than individual elements. A full $16{\times}16{\times}16$ tile product contains $16^3=4{,}096$ multiply-accumulate operations, but the cycles required depend on the actual instruction and architecture. Sustained throughput also depends on the number of matrix units, operand precision, issue rate, pipeline behavior, and whether memory can keep the units fed. Matrix units complement vector execution by accelerating structured many-to-many transformations.
 
 Like vector processing, matrix acceleration has deep historical roots—DSPs and GPUs optimized for matrix computations in the 1980s-1990s for image processing, scientific computing, and 3D rendering [@owens2008; @hwu2011]. Neural networks have made matrix multiplication commercially dominant, driving the integration of two-dimensional systolic arrays and matrix execution engines (such as NVIDIA Tensor Cores and Google TPUs) directly into processor datapaths.
 
@@ -1350,7 +1355,7 @@ Linear algebra constitutes only part of the neural network execution pipeline. B
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.3}
+%\renewcommand{\arraystretch}{1.15}
 ```
 
 | **Operation type**\index{Operation type!definition} | Best For                  | Examples                                                          | **Key characteristic**\index{Key characteristic!definition} |
@@ -1371,10 +1376,6 @@ Special Function Units (SFUs)\index{Special Function Unit!SFU} or specialized in
 
 #### Nonlinear functions {#sec-hardware-acceleration-nonlinear-functions-cc93}
 
-```{=latex}
-\noindent
-\begin{minipage}{1\linewidth}
-```
 A common layer sequence illustrates how non-matrix operators enter the execution pipeline [@goodfellow2016deep]. @Lst-nonlinear_layer chains a linear transformation with ReLU activation and batch normalization—operations that appear trivial in Python framework code but impose distinct arithmetic and memory constraints on hardware.
 
 ::: {#lst-nonlinear_layer lst-cap="**Linear–Nonlinear Layer Sequence**: A linear layer, ReLU, and BatchNorm combine matrix, element-wise, and normalization work in one common layer sequence."}
@@ -1387,9 +1388,6 @@ output = layer(input_tensor)
 ```
 
 :::
-```{=latex}
-\end{minipage}
-```
 
 @Lst-nonlinear_math expands this sequence into its arithmetic primitives, isolating the element-wise thresholding of ReLU from the cross-batch reductions and reciprocal square root required by batch normalization.
 
@@ -1412,6 +1410,9 @@ Translating these mathematical functions to silicon exposes sharp differences in
 The label *nonlinear* hides three different execution contracts. Pointwise functions such as ReLU leave elements independent and therefore map naturally to vector lanes or parallel threads. Reductions such as the mean and variance in batch normalization introduce cross-element dependencies: partial results must be combined before later stages can proceed. Transcendental functions such as exponential, logarithm, and reciprocal square root add a numerical contract because their implementations trade latency, precision, and valid input range. The dependency pattern, not the mathematical label alone, determines whether vector arithmetic, a reduction tree, or a specialized approximation path is appropriate. A faster special-function path accelerates only the operation it implements; it does not remove surrounding tensor traffic or synchronization.
 
 @Lst-traditional_overhead is intentionally dependency-explicit rather than a model of an optimized kernel. The loops expose three state lifetimes: per-element activations, per-feature accumulators, and the final normalized outputs. The normalization parameters cannot be applied until the required statistics are available, so implementations must either retain intermediate activations or recompute them. Training derives those statistics from the current batch, whereas inference can use stored statistics and reduce normalization to an element-wise affine transform. Compilers may fuse legal stages, but the data dependencies determine which transformations preserve the computation. Reading the listing as a dependency graph therefore reveals the durable hardware questions: how often each tensor crosses a memory interface, which intermediates remain local, and where reductions impose synchronization.
+
+The dependency structure in @lst-traditional_overhead exposes why naive execution collapses performance: arithmetic intensity drops precipitously. The pointwise ReLU and normalization scale-and-shift perform only one or two arithmetic operations per four-byte memory access, plunging the workload deep into the memory-bound regime. Furthermore, because batch statistics cannot be finalized until all samples are processed, the intermediate tensor `temp` must be written back to memory and reread in a subsequent pass, inflating memory bandwidth consumption and cache pressure. At the same time, computing $1/\sqrt{\mathrm{var} + \epsilon}$ requires an iterative square root and division that can stall pipeline execution for tens of cycles if executed on standard integer or floating-point ALUs. Mitigating these overheads requires two complementary strategies: hardware-level Special Function Units to approximate transcendental arithmetic in single-digit cycles, and compiler-level kernel fusion to keep intermediate values in registers rather than spilling them across the memory bus.
+
 
 ::: {#lst-traditional_overhead lst-cap="**ReLU and BatchNorm Operations**: Neural networks process input data through element-wise selections and multiple normalization passes, highlighting efficiency challenges in naive implementations."}
 
@@ -1446,8 +1447,6 @@ for feature in range(512):
 ```
 
 :::
-
-The dependency structure in @lst-traditional_overhead exposes why naive execution collapses performance: arithmetic intensity drops precipitously. The pointwise ReLU and normalization scale-and-shift perform only one or two arithmetic operations per four-byte memory access, plunging the workload deep into the memory-bound regime. Furthermore, because batch statistics cannot be finalized until all samples are processed, the intermediate tensor `temp` must be written back to memory and reread in a subsequent pass, inflating memory bandwidth consumption and cache pressure. At the same time, computing $1/\sqrt{\mathrm{var} + \epsilon}$ requires an iterative square root and division that can stall pipeline execution for tens of cycles if executed on standard integer or floating-point ALUs. Mitigating these overheads requires two complementary strategies: hardware-level Special Function Units to approximate transcendental arithmetic in single-digit cycles, and compiler-level kernel fusion to keep intermediate values in registers rather than spilling them across the memory bus.
 
 #### SFU hardware implementation {#sec-hardware-acceleration-sfu-hardware-implementation-90ff}
 
@@ -1714,25 +1713,25 @@ Design priorities determine how matrix engines appear in different processor fam
 };
 %—point labels ---
 \node[anchor=north, align=center,text=black, font=\sffamily\fontsize{7pt}{8}\selectfont]
-    at (axis cs:2012,4.4e0) {\textbf{K20X} \\ {\color{black!60}3.9 TFLOP/s FP32}};
+    at (axis cs:2011.62,16.4e0) {\textbf{K20X} \\ {\color{black!60}3.9 TFLOP/s FP32}};
 
 \node[anchor=south, align=center,text=black, font=\sffamily\fontsize{7pt}{8}\selectfont]
-    at (axis cs:2014,9.5e0) {\textbf{M40} \\ {\color{black!60}6.8 TFLOP/s FP32}};
+    at (axis cs:2014,1.99e0) {\textbf{M40} \\ {\color{black!60}6.8 TFLOP/s FP32}};
 
 \node[anchor=east, align=center,text=black, font=\sffamily\fontsize{7pt}{8}\selectfont]
     at (axis cs:2015.75,0.62e2) {\textbf{P40} \\ {\color{black!60}47 TOPS INT8}};
 
 \node[anchor=west, align=center,text=black, font=\sffamily\fontsize{7pt}{8}\selectfont]
-    at (axis cs:2017.25,1.05e2) {\textbf{V100} \\ {\color{black!60}125 TFLOP/s FP16}};
+    at (axis cs:2016.55,0.8e2) {\textbf{V100} \\ {\color{black!60}125 TFLOP/s FP16}};
 
 \node[anchor=north, align=center,text=black, font=\sffamily\fontsize{7pt}{8}\selectfont]
-    at (axis cs:2020.4,1.0e3) {\textbf{A100} \\ {\color{black!60}1,248 TOPS INT8}};
+    at (axis cs:2020.4,0.9e3) {\textbf{A100} \\ {\color{black!60}1,248 TOPS INT8}};
 
 \node[anchor=south east, align=center,text=black, font=\sffamily\fontsize{7pt}{8}\selectfont]
-    at (axis cs:2021.8,0.45e4) {\textbf{H100} \\ {\color{black!60}4,000 TFLOP/s FP8}};
+    at (axis cs:2021.8,0.35e4) {\textbf{H100} \\ {\color{black!60}4,000 TFLOP/s FP8}};
 
 \node[anchor=west, align=center,text=black, font=\sffamily\fontsize{7pt}{8}\selectfont]
-    at (axis cs:2024.3,0.9e4) {\textbf{B200} \\ {\color{black!60}9,000 TFLOP/s FP8}};
+    at (axis cs:2023.0,0.4e4) {\textbf{B200} \\ {\color{black!60}9,000 TFLOP/s FP8}};
 %
 \coordinate(A)at(axis cs:2022.5,0.4e4);
 \coordinate(B)at(axis cs:2012,5e0);
@@ -1769,7 +1768,7 @@ Parallel architectures require structural regularity because of how sparse matri
 ::: {#fig-sparse-formats fig-env="figure" fig-pos="htb" fig-cap="**Sparse Matrix Layouts**: The four panels compare dense, CSR, block-sparse, and BSR matrix occupancy patterns. The separate nonzero-block-index column represents the metadata required to locate retained blocks in the block-sparse cases. Regular block structure keeps this metadata predictable and compact so hardware can skip zero blocks and fetch retained blocks efficiently." fig-alt="Four 3-by-9 cell grids labeled Dense Matrix, Sparse Matrix (CSR), Block Sparse Matrix, and Block Sparse (BSR). Blue cells mark retained values or blocks against gray cells. A vertical list of nonzero block indices 1, 2, 4, 5, 7, and 9 connects by arrows to the two block-sparse grids."}
 
 ```{.tikz}
-\begin{tikzpicture}[ x=5mm,y=5mm,line join=round,font=\sffamily\small]
+\begin{tikzpicture}[ x=5mm,y=5mm,line join=round,font=\sffamily\footnotesize]
 \tikzset{%
   cell/.style={draw=white, line width=0.6pt},
   gridline/.style={draw=black!70, line width=1.5pt},
@@ -2334,8 +2333,6 @@ class SystolicOpsCalc:
 
 A `{python} SystolicOpsCalc.systolic_dim_str` $\times$ `{python} SystolicOpsCalc.systolic_dim_str` systolic array capable of `{python} SystolicOpsCalc.systolic_ops_str` per cycle requires a continuous operand stream to maintain utilization. On-chip buffers feed activations and weights to the array edges and are replenished from off-chip memory as needed; reuse within the array avoids fetching every operand from HBM each cycle. The TPU v4's `{python} SystolicOpsCalc.tpuv4_bw_gb_per_s_str` HBM2 bandwidth helps sustain this stream, but off-chip bandwidth can still limit models whose working sets and reuse patterns exceed on-chip capacity.
 
-The quantization techniques in @sec-model-compression-quantization-precision-cd46 reduce model memory footprint by converting FP32 weights to INT8 representations. Converting 32-bit floating-point weights to 8-bit integers reduces weight traffic by 4$\times$; whether that changes a kernel from bandwidth bound to compute bound depends on the operation's original arithmetic intensity, the accelerator's INT8 ridge point (the intensity threshold at which its INT8 compute saturates), and the overhead of quantization and dequantization. Similarly, structured pruning removes entire rows or columns of weight matrices, reducing both the data volume that must traverse memory hierarchies and the computation required. In the D·A·M taxonomy, these algorithmic optimizations prove valuable precisely because they target the memory bottleneck that limits accelerator performance in practice.
-
 ::: {#psp-hw-acceleration-matching-architecture-workload .callout-perspective title="Matching architecture to workload"}
 
 **Challenge**: Systolic arrays must choose which data to keep stationary (in registers) to minimize movement. This choice hard-codes the hardware's preference for certain model types. @Tbl-hw-acceleration-systolic-dataflow previews the three stationary-operand strategies and the workloads each favors; @sec-hardware-acceleration-dataflow-optimization-strategies-ce52 develops each one in full as a general mapping decision.
@@ -2351,6 +2348,9 @@ The quantization techniques in @sec-model-compression-quantization-precision-cd4
 No single accelerator architecture suits every workload. A chip optimized for weight-stationary dataflow (like early TPUs) excels at CNNs where filter weights are small and reused across many image patches. That same architecture stalls on large language model (LLM) autoregressive inference at batch size 1, where the entire weight matrix must be read from off-chip memory once per generated token with zero batch reuse, forcing architectures toward output-stationary or hybrid dataflow patterns.
 
 :::
+
+The quantization techniques in @sec-model-compression-quantization-precision-cd46 reduce model memory footprint by converting FP32 weights to INT8 representations. Converting 32-bit floating-point weights to 8-bit integers reduces weight traffic by 4$\times$; whether that changes a kernel from bandwidth bound to compute bound depends on the operation's original arithmetic intensity, the accelerator's INT8 ridge point (the intensity threshold at which its INT8 compute saturates), and the overhead of quantization and dequantization. Similarly, structured pruning removes entire rows or columns of weight matrices, reducing both the data volume that must traverse memory hierarchies and the computation required. In the D·A·M taxonomy, these algorithmic optimizations prove valuable precisely because they target the memory bottleneck that limits accelerator performance in practice.
+
 
 ### Numerics in AI acceleration {#sec-hardware-acceleration-numerics-ai-acceleration-f7be}
 
@@ -2601,7 +2601,7 @@ Data access can dominate the energy budget of a memory-intensive kernel.[^fn-von
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.65))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
 
 # =============================================================================
 # DATA: Horowitz Numbers
@@ -2763,7 +2763,7 @@ from binder.tools.figures import style as book_style
 from matplotlib.ticker import FixedLocator, FixedFormatter, NullLocator
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4))
 
 # +-- 2. ARRAYS ----------------------------------------------------------------
 _gens = [
@@ -2853,7 +2853,7 @@ The threshold required for a kernel to become compute bound has shifted across a
 from binder.tools.figures import style as book_style
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4))
 
 # =============================================================================
 # DATA: Ridge Points (Peak FLOP/s/Memory Bandwidth)
@@ -3718,9 +3718,6 @@ class RooflineGap:
     full_util_pct_str = fmt_percent(1.0, precision=0, commas=False, style='prose')
 ```
 
-Performance is bounded by two ceilings, as @eq-roofline formalizes. Here, attainable performance $R_{\text{attain}}$ and peak compute $R_{\text{peak}}$ are in FLOP/s (often reported as TFLOP/s), peak bandwidth $\text{BW}$ is in bytes/s (often TB/s), and arithmetic intensity $I$ is in FLOP/byte:
-$$R_{\text{attain}} = \min(R_{\text{peak}}, \text{BW} \times I)$$ {#eq-roofline}
-
 ::: {#dfn-hw-acceleration-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
 
 ***Arithmetic intensity***\index{Arithmetic intensity!definition} is the ratio of operations to bytes transferred across the memory interface being modeled ($\text{FLOP}/\text{byte}$). Together with that level's bandwidth and the relevant compute peak, it determines which idealized roofline ceiling is lower.
@@ -3730,6 +3727,9 @@ $$R_{\text{attain}} = \min(R_{\text{peak}}, \text{BW} \times I)$$ {#eq-roofline}
 3.  **Common pitfall**: A frequent misconception is that arithmetic intensity is a fixed property of an operation. In practice, it depends on implementation details: a naive matrix multiplication that reloads operands from DRAM for each output element has low arithmetic intensity; a blocked (tiled) implementation that reuses data from fast SRAM achieves high arithmetic intensity—the same mathematical operation, orders of magnitude apart in hardware efficiency.
 
 :::
+
+Performance is bounded by two ceilings, as @eq-roofline formalizes. Here, attainable performance $R_{\text{attain}}$ and peak compute $R_{\text{peak}}$ are in FLOP/s (often reported as TFLOP/s), peak bandwidth $\text{BW}$ is in bytes/s (often TB/s), and arithmetic intensity $I$ is in FLOP/byte:
+$$R_{\text{attain}} = \min(R_{\text{peak}}, \text{BW} \times I)$$ {#eq-roofline}
 
 With $O$ as the operation count and $D_{\text{vol}}$ as data volume in bytes, @eq-arithmetic-intensity makes the definition operational.
 $$I = \frac{O}{D_{\text{vol}}}$$ {#eq-arithmetic-intensity}
@@ -3795,6 +3795,10 @@ Operations such as depthwise convolution\index{Depthwise Convolution!low arithme
 | Embedding lookup                                    | $<1$ FLOP/byte       | Memory-bound                                        | DLRM                                                        |
 
 : **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. Large, well-tiled convolutions and batched GEMMs can be compute-bound, while MobileNet depthwise layers, attention softmax, normalization, and DLRM embeddings are often memory-bound. To see how these intensity values translate into real performance predictions, a transformer layer provides a complete arithmetic-intensity calculation across its major sub-operations. {#tbl-roofline-operations tbl-colwidths="[25,25,25,25]"}
+
+```{=latex}
+\endgroup
+```
 
 ```{python}
 #| echo: false
@@ -3886,8 +3890,6 @@ $$\text{BW}_{\text{req}} = \frac{R_{\text{ops}}}{I} \text{ bytes/s}$$ {#eq-requi
 
 When this required bandwidth exceeds the hardware's peak memory bandwidth $\text{BW}$, memory transfers cap attainable throughput according to @eq-attainable-throughput:
 $$R_{\text{attain}} = \text{BW} \times I$$ {#eq-attainable-throughput}
-
-Evaluating an operation against the hardware's ridge point determines whether execution is bound by memory bandwidth or arithmetic throughput. When data reuse is extensive, arithmetic intensity clears the ridge point, placing the kernel in the compute-bound regime. A 2D convolution demonstrates this behavior.
 
 ```{python}
 #| echo: false
@@ -3983,9 +3985,7 @@ $I$ = `{python} Conv2dAnalysisCalc.conv_total_gflop_str` / `{python} Conv2dAnaly
 
 :::
 
-The convolutional layer's high arithmetic intensity arises from spatial weight reuse: the same $3{\times}3$ kernel is applied across every spatial location in the feature map, amortizing the cost of loading weights from off-chip memory across millions of multiply-accumulate operations. Because intermediate values and kernel weights remain in fast on-chip registers and shared memory, the off-chip memory bus remains idle while arithmetic pipelines stay saturated.
-
-Not all neural network layers exhibit such extensive data reuse. Fully connected (dense) layers—such as classification heads, feed-forward networks, and linear projections in transformer attention blocks—lack spatial dimensions. When evaluated at small batch sizes, their arithmetic intensity drops substantially, shifting execution into the memory-bound regime:
+Evaluating an operation against the hardware's ridge point determines whether execution is bound by memory bandwidth or arithmetic throughput. When data reuse is extensive, arithmetic intensity clears the ridge point, placing the kernel in the compute-bound regime. A 2D convolution demonstrates this behavior.
 
 ```{python}
 #| echo: false
@@ -4070,6 +4070,7 @@ Consider a fully connected layer\index{Dense Layer!roofline analysis}\index{Roof
 
 ```{=latex}
 \vspace*{-0.75ex}
+%\tcbbreak
 ```
 **Arithmetic intensity**:
 $I$ = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str` / `{python} DenseLayerAnalysisCalc.dense_total_mb_str` = `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str`
@@ -4080,6 +4081,10 @@ $R_{\text{attain}}$ = `{python} DenseLayerAnalysisCalc.a100_bw_gb_per_s_str` $\t
 **Systems insight**: Delivered throughput reaches only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, demonstrating the memory wall effect for small batch sizes.
 
 :::
+
+The convolutional layer's high arithmetic intensity arises from spatial weight reuse: the same $3{\times}3$ kernel is applied across every spatial location in the feature map, amortizing the cost of loading weights from off-chip memory across millions of multiply-accumulate operations. Because intermediate values and kernel weights remain in fast on-chip registers and shared memory, the off-chip memory bus remains idle while arithmetic pipelines stay saturated.
+
+Not all neural network layers exhibit such extensive data reuse. Fully connected (dense) layers—such as classification heads, feed-forward networks, and linear projections in transformer attention blocks—lack spatial dimensions. When evaluated at small batch sizes, their arithmetic intensity drops substantially, shifting execution into the memory-bound regime.
 
 The dense layer's lower arithmetic intensity stems from limited parameter reuse. While a convolutional kernel is reused across every spatial location in an activation map, a dense weight matrix is reused only across the batch dimension. At a batch size of 32, each weight parameter transferred from HBM is multiplied only 32 times before being evicted. Because the off-chip memory bus cannot transfer operands fast enough to keep the tensor cores fed, arithmetic units spend over 80 percent of their cycles stalled, capping throughput at `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capacity. This structural constraint explains why transformer inference at low batch sizes is dominated by memory bandwidth rather than arithmetic capability.
 
@@ -4367,6 +4372,8 @@ Through this derivation, the Roofline Model provides a diagnostic framework for 
 
 Consider a $3{\times}3$ convolution running on an accelerator tile. The mathematical operation is fixed, but the execution plan is not. One schedule can keep a filter in local registers while many output pixels stream past it; another can advance pixel by pixel and reload the same filter values repeatedly from a slower memory tier. Both schedules compute the same tensor. Only one turns the reuse in the convolution into real bandwidth savings.
 
+The convolution example exposes the three decisions that recur throughout accelerator compilation. Placement assigns the multiply-accumulate work to processing elements so parallelism does not turn into idle time or interconnect congestion. Allocation keeps weights, activations, and partial sums in the memory tier where their next use will occur, rather than letting reuse spill back to DRAM. Scheduling orders loops and kernels so the chosen placement and allocation remain valid over time. A poor choice in any one dimension can collapse a high-arithmetic-intensity operation back into a bandwidth-bound execution. In practice, these choices are too coupled for developers to manage by hand at model scale, which is why systems such as XLA\index{XLA!accelerator compilation}, TVM\index{Apache TVM!accelerator compilation}, and TensorRT\index{TensorRT!accelerator compilation} lower high-level models and search or select execution plans within their compile-time and hardware budgets. @Sec-hardware-acceleration-compiler-support-172e examines that compiler support in detail.
+
 ::: {#dfn-hw-acceleration-mapping-ai-acceleration .callout-definition title="Mapping in AI acceleration"}
 
 ***Mapping in AI acceleration***\index{Hardware Mapping!definition} is the accelerator-compiler process of binding the logical computation graph to the physical hardware topology by deciding which operations execute on which processing elements, which data resides in which memory tier, and in what temporal order.
@@ -4376,8 +4383,6 @@ Consider a $3{\times}3$ convolution running on an accelerator tile. The mathemat
 3.  **Common pitfall**: A frequent misconception is that mapping is automatically handled by frameworks. For general GPU workloads, compilers such as Accelerated Linear Algebra (XLA) can find strong mappings for common kernels; for specialized accelerators (systolic arrays, custom ASICs), compiler-generated mappings may still lag hand-tuned schedules because the compiler's search space is limited by the time budget at compilation.
 
 :::
-
-The convolution example exposes the three decisions that recur throughout accelerator compilation. Placement assigns the multiply-accumulate work to processing elements so parallelism does not turn into idle time or interconnect congestion. Allocation keeps weights, activations, and partial sums in the memory tier where their next use will occur, rather than letting reuse spill back to DRAM. Scheduling orders loops and kernels so the chosen placement and allocation remain valid over time. A poor choice in any one dimension can collapse a high-arithmetic-intensity operation back into a bandwidth-bound execution. In practice, these choices are too coupled for developers to manage by hand at model scale, which is why systems such as XLA\index{XLA!accelerator compilation}, TVM\index{Apache TVM!accelerator compilation}, and TensorRT\index{TensorRT!accelerator compilation} lower high-level models and search or select execution plans within their compile-time and hardware budgets. @Sec-hardware-acceleration-compiler-support-172e examines that compiler support in detail.
 
 ### Placement and allocation {#sec-hardware-acceleration-computation-placement-23d2}
 
@@ -4389,6 +4394,8 @@ Computation placement is the process of assigning operations to an accelerator's
 
 The difficulty of placement depends on workload regularity. Convolutional networks and dense transformer operations possess regular access patterns that tile predictably, though transformer architectures mix operations with distinct tensor shapes and reuse profiles. Graph neural networks (GNNs)\index{Graph Neural Network!irregular computation} present greater difficulty: sparse, input-dependent neighborhood aggregations introduce load imbalance and non-uniform communication across processing elements. @Tbl-placement-challenges summarizes these core placement challenges and their operational impact.
 
+Static spatial mappings suffice for regular dense operations whose shapes and loop bounds are known ahead of time. Workloads with dynamic shapes, sparsity, or mixture-of-experts routing instead require runtime scheduling to balance execution across processing elements. Yet even an optimal computation placement stalls if the required operands are not staged in time: compute units can execute only as fast as operands arrive from the memory hierarchy.
+
 | **Challenge**\index{Challenge!definition}                                           | **Impact on execution**\index{Impact on execution!definition}                                                      | **Key Considerations for Placement**                                                        |
 |:------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|
 | **Workload imbalance**\index{Workload imbalance!definition}                         | Some processing elements finish early while others remain overloaded, leading to idle compute resources.           | Distribute operations evenly to prevent stalls and ensure full utilization of PEs.          |
@@ -4398,8 +4405,6 @@ The difficulty of placement depends on workload regularity. Convolutional networ
 | **Model-specific execution needs**\index{Model-specific execution needs!definition} | CNNs, transformers, and GNNs require different execution patterns, making a single placement strategy ineffective. | Tailor placement strategies to match the computational structure of each model type.        |
 
 : **Computation Placement Challenges**: Effective neural network deployment requires strategic allocation of computations to processing elements, balancing workload distribution, data movement costs, and hardware constraints to maximize execution efficiency. These challenges guide the design of mapping strategies that optimize resource utilization and minimize communication overhead. {#tbl-placement-challenges tbl-colwidths="[20,45,35]"}
-
-Static spatial mappings suffice for regular dense operations whose shapes and loop bounds are known ahead of time. Workloads with dynamic shapes, sparsity, or mixture-of-experts routing instead require runtime scheduling to balance execution across processing elements. Yet even an optimal computation placement stalls if the required operands are not staged in time: compute units can execute only as fast as operands arrive from the memory hierarchy.
 
 #### Memory allocation {#sec-hardware-acceleration-memory-allocation-faec}
 
@@ -4614,8 +4619,6 @@ Weight stationary keeps weights local and streams inputs through the system. The
 
 @Lst-output_stationary demonstrates how accumulating partial sums locally minimizes memory writes and enhances efficiency during matrix multiplication. In this implementation, the accumulator buffer stays in local registers or scratchpad throughout the inner loop; weights and inputs stream in, contribute to the running sum, and are discarded. The final result is written out only once per output element, eliminating the repeated write traffic that would otherwise dominate bandwidth.
 
-This approach aligns naturally with systolic arrays, where computation progresses through a grid of processing elements and partial sums can flow along one axis without leaving the chip. The trade-off is that both weights and activations must now be streamed dynamically, so the system must sustain high read bandwidth for two data streams simultaneously. Parallel implementations also require careful synchronization when multiple PEs contribute to the same output element. Output stationary is therefore most effective for workloads where accumulation dominates, such as fully connected layers and attention mechanisms, but less suitable when input reuse is the critical bottleneck.
-
 ::: {#lst-output_stationary lst-cap="**Output Stationary Dataflow**: Partial sums stay resident in local memory while weights and inputs stream through, so each output is written out only once, minimizing accumulation write traffic; best for fully connected layers and attention."}
 
 ```{.python}
@@ -4633,9 +4636,13 @@ for output_block in outputs:  # Keep partial sums stationary
 
 :::
 
+This approach aligns naturally with systolic arrays, where computation progresses through a grid of processing elements and partial sums can flow along one axis without leaving the chip. The trade-off is that both weights and activations must now be streamed dynamically, so the system must sustain high read bandwidth for two data streams simultaneously. Parallel implementations also require careful synchronization when multiple PEs contribute to the same output element. Output stationary is therefore most effective for workloads where accumulation dominates, such as fully connected layers and attention mechanisms, but less suitable when input reuse is the critical bottleneck.
+
 ##### Input stationary {#sec-hardware-acceleration-input-stationary-6c7b}
 
 The two strategies examined so far each fix a different operand in local memory: weight stationary fixes weights to reduce read bandwidth for parameters, and output stationary fixes partial sums to reduce write bandwidth for accumulations. The third strategy completes the picture by fixing the remaining operand: input activations\index{Input-stationary!dataflow strategy}. Within a transformer layer, one activation can feed multiple projections or attention heads; the next layer receives a newly computed representation rather than the same token activation. When activation reuse is the dominant memory cost, keeping inputs stationary and streaming weights through the system can reduce energy and bandwidth. @Lst-input_stationary illustrates this approach.
+
+Here, input activations are loaded once and held fixed in local storage while weights stream through. Partial sums accumulate and are eventually written out, but unlike output-stationary dataflow, the accumulation buffer is not the primary beneficiary of locality; instead, the input activations are.
 
 ::: {#lst-input_stationary lst-cap="**Input Stationary Dataflow**: Input activations stay resident in local memory while weights stream through, reducing activation read traffic when one activation tile feeds several computations."}
 
@@ -4653,8 +4660,6 @@ for input_block in inputs:  # Keep input activations stationary
 ```
 
 :::
-
-Here, input activations are loaded once and held fixed in local storage while weights stream through. Partial sums accumulate and are eventually written out, but unlike output-stationary dataflow, the accumulation buffer is not the primary beneficiary of locality; instead, the input activations are.
 
 The trade-off mirrors the other two strategies: weights stream dynamically, requiring sustained read bandwidth from memory, and partial sums require buffering before write-back. Input stationary is most effective when an activation tile feeds multiple projections, attention heads, or gate evaluations before eviction.
 
@@ -4706,6 +4711,13 @@ The relative advantage of NCHW\index{NCHW!channels-first layout} versus NHWC dep
 
 Both channels-last (NHWC) and channels-first (NCHW) layouts address specific hardware access patterns, with their efficiency determined by whether a kernel parallelizes over spatial coordinates or vectorizes across channel dimensions. Layout choice directly governs cache line utilization, memory bus transaction count, and compute unit occupancy. @Tbl-major contrasts the performance trade-offs and hardware compatibility between these two approaches.
 
+While compilers such as XLA, TensorRT, and PyTorch Inductor automate layout propagation and insert layout conversions when beneficial, format conversions are not free: transposing a tensor requires reading every element from memory and writing it back in a different order, consuming memory bandwidth without executing useful arithmetic. In production deployments, matching the model's memory layout to the accelerator's native kernel format eliminates these layout transformations entirely.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | Feature                                                               | **Channels-Last (NHWC)**                                       | **Channels-First (NCHW)**                                      |
 |:----------------------------------------------------------------------|:---------------------------------------------------------------|:---------------------------------------------------------------|
 | **Memory storage order**\index{Memory storage order!definition}       | Pixels are stored row-by-row, channel interleaved              | All values for a given channel are stored together first       |
@@ -4717,7 +4729,9 @@ Both channels-last (NHWC) and channels-first (NCHW) layouts address specific har
 
 : **Data Layout Strategies**: Channels-last (NHWC) and channels-first (NCHW) layouts optimize memory access patterns for different backend kernels. NHWC often suits CPU vectorization and modern Tensor Core convolution/fusion paths, while NCHW remains common in PyTorch model code and many GPU kernels. Choosing the appropriate layout directly impacts performance by maximizing cache utilization and memory bandwidth efficiency. {#tbl-major}
 
-While compilers such as XLA, TensorRT, and PyTorch Inductor automate layout propagation and insert layout conversions when beneficial, format conversions are not free: transposing a tensor requires reading every element from memory and writing it back in a different order, consuming memory bandwidth without executing useful arithmetic. In production deployments, matching the model's memory layout to the accelerator's native kernel format eliminates these layout transformations entirely.
+```{=latex}
+\endgroup
+```
 
 Even when tensor layout is perfectly aligned with the hardware, executing operations as isolated kernels introduces a separate bottleneck: intermediate values must still travel to and from device memory between operations. Resolving that bottleneck requires changing how operations are scheduled rather than how tensors are laid out.
 
@@ -4732,6 +4746,26 @@ Reducing intermediate data movement between operations is one of the primary mec
 Neural network execution is frequently bound by memory bandwidth rather than arithmetic throughput. When operations execute as isolated kernels, each intermediate result is written to device memory (DRAM or HBM) and subsequently read back by the downstream operator. This round trip introduces memory latency, stalls compute units, and consumes bus bandwidth on data with zero reuse outside that immediate pair of operations.
 
 This hardware reality provides the physical motivation for the operator fusion techniques introduced in @sec-model-compression-operator-fusion-ac1d. While @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 analyzed bandwidth limits in terms of low operational intensity, chained elementwise operations aggravate the memory wall by multiplying global memory transactions [@nvidia2017gpu].
+
+::: {#lst-naive_execution lst-cap="**Naïve Execution**: Each step writes intermediate results to memory before processing the next, leading to increased bandwidth usage and reduced efficiency."}
+
+```{.python}
+import torch
+import torch.nn.functional as F
+
+## Input tensor
+X = torch.randn(1024, 1024).cuda()
+running_mean = torch.zeros(1024, device=X.device)
+running_var = torch.ones(1024, device=X.device)
+## Step-by-step execution (naïve approach)
+X1 = torch.relu(X)  # Intermediate tensor stored in memory
+X2 = F.batch_norm(
+    X1, running_mean, running_var, training=False
+)  # Frozen inference BatchNorm
+Y = 2.0 * X2 + 1.0  # Final result
+```
+
+:::
 
 ```{python}
 #| echo: false
@@ -4766,34 +4800,13 @@ class MemoryFootprintCalc:
 
 In a naïve execution model, each operation executes as a separate GPU kernel, forcing intermediate tensors to round-trip through device memory (@lst-naive_execution). In a chain of three operations—such as ReLU, batch normalization, and affine scaling—the intermediate outputs $X_1$ and $X_2$ are written to DRAM only to be immediately re-read by the subsequent kernel. For elementwise operators where arithmetic intensity is low ($I \ll 1\text{ FLOP/byte}$), the time spent moving data across the memory bus outweighs the computation time [@Jia2019]. Furthermore, holding these un-fused intermediate buffers in memory inflates the live-tensor footprint during execution (@tbl-memory-footprint).
 
-::: {#lst-naive_execution lst-cap="**Naïve Execution**: Each step writes intermediate results to memory before processing the next, leading to increased bandwidth usage and reduced efficiency."}
-
-```{.python}
-import torch
-import torch.nn.functional as F
-
-## Input tensor
-X = torch.randn(1024, 1024).cuda()
-running_mean = torch.zeros(1024, device=X.device)
-running_var = torch.ones(1024, device=X.device)
-
-## Step-by-step execution (naïve approach)
-X1 = torch.relu(X)  # Intermediate tensor stored in memory
-X2 = F.batch_norm(
-    X1, running_mean, running_var, training=False
-)  # Frozen inference BatchNorm
-Y = 2.0 * X2 + 1.0  # Final result
-```
-
-:::
-
 ##### Kernel fusion for memory efficiency {#sec-hardware-acceleration-kernel-fusion-memory-efficiency-f227}
 
 The two intermediate tensors consume memory capacity when they remain live and create external traffic when separate kernels materialize them. Kernel fusion\index{Kernel fusion!memory efficiency} can eliminate those intermediate writes and reloads [@Jia2019] by propagating values through registers or local memory within one kernel.
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.3}
+\renewcommand{\arraystretch}{1.4}
 ```
 
 | Tensor       |   **Size (MB) for $1024{\times}1024$ Tensor**   |
@@ -5067,8 +5080,6 @@ Hybrid tiling combines spatial and temporal strategies when neither dimension al
 
 Register blocking, double buffering, and hierarchical tiling extend the same locality principle at smaller and larger memory tiers. AI compilers and runtime systems such as TensorFlow XLA, TVM, and MLIR automatically select these tiling strategies based on hardware constraints, enabling fine-tuned performance optimization without manual intervention. @Tbl-tiling-strategies provides a comparative overview of spatial, temporal, and hybrid tiling approaches, highlighting their respective benefits and trade-offs.
 
-When machine learning models grow in size and complexity, tiling remains a critical tool for improving hardware efficiency, ensuring that AI accelerators operate near their practical potential. While manual tiling strategies can provide substantial benefits, compilers and hardware-aware optimization techniques further enhance performance by automatically selecting effective tiling strategies for a given workload.
-
 | Aspect                                                    | **Spatial Tiling (Data Tiling)**                                                           | **Temporal Tiling (Loop Blocking)**                                    | **Hybrid tiling**\index{Hybrid tiling!definition}              |
 |:----------------------------------------------------------|:-------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|:---------------------------------------------------------------|
 | Primary Goal                                              | Reduce memory accesses by keeping data in fast memory longer                               | Increase data reuse across loop iterations                             | Adapt dynamically to workload constraints                      |
@@ -5081,6 +5092,8 @@ When machine learning models grow in size and complexity, tiling remains a criti
 
 : **Tiling Strategies**: Spatial, temporal, and hybrid tiling optimize memory access patterns for improved performance. Spatial tiling maximizes data reuse within fast memory, temporal tiling exploits loop structure for reduced accesses, and hybrid tiling combines both approaches. AI compilers and runtime systems use these techniques to automatically optimize model execution on diverse hardware. {#tbl-tiling-strategies tbl-colwidths="[16,31,27,26]"}
 
+When machine learning models grow in size and complexity, tiling remains a critical tool for improving hardware efficiency, ensuring that AI accelerators operate near their practical potential. While manual tiling strategies can provide substantial benefits, compilers and hardware-aware optimization techniques further enhance performance by automatically selecting effective tiling strategies for a given workload.
+
 ### Applying mapping strategies to neural networks {#sec-hardware-acceleration-applying-mapping-strategies-neural-networks-3110}
 
 While these foundational mapping techniques apply broadly, their effectiveness varies based on the computational structure, data access patterns, and parallelization opportunities of different neural network architectures. Each architecture imposes distinct constraints on data movement, memory hierarchy, and computation scheduling, requiring tailored mapping strategies to optimize performance.
@@ -5091,9 +5104,10 @@ These principles apply to three representative AI workloads, each characterized 
 
 Despite their differences, each of these models follows a common set of mapping principles, with variations in how optimizations are prioritized. @Tbl-mapping-strategies summarizes the suitability of different optimization strategies for CNNs, transformers, and MLPs.
 
-#### Convolutional neural networks (ResNet-50) {#sec-hardware-acceleration-convolutional-neural-networks-resnet50-3eb6}
-
-For ResNet-50\index{ResNet-50!weight reuse mapping} and similar CNNs, a key mapping opportunity is spatial weight reuse\index{Weight Reuse!spatial}. A small filter is applied across many spatial locations, so its weights participate in many multiply-accumulate operations. Weight-stationary mappings can capture that reuse by retaining filter tiles locally, while row-stationary or output-stationary mappings may better balance activation and partial-sum traffic on other architectures. Favorable convolution shapes can achieve high arithmetic intensity, which makes them well suited to matrix and systolic execution paths. The model family does not determine one universal dataflow: layer shape, batch size, local-storage capacity, and the target's supported kernels decide which reuse pattern is worth retaining.
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
 
 | **Optimization technique**\index{Optimization technique!definition}           | CNNs                                                                                 | Transformers                                      | MLPs                        | Rationale                                                                                                                                                                                            |
 |:------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------|:--------------------------------------------------|:----------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -5103,6 +5117,14 @@ For ResNet-50\index{ResNet-50!weight reuse mapping} and similar CNNs, a key mapp
 | **Tiling for Memory Efficiency**                                              | Spatial Tiling                                                                       | Temporal Tiling                                   | Blocked Tiling              | CNNs tile along spatial dimensions; Transformers use loop blocking to improve sequence memory efficiency; MLPs use blocked tiling for large matrix multiplications.                                  |
 
 : **Architecture-Specific Mapping Strategies**: Each neural network architecture benefits from different optimization priorities based on its computational and memory characteristics. {#tbl-mapping-strategies tbl-colwidths="[13,21,14,10,42]"}
+
+```{=latex}
+\endgroup
+```
+
+#### Convolutional neural networks (ResNet-50) {#sec-hardware-acceleration-convolutional-neural-networks-resnet50-3eb6}
+
+For ResNet-50\index{ResNet-50!weight reuse mapping} and similar CNNs, a key mapping opportunity is spatial weight reuse\index{Weight Reuse!spatial}. A small filter is applied across many spatial locations, so its weights participate in many multiply-accumulate operations. Weight-stationary mappings can capture that reuse by retaining filter tiles locally, while row-stationary or output-stationary mappings may better balance activation and partial-sum traffic on other architectures. Favorable convolution shapes can achieve high arithmetic intensity, which makes them well suited to matrix and systolic execution paths. The model family does not determine one universal dataflow: layer shape, batch size, local-storage capacity, and the target's supported kernels decide which reuse pattern is worth retaining.
 
 This spatial regularity also enables aggressive fusion and tiling. For inference with frozen BatchNorm statistics, compilers can fold or fuse convolution, normalization, and activation to avoid unnecessary intermediate writes. Training-mode BatchNorm requires reductions over batch statistics and does not have the same element-wise fusion contract. Spatial tiling partitions the feature map into subregions sized to fit within on-chip SRAM, so the fused kernel processes each tile from fast memory before moving to the next.
 

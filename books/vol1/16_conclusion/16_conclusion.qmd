@@ -95,10 +95,6 @@ Diagnosing these cascading interactions requires concrete constraint maps. Groun
 
 The five lighthouse models\index{Lighthouse model!bottleneck probe} (@sec-introduction-iron-law-ml-systems-c32a) ground constraint propagation in concrete execution profiles:
 
-```{=latex}
-\newpage
-```
-
 Each workload exposes a distinct physical bottleneck across the execution spectrum:
 
 - **ResNet-50**\index{ResNet-50!batching efficiency}: Batch size turns image inference from memory-bound weight movement into compute-bound matrix throughput by reusing the same filter weights across multiple inputs, amortizing memory transfer costs until arithmetic intensity crosses the hardware ridge point.
@@ -178,6 +174,10 @@ Decisions in one row dictate options in the next: architecture choices (depthwis
 
 Reasoning about ML system behavior requires quantitative instruments. These **thirteen quantitative principles**\index{Thirteen quantitative principles!framework} deliberately combine exact mathematical bounds, engineering decompositions, fitted empirical models, policy constraints, and design heuristics. @Tbl-thirteen-principles summarizes all thirteen principles across four systems phases. Their utility depends on rigorous application within stated assumptions rather than treating every relation as an unvarying physical law.
 
+The thirteen principles are not independent axioms. They form an integrated framework connected by a single meta-principle: the conservation-of-complexity heuristic\index{Conservation of complexity!meta-principle}.[^fn-conservation-complexity-heuristic] Complexity removed from one interface often reappears in another part of the system, but this is not a physical conservation law and does not imply that every simplification has an equal compensating cost. Its value is diagnostic: after simplifying one component, check where validation, state, coordination, or operational burden changed. The test is whether the principles explain the same lighthouse bottlenecks from data, model, hardware, and deployment perspectives without contradicting one another.
+
+[^fn-conservation-complexity-heuristic]: **Conservation-of-complexity heuristic**\index{Conservation of complexity!heuristic limits}: Tesler's Law\index{Tesler's law!conservation of complexity}, a design aphorism, says that an application's irreducible complexity must be handled somewhere in the interaction among user, application, and platform [@tesler1984complexity]; extending it to all ML-system complexity is an analogy, not a physical law. Quantization may add validation burden, and abstraction may move implementation detail behind an interface, but good design can also remove accidental complexity outright. Large language model application pipelines illustrate a possible shift: simplifying the user-facing interface with shorter or vaguer prompts may move work into system prompts, retrieval, or output verification. Use the heuristic to search for displaced costs, not to assume that an equal compensating cost must exist.
+
 ```{python}
 #| echo: false
 #| label: conclusion-energy-movement-math
@@ -248,10 +248,6 @@ class EnergyMovementMath:
 
 : **Thirteen Quantitative Principles**: Each tool appears in the part where its governing constraint or diagnostic use first becomes visible. The collection combines bounds, decompositions, fitted models, policy requirements, and heuristics. Each row is useful only under its stated assumptions; together they provide a shared analytical vocabulary for system design, optimization, and deployment rather than a set of universal invariants. {#tbl-thirteen-principles tbl-colwidths="[3,15,13,39,30]"}
 
-The thirteen principles are not independent axioms. They form an integrated framework connected by a single meta-principle: the conservation-of-complexity heuristic\index{Conservation of complexity!meta-principle}.[^fn-conservation-complexity-heuristic] Complexity removed from one interface often reappears in another part of the system, but this is not a physical conservation law and does not imply that every simplification has an equal compensating cost. Its value is diagnostic: after simplifying one component, check where validation, state, coordination, or operational burden changed. The test is whether the principles explain the same lighthouse bottlenecks from data, model, hardware, and deployment perspectives without contradicting one another.
-
-[^fn-conservation-complexity-heuristic]: **Conservation-of-complexity heuristic**\index{Conservation of complexity!heuristic limits}: Tesler's Law\index{Tesler's law!conservation of complexity}, a design aphorism, says that an application's irreducible complexity must be handled somewhere in the interaction among user, application, and platform [@tesler1984complexity]; extending it to all ML-system complexity is an analogy, not a physical law. Quantization may add validation burden, and abstraction may move implementation detail behind an interface, but good design can also remove accidental complexity outright. Large language model application pipelines illustrate a possible shift: simplifying the user-facing interface with shorter or vaguer prompts may move work into system prompts, retrieval, or output verification. Use the heuristic to search for displaced costs, not to assume that an equal compensating cost must exist.
-
 ### Foundations: Where complexity originates (principles 1–2) {.unnumbered}
 
 The data-as-code principle\index{Data-as-code principle!logical program} (\ref{pri-data-as-code}) and the data-gravity heuristic\index{Data gravity principle!physical anchor} (principle \ref{pri-data-gravity}), developed in @sec-data-engineering, establish data as a primary logical program and physical anchor. Runtime behavior reflects data, algorithm, and implementation in concert, while compute-to-data placement balances transfer volume, reuse frequency, network bandwidth, and compute mobility. Model behavior and architecture directly inherit constraints from this data substrate.
@@ -299,13 +295,122 @@ A colleague proposes quantizing your model from FP32 to INT8 to reduce serving c
 
 @Fig-invariants-cycle maps this cycle of mutual constraint. Four phases—Foundations, Build, Optimize, and Deploy—surround a central hub representing the conservation-of-complexity heuristic. Arrows trace how engineering choices propagate downstream: Build constraints dictate Optimize strategies, while runtime signals—statistical drift, feature skew, and outcome regressions—feed back into Foundations. Managing this cycle requires steering displaced complexity toward layers capable of handling it efficiently.
 
-The Deploy-to-Foundations feedback loop is central to production engineering. Principles 9 through 13 expose signals that trigger targeted remediations: canary rollbacks, fallback heuristics, dataset augmentation, model retraining, or kernel retuning. When anomalies emerge, engineers diagnose root causes rather than triggering uncalibrated rollbacks. This cycle governs single-system design: the objective is not to catalog every future architecture, but to make feedback loops observable before operational failures compound.
+```{python}
+#| echo: false
+#| label: conclusion-roofline-setup
+#| output: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONCLUSION CHAPTER ROOFLINE ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Cost-of-a-token callout demonstrating Iron Law in practice
+# │
+# │ Goal: Illustrate the memory-compute trade-off for LLM inference.
+# │ Scope: chapter-anchor — the summary reuses this chapter-level result.
+# │ Show: The ratio between idealized memory-transfer and peak-compute bounds
+# │       for batch-one Llama 2 70B decode on two balanced H100 shards.
+# │ How:  Aggregate H100 bandwidth and peak FP16 throughput across two shards.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Models
+from mlsysim.physics import calc_transformer_decode_flops
+from mlsysim.fmt import fmt, fmt_math, MarkdownStr, check, fmt_params, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_multiple
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ConclusionRoofline:
+    """
+    Namespace for Conclusion Roofline Analysis.
+    Scenario: 70-billion-parameter Llama 2 inference sharded across two H100s.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    gpu = Hardware.Cloud.H100
+    gpu_count = 2
+    model = Models.Language.Llama2_70B
+    precision_bytes = BYTES_FP16
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    d_vol = model.size_in_bytes(precision_bytes)
+    compute_req = calc_transformer_decode_flops(model.parameters)
+    aggregate_memory_bandwidth = gpu.memory.bandwidth * gpu_count
+    aggregate_peak_flops = gpu.compute.peak_flops * gpu_count
+
+    t_mem = d_vol / aggregate_memory_bandwidth
+    t_comp = compute_req / aggregate_peak_flops
+
+    ratio = t_mem / t_comp
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(d_vol <= gpu.memory.capacity * gpu_count, "FP16 weights must fit across the H100 shards.")
+    check(ratio >= 10, f"Batch-one decode should be bandwidth bound in this model. Ratio is only {ratio:.1f}x")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    llama_params_count_str = fmt_params(model.parameters, scale_style="word", precision=0)
+    llama_params_modifier_str = fmt_params(
+        model.parameters,
+        scale_style="word",
+        precision=0,
+        attributive=True,
+    )
+    llama_dvol_gb_str = fmt_memory(d_vol, unit=GB, precision=0, commas=False)
+    llama_compute_gflop_str = fmt_flops(compute_req, unit=GFLOPs, precision=0, commas=False)
+
+    h100_bw_tb_per_s_str = fmt_bandwidth(aggregate_memory_bandwidth, unit=TB / second, precision=2, commas=False)
+    h100_peak_tflop_per_s_str = fmt_flop_rate(aggregate_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+
+    t_mem_ms_str = fmt_time(t_mem, unit=ms, precision=1, commas=False)
+    t_comp_ms_str = fmt_time(t_comp, unit=ms, precision=2, commas=False)
+    ratio_mult_str = fmt_multiple(ratio.to("").magnitude, precision=1, commas=False)
+
+    # LaTeX equations — use raw magnitudes, not suffixed _str exports
+    dvol_gb_val = d_vol.to(GB).magnitude
+    h100_bw_gb_val = aggregate_memory_bandwidth.to(GB / second).magnitude
+    compute_gflops_val = compute_req.to(GFLOPs).magnitude
+    h100_peak_tflops_val = aggregate_peak_flops.to(TFLOP / second).magnitude
+    t_mem_ms_val = t_mem.to(ms).magnitude
+    t_comp_ms_val = t_comp.to(ms).magnitude
+
+    t_mem_math = fmt_math(
+        f"T_{{\\text{{mem}}}} = \\frac{{{dvol_gb_val:.0f} \\text{{ GB}}}}{{{h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {t_mem_ms_val:.1f} \\text{{ ms}}"
+    )
+    t_comp_math = fmt_math(
+        f"T_{{\\text{{comp}}}} = \\frac{{{compute_gflops_val:.0f} \\times 10^9 \\text{{ FLOP}}}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}} \\text{{ FLOP/s}}}} \\approx {t_comp_ms_val:.2f} \\text{{ ms}}"
+    )
+```
+
+:::: {#nbk-conclusion-cost-token .callout-notebook title="The cost of a token"}
+
+**Problem**: Applying the iron law (principle \ref{pri-iron-law}) and the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) to serving one token from a `{python} ConclusionRoofline.llama_params_modifier_str`-parameter model like Llama 2 70B\index{Llama 2!70-billion-parameter memory-bound workload}, with its FP16 weights sharded evenly across two NVIDIA H100s, which idealized lower bound is larger: memory transfer or peak compute? @Sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1 supplies the H100 specifications. This calculation excludes KV-cache traffic, activations, context-dependent attention-over-KV FLOPs, interconnect communication, and dispatch overhead.
+
+**Physics**:
+
+- **Model-weight byte volume moved** $(D_{\text{vol}})$: `{python} ConclusionRoofline.llama_params_count_str` parameters $\times$ 2 bytes (FP16) = \mbox{`{python} ConclusionRoofline.llama_dvol_gb_str`.}
+- **Compute** $(O)$: $O \approx 2 \times P =$ `{python} ConclusionRoofline.llama_compute_gflop_str` per token, where $P$ is the parameter count.
+- **Hardware**: Two H100s with aggregate $\text{BW}$ = `{python} ConclusionRoofline.h100_bw_tb_per_s_str`, $R_{\text{peak}} \approx$ `{python} ConclusionRoofline.h100_peak_tflop_per_s_str` FP16.
+
+**Math**:
+
+- **Time to move data**: `{python} ConclusionRoofline.t_mem_math`
+- **Time to compute**: `{python} ConclusionRoofline.t_comp_math`
+
+**Systems insight**:
+
+The idealized memory-transfer lower bound $T_{\text{mem}}$ is `{python} ConclusionRoofline.ratio_mult_str` larger than the peak-compute lower bound $T_{\text{comp}}$. Under this batch-one model, decode is heavily bandwidth bound (arithmetic intensity $\approx 1$ FLOP/byte). Because each 2-byte FP16 weight is fetched from high-bandwidth memory to perform a single multiply-accumulate ($2\text{ FLOPs}$) with the active token activation, the arithmetic intensity is $\frac{2\text{ FLOPs}}{2\text{ bytes}} = 1\text{ FLOP/byte}$—far below the dual H100 ridge point of $\approx 295\text{ FLOP/byte}$. The tensor cores spend over $99\%$ of their cycles starved for data. Batching can increase reuse, while quantization can reduce weight traffic. Optimizing only compute execution can reduce realized compute time toward the `{python} ConclusionRoofline.t_comp_ms_str` lower bound, but it cannot reduce the `{python} ConclusionRoofline.t_mem_ms_str` memory-transfer lower bound.
+
+::::
+
+::: {.column-margin}
+```{=latex}
+\vspace*{-15mm}
+```
+![](images/svg/vol1_conclusion_margin_002.svg){width="100%" fig-alt="Idealized batch-one Llama decode point plotted to the left of the roofline ridge on an H100 chart."}
+
+*In this batch-one lower-bound model, decode sits left of the roofline ridge in the bandwidth-bound regime.*
+:::
 
 ::: {#fig-invariants-cycle fig-env="figure" fig-pos="htb" fig-cap="**The Cycle of ML Systems (13 Principles)**: A four-phase systems engineering lifecycle organized around the conservation-of-complexity heuristic. The phases connect in a feedback cycle, and the thirteen principles are grouped along the transitions as bounds, decompositions, fitted models, policy requirements, and design heuristics whose assumptions must be checked." fig-alt="Clockwise circular diagram with four phases: Foundations (Data), Build (Model), Optimize (Hardware), and Deploy (Operations). Arrows connect Foundations to Build, Build to Optimize, Optimize to Deploy, and Deploy back to Foundations. The transitions are labeled 1–2 Data as Code and data gravity; 3–4 iron law and Silicon Contract; 5–8 Pareto Frontier, Arithmetic Intensity, Energy-Movement, and Amdahl’s Law; and 9–13 verification gap, Statistical Drift, Skew Diagnostic, Latency Budget, and Bias Feedback. A dashed center circle is labeled Conservation of Complexity."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily]
-
 \tikzset{
 Box/.style={align=flush center,
     inner sep=4pt,
@@ -606,119 +711,9 @@ arc[radius=\radius, start angle=160, end angle= 114];
 
 :::
 
+The Deploy-to-Foundations feedback loop is central to production engineering. Principles 9 through 13 expose signals that trigger targeted remediations: canary rollbacks, fallback heuristics, dataset augmentation, model retraining, or kernel retuning. When anomalies emerge, engineers diagnose root causes rather than triggering uncalibrated rollbacks. This cycle governs single-system design: the objective is not to catalog every future architecture, but to make feedback loops observable before operational failures compound.
+
 Tracing a quantization proposal through four principles is one diagnostic pass; the same habit applies when the bottleneck is not an optimization proposal but the cost of serving a single generated token.
-
-```{python}
-#| echo: false
-#| label: conclusion-roofline-setup
-#| output: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CONCLUSION CHAPTER ROOFLINE ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Cost-of-a-token callout demonstrating Iron Law in practice
-# │
-# │ Goal: Illustrate the memory-compute trade-off for LLM inference.
-# │ Scope: chapter-anchor — the summary reuses this chapter-level result.
-# │ Show: The ratio between idealized memory-transfer and peak-compute bounds
-# │       for batch-one Llama 2 70B decode on two balanced H100 shards.
-# │ How:  Aggregate H100 bandwidth and peak FP16 throughput across two shards.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
-from mlsysim.physics import calc_transformer_decode_flops
-from mlsysim.fmt import fmt, fmt_math, MarkdownStr, check, fmt_params, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_multiple
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ConclusionRoofline:
-    """
-    Namespace for Conclusion Roofline Analysis.
-    Scenario: 70-billion-parameter Llama 2 inference sharded across two H100s.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gpu = Hardware.Cloud.H100
-    gpu_count = 2
-    model = Models.Language.Llama2_70B
-    precision_bytes = BYTES_FP16
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    d_vol = model.size_in_bytes(precision_bytes)
-    compute_req = calc_transformer_decode_flops(model.parameters)
-    aggregate_memory_bandwidth = gpu.memory.bandwidth * gpu_count
-    aggregate_peak_flops = gpu.compute.peak_flops * gpu_count
-
-    t_mem = d_vol / aggregate_memory_bandwidth
-    t_comp = compute_req / aggregate_peak_flops
-
-    ratio = t_mem / t_comp
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(d_vol <= gpu.memory.capacity * gpu_count, "FP16 weights must fit across the H100 shards.")
-    check(ratio >= 10, f"Batch-one decode should be bandwidth bound in this model. Ratio is only {ratio:.1f}x")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    llama_params_count_str = fmt_params(model.parameters, scale_style="word", precision=0)
-    llama_params_modifier_str = fmt_params(
-        model.parameters,
-        scale_style="word",
-        precision=0,
-        attributive=True,
-    )
-    llama_dvol_gb_str = fmt_memory(d_vol, unit=GB, precision=0, commas=False)
-    llama_compute_gflop_str = fmt_flops(compute_req, unit=GFLOPs, precision=0, commas=False)
-
-    h100_bw_tb_per_s_str = fmt_bandwidth(aggregate_memory_bandwidth, unit=TB / second, precision=2, commas=False)
-    h100_peak_tflop_per_s_str = fmt_flop_rate(aggregate_peak_flops, unit=TFLOP / second, precision=0, commas=False)
-
-    t_mem_ms_str = fmt_time(t_mem, unit=ms, precision=1, commas=False)
-    t_comp_ms_str = fmt_time(t_comp, unit=ms, precision=2, commas=False)
-    ratio_mult_str = fmt_multiple(ratio.to("").magnitude, precision=1, commas=False)
-
-    # LaTeX equations — use raw magnitudes, not suffixed _str exports
-    dvol_gb_val = d_vol.to(GB).magnitude
-    h100_bw_gb_val = aggregate_memory_bandwidth.to(GB / second).magnitude
-    compute_gflops_val = compute_req.to(GFLOPs).magnitude
-    h100_peak_tflops_val = aggregate_peak_flops.to(TFLOP / second).magnitude
-    t_mem_ms_val = t_mem.to(ms).magnitude
-    t_comp_ms_val = t_comp.to(ms).magnitude
-
-    t_mem_math = fmt_math(
-        f"T_{{\\text{{mem}}}} = \\frac{{{dvol_gb_val:.0f} \\text{{ GB}}}}{{{h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {t_mem_ms_val:.1f} \\text{{ ms}}"
-    )
-    t_comp_math = fmt_math(
-        f"T_{{\\text{{comp}}}} = \\frac{{{compute_gflops_val:.0f} \\times 10^9 \\text{{ FLOP}}}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}} \\text{{ FLOP/s}}}} \\approx {t_comp_ms_val:.2f} \\text{{ ms}}"
-    )
-```
-
-:::: {#nbk-conclusion-cost-token .callout-notebook title="The cost of a token"}
-
-**Problem**: Applying the iron law (principle \ref{pri-iron-law}) and the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) to serving one token from a `{python} ConclusionRoofline.llama_params_modifier_str`-parameter model like Llama 2 70B\index{Llama 2!70-billion-parameter memory-bound workload}, with its FP16 weights sharded evenly across two NVIDIA H100s, which idealized lower bound is larger: memory transfer or peak compute? @Sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1 supplies the H100 specifications. This calculation excludes KV-cache traffic, activations, context-dependent attention-over-KV FLOPs, interconnect communication, and dispatch overhead.
-
-**Physics**:
-
-- **Model-weight byte volume moved** $(D_{\text{vol}})$: `{python} ConclusionRoofline.llama_params_count_str` parameters $\times$ 2 bytes (FP16) = \mbox{`{python} ConclusionRoofline.llama_dvol_gb_str`.}
-- **Compute** $(O)$: $O \approx 2 \times P =$ `{python} ConclusionRoofline.llama_compute_gflop_str` per token, where $P$ is the parameter count.
-- **Hardware**: Two H100s with aggregate $\text{BW}$ = `{python} ConclusionRoofline.h100_bw_tb_per_s_str`, $R_{\text{peak}} \approx$ `{python} ConclusionRoofline.h100_peak_tflop_per_s_str` FP16.
-
-**Math**:
-
-- **Time to move data**: `{python} ConclusionRoofline.t_mem_math`
-- **Time to compute**: `{python} ConclusionRoofline.t_comp_math`
-
-**Systems insight**:
-
-The idealized memory-transfer lower bound $T_{\text{mem}}$ is `{python} ConclusionRoofline.ratio_mult_str` larger than the peak-compute lower bound $T_{\text{comp}}$. Under this batch-one model, decode is heavily bandwidth bound (arithmetic intensity $\approx 1$ FLOP/byte). Because each 2-byte FP16 weight is fetched from high-bandwidth memory to perform a single multiply-accumulate ($2\text{ FLOPs}$) with the active token activation, the arithmetic intensity is $\frac{2\text{ FLOPs}}{2\text{ bytes}} = 1\text{ FLOP/byte}$—far below the dual H100 ridge point of $\approx 295\text{ FLOP/byte}$. The tensor cores spend over $99\%$ of their cycles starved for data. Batching can increase reuse, while quantization can reduce weight traffic. Optimizing only compute execution can reduce realized compute time toward the `{python} ConclusionRoofline.t_comp_ms_str` lower bound, but it cannot reduce the `{python} ConclusionRoofline.t_mem_ms_str` memory-transfer lower bound.
-
-::::
-
-::: {.column-margin}
-```{=latex}
-\vspace*{-15mm}
-```
-![](images/svg/vol1_conclusion_margin_002.svg){width="100%" fig-alt="Idealized batch-one Llama decode point plotted to the left of the roofline ridge on an H100 chart."}
-
-*In this batch-one lower-bound model, decode sits left of the roofline ridge in the bandwidth-bound regime.*
-:::
 
 This roofline evaluation demonstrates how physical bounds operate as diagnostic instruments rather than abstract taxonomies. Across three core engineering domains—building foundations, engineering for scale, and navigating production reality—these bounds, empirical models, and heuristics govern system design and operational stability.
 
@@ -891,13 +886,13 @@ A composed system cannot rely on a single model-quality claim; it needs interfac
 
 The systems cost is visible in a single request. If an assistant fans out to retrieval, a planner, two tools, a generator, and a verifier, its realized latency follows the request's critical path\index{Critical path!composed request}, with parallel tool calls contributing their maximum rather than their sum, plus orchestration overhead. Its reliability analysis must also account for each component: every additional component creates another timeout, schema mismatch, stale index, or verifier false negative to monitor. Conventional microservices already face runtime contract failures across process boundaries. Composed ML systems add probabilistic interfaces in which a large language model planner may hallucinate a tool name or produce JSON that deviates from the declared schema, requiring defensive parsing, retry logic, and output validation at each interface boundary. Capability can increase by adding system structure, but that structure must obey the same latency, reliability, and observability requirements as any production ML system.
 
-System composition aligns directly with fundamental systems engineering principles. Modular sub-components can be independently compressed (@sec-model-compression) and accelerated on targeted backends (@sec-hardware-acceleration). Each component exposes an individual silicon contract (principle \ref{pri-silicon-contract}) and arithmetic intensity profile, opening avenues for heterogeneous specialization. The interfaces between components establish explicit observation points for detecting drift, skew, and numerical degradation. Orchestrating multiple models reliably, routing requests dynamically across specialized hardware, and enforcing transactional consistency across shared memory states require end-to-end co-design from data ingest through accelerator scheduling to operational feedback.
-
 ::: {#psp-conclusion-new-golden-age .callout-perspective title="A new golden age"}
 
 @hennessy2019 declared a "New Golden Age for Computer Architecture," driven by the end of Dennard scaling, the slowdown of Moore's Law, and new opportunities from domain-specific architectures, open instruction sets, and agile chip development. Large-scale AI workloads are one domain where those pressures are visible. Building more capable AI services will not be a matter of writing a better loss function alone; it will be a systems engineering challenge involving energy efficiency, high-bandwidth interconnects, memory hierarchy design, and software stacks that keep heterogeneous hardware useful rather than idle. The thirteen principles provide a quantitative vocabulary for navigating that regime while preserving the distinction between physical bounds and deployment-specific assumptions.
 
 :::
+
+System composition aligns directly with fundamental systems engineering principles. Modular sub-components can be independently compressed (@sec-model-compression) and accelerated on targeted backends (@sec-hardware-acceleration). Each component exposes an individual silicon contract (principle \ref{pri-silicon-contract}) and arithmetic intensity profile, opening avenues for heterogeneous specialization. The interfaces between components establish explicit observation points for detecting drift, skew, and numerical degradation. Orchestrating multiple models reliably, routing requests dynamically across specialized hardware, and enforcing transactional consistency across shared memory states require end-to-end co-design from data ingest through accelerator scheduling to operational feedback.
 
 That era demands concrete engineering advances. Achieving exascale sustained throughput $(\geq 10^{18} \text{ FLOP/s})$ and beyond requires new approaches to power delivery, cooling, interconnects, and software coordination, not merely faster chips. These analytical tools equip engineers to navigate that regime, scaling from single-node accelerators to exascale clusters.
 
