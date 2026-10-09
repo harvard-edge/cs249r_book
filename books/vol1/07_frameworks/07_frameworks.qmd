@@ -100,9 +100,7 @@ Choosing a framework therefore also chooses the compiler that determines hardwar
 
 An ML framework translates logical intent into physical execution under the constraints of the iron law, deciding how to partition computation across memory hierarchies, when to trade numerical precision for throughput, and how to schedule operations so that whichever term dominates (data movement $\DataVolume$, arithmetic computation, or launch latency $\Latency$) is minimized. The framework is where the governing physics developed throughout this book becomes executable code.
 
-The machinery hidden behind `loss.backward()` (operation recording, gradient allocation, reverse-order traversal, and kernel dispatch) would require substantial manual bookkeeping even for a three-layer network. Building it from scratch for every model would be economically prohibitive for most organizations, which is why the history of ML frameworks is a history of progressively automating these layers.
-
-Execution, differentiation, and abstraction did not emerge as problems simultaneously. Each arose as a response to scaling limitations in the previous generation of tools, creating a historical progression of abstractions from low-level linear algebra routines to compiled graph runtimes.
+Automating this machinery—recording operation graphs, allocating gradient buffers, traversing dependencies in reverse, and dispatching hardware kernels—did not happen all at once. Execution, differentiation, and abstraction emerged sequentially as responses to scaling bottlenecks in earlier numerical tools, creating a four-decade historical progression from hand-tuned assembly routines to compiled graph runtimes.
 
 ## The Ladder of Abstraction {#sec-ml-frameworks-frameworks-evolved-ac68}
 
@@ -222,7 +220,7 @@ The key optimization for memory-bound operations is kernel fusion\index{Kernel f
 
 [^fn-flashattention-fusion-fw]: **Fused attention kernel**\index{Attention mechanism!fused kernel}: A fused attention kernel combines the $\AttentionQueryMatrix\AttentionKeyMatrix^T$ product, softmax, and value-weighted output into a tiled implementation that keeps intermediate values in on-chip memory rather than materializing the full attention matrix in HBM. FlashAttention\index{FlashAttention!framework fusion example} is the canonical named example introduced in @sec-network-architectures-memory-requirements-72c3 and reports up to 9$\times$ fewer HBM accesses with workload-specific speedups from 15 percent to 3$\times$ [@dao2022]. The framework lesson is broader than the specific algorithm: fusion can shift an operation's position on the Roofline Model from bandwidth-limited toward throughput-limited execution by reducing round-trips through external memory.
 
-Frameworks can fuse only operations visible together. Separately dispatched eager operations\index{Eager Execution!optimization limitations} hide cross-operation opportunities, but graph capture can expose them. A deferred graph\index{Graph Execution!optimization advantages} lets the framework optimize the captured computation. Execution strategy therefore determines which optimizations are possible and their scope.
+Framework compilers can fuse only operations that are visible to them simultaneously. When an eager runtime dispatches operations individually\index{Eager Execution!optimization limitations}, each kernel launch executes in isolation, concealing cross-operation fusion and buffer-reuse opportunities. Capturing a broader region of computation into a deferred graph\index{Graph Execution!optimization advantages} removes that isolation: the compiler can examine an entire sequence of dependencies, establish intermediate tensor lifetimes, and fuse compatible operations before dispatching work to the accelerator. How and when a framework captures that computation is therefore the core systems choice governing execution performance.
 
 ### The computational graph {#sec-ml-frameworks-computational-graph-00f7}
 
@@ -1541,12 +1539,12 @@ These throughput differences are not uniform across workloads, so the execution 
 ↩ The workload archetypes and the iron law term that dominates each are established in @sec-ml-systems-workload-archetypes-fd10.
 :::
 
-| **Archetype**                 | **Dominant Iron Law Term**                                    | **Candidate Framework Strategy**                | **Rationale**                                                                                                                                                         |
-|:------------------------------|:--------------------------------------------------------------|:------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **ResNet-50 (Compute Beast)** | $\frac{\Operations}{\PeakRate \cdot \EfficiencyHw}$ (Compute) | Compiled dense kernels                          | Regular dense kernels benefit from layout selection, precision lowering, and backend specialization; fusion helps most in surrounding memory- or launch-bound regions |
+| **Archetype**                 | **Dominant Iron Law Term**                                    | **Candidate Framework Strategy**                | **Rationale**                                                                                                                                                                  |
+|:------------------------------|:--------------------------------------------------------------|:------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **ResNet-50 (Compute Beast)** | $\frac{\Operations}{\PeakRate \cdot \EfficiencyHw}$ (Compute) | Compiled dense kernels                          | Regular dense kernels benefit from layout selection, precision lowering, and backend specialization; fusion helps most in surrounding memory- or launch-bound regions          |
 | **GPT-2 (Bandwidth Hog)**     | $\frac{\DataVolume}{\Bandwidth}$ (Memory Bandwidth)           | Fused attention + graph compilation             | Fused attention eliminates intermediate activation round-trips, while compilation removes kernel launch tax; streaming parameter and KV-cache traffic remain bandwidth-limited |
-| **DLRM (Sparse Scatter)**     | $\frac{\DataVolume}{\Bandwidth}+\Latency$ (Gathers, Network)  | Specialized lookup kernels and measured capture | Irregular gathers limit some optimizations; measure compilation benefits in dense regions and surrounding dispatch                                                    |
-| **DS-CNN (Tiny Constraint)**  | Memory Capacity (Feasibility Gate)                            | Ahead-of-time microcontroller runtime           | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                           |
+| **DLRM (Sparse Scatter)**     | $\frac{\DataVolume}{\Bandwidth}+\Latency$ (Gathers, Network)  | Specialized lookup kernels and measured capture | Irregular gathers limit some optimizations; measure compilation benefits in dense regions and surrounding dispatch                                                             |
+| **DS-CNN (Tiny Constraint)**  | Memory Capacity (Feasibility Gate)                            | Ahead-of-time microcontroller runtime           | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                                    |
 
 : **Framework Execution Strategy by Workload**: Candidate execution strategies for each workload archetype, aligned to the dominant iron law term. For the Bandwidth Hog row, attention fusion and graph compilation eliminate intermediate round-trips and launch overhead, but they do not eliminate the memory-bandwidth bottleneck of streaming weights and KV caches during autoregressive decoding; altering that limit requires increasing batch size or adopting lower-precision representations. For the Tiny Constraint row, memory capacity is a feasibility gate that must be met before any iron law term matters. For the Sparse Scatter row, the bandwidth and latency are those of irregular embedding gathers and the network exchange that follows them, not the streaming peak. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
 
@@ -4440,12 +4438,9 @@ class TrainingStepCalc:
         (mm1_flops / mm1_mem).to(flop / byte).magnitude > (relu_flops / relu_mem).to(flop / byte).magnitude,
         "MatMul must have higher arithmetic intensity than ReLU.",
     )
-    check(dw1_flops == mm1_flops and dw2_flops == dh_flops == mm2_flops,
-          "Backward GEMMs must match the requested weight and hidden gradients.")
-    check(dense_training_flops == 3 * dense_forward_flops - mm1_flops,
-          "Omit the first input-gradient GEMM from the three-product rule.")
-    check(2.012 < dense_training_ratio < 2.013,
-          f"Expected about 2.013x dense work, got {dense_training_ratio}.")
+    check(dw1_flops == mm1_flops and dw2_flops == dh_flops == mm2_flops, "Backward GEMMs must match the requested weight and hidden gradients.")
+    check(dense_training_flops == 3 * dense_forward_flops - mm1_flops, "Omit the first input-gradient GEMM from the three-product rule.")
+    check(2.012 < dense_training_ratio < 2.013, f"Expected about 2.013x dense work, got {dense_training_ratio}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     train_mm1_dims_math = fmt_math(f"2 \\times {_batch} \\times {_input}{{\\times}}{_hidden}")
@@ -4487,16 +4482,16 @@ The backward products use the same read/read/write rule. The weight gradient `h.
 
 The forward cross-entropy model assigns one operation-equivalent each to exponentiation, accumulation, and normalization per logit, and counts the logit read and saved-score write. For the nonlinear backward work, the ReLU model reads the saved activation and upstream gradient and writes a masked gradient. The simplified combined cross-entropy model reads saved probabilities and integer labels, then subtracts the target and scales by the batch mean to write the logit gradient. Actual loss implementations may split these operations across kernels. The resulting estimates make the arithmetic-intensity comparison reproducible without substituting for a measured memory-traffic profile:
 
-| **Component**                            |                                           **Modeled Work**                                          |                 **Memory Traffic**                |            **Arithmetic Intensity**           |
-|:-----------------------------------------|:---------------------------------------------------------------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
-| **MatMul (x @ W1)**                      |  `{python} TrainingStepCalc.train_mm1_dims_math` = `{python} TrainingStepCalc.train_mm1_mflop_str`  |  `{python} TrainingStepCalc.train_mm1_mem_mb_str` |  `{python} TrainingStepCalc.train_mm1_ai_str` |
-| **ReLU**                                 | `{python} TrainingStepCalc.train_relu_dims_math` = `{python} TrainingStepCalc.train_relu_kflop_str` | `{python} TrainingStepCalc.train_relu_mem_kb_str` | `{python} TrainingStepCalc.train_relu_ai_str` |
-| **MatMul (h @ W2)**                      |  `{python} TrainingStepCalc.train_mm2_dims_math` = `{python} TrainingStepCalc.train_mm2_kflop_str`  |  `{python} TrainingStepCalc.train_mm2_mem_kb_str` |  `{python} TrainingStepCalc.train_mm2_ai_str` |
-| **Cross-entropy (simplified)**           |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
-| **Backward `dW2`** | `{python} TrainingStepCalc.train_dw2_kflop_str` | `{python} TrainingStepCalc.train_dw2_mem_kb_str` | `{python} TrainingStepCalc.train_dw2_ai_str` |
-| **Backward `dh`** | `{python} TrainingStepCalc.train_dw2_kflop_str` | `{python} TrainingStepCalc.train_dw2_mem_kb_str` | `{python} TrainingStepCalc.train_dw2_ai_str` |
-| **Backward `dW1`** | `{python} TrainingStepCalc.train_dw1_mflop_str` | `{python} TrainingStepCalc.train_dw1_mem_mb_str` | `{python} TrainingStepCalc.train_dw1_ai_str` |
-| **Backward nonlinear (simplified)** | `{python} TrainingStepCalc.train_pointwise_bwd_kflop_str` | `{python} TrainingStepCalc.train_pointwise_bwd_mem_kb_str` | `{python} TrainingStepCalc.train_pointwise_bwd_ai_str` |
+| **Component**                       |                                           **Modeled Work**                                          |                     **Memory Traffic**                     |                **Arithmetic Intensity**                |
+|:------------------------------------|:---------------------------------------------------------------------------------------------------:|:----------------------------------------------------------:|:------------------------------------------------------:|
+| **MatMul (x @ W1)**                 |  `{python} TrainingStepCalc.train_mm1_dims_math` = `{python} TrainingStepCalc.train_mm1_mflop_str`  |      `{python} TrainingStepCalc.train_mm1_mem_mb_str`      |      `{python} TrainingStepCalc.train_mm1_ai_str`      |
+| **ReLU**                            | `{python} TrainingStepCalc.train_relu_dims_math` = `{python} TrainingStepCalc.train_relu_kflop_str` |     `{python} TrainingStepCalc.train_relu_mem_kb_str`      |     `{python} TrainingStepCalc.train_relu_ai_str`      |
+| **MatMul (h @ W2)**                 |  `{python} TrainingStepCalc.train_mm2_dims_math` = `{python} TrainingStepCalc.train_mm2_kflop_str`  |      `{python} TrainingStepCalc.train_mm2_mem_kb_str`      |      `{python} TrainingStepCalc.train_mm2_ai_str`      |
+| **Cross-entropy (simplified)**      |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |      `{python} TrainingStepCalc.train_ce_mem_kb_str`       |      `{python} TrainingStepCalc.train_ce_ai_str`       |
+| **Backward `dW2`**                  |                           `{python} TrainingStepCalc.train_dw2_kflop_str`                           |      `{python} TrainingStepCalc.train_dw2_mem_kb_str`      |      `{python} TrainingStepCalc.train_dw2_ai_str`      |
+| **Backward `dh`**                   |                           `{python} TrainingStepCalc.train_dw2_kflop_str`                           |      `{python} TrainingStepCalc.train_dw2_mem_kb_str`      |      `{python} TrainingStepCalc.train_dw2_ai_str`      |
+| **Backward `dW1`**                  |                           `{python} TrainingStepCalc.train_dw1_mflop_str`                           |      `{python} TrainingStepCalc.train_dw1_mem_mb_str`      |      `{python} TrainingStepCalc.train_dw1_ai_str`      |
+| **Backward nonlinear (simplified)** |                      `{python} TrainingStepCalc.train_pointwise_bwd_kflop_str`                      | `{python} TrainingStepCalc.train_pointwise_bwd_mem_kb_str` | `{python} TrainingStepCalc.train_pointwise_bwd_ai_str` |
 
 : **Per-Operation Roofline Analysis**: Analytical work and buffer-traffic estimates for the selected operations of a two-layer MLP. Each GEMM counts two operand reads and one result write; backward includes only the requested gradients. Cross-entropy and pointwise derivative work use the simplified models stated in the text. These are operator-level estimates rather than measured device instruction or HBM-transaction counts. {#tbl-training-step-roofline tbl-colwidths="[27,33,18,22]"}
 
@@ -4542,10 +4537,8 @@ class MnistTrainingStepCalc:
     t_launch = driver_launches * driver_launch
     t_overhead = t_python + t_launch
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(python_entries == 5 and driver_launches == 9,
-          "Selected ledger must have five Python entries and nine modeled launches.")
-    check(t_overhead > 10 * max(t_compute, t_memory),
-          "Illustrative host costs should exceed ideal device-time bounds.")
+    check(python_entries == 5 and driver_launches == 9, "Selected ledger must have five Python entries and nine modeled launches.")
+    check(t_overhead > 10 * max(t_compute, t_memory), "Illustrative host costs should exceed ideal device-time bounds.")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mnist_t_compute_us_str = fmt_time(t_compute, microsecond, precision=1, commas=False)
     mnist_t_memory_us_str = fmt_time(t_memory, microsecond, precision=1, commas=False)
