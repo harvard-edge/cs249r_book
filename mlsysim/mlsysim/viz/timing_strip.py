@@ -455,7 +455,7 @@ def chunk_renewal_strip(machine, evidence_horizon=None, n_renewals=4):
     span = _ms(sched["chunk_span"])
     age = _ms(sched["open_loop_span"])          # age of the evidence when the successor takes over
     horizon_n = machine.chunk_horizon
-    t_end = infer + span
+    t_end = span  # prediction support ends relative to capture, not availability
     spans = []
     # capture instants and inference bars
     for k in range(n_renewals + 1):
@@ -470,9 +470,14 @@ def chunk_renewal_strip(machine, evidence_horizon=None, n_renewals=4):
                           label_pos="in"))
     # the first chunk's whole predicted span
     replaced = period + infer                     # successor available
+    if not infer < replaced <= t_end:
+        raise ValueError("Chunk support must cover availability through replacement.")
+    spans.append(Span("elapsed prefix", 0, infer, "neutral", 3, outline_only=True, label_pos="in"))
     spans.append(Span("executed", infer, replaced, "proposal", 3, solid=True, label_pos="in"))
     if evidence_horizon is not None:
         t_ev = _ms(evidence_horizon)
+        if not replaced < t_ev < t_end:
+            raise ValueError("Evidence horizon must lie between replacement and support end.")
         spans.append(Span("evidence still valid", replaced, t_ev, "proposal", 3, label_pos="in"))
         spans.append(Span("buffer, not permission", t_ev, t_end, "neutral", 3, hatch="///", label_pos="in"))
     else:
