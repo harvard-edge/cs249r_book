@@ -41,7 +41,7 @@
           {
             "question_type": "SHORT",
             "question": "A 175B-parameter model trains for 30 days on 256 nodes, writing resumable mixed-precision Adam checkpoints of roughly $2.45\\text{ TB}$ ($350\\text{ GB}$ FP16 weights, $700\\text{ GB}$ FP32 master weights, and $1.4\\text{ TB}$ of Adam moments) every 10 minutes. Explain why ML storage design is fundamentally a joint physics-and-economics optimization problem.",
-            "answer": "Physics dictates that physical proximity governs bandwidth and latency: HBM sits millimeters from compute on a silicon interposer delivering terabytes per second, while remote object storage sits across datacenter networks delivering tens to hundreds of gigabytes per second with millisecond latency. Economics dictates that cost per bit decreases as distance and capacity increase: HBM costs roughly $\\$15/\\text{GB}$ in capital expenditure, whereas cold archive storage costs fractions of a cent per gigabyte-month. Because keeping petabytes of datasets and checkpoints in HBM is economically impossible and keeping them only in remote storage stalls accelerators for seconds per iteration, the storage architecture must tier data so expensive high-bandwidth memory holds only active in-flight tensors while cheaper tiers stage the rest.",
+            "answer": "HBM supplies high local bandwidth for active tensors but cannot economically retain the corpus and checkpoint history. Shared durable storage pools capacity at lower cost, while interfaces, contention, and client allocation determine the rate and latency a consumer receives. Tier placement must satisfy input-delivery and checkpoint-recovery budgets at the lowest total delivery cost. Remote input reads can suffice when their sustained rate and buffered latency meet demand; local staging is useful when they do not. Compare capacity cost, transfers, and exposed accelerator wait rather than infer a stall from remote placement alone.",
             "learning_objective": "Analyze why ML storage architecture requires tiered placement that simultaneously satisfies bandwidth physics and capacity economics"
           },
           {
@@ -111,8 +111,8 @@
           {
             "question_type": "SHORT",
             "question": "Explain why ML data loaders implement shard-level shuffling combined with within-shard buffer mixing rather than true global per-sample random shuffling across petabyte-scale training corpora.",
-            "answer": "True global random shuffling requires issuing non-sequential per-sample seeks across the entire petabyte-scale corpus, which collapses storage performance to the drive's random-read IOPS rate (causing a $10\\times$ to $30\\times$ throughput drop on NVMe and $100\\times$ on HDD). Shard-level shuffling combined with in-memory buffer mixing preserves high-bandwidth sequential streaming at the physical storage device by reading large ($256\\text{ MB}$ to $4\\text{ GB}$) contiguous blocks, while still providing sufficient sample-level randomness within each local buffer to satisfy stochastic gradient descent convergence requirements.",
-            "learning_objective": "Justify shard-level shuffling as an optimal systems compromise between convergence randomness and storage sequential throughput"
+            "answer": "Shard-level shuffling and within-shard buffer mixing preserve sequential I/O while introducing sample-order variation. Adequate mixing depends on shard composition and buffer size: homogeneous shards may require finer shards or larger mixing buffers. Validate the layout against the loss curve of a fully shuffled baseline on a subset before committing the run.",
+            "learning_objective": "Justify shard-level shuffling under explicit mixing and convergence checks"
           },
           {
             "question_type": "MCQ",
@@ -156,9 +156,9 @@
         "questions": [
           {
             "question_type": "ORDER",
-            "question": "Order the six tiers of the ML storage hierarchy from closest physical proximity and highest bandwidth to lowest bandwidth and greatest distance from the accelerator: (1) Local NVMe SSD, (2) Object Storage, (3) Host DRAM, (4) GPU HBM, (5) Parallel File System, (6) Archive / Cold Storage.",
-            "answer": "The correct order is: (4) GPU HBM, (3) Host DRAM, (1) Local NVMe SSD, (5) Parallel File System, (2) Object Storage, (6) Archive / Cold Storage. GPU HBM (Tier 0) sits on the silicon interposer delivering terabytes per second at sub-microsecond latency. Host DRAM (Tier 1) connects across PCIe/NVLink at hundreds of gigabytes per second. Local NVMe (Tier 2) sits on compute nodes delivering tens of gigabytes per second. Parallel File Systems (Tier 3) aggregate bandwidth across a dedicated cluster fabric at gigabytes per second per node. Object Storage (Tier 4) spans cloud/datacenter pools delivering high capacity with tens of milliseconds of latency. Archive Storage (Tier 5) holds cold data at lowest cost with minutes-to-hours retrieval latency.",
-            "learning_objective": "Classify the six tiers of the ML storage hierarchy by physical proximity, bandwidth, and latency"
+            "question": "Order the six tiers from Tier 0 through Tier 5 in the chapter's placement hierarchy, moving outward from accelerator-resident memory through node-local resources to shared storage and archive: (1) Local NVMe SSD, (2) Object Storage, (3) Host DRAM, (4) GPU HBM, (5) Parallel File System, (6) Archive / Cold Storage.",
+            "answer": "The correct order is: (4) GPU HBM, (3) Host DRAM, (1) Local NVMe SSD, (5) Parallel File System, (2) Object Storage, (6) Archive / Cold Storage. HBM is accelerator-resident; host DRAM and local NVMe serve the node; the parallel file system provides shared access; object storage retains durable organizational data; and archive preserves rarely accessed history. This is the chapter's placement order, not a universal bandwidth ranking. HBM rates are per accelerator, DRAM and local NVMe rates are per node, and shared-service rates must be allocated among clients and checked against the actual delivery path.",
+            "learning_objective": "Order the six storage tiers by placement and distinguish that order from a bandwidth comparison"
           },
           {
             "question_type": "MCQ",
@@ -174,14 +174,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A vision training cluster migrating to a high-performance parallel file system (PFS) with $500\\text{ GB/s}$ rated aggregate bandwidth reports that throughput during ImageNet training is capped at under $5\\text{ GB/s}$, with storage data disks showing negligible I/O activity. What is the root cause and the correct architectural fix?",
+            "question": "A vision training cluster migrating to a high-performance parallel file system (PFS) with $500\\text{ GB/s}$ rated aggregate bandwidth reports that throughput during ImageNet training is capped at under $5\\text{ GB/s}$, with storage data disks showing negligible I/O activity. The dataset consists of millions of individual JPEG files. A worker trace shows repeated waits for file opens, and the MDS reports a sustained operation queue with rising lookup latency while its service rate is saturated. What bottleneck do these additional measurements establish, and which fix addresses it?",
             "choices": [
               "The network fabric is dropping packets due to congestion; enable flow control on top-of-rack switches.",
               "The parallel file system is bottlenecked on drive endurance wear-leveling; replace SSDs with high-DWPD enterprise drives.",
               "The dataset is stored as millions of individual image files, saturating the Metadata Server (MDS) with per-file POSIX lookups; repackage images into large sequential shards (such as WebDataset tar archives).",
               "The GPUs are compute-bound and cannot consume data faster; decrease the batch size to increase I/O request frequency."
             ],
-            "answer": "The correct answer is C. The dataset is stored as millions of individual image files, saturating the Metadata Server (MDS) with per-file POSIX lookups; repackage images into large sequential shards (such as WebDataset tar archives). The signature of near-idle data disks combined with collapsed aggregate throughput is the classic small-file problem: opening, stating, and closing millions of individual files serializes on the MDS lock and namespace managers long before data path bandwidth is utilized. Packing thousands of images into large ($256\\text{ MB}$ to $4\\text{ GB}$) sequential shards amortizes each metadata operation across thousands of samples. The network congestion and drive endurance options misdiagnose a software/format metadata bottleneck as a hardware degradation issue. The compute-bound batch size claim contradicts the premise of underutilized storage delivery.",
+            "answer": "The correct answer is C. The saturated MDS service rate, rising lookup latency, and worker file-open waits establish a metadata bottleneck in this case. Repackaging images into sequential shards amortizes per-file operations across many samples. Idle data disks and low throughput alone would not establish this cause; the supplied metadata measurements distinguish it from a slow decoder or another blocked pipeline stage.",
             "learning_objective": "Analyze parallel file system metadata saturation from telemetry signatures and prescribe shard-aggregation remediation"
           },
           {
@@ -192,15 +192,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A multi-modal training job combines $3\\text{ TB}$ of text, $50\\text{ TB}$ of images, and $200\\text{ TB}$ of video. The infrastructure team provisions storage bandwidth based exclusively on the video modality because video represents over $75\\%$ of total dataset capacity. What failure does this provisioning strategy cause?",
+            "question": "A multi-modal training job combines $3\\text{ TB}$ of text, $50\\text{ TB}$ of images, and $200\\text{ TB}$ of video. The infrastructure team provisions storage bandwidth based exclusively on the video modality because video represents over $75\\%$ of total dataset capacity. What can be concluded about this sizing decision from the supplied information?",
             "choices": [
-              "The storage hierarchy will under-provision host DRAM and data-loader CPU decode bandwidth because text and image streams run concurrently and generate additive per-iteration bandwidth and transformation demands.",
+              "Adequacy cannot be established from corpus capacity alone; sizing must include the combined sampled-batch byte rate and decoding, augmentation, and buffering demand of all active modalities.",
               "The video stream will starve the parallel file system because image and text files use incompatible POSIX stripe sizes.",
               "The model will fail to converge because object storage cannot maintain ACID consistency when serving multiple modalities simultaneously.",
               "The training job will exhaust GPU HBM because video tensors automatically overwrite text embeddings during collation."
             ],
-            "answer": "The correct answer is A. The storage hierarchy will under-provision host DRAM and data-loader CPU decode bandwidth because text and image streams run concurrently and generate additive per-iteration bandwidth and transformation demands. Multimodal training runs parallel ingestion pipelines for each modality; while video dominates static storage capacity, images and text impose distinct, additive demands on host DRAM prefetch buffers, CPU decoding threads, and network throughput that cannot be subsumed within the video pipeline's envelope. Sizing only for video neglects the high sample-rate decoding demands of images and text. The POSIX stripe-incompatibility option is incorrect because stripe sizes are configured per directory or file. The ACID consistency claim is irrelevant since object stores serve immutable read shards. The HBM overwriting claim describes a nonexistent memory management bug.",
-            "learning_objective": "Apply the additive-demand rule to multi-modal storage provisioning across concurrent data streams"
+            "answer": "The correct answer is A. Retained corpus capacity does not determine per-step delivery demand. Sampling frequency, batch representation, and compute time set how many bytes each modality contributes to the feed, while transformations determine its decoding and augmentation work. Sum those demands across active streams and compare them with measured stage rates and buffer capacity. Video-only sizing omits that accounting, but the supplied corpus sizes do not prove a particular storage, host-DRAM, or decoding bottleneck.",
+            "learning_objective": "Distinguish retained corpus capacity from combined sampled-batch and transformation demand when sizing multimodal delivery"
           },
           {
             "question_type": "FILL",
@@ -652,20 +652,20 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A training team upgrades its cluster from A100 to H100 GPUs, expecting a $3\\times$ end-to-end training speedup. However, wall-clock epoch time barely improves, and GPU utilization drops from $85\\%$ to $35\\%$. Diagnose the system bottleneck and explain why upgrading compute caused this regression.",
-            "answer": "The training pipeline was previously operating near the threshold of the I/O wall on A100 GPUs. Upgrading to H100s reduced computation time per batch ($T_{\\text{compute}}$) by $\\approx 3\\times$ without increasing storage delivery bandwidth ($T_{\\text{I/O}}$); because $T_{\\text{I/O}}$ now significantly exceeds $T_{\\text{compute}}$, the workload shifted from being compute-dominated to severely I/O-bound. The GPUs finish their forward-backward passes rapidly and sit idle waiting for the next batch, driving up the data stall ratio and collapsing hardware utilization.",
+            "question": "A training team upgrades its cluster from A100 to H100 GPUs, expecting a $3\\times$ end-to-end training speedup. However, wall-clock epoch time barely improves, and GPU utilization drops from $85\\%$ to $35\\%$. Traces show shorter uninterrupted compute time, unchanged measured input-delivery rate, and increased time waiting for ready input batches, while communication and checkpoint pauses remain unchanged. Diagnose the measured bottleneck and explain why faster compute exposed it.",
+            "answer": "The traces establish an input-delivery limit: compute finishes sooner, but the unchanged pipeline does not supply ready batches at the new consumption rate. More of the iteration is therefore exposed input wait. Prefetching can hide delays within its queue window but cannot overcome a sustained delivery-rate deficit. The utilization and epoch-time figures alone would not identify this cause; the supplied timing measurements distinguish it from communication or checkpoint pauses. Profile individual read, decode, and transfer stages before selecting a remedy.",
             "learning_objective": "Analyze training throughput regressions following accelerator compute upgrades using the I/O wall framework"
           },
           {
             "question_type": "MCQ",
-            "question": "A team applies aggressive zstd level 9 compression ($4:1$ ratio, decompression throughput $\\approx 0.5\\text{ GB/s}$ per core) to training shards on local NVMe. While storage space decreases, training step time increases significantly. What caused this performance regression?",
+            "question": "A team replaces a lighter codec with a denser codec on local-NVMe training shards. On this corpus, illustrative measurements give the lighter codec a 3:1 ratio and 1.5 GB/s decoded output per core, versus 4:1 and 0.5 GB/s for the denser codec. Before the change, worker profiles show decoding and augmentation saturating the host CPU and the ready-batch queue repeatedly draining. Afterward, decompression consumes more CPU time, the queue drains more often, and training step time increases although stored bytes decrease. What caused this measured regression?",
             "choices": [
               "Compressed shards cannot be read by NVMe controllers because flash drives require raw uncompressed binary blocks.",
               "The pipeline was already CPU-bound on data decoding and augmentation, so adding heavy decompression work saturated the host CPU, starving the GPU of assembled batches.",
-              "Zstd level 9 introduces non-deterministic bit flips that cause stochastic gradient descent to diverge.",
+              "The denser codec introduces non-deterministic bit flips that cause stochastic gradient descent to diverge.",
               "The parallel file system rejects compressed shards larger than 1 GB due to POSIX file locking constraints."
             ],
-            "answer": "The correct answer is B. The pipeline was already CPU-bound on data decoding and augmentation, so adding heavy decompression work saturated the host CPU, starving the GPU of assembled batches. Compression involves an explicit trade-off between storage I/O bandwidth and CPU cycles; if a pipeline is already bottlenecked on host CPU processing (such as image augmentation), aggressive compression exacerbates the CPU bottleneck by dedicating CPU cores to slow decompression ($0.5\\text{ GB/s/core}$ vs $1.5\\text{ GB/s/core}$ for zstd level 1), reducing overall batch delivery rate to the GPU. The flash controller, non-deterministic bit flip, and POSIX lock claims are completely false.",
+            "answer": "The correct answer is B. The supplied worker profiles and ready-batch queues establish a host-processing limit before the change; additional decompression work further reduces completed-batch delivery. The denser codec saves stored bytes but requires more CPU work for the same decoded output under these corpus-specific measurements. These illustrative rates are not fixed properties of named compression levels. Compare output-equivalent stage rates and input wait when choosing a representation.",
             "learning_objective": "Analyze the CPU-versus-I/O trade-offs of data compression and identify when decompression overhead degrades pipeline throughput"
           },
           {
@@ -692,24 +692,24 @@
           "focus_areas": [
             "holistic storage hierarchy synthesis and the fuel line principle",
             "system-level root-cause diagnosis of cluster underutilization",
-            "coupling between parallel splitting strategies (data, pipeline, expert) and storage demand patterns"
+            "local checkpoint staging versus durable publication and verified restore eligibility"
           ],
-          "question_strategy": "Synthesize the major themes of the chapter: end-to-end diagnostic evaluation, physics-economics hierarchy co-design, and parallel training workload storage signatures.",
-          "difficulty_progression": "Start with a complex multi-metric cluster diagnostic scenario (MCQ), evaluate the overarching physics-economics hierarchy design (SHORT), and analyze storage signatures across parallelism paradigms (SHORT).",
+          "question_strategy": "Synthesize the major themes of the chapter: end-to-end diagnostic evaluation, physics-economics hierarchy co-design, and checkpoint publication under a supplied failure trace.",
+          "difficulty_progression": "Start with a complex multi-metric cluster diagnostic scenario (MCQ), evaluate the overarching physics-economics hierarchy design (SHORT), and apply the checkpoint commit contract to a failure trace (SHORT).",
           "integration": "Connects storage infrastructure to the preceding compute and networking chapters and bridges to the subsequent distributed training chapters.",
           "ranking_explanation": "Provides a comprehensive capstone review synthesizing all core concepts, formulas, and trade-offs of Chapter 4."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A 2,048-GPU training cluster reports $40\\%$ GPU hardware utilization. Telemetry reveals: (1) GPUs spend $45\\%$ of iteration time waiting for data tensors, (2) Storage data disks on the parallel file system report less than $5\\%$ bandwidth utilization, (3) Data loader host CPU cores report $100\\%$ utilization, and (4) The dataset is stored as 50 million individual JPEG files. What is the primary root cause and the most effective remediation?",
+            "question": "A 2,048-GPU training cluster reports $40\\%$ GPU hardware utilization. Telemetry reveals: (1) GPUs spend $45\\%$ of iteration time waiting for data tensors, (2) Storage data disks on the parallel file system report less than $5\\%$ bandwidth utilization, (3) Data loader host CPU cores report $100\\%$ utilization, and (4) The dataset is stored as 50 million individual JPEG files. A worker CPU profile attributes most active CPU time to JPEG decoding, the MDS shows a sustained queue at its operation-rate limit, and the completed-batch queue repeatedly drains. Which remediation targets the two measured limiting stages?",
             "choices": [
               "The parallel file system network fabric is saturated; upgrade InfiniBand links between compute nodes and storage servers.",
               "GPU HBM capacity is exhausted; apply aggressive 4-bit activation quantization to free GPU memory.",
               "NVMe drive endurance limits have triggered write throttling; replace compute node local SSDs.",
-              "The workload is suffering from both metadata server saturation (individual small files) and CPU-bound decoding; repackage the dataset into large WebDataset tar shards and offload JPEG decompression to GPU decoders."
+              "The workload is suffering from both metadata server saturation (individual small files) and CPU-bound decoding; repackage the dataset into large WebDataset tar shards and evaluate GPU JPEG decoding against its compute and HBM budget."
             ],
-            "answer": "The correct answer is D. The workload is suffering from both metadata server saturation (individual small files) and CPU-bound decoding; repackage the dataset into large WebDataset tar shards and offload JPEG decompression to GPU decoders. The telemetry presents the classic composite data loading bottleneck: 50 million individual files saturate metadata servers while leaving bulk data disks idle, and host CPU cores are completely overwhelmed attempting to open and decode millions of images sequentially, starving GPUs of batch tensors ($45\\%$ wait time). Repackaging samples into large sequential shards eliminates POSIX metadata overhead, and shifting decompression to GPU hardware decoders (or using fast formats) relieves the CPU bottleneck. The InfiniBand upgrade option misidentifies a CPU/metadata bottleneck as a fabric bandwidth shortfall. The quantization and drive endurance options are wholly unrelated to data loader ingestion stalls.",
+            "answer": "The correct answer is D. The MDS queue at its operation-rate limit confirms metadata contention, and the worker profile confirms decoding consumes the host CPU budget; the drained completed-batch queue connects these limits to input starvation. Sequential shards reduce per-file metadata demand, and GPU decoding is a candidate when the supported decoder, available compute, and HBM budget permit it. Compare completed-batch throughput and input wait after each change. High host CPU activity and idle data disks alone would not prove both causes.",
             "learning_objective": "Evaluate composite storage and host-CPU data loading bottlenecks from multi-tier cluster telemetry and prescribe architectural remediations"
           },
           {
@@ -720,9 +720,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how different distributed training parallelism strategies (data parallelism, pipeline parallelism, and expert parallelism) place distinct demand signatures on the storage and checkpointing infrastructure.",
-            "answer": "Data parallelism creates uniform, high-throughput streaming reads across all nodes but generates massive write redundancy during checkpoint storms if full replicas are saved rather than sharded states. Pipeline parallelism introduces sequential stage dependencies where a data loading stall in an early stage bubbles down the entire pipeline and starves all downstream accelerators. Expert parallelism (Mixture of Experts) routes tokens dynamically to different expert nodes, generating non-uniform, routing-dependent storage and memory access patterns where localized memory stalls can create stragglers that delay global synchronization barriers.",
-            "learning_objective": "Compare the distinct storage ingestion and checkpoint write demand signatures created by data, pipeline, and expert parallelism strategies"
+            "question": "Generation g is durably committed and retained. Training resumes after locally staging all shards of g+1, but a node fails before durable publication of g+1 and its required shard is lost. Which generation may restore, and what evidence is required before g+1 could become a restore candidate?",
+            "answer": "Restore the retained committed generation g after verifying its manifest and shards. Resuming training after local staging does not publish g+1; the lost required shard prevents that generation from satisfying the restore contract. Before g+1 becomes a candidate, every expected same-step shard must be durably persisted and verified against the generation manifest, which is published last using the backend's atomic publication primitive.",
+            "learning_objective": "Apply the distinction between local staging and durable checkpoint publication to a failure trace"
           }
         ]
       }

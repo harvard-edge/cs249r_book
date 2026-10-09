@@ -294,7 +294,7 @@
               "Per-tensor quantization can only be executed on CPUs, whereas per-channel quantization is restricted to edge microcontrollers",
               "Per-channel quantization automatically converts float operations into sparse matrix multiplications"
             ],
-            "answer": "The correct answer is B. In deep convolutional neural networks, different filters within the same layer specialize in distinct feature patterns, often resulting in weight distributions with variances that differ by orders of magnitude. Under per-tensor (layer-wise) quantization, a single clipping range must encompass all filters, forcing narrow-distribution filters into a tiny subset of quantization bins. Per-channel (per-filter) quantization assigns an independent scale factor $S_c$ and zero-point $Z_c$ to each output channel, preserving optimal dynamic range and numerical resolution across all filters.",
+            "answer": "The correct answer is B. In deep convolutional neural networks, different filters within the same layer specialize in distinct feature patterns, often resulting in weight distributions with variances that differ by orders of magnitude. Under per-tensor (layer-wise) quantization, a single clipping range must encompass all filters, forcing narrow-distribution filters into a tiny subset of quantization bins. Per-channel (per-filter) quantization assigns an independent scale factor $S_c$ and zero-point $Z_c$ to each output channel, giving narrow-range filters finer numerical resolution when their ranges differ. This can explain the measured quality advantage, but scale metadata, kernel support, and the calibration policy still determine the deployment trade-off.",
             "learning_objective": "Explain why per-channel quantization granularity preserves accuracy in convolutional networks compared to per-tensor quantization"
           }
         ]
@@ -436,7 +436,7 @@
     },
     {
       "section_id": "#sec-model-compression-optimization-strategies-f2f6",
-      "section_title": "Optimization Strategies",
+      "section_title": "Combining and Sequencing",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
@@ -456,11 +456,11 @@
             "question": "The chapter's illustrative BERT compression pipeline compresses a $440\\text{ MB}$ FP32 model down to $28\\text{ MB}$ (roughly $16\\times$) by sequencing pruning, distillation, and INT8 quantization. Why do these techniques compound multiplicatively rather than substituting for one another?",
             "choices": [
               "The techniques duplicate each other's reductions, causing total compression to saturate at the performance of the single strongest method",
-              "Pruning and distillation reduce structural parameter count while quantization reduces numerical bit-width per parameter; because these operate on orthogonal resource axes, their compression ratios multiply ($4\\times \\text{ structural} \\times 4\\times \\text{ precision} \\approx 16\\times \\text{ total}$)",
+              "Pruning produces the smaller student graph, distillation recovers its quality at the same parameter count, and quantization reduces numerical bit-width per parameter; because these operate on orthogonal resource axes, their compression ratios multiply ($4\\times \\text{ structural} \\times 4\\times \\text{ precision} \\approx 16\\times \\text{ total}$)",
               "Applying quantization automatically converts the pruned network into a student model without requiring teacher supervision",
               "Multiplicative gains occur only when the pipeline starts with operator fusion on uncompressed weights"
             ],
-            "answer": "The correct answer is B. In the illustrative BERT compression pipeline ($440\\text{ MB} \\to 28\\text{ MB}$, a $16\\times$ total reduction), structural optimization (pruning and distillation) removes $75\\%$ of the parameters ($4\\times$ parameter reduction), while INT8 quantization reduces the bit-width of the surviving parameters from 32-bit float to 8-bit integer ($4\\times$ precision reduction). Because parameter count and bit-width per parameter are independent orthogonal axes of model size ($\\text{Total Bytes} = \\text{Parameters} \\times \\text{Bits-per-Parameter} / 8$), their reduction factors compound multiplicatively ($4 \\times 4 = 16\\times$). Quantization does not perform distillation, and fusion is an execution optimization rather than a prerequisite for structural and precision composition.",
+            "answer": "The correct answer is B. The stipulated pruned graph has 27.5M parameters, one quarter of the 110M teacher. Distillation recovers quality at that count; INT8 then stores each weight in one byte instead of four. The raw payload falls from 440 MB to 27.5 MB (rounded to 28 MB), a 16× reduction. Fusion changes execution rather than supplying either weight-storage factor. These arithmetic savings do not guarantee latency gains.",
             "learning_objective": "Explain why combining orthogonal compression techniques across structural and numerical dimensions yields multiplicative compression ratios"
           },
           {
@@ -510,13 +510,13 @@
           {
             "question_type": "SHORT",
             "question": "An engineering team reports that an INT8-quantized ResNet-50 model maintains top-1 validation accuracy within $0.2\\%$ of its FP32 baseline on ImageNet. Explain why this metric alone is insufficient to certify the model as deployment-ready, identifying at least three additional critical measurement axes required by the chapter.",
-            "answer": "Near-baseline top-1 accuracy says little about whether the compressed model meets deployment constraints. The chapter also requires measuring on-target latency, peak runtime memory rather than just artifact size, and energy per inference in joules or sustained power in watts. It also calls for checking calibration drift, because confidence quality can degrade even when accuracy looks stable. The practical consequence is that a model can look statistically acceptable yet still fail hardware, power, or confidence requirements in deployment.",
+            "answer": "Near-baseline top-1 accuracy says little about whether the compressed model meets deployment constraints. The chapter also requires measuring on-target latency, peak runtime memory rather than just artifact size, and energy per inference in joules or sustained power in watts. It also calls for checking calibration drift, because confidence quality can degrade even when accuracy looks stable. For example, with a $75.5\\%$ minimum top-1 accuracy and a $3.0\\%$ maximum calibration error, the modeled INT8 profile passes accuracy but fails calibration. Acceptance requires satisfying each stated limit; resource gains cannot compensate for a failed quality requirement.",
             "learning_objective": "Identify the additional latency, memory, energy, and calibration measurements needed beyond top-1 accuracy to validate a compressed model"
           },
           {
             "question_type": "TF",
             "question": "True or False: If an INT8-quantized classifier achieves the exact same top-1 accuracy as its full-precision baseline, its output probability distributions and confidence calibration are guaranteed to be equally reliable for downstream safety thresholds.",
-            "answer": "False. Top-1 accuracy evaluates only the argmax class prediction and remains unaffected as long as the relative ranking of the top score does not change. However, quantization noise, clipping, and scale rounding frequently alter the raw logit magnitudes and softmax temperature, significantly degrading confidence calibration and probability sharpness. In safety-critical systems, an uncalibrated quantized model may output overconfident or miscalibrated probabilities despite maintaining identical top-1 accuracy.",
+            "answer": "False. Top-1 accuracy counts correct argmax predictions; equal aggregate accuracy does not require the same examples to be correct. Even when every argmax prediction stays unchanged, quantization can alter logit magnitudes and output probabilities, changing confidence calibration. In safety-critical systems, an uncalibrated quantized model may output overconfident or miscalibrated probabilities despite maintaining identical top-1 accuracy.",
             "learning_objective": "Compare top-1 classification accuracy with confidence calibration and probability reliability in quantized models"
           }
         ]
@@ -559,7 +559,7 @@
           },
           {
             "question_type": "FILL",
-            "question": "In PyTorch and TensorFlow quantization toolkits, ____ nodes are temporarily attached to tensor edges during calibration or Quantization-Aware Training (QAT) to collect running statistics (min/max or histograms) and compute optimal scale and zero-point parameters without altering the forward-pass numerical values.",
+            "question": "In PyTorch and TensorFlow quantization toolkits, ____ nodes are temporarily attached to tensor edges during calibration or Quantization-Aware Training (QAT) to collect running statistics (min/max or histograms) and compute scale and zero-point parameters without altering the forward-pass numerical values.",
             "answer": "observer. Observer nodes (or observers / quantization observers / observer nodes) monitor tensor value distributions during calibration passes or QAT epochs, calculating scale ($S$) and zero-point ($Z$) values before being removed or converted into fixed quantization parameters during final graph freezing.",
             "learning_objective": "Explain the role of observer nodes in collecting activation statistics and computing quantization parameters"
           }

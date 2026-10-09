@@ -36,13 +36,13 @@
               "Unacceptable wall-clock training duration, even though single-device memory capacity and local storage are sufficient",
               "Fault tolerance limitations, because single-GPU training cannot survive hardware restarts"
             ],
-            "answer": "The correct answer is C. Three independent signals can necessitate distributed training: memory exhaustion, unacceptable wall-clock training duration, and dataset scale exceeding single-machine storage. In this scenario, memory and dataset storage both suffice, but an 18-month training duration makes the calendar itself the binding system constraint. The explanation attributing necessity to dataset size confuses input pipeline throughput with model parallelism. The presence of NVLink enables intra-node tensor parallelism when needed, but hardware interconnect availability alone does not mandate distribution. Single-GPU training easily checkpoints locally without facing multi-node failure cascades.",
+            "answer": "The correct answer is C. The deadline is the binding constraint even though the complete model fits and local storage is sufficient. Memory exhaustion can motivate sharding, offload, or other capacity remedies; dataset capacity and delivery rate can motivate distributed data services without forcing model computation across devices. NVLink enables exchanges when needed but does not mandate distribution. Single-device jobs can checkpoint and recover from interruption.",
             "learning_objective": "Analyze which physical trigger necessitates distributed training when model memory and dataset storage are not binding constraints"
           },
           {
             "question_type": "SHORT",
-            "question": "A team doubles a data-parallel cluster from 64 to 128 GPUs and observes that total step time drops by only 12 percent even though per-worker compute time halves. Using the distributed step-time equation $T_{\\text{step}}(N) = T_{\\text{compute}}/N + T_{\\text{comm}}(N) + T_{\\text{sync}}(N) - T_{\\text{overlap}}$, explain the underlying mechanism and what measurement would confirm this diagnosis.",
-            "answer": "Per-worker compute time halves ($T_{\\text{compute}}/128 = 0.5 \\times T_{\\text{compute}}/64$), but communication time $T_{\\text{comm}}(N)$ and synchronization overhead $T_{\\text{sync}}(N)$ remain flat or increase with cluster size. Consequently, the communication-computation ratio $\\rho = T_{\\text{comm}}(N) / (T_{\\text{compute}}/N)$ increases, shifting the cluster into the communication-bound regime where workers spend most of their time waiting for gradient aggregation. A timeline trace (e.g., via PyTorch Profiler or NVTX) showing collective AllReduce and barrier wait times dominating step time would confirm this diagnosis.",
+            "question": "A team doubles a data-parallel cluster from 64 to 128 GPUs and observes that total step time drops by only 12 percent even though per-worker compute time halves. Using the distributed step-time equation $T_{\\text{step}}(N) = T_{\\text{compute}}/N + T_{\\text{comm}}(N) + T_{\\text{sync}}(N) - T_{\\text{overlap}}$, explain what the observation establishes and what measurement would distinguish possible causes.",
+            "answer": "The observation establishes that halving per-worker compute did not halve the complete step. Exposed communication, synchronization, reduced overlap, or another critical-path delay can explain the residual; the step-time ratio alone does not identify which one binds. Compare aligned rank timelines for gradient readiness, collective transfer, barrier waiting, input delivery, and kernel execution. Collective waiting may reflect a late participant rather than limited fabric capacity, so link utilization during the critical interval is needed to support a network diagnosis.",
             "learning_objective": "Analyze how the communication-computation ratio limits scaling when per-worker compute shrinks faster than communication cost"
           },
           {
@@ -55,12 +55,12 @@
             "question_type": "MCQ",
             "question": "Framing distributed parallelism strategies as compiler loop transformations across the training loop's iterators (batches, layers, and operations), which distributed strategy corresponds to vectorization (SIMD) of inner matrix multiplications?",
             "choices": [
-              "Tensor parallelism, which splits inner matrix-multiplication operations across devices with NVLink acting as a cluster-scale register fabric",
+              "Tensor parallelism, which partitions inner matrix-multiplication operations across devices and exchanges partial results over the interconnect",
               "Data parallelism, which unrolls the outer batch loop across devices so each rank processes independent data indices",
               "Pipeline parallelism, which stages sequential layer operations across devices analogous to CPU instruction pipelining",
               "Model replication, which duplicates the entire forward and backward execution redundantly across machines"
             ],
-            "answer": "The correct answer is A. Tensor parallelism splits the inner matrix multiplication operations within each layer across devices, effectively acting as a cluster-scale SIMD unit where NVLink provides the low-latency communication analogous to a vector register file. The loop transformation unrolling the outer batch loop describes data parallelism. Staging sequential layer blocks across time steps describes pipeline parallelism. Redundant execution describes replication rather than intra-operation parallelization.",
+            "answer": "The correct answer is A. Tensor parallelism partitions inner matrix operations, analogous to vectorizing the inner loop. The analogy describes the computational cut; NVLink still exchanges messages between devices with separate memory and does not provide a shared vector register file. Unrolling the outer batch loop describes data parallelism, while staging layer groups describes pipeline parallelism. Replication does not partition an operation.",
             "learning_objective": "Classify distributed parallelism strategies according to compiler loop transformations"
           },
           {
@@ -72,13 +72,13 @@
               "The total accelerator count is the sum of the dimensions ($N_{\\text{total}} = d + p + t$), with each parallelism type requiring a disjoint node pool",
               "The axes compose multiplicatively ($N_{\\text{total}} = d \\times p \\times t$), allowing systems to simultaneously shard layers (TP), pipeline stages (PP), and replicate the pipeline across data shards (DP)"
             ],
-            "answer": "The correct answer is D. Data ($d$), pipeline ($p$), and tensor ($t$) parallelism are independent, orthogonal scaling dimensions whose product determines total accelerator count ($N_{\\text{total}} = d \\times p \\times t$). Large-model training configurations routinely compose all three (e.g., $\\text{TP}=8$ within an NVLink node, $\\text{PP}=16$ across nodes via InfiniBand, and $\\text{DP}=128$ across the cluster) to satisfy memory capacity, per-layer latency, and global throughput constraints simultaneously. The assertion of mutual exclusivity is contradicted by production 3D training loops. Restricting data parallelism from combining with model parallelism ignores standard hybrid practices. Adding rather than multiplying dimensions confuses additive resource partitioning with multiplicative coordinate composition.",
+            "answer": "The correct answer is D. Data ($d$), pipeline ($p$), and tensor ($t$) parallelism partition orthogonal workload dimensions whose degrees must jointly satisfy memory, communication, and global-batch constraints. The product of the degrees determines total accelerator count ($N_{\\text{total}} = d \\times p \\times t$). Large-model training configurations routinely compose all three (e.g., $\\text{TP}=8$ within an NVLink node, $\\text{PP}=16$ across nodes via InfiniBand, and $\\text{DP}=128$ across the cluster) to satisfy memory capacity, per-layer latency, and global throughput constraints simultaneously. The assertion of mutual exclusivity is contradicted by production 3D training loops. Restricting data parallelism from combining with model parallelism ignores standard hybrid practices. Adding rather than multiplying dimensions confuses additive resource partitioning with multiplicative coordinate composition.",
             "learning_objective": "Calculate total cluster resource allocation using the multiplicative axes of the 3D parallelism cube"
           },
           {
             "question_type": "FILL",
-            "question": "The dimensionless ratio $\\rho = T_{\\text{comm}}(N) / (T_{\\text{compute}}/N)$, which determines whether a distributed cluster operates in the compute-bound regime or collapses into the communication-bound regime, is defined as the ____.",
-            "answer": "Communication-Computation Ratio. The communication-computation ratio $\\rho$ quantifies the balance between network data exchange and arithmetic execution. When $\\rho \\ll 1$, scaling remains near-linear; when $\\rho \\ge 1$, communication overhead dominates step time and limits scaling efficiency.",
+            "question": "The dimensionless ratio $\\rho = T_{\\text{comm}}(N) / (T_{\\text{compute}}/N)$, which screens communication demand relative to per-worker compute time, is defined as the ____.",
+            "answer": "Communication-Computation Ratio. The ratio compares communication time with per-worker compute time. A large ratio warns that communication may limit scaling, but actual step time depends on overlap, readiness, and other exposed work. A small ratio alone does not guarantee near-linear scaling.",
             "learning_objective": "Define the metric governing the transition between compute-bound and communication-bound cluster operation"
           }
         ]
@@ -130,7 +130,7 @@
           },
           {
             "question_type": "MCQ",
-            "question": "If a model's parameters, gradients, and activations already fit comfortably within single-GPU memory with high compute utilization under standard DDP, what is the expected throughput impact of enabling ZeRO-3 / FSDP Full Sharding?",
+            "question": "If a model's parameters, gradients, optimizer state, activations, and working buffers already fit comfortably within single-GPU memory with high compute utilization under standard DDP, what is the expected throughput impact of enabling ZeRO-3 / FSDP Full Sharding?",
             "choices": [
               "Throughput will increase linearly by $N\\times$ because sharding reduces per-GPU gradient memory",
               "Throughput can decrease because FSDP introduces additional AllGather collectives before forward and backward passes and ReduceScatter on the critical path",
@@ -149,14 +149,14 @@
               "AllReduce eliminates all network traffic by updating weights locally without exchanging data",
               "Centralized parameter servers create an $\\mathcal{O}(N)$ network bottleneck at the server's network interface, whereas AllReduce distributes communication symmetrically across all workers"
             ],
-            "answer": "The correct answer is D. In a parameter server architecture with $N$ workers, the central server's network interface must ingest gradients from and broadcast weights to all $N$ workers simultaneously, creating an $\\mathcal{O}(N)$ bottleneck that collapses scaling past a few nodes. Symmetrical Ring and Tree AllReduce topologies distribute communication evenly across all workers, bounding per-GPU transfer volume to $2(N-1)/N \\times M_{\\text{grad}}$ regardless of cluster size. The claim that parameter servers cannot implement valid SGD is false. The assertion that parameter servers cannot use GPUs is factually incorrect. The claim that AllReduce eliminates network communication is false since gradient synchronization requires explicit data exchange.",
+            "answer": "The correct answer is D. A centralized server must service the dense gradient and parameter streams of all workers, concentrating traffic at its interfaces. AllReduce distributes that exchange among participants. For an ideal ring, each worker transfers $2(N-1)/N \\times M_{\\text{grad}}$ bytes; tree schedules have their own transfer and startup accounting. Whether either design meets the step budget depends on sustained bandwidth, topology, readiness, and overlap. Parameter servers can implement valid SGD on CPU or GPU hosts, and AllReduce still requires communication.",
             "learning_objective": "Compare centralized and decentralized synchronization topologies in terms of bandwidth bottlenecks for dense gradient traffic"
           },
           {
             "question_type": "FILL",
             "question": "In standard PyTorch DistributedDataParallel, each worker uses a ____ to partition dataset indices deterministically and assign rank-specific shards based on process rank and epoch seed.",
             "answer": "DistributedSampler. It assigns rank-specific dataset indices using the rank and epoch seed. When the dataset size is not divisible by the worker count, padding can repeat samples unless the remainder is dropped; the sampler and loss accounting must handle that boundary explicitly.",
-            "learning_objective": "Identify the component responsible for deterministic, non-overlapping dataset partitioning in data-parallel training"
+            "learning_objective": "Identify deterministic rank-specific dataset partitioning and account for repeated or dropped remainder samples"
           }
         ]
       }
@@ -198,19 +198,19 @@
           {
             "question_type": "SHORT",
             "question": "Explain the distinction between hardware efficiency and statistical efficiency in distributed training, and describe a concrete scenario where a cluster configuration achieves high hardware efficiency but poor statistical efficiency.",
-            "answer": "Hardware efficiency measures how effectively cluster compute capacity (TFLOP/s) translates into step throughput (samples/sec), penalized by communication, kernel launches, and synchronization barriers. Statistical efficiency measures how effectively processed samples reduce the training loss (loss reduction per sample). In a scenario where global batch size is scaled far beyond the critical batch size ($B \\gg B^*$) across 1,024 GPUs, hardware efficiency remains high (high MFU and fast step times), but statistical efficiency collapses because gradient updates become redundant; as a result, total training time and cost to reach target validation loss increase despite high throughput.",
+            "answer": "Hardware efficiency measures how effectively compute capacity produces step throughput after exposed execution overhead. Statistical efficiency measures how effectively processed samples advance learning toward the target quality. A global batch far beyond the critical-batch crossover can keep MFU high while added examples yield diminishing reductions in update count. This can increase the examples and allocated GPU-hours needed to reach the target. Whether wall-clock time also increases depends on achieved throughput and the measured steps to the same target; high throughput alone does not establish either a faster or slower complete run.",
             "learning_objective": "Compare hardware throughput efficiency with statistical sample efficiency in distributed optimization"
           },
           {
             "question_type": "MCQ",
-            "question": "Why does Stale-Synchronous Parallel (SSP) training typically require a smaller effective learning rate than Bulk-Synchronous Parallel (BSP) at the same global batch size?",
+            "question": "Why must the learning-rate schedule be revalidated when moving from Bulk-Synchronous Parallel (BSP) to Stale-Synchronous Parallel (SSP) at the same global batch size?",
             "choices": [
-              "Bounded parameter staleness introduces an optimization error term that destabilizes parameter updates unless damped by a smaller learning rate",
+              "Gradients computed against stale parameters can alter update stability, with effects that depend on delay, objective, and optimizer schedule",
               "SSP workers compute exact full-batch gradients instead of stochastic minibatches",
               "SSP eliminates all inter-GPU network communication, which alters the loss landscape",
               "SSP is mathematically restricted to second-order quasi-Newton optimizers that require small step sizes"
             ],
-            "answer": "The correct answer is A. In SSP, workers compute gradients against parameter snapshots that may lag up to $\\tau_{\\text{stale}}$ steps behind the most recent model state. This staleness introduces a gradient error term proportional to $\\tau_{\\text{stale}} \\cdot \\eta \\cdot \\|\\nabla \\mathcal{L}\\|$; damping the learning rate $\\eta$ is necessary to bound this staleness penalty and prevent divergence. The assertion that SSP computes full-batch gradients is false. The claim that SSP eliminates communication is incorrect because workers still synchronize parameters asynchronously. The claim that SSP is restricted to second-order optimizers is false.",
+            "answer": "The correct answer is A. SSP permits gradients from parameter snapshots that lag behind the current state. Their effect on stability depends on the delay bound, objective, and optimizer schedule; there is no universal staleness penalty or mandatory learning-rate reduction. A smaller learning rate is one candidate to validate by comparing complete runs to the same target quality. SSP still communicates, uses stochastic minibatches, and is not restricted to second-order optimizers.",
             "learning_objective": "Explain the impact of bounded gradient staleness on optimizer stability and learning rate selection"
           },
           {
@@ -222,26 +222,26 @@
           {
             "question_type": "TF",
             "question": "True or False: Scaling data parallelism significantly beyond a model's critical batch size ($B \\gg B^*$) continues to reduce total GPU-hours to reach target loss because additional GPUs always increase processed samples per second.",
-            "answer": "False. Beyond the critical batch size $B^*$, gradient updates become saturated with redundant information, causing sample efficiency (loss reduction per sample) to collapse. While hardware step throughput (samples/sec) may scale with added workers, the total number of samples and FLOPs required to achieve target loss grows disproportionately, increasing total GPU-hours and compute cost.",
+            "answer": "False. Batch growth beyond the critical-batch crossover yields diminishing reductions in updates per added sample. Additional workers may raise sample throughput, but total GPU-hours depend on achieved step time and the measured updates to the same target quality. More GPUs do not guarantee either a cheaper run or a faster one.",
             "learning_objective": "Evaluate the compute cost consequences of scaling data parallelism beyond the critical batch size"
           },
           {
             "question_type": "MCQ",
-            "question": "Why does standard FP8 mixed-precision training pair the E4M3 format for forward-pass activations and weights with the E5M2 format for backward-pass gradients?",
+            "question": "Why does the FP8 recipe described in this chapter pair the E4M3 format for forward-pass activations and weights with the E5M2 format for backward-pass gradients?",
             "choices": [
               "E4M3 has a wider numerical range than E5M2, which prevents gradient underflow during backpropagation",
               "E4M3 provides higher precision (3 mantissa bits, range $\\pm 448$) suitable for bounded activations, while E5M2 provides a wider dynamic range (5 exponent bits, range $\\pm 57344$) necessary for gradients spanning multiple orders of magnitude",
               "E4M3 is an integer format while E5M2 is a floating-point format supported exclusively on CPU hosts",
               "E5M2 requires half the memory bandwidth of E4M3, accelerating the backward pass AllReduce"
             ],
-            "answer": "The correct answer is B. Forward-pass activations and weights follow relatively well-behaved, bounded distributions where higher numerical precision (3 mantissa bits in E4M3) preserves representational accuracy. Backward-pass gradients can vary across many orders of magnitude and require the wider dynamic range of E5M2 (5 exponent bits, representing values up to $\\pm 57344$) to prevent catastrophic overflow and underflow. The assertion that E4M3 has a wider range than E5M2 inverts their specifications. Both E4M3 and E5M2 are 8-bit floating-point formats occupying identical memory footprints (1 byte per element).",
+            "answer": "The correct answer is B. E4M3 provides finer precision, while E5M2 provides a wider representable range. The cited recipe uses these properties for scaled weights/activations and gradients respectively. Tensor distributions and scaling determine suitability; neither format guarantees that all values avoid underflow or overflow. Both are one-byte floating-point formats, so choosing E5M2 rather than E4M3 does not halve wire traffic.",
             "learning_objective": "Compare E4M3 and E5M2 FP8 formats based on numerical range, precision, and training tensor roles"
           },
           {
             "question_type": "SHORT",
             "question": "Explain why per-tensor dynamic scaling is necessary in FP8 distributed training and describe how the scaling factor is computed during execution.",
             "answer": "FP8 scaling maps each tensor into the limited representable range. A simple current-maximum rule uses $S=\\mathrm{FP8}_{\\max}/\\max(|X|)$ before casting, with an appropriate zero-tensor guard. For a product of independently scaled operands, the output must be divided by the product of their scales. Practical policies may use history or smaller scaling blocks; the objective is to balance rounding, underflow, and overflow.",
-            "learning_objective": "Explain how dynamic scaling prevents underflow and overflow in narrow dynamic range FP8 tensors"
+            "learning_objective": "Explain how scaling balances rounding, underflow, and overflow in FP8 tensors"
           },
           {
             "question_type": "TF",
@@ -286,7 +286,7 @@
           {
             "question_type": "SHORT",
             "question": "In a synchronous 1F1B pipeline-parallel training schedule with $p=8$ stages and $m=32$ microbatches, calculate the theoretical pipeline bubble fraction and explain how increasing the microbatch count $m$ affects bubble overhead and activation memory.",
-            "answer": "The bubble fraction is $F_{\\text{bubble}} = \\frac{p-1}{m+p-1} = \\frac{8-1}{32+8-1} = \\frac{7}{39} \\approx 17.9\\%$. Increasing the microbatch count $m$ relative to stage count $p$ drives the bubble fraction down toward zero ($F_{\\text{bubble}} \\to 0$). Under 1F1B scheduling, peak activation memory remains bounded at $\\mathcal{O}(p)$ rather than scaling as $\\mathcal{O}(m \\times p)$, making larger microbatch counts practical.",
+            "answer": "The bubble fraction is $F_{\\text{bubble}} = \\frac{p-1}{m+p-1} = \\frac{8-1}{32+8-1} = \\frac{7}{39} \\approx 17.9\\%$. Increasing the microbatch count $m$ relative to stage count $p$ drives the bubble fraction down toward zero ($F_{\\text{bubble}} \\to 0$). Under 1F1B scheduling, with equal activation sizes per microbatch, peak activation memory per stage is bounded at $\\mathcal{O}(p)$ rather than GPipe's $\\mathcal{O}(m)$, making larger microbatch counts practical.",
             "learning_objective": "Calculate pipeline bubble overhead and explain the role of microbatch count in pipeline utilization"
           },
           {
@@ -297,14 +297,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In a capacity-limited Mixture of Experts (MoE) system using token dropping, what occurs when a hot expert receives more tokens than its allocated buffer capacity determined by the Capacity Factor $C$?",
+            "question": "In a capacity-limited Mixture of Experts (MoE) system using top-1 routing and token dropping, what occurs when a hot expert receives more tokens than its allocated buffer capacity determined by the Capacity Factor $C$?",
             "choices": [
               "Excess tokens are dropped and pass through the MoE layer unprocessed via the residual connection",
               "The expert GPU dynamically allocates host CPU memory over PCIe, halting computation on other ranks",
               "The All-to-All collective automatically pauses until all sibling experts process matching token counts",
               "The extra tokens are rerouted to a random cold expert regardless of gating network weights"
             ],
-            "answer": "The correct answer is A. To prevent memory overflow and load-imbalance stalls on devices hosting popular experts, MoE frameworks enforce a capacity limit $C \\cdot (B \\times S)/E$. When an expert's assigned token count exceeds this buffer, the excess tokens are dropped and bypass the feed-forward computation, flowing directly through the residual connection. Dynamically allocating host CPU memory would stall GPU execution. Collective communication does not pause dynamically for uneven token counts. Rerouting to random unselected experts would violate gating semantics.",
+            "answer": "The correct answer is A. To prevent memory overflow and load-imbalance stalls on devices hosting popular experts, the stated top-1 dropping implementation enforces a capacity limit $C \\cdot (B \\times S)/E$. When an expert's assigned token count exceeds this buffer, the excess tokens are dropped and bypass the feed-forward computation, flowing directly through the residual connection. Dynamically allocating host CPU memory would stall GPU execution. Collective communication does not pause dynamically for uneven token counts. Rerouting to random unselected experts would violate gating semantics.",
             "learning_objective": "Explain the function of the capacity factor and token dropping in distributed MoE routing"
           },
           {
@@ -360,9 +360,9 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Order the three primary communication patterns in hybrid 3D parallelism from highest communication frequency (most frequent) to lowest communication frequency (least frequent):\n(1) Data-parallel AllReduce across replica groups\n(2) Tensor-parallel intra-node AllReduce within transformer blocks\n(3) Pipeline-parallel point-to-point activation transfers across stage boundaries",
-            "answer": "(2) -> (3) -> (1). First, (2) Tensor-parallel intra-node AllReduce occurs multiple times per transformer layer on every forward and backward pass (highest frequency). Next, (3) Pipeline-parallel point-to-point transfers occur once per microbatch at stage boundaries (intermediate frequency). Finally, (1) Data-parallel AllReduce occurs once per global optimizer step (lowest frequency).",
-            "learning_objective": "Rank the communication patterns of 3D parallelism by their temporal frequency across a training step"
+            "question": "For one rank in a balanced 3D layout with eight transformer layers per pipeline stage, 32 microbatches per update, two tensor-parallel reductions per layer in each pass, and one unbucketed data-parallel reduction after accumulation, order these communication patterns by invocation count per update, highest to lowest:\n(1) Data-parallel gradient reduction\n(2) Tensor-parallel reductions\n(3) Pipeline stage-boundary transfers",
+            "answer": "(2) -> (3) -> (1). Tensor reductions recur within each layer of each microbatch. Pipeline transfers recur at stage boundaries for each microbatch. The specified unbucketed data-parallel reduction occurs once after accumulation. This ordering depends on the supplied layer count, schedule, and bucketing; it is not a universal ranking of bandwidth demand or exposed time.",
+            "learning_objective": "Compare communication invocation counts under an explicitly specified hybrid schedule"
           },
           {
             "question_type": "MCQ",
@@ -379,7 +379,7 @@
           {
             "question_type": "TF",
             "question": "True or False: A uniform fat-tree network topology providing equal bisection bandwidth between all node pairs is always more cost-effective than a rail-optimized topology when training large language models with hierarchy-aware 3D parallelism.",
-            "answer": "False. Hierarchy-aware 3D parallelism confines high-frequency tensor parallelism to intra-node NVLink and structures inter-node pipeline and data-parallel traffic along predictable rail dimensions. A rail-optimized topology provides dedicated high-bandwidth rails matching these communication groups at lower hardware and cabling cost, whereas a uniform any-to-any fat-tree over-provisions cross-cluster bisection bandwidth that 3D parallelism does not utilize.",
+            "answer": "False. A rail-optimized fabric can reduce hardware and cabling costs when its connectivity matches the intended pipeline and data-parallel groups. The saving requires a workload and placement comparison; expert All-to-All traffic, mixed jobs, routing constraints, and contention can change the required fabric. Neither topology is always more cost-effective.",
             "learning_objective": "Evaluate how network topology design interacts with hierarchy-aware parallelism communication locality"
           }
         ]
@@ -418,7 +418,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain how Direct Preference Optimization (DPO) simplifies cluster infrastructure compared to PPO, detailing which models and computational phases are eliminated.",
-            "answer": "DPO eliminates the separate reward model and value/critic model entirely, reducing the fleet from four models to two (Policy in training mode and Reference in inference mode), which cuts static parameter memory by 16–48%. Furthermore, DPO eliminates online autoregressive sequence generation and dynamic KV cache storage, transforming the workflow into standard supervised-style batch training over static preference triples $(x, y_w, y_l)$ using pretraining 3D parallelism pipelines.",
+            "answer": "Standard offline DPO removes separate reward and value models and online autoregressive rollouts from the update loop. It trains on fixed preference pairs using a policy and a frozen reference, whose scores may be precomputed. Static-state savings depend on the PPO model sizes and placement. Removing rollout KV state eliminates a generation peak; it does not by itself enlarge update microbatches because both methods still need policy activations and other live buffers.",
             "learning_objective": "Compare the memory and execution pipeline requirements of PPO and DPO alignment architectures"
           },
           {
@@ -467,20 +467,20 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "According to the chapter's parallelism decision framework, which condition indicates that standard DistributedDataParallel (DDP) is the optimal default strategy over FSDP, TP, or PP?",
+            "question": "According to the chapter's parallelism decision framework, which condition indicates that standard DistributedDataParallel (DDP) is a sensible baseline to evaluate over FSDP, TP, or PP?",
             "choices": [
               "The model's single layer weight matrices exceed the HBM capacity of an individual GPU",
               "The cluster is connected by slow 10 Gb/s commodity Ethernet across 1,024 nodes",
               "The entire model state (parameters, gradients, and optimizer state) fits comfortably within single-device memory with sufficient headroom for activations",
               "The model architecture contains sparse Mixture-of-Experts routing layers"
             ],
-            "answer": "The correct answer is C. When full model state (weights, gradients, and optimizer state) fits within single-GPU memory with adequate room for batch activations, standard DDP provides maximum throughput by avoiding the per-layer AllGather/ReduceScatter collective overhead of FSDP and the pipeline bubbles of PP. When single layers exceed GPU memory, tensor parallelism is required. Scaling across slow 10 Gb/s Ethernet lets communication dominate the step, which requires gradient accumulation or high-speed fabrics. Sparse MoE layers require expert parallelism with All-to-All routing.",
+            "answer": "The correct answer is C. Comfortable full-state and activation fit makes DDP a sensible baseline because it avoids sharded parameter reconstruction and pipeline bubbles. Memory fit alone does not prove maximum throughput; exposed communication and useful batch size still need evaluation. An oversized layer makes tensor parallelism a candidate, while offload or recomputation may enable other layouts. Slow Ethernet requires a workload-specific communication budget; accumulation or a faster fabric may help. Sparse MoE routing motivates evaluating expert placement and its All-to-All demand.",
             "learning_objective": "Identify the binding constraint criteria that validate using standard Data Parallelism"
           },
           {
             "question_type": "SHORT",
-            "question": "An engineering team observes that an 8-GPU training job using pure pipeline parallelism achieves only 35 percent Model Flops Utilization (MFU), while interconnect links are largely idle. Diagnosing the issue with the bubble formula $F_{\\text{bubble}} = \\frac{p-1}{m+p-1}$, explain the root cause and propose two concrete adjustments to recover throughput.",
-            "answer": "The low utilization is caused by pipeline bubble overhead, where GPUs idle during pipeline fill and drain phases because too few microbatches ($m$) are scheduled relative to the stage depth ($p$). To recover throughput, the team can: (1) increase the microbatch count $m$ (using 1F1B scheduling to keep peak activation memory bounded), and (2) reduce the pipeline stage count $p$ by switching intra-node GPUs to tensor parallelism.",
+            "question": "An engineering team observes that an 8-GPU training job using pure pipeline parallelism achieves only 35 percent Model Flops Utilization (MFU), while interconnect links are largely idle. Using the bubble formula $F_{\\text{bubble}} = \\frac{p-1}{m+p-1}$, explain how to assess the pipeline-bubble hypothesis and propose two adjustments if the trace confirms it.",
+            "answer": "Low MFU and idle interconnect links make pipeline bubbles a candidate, but they do not prove the cause. Measure stage timelines and the microbatch count, and compare observed fill/drain idle slots with the bubble formula. Stage imbalance, input stalls, or inefficient local kernels can also lower MFU. If bubbles bind, increasing microbatch count can reduce their fraction, subject to activation memory and useful global batch size. Reducing stage count can also help when the revised memory budget fits; replacing some intra-node stages with tensor parallelism additionally requires a suitable communication budget.",
             "learning_objective": "Analyze pipeline bubble underutilization and propose architectural remedies"
           },
           {
@@ -530,7 +530,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain why framework optimizations such as CUDA graphs and asynchronous communication streams cannot eliminate the physical scaling penalty of distributed training as the cluster size $N$ becomes very large.",
-            "answer": "While framework optimizations eliminate CPU launch overheads and overlap non-dependent transfers, they cannot change the underlying communication-computation ratio $\\rho = T_{\\text{comm}}(N) / (T_{\\text{compute}}/N)$. As $N \\to \\infty$, per-worker computation time shrinks toward zero while collective communication volume and physical interconnect latency remain non-zero, making network transfer the dominant term in step time and capping speedup according to Amdahl's Law.",
+            "answer": "Framework optimizations can reduce launch overhead and change readiness, overlap, and effective communication service time. They cannot make a required payload cross a finite-bandwidth link instantaneously. At fixed global work, adding ranks reduces local compute while required transfers and coordination can remain exposed. A scaling prediction therefore needs the actual workload, collective schedule, and critical path; a fixed-residual Amdahl ceiling applies only under that model’s assumptions.",
             "learning_objective": "Evaluate the physical limits of framework-level communication optimizations"
           }
         ]
@@ -565,7 +565,7 @@
               "12.5 percent of peak compute (delivering 128 GPU-equivalents of useful work)"
             ],
             "answer": "The correct answer is A. Starting from the single-node MFU baseline, the distributed model-FLOP rate is $0.50\\times0.50=0.25$ of fleet peak, or 256 peak-GPU equivalents. The scaling factor accounts for losses relative to that baseline. A measured distributed MFU would already include those losses and must not be multiplied by scaling efficiency again. Retained-progress goodput additionally requires accounting for replay and recovery outside this measurement.",
-            "learning_objective": "Calculate cluster goodput by composing hardware MFU with scaling efficiency"
+            "learning_objective": "Calculate distributed model-FLOP rate from a local MFU baseline and scaling efficiency without double-counting losses"
           },
           {
             "question_type": "SHORT",
@@ -578,11 +578,11 @@
             "question": "Why is gradient accumulation NOT a cost-free substitute for true physical scale-out even though it reduces gradient AllReduce communication frequency by a factor of $k$?",
             "choices": [
               "It is mathematically incompatible with the Adam optimizer",
-              "It requires keeping live gradient buffers resident in HBM, increases optimizer update latency by $k\\times$, and risks FP16 numerical overflow when summing hundreds of gradient tensors",
+              "It keeps a live gradient buffer resident, spaces optimizer updates by $k$ microsteps, and requires appropriate accumulation precision and normalization",
               "It requires dedicated InfiniBand links between CPU and GPU for each microstep",
               "It forces batch normalization layers to synchronize across all nodes on every forward pass"
             ],
-            "answer": "The correct answer is B. Gradient accumulation requires keeping a live gradient buffer resident in HBM throughout the accumulation window, delays parameter updates by $k$ forward/backward steps (slowing convergence dynamics), and risks numerical overflow when repeatedly accumulating unscaled FP16 values in early training. Gradient accumulation is fully compatible with Adam. It does not require special CPU-GPU InfiniBand links. It does not force cross-node batch normalization synchronization.",
+            "answer": "The correct answer is B. One optimizer update follows $k$ forward/backward microsteps, but this does not imply $k$ times the wall-clock update latency: saved synchronization and the comparison schedule affect elapsed time. A live gradient buffer remains resident during the window. Unscaled FP16 accumulation can overflow; accumulation precision and loss normalization must preserve the intended update. Changes in effective batch size must be evaluated at matched target quality. Accumulation is compatible with Adam and requires neither special CPU-GPU links nor mandatory cross-node batch normalization.",
             "learning_objective": "Analyze the memory, latency, and numerical stability trade-offs of gradient accumulation"
           },
           {
@@ -632,13 +632,13 @@
           {
             "question_type": "SHORT",
             "question": "Contrast the primary partitioning strategy and binding hardware bottleneck for Archetype A (GPT-4/Llama-3) versus Archetype B (DLRM at Scale).",
-            "answer": "Archetype A (GPT-4/Llama-3) uses Hybrid 3D Parallelism (Tensor, Pipeline, and Data Parallelism) and is bound by GPU compute throughput and high-bandwidth interconnects (NVLink and InfiniBand). Archetype B (DLRM at Scale) uses Embedding Sharding across Parameter Server architectures and is bound by aggregate memory capacity (terabytes of DRAM/HBM) and random-access memory latency for sparse lookups rather than dense compute.",
+            "answer": "Dense language-model training can combine tensor, pipeline, and data parallelism with state sharding to meet memory, compute, and communication budgets. DLRM partitions large embedding tables across parameter servers or accelerator shards and exchanges rows selected by each batch. Capacity, random-access service, and skewed lookup traffic can bind; dense layer reductions are a different demand. The binding resource must be measured for the actual configuration.",
             "learning_objective": "Compare distributed training archetypes by their primary partitioning strategy and binding hardware bottleneck"
           },
           {
             "question_type": "SHORT",
             "question": "Explain why data, pipeline, and tensor parallelism are treated as orthogonal scaling dimensions rather than mutually exclusive strategies in the 3D Parallelism Cube, and provide an example configuration that combines them.",
-            "answer": "Data, pipeline, and tensor parallelism partition different dimensions of the workload (batch dimension, model depth across layers, and intra-layer tensor operations, respectively). Because they address independent bottlenecks (throughput, depth-induced memory, and operator-level memory), they compose multiplicatively ($N_{\\text{total}} = d \\times p \\times t$). For example, a frontier training run may use $\\text{TP}=8$ within NVLink nodes, $\\text{PP}=16$ across nodes over InfiniBand, and $\\text{DP}=128$ across the cluster to balance memory, latency, and global batch throughput.",
+            "answer": "Data, pipeline, and tensor parallelism partition different dimensions of the workload (batch dimension, model depth across layers, and intra-layer tensor operations, respectively). Their coordinate counts compose multiplicatively, while their degrees remain coupled through memory, communication, scheduling, and useful global batch size ($N_{\\text{total}} = d \\times p \\times t$). For example, a frontier training run may use $\\text{TP}=8$ within NVLink nodes, $\\text{PP}=16$ across nodes over InfiniBand, and $\\text{DP}=128$ across the cluster to balance memory, latency, and global batch throughput.",
             "learning_objective": "Evaluate the orthogonal composability of the 3D parallelism cube axes"
           }
         ]

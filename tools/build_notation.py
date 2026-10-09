@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Emit LaTeX macros for MLSysBook from MLSysIM Notation registry."""
 import sys
+from html import escape
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -36,11 +37,12 @@ html_lines = [
     "<div style=\"display: none;\">",
     "$$",
 ]
+# Macro definitions are HTML text, not markup; MathJax reads their decoded TeX.
 for s in Notation.list():
-    html_lines.append(f"\\newcommand{{{s.macro}}}{{{s.latex}}}")
+    html_lines.append(escape(f"\\newcommand{{{s.macro}}}{{{s.latex}}}", quote=False))
 for alias, canonical in COMPATIBILITY_ALIASES.items():
-    html_lines.append(f"\\newcommand{{{alias}}}{{{canonical}}}")
-html_lines.append("\\newcommand{\\Glyph}[1]{#1}")
+    html_lines.append(escape(f"\\newcommand{{{alias}}}{{{canonical}}}", quote=False))
+html_lines.append(escape("\\newcommand{\\Glyph}[1]{#1}", quote=False))
 html_lines.extend(["$$", "</div>", ""])
 
 macros_html_path = PROJECT_ROOT / "books/shared/_includes/_macros.html"

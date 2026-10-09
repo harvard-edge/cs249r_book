@@ -40,9 +40,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "An operation has an arithmetic intensity of 200 FLOP/byte. On an NVIDIA V100 (ridge point $\\approx 139\\text{ FLOP/byte}$) and an H100 (ridge point $\\approx 295\\text{ FLOP/byte}$), how does the workload's operational bottleneck shift across generations, and what is the primary systems implication for performance optimization?",
-            "answer": "The operation shifts from being compute-bound on the V100 (since $200 > 139$) to memory-bound on the H100 (since $200 < 295$). The systems implication is that compute optimizations (such as improving instruction scheduling) are sufficient on V100, but memory-reduction techniques (such as operator fusion, tiling, and precision quantization) become mandatory on H100 to achieve higher throughput because compute throughput grew ($7.9\\times$) much faster than memory bandwidth ($3.7\\times$).",
-            "learning_objective": "Analyze how generational shifts in hardware balance points change the active performance bottleneck of ML workloads"
+            "question": "An operation has an arithmetic intensity of 200 FLOP/byte. On an NVIDIA V100 (ridge point $\\approx 139\\text{ FLOP/byte}$) and an H100 (ridge point $\\approx 295\\text{ FLOP/byte}$), how does the tighter roofline ceiling change across generations, and what is the primary systems implication for performance optimization?",
+            "answer": "At fixed intensity, the tighter ideal ceiling changes from compute on V100 (200 > 139 FLOP/byte) to bandwidth on H100 (200 < 295 FLOP/byte). This identifies candidate limits, not an observed bottleneck. Measure kernel traffic and execution first; fusion, tiling, or precision reduction can raise the bandwidth ceiling, while dependencies, launch costs, or inefficient scheduling can keep either implementation below its roofline.",
+            "learning_objective": "Analyze how generational hardware balance changes a workload’s tighter ideal ceiling and the evidence needed to diagnose execution."
           },
           {
             "question_type": "ORDER",
@@ -95,15 +95,15 @@
             "choices": [
               "Prefill generates tokens sequentially one by one, making it memory-bound by weight reads, whereas decode processes all prompt tokens in parallel, making it compute-bound by Tensor Cores",
               "Prefill relies exclusively on integer arithmetic units, whereas decode requires floating-point matrix multiplication units",
-              "Prefill processes all prompt tokens in parallel via large GEMMs, achieving high arithmetic intensity and compute-bound Tensor Core execution, whereas single-request decode reads all model weights to generate a single token, operating deep in the memory-bound regime",
+              "Long-prompt prefill GEMMs reuse weights across prompt tokens and can have a compute ceiling, whereas weight-dominated single-request decode has low intensity and a bandwidth ceiling",
               "Prefill requires continuous network AllToAll collective exchanges between GPUs, whereas decode requires no inter-GPU communication"
             ],
-            "answer": "The correct answer is C. Prefill processes all prompt tokens in parallel via large GEMMs, achieving high arithmetic intensity and compute-bound Tensor Core execution, whereas single-request decode reads all model weights to generate a single token, operating deep in the memory-bound regime. For a prompt of $S=1024$ tokens, prefill executes a matrix multiplication of shape $[S, d_{\\text{model}}] \\times [d_{\\text{model}}, d_{\\text{model}}]$, achieving an arithmetic intensity of $\\sim 1024\\text{ FLOP/byte}$ for FP16 weights, which saturates Tensor Cores. In contrast, batch-1 autoregressive decode reads the entire weight tensor to compute a single output token, giving an arithmetic intensity of $\\sim 1\\text{ FLOP/byte}$, which leaves Tensor Cores mostly idle while waiting for HBM bandwidth. The other choices invert the phases, falsely claim differing arithmetic types, or fabricate communication differences.",
+            "answer": "The correct answer is C. Long-prompt prefill GEMMs can reuse weights across many prompt tokens, while single-request decode streams weights for one token. The simplified FP16 estimates place those components above and below the ridge, respectively. Neither estimate proves saturation or classifies every operator: actual traffic, kernel shapes, cache reads, dispatch, and communication require profiling. The phases use compatible arithmetic rather than exclusively different number types.",
             "learning_objective": "Compare the computational characteristics and primary hardware bottlenecks of the prefill and decode serving phases"
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how PagedAttention enables a 2–4$\\times$ throughput improvement in LLM serving without modifying model weights or numerical precision, contrasting its memory allocation mechanism with traditional contiguous preallocation.",
+            "question": "Explain how PagedAttention reduces KV-cache allocation waste compared with contiguous preallocation. What measurements determine whether the recovered capacity improves serving throughput?",
             "answer": "Contiguous preallocation reserves capacity for each request's maximum length, leaving unused slots when sequences are shorter. PagedAttention allocates fixed-size blocks as sequences grow and reuses free blocks across requests, sharply reducing allocation waste, though a final partly filled block can remain. The recovered capacity permits larger batches; reported 2–4-fold throughput gains depend on the workload and latency constraint rather than following automatically from paging.",
             "learning_objective": "Explain how paged allocation reduces KV fragmentation and can expand batch capacity."
           },
@@ -161,7 +161,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Using the 4-level profiling hierarchy (Application, Distributed/Communication, Trace/Timeline, Operation/Hardware Counters), describe the step-by-step drill-down sequence an engineer should use to diagnose an LLM serving pipeline that misses its P99 latency SLA.",
+            "question": "Using the application-to-hardware profiling hierarchy, describe the drill-down an engineer should use to diagnose an LLM serving pipeline that misses its p99 latency objective. Explain where synchronized traces across ranks enter the investigation.",
             "answer": "Start with application metrics such as P99 first-token and inter-token latency. Use framework traces across ranks to localize scheduling, data-transfer, or collective delays. Inspect kernel timelines to distinguish launch gaps, late arrival, and serialized work. Finally, use hardware counters on the implicated kernel to test memory bandwidth, occupancy, and instruction mix. Distributed scope cuts across this application-to-hardware hierarchy; it is not a separate fixed level.",
             "learning_objective": "Synthesize a structured multi-level profiling diagnostic protocol to isolate performance bottlenecks"
           },
@@ -202,10 +202,10 @@
             "Fleet MFU vs Local MFU and the Scaling Tax",
             "Small-scale canaries, fleet baselines, and gray failure detection",
             "Straggler amplification in synchronous distributed systems",
-            "Hero run tax: MLPerf benchmarks vs production realities"
+            "Aligned-rank evidence distinguishing late arrival from prolonged collective completion"
           ],
-          "question_strategy": "Calculate the Scaling Tax across a 128-GPU cluster in an MCQ, explain straggler amplification from a single gray failure node in a SHORT question, test benchmark terminology in a FILL question, and evaluate regression testing tiers in an MCQ.",
-          "difficulty_progression": "Quantitative scaling tax calculation -> distributed straggler mechanics -> terminology recall -> regression testing strategy.",
+          "question_strategy": "Calculate the Scaling Tax across a 128-GPU cluster in an MCQ, explain straggler amplification from a single gray failure node in a SHORT question, interpret synchronized rank arrival and completion times in a SHORT question, and evaluate regression testing tiers in an MCQ.",
+          "difficulty_progression": "Quantitative scaling tax calculation -> distributed straggler mechanics -> causal trace interpretation -> regression testing strategy.",
           "integration": "Scales node-level profiling to thousands of accelerators, addressing network jitter, multi-node stragglers, and fleet telemetry.",
           "ranking_explanation": "Crucial section bridging single-node engineering to fleet-scale distributed infrastructure."
         },
@@ -217,9 +217,9 @@
               "17.0% Scaling Tax, calculated as the direct difference ($65\\% - 48\\%$)",
               "35.4% Scaling Tax, calculated as the ratio of unutilized compute ($1 - 0.48 / 0.65$)",
               "52.0% Scaling Tax, representing the unutilized fraction of the 128 GPUs",
-              "Approximately 26.2% Scaling Tax ($1 - \\text{Fleet MFU} / \\text{Local MFU} = 1 - 0.48 / 0.65$), representing the fraction of single-node efficiency lost to inter-node communication and barrier synchronization"
+              "Approximately 26.2% Scaling Tax ($1 - \\text{Fleet MFU} / \\text{Local MFU} = 1 - 0.48 / 0.65$), representing the relative efficiency loss compared with the single-node baseline"
             ],
-            "answer": "The correct answer is D. Approximately 26.2% Scaling Tax ($1 - \\text{Fleet MFU} / \\text{Local MFU} = 1 - 0.48 / 0.65$), representing the fraction of single-node efficiency lost to inter-node communication and barrier synchronization. The Scaling Tax measures the relative loss of efficiency when transitioning from a local node baseline to multi-node scale: $\\text{Scaling Tax} = 1 - (\\text{MFU}_{\\text{fleet}} / \\text{MFU}_{\\text{local}}) = 1 - (0.48 / 0.65) = 1 - 0.7385 \\approx 26.2\\%$. Reporting raw percentage-point differences ($65\\% - 48\\% = 17\\%$) confuses absolute percentage points with relative scaling efficiency loss.",
+            "answer": "The correct answer is D. The relative MFU loss is 1 - 0.48/0.65 ≈ 26.2%; the 17-point difference is an absolute percentage-point change. The ratio measures efficiency loss under the stated workload and accounting assumptions. It does not isolate communication or barriers: matched traces must distinguish those costs from workload shape, offload, kernel efficiency, and rank imbalance.",
             "learning_objective": "Calculate and interpret the distributed Scaling Tax from single-node and fleet-wide MFU metrics"
           },
           {
@@ -229,10 +229,10 @@
             "learning_objective": "Analyze how barrier synchronization amplifies single-node gray failures and stragglers into cluster-wide throughput collapses"
           },
           {
-            "question_type": "FILL",
-            "question": "The 10–20% throughput gap between highly tuned, unmonitored benchmark configurations (such as MLPerf) and real-world production clusters burdened by checkpointing, health heartbeats, logging, and thermal entropy is known as the ____ run tax.",
-            "answer": "hero. Benchmark configurations can exclude production duties such as checkpointing and monitoring. Capacity planning must measure that gap under the actual operating workload rather than assume a fixed percentage.",
-            "learning_objective": "Identify the industry term describing the efficiency gap between idealized benchmark runs and production deployments"
+            "question_type": "SHORT",
+            "question": "Synchronized clocks record the same collective in otherwise matched runs. In the baseline, every rank enters at 8 ms and all finish at 10 ms. In case A, all but one rank enter at 8 ms, the last enters at 12 ms, and all finish at 14 ms. In case B, every rank enters at 8 ms and all finish at 14 ms. What interval accounts for the extra completion time in each case, and what measurement and targeted experiment would help distinguish the causes?",
+            "answer": "Case A adds 4 ms before the last rank enters; completion remains 2 ms after that entry. Trace the delayed rank’s preceding computation, input, and host work, then test the implicated delay with the collective configuration held fixed. Case B extends the interval after all ranks enter from 2 ms to 6 ms. Inspect collective progress and contention, then repeat with competing traffic isolated. The trace localizes the exposed delay but does not alone prove a network fault.",
+            "learning_objective": "Diagnose supplied aligned-rank traces and justify measurements that distinguish late arrival from prolonged collective completion."
           },
           {
             "question_type": "MCQ",
@@ -258,7 +258,7 @@
           "focus_areas": [
             "Intermediate HBM traffic reduction from fusion",
             "Categories of fusion (element-wise, reduction, operator-specific)",
-            "CUDA Graphs eliminating CPU launch latency and determinism constraints",
+            "CUDA Graph replay reducing repeated submission under capture and storage constraints",
             "FlashAttention online softmax tiling and algorithmic FLOP trade-offs"
           ],
           "question_strategy": "Order the steps of online softmax, examine CUDA Graph execution constraints, probe FlashAttention's I/O-aware FLOP vs memory trade-off, clarify CUDA Graph fusion misconceptions, and evaluate HBM traffic savings in an operator fusion chain.",
@@ -277,7 +277,7 @@
             "question_type": "MCQ",
             "question": "Why are CUDA Graphs highly effective at accelerating the autoregressive decode phase of Large Language Models, but significantly more difficult to apply to the prompt prefill phase?",
             "choices": [
-              "CUDA Graphs require deterministic execution with fixed tensor shapes and static memory allocations, which matches the repetitive token-by-token decode loop but conflicts with dynamic, variable-length prefill prompts",
+              "CUDA Graph replay requires capture-compatible work and valid referenced storage; repetitive decode shapes often allow more reuse than variable-length prefill shapes",
               "CUDA Graphs only support integer quantization kernels and cannot record floating-point matrix multiplications used during prefill",
               "CUDA Graphs execute exclusively on CPU cores and cannot capture GPU kernels that exceed 1000 TFLOP/s",
               "CUDA Graphs require disaggregated serving network fabrics to replay kernel dispatches across multiple nodes"
@@ -287,14 +287,14 @@
           },
           {
             "question_type": "SHORT",
-            "question": "FlashAttention performs strictly MORE total floating-point operations (FLOPs) than standard unfused attention due to online softmax rescaling. Explain the systems principle that allows FlashAttention to achieve a 2–4$\\times$ wall-clock speedup despite executing more arithmetic.",
+            "question": "Explain how tiled attention can improve runtime even when online softmax rescaling or backward recomputation adds arithmetic. Why do removed HBM transfers alone not establish a fixed wall-clock speedup?",
             "answer": "Standard unfused attention materializes score and probability matrices in HBM. FlashAttention tiles the computation so these intermediates remain on chip. Extra rescaling arithmetic can be cheaper than the removed HBM traffic when data movement is the bottleneck. The additional work is not literally free or necessarily executed on Tensor Cores; the net gain depends on sequence length, kernel implementation, and the resulting resource limits.",
             "learning_objective": "Analyze the I/O-aware systems trade-off of trading extra arithmetic operations in SRAM to eliminate off-chip HBM traffic"
           },
           {
             "question_type": "TF",
             "question": "True or False: Wrapping an unfused PyTorch layer in a CUDA Graph automatically fuses adjacent element-wise kernels into a single GPU kernel to eliminate intermediate high-bandwidth memory (HBM) writes.",
-            "answer": "False. CUDA Graphs only eliminate CPU-side launch latency and dispatch overhead by recording and replaying a static graph of kernel launches in a single CPU command. CUDA Graphs do not inspect, rewrite, or fuse GPU kernel code; eliminating intermediate HBM writes requires operator fusion via compilers (like `torch.compile` / TorchInductor) or custom hand-written Triton/CUDA kernels.",
+            "answer": "False. Graph replay reduces repeated host submission for a captured kernel sequence; it does not itself fuse kernels or eliminate every launch and synchronization cost. Removing intermediate HBM transfers requires a supported fusion transformation or a custom kernel. The measured end-to-end saving depends on how much submission overhead was exposed.",
             "learning_objective": "Distinguish between launch-overhead elimination via CUDA Graphs and memory-traffic reduction via operator fusion"
           },
           {
@@ -350,7 +350,7 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: In block-wise INT4 quantization, reducing the group block size $G_{\\text{block}}$ from 64 to 16 reduces quantization error but quadruples the scale-factor metadata overhead from 0.25 bits/weight (6.25% overhead on INT4) to 1.0 bit/weight (25% overhead on INT4).",
+            "question": "True or False: In block-wise INT4 quantization, reducing the group block size $G_{\\text{block}}$ from 64 to 16 can improve local range resolution but quadruples the scale-factor metadata overhead from 0.25 bits/weight (6.25% overhead on INT4) to 1.0 bit/weight (25% overhead on INT4).",
             "answer": "True. With block-wise quantization, each group of $G_{\\text{block}}$ weights shares one 16-bit FP16 scale factor. For $G_{\\text{block}} = 64$, the scale adds $16/64 = 0.25$ bits per weight (a $0.25/4 = 6.25\\%$ overhead relative to 4-bit payload). For $G_{\\text{block}} = 16$, the scale adds $16/16 = 1.0$ bit per weight (a $1.0/4 = 25\\%$ overhead relative to 4-bit payload), yielding an effective bit-width of 5.0 bits/weight.",
             "learning_objective": "Calculate the metadata overhead and effective bit-width scaling of block-wise quantization group sizes"
           },
@@ -408,27 +408,27 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A 13B model in PyTorch eager mode spends 50% of step time in GEMMs (4.17 ms), 35% in element-wise operations (2.92 ms), and 15% in kernel launch overhead (1.25 ms), totaling 8.33 ms per token (120 tokens/s). Applying `torch.compile` eliminates 80% of launch overhead and reduces element-wise time by 70% via fusion while leaving GEMM time unchanged. Calculate the new step time, the resulting throughput, and identify the new dominant bottleneck.",
-            "answer": "New GEMM time = 4.17 ms. New element-wise time = $2.92 \\times (1 - 0.70) = 0.88\\text{ ms}$. New launch overhead = $1.25 \\times (1 - 0.80) = 0.25\\text{ ms}$. New total step time = $4.17 + 0.88 + 0.25 = 5.30\\text{ ms}$, yielding a throughput of $1000 / 5.30 \\approx 189\\text{ tokens/s}$ (a $1.58\\times$ speedup). The new dominant bottleneck is the GEMM computation itself, which now accounts for $4.17 / 5.30 \\approx 79\\%$ of total step time.",
-            "learning_objective": "Calculate the quantitative throughput speedup and identify the new dominant bottleneck resulting from compiler fusion and launch overhead reduction"
+            "question": "A constructed batch-one budget for a 13B model stored in INT4 with FP16 arithmetic after dequantization assigns 50% of step time to GEMMs (4.17 ms), 35% to element-wise operations (2.92 ms), and 15% to launch overhead (1.25 ms), approximately 8.33 ms per token (120 tokens/s). Assume compilation removes 80% of launch overhead and reduces element-wise time by 70%, leaving GEMM time unchanged. Calculate the new time and throughput, and identify the next interval to inspect.",
+            "answer": "The remaining intervals are 4.17 ms GEMM, about 0.88 ms element-wise work, and 0.25 ms launch overhead, totaling approximately 5.30 ms, or 189 tokens/s. Rounded inputs account for the small difference in the displayed baseline sum. GEMM now occupies about 79% of the budget, making it the next interval to inspect; counters and traces must determine whether its exposed cost is compute, memory traffic, or implementation inefficiency.",
+            "learning_objective": "Calculate a constructed compilation dividend and identify the next interval requiring diagnosis."
           },
           {
             "question_type": "FILL",
-            "question": "In `torch.compile`, the compilation mode that exhaustively benchmarks multiple candidate tile sizes, thread block configurations, and memory access patterns on the target GPU to select the fastest implementation is called ____.",
+            "question": "In `torch.compile`, the compilation mode that expands the search over supported kernel implementations, trading additional build work for potential warmed-execution gains, is called ____.",
             "answer": "max-autotune. This mode benchmarks candidate implementations and retains a fast choice for the target workload and hardware, trading compilation work for subsequent execution efficiency.",
             "learning_objective": "Identify the torch.compile configuration mode responsible for hardware kernel autotuning"
           },
           {
             "question_type": "MCQ",
-            "question": "How does XLA's whole-program compilation model (used in JAX/TPU workflows) differ fundamentally from PyTorch's `torch.compile` TorchDynamo tracing approach, and what is the primary operational trade-off?",
+            "question": "How does XLA optimization within a selected compiled region differ from eager execution boundaries, and what specialization trade-off must a deployment account for?",
             "choices": [
               "XLA generates Python bytecode on every forward pass, trading compilation speed for execution latency",
-              "XLA enforces a static whole-program graph, enabling global cross-layer optimizations and automated GSPMD distributed sharding at the cost of multi-minute compilation times and shape-change recompilations",
+              "XLA optimizes across a selected compiled region and can insert GSPMD communication; new signatures can require specialization, while cached signatures can reuse executables",
               "XLA executes only on CPU hosts, whereas TorchDynamo compiles directly to TPU hardware",
               "XLA requires dynamic shapes and cannot optimize static tensor dimensions"
             ],
-            "answer": "The correct answer is B. XLA enforces a static whole-program graph, enabling global cross-layer optimizations and automated GSPMD distributed sharding at the cost of multi-minute compilation times and shape-change recompilations. XLA treats the entire program as a static DAG, enabling systolic array dimension padding ($128 \\times 128$ TPU units) and automatic collective insertion (GSPMD), achieving 55–65% MFU on production training. However, any change in batch size or sequence length triggers expensive recompilations. TorchDynamo prioritizes dynamic Python agility, using bytecode interception and graph breaks to compile subgraphs with minimal startup latency. The other options state false claims about CPU execution or dynamic shape requirements.",
-            "learning_objective": "Compare whole-program static compilation in XLA with incremental bytecode tracing in TorchDynamo"
+            "answer": "The correct answer is B. XLA can optimize across operations within a selected region and derive communication from sharding annotations. Compilation and specialization costs depend on that region and its signatures; previously compiled signatures can reuse cached executables. It need not capture all host activity, and it supports accelerator backends as well as CPUs. Measure build cost and reuse rather than assuming every shape change recompiles the entire application.",
+            "learning_objective": "Analyze compiled-region scope, specialization cost, and artifact reuse."
           }
         ]
       }
@@ -512,18 +512,18 @@
             "question_type": "MCQ",
             "question": "Under the exposed-time formulation of communication-computation overlap ($T_{\\text{step}} = \\max(T_{\\text{compute}}, T_{\\text{comm}}) + T_{\\text{sync}}$), what physical condition is required to achieve 100% communication hiding (zero exposed communication time)?",
             "choices": [
-              "$T_{\\text{comm}} \\leq T_{\\text{compute}}$, meaning the network data transfer duration is fully bounded within the concurrent local GPU compute window",
+              "$T_{\\text{comm}} \\leq T_{\\text{compute}}$, a necessary duration condition; full hiding additionally requires timely independent work and tolerable resource interference",
               "$T_{\\text{comm}} = 0$, requiring all distributed GPUs to share a single physical HBM memory controller",
               "$T_{\\text{compute}} = 0$, requiring the GPU to execute collective operations without running backward pass gradients",
               "$T_{\\text{comm}} \\ge 2 \\times T_{\\text{compute}}$, ensuring communication has priority over SM scheduling"
             ],
-            "answer": "The correct answer is A. $T_{\\text{comm}} \\leq T_{\\text{compute}}$, meaning the network data transfer duration is fully bounded within the concurrent local GPU compute window. Overlap removes communication from the critical path only when local computation takes longer than the concurrent network collective ($T_{\\text{comm}} - T_{\\text{overlap}} \\le 0$). When $T_{\\text{comm}} > T_{\\text{compute}}$ (as often occurs across slow inter-node Ethernet or when scaling to 1024 GPUs), the excess communication $(T_{\\text{comm}} - T_{\\text{compute}})$ remains exposed and stalls the step. The other choices describe physically impossible zero-time assumptions or inverted conditions.",
+            "answer": "The correct answer is A. Communication duration must fit within the available independent-compute window. This duration condition is necessary, not sufficient: dependencies must make that work ready in time, and resource contention must not erase the gain. If communication outlasts the window, some remains exposed. Neither zero-time communication nor giving collectives scheduling priority establishes useful overlap.",
             "learning_objective": "Apply the exposed-time test to determine whether inter-device communication is fully hidden behind concurrent computation"
           },
           {
             "question_type": "SHORT",
-            "question": "Describe the physical mechanism of 'SM Partitioning' when running concurrent compute and NCCL communication streams on an accelerator like the NVIDIA H100, and explain why a 3–6% compute throughput penalty is considered an acceptable trade-off.",
-            "answer": "Some communication implementations use SM resources that would otherwise execute GEMMs. Reserving resources can therefore reduce local compute throughput while allowing collective transfers to overlap useful computation. A few percent compute penalty is worthwhile only if the reduction in exposed communication is larger; SM counts and the benefit depend on the collective, transport, hardware, and workload rather than a fixed universal reservation.",
+            "question": "Explain how concurrent GEMM and NCCL streams can contend for an accelerator’s SMs and memory bandwidth. Under what measured condition is a reduction in local compute throughput worthwhile?",
+            "answer": "Communication kernels can consume execution, cache, and bandwidth resources that the GEMM also needs. Temporal overlap can therefore slow local computation. The trade-off is worthwhile only when the communication time removed from the critical path exceeds the added slowdown and the end-to-end workload improves. A fixed SM reservation or universal percentage penalty cannot establish that condition.",
             "learning_objective": "Explain the physical resource contention mechanism of SM partitioning during concurrent compute and communication execution"
           },
           {
@@ -534,8 +534,8 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: In multi-stream CUDA programming, launching an asynchronous memory copy or NCCL collective on a side stream without explicit `event.record()` and `event.wait()` synchronization against the default stream can cause silent data corruption because the collective may read tensors before the producing kernel finishes writing them.",
-            "answer": "True. CUDA streams execute sequentially internally, but operations across different streams execute concurrently without implicit order. If a kernel on Stream A writes a tensor and Stream B launches an AllReduce reading that tensor without an explicit `cudaEventRecord` on Stream A and `cudaStreamWaitEvent` on Stream B, the GPU hardware scheduler may execute the read before the write completes, causing silent data races.",
+            "question": "True or False: If a side-stream collective reads a tensor before its producing kernel completes, missing producer-consumer ordering can cause a data race even though each stream executes its own operations in order.",
+            "answer": "True. Per-stream order does not establish order between a producer and consumer on different streams. An event wait, an appropriate stream wait, or equivalent ordering must establish readiness; storage lifetime must also remain valid. Concurrency is safe only after both obligations hold.",
             "learning_objective": "Analyze multi-stream CUDA synchronization hazards and data race conditions"
           }
         ]
@@ -625,15 +625,15 @@
               "The fallacy that H100 GPUs cannot execute FP16 operations without INT4 emulation",
               "The fallacy that Python cannot run on Hopper-architecture accelerators",
               "The fallacy that PyTorch profiler traces disable GPU Tensor Cores during inference",
-              "The fallacy that raw compute capacity dictates inference speed: batch-1 decode is bound by HBM memory bandwidth (~1 FLOP/byte), so doubling compute FLOP/s yields negligible speedup when memory bandwidth grows much more modestly"
+              "The fallacy that peak arithmetic alone predicts decode latency; low-intensity weight streaming has a bandwidth ceiling, and other exposed costs can limit the observed gain"
             ],
-            "answer": "The correct answer is D. The fallacy that raw compute capacity dictates inference speed: batch-1 decode is bound by HBM memory bandwidth (~1 FLOP/byte), so doubling compute FLOP/s yields negligible speedup when memory bandwidth grows much more modestly. Roofline analysis shows that batch-1 decode operates deep in the memory-bound regime. An H100 offers $\\sim 3.35\\text{ TB/s}$ bandwidth compared to A100's $\\sim 2.0\\text{ TB/s}$ ($1.67\\times$ bandwidth increase), whereas compute increased $3.16\\times$. Token generation rate is governed by how fast weights are read from memory ($D_{\\text{vol}}/\\text{BW}$), not peak FLOP/s. Expecting compute ratings to dictate decode speed ignores the memory wall. The other choices present absurd claims about driver incompatibilities or disabled Tensor Cores.",
+            "answer": "The correct answer is D. Peak arithmetic does not predict weight-dominated decode: its low intensity gives a bandwidth ceiling. A higher advertised bandwidth raises that ideal ceiling but does not establish the supplied 15% observed latency improvement. Matched traces must check achieved bandwidth, cache behavior, launch overhead, and communication; these unchanged or inefficient intervals can limit the realized gain.",
             "learning_objective": "Analyze the fallacy of using peak arithmetic FLOP/s ratings to project memory-bandwidth-bound inference performance"
           },
           {
             "question_type": "SHORT",
             "question": "Explain why evaluating LLM serving performance purely on average inter-token latency can mask severe production failures, and describe two specific systems engineering techniques used to optimize P99 tail latency.",
-            "answer": "Average latency can appear excellent (e.g. 30 ms) while users experience disruptive freezes due to high P99 latency (e.g. 500 ms) triggered by runtime garbage collection pauses, dynamic memory reallocation stalls, or network AllReduce jitter. Two systems techniques to protect P99 tail latency are: (1) preallocated static memory buffer pools (or PagedAttention blocks) to eliminate runtime dynamic allocation stalls, and (2) CUDA Graph replay, which eliminates variance in CPU kernel dispatch times.",
+            "answer": "A mean of 30 ms can coexist with p99 of 500 ms for the same request mix; p99 is a percentile, not a worst-case bound. Traces must locate the slow intervals. Preallocated buffers can reduce allocation stalls, while graph replay can reduce exposed host-submission variation. Either helps only when it targets the measured cause; repeat latency measurements at the same offered load to confirm the benefit.",
             "learning_objective": "Explain the operational divergence between average latency and tail latency in serving systems and identify mitigation techniques"
           },
           {
@@ -644,14 +644,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Why can automated deep learning graph compilers (like `torch.compile` or TensorRT) not automatically discover algorithmic transformations such as FlashAttention or Speculative Decoding?",
+            "question": "Why does successful graph compilation not establish that a workload has exploited algorithmic choices such as tiled online attention or draft-and-verify speculative decoding?",
             "choices": [
-              "Graph compilers automate algebraic rewrites, memory planning, and fusion within a fixed mathematical computation graph; they cannot invent new mathematical formulations (like online softmax tiling) or new execution loops (like draft-verify speculative decoding)",
+              "Graph compilers apply implemented transformations and supported kernels; compilation alone does not settle algorithm selection, draft-verification correctness, or performance",
               "Graph compilers are restricted by hardware law to only optimize CPU assembly code",
               "Graph compilers only support models with fewer than 100,000 parameters",
               "Graph compilers disable shared memory allocations on NVIDIA GPUs"
             ],
-            "answer": "The correct answer is A. Graph compilers automate algebraic rewrites, memory planning, and fusion within a fixed mathematical computation graph; they cannot invent new mathematical formulations (like online softmax tiling) or new execution loops (like draft-verify speculative decoding). Compilers operate on known directed acyclic graphs, applying deterministic cost models to fuse adjacent operators and reuse buffers. FlashAttention required human mathematical insight to reformulate softmax into an incremental online algorithm that avoids quadratic memory, while speculative decoding altered the autoregressive execution loop. The other options make false claims about CPU restrictions, parameter limits, or shared memory disablement.",
+            "answer": "The correct answer is A. A compiler applies transformations it implements and evaluates with its cost model. It can select or generate a known fused attention kernel when supported, but successful capture alone does not establish that choice. Draft-and-verify execution also needs an explicit algorithmic and correctness contract. Inspect generated execution and measure the workload rather than treating compilation as proof of optimality.",
             "learning_objective": "Distinguish between the automated optimization scope of graph compilers and the algorithmic innovations required of performance engineers"
           }
         ]
@@ -668,17 +668,17 @@
             "Optimization as continuous bottleneck displacement",
             "Locality, precision, and algorithmic roofline movement"
           ],
-          "question_strategy": "Order and match the three optimization pillars to their corresponding terms in the iron law, synthesize bottleneck displacement in a SHORT question, and evaluate the primacy of memory hierarchy optimization on modern accelerators in an MCQ.",
-          "difficulty_progression": "Iron law mapping -> holistic methodology synthesis -> architectural primacy evaluation.",
+          "question_strategy": "Analyze regime-specific changes to the iron-law budget, synthesize bottleneck displacement in a SHORT question, and evaluate the primacy of memory hierarchy optimization on modern accelerators in an MCQ.",
+          "difficulty_progression": "Regime-specific budget analysis -> holistic methodology synthesis -> architectural primacy evaluation.",
           "integration": "Unifies the entire chapter's technical argument into the governing physical equation of ML performance.",
           "ranking_explanation": "Executive summary distilling the core principles of performance engineering."
         },
         "questions": [
           {
-            "question_type": "ORDER",
-            "question": "Match and arrange the three primary performance engineering intervention pillars to the exact term of the iron law of ML performance ($T = D_{\\text{vol}}/\\text{BW} + O/(R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}) + L_{\\text{lat}}$) they directly optimize:\n\n(1) Algorithmic Restructuring (Speculative Decoding, Mixture of Experts)\n(2) Overhead & Latency Elimination (Graph Compilation, CUDA Graphs, Stream Overlap)\n(3) Data Movement Reduction (Operator Fusion, FlashAttention, Precision Engineering)",
-            "answer": "The correct mapping and sequence is (3) Data Movement Reduction -> targets $D_{\\text{vol}}/\\text{BW}$ (shrinking bytes transferred and eliminating HBM round-trips) -> (1) Algorithmic Restructuring -> targets $O / (R_{\\text{peak}} \\cdot \\eta_{\\text{hw}})$ (changing the fundamental operational work to verify multiple tokens or route sparsely) -> (2) Overhead & Latency Elimination -> targets $L_{\\text{lat}}$ (eliminating CPU dispatch gaps, Python GIL overhead, and serialized communication).",
-            "learning_objective": "Map core performance engineering optimization pillars to the governing terms of the iron law of ML performance"
+            "question_type": "SHORT",
+            "question": "For memory-bound decode, identify how operator fusion, CUDA Graph replay, and speculative decoding change the execution budget. Contrast speculative decoding with MoE routing in a compute-bound regime. Why does each intervention still require end-to-end measurement?",
+            "answer": "Fusion can remove intermediate HBM transfers and launches; graph replay reduces repeated host submission. In memory-bound decode, speculation amortizes target weight bytes over emitted tokens while adding draft and verification work. In compute-bound execution, MoE can reduce active arithmetic but adds routing and communication. None has a universal one-to-one mapping to a single cost term. Dependencies, quality, resource contention, and remaining exposed intervals determine the measured gain.",
+            "learning_objective": "Analyze which execution costs an optimization changes under a stated regime and justify end-to-end verification."
           },
           {
             "question_type": "SHORT",
@@ -688,15 +688,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "On modern AI accelerators (such as the NVIDIA H100 with an FP16 ridge point of $\\sim 295\\text{ FLOP/byte}$ footed against 3.35 TB/s HBM bandwidth), why does performance engineering prioritize memory hierarchy optimizations (fusion, tiling, quantization) over raw compute throughput tuning for LLM inference?",
+            "question": "For weight-dominated, small-batch LLM decode below the H100 FP16 ridge point, what does the roofline bandwidth ceiling establish about optimization priorities?",
             "choices": [
               "Because Tensor Cores are physically disabled during inference workloads",
-              "Because the vast majority of autoregressive inference operations have arithmetic intensities far below the ridge point (1–50 FLOP/byte), making execution time strictly bound by data movement across the memory hierarchy rather than arithmetic capacity",
+              "Low arithmetic intensity makes bandwidth the tighter ideal ceiling; measurements must still identify the exposed cost before choosing fusion, precision, or launch-overhead reduction",
               "Because memory bandwidth is free and unlimited in modern cloud data centers",
               "Because compiler graph optimizations only work on memory access instructions"
             ],
-            "answer": "The correct answer is B. Because the vast majority of autoregressive inference operations have arithmetic intensities far below the ridge point (1–50 FLOP/byte), making execution time strictly bound by data movement across the memory hierarchy rather than arithmetic capacity. In generative LLM serving, token decoding streams gigabytes of weights and KV caches for a few arithmetic operations per element ($I \\approx 1\\text{ FLOP/byte}$). Under the roofline model, these operations sit deep on the sloped bandwidth ceiling, rendering peak compute throughput irrelevant until data movement is compressed through fusion, tiling (FlashAttention), and low-bit quantization. The other choices present absurd falsehoods about disabled hardware or unlimited bandwidth.",
-            "learning_objective": "Evaluate the architectural primacy of memory hierarchy optimization over compute throughput in modern accelerator workloads"
+            "answer": "The correct answer is B. Low intensity places the ideal ceiling on the bandwidth slope, so faster arithmetic alone does not raise that ceiling. It does not establish the observed critical-path cause: launch gaps, dependencies, occupancy, and communication can keep execution below it. Traces and counters determine whether bytes, dispatch, or another exposed interval should be targeted first.",
+            "learning_objective": "Distinguish a roofline bandwidth ceiling from an observed critical-path bottleneck."
           }
         ]
       }

@@ -4192,7 +4192,7 @@ class QuantizationSpeedup:
 2.  **New size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_int4_value_str` bytes = `{python} QuantizationSpeedup.int4_size_gb_str` of weights, or `{python} QuantizationSpeedup.int4_total_gb_str` including the unchanged FP16 KV cache.
 3.  **New speed**: Loading that total takes `{python} QuantizationSpeedup.int4_latency_ms_str`. Speed rises to `{python} QuantizationSpeedup.int4_tokens_per_s_str`.
 
-**Systems insight**: Weight quantization makes this configuration fit and yields a `{python} QuantizationSpeedup.speedup_mult_str` speedup in the stated traffic model, below 4$\times$ because FP16 KV-cache traffic is unchanged.
+**Systems insight**: Weight quantization brings the modeled weights-plus-KV subtotal below capacity and yields a `{python} QuantizationSpeedup.speedup_mult_str` speedup in the stated traffic model, below 4$\times$ because FP16 KV-cache traffic is unchanged. Deployment feasibility still requires space for metadata, activations, workspace, and the operating system, and measured speedup depends on the supported kernel path.
 
 :::
 
@@ -4349,7 +4349,7 @@ The energy argument of @sec-model-compression-precision-energy-cc8e carries into
 
 Reducing numerical bit width relieves memory traffic and arithmetic energy, but naive truncation introduces quantization noise that degrades model accuracy. Deploying low-precision representations requires structured strategies that control where and how bit widths change across the computational graph.
 
-Three approaches form a complexity ladder. Post-training quantization (PTQ) reduces precision after training, requiring no retraining and minimal engineering effort. Quantization-aware training (QAT) incorporates quantization effects into the training loop, enabling models to adapt to lower precision and retain higher accuracy. Mixed-precision approaches assign different bit widths to different layers, matching numerical precision to each operator's sensitivity. @Fig-quantization-roadmap stages these techniques along a three-tier complexity ladder: progressing from Foundational post-training calibration (0.5 to 2 percent loss, minimal training cost) through Production quantization-aware retraining (0.2 to 1 percent loss) to the Research Frontier of extreme sub-4-bit formats (2 to 10 percent loss).
+Three approaches form a complexity ladder. Post-training quantization (PTQ) reduces precision after training, requiring no retraining and minimal engineering effort. Quantization-aware training (QAT) incorporates quantization effects into the training loop, enabling models to adapt to lower precision and retain higher accuracy. Mixed-precision approaches assign different bit widths to different layers, matching numerical precision to each operator's sensitivity. @Fig-quantization-roadmap stages these techniques along a three-tier complexity ladder: progressing from Foundational post-training calibration through Production quantization-aware retraining to the Research Frontier of extreme sub-4-bit formats. The displayed accuracy-loss ranges are illustrative scenario values, not expected results for each method; the task and calibration or recovery procedure determine the measured loss.
 
 ::: {#fig-quantization-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Quantization Complexity Roadmap**: The tiers order techniques by typical engineering and validation effort, not by guaranteed accuracy. PTQ provides a low-cost starting point; QAT and mixed precision add training or kernel control; INT4, binary, and ternary methods require increasingly model- and hardware-specific validation. A deployment may stop at any tier once it meets measured quality, latency, memory, and energy criteria, and a more complex tier is not automatically better." fig-alt="Tiered diagram with three levels. Foundation includes PTQ and basic INT8. Production adds QAT and mixed precision. Research frontier shows INT4, binary, and ternary quantization with increasing implementation and validation complexity."}
 
@@ -4663,7 +4663,7 @@ anchor= south east](B5){Calibration data};
 
 The single calibration pass over $\CalibrationDataset$ avoids retraining, and FP32-to-INT8 weight quantization cuts raw stored weight values by 4$\times$ before scale, zero-point, and packing metadata. The price is that the static activation ranges fixed in the loop risk saturation or wasted integer levels when the calibration data misses deployment tails. The quantization step then converts model parameters to the lower-precision format, producing the final quantized model.
 
-Mapping an unnecessarily wide real-valued interval to the 256 discrete bins of an 8-bit integer wastes numerical resolution on empty range, whereas clipping too aggressively truncates signal. Three calibration methods balance this clipping-versus-resolution trade-off: **max**\index{Quantization calibration!max method} sets bounds to the absolute extremum (preserving extreme values at the cost of vulnerability to outliers), **entropy**\index{Quantization calibration!entropy method} selects bounds by minimizing the Kullback--Leibler (KL) divergence between original and quantized distributions, and **percentile**\index{Quantization calibration!percentile method} retains a chosen fraction (such as 99.9 percent) and clips the remaining tail. @Fig-resnet-activations-histogram charts this dynamic range trade-off for a ResNet-50 layer: the dense bulk of activations clusters below 1.1, while a sparse outlier tail stretching past 2.0 motivates testing a 99th-percentile clipping boundary to allocate more INT8 bins to the bulk. Task validation must establish whether clipping that tail preserves important rare cases.
+Mapping an unnecessarily wide real-valued interval to the 256 discrete bins of an 8-bit integer wastes numerical resolution on empty range, whereas clipping too aggressively truncates signal. Three calibration methods balance this clipping-versus-resolution trade-off: **max**\index{Quantization calibration!max method} sets bounds to the absolute extremum (preserving extreme values at the cost of vulnerability to outliers), **entropy**\index{Quantization calibration!entropy method} selects bounds by minimizing the Kullback--Leibler (KL) divergence between original and quantized distributions, and **percentile**\index{Quantization calibration!percentile method} retains a chosen fraction (such as 99.9 percent) and clips the remaining tail. @Fig-resnet-activations-histogram charts this dynamic range trade-off for a ResNet-50 layer: the dense bulk of activations clusters below 1.1, while a sparse outlier tail stretching past 2.0 motivates testing a candidate clipping boundary near 1.1 to allocate more INT8 bins to the bulk. Choosing a percentile boundary requires cumulative activation counts; the illustrated boundary is not assigned a percentile rank. Task validation must establish whether clipping that tail preserves important rare cases.
 
 ::: {#fig-resnet-activations-histogram fig-env="figure" fig-pos="htb" fig-cap="**Activation Distribution**: ResNet-50 layer activations exhibit a long tail, with outlier values that can lead to inefficient precision use if not handled carefully. Source: [@wu2020integer]." fig-alt="Histogram of ResNet50 activation values showing right-skewed distribution. Most values cluster near zero with long tail extending to outliers around 2.1."}
 
@@ -4743,8 +4743,8 @@ coordinates {(1.1,0) (1.1,1.0)};
 % 4) Annotations (Tail errors) with dashed arrows
 % ------------------------------------------------------------
 \node[align=left,text=GreenD, font=\small\sffamily\bfseries,
-anchor=north west]at (axis cs:1.15,0.96){99th percentile\\
-{\sffamily\itshape clip here}};
+anchor=north west]at (axis cs:1.15,0.96){Candidate threshold\\
+{\sffamily\itshape test clipping here}};
 %
 \draw[red!70!black, dashed, <-, >=Latex,line width=1pt]
 (axis cs:1.15,0.13) --  (axis cs:1.6,0.4)
@@ -4765,7 +4765,7 @@ Calibration ranges can be **symmetric**\index{Quantization!symmetric} (a zero-ce
 
 Once calibration identifies clipping boundaries $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$, the range must be mapped onto integer endpoints. @Fig-calibration-ranges contrasts the two primary mapping schemes: the symmetric layout on the left forces real zero to integer zero by mapping $[-1, 1]$ directly onto $[-127, 127]$, whereas the asymmetric layout on the right accommodates skewed activation intervals $[-0.5, 1.5]$ across $[-128, 127]$ by shifting the integer zero-point offset $\QuantizationZeroPoint$.
 
-::: {#fig-calibration-ranges fig-env="figure" fig-pos="htb" fig-cap="**Calibration Range Selection**: Symmetric vs. asymmetric affine quantization mappings. Symmetric quantization (left) forces real zero to map to integer zero, constraining range selection to $[-\SymmetricClippingThreshold, \SymmetricClippingThreshold]$ at the expense of wasted dynamic range for skewed activation distributions; asymmetric quantization (right) uses an explicit zero-point offset $\QuantizationZeroPoint$ to map non-centered ranges $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$ efficiently." fig-alt="Two side-by-side mapping diagrams. Left shows symmetric calibration with range from – 1 to 1 mapping to – 127 to 127 with zero aligned. Right shows asymmetric calibration with range – 0.5 to 1.5 mapping with shifted zero point."}
+::: {#fig-calibration-ranges fig-env="figure" fig-pos="htb" fig-cap="**Calibration Range Selection**: Symmetric vs. asymmetric affine quantization mappings. Symmetric quantization (left) forces real zero to map to integer zero, using equal-magnitude negative and positive clipping bounds at the expense of wasted dynamic range for skewed activation distributions; asymmetric quantization (right) uses an explicit zero-point offset $\QuantizationZeroPoint$ to map non-centered ranges $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$ efficiently." fig-alt="Two side-by-side mapping diagrams. Left shows symmetric calibration with range from – 1 to 1 mapping to – 127 to 127 with zero aligned. Right shows asymmetric calibration with range – 0.5 to 1.5 mapping with shifted zero point."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\large\sffamily]
@@ -5217,7 +5217,7 @@ Quantization granularity trades calibration and metadata overhead against repres
 | **Channelwise**\index{Quantization!channelwise}         | One range per filter               | Common default; balances quantization error against scale metadata and implementation overhead    |
 | **Sub-channelwise**\index{Quantization!sub-channelwise} | Ranges within each filter          | More local ranges can reduce quantization error but increase metadata and implementation overhead |
 
-: **Quantization Granularity Levels**: Granularity trades calibration overhead for accuracy, from a single per-layer range to per-filter sub-ranges. {#tbl-quantization-granularity tbl-colwidths="[15,29,56]"}
+: **Quantization Granularity Levels**: Granularity trades calibration and metadata overhead against representation error, from a single per-layer range to per-filter sub-ranges. {#tbl-quantization-granularity tbl-colwidths="[15,29,56]"}
 
 Channelwise quantization preserves accuracy over layerwise quantization when channel dynamic ranges differ, at the cost of storing additional scale vectors and executing per-channel rescaling in the kernel pipeline. Beyond scale granularity, execution efficiency depends on the distinction between static weights and dynamic activations, which impose fundamentally different memory and latency constraints on the deployment system.
 
@@ -5332,7 +5332,7 @@ Quantization succeeds only when the range policy matches deployment data and run
 
 Post-training quantization balances deployment turnaround against accuracy control. PTQ requires no gradient backpropagation or retraining, establishing it as the standard initial step in deployment optimization pipelines. Whether offline calibration is sufficient depends on the architecture, calibration data distribution, numerical quantizer design, and target hardware constraints.
 
-The primary limitation is that PTQ freezes model parameters, preventing compensation for accuracy loss. When a quantized model falls below the production threshold, mitigations include recalibrating, refining scale granularity, adopting mixed precision, or escalating to quantization-aware training. QAT integrates precision constraints directly into the training graph using a **straight-through estimator (STE)**\index{Straight-through estimator!gradient approximation} (@sec-model-compression-training-mathematics-699e) to pass gradients through nondifferentiable rounding operators. This enables weights to adapt to low-bit representations during retraining, recovering accuracy at the cost of full training compute ($\TrainingCompute$) and hyperparameter tuning.
+The primary limitation is that PTQ freezes model parameters, preventing compensation for accuracy loss. When a quantized model falls below the production threshold, mitigations include recalibrating, refining scale granularity, adopting mixed precision, or escalating to quantization-aware training. QAT integrates precision constraints directly into the training graph using a **straight-through estimator (STE)**\index{Straight-through estimator!gradient approximation} (@sec-model-compression-training-mathematics-699e) to pass gradients through nondifferentiable rounding operators. This enables weights to adapt to low-bit representations during retraining, recovering accuracy at the cost of additional training compute ($\TrainingCompute$) and hyperparameter tuning.
 
 #### Quantization-aware training {#sec-model-compression-quantizationaware-training-4032}
 
@@ -5863,9 +5863,9 @@ The deployment choice is therefore not a generic desire for fewer parameters; it
 
 Achieving actual speedups from sparsity requires hardware that can efficiently skip zero-valued computations. Different processor architectures handle sparse patterns with varying effectiveness—for example, Ampere Sparse Tensor Cores exploit fine-grained 2:4 structured patterns while systolic arrays require dense block structures. Software libraries such as cuSPARSE can help bridge this gap by reformulating sparse computations into patterns that current hardware handles efficiently. For example, MegaBlocks [@gale2022megablocksefficientsparsetraining] reformulates sparse Mixture of Experts training into block-sparse operations, grouping routed expert-token work into dense tiles so specialized kernels can maintain high accelerator utilization despite irregular sparsity patterns.
 
-A sparse pattern earns hardware speedup only when it is regular enough for kernels to predict. Two prominent formats make that regularity explicit: block sparse matrices and N:M sparsity patterns. Block sparse matrices isolate blocks of zero and nonzero dense submatrices so that operations on the large sparse matrix can be re-expressed as a smaller number of dense operations on submatrices. This structure supports more efficient storage of dense submatrices while maintaining shape compatibility for matrix or vector products. @Fig-block-sparse-gemm diagrams how NVIDIA's cuSPARSE [@nvidia_cusparse_block] format clusters nonzero weights into uniform $3\times 3$ dense sub-blocks indexed by an auxiliary coordinate array, allowing regular sub-block GEMM kernels to bypass empty gray tiles while maintaining aligned memory transactions. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have built on this block-sparsity approach to strike an improved balance between matrix expressivity and compute/memory efficiency.
+A sparse pattern earns hardware speedup only when it is regular enough for kernels to predict. Two prominent formats make that regularity explicit: block sparse matrices and N:M sparsity patterns. Block sparse matrices isolate blocks of zero and nonzero dense submatrices so that operations on the large sparse matrix can be re-expressed as a smaller number of dense operations on submatrices. This structure supports more efficient storage of dense submatrices while maintaining shape compatibility for matrix or vector products. @Fig-block-sparse-gemm illustrates this representation with $3\times 3$ dense sub-blocks indexed by an auxiliary coordinate array, allowing sub-block kernels to bypass empty gray tiles [@nvidia_cusparse_block]. The block size is a teaching choice. Actual speedup requires a block shape, layout, datatype, and kernel supported by the target library and hardware; regular blocks alone do not guarantee aligned memory transactions or Tensor Core execution. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have built on this block-sparsity approach to strike an improved balance between matrix expressivity and compute/memory efficiency.
 
-::: {#fig-block-sparse-gemm fig-env="figure" fig-pos="htb" fig-cap="**Block Sparse Representation**: Grouping non-zero weights into dense sub-blocks ($3\times3$ tiles) and storing an auxiliary index array allows sparse matrices to be computed via regular sub-block GEMM kernels, restoring high GPU memory alignment and Tensor Core utilization. Adapted from NVIDIA cuSPARSE documentation [@nvidia_cusparse_block]." fig-alt="Grid of 3×3 matrix blocks with varying shades indicating dense submatrices. Adjacent index array shows non zero block positions. Gray blocks represent zeros, colored blocks represent dense submatrices stored separately."}
+::: {#fig-block-sparse-gemm fig-env="figure" fig-pos="htb" fig-cap="**Block Sparse Representation**: Grouping non-zero weights into dense sub-blocks and storing an auxiliary index array lets matching kernels skip empty blocks. The $3\times3$ tiles illustrate the representation; efficient GPU execution depends on supported block shapes, layouts, and kernels. Adapted from NVIDIA cuSPARSE documentation [@nvidia_cusparse_block]." fig-alt="Grid of 3×3 matrix blocks with varying shades indicating dense submatrices. Adjacent index array shows non zero block positions. Gray blocks represent zeros, colored blocks represent dense submatrices stored separately."}
 
 ```{.tikz}
 \scalebox{0.6}{\begin{tikzpicture}[line join=round,font=\sffamily]
@@ -7055,48 +7055,53 @@ Validating that a chosen technique achieves its performance target requires syst
 # │ Context: BERT-Base compression headline (pruning + distillation + quantization)
 # │
 # │ Goal: Pin the 16x footprint reduction shared across this section.
-# │ How: ratio = round(full_mb / compressed_mb) from measured footprints.
+# │ How: raw bytes = parameter count times bytes per parameter; ratio uses unrounded sizes.
 # │
 # │ Scope: chapter-anchor — BERT compression is the chapter's running
 # │        optimization-strategy example and is recalled in the summary.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_multiple, fmt_percent, fmt_qty_int
-from mlsysim.core.units import MB
+from mlsysim import Models
+from mlsysim.fmt import check, fmt_multiple, fmt_percent, fmt_qty_int, fmt_params, fmt_memory
+from mlsysim.core.units import MB, param, BYTES_FP32, BYTES_INT8
+from mlsysim.physics import memory_from_params
 
 class BertCompression:
-    """BERT-Base mobile compression: 440 MB to 28 MB via pruning, distillation, quantization."""
+    """Modeled BERT-Base pipeline with a stipulated compact student."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    full_mb = 440  # scenario: BERT-Base FP32 footprint
-    compressed_mb = 28  # scenario: final compressed footprint
-    attention_prune = 0.30  # scenario: structured-pruning share
-    ffn_trim = 0.40  # scenario: FFN-width trim
-    parameter_reduction = 0.75  # scenario: total structural reduction
+    teacher_params = Models.Language.BERT_Base.parameters
+    student_params = 27_500_000 * param  # scenario: final pruned graph, also the distillation student
     baseline_accuracy = 0.762  # scenario: task accuracy before compression
     pruned_accuracy = 0.751  # scenario: post-pruning accuracy
     distilled_accuracy = 0.759  # scenario: post-distillation recovery
     final_accuracy = 0.756  # scenario: final INT8 accuracy
-    quant_memory_reduction = 4  # scenario: INT8 memory reduction
     mobile_speedup = 12  # scenario: mobile CPU speedup
     wrong_order_loss = 0.021  # scenario: loss if quantization precedes pruning
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    full_size = full_mb * MB
-    compressed_size = compressed_mb * MB
-    compression_ratio = round(full_mb / compressed_mb)
+    full_size = memory_from_params(teacher_params, BYTES_FP32 / param)
+    student_fp32_size = memory_from_params(student_params, BYTES_FP32 / param)
+    compressed_size = memory_from_params(student_params, BYTES_INT8 / param)
+    full_mb = full_size.to(MB).magnitude
+    compressed_mb = compressed_size.to(MB).magnitude
+    parameter_reduction = 1 - (student_params / teacher_params).magnitude
+    quant_memory_reduction = (BYTES_FP32 / BYTES_INT8).magnitude
+    compression_ratio = (full_size / compressed_size).magnitude
     final_accuracy_loss = baseline_accuracy - final_accuracy
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(full_mb > compressed_mb, "Compressed model must be smaller than the original.")
-    check(compression_ratio == 16, f"BERT compression should round to 16x, got {compression_ratio}.")
+    check(compression_ratio == 16, f"BERT raw-weight compression should be 16x, got {compression_ratio}.")
     check(final_accuracy_loss < wrong_order_loss, "Sequenced compression should lose less accuracy than quantization-first compression.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     full_mb_str = fmt_qty_int(full_size, MB, commas=False)
-    compressed_mb_str = fmt_qty_int(compressed_size, MB, commas=False)
+    compressed_mb_str = fmt_qty_int(round(compressed_mb) * MB, MB, commas=False)
+    compressed_exact_str = fmt_memory(compressed_size, unit=MB, precision=1)
+    student_fp32_size_str = fmt_memory(student_fp32_size, unit=MB, precision=0)
+    teacher_params_str = fmt_params(teacher_params, scale="M", precision=0)
+    student_params_str = fmt_params(student_params, scale="M", precision=1)
     compression_ratio_mult_str = fmt_multiple(compression_ratio, precision=0, commas=False)
-    attention_prune_pct_str = fmt_percent(attention_prune, precision=0, commas=False, style="prose")
-    ffn_trim_pct_str = fmt_percent(ffn_trim, precision=0, commas=False, style="prose")
     parameter_reduction_pct_str = fmt_percent(parameter_reduction, precision=0, commas=False, style="prose")
     baseline_accuracy_pct_str = fmt_percent(baseline_accuracy, precision=1, commas=False, style="prose")
     pruned_accuracy_pct_str = fmt_percent(pruned_accuracy, precision=1, commas=False, style="prose")
@@ -7108,11 +7113,15 @@ class BertCompression:
     wrong_order_loss_pct_str = fmt_percent(wrong_order_loss, precision=1, commas=False, style="prose")
 ```
 
-Production deployment constraints rarely permit relying on an isolated optimization. One candidate for fitting a 110M-parameter language model within a mobile memory and thermal budget composes structural pruning, knowledge distillation, and precision quantization. In this modeled mobile pipeline, staged optimization reduces a BERT-Base footprint from `{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str`, achieving a `{python} BertCompression.compression_ratio_mult_str` raw-footprint reduction. Each stage addresses a distinct bottleneck in the D·A·M hierarchy: structural pruning eliminates redundant matrix multiplications to reduce arithmetic operations, knowledge distillation supervises the compact student to recover representational capacity, and quantization packs weights and activations into lower-bit integers to alleviate memory bandwidth pressure.
+Production deployment constraints rarely permit relying on an isolated optimization. One candidate for fitting a 110M-parameter language model within a mobile memory and thermal budget composes structural pruning, knowledge distillation, and precision quantization. In this modeled mobile pipeline, staged optimization reduces a BERT-Base footprint from `{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str` (rounded), achieving a `{python} BertCompression.compression_ratio_mult_str` raw-footprint reduction. Each stage addresses a distinct bottleneck in the D·A·M hierarchy: structural pruning eliminates redundant matrix multiplications to reduce arithmetic operations, knowledge distillation supervises the compact student to recover representational capacity, and quantization packs weights and activations into lower-bit integers to alleviate memory bandwidth pressure.
 
 ::: {#exmp-model-compression-bert-base-mobile-deployment-pipeline .callout-example title="BERT-Base mobile deployment pipeline"}
 
-**Scenario**: A modeled deployment targets executing a 110M-parameter BERT-Base language model on resource-constrained mobile hardware [@sanh2019distilbert].
+**Scenario**: A modeled deployment targets executing a `{python} BertCompression.teacher_params_str`-parameter BERT-Base language model on resource-constrained mobile hardware. The compact graph is stipulated for this example; the figures are not reported DistilBERT results.
+
+The FP32 teacher begins at `{python} BertCompression.full_mb_str` with assigned task accuracy `{python} BertCompression.baseline_accuracy_pct_str`. Structural pruning produces a stipulated `{python} BertCompression.student_params_str`-parameter graph, a `{python} BertCompression.parameter_reduction_pct_str` parameter reduction, with raw FP32 weights of `{python} BertCompression.student_fp32_size_str` and assigned accuracy `{python} BertCompression.pruned_accuracy_pct_str`.
+
+That pruned graph is the distillation student. Teacher supervision recovers its assigned accuracy to `{python} BertCompression.distilled_accuracy_pct_str` without another parameter-count reduction. Final INT8 quantization leaves the same parameter count, reduces raw weight storage to `{python} BertCompression.compressed_exact_str`, and has assigned accuracy `{python} BertCompression.final_accuracy_pct_str`. The headline ratio uses this unrounded weight payload; scales, zero-points, packing, activations, and runtime workspace remain outside the calculation.
 
 **Diagnosis**: In this modeled comparison, quantization before pruning has an assigned accuracy loss of `{python} BertCompression.wrong_order_loss_pct_str`. One mechanism to investigate is whether structural changes invalidate previously calibrated ranges. Pruning and distillation before quantization allow calibration to use the resulting distributions; the modeled values illustrate that hypothesis rather than establish a universal ordering.
 
@@ -7512,6 +7521,8 @@ Quantizing ResNet-50 from FP32 to INT8 demonstrates how compression decisions ri
 ```
 
 In this illustrative profile, converting weights and activations to INT8 reduces the model footprint by `{python} ResNet50Int8Metrics.size_reduction_mult_str` (from `{python} ResNet50Int8Metrics.fp32_size_mb_str` to `{python} ResNet50Int8Metrics.int8_size_mb_str`), while the scenario assigns a `{python} ResNet50Int8Metrics.energy_improvement_mult_str` reduction in per-inference energy. That energy figure is the modeled latency speedup applied to energy, which assumes average power stays constant; it is not a separate result, and a measured profile could differ in either direction. The latency scenario starts from a modeled V100 FP32 baseline of `{python} ResNet50Int8Metrics.fp32_latency_ms_str` and applies an illustrative speedup factor to obtain `{python} ResNet50Int8Metrics.int8_latency_ms_str`. While aggregate top-1 accuracy drops by only `{python} ResNet50Int8Metrics.top1_drop_pp_prose_str` (from `{python} ResNet50Int8Metrics.fp32_top1_prose_str` to `{python} ResNet50Int8Metrics.int8_top1_prose_str`), calibration error increases from `{python} ResNet50Int8Metrics.calibration_error_fp32_prose_str` to `{python} ResNet50Int8Metrics.calibration_error_int8_prose_str`. Post-quantization probability distributions drift, which can compromise safety-critical confidence thresholds even when top-1 classification accuracy appears preserved. Production deployment decisions require corresponding quality, latency, and energy measurements using a supported execution path on target hardware.
+
+Suppose the application requires at least 75.5 percent top-1 accuracy and no more than 3.0 percent calibration error, measured with the same validation data and calibration metric as the profile. The INT8 candidate passes the accuracy limit but fails the calibration limit. Its modeled resource savings therefore do not justify acceptance. Retain the baseline for comparison, try confidence recalibration or a less aggressive quantization configuration, and repeat the quality checks before validating resource gains on the target runtime.
 
 Realizing these gains in production requires evaluating interactions among multiple compression techniques. Applying pruning, quantization, and knowledge distillation sequentially can produce non-additive gains or compound degradation; for example, uncalibrated weight quantization on an aggressively pruned sparse matrix can trigger catastrophic accuracy collapse. Evaluating these compounded trade-offs requires mapping models onto an efficiency-quality Pareto frontier. Executing this systematic profiling and multi-stage transformation pipeline in turn depends on automated software tooling that coordinates compilation, kernel generation, and hardware benchmarking.
 

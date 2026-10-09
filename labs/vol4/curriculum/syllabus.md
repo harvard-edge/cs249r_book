@@ -21,7 +21,7 @@ When a chatbot makes a mistake, you retype the prompt. When a robot makes a mist
 |:---|:---|
 | **Format** | Two meetings a week: a 90-minute systems seminar and a 3-hour supervised lab. Six labs, then a three-week capstone. No written exam. |
 | **Length** | 14 teaching weeks |
-| **Prerequisites** | Programming in Python and C, basic linear algebra and probability, introductory machine learning, and first-year Newtonian physics. Operating systems or control experience helps but is not required. |
+| **Prerequisites** | Programming in Python, basic linear algebra and probability, introductory machine learning, and first-year Newtonian physics. C, operating systems, or control experience helps but is not required; staff provide the baseline firmware and support its extension. |
 | **Teams** | Two or three students per bench station, with rotating roles |
 | **Hardware** | One station per team: Arduino UNO Q, SO-101 arm, overhead camera, and separate motor power. See the [Station Reference Card](../labs/station-reference.md). |
 | **Workload** | Seminar and lab each week, plus reading, analysis, and booked bench time. Credits: TBD |
@@ -66,10 +66,10 @@ Read the week's chapter before the seminar: the chapter gives the principles, th
 |:---:|:---|:---|:---|
 | 1 | [Ch 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) | [**Getting Started**](../labs/week-01-getting-started.md) |  |
 | 2 | [Ch 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd) | [**1A** Measure the body](../labs/lab-01-digital-twin.md) |  |
-| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1B** Build the digital twin](../labs/lab-01-digital-twin.md) |  |
+| 3 | [Ch 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) | [**1B** Build the digital twin](../labs/lab-01-digital-twin.md) | **Lab 1** |
 | 4 | [Ch 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd) | [**2A** IK on the real arm](../labs/lab-02-sim-to-real.md) | **Lab 2** |
 | 5 | [Ch 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) | [**3A** VLAs in simulation](../labs/lab-03-learned-control.md) |  |
-| 6 | [Ch 6: Policy Training](../../../books/vol4/06_training/06_training.qmd); read ahead: calibration in Ch 8 | [**3B** The VLA on real hardware](../labs/lab-03-learned-control.md) |  |
+| 6 | [Ch 6: Policy Training](../../../books/vol4/06_training/06_training.qmd); read ahead: calibration in Ch 8 | [**3B** The VLA on real hardware](../labs/lab-03-learned-control.md) | **Lab 3** |
 | 7 | [Ch 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd) | [**4A** Real demonstrations](../labs/lab-04-real-data-and-fine-tuning.md) |  |
 | 8 | [Ch 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Ch 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd) | [**4B** Fine-tuned & untethered](../labs/lab-04-real-data-and-fine-tuning.md) | **Lab 4**, capstone proposal |
 | 9 | [Ch 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd), [Ch 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd) | [**5A** Stress the loop](../labs/lab-05-stress-testing.md) | **Lab 5** |
@@ -93,10 +93,10 @@ Grades are earned through witnessed bench demonstrations, lab deliverables, and 
 
 | Graded work | Due | Weight | Witnessed Evidence | Competencies |
 |:---|:---:|:---:|:---|:---:|
-| **Labs 1–2:** Station & envelope | End of Weeks 3 and 4 | **15%** | Getting Started and Labs 1–2. Safe-state check, the body's measured limits, a digital twin driven by your own kinematics, and the sim-vs-real gap measured with your own IK on the real arm. | A1, A3 |
-| **Labs 3–4:** Learned policy on the edge | End of Weeks 6 and 8 | **25%** | Labs 3–4. Camera calibration, a sim-trained VLA deployed with a measured sim2real gap, a real LeRobot dataset with all four action taps, and a fine-tuned policy running untethered on the UNO Q. | A2, B1, B2, B3, C1 |
+| **Labs 1–2:** Station & envelope | End of Weeks 3 and 4 | **15%** | Getting Started and Labs 1–2. Safe-state check, the body's measured limits, a digital twin driven by your own kinematics, and the sim-vs-real gap measured with your own IK on the real arm. | A1; A3 timing foundation |
+| **Labs 3–4:** Learned policy on the edge | End of Weeks 6 and 8 | **25%** | Labs 3–4. Camera calibration, training/validation curves, a sim-trained VLA deployed with a measured sim2real gap, a real LeRobot dataset with all four action taps, and a fine-tuned policy running untethered on the UNO Q. | A2, A3 (complete), B1, B2, B3, C1 |
 | **Lab 5:** Stress-tested loop | End of Week 9 | **10%** | Lab 5. Chunk-horizon benchmark, live recovery from a displaced target, and a language check. | C2, C3 |
-| **Lab 6:** Your own governor | End of Week 11 | **25%** | Lab 6. Your own governor clamps or vetoes unsafe proposals, the watchdog halts the arm when Linux freezes, and no stale command runs on resume. | D1, D2 |
+| **Lab 6:** Your own governor | End of Week 11 | **25%** | Lab 6. Your own governor clamps or vetoes proposals outside the declared checked limits; staff-approved fault trials measure its response against declared limits, including the watchdog and stale-command rejection on resume. | D1, D2 |
 | **Capstone:** Release & defense | End of Week 14 | **25%** | Capstone. Proposal and frozen task, then live held-out trials under disturbance, baseline comparison, oral defense, and the Physical Release Dossier. | D3 (full card) |
 
 **Three grading principles.**

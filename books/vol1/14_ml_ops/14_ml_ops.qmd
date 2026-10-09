@@ -938,7 +938,7 @@ Training-serving skew\index{Training-serving skew!silent accuracy degradation}\i
 
 | **Skew Type**               | **Example**                                   | **Detection Method**                            |
 |:----------------------------|:----------------------------------------------|:------------------------------------------------|
-| **Feature preprocessing**   | Normalization uses different statistics       | Statistical comparison of feature distributions |
+| **Feature preprocessing**   | Normalization uses different statistics       | Same-input replay and value comparison          |
 | **Missing data handling**   | Training fills NaN with mean; serving uses 0  | Schema validation with explicit null handling   |
 | **Time-dependent features** | Features computed with different time cutoffs | Timestamp validation in feature pipelines       |
 | **Library version drift**   | NumPy or Pandas version differences           | Environment hash comparison                     |
@@ -951,7 +951,7 @@ Training-serving skew\index{Training-serving skew!silent accuracy degradation}\i
 
 ##### Training-serving skew case study {#sec-ml-operations-trainingserving-skew-case-study-4d24}
 
-A production recommendation system illustrates how feature divergence manifests in deployment. One month after rollout, the model exhibits an 8 percent accuracy degradation despite zero alterations to model code or weights. Comparing feature distributions reveals that `user_session_length` has an empirical mean of 45 minutes in the training set but only 12 minutes in online inference. The failure traces to feature-definition skew: the offline training pipeline calculated wall-clock duration from the initial event to the final event in a session, whereas the online serving path counted only foreground-active time after filtering idle periods. The model learned decision boundaries against a feature distribution that the serving infrastructure never delivers.
+A production recommendation system illustrates how feature divergence manifests in deployment. One month after rollout, the model exhibits an 8 percent accuracy degradation despite zero alterations to model code or weights. Comparing feature distributions reveals that `user_session_length` has an empirical mean of 45 minutes in the training set but only 12 minutes in online inference. That difference starts the investigation; different user populations could produce it even with identical feature logic. Replaying the same recorded sessions through the versioned training and serving transformations, with the same available events and cutoff, reveals different durations for the same requests. Inspection of those artifacts then identifies feature-definition skew: the offline training pipeline calculated wall-clock duration from the initial event to the final event in a session, whereas the online serving path counted only foreground-active time after filtering idle periods. The model learned decision boundaries against a feature distribution that the serving infrastructure never delivers.
 
 Feature stores resolve this discrepancy by centralizing feature logic into a single versioned definition, extending upstream data pipelines. @Lst-feature-store-consistency demonstrates the architecture: training materializes historical features with point-in-time correctness, serving performs real-time point lookups, and both pipelines bind to the identical versioned definition hash rather than independent code paths.
 
@@ -996,21 +996,25 @@ The consistency imperative (@sec-ml-operations-principle-3-consistency-imperativ
 
 ##### Skew detection in CI/CD {#sec-ml-operations-skew-detection-cicd-e361}
 
-Continuous integration pipelines must validate feature consistency before deployment. @Lst-ops-validate-skew defines a gate that compares offline training distributions against online serving samples using the two-sample Kolmogorov-Smirnov (KS) test\index{Kolmogorov-Smirnov test!feature distribution} that the data pipeline already uses to watch for drift (notebook \ref{nbk-data-engineering-detecting-drift-with-k-s-test}), blocking deployment if any feature diverges beyond a predefined threshold. The KS statistic measures the maximum vertical distance between the empirical cumulative distribution functions (eCDFs) of the training and serving samples, $\TrainingEmpiricalCdf$ and $\ServingEmpiricalCdf$: $\KolmogorovSmirnovStatistic= \max_{\MonitoredFeatureLevel}|\TrainingEmpiricalCdf(\MonitoredFeatureLevel) - \ServingEmpiricalCdf(\MonitoredFeatureLevel)|$. Setting the threshold to $0.1$ asserts that cumulative probabilities do not diverge by more than 10 percentage points at any value across the feature's support, providing a parameter-free divergence metric for continuous features without requiring empirical binning. This validation gate converts distribution divergence into an automated test failure prior to production rollout. The threshold must be calibrated against sample size and feature sensitivity. Differences between unmatched historical and live populations can reflect genuine drift rather than inconsistent feature code. Passing the check indicates limited marginal distribution differences at the chosen threshold; matched-input value checks are still needed to verify semantic parity, along with separate point-in-time tests.
+Continuous integration pipelines must validate feature consistency before deployment. A parity test replays recorded inputs through the versioned training and serving transformations, aligns results by request identifier, and compares each feature using its declared semantics and numerical tolerance. Both paths must receive the same events available at the prediction cutoff; otherwise the test confounds implementation differences with differences in information. For a duration feature, the contract specifies the time unit and whether idle periods count. Categorical values and missingness must agree exactly; floating-point values may use a feature-specific tolerance.
 
-::: {#lst-ops-validate-skew lst-cap="**Feature Skew Validation**: This function compares training and serving feature distributions using the Kolmogorov-Smirnov test, rejecting deployment when any feature diverges beyond a configurable threshold."}
+A small counterexample shows why distributions cannot replace this check. Suppose the training transformation returns session durations of 12 and 45 minutes for requests A and B, respectively, while serving returns 45 and 12 minutes for those same requests. The marginal distributions are identical, so a KS comparison finds no difference, but request-keyed comparison detects both mismatches. Conversely, a new population of shorter sessions can shift the marginal distribution while both paths still agree for every replayed request. Point-in-time correctness remains a separate requirement; agreeing paths can both use information unavailable at prediction time.
+
+@Lst-ops-validate-skew supplies a complementary distribution screen using the two-sample Kolmogorov-Smirnov (KS) test\index{Kolmogorov-Smirnov test!feature distribution} that the data pipeline already uses to watch for drift (notebook \ref{nbk-data-engineering-detecting-drift-with-k-s-test}). The KS statistic measures the maximum vertical distance between the empirical cumulative distribution functions (eCDFs) of the training and serving samples, $\TrainingEmpiricalCdf$ and $\ServingEmpiricalCdf$: $\KolmogorovSmirnovStatistic = \max_{\MonitoredFeatureLevel} |\TrainingEmpiricalCdf(\MonitoredFeatureLevel) - \ServingEmpiricalCdf(\MonitoredFeatureLevel)|$. Setting the threshold to $0.1$ asserts that cumulative probabilities do not diverge by more than 10 percentage points at any value across the feature's support, providing a parameter-free divergence metric for continuous features without requiring empirical binning. In this illustrative release policy, exceeding the threshold pauses promotion for review rather than diagnosing skew. The threshold must be calibrated against sample size and feature sensitivity. Passing the screen establishes only limited marginal divergence at that threshold; it does not establish per-request parity.
+
+::: {#lst-ops-validate-skew lst-cap="**Feature Distribution Screen**: This function compares training and serving feature distributions using the Kolmogorov-Smirnov test, pausing promotion for review under an illustrative threshold policy."}
 
 ```{.python}
-def validate_no_skew(
+def screen_feature_distributions(
     training_features, serving_features, threshold=0.1
 ):
-    """Reject deployment if feature distributions diverge."""
+    """Pause promotion for review if distributions diverge."""
     for feature in training_features.columns:
         ks_stat = ks_2samp(
             training_features[feature], serving_features[feature]
         )
         if ks_stat.statistic > threshold:
-            raise SkewDetectedError(
+            raise DistributionReviewRequired(
                 f"{feature}: KS={ks_stat.statistic:.3f}"
             )
 ```
@@ -1971,9 +1975,9 @@ Alerting mechanisms convert these operational signals into proactive interventio
 
 **Scenario**: Consider a high-throughput streaming recommendation service whose latency remained within its SLO while recommendation quality declined as user behavior changed.
 
-**Diagnosis**: Traditional infrastructure metrics (CPU utilization, HTTP error rates) remained green while model CTR dropped because global metrics masked localized subpopulation degradation.
+**Diagnosis**: Traditional infrastructure metrics (CPU utilization, HTTP error rates) remained green while cohort-level CTR fell. The engagement decline motivates investigation of traffic, feature pipelines, and ranking behavior; it does not establish classification accuracy loss.
 
-**Systems lesson**: Infrastructure telemetry alone cannot detect statistical model failure. High-throughput recommendation systems require cohort-level subpopulation tracking and counterfactual evaluation to detect localized accuracy drift.
+**Systems lesson**: Infrastructure telemetry alone cannot establish recommendation quality. Cohort-level outcome tracking exposes localized engagement changes, while matched comparisons and mature labels are needed to assess predictive-quality changes and their causes.
 
 :::
 
@@ -2336,7 +2340,7 @@ Schema validation catches structural corruption (missing columns, wrong types, n
 
 Gradual long-term degradation is particularly insidious because it evades coarse detection thresholds: small day-to-day changes in a quality metric compound into material degradation over a year without tripping monthly alerts. Seasonal patterns compound this complexity; a model trained in summer may perform well through autumn but fail in winter conditions it never observed. Detecting such gradual degradation requires multi-timescale monitoring: performance baselines across multiple time horizons (daily, weekly, quarterly), sliding window comparisons that detect slow trends, and seasonal profiles that account for cyclical variation.
 
-Statistical distance measures quantify this divergence by comparing serving distributions against training baselines. Three are common: the population stability index (PSI) for categorical and binned features, the Kolmogorov-Smirnov (KS) statistic of the CI/CD skew gate for continuous distributions, and Jensen-Shannon divergence\index{Jensen-Shannon divergence!distribution shift} for symmetric, bounded comparison of probability distributions. Each needs an alert threshold, and sample size makes that choice harder than it looks.
+Statistical distance measures quantify this divergence by comparing serving distributions against training baselines. Three are common: the population stability index (PSI) for categorical and binned features, the Kolmogorov-Smirnov (KS) statistic of the CI/CD distribution screen for continuous distributions, and Jensen-Shannon divergence\index{Jensen-Shannon divergence!distribution shift} for symmetric, bounded comparison of probability distributions. Each needs an alert threshold, and sample size makes that choice harder than it looks.
 
 In high-throughput production monitoring, statistical significance alone is an inadequate alert policy. With large samples, tests such as the two-sample KS test or the chi-square test (the standard test for differences in categorical frequencies) can detect small genuine differences that have little operational significance. The mechanism is the sample-size term in the test's critical value. The KS critical value $\KolmogorovSmirnovCriticalThreshold$ used in notebook \ref{nbk-data-engineering-detecting-drift-with-k-s-test} scales with $\sqrt{(\DriftTestSampleSize_0 + \DriftTestSampleSize_t)/(\DriftTestSampleSize_0 \DriftTestSampleSize_t)}$, so it shrinks roughly as $1/\sqrt{\DriftTestSampleSize}$, and a monitor that compares millions of serving requests against a large training sample rejects equality for shifts far smaller than the 0.1 gate of @lst-ops-validate-skew. These detections are not necessarily statistical false positives, but paging on each one creates unnecessary alerts. Conversely, small-sample edge telemetry may lack power to detect a meaningful change. Monitoring must consider effect size, sampling uncertainty, and the cost of missed change together.
 
@@ -2700,7 +2704,7 @@ Incident response, debugging, and on-call rotation form the human half of the mo
 
 At 2:00 AM, an on-call engineer receives an alert: recommendation click-through rate has dropped 12 percent over the past hour. There is no stack trace, no error log, no crashed process, just a statistical signal that something has changed. The responder must distinguish among four candidate root causes: an upstream data-pipeline failure, model drift, a seasonal traffic pattern, or statistical noise. This ambiguity is common in ML incidents\index{Incident response!ML-specific challenges}: symptoms may appear as degradation in outcome or predictive-quality metrics rather than explicit errors, so incident response\index{Incident response!structured processes} must account for statistical uncertainty.
 
-Severity classification\index{Severity classification!incident prioritization} provides the foundation for prioritizing response in this ambiguous landscape. @Tbl-incident-severity defines four priority levels with associated response times, from P0 complete failures requiring 15-minute response to P3 minor anomalies allowing 24-hour investigation.
+Severity classification\index{Severity classification!incident prioritization} provides the foundation for prioritizing response in this ambiguous landscape. @Tbl-incident-severity gives one recommendation service's illustrative policy, with response deadlines from 15 minutes to 24 hours. Priority depends on affected traffic, consequences, and the need for containment. CTR measures engagement, not classification accuracy, and a PSI value alone establishes neither quality loss nor incident severity.
 
 The following checklist gives one structured response workflow. Urgent containment can proceed alongside evidence collection rather than waiting for complete diagnosis:
 
@@ -2712,12 +2716,12 @@ The following checklist gives one structured response workflow. Urgent containme
 
 | **Level** | **Criteria**                            | **Response Time** | **Example**                    |
 |:---------:|:----------------------------------------|:-----------------:|:-------------------------------|
-|   **P0**  | Complete model failure, serving errors  |     15 minutes    | Model returns null predictions |
-|   **P1**  | Significant accuracy degradation (>10%) |       1 hour      | Recommendation CTR drops 15%   |
-|   **P2**  | Moderate drift, localized impact        |      4 hours      | One feature shows PSI 0.1–0.25 |
-|   **P3**  | Minor anomalies, no user impact         |      24 hours     | Training pipeline delay        |
+|   **P0**  | Service unavailable across live traffic |     15 minutes    | Null predictions prevent recommendation delivery |
+|   **P1**  | Broad harmful impact needing containment |       1 hour      | CTR falls across major cohorts; replay confirms a broken feature contract, while longer-term outcomes remain pending |
+|   **P2**  | Bounded impact with a validated fallback |      4 hours      | A localized feature defect is contained; the owner investigates remaining exposure and pending outcomes |
+|   **P3**  | No observed impact or immediate exposure |      24 hours     | Training is delayed while the current release remains within its measured operating limits |
 
-: **Incident Severity Classification for ML Systems**: Response times reflect the urgency and potential business impact of each severity level. {#tbl-incident-severity tbl-colwidths="[7,41,16,36]"}
+: **Incident Severity Classification for ML Systems**: Illustrative response deadlines belong to this service's policy. Impact, evidence, and containment needs determine priority; drift magnitude alone does not. {#tbl-incident-severity tbl-colwidths="[7,41,16,36]"}
 
 For P0 and P1 incidents, postmortem documentation\index{Postmortem documentation!incident analysis} is required. These postmortems must include timeline, root cause, user impact, and preventive measures. ML-specific elements include identifying which monitoring gap allowed the issue to reach production and what validation would have caught it earlier.
 
@@ -2736,7 +2740,7 @@ When model performance degrades\index{Model debugging!decision tree}, the follow
 :::
 
 1. **Data pipeline integrity**: Inspect upstream data pipelines for schema changes, missing values, serialization errors, or input distribution shifts. Data integrity is an effective starting boundary because altered inputs, corrupted labels, and upstream feature changes can affect every downstream prediction.
-2. **Training-serving skew**: Compare feature distributions and preprocessing transformations between offline training and online serving for matched requests. Statistical distance metrics such as KS or PSI screen for distributional divergence, verifying whether serving inputs faithfully match training expectations.
+2. **Training-serving skew**: Replay matched requests through the versioned offline and serving transformations and compare feature values, missingness, units, and time cutoffs. KS or PSI separately screen for population divergence; neither verifies that the two paths compute the same value for a given request.
 3. **Subpopulation slicing**: Disaggregate performance across operational dimensions (such as geography, client hardware, or user cohorts). Localized degradation isolates data coverage gaps and slice-specific label noise that aggregate metrics conceal.
 4. **Temporal degradation dynamics**: Evaluate performance trends across time. Abrupt drops prioritize recent release artifacts and upstream infrastructure outages, whereas gradual degradation motivates checking seasonality and changing predictive relationships.
 5. **Model and representation attribution**: After verifying data pipeline integrity and ruling out serving skew, evaluate model-level failure modes through prediction confidence distributions, calibration curves, and feature attribution.
@@ -2863,10 +2867,14 @@ The diagnostic lenses identify places to investigate; a six-phase checklist\inde
 
 1. **Reproduce**: An ML failure that cannot be reproduced on held-out data is often data-dependent, an insight that redirects investigation toward the D·A·M taxonomy's data layer.
 2. **Isolate**: Once reproduced, identifying the minimal input set that triggers the failure transforms a diffuse "the model is wrong" complaint into a specific, testable condition.
-3. **Bisect**: If the failure correlates with a recent deployment, comparing model versions pinpoints which change introduced the regression.
+3. **Bisect**: If the failure correlates with a recent deployment, controlled comparisons of versioned model, feature-transform, and runtime artifacts help isolate which change introduced the regression.
 4. **Attribute**: Feature attribution applies interpretability techniques to identify which input factors drive the erroneous behavior.
 5. **Validate**: Confirming that the hypothesized root cause, when corrected, actually resolves the failure distinguishes genuine fixes from coincidental improvements.
 6. **Prevent**: Converting each resolved incident into a monitoring rule or validation check systematically closes the gap between detection and recurrence. This cumulative hardening can reduce repeated failure modes over time because each incident strengthens the observability infrastructure.
+
+The session-duration defect illustrates how these phases lead to a specific response. Suppose the CTR alert coincides with a serving-transform release on one recommendation host. The model weights, runtime, and offline feature definition are unchanged. Request logs place the new transform on the affected sessions, and replaying those exact inputs reproduces the wall-clock versus foreground-active mismatch. Representative traces show unchanged feature-retrieval and model-execution durations, weakening a latency-regression explanation without ruling out every infrastructure fault. Mature recommendation outcomes for the new release are still pending, so the responder has established a feature-contract violation, not its eventual effect on accuracy or revenue.
+
+The owning engineer restores the prior serving transform and its compatible feature-cache namespace, first checking the rollback on replayed requests and then exposing it through a bounded canary. Matched values agree again, and the same-input scores return to the prior artifact's outputs within the declared tolerance. Those observations demonstrate recovery of the feature contract; later comparable, mature outcome cohorts must establish whether user outcomes recover. A weights-only rollback leaves the changed feature computation in place, and immediate retraining would teach against the defect rather than repair the contract. The prevention step adds the affected idle-session inputs to parity validation and records the transform, cutoff, and cache versions needed for future replay.
 
 Debugging ML systems requires both systematic methodology and domain expertise. The most effective debugging often comes from engineers who understand both the model architecture and the business context of the predictions.
 
@@ -3974,7 +3982,7 @@ Investing in MLOps tooling without defining organizational interfaces leads to f
 
 **Fallacy**: *Training and serving environments automatically remain consistent once pipelines are established.*
 
-Establishing an initial end-to-end pipeline does not guarantee permanent parity between training and serving\index{MLOps fallacies!automatic consistency}. Training-serving skew arises from fundamental architectural divergences between offline and online execution paths. Training typically runs as an offline batch workflow (such as distributed SQL queries or Spark pipelines) optimized for high-throughput scans over historical logs, whereas online serving runs in low-latency microservices under millisecond latency constraints. Maintaining dual implementations of feature transformations across these environments risks numerical disparities, differing missing-value semantics, or lookahead bias in historical joins. As demonstrated in @sec-ml-operations-feature-stores-c01c, feature stores alleviate this divergence by unifying transformation logic and synchronizing batch and point-lookup stores. However, software pipelines alone cannot guarantee consistency; operational verification requires continuous distribution parity checks and schema assertions between offline feature logs and online inference inputs to catch divergence before it degrades downstream decisions.
+Establishing an initial end-to-end pipeline does not guarantee permanent parity between training and serving\index{MLOps fallacies!automatic consistency}. Training-serving skew arises from fundamental architectural divergences between offline and online execution paths. Training typically runs as an offline batch workflow (such as distributed SQL queries or Spark pipelines) optimized for high-throughput scans over historical logs, whereas online serving runs in low-latency microservices under millisecond latency constraints. Maintaining dual implementations of feature transformations across these environments risks numerical disparities, differing missing-value semantics, or lookahead bias in historical joins. As demonstrated in @sec-ml-operations-feature-stores-c01c, feature stores alleviate this divergence by unifying transformation logic and synchronizing batch and point-lookup stores. However, software pipelines alone cannot guarantee consistency; operational verification requires request-keyed value comparisons and schema assertions between offline replays and online inference inputs, alongside separate distribution monitoring to catch divergence before it degrades downstream decisions.
 
 :::
 

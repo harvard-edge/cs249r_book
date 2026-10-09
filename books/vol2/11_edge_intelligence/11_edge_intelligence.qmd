@@ -362,7 +362,7 @@ Local adaptation requires a feasible execution path for both prediction and lear
 
 The gap between running a model on a generic mobile CPU and on a dedicated NPU\index{Neural processing unit!silicon dividend} is best understood as a "silicon dividend" rather than a marginal speedup. Published NPU profiles vary by silicon generation and workload, so this callout uses explicit scenario assumptions rather than a benchmark: a `{python} EdgeNpuSpeedup.npu_speedup_mult_str` latency improvement and a `{python} EdgeNpuSpeedup.npu_energy_gain_mult_str` energy-efficiency improvement relative to the modeled MobileNetV2 baseline (`{python} EdgeNpuSpeedup.npu_cpu_lat_ms_str` per inference on the CPU).
 
-The dividend belongs to the operators the NPU actually executes. An update adds backward and optimizer work that costs roughly one to two more forward passes, because the backward pass computes gradients with respect to both activations and weights. If the runtime cannot place those operators on the NPU, they fall back to the CPU at baseline cost. The forward pass still collects its `{python} EdgeNpuSpeedup.npu_speedup_mult_str` dividend, but it is now the smaller part of the update, so the update as a whole runs at close to CPU speed and CPU energy. An inference-dominated product and an adaptation-dominated one can therefore see very different returns from the same silicon, and only the traced update path says which case a deployment is in.
+The dividend belongs to the operators the NPU actually executes. An update adds backward and optimizer work that costs roughly one to two more forward passes, because the backward pass computes gradients with respect to both activations and weights. If the runtime cannot place those operators on the NPU, they fall back to the CPU. The forward pass may still collect its `{python} EdgeNpuSpeedup.npu_speedup_mult_str` dividend, but CPU backward work and transfers between processors can dominate the complete update. The resulting speed and energy depend on that mixed execution path. An inference-dominated product and an adaptation-dominated one can therefore see very different returns from the same silicon, and only the traced update path says which case a deployment is in.
 
 :::
 
@@ -491,7 +491,7 @@ Latency is the requirement most often mistaken for such evidence. For applicatio
 
 These motivations are grounded in the broader concept of knowledge transfer\index{Knowledge transfer!pretrained representations}, where a pretrained model supplies representations useful for a new task or domain. Reusing those representations reduces what the device must learn from local examples. The benefit depends on what the tasks share, much as experience with one musical instrument helps with some aspects of another. A model pretrained in the cloud can adapt with limited local updates when its representations retain the distinctions the new task requires. If a new input modality or objective requires features the base model does not provide, a small local update may be insufficient.
 
-Transfer is the premise that every adaptation method in @sec-edge-intelligence-model-adaptation-6a82 relies on. Bias-only updates, adapters, and head-only training can afford to freeze almost the whole network only because the frozen representations already carry the distinctions a personal typing vocabulary, an individual gait, or a drifting sensor needs; the device then learns a small correction instead of a representation. When that premise fails, no choice of trainable subset recovers the missing features, and the case for local learning weakens accordingly.
+Transfer is the starting point for the adaptation methods in @sec-edge-intelligence-model-adaptation-6a82. When pretrained representations carry the distinctions a personal typing vocabulary, an individual gait, or a drifting sensor needs, bias-only updates, adapters, and head-only training can learn a small correction while freezing most of the network. When that premise fails, head-only adaptation cannot recover distinctions absent from its fixed features. Earlier-layer adapters or broader updates may learn them, but their added state, computation, and data requirements must fit the device budget.
 
 ### Real-world application domains {#sec-edge-intelligence-realworld-application-domains-c4e4}
 
@@ -835,7 +835,7 @@ Moving up the computational hierarchy, mobile-class hardware represents improvem
 
 [^fn-neuralengine-hardware-evolution]: **Apple Neural Engine**\index{Apple Neural Engine!definition}\index{Neural Engine!on-device training}: Apple's dedicated neural accelerator, first shipped in the A11 Bionic in 2017; its rating growth through the A18 Pro is tracked in @fig-edge-npu-tops. Which of an update's operators actually reach it, rather than falling back to the CPU or GPU, is the runtime question worked through in @sec-edge-intelligence-mobile-ai-accelerator-optimization-67fe.
 
-Published benchmark results from MLPerf Tiny and vendor data illustrate the range of edge inference costs in @fig-edge-inference-landscape. The plotted tiers span roughly 100$\times$ in energy per inference. Dedicated neural processors such as the Syntiant Core 2 and STM32N6 NPU occupy the sub-millijoule MCU and application-specific integrated circuit (ASIC) band (30 to 444 $\Glyph{\mu}$J per inference across keyword spotting, visual wake words, and small-image classification, with keyword spotting finishing in under 5 ms), Google Coral appears near 4.8 mJ, and the Jetson AGX Orin appears near 15 mJ for ResNet-50. The roughly 100$\times$ gap mixes different workloads with different hardware, so it is not a matched-task efficiency comparison. Nor does energy per inference determine battery lifetime, because inference frequency, sleep power, sensing, radio use, and usable battery capacity also enter that budget. For a learning device the figure sets the scale against which an update must be judged. One evaluation costs microjoules to millijoules, while each second of training inside the `{python} EdgeMobilePowerEnvelope.sustained_range_str` sustained envelope spends joules, more than a thousand keyword-spotting evaluations at the plotted 30 to 160 $\Glyph{\mu}$J. On a device that learns, the update path rather than inference is where the energy budget goes, and it needs its own measurement.
+Published benchmark results from MLPerf Tiny and vendor data illustrate the range of edge inference costs in @fig-edge-inference-landscape. The plotted tiers span roughly 100$\times$ in energy per inference. Dedicated neural processors such as the Syntiant Core 2 and STM32N6 NPU occupy the sub-millijoule MCU and application-specific integrated circuit (ASIC) band (30 to 444 $\Glyph{\mu}$J per inference across keyword spotting, visual wake words, and small-image classification, with keyword spotting finishing in under 5 ms), Google Coral appears near 4.8 mJ, and the Jetson AGX Orin appears near 15 mJ for ResNet-50. The roughly 100$\times$ gap mixes different workloads with different hardware, so it is not a matched-task efficiency comparison. Nor does energy per inference determine battery lifetime, because inference frequency, sleep power, sensing, radio use, and usable battery capacity also enter that budget. For a learning device the figure sets the scale against which an update must be judged. One evaluation costs microjoules to millijoules, while each second of training inside the `{python} EdgeMobilePowerEnvelope.sustained_range_str` sustained envelope spends joules, more than a thousand keyword-spotting evaluations at the plotted 30 to 160 $\Glyph{\mu}$J. An update can therefore be a substantial energy cost, but its share of the device budget depends on how often training and inference run. Both paths need measurement over the same operating period.
 
 ::: {#fig-edge-inference-landscape fig-env="figure" fig-pos="htb" fig-cap="**The edge inference landscape**: Published inference latency and energy measurements from MLPerf Tiny and official benchmarks reveal three distinct hardware tiers separated by approximately 100$\times$ in energy per inference; because the tiers run different workloads (keyword spotting and small-image tasks versus ResNet-50), the gap mixes hardware efficiency with workload size. Dedicated neural processors (Syntiant, STM32N6) achieve keyword spotting in under 5 ms at 30--160 microjoules, while edge GPUs (Jetson Orin) deliver sub-millisecond latency at 15 mJ." fig-alt="Scatter plot of inference latency vs. energy per inference showing three hardware tiers from MCU to edge GPU."}
 
@@ -1200,7 +1200,7 @@ Each solution pillar addresses a different decision. Model adaptation determines
 
 ## Model Adaptation {#sec-edge-intelligence-model-adaptation-6a82}
 
-The 10M-parameter model of @fig-training-memory-amplifier runs comfortably for inference on a smartwatch with `{python} EdgeAdaptationTierProfile.wearable_system_memory_mb_str` of total system memory, because its FP32 weights occupy 40 MB. Training every parameter would need the full 360 MB stack, most of the watch's memory before its operating system and foreground application take their share. The model fits; training all of it does not. Freezing parameters removes their gradients and optimizer state but not the storage or execution cost of the frozen network, so the system trains only a compact, strategically placed parameter set and, where it can, also shrinks the activations that the backward pass must keep. Resource-efficient model adaptation\index{On-device adaptation!parameter-efficient strategies} then determines both the local work a device can complete and the shared update format the fleet can aggregate.
+The 10M-parameter model of @fig-training-memory-amplifier is an inference candidate for a smartwatch with `{python} EdgeAdaptationTierProfile.wearable_system_memory_mb_str` of total system memory, because its FP32 weights occupy 40 MB. Training every parameter would need the full 360 MB stack, most of the watch's memory before its operating system and foreground application take their share. The weight footprint alone does not establish inference fit; activation buffers, runtime workspace, and foreground reserve must also fit. Full-model training leaves much less room for that remaining state. Freezing parameters removes their gradients and optimizer state but not the storage or execution cost of the frozen network, so the system trains only a compact, strategically placed parameter set and, where it can, also shrinks the activations that the backward pass must keep. Resource-efficient model adaptation\index{On-device adaptation!parameter-efficient strategies} then determines both the local work a device can complete and the shared update format the fleet can aggregate.
 
 The engineering choice balances adaptation expressivity against resource consumption. Full fine-tuning exposes all parameters to learning and can fit sufficiently small models; retaining a fixed model can be adequate when local context already supplies the needed personalization. Between these choices, selective updates offer smaller training state. The device resource envelope determines which candidates fit: a wearable-class device with `{python} EdgeAdaptationTierProfile.tiny_wearable_ram_mb_str` RAM has a different budget from a smartphone with `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str`. The local variation then determines how much trainable capacity is useful. Bias updates may capture calibration changes, while shifts requiring new features need a richer update space. Runtime support, inference cost, shared-update compatibility, and rollback determine whether the candidate can enter the deployed system.
 
@@ -1393,7 +1393,7 @@ class EdgeLoraParameterEfficiency:
 
 @Fig-adapter-lora-arch traces the parallel dataflow of Low-Rank Adaptation (LoRA): input $\LayerInputVector\in \mathbb{R}^\HiddenDimension$ passes through a frozen base matrix $\WeightMatrix_0 \in \mathbb{R}^{\HiddenDimension\times \HiddenDimension}$ and a trainable path with down-projection $\AdapterDownProjectionMatrix\in \mathbb{R}^{\AdapterRank\times \HiddenDimension}$ and up-projection $\AdapterUpProjectionMatrix\in \mathbb{R}^{\HiddenDimension\times \AdapterRank}$. Their outputs sum to $\HiddenActivation= \WeightMatrix_0 \LayerInputVector+ \AdapterUpProjectionMatrix\AdapterDownProjectionMatrix\LayerInputVector$, with the update restricted to rank $\AdapterRank\ll \HiddenDimension$. The base weights need no parameter gradients or optimizer state, although backward computation may still traverse the base path. Folding the product into the base weights ($\WeightMatrix_0 + \AdapterUpProjectionMatrix\AdapterDownProjectionMatrix$) removes separate adapter arithmetic for that merged model. Numerical compatibility, any requantization, and the cost of retaining merged copies determine whether this is the appropriate serving representation.
 
-::: {#fig-adapter-lora-arch fig-env="figure" fig-pos="htb" fig-cap="**LoRA architecture**: The input $\LayerInputVector$ passes through the frozen base matrix $\WeightMatrix_0$ and, in parallel, through a trainable low-rank path: down-projection $\AdapterDownProjectionMatrix$ ($\AdapterRank \times \HiddenDimension$) and up-projection $\AdapterUpProjectionMatrix$ ($\HiddenDimension \times \AdapterRank$), which play the roles of $\LowRankRightFactor^T$ and $\LowRankLeftFactor$ in the low-rank update above. Only $\AdapterDownProjectionMatrix$ and $\AdapterUpProjectionMatrix$ carry gradients and optimizer state. For serving, the product $\AdapterUpProjectionMatrix\AdapterDownProjectionMatrix$ can be folded into $\WeightMatrix_0$, so the adapted layer adds no inference latency." fig-alt="Input x splits into two paths. The upper path goes through a gray frozen matrix W0 of size d by d. The lower path goes through a blue trapezoid A of size r by d, narrows to r, then widens through blue trapezoid B of size d by r. The outputs W0 x and BA x add at a plus node to give output h, labeled merged for serving as W0 plus BA. A legend marks gray as frozen and blue as trainable."}
+::: {#fig-adapter-lora-arch fig-env="figure" fig-pos="htb" fig-cap="**LoRA architecture**: The input $\LayerInputVector$ passes through the frozen base matrix $\WeightMatrix_0$ and, in parallel, through a trainable low-rank path: down-projection $\AdapterDownProjectionMatrix$ ($\AdapterRank \times \HiddenDimension$) and up-projection $\AdapterUpProjectionMatrix$ ($\HiddenDimension \times \AdapterRank$), which play the roles of $\LowRankRightFactor^T$ and $\LowRankLeftFactor$ in the low-rank update above. Only $\AdapterDownProjectionMatrix$ and $\AdapterUpProjectionMatrix$ carry gradients and optimizer state. For serving, the product $\AdapterUpProjectionMatrix\AdapterDownProjectionMatrix$ can be folded into $\WeightMatrix_0$, removing the separate adapter operations when the merged representation is supported. End-to-end latency still needs measurement." fig-alt="Input x splits into two paths. The upper path goes through a gray frozen matrix W0 of size d by d. The lower path goes through a blue trapezoid A of size r by d, narrows to r, then widens through blue trapezoid B of size d by r. The outputs W0 x and BA x add at a plus node to give output h, labeled merged for serving as W0 plus BA. A legend marks gray as frozen and blue as trainable."}
 ![](images/svg/adapter-lora-arch.svg)
 
 :::
@@ -1668,7 +1668,7 @@ Few-shot and streaming adaptation form the foundation for more advanced memory a
 ::: {.column-margin}
 ![](images/svg/vol2_edge_intelligence_margin_003.svg){width="100%" fig-alt="Two trend lines: green new-task performance rises while red old-task accuracy falls."}
 
-*Learning the new task erodes accuracy on the old one.*
+*Learning a new task can erode accuracy on an earlier one.*
 :::
 
 ::::
@@ -2066,10 +2066,10 @@ Scheduling must also bound how long a round waits on its slowest participants. N
 ```
 ![](images/svg/edge_intelligence_straggler_cutoff_strip.svg){width="100%" fig-alt="Sequence strip showing the first K federated-client updates accepted before the round closes, while a late straggler is dropped."}
 
-*Over-selection closes the round on the first K updates.*
+*Enough valid reports let the round close before its slowest clients finish.*
 :::
 
-To prevent the global model update from stalling, production FL systems employ **over-selection**\index{Over-Selection!definition}. The server selects a candidate pool size $\CandidateClientCount$ larger than the target number of updates $\TargetUpdateCount$ (the production system of @bonawitz2019towards selects about 130 percent of the target, $\CandidateClientCount\approx 1.3 \times \TargetUpdateCount$). The server aggregates updates from the first $\TargetUpdateCount$ responders and discards the rest. This approach bounds the round duration by the speed of the $\TargetUpdateCount$-th fastest device rather than the absolute slowest. Accepting the fastest responders can amplify the participation bias just described, so shorter rounds must be evaluated against cohort coverage and wall-clock time to the declared quality target.
+To reduce waiting for stragglers, production FL systems employ **over-selection**\index{Over-Selection!definition}. The server selects a candidate pool size $\CandidateClientCount$ larger than the target number of updates $\TargetUpdateCount$ (the production system of @bonawitz2019towards selects about 130 percent of the target, $\CandidateClientCount \approx 1.3 \times \TargetUpdateCount$). When enough valid reports arrive, the server can form an aggregate from $\TargetUpdateCount$ completed updates rather than wait for every selected device. Completion then depends on the target-th valid report, but over-selection alone does not guarantee that the target is reached. A round deadline and an explicit acceptance or abandonment rule handle insufficient completion. Secure aggregation adds participation thresholds and dropout-recovery requirements; selecting the fastest reports must remain compatible with that protocol. Accepting the fastest responders can amplify the participation bias just described, so shorter rounds must be evaluated against cohort coverage and wall-clock time to the declared quality target.
 
 These scheduling decisions directly impact convergence rate, model generalization, energy consumption, and overall user experience. Poor scheduling results in excessive stragglers, overfitting to narrow client segments, or wasted computation. Client scheduling is therefore a core component of system design in federated learning, demanding both algorithmic insight and infrastructure-level coordination.
 
@@ -2084,7 +2084,7 @@ The compression decision separates into three levers, each changing a different 
 [^fn-sparsification-topk-gradient]: **Gradient Sparsification**\index{Gradient Sparsification!definition}: Selecting the largest 1--10 percent of gradient elements by magnitude reduces transmitted value count by 10--100$\times$ before coordinate indices and other metadata are included. Sparsified SGD and deep gradient compression retain untransmitted residuals for later updates rather than assuming that small components can be discarded permanently [@stich2018sparsified; @lin2018deep]. Wire-byte savings depend on the encoding, while convergence depends on the residual handling, optimizer, and compression schedule; a value-count reduction alone establishes neither.
 
 ::: {.column-margin .margin-pointer}
-↩ Gradient quantization, top-$\Glyph{k}$ sparsification, and the error feedback that keeps compressed training convergent are established in @sec-communication-collective-operations-collective-operations-gradient-compression-7a5c.
+↩ Gradient quantization, top-$\Glyph{k}$ sparsification, and error feedback that carries unsent updates forward are established in @sec-communication-collective-operations-collective-operations-gradient-compression-7a5c. Convergence depends on the optimizer and compression assumptions.
 :::
 
 Selective update sharing further reduces communication by transmitting only subsets of model parameters or updates. In layer-wise selective sharing, clients update only certain layers, typically the final classifier or adapter modules, while keeping the majority of the backbone frozen. This reduces the update payload and limits which shared representations can change, but the trainable subset can still overfit nonrepresentative client data.
@@ -2103,7 +2103,7 @@ $$ {#eq-edge-federated-communication-ledger}
 ↪ The break-even condition under which encoding and decoding time costs less than the transfer time compression saves is developed, with a worked example, in @sec-appdx-comm-foundations-compression.
 :::
 
-The local-work schedule and update encoding jointly determine communication cost. @Fig-gradient-compression compares uncompressed 32-bit values (Panel A) with uniform 8-bit quantization (Panel B), which gives a $4\times$ reduction in value bytes before scales and other metadata are counted. Top-$\Glyph{k}$ sparsification with retained error feedback (Panel C) must encode coordinate identities as well as selected values. Error feedback retains untransmitted residuals and adds local state. The receiving path must reconstruct or aggregate these encodings consistently, with separate compatibility requirements when secure aggregation hides individual updates.
+The local-work schedule and update encoding jointly determine communication cost. @Fig-gradient-compression compares uncompressed 32-bit values (Panel A) with uniform 8-bit quantization (Panel B), which gives a $4\times$ reduction in value bytes before scales and other metadata are counted. Top-$k$ sparsification with retained error feedback (Panel C) must encode coordinate identities as well as selected values. Error feedback retains one residual value per update coordinate between transmissions. Its storage depends on the update size and residual precision and must fit the device allowance alongside training and replay state. The receiving path must reconstruct or aggregate these encodings consistently, with separate compatibility requirements when secure aggregation hides individual updates.
 
 ::: {#fig-gradient-compression fig-env="figure" fig-pos="htb" fig-cap="**Gradient compression techniques**: Standard updates transmit full-precision values; quantization maps values to lower-precision buckets, such as FP32 to INT8; and sparsification transmits only the most significant top-$\Glyph{k}$ gradients. The latter two mechanisms reduce bytes transferred but introduce representation error or residual state that the training algorithm must manage." fig-alt="Three-panel comparison of gradient vector representations: standard FP32, quantized INT8, and sparsified Top-k with arrows to server."}
 
@@ -2181,7 +2181,7 @@ The local-work schedule and update encoding jointly determine communication cost
     \node[draw=mlsysblue!40, fill=mlsysblue!5, rounded corners=2pt, line width=0.5pt,
           minimum width=5.4cm, minimum height=0.65cm, align=center, anchor=south]
         at ([yshift=8pt]scA_diag.south) {
-        {\fontsize{6.8}{7.8}\selectfont\bfseries Total Transmission: $4 \times 32 = 128\text{ bits}$}\\[1pt]
+        {\fontsize{6.8}{7.8}\selectfont\bfseries Value Payload: $4 \times 32 = 128\text{ bits}$}\\[1pt]
         {\fontsize{6}{7}\selectfont\color{mlsysdarkgray} Baseline payload $\cdot$ High cellular egress cost}
     };
 
@@ -2230,7 +2230,7 @@ The local-work schedule and update encoding jointly determine communication cost
     \node[draw=mlsysamber!40, fill=mlsysamber!5, rounded corners=2pt, line width=0.5pt,
           minimum width=5.4cm, minimum height=0.65cm, align=center, anchor=south]
         at ([yshift=8pt]scB_diag.south) {
-        {\fontsize{6.8}{7.8}\selectfont\bfseries Total Transmission: $4 \times 8 = 32\text{ bits}$ ($4\times$ Gain)}\\[1pt]
+        {\fontsize{6.8}{7.8}\selectfont\bfseries Value Payload: $4 \times 8 = 32\text{ bits}$ ($4\times$, values only)}\\[1pt]
         {\fontsize{6}{7}\selectfont\color{mlsysdarkgray} Transmits scale $s \in \mathbb{R}$ + packed integer vector}
     };
 
@@ -2238,7 +2238,7 @@ The local-work schedule and update encoding jointly determine communication cost
     \node[subcard, minimum width=6.2cm, text width=5.6cm, align=left, inner sep=5pt, anchor=south] (scB_text)
         at ([yshift=0.2cm]colB.south) {
         {\fontsize{6.8}{7.8}\selectfont\bfseries\color{mlsysamber} Trade-off Profile}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont\textbf{Compression Ratio:} $4\times$ reduction ($8\text{ bits/value}$)}\\[1.5pt]
+        {\fontsize{6.5}{7.5}\selectfont\textbf{Compression Ratio:} $4\times$ for values; scale adds bytes}\\[1.5pt]
         {\fontsize{6.5}{7.5}\selectfont\textbf{Fidelity:} Bounded rounding error $|\delta_q| \le s/2$}\\[1.5pt]
         {\fontsize{6.5}{7.5}\selectfont\textbf{Memory Overhead:} Zero client state; stateless decode}
     };
@@ -2279,7 +2279,7 @@ The local-work schedule and update encoding jointly determine communication cost
     \node[draw=mlsysgreen!40, fill=mlsysgreen!5, rounded corners=2pt, line width=0.5pt,
           minimum width=5.4cm, minimum height=0.65cm, align=center, anchor=south]
         at ([yshift=8pt]scC_diag.south) {
-        {\fontsize{6.8}{7.8}\selectfont\bfseries Transmit $K_{\text{top}}=2$ Values + Indices ($\approx 2\times$ here)}\\[1pt]
+        {\fontsize{6.8}{7.8}\selectfont\bfseries Transmit $k=2$ Values + Indices ($2\times$, values only)}\\[1pt]
         {\fontsize{6}{7}\selectfont\color{mlsysdarkgray} Error Feedback: $\mathbf{e}^{(t+1)} \leftarrow \mathbf{e}^{(t)} + \mathbf{g}^{(t)} - \tilde{\mathbf{g}}^{(t)}$}
     };
 
@@ -2287,9 +2287,9 @@ The local-work schedule and update encoding jointly determine communication cost
     \node[subcard, minimum width=6.2cm, text width=5.6cm, align=left, inner sep=5pt, anchor=south] (scC_text)
         at ([yshift=0.2cm]colC.south) {
         {\fontsize{6.8}{7.8}\selectfont\bfseries\color{mlsysgreen} Trade-off Profile}\\[2pt]
-        {\fontsize{6.5}{7.5}\selectfont\textbf{Compression:} Scalable (10$\times$--100$\times$ in large models)}\\[1.5pt]
-        {\fontsize{6.5}{7.5}\selectfont\textbf{Fidelity:} Unsent residuals accumulate in local SRAM}\\[1.5pt]
-        {\fontsize{6.5}{7.5}\selectfont\textbf{Memory:} Small persistent error buffer $\mathbf{e}$}
+        {\fontsize{6.5}{7.5}\selectfont\textbf{Compression:} 10$\times$--100$\times$ fewer values; indices extra}\\[1.5pt]
+        {\fontsize{6.5}{7.5}\selectfont\textbf{Fidelity:} Unsent residuals persist between updates}\\[1.5pt]
+        {\fontsize{6.5}{7.5}\selectfont\textbf{Memory:} Update-sized residual; precision sets bytes}
     };
 
 
@@ -2324,7 +2324,7 @@ The local-work schedule and update encoding jointly determine communication cost
 
     \draw[->, line width=1.0pt, mlsysamber, shorten >=2pt, shorten <=2pt]
         (colB.south) -- (colB.south |- server.north)
-        node[midway, right=2pt, font=\fontsize{6.5}{7.5}\selectfont\bfseries, text=mlsysamber] {Upload $32\text{b}$};
+        node[midway, right=2pt, font=\fontsize{6.5}{7.5}\selectfont\bfseries, text=mlsysamber] {Upload $32\text{b}$ + scale};
 
     \draw[->, line width=1.0pt, mlsysgreen, shorten >=2pt, shorten <=2pt]
         (colC.south) -- (colC.south |- server.north)
@@ -2336,7 +2336,7 @@ The local-work schedule and update encoding jointly determine communication cost
 
 :::
 
-Compression is useful when its reduction in total communication outweighs encoding work and any extra rounds needed to reach the quality target. A smaller upload helps a round only if transfer was what made clients miss the deadline or excluded a cohort, and the round's completion logs show which. Even when transfer becomes feasible, the shared model may still fail to capture local variation.
+The quantization panel’s “Zero client state” means no persistent error-feedback residual; encoding buffers, scales, and temporary workspace still enter the device budget. Compression is useful when its reduction in total communication outweighs encoding work and any extra rounds needed to reach the quality target. A smaller upload helps a round only if transfer was what made clients miss the deadline or excluded a cohort, and the round's completion logs show which. Even when transfer becomes feasible, the shared model may still fail to capture local variation.
 
 ### Federated personalization {#sec-edge-intelligence-federated-personalization-3c73}
 
@@ -2419,7 +2419,7 @@ Consider architecting a federated learning system for a fleet of 10 million mobi
 Consider three design decisions:
 
 1.  Aggregation: Select plain FedAvg, reduced local epochs, or personalization/clustering for the non-IID population, and justify how the choice controls client drift.
-2.  Privacy: Decide whether the deployment needs formal differential-privacy noise or whether secure aggregation and data minimization are sufficient for the stated threat model; using the clipping and noise described in this section, explain why adding noise typically increases the rounds needed to reach the quality target.
+2.  Privacy: Decide whether the deployment needs formal differential-privacy noise or whether secure aggregation and data minimization are sufficient for the stated threat model; using the clipping and noise described in this section, explain how noise can affect utility and rounds to the same quality target, and what measurements would establish that cost.
 3.  Communication: Choose between gradient quantization (e.g., 8-bit) and structured sparsity under constrained bandwidth, and justify the bandwidth/accuracy trade-off.
 
 :::
@@ -2577,9 +2577,9 @@ These layers only work as a system when the integration policy protects against 
 
 : **Edge-Learning Integration Controls**: A tiered edge-learning deployment needs explicit controls for capability matching, graceful degradation, resource conflicts, and validation across device and network combinations. {#tbl-edge-integration-controls}
 
-@Fig-tiered-adaptation condenses the same reasoning into three questions. The first asks how much adaptation the local change needs, so a light change stays on bias-only updates whatever the device. The second asks whether the device's compute and energy envelope can afford more than adapters, and the third asks whether the updates are valuable across devices, which decides between local-only learning and federation. The cards' adaptation labels (lightweight, moderate, full) describe branches of adaptation demand, not the Tier 1--3 device classes, and the device names on each card mark typical homes for a branch. In tier terms, Tier 3 devices sit in the lightweight branch, Tier 1 and Tier 2 phones in the moderate branch, and wall-powered edge servers in the full branch. The voice-assistant policy of this section therefore spans the lightweight and moderate branches, with budget phones held to the lightweight branch by a memory limit that the flowchart does not draw. The deployable choice must still satisfy the measured working-set, runtime, and energy constraints while meeting the local quality target, and federation adds the compatibility and population-validation requirements just established.
+@Fig-tiered-adaptation condenses the same reasoning into three questions. The first asks how much adaptation the local change needs, so a light change stays on bias-only updates whatever the device. The second asks whether meeting the declared quality target requires a larger update and whether that candidate fits the measured device budget, and the third asks whether the updates are valuable across devices, which decides between local-only learning and federation. The cards distinguish lightweight and moderate adaptation from a larger update candidate; these labels describe adaptation demand rather than the Tier 1--3 device classes, and the device names on each card mark typical homes for a branch. In tier terms, Tier 3 devices sit in the lightweight branch, Tier 1 and Tier 2 phones in the moderate branch, and wall-powered edge servers as possible candidates for the larger-update branch. A no answer at the second decision retains adapters because the larger update is unnecessary or does not fit; if that smaller update also misses the quality target, the policy must be revised before deployment. The voice-assistant policy of this section therefore spans the lightweight and moderate branches, with budget phones held to the lightweight branch by a memory limit that the flowchart does not draw. The deployable choice must still satisfy the measured working-set, runtime, and energy constraints while meeting the local quality target, and federation adds the compatibility and population-validation requirements just established.
 
-::: {#fig-tiered-adaptation fig-env="figure" fig-pos="htb" fig-cap="**Tiered adaptation strategy**: The flowchart routes a deployment by the adaptation the local change needs, then by the device's compute and energy envelope, then by whether updates are valuable across devices. Bias-only updates, adapters or LoRA, and partial or full fine-tuning are candidates for increasingly demanding changes on increasingly capable devices, subject to measured resource and quality budgets. The federated card names one common configuration; whether differential privacy is required depends on the deployment's threat model." fig-alt="Flowchart with diamond decision nodes branching from deployment start through adaptation, compute, and data sharing decisions."}
+::: {#fig-tiered-adaptation fig-env="figure" fig-pos="htb" fig-cap="**Tiered adaptation strategy**: The flowchart routes a deployment by the adaptation the local change needs, then by whether a larger update is needed for the quality target and fits the measured device budget, then by whether updates are valuable across devices. Bias-only updates, adapters or LoRA, and partial or full fine-tuning are candidates for increasingly demanding changes on increasingly capable devices, subject to measured resource and quality budgets. The federated card names one common configuration; whether differential privacy is required depends on the deployment's threat model." fig-alt="Flowchart with diamond decision nodes branching from deployment start through adaptation demand, quality and resource eligibility, and data sharing decisions."}
 
 ```{.tikz}
 \providecolor{mlsysblue}{RGB}{26, 86, 160}
@@ -2671,14 +2671,14 @@ These layers only work as a system when the integration policy protects against 
 
 % B5: Decision 2
 \node[DecisionDiamond] (B5) at (3.6, 0.4) {
-  {\fontsize{7.5}{9}\selectfont\bfseries\color{mlsyspurple} Sufficient Compute}\\[1pt]
-  {\fontsize{7.5}{9}\selectfont\bfseries\color{mlsyspurple} \& Energy Envelope?}
+  {\fontsize{7.5}{9}\selectfont\bfseries\color{mlsyspurple} Quality Requires More}\\[1pt]
+  {\fontsize{7.5}{9}\selectfont\bfseries\color{mlsyspurple} \& Budget Fits?}
 };
 
 % B6: Fine-Tuning
-\node[ActionCard, draw=mlsysred!70, fill=redbg] (B6) at (3.6, -1.8) {
-  {\fontsize{7}{8.5}\selectfont\bfseries\color{mlsysred} FULL ADAPTATION}\\[2pt]
-  {\fontsize{8}{10}\selectfont\bfseries\color{mlsysdark} Partial or Full Fine-Tuning}\\[1.5pt]
+\node[ActionCard, draw=mlsysred!70, fill=redbg, inner sep=6pt] (B6) at (3.6, -1.8) {
+  {\fontsize{7}{8.5}\selectfont\bfseries\color{mlsysred} LARGER UPDATE CANDIDATE}\\[2pt]
+  {\fontsize{8}{10}\selectfont\bfseries\color{mlsysdark} Evaluate Partial or Full Fine-Tuning}\\[1.5pt]
   {\fontsize{6.8}{8}\selectfont\color{mlsysgray} Wall-powered edge servers \& high-end GPUs}
 };
 
@@ -2713,7 +2713,7 @@ These layers only work as a system when the integration policy protects against 
 \draw[FlowArrow] (B4) -- (B5);
 
 % B5 No -> B7 (device stays in the moderate tier; data value still decides)
-\draw[FlowArrow] (B5.west) -- ++(-2.0, 0) node[midway, above, DecisionLabel, color=mlsysred] {No (Constrained)} |- (B7.west);
+\draw[FlowArrow] (B5.west) -- ++(-2.0, 0) node[midway, above, DecisionLabel, color=mlsysred] {No} |- (B7.west);
 % B3 -> B7 (lightweight tier also reaches the data-value decision)
 \draw[FlowArrow] (B3.south) |- (B7.west);
 

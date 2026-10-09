@@ -503,7 +503,7 @@ class EmbodiedSiteScenario(BaseModel):
     chunk_wire_bytes: Quantity            # serialized chunk with header and evidence epoch
     board_link_clock: Quantity            # board-link (SPI) clock, one bit per clock
     t_chunk_deserialize: Quantity
-    t_plan_validate: Quantity             # whole-plan validation on the safety MCU
+    t_plan_validate: Quantity             # aggregate host geometry and local MCU admission allowance
     t_plan_activate: Quantity
     # site geometry, people, and floor
     v_human_approach: Quantity

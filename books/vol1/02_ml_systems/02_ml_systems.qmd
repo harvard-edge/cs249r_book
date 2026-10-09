@@ -968,6 +968,8 @@ class ResnetCloud:
     cloud_ridge_str = fmt_int(round(cloud_ridge_value), commas=False)
 ```
 
+The analytical model assumes `{python} fmt_memory(ResnetCloud.cloud_traffic_bytes, unit=MB, precision=1, commas=False)` moved per inference, including weights and activation traffic. This is a modeled transfer volume, not the stored parameter footprint; reuse and runtime choices can change it.
+
 - Peak compute: `{python} ResnetCloud.cloud_peak_tflop_per_s_str` (FP16)
 - Memory bandwidth: `{python} ResnetCloud.cloud_bandwidth_tb_per_s_str`
 - Compute time: $\IronLawComputeTime$ = `{python} ResnetCloud.cloud_compute_frac`
@@ -1038,6 +1040,8 @@ class ResnetMobile:
     inference_speed_mult_str = fmt_multiple(inference_speed_x_value, precision=1, commas=False)
 ```
 
+At INT8, the analytical model assumes `{python} fmt_memory(ResnetMobile.mobile_traffic_bytes, unit=MB, precision=1, commas=False)` moved per inference, including weights and activation traffic. The INT8 weight footprint below is only one component of that transfer volume.
+
 - Peak compute: ~`{python} ResnetMobile.mobile_tops_str` (INT8)—representative of modern mobile NPUs
 - Memory bandwidth: ~`{python} ResnetMobile.mobile_bw_gb_per_s_str` (LPDDR5)
 - Model size: `{python} ResnetSetup.resnet_int8_mb_str` (INT8 quantized)
@@ -1045,7 +1049,7 @@ class ResnetMobile:
 - Memory time (weights plus activations): $\IronLawMemoryTime$ = `{python} ResnetMobile.mobile_memory_frac`
 - **Result**: Bottleneck = `{python} ResnetMobile.mobile_bottleneck_str` (`{python} ResnetMobile.mobile_ratio_mult_str` slower than compute)
 
-**Systems insight**: Both platforms are memory bound for single-image inference. The A100's faster memory bandwidth (`{python} ResnetCloud.cloud_bandwidth_tb_per_s_str` vs. `{python} ResnetMobile.mobile_bw_gb_per_s_str` = `{python} ResnetMobile.bw_advantage_mult_str`) translates to roughly `{python} ResnetMobile.inference_speed_mult_str` faster inference; peak compute alone is not the limiting comparison. This explains why byte-reduction and lower-precision techniques can beat simply buying more peak FLOP/s for deployment.
+**Systems insight**: Both platforms are memory bound for single-image inference. The A100's faster memory bandwidth (`{python} ResnetCloud.cloud_bandwidth_tb_per_s_str` vs. `{python} ResnetMobile.mobile_bw_gb_per_s_str` = `{python} ResnetMobile.bw_advantage_mult_str`) gives roughly `{python} ResnetMobile.inference_speed_mult_str` lower modeled memory-transfer time under the stated FP16 and INT8 traffic assumptions; this ratio is not a measured end-to-end inference speedup. This explains why byte-reduction and lower-precision techniques can beat simply buying more peak FLOP/s for deployment.
 
 ResNet-50 becomes compute bound when batching and data reuse raise computation per byte moved above the hardware balance point, $\ArithmeticIntensity > \PeakRate/\Bandwidth$, where $\ArithmeticIntensity = \Operations/\DataVolume$. Specifically, during batched inference, the static model weights are transferred across the memory bus only once and subsequently reused across all $\BatchSize$ samples in the batch. This amortizes the weight transfer over $\BatchSize$ inputs, increasing the arithmetic intensity until computation time overtakes memory-transfer time. The crossover is architecture- and implementation-dependent because activation traffic, input/output movement, cache reuse, and runtime execution details all change the effective bytes moved per inference.
 
@@ -1490,7 +1494,7 @@ class DistancePenalty:
 2.  **Round-trip propagation**: (`{python} DistancePenalty.distance_km_str` $\times$ 2)/`{python} DistancePenalty.sol_km_per_s_str` = `{python} DistancePenalty.rtt_formatted_ms_str`.
 3.  **Result**: Round-trip propagation alone requires `{python} DistancePenalty.rtt_formatted_ms_str`, exceeding the `{python} DistancePenalty.safety_budget_ms_str` end-to-end budget by `{python} DistancePenalty.overrun_ms_str` before the model performs any inference.
 
-**Systems insight**: Even a regional data center misses the budget on propagation alone, so physics has made cloud ML *impossible* for this application. The model must move to the edge.
+**Systems insight**: The specified regional cloud path misses the budget on propagation alone and is therefore infeasible. Running the model beside the arm removes that remote propagation term, but the complete local sensing, inference, and control path must still be checked against the deadline.
 
 :::
 
@@ -1516,7 +1520,7 @@ Centralization also changes how models are served and governed. Cloud APIs make 
 
 Scale does not make the cloud universally superior. The data-gravity principle\index{Data gravity principle!cloud limitations} (\ref{pri-data-gravity}) explains why. Shipping a dataset of size $\DataVolume$ over a network link of bandwidth $\NetworkBandwidth$ takes $\DataVolume/\NetworkBandwidth$, a time that grows with the data, while shipping the computation (a model and its code) costs roughly the same however much data waits at the other end. As data volume grows, moving the data to a remote cluster therefore eventually costs more than moving the computation to the data. @Sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0 works through the transfer arithmetic, and the edge section applies the same comparison to a single request under a deadline. The deployment paradigm is dictated by the binding physical constraint, not by the largest available throughput.
 
-[^fn-cloud-elastic-cost]: **Pay-as-you-go pricing**\index{Cloud economics!elastic pricing}: A cloud economic model where users pay for accelerator-hours consumed rather than hardware owned. Elastic pricing converts the fixed cost of idle $\PeakRate$ into a variable cost proportional to actual utilization, but sustained 24/7 workloads can cost more on cloud than equivalent on-premises hardware amortized over three years, a crossover that drives the total cost of ownership (TCO) analysis in @tbl-ml-systems-cloud-tco.
+[^fn-cloud-elastic-cost]: **Pay-as-you-go pricing**\index{Cloud economics!elastic pricing}: A cloud economic model where users pay for billable allocated accelerator-hours rather than hardware owned. Idle time can still be billed while an instance remains allocated; busy utilization alone does not determine the charge. Sustained allocation can cost more than amortized on-premises hardware, but @tbl-ml-systems-cloud-tco illustrates only a partial budget under stated assumptions, not a matched total-cost crossover.
 
 ### Cloud ML trade-offs and constraints {#sec-ml-systems-cloud-ml-tradeoffs-constraints-96ed}
 
@@ -1662,7 +1666,7 @@ class CloudEdgeTCO:
     gpu_utilization_pct_str = fmt_percent(gpu_utilization, precision=1, commas=False, style='prose')
 ```
 
-A vision system serves `{python} CloudEdgeTCO.requests_str` daily inferences at ResNet-50 scale (`{python} CloudEdgeTCO.inference_ms_str` latency, `{python} CloudEdgeTCO.response_kb_str` response). The comparison spans `{python} CloudEdgeTCO.server_life_years_str`. The `{python} CloudEdgeTCO.gpu_instances_str` instances are a provisioning choice (redundancy and headroom for traffic peaks), not a throughput requirement. @Tbl-ml-systems-cloud-tco itemizes the annual GPU, network, load-balancer, and observability costs of this fixed-capacity cloud implementation under public list pricing, and @tbl-ml-systems-edge-tco itemizes the corresponding hardware, power, cooling, network, and DevOps labor costs of an on-premises edge-server implementation.
+A vision system serves `{python} CloudEdgeTCO.requests_str` daily inferences at ResNet-50 scale (`{python} CloudEdgeTCO.inference_ms_str` latency, `{python} CloudEdgeTCO.response_kb_str` response). The illustrative budget spans `{python} CloudEdgeTCO.server_life_years_str`. It includes the listed components rather than a complete, matched TCO. Cloud operating labor, edge redundancy, installation, and failure recovery are not priced, and comparable capacity and availability have not been established. The `{python} CloudEdgeTCO.gpu_instances_str` instances are a provisioning choice (redundancy and headroom for traffic peaks), not a throughput requirement. @Tbl-ml-systems-cloud-tco itemizes the annual GPU, network, load-balancer, and observability costs of this fixed-capacity cloud implementation under public list pricing, and @tbl-ml-systems-edge-tco itemizes the corresponding hardware, power, cooling, network, and DevOps labor costs of an on-premises edge-server implementation.
 
 ```{=latex}
 \begingroup
@@ -1677,7 +1681,7 @@ A vision system serves `{python} CloudEdgeTCO.requests_str` daily inferences at 
 | **Monitoring/logging** | Monitoring, alerts                                                                                                                                     |      `{python} CloudEdgeTCO.c_logs_usd_str` |
 | **Total Cloud**        |                                                                                                                                                        | **`{python} CloudEdgeTCO.c_total_usd_str`** |
 
-: **Cloud Inference Annual TCO**: Itemized GPU, network, load-balancer, and observability costs for the fixed-capacity cloud implementation of the ResNet-50-scale vision workload. {#tbl-ml-systems-cloud-tco tbl-colwidths="[33,37,30]"}
+: **Cloud Inference Annual Budget**: Itemized GPU, network, load-balancer, and observability costs for the fixed-capacity cloud implementation of the ResNet-50-scale vision workload. {#tbl-ml-systems-cloud-tco tbl-colwidths="[33,37,30]"}
 
 ```{=latex}
 \endgroup
@@ -1697,24 +1701,24 @@ A vision system serves `{python} CloudEdgeTCO.requests_str` daily inferences at 
 | **DevOps labor**     | `{python} CloudEdgeTCO.devops_fte_str` $\times$ `{python} CloudEdgeTCO.devops_salary_usd_str` salary                                         |     `{python} CloudEdgeTCO.e_labor_usd_str` |
 | **Total Edge**       |                                                                                                                                              | **`{python} CloudEdgeTCO.e_total_usd_str`** |
 
-: **Edge Inference Annual TCO**: Itemized hardware, power, cooling, network, and DevOps labor costs for the on-premises edge-server implementation, exposing labor as the dominant component of this scenario. {#tbl-ml-systems-edge-tco tbl-colwidths="[33,37,30]"}
+: **Edge Inference Annual Budget**: Itemized hardware, power, cooling, network, and DevOps labor costs for the on-premises edge-server implementation, exposing labor as the dominant component of this scenario. {#tbl-ml-systems-edge-tco tbl-colwidths="[33,37,30]"}
 
 ```{=latex}
 \endgroup
 ```
 
-::: {#nbk-ml-systems-cloud-vs-edge-tco .callout-notebook title="Cloud vs. edge TCO"}
+::: {#nbk-ml-systems-cloud-vs-edge-tco .callout-notebook title="Cloud vs. edge annual budgets"}
 
-**Problem**: When all costs are included (GPU hours, network egress, power, cooling, and labor, itemized in @tbl-ml-systems-cloud-tco and @tbl-ml-systems-edge-tco), is cloud or on-premises edge deployment cheaper over `{python} CloudEdgeTCO.server_life_years_str`?
+**Problem**: Under the partial accounting boundaries itemized in @tbl-ml-systems-cloud-tco and @tbl-ml-systems-edge-tco, which implementation has the lower estimated annual budget over `{python} CloudEdgeTCO.server_life_years_str`?
 
 **Math**: The question is the annual cost at this operating point, so the comparison in @eq-edge-breakeven is the gap between the two annual totals:
-$$\text{Annual cost gap} = \text{Cloud annual TCO} - \text{Edge annual TCO}$$ {#eq-edge-breakeven}
+$$\text{Annual cost gap} = \text{Cloud annual budget} - \text{Edge annual budget}$$ {#eq-edge-breakeven}
 
 At `{python} CloudEdgeTCO.requests_str` inferences/day, the gap is `{python} CloudEdgeTCO.c_total_usd_str` − `{python} CloudEdgeTCO.e_total_usd_str` = `{python} CloudEdgeTCO.cost_gap_usd_str`. Almost all of the cloud bill is provisioned capacity rather than use. At `{python} CloudEdgeTCO.inference_ms_str` per request the day's traffic needs only about `{python} CloudEdgeTCO.gpu_busy_hours_str` GPU-hours of the `{python} CloudEdgeTCO.gpu_provisioned_hours_str` provisioned, about `{python} CloudEdgeTCO.gpu_utilization_pct_str` utilization. Only egress scales with traffic.
 
-**Result**: Edge costs about `{python} CloudEdgeTCO.edge_savings_str` less at this operating point. Because the fixed cloud pool alone already costs more than the whole edge deployment, no traffic level in this scenario makes the cloud cheaper; a genuine break-even\index{Break-even analysis!edge vs. cloud utilization} analysis would need cloud capacity that scales with demand.
+**Result**: The listed edge budget costs about `{python} CloudEdgeTCO.edge_savings_str` less at this operating point. Because the fixed cloud pool alone already costs more than the listed edge budget, no traffic level under this fixed provisioning and partial accounting makes the cloud cheaper; a genuine break-even\index{Break-even analysis!edge vs. cloud utilization} analysis would need cloud capacity that scales with demand.
 
-**Systems insight**: Edge TCO is dominated by labor (`{python} CloudEdgeTCO.e_labor_usd_str` ÷ `{python} CloudEdgeTCO.e_total_usd_str` ≈ `{python} CloudEdgeTCO.labor_pct_str`), not hardware. Organizations without existing DevOps capacity should factor in the full cost of maintaining on-premises infrastructure.
+**Systems insight**: The listed edge budget is dominated by labor (`{python} CloudEdgeTCO.e_labor_usd_str` ÷ `{python} CloudEdgeTCO.e_total_usd_str` ≈ `{python} CloudEdgeTCO.labor_pct_str`), not hardware. Organizations without existing DevOps capacity should factor in the full cost of maintaining on-premises infrastructure.
 
 :::
 
@@ -2195,9 +2199,9 @@ Saturating an uplink with uncompressed sensor streams demonstrates the bandwidth
 
 :::
 
-Offloading raw telemetry over cellular or Wi-Fi links rapidly depletes onboard battery reserves. @Fig-energy-per-inference charts this disparity on a logarithmic scale spanning eight orders of magnitude, isolating the `{python} EnergyAnchors.span_mult_str` gap between an always-on TinyML keyword spotting inference (about `{python} EnergyAnchors.e_kws_str`) and a cloud foundation-model query (about `{python} EnergyAnchors.e_llm_query_str`, an order-of-magnitude scenario anchor that includes data-center overhead rather than a measured value). This steep energy gradient demonstrates why continuous sensing demands local, specialized low-power acceleration rather than constant wireless offloading.
+The matched transmission calculation shows why uploading this raw payload spends more device energy than local inference under the stated assumptions. @Fig-energy-per-inference instead supplies energy scale anchors for different tasks and accounting boundaries on a logarithmic scale spanning eight orders of magnitude, isolating the `{python} EnergyAnchors.span_mult_str` gap between an always-on TinyML keyword spotting inference (about `{python} EnergyAnchors.e_kws_str`) and a cloud foundation-model query (about `{python} EnergyAnchors.e_llm_query_str`, an order-of-magnitude scenario anchor that includes data-center overhead rather than a measured value). The across-task ratio does not isolate a hardware advantage or establish an offload decision; that decision requires matched local and remote paths for the same task.
 
-::: {#fig-energy-per-inference fig-env="figure" fig-pos="htb" fig-cap="**Energy per Inference Across Deployment Tiers**: An eight-order-of-magnitude energy gap separates always-on TinyML keyword spotting (~10 µJ) from a cloud foundation-model query (~1 kJ) on a log scale. The three vision bars are device-level estimates (the device's power draw at its modeled utilization over the batch-1 inference window, counting the whole phone, the edge tier's NVIDIA Jetson embedded GPU module, or the A100 card) from the same analytical model used throughout this chapter; the two endpoints are scenario anchors. This divergence explains why always-on edge sensing requires specialized low-power architectures rather than continuous wireless streaming to the cloud." fig-alt="Horizontal log-scale bar chart of energy per inference for five workloads across four deployment paradigms. TinyML keyword spotting is about 10 microjoules; Mobile MobileNetV2 and Edge ResNet-50 fall in the single and low tens of millijoules; Cloud ResNet-50 on an A100 is under a tenth of a joule; and a Cloud GPT-4 query is about 1 kilojoule, eight orders of magnitude above keyword spotting."}
+::: {#fig-energy-per-inference fig-env="figure" fig-pos="htb" fig-cap="**Energy per Inference Across Deployment Tiers**: An eight-order-of-magnitude energy gap separates always-on TinyML keyword spotting (~10 µJ) from a cloud foundation-model query (~1 kJ) on a log scale. The three vision bars are device-level estimates (the device's power draw at its modeled utilization over the batch-1 inference window, counting the whole phone, the edge tier's NVIDIA Jetson embedded GPU module, or the A100 card) from the same analytical model used throughout this chapter; the two endpoints are scenario anchors. The tasks and accounting boundaries differ, so these bars illustrate energy scales rather than a controlled hardware-efficiency or offload comparison." fig-alt="Horizontal log-scale bar chart of energy per inference for five workloads across four deployment paradigms. TinyML keyword spotting is about 10 microjoules; Mobile MobileNetV2 and Edge ResNet-50 fall in the single and low tens of millijoules; Cloud ResNet-50 on an A100 is under a tenth of a joule; and a Cloud GPT-4 query is about 1 kilojoule, eight orders of magnitude above keyword spotting."}
 
 ```{python}
 #| echo: false
@@ -2368,13 +2372,13 @@ The decision between local edge processing and remote cloud processing is govern
 
 ::: {#dfn-ml-systems-data-locality-invariant .callout-definition title="The data locality invariant"}
 
-***The data locality invariant***\index{Data locality invariant!definition} first tests a complete remote path against the service deadline. Let $\RemotePathTime$ denote complete remote-path time, $\CompletionDeadline$ the deadline, $\NetworkBandwidth$ offload bandwidth, $\NetworkLatency$ network latency, and $\RemotePeakRate$ and $\RemoteHardwareEfficiency$ the remote compute rate and efficiency:
-$$\RemotePathTime= \frac{\DataVolume}{\NetworkBandwidth} + \NetworkLatency+ \frac{\Operations}{\RemotePeakRate\cdot \RemoteHardwareEfficiency}, \quad \text{remote feasible} \iff \RemotePathTime\le \CompletionDeadline$$
+***The data locality invariant***\index{Data locality invariant!definition} first screens a remote path against the service deadline. The expression below gives a lower bound on complete remote-path time $\RemotePathTime$; let $\CompletionDeadline$ denote the deadline, $\NetworkBandwidth$ offload bandwidth, $\NetworkLatency$ network latency, and $\RemotePeakRate$ and $\RemoteHardwareEfficiency$ the remote compute rate and efficiency:
+$$\RemotePathTime \ge \frac{\DataVolume}{\NetworkBandwidth} + \NetworkLatency + \frac{\Operations}{\RemotePeakRate \cdot \RemoteHardwareEfficiency}$$
 
-The corresponding $\LocalPathTime$ is the complete local-path time. If both paths are feasible, compare $\LocalPathTime$ and $\RemotePathTime$; either path can be rejected by the deadline. Here, $\NetworkLatency$ captures the full network round-trip time (propagation, routing, and protocol handshakes), while the return payload transmission time is typically omitted because inference results (such as a class label or bounding box) are orders of magnitude smaller than the raw input payload $\DataVolume$.
+The bound includes input transmission, network round-trip time, and arithmetic execution, but omits remote memory movement, queueing, preprocessing, runtime overhead, and response serialization. If even this lower bound exceeds the deadline, reject the remote path. A bound below the deadline leaves a candidate for complete-path measurement; it does not establish feasibility. Compare complete local and remote times only after each path meets the deadline and its resource constraints. Here, $\NetworkLatency$ covers propagation, routing, and protocol handshakes; response serialization may be small for a class label but must be included when material.
 
-1.  **Significance**: The invariant defines a crossover beyond which adding remote compute $(\RemotePeakRate)$ has little effect because transmission dominates $\RemotePathTime$. The local path is preferred only after its own complete execution time and resource limits are checked.
-2.  **Distinction**: Unlike the iron law, which decomposes one execution path, the locality invariant compares two complete paths against each other and against an explicit service deadline.
+1.  **Significance**: The invariant defines a crossover beyond which adding remote compute $(\RemotePeakRate)$ has little effect because transmission dominates the lower bound. The local path is preferred only after its own complete execution time and resource limits are checked.
+2.  **Distinction**: Unlike the iron law, which decomposes one execution path, the locality invariant uses a deadline to reject an idealized remote path, then requires complete-path evidence to choose between the remaining alternatives.
 3.  **Common pitfall**: A frequent misconception is that 5G/6G "solves" locality. While these technologies improve $\NetworkBandwidth$, they do not remove propagation and protocol latency, so a remote path can still miss a tight service deadline.
 
 :::
@@ -2457,13 +2461,14 @@ class DataLocalityInvariant:
 - **Data $(\DataVolume)$**: `{python} DataLocalityInvariant.frame_label_str` frame ≈ `{python} DataLocalityInvariant.frame_mb_str`.
 - **Bandwidth $(\NetworkBandwidth)$**: `{python} DataLocalityInvariant.net_bw_mbit_per_s_str` cellular uplink.
 - **Remote network and compute response**: `{python} DataLocalityInvariant.remote_ms_str` (round-trip + remote compute).
+- **Per-frame completion deadline**: `{python} DataLocalityInvariant.frame_budget_ms_str`, equal to the frame interval in this illustrative scenario; each avoidance result must be ready before the next frame arrives.
 
 **Math**:
 
 1.  **Transmission time**: `{python} DataLocalityInvariant.frame_mb_str` $\times$ 8 bits/`{python} DataLocalityInvariant.net_bw_mbit_per_s_str` = `{python} DataLocalityInvariant.tx_time_ms_str`.
-2.  **Complete remote path**: Transmission + `{python} DataLocalityInvariant.remote_ms_str` remote response = `{python} DataLocalityInvariant.remote_total_ms_str`, vs. a `{python} DataLocalityInvariant.frame_budget_ms_str` frame interval.
+2.  **Remote-path lower bound**: Transmission + `{python} DataLocalityInvariant.remote_ms_str` remote response = `{python} DataLocalityInvariant.remote_total_ms_str`, vs. the stated `{python} DataLocalityInvariant.frame_budget_ms_str` per-frame deadline.
 
-**Systems insight**: The remote path misses the frame interval before control-loop slack is considered, and faster remote compute cannot remove the transmission time. Cloud offload is therefore infeasible under these assumptions; the local path must still be measured to confirm that it meets the deadline.
+**Systems insight**: The remote path misses the stated per-frame deadline, and faster remote compute cannot remove the transmission time. Cloud offload is therefore infeasible under these assumptions; the local path must still be measured to confirm that it meets the deadline.
 
 :::
 
@@ -2713,11 +2718,11 @@ class EdgeSizingFeasibility:
 
 ::: {#nbk-ml-systems-edge-inference-sizing .callout-notebook title="Edge inference sizing"}
 
-**Problem**: Given the throughput target in @tbl-ml-systems-edge-sizing-requirements and the candidates in @tbl-ml-systems-edge-hardware-options, which edge accelerator (USB-scale TPU, workstation-class embedded GPU, or general-purpose mini-PC) delivers the required throughput at the lowest three-year fleet cost?
+**Problem**: Given the throughput target in @tbl-ml-systems-edge-sizing-requirements and the candidates in @tbl-ml-systems-edge-hardware-options, which edge accelerator (USB-scale TPU, workstation-class embedded GPU, or general-purpose mini-PC) delivers the required throughput at the lowest estimated three-year hardware-and-power budget?
 
 **Math**: We screen capacity using an assumed sustained rate rather than the datasheet peak. The scenario's `{python} EdgeSizingFleetTCO.derate_pct_str` derating plays the role of the efficiency $\EfficiencyHw$ in the iron law. One Jetson derates from `{python} EdgeSizingFleetTCO.jetson_tops_str` to `{python} EdgeSizingFeasibility.jetson_sustained_tops_str`, far above the `{python} EdgeSizingFleetTCO.req_tops_equiv_str` requirement. One NUC derates to `{python} EdgeSizingFeasibility.nuc_sustained_tops_str` and falls short; meeting the target would take `{python} EdgeSizingFeasibility.nuc_units_str` per store, about `{python} EdgeSizingFeasibility.nuc_fleet_capex_str` of hardware across the fleet. A Coral Dev Board is rated at `{python} EdgeSizingFleetTCO.coral_tops_str` peak; the same derating gives `{python} EdgeSizingFleetTCO.coral_sustained_tops_str`, so the count per store is `{python} EdgeSizingFleetTCO.req_tops_equiv_str` required ÷ `{python} EdgeSizingFleetTCO.coral_sustained_tops_str` per board = `{python} EdgeSizingFleetTCO.coral_boards_exact_str` boards, which rounds up to `{python} EdgeSizingFleetTCO.coral_units_per_store_str`. This estimate assumes the model's operations and numerical format are supported and that work can be divided across the boards at the assumed rate.
 
-Over `{python} EdgeSizingFleetTCO.years_span_str` across `{python} EdgeSizingFleetTCO.stores_str` stores, the TCO comparison for that configuration is Hardware `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` + Power (`{python} EdgeSizingFleetTCO.coral_cluster_power_kw_str` $\times$ `{python} EdgeSizingFleetTCO.stores_str` $\times$ `{python} EdgeSizingFleetTCO.hours_per_year_str` $\times$ `{python} EdgeSizingFleetTCO.years_count_str` $\times$ `{python} EdgeSizingFleetTCO.elec_cost_str` = `{python} EdgeSizingFleetTCO.coral_cluster_power_opex_str`) = `{python} EdgeSizingFleetTCO.coral_cluster_tco_str` total vs. a baseline of one dedicated cloud GPU per store, at the same `{python} CloudEdgeTCO.gpu_price_str` instance rate as the cloud-versus-edge comparison, of ~`{python} EdgeSizingFleetTCO.cloud_cost_str`. The other two candidates need no power arithmetic to rank, because the Coral configuration's complete three-year cost is already below the Jetson fleet's `{python} EdgeSizingFeasibility.jetson_fleet_capex_str` hardware bill and far below a feasible NUC fleet's.
+Over `{python} EdgeSizingFleetTCO.years_span_str` across `{python} EdgeSizingFleetTCO.stores_str` stores, the hardware-and-power estimate for that configuration is Hardware `{python} EdgeSizingFleetTCO.coral_cluster_fleet_usd_str` + Power (`{python} EdgeSizingFleetTCO.coral_cluster_power_kw_str` $\times$ `{python} EdgeSizingFleetTCO.stores_str` $\times$ `{python} EdgeSizingFleetTCO.hours_per_year_str` $\times$ `{python} EdgeSizingFleetTCO.years_count_str` $\times$ `{python} EdgeSizingFleetTCO.elec_cost_str` = `{python} EdgeSizingFleetTCO.coral_cluster_power_opex_str`) = `{python} EdgeSizingFleetTCO.coral_cluster_tco_str` total vs. a baseline of one dedicated cloud GPU per store, at the same `{python} CloudEdgeTCO.gpu_price_str` instance rate as the cloud-versus-edge comparison, of ~`{python} EdgeSizingFleetTCO.cloud_cost_str`. Within this accounting boundary, the other two candidates need no power arithmetic to rank, because the Coral configuration's hardware-and-power estimate is already below the Jetson fleet's `{python} EdgeSizingFeasibility.jetson_fleet_capex_str` hardware bill and far below a feasible NUC fleet's. Integration, maintenance, redundancy, and matched cloud operating costs remain outside this comparison.
 
 **Result**: One Coral alone is undersized under these assumptions, but the sharded configuration with `{python} EdgeSizingFleetTCO.coral_units_per_store_str` is a low-cost edge candidate within the hardware-and-power boundary, with an estimated `{python} EdgeSizingFleetTCO.coral_cluster_sustained_tops_str` and about `{python} EdgeSizingFleetTCO.jetson_vs_coral_cluster_capex_ratio_mult_str` lower per-store hardware CapEx than Jetson. Jetson remains the simpler single-device candidate when integration complexity matters more than hardware cost.
 
@@ -2739,7 +2744,7 @@ Many industrial and retail edge systems are stationary and connected to site pow
 
 [^fn-checkout-free-edge]: **Checkout-free retail**\index{Checkout-free retail!edge processing}: A store may fuse camera observations with shelf events and transaction state locally, then transmit only selected events or aggregates. The privacy boundary must still include those derived records, because reducing raw-video transport does not determine retention, access, or secondary use.
 
-[^fn-industry-four-feedback]: **Industry 4.0**\index{Industry 4.0!control loop latency}: The fourth industrial revolution integrates ML into the sensor-actuator feedback loop on factory floors. The systems consequence is that the end-to-end control loop latency $(\Time)$ must be shorter than the physical process it governs: a welding robot that detects a defect at 60 Hz has a 16.7 ms sampling interval, requiring a deployment whose complete response path fits that deadline.
+[^fn-industry-four-feedback]: **Industry 4.0**\index{Industry 4.0!control loop latency}: The fourth industrial revolution integrates ML into the sensor-actuator feedback loop on factory floors. In an illustrative welding-robot scenario, defect detection samples at 60 Hz, giving a 16.7 ms sampling interval. If each response must finish before the next sample, the complete sensing-to-actuation path must fit that deadline. This completion requirement is a scenario assumption; the sampling rate alone does not establish the control deadline or guarantee safe operation.
 
 [^fn-predictive-maint-edge]: **Predictive maintenance**\index{Predictive maintenance!edge duty cycle}: Models analyze sensor data such as vibration and temperature to estimate equipment condition and failure risk. Continuous monitoring makes sensing cadence, duty cycle, power, and local storage first-class constraints. Battery-powered nodes may require sub-watt average operation, whereas mains-powered industrial gateways can use a much larger envelope.
 
@@ -3218,11 +3223,11 @@ TinyML completes the deployment spectrum by pushing intelligence to its physical
 
 :::
 
-Operating at this physical scale requires microcontrollers (MCUs)[^fn-mcu-resource-floor] that eliminate the power-hungry infrastructure of conventional computing. Mobile and edge processors rely on external dynamic RAM (DRAM), high-speed memory buses, and operating system runtimes that draw hundreds of milliwatts simply to refresh memory cells and toggle bus lines. Microcontrollers dispense with external memory buses entirely, integrating the processor core, non-volatile flash, and static RAM (SRAM) onto a single silicon die [@banbury2021mlperftiny; @lin2020mcunet; @janapa_reddi2022]. Eliminating off-chip signaling lets duty-cycled average power fall below a milliwatt and sleep power reach microwatts, although active inference on boards such as the ESP32-S3 still draws tens to hundreds of milliwatts. The same integration imposes an unforgiving memory ceiling. On-chip SRAM is physically constrained by silicon die area: because each SRAM cell requires six transistors ($6\text{T}$), expanding capacity directly inflates manufacturing cost. A TinyML model must therefore execute within tens to hundreds of kilobytes of SRAM, with no virtual memory, paging, or swap space to cushion an overflow. Single-die integration is also what places the keyword spotter at the bottom of @fig-energy-per-inference, about four orders of magnitude below even a single cloud vision inference,[^fn-tinyml-energy-gap] and it is what makes continuous multi-year operation on coin-cell batteries possible.[^fn-coin-cell-longevity] Fitting the entire inference pipeline, from sensor acquisition to classification output, into this kilobyte-scale memory footprint requires formalizing the TinyML operating regime.
+Operating at this physical scale requires microcontrollers (MCUs)[^fn-mcu-resource-floor] that eliminate the power-hungry infrastructure of conventional computing. Mobile and edge processors rely on external dynamic RAM (DRAM), high-speed memory buses, and operating system runtimes that draw hundreds of milliwatts simply to refresh memory cells and toggle bus lines. Microcontrollers dispense with external memory buses entirely, integrating the processor core, non-volatile flash, and static RAM (SRAM) onto a single silicon die [@banbury2021mlperftiny; @lin2020mcunet; @janapa_reddi2022]. Eliminating off-chip signaling lets duty-cycled average power fall below a milliwatt and sleep power reach microwatts, although active inference on boards such as the ESP32-S3 still draws tens to hundreds of milliwatts. The same integration imposes an unforgiving memory ceiling. On-chip SRAM is physically constrained by silicon die area: because each SRAM cell requires six transistors ($6\text{T}$), expanding capacity directly inflates manufacturing cost. A TinyML model must therefore execute within tens to hundreds of kilobytes of SRAM, with no virtual memory, paging, or swap space to cushion an overflow. The small keyword-spotting task, low-power hardware, and duty cycle jointly determine its energy budget.[^fn-tinyml-energy-gap] Multi-year coin-cell operation additionally requires the complete device load to fit the battery budget.[^fn-coin-cell-longevity] Fitting the entire inference pipeline, from sensor acquisition to classification output, into this kilobyte-scale memory footprint requires formalizing the TinyML operating regime.
 
 [^fn-mcu-resource-floor]: **Microcontroller (MCU)**\index{Microcontroller!memory ceiling}: A single-chip computer whose design prioritizes minimal cost and power over performance, creating the "radical constraint" mentioned. Many TinyML targets provide only tens to hundreds of kilobytes of on-chip SRAM and no virtual memory; some higher-end microcontrollers can attach external memory. The complete model, activations, and runtime state must therefore fit the memory actually available to the target, often orders of magnitude less than a smartphone provides.
 
-[^fn-tinyml-energy-gap]: **TinyML energy gap**\index{TinyML!energy gap}: This differential is rooted in hardware design philosophy; cloud GPUs are optimized for raw throughput, consuming hundreds of watts, while TinyML microcontrollers are designed for near-zero power sleep states. A batch-1 ResNet-50 inference on a cloud accelerator consumes about `{python} EnergyAnchors.e_resnet_cloud_str` of accelerator energy, while an always-on keyword spotter uses about `{python} EnergyAnchors.e_kws_str`, a gap of `{python} EnergyAnchors.kws_vs_cloud_vision_mult_str`. A cloud LLM query at about `{python} EnergyAnchors.e_llm_query_str` widens the gap to `{python} EnergyAnchors.span_mult_str`, the span plotted in @fig-energy-per-inference.
+[^fn-tinyml-energy-gap]: **TinyML energy gap**\index{TinyML!energy gap}: The figure compares different tasks on different hardware and with different energy accounting boundaries; its ratios do not identify the effect of hardware integration alone. A batch-1 ResNet-50 inference on a cloud accelerator consumes about `{python} EnergyAnchors.e_resnet_cloud_str` of accelerator energy, while an always-on keyword spotter uses about `{python} EnergyAnchors.e_kws_str`, a gap of `{python} EnergyAnchors.kws_vs_cloud_vision_mult_str`. A cloud LLM query at about `{python} EnergyAnchors.e_llm_query_str` widens the gap to `{python} EnergyAnchors.span_mult_str`, the span plotted in @fig-energy-per-inference.
 
 [^fn-coin-cell-longevity]: **Coin-cell deployment**\index{Battery!coin-cell deployment}: A CR2032 battery (225 mAh at 3 V, ~675 mWh) ideally powers a complete 10–50 µW system for about 1.5–7.7 years. This "deploy-and-forget" operating model drives innovation in intermittent computing\index{Intermittent computing!power management}, where the device sleeps between inferences to stretch the energy budget across years of unattended operation.
 
@@ -3387,218 +3392,63 @@ Deployment decisions require evaluating latency-vs-throughput paradigm trade-off
 | **Data Exposure**          | Remote processing expands the surface | Local processing reduces transmission | On-device processing reduces transmission         | Raw data can remain local |
 | **Connectivity Required**  | Constant high-bandwidth               | Intermittent                          | Optional                                          | None                      |
 | **Offline Capability**     | None                                  | Good                                  | Excellent                                         | Complete                  |
-| **Real-time Processing**   | Dependent on network                  | Good                                  | Very Good                                         | Excellent                 |
-| **Cost**                   | High (\$1000s+/month)                 | Moderate (\$100s–\$1,000s)            | Device purchase (\$200–\$1000+; often user-owned) | Very Low (\$1–\$10)       |
+| **Real-time Processing**   | Network and execution must fit deadline | Local execution must fit deadline     | Execution and sustained power must fit deadline   | Execution and memory must fit deadline |
+| **Cost anchor**            | Service bill (\$1000s+/month)         | Hardware purchase (\$100s–\$1,000s per device) | Device purchase (\$200–\$1000+; often user-owned) | Hardware purchase (\$1–\$10 per device) |
 | **Development Complexity** | High (cloud expertise needed)         | Moderate-High (edge+networking)       | Moderate (mobile SDKs)                            | High (embedded expertise) |
 | **Deployment Speed**       | Fast                                  | Moderate                              | Fast                                              | Slow                      |
 
-: **Operational Paradigm Comparison**: Eight operational dimensions that complement the resource envelopes of @tbl-deployment-paradigms-overview and @tbl-representative-systems. Cloud ML scales most easily, while local processing can reduce transmission and centralized-storage exposure without itself guaranteeing privacy; offline capability and real-time response improve toward TinyML, while development complexity is highest at the two ends of the spectrum. {#tbl-big_vs_tiny tbl-colwidths="[16,20,20,22,22]"}
+: **Operational Paradigm Comparison**: Eight operational dimensions that complement the resource envelopes of @tbl-deployment-paradigms-overview and @tbl-representative-systems. Cloud ML scales most easily, while local processing can reduce transmission and centralized-storage exposure without itself guaranteeing privacy; local tiers can operate without a WAN, but real-time response depends on workload and complete-path timing, while development complexity is highest at the two ends of the spectrum. Cost anchors mix recurring service bills with device purchase prices; they are partial illustrations, not a matched lifecycle-cost ranking. {#tbl-big_vs_tiny tbl-colwidths="[16,20,20,22,22]"}
 
 This contrast reflects the fundamental tension between data locality and computational scale. Remote processing expands the network attack surface and requires robust transport encryption and tenancy isolation; local processing confines raw data to the device, mitigating ingress exposure without eliminating physical side-channel risks. The workload archetypes from @sec-ml-systems-analyzing-workloads-cbb8 map directly to these boundaries, with each archetype gravitating toward paradigms that alleviate its primary bottleneck.
 
-@Fig-op-char plots these multi-dimensional trade-offs across two complementary four-axis radar profiles on an ordinal 0–10 scale: subplot (a) contrasts compute power, low-latency capability, scalability, and energy efficiency, while subplot (b) evaluates operational autonomy across connectivity independence, data locality, real-time processing, and offline capability.
-
-::: {#fig-op-char fig-env="figure" fig-pos="htb" fig-cap="**Paradigm Comparison Radar Plots**: Two radar plots compare performance and operational characteristics across cloud, edge, mobile, and TinyML paradigms using ordinal 0--10 scores. The left plot contrasts compute power, low-latency capability, scalability, and energy efficiency; the right plot contrasts connectivity independence, data locality, real-time capability, and offline operation. In both plots, a larger polygon indicates stronger performance, with cloud ML peaking on compute and scalability and TinyML peaking on energy efficiency, data locality, and offline operation." fig-alt="Two radar plots with four overlapping polygons each. Left plot axes: compute power, low-latency capability, scalability, energy efficiency. Right plot axes: connectivity independence, data locality, real-time capability, offline capability."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\sffamily]
-\pgfplotsset{myaxis/.style={
-   y axis line style={draw=none},
-   x axis line style={draw=black,line width=1 pt},
-    width=8cm,
-    height=8cm,
-    grid=both,
-    grid style={black!30,dashed},
-    tick align=inside,
-    tick style={draw=none},
-    ymin=0, ymax=10,
-    ytick={1,3,5,7,9},
-    yticklabels={},
-    xtick={0,90,180,270},
-    xticklabel style={align=center,font=\fontsize{8pt}{9}\selectfont\sffamily},
- % yticklabel style={font=\fontsize{7pt}{7}\selectfont\sffamily},
-     yticklabel style={
-     rotate around={50:(axis cs:0,0)},
-     anchor=center
-    },
-   xlabel style={font=\fontsize{7pt}{7}\selectfont\sffamily,rotate=30},
-   label distance=5pt,
-   legend style={at={(1.25,1)}, anchor=north},
-   legend cell align=left,
-   legend style={fill=BrownL!30,draw=BrownLine,row sep=2.1pt,
-   font=\fontsize{7pt}{7}\selectfont\sffamily},
-      cycle list={
-     {myblue,line width=1.5pt,fill=myblue!70,fill opacity=0.9},
-     {mygreen,line width=1.5pt,fill=mygreen!70,fill opacity=0.4},
-     {myorange,line width=1.5pt,fill=myorange!20,fill opacity=0.4},
-     {myred,line width=1.5pt,fill=myred!70,fill opacity=0.4},
-  },
-    after end axis/.code={
-      % manual y-tick labels
-      \foreach \R in {1,3,5,7,9}{
-      \pgfmathtruncatemacro{\newR}{\R + 0.5} %
-        \node[
-          font=\footnotesize\sffamily,
-          anchor=base
-        ]
-        at (axis cs:50,\newR) {\R};
-      }
-    },
-    legend image code/.code={
-      % rectangle in Legend
-      \draw[fill=#1,draw=none,fill opacity=1]
-        (0pt,-2pt) rectangle (4mm,3pt);
-    }
-    }}
- %left graph
-\begin{scope}[local bounding box=GR1,shift={(0,0)}]
-\begin{polaraxis}[myaxis,
-    xticklabels={Compute\\ Power, Low-Latency\\ Capability, Scalability,Energy\\ Efficiency},
-]
-% Cloud ML
-\addplot+[]  coordinates {(0,10) (90,2) (180,10) (270,3) (360,10)};
-% Edge ML
-\addplot+[] coordinates {(0,8) (90,7) (180,8) (270,5) (360,8)};
-% Mobile ML
-\addplot+[] coordinates {(0,6) (90,8) (180,7) (270,7) (360,6)};
-% TinyML
-\addplot+[]  coordinates {(0,3) (90,9) (180,5) (270,10) (360,3)};
-\legend{Cloud ML, Edge ML, Mobile ML, TinyML}
-\addplot[draw=myblue,line width=1.5pt]   coordinates {(0,10) (90,2) (180,10) (270,3) (360,10)};
-\addplot[draw=mygreen,line width=1.5pt]  coordinates {(0,8) (90,7) (180,8) (270,5) (360,8)};
-
-\end{polaraxis}
-\end{scope}
-\node[below=2mm of GR1,xshift=-5mm]{\large a)};
- %right graph
-\begin{scope}[local bounding box=GR2,shift={(10,0)}]
-\begin{polaraxis}[myaxis,
-xticklabels={Connectivity\\ Independence, Data\\ Locality, Real-time\\ Processing,Offline\\ Capability},
-]
-% Cloud ML
-\addplot+[]  coordinates {(0,2) (90,3) (180,2) (270,2) (360,2)};
-% Edge ML
-\addplot+[] coordinates {(0,7) (90,7) (180,8) (270,6) (360,7)};
-% Mobile ML
-\addplot+[] coordinates {(0,8) (90,9) (180,7) (270,8) (360,8)};
-% TinyML
-\addplot+[]  coordinates {(0,10) (90,10) (180,10) (270,10) (360,10)};
-%\legend{Cloud ML, Edge ML, Mobile ML, TinyML}
-\addplot[draw=myblue,line width=1.5pt]  coordinates {(0,2) (90,3) (180,2) (270,2) (360,2)};
-\addplot[draw=mygreen,line width=1.5pt] coordinates {(0,7) (90,7) (180,8) (270,6) (360,7)};
-\end{polaraxis}
-\end{scope}
-\node[below=2mm of GR2]{\large b)};
-\end{tikzpicture}
-```
-
-:::
-
-The divergent polygon contours in @fig-op-char demonstrate that no single deployment tier dominates across all operational dimensions. Instead, each paradigm shifts engineering complexity to a distinct subsystem. Cloud deployments demand expertise in distributed consensus, multi-tenant networking, and dynamic cost governance. Edge and TinyML deployments impose severe physical limitations on thermal envelope and memory capacity, requiring bare-metal optimization, heterogeneous hardware abstraction, and remote fleet orchestration. Mobile deployments operate on user-owned hardware, mitigating infrastructure costs while introducing platform-specific driver fragmentation, aggressive operating-system background task throttling, and strict energy budgets.
+Each paradigm shifts engineering complexity to a distinct subsystem. Cloud deployments demand expertise in multi-tenant networking and dynamic cost governance. Edge and TinyML deployments impose local thermal and memory limits while distributing update and maintenance responsibilities across sites. Mobile deployments operate on user-owned hardware, reducing infrastructure purchase costs while introducing platform-specific drivers, operating-system background task limits, and shared energy budgets. None of these categories supplies a workload-independent latency or energy ranking.
 
 A common architectural failure is selecting a deployment target based on model accuracy alone while treating hardware constraints as downstream optimization details. An unquantized model that delivers 99 percent accuracy in an offline evaluation becomes unviable if its memory footprint triggers paging on mobile hardware, or if continuous inference drives thermal throttling within seconds. Physical invariants—memory capacity, thermal dissipation limits, and network transit delay—must serve as early screening criteria before model development begins, pruning invalid deployment targets before training resources are expended.
 
 ### Decision framework {#sec-ml-systems-decision-framework-241f}
 
-Systematic paradigm selection relies on a tiered decision framework\index{Decision framework!paradigm selection} ordered by how rapidly a constraint invalidates an architecture. The screening hierarchy evaluates four successive gates: regulatory privacy, physical latency, local compute capacity, and lifecycle economics. Privacy leads the order even though physics, not regulation, creates the paradigm boundaries, because a legal prohibition on moving data eliminates an option before anything is measured, whereas the latency and compute gates require numbers. @Fig-mlsys-playbook-flowchart formalizes this screening sequence through four sequential question layers, routing candidate applications toward viable deployment targets while pruning physically infeasible architectures.
+Systematic paradigm selection relies on a tiered decision framework\index{Decision framework!paradigm selection} ordered by how rapidly a constraint invalidates an architecture. The screening hierarchy evaluates four successive gates: regulatory privacy, physical latency, local compute capacity, and lifecycle economics. Privacy leads the order even though physics, not regulation, creates the paradigm boundaries, because a legal prohibition on moving data eliminates an option before anything is measured, whereas the latency and compute gates require numbers. @Fig-mlsys-playbook-flowchart formalizes this screening sequence as successive filters on a candidate set. Each gate passes only its survivors to the next.
 
-::: {#fig-mlsys-playbook-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Deployment Decision Screening**: Four layers organize privacy, latency, compute-demand, and cost questions, then associate their branches with cloud, edge, mobile, and TinyML options. Reconverging branches and a low-cost branch that reaches both mobile and TinyML make this a screening aid rather than a deterministic selector." fig-alt="Flowchart with four question layers: privacy, low-latency requirement, compute demand, and cost. Labeled branches lead to cloud ML, edge ML, mobile ML, and TinyML options; several branches reconverge, and the low-cost branch reaches both mobile ML and TinyML."}
+::: {#fig-mlsys-playbook-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Deployment Decision Screening**: Apply privacy, latency, resource, and cost gates to the remaining candidate set. Every gate retains upstream exclusions. An empty set requires redesign or partitioning; surviving candidates still need complete-path validation." fig-alt="Vertical sequence from cloud, edge, mobile, and TinyML candidates through privacy, latency, resource, and cost filters to remaining candidates. Each filter has an exclusion condition alongside it. A side box directs an empty set to redesign or partitioning."}
 
 ```{.tikz}
 \resizebox{.8\textwidth}{!}{%
-\begin{tikzpicture}[line join=round,font=\small\sffamily]
-\tikzset{%
-Line/.style={black!50,-{Triangle[width = 5pt, length = 8pt]}, line width = 1.25pt,text=black},
-LineA/.style={line width=1.0pt,black!50,latex-latex},
-Box/.style={inner xsep=2pt,inner ysep=6pt,
-    node distance=1.5,
-    draw=BlueLine,
-    line width=0.75pt,
-    fill=BlueL!40,
-    align=flush center,
-    text width=28mm,
-    minimum width=28mm, minimum height=12mm
-  },
-start/.style={inner xsep=2pt,draw=magenta, line width=0.75pt,  fill=magenta!07,rounded corners=8pt,
-    text width=25mm,align=flush center, minimum width=25mm, minimum height=9mm},
-Box3/.style={draw=VioletLine,fill=VioletL2, trapezium,aspect=1.75,inner xsep=-2ex, text width=38mm,
-    node distance=1.5,font=\footnotesize\sffamily,
-diamond, minimum width=35mm, minimum height=23mm,line width=0.75pt, align= flush center},
-Text/.style={above,text=black!80, font=\footnotesize\sffamily},
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{
+  Filter/.style={draw=BlueLine,fill=BlueL!40,line width=0.75pt,
+    align=center,text width=55mm,minimum height=14mm,inner sep=6pt},
+  Exclusion/.style={draw=RedLine,fill=RedL!40,line width=0.75pt,
+    align=left,text width=54mm,minimum height=14mm,inner sep=6pt},
+  Result/.style={Filter,draw=GreenLine,fill=GreenL!40},
+  Line/.style={black!60,-{Triangle[width=5pt,length=8pt]},
+    line width=1pt,shorten >=2pt}
 }
-
-\node[start](B1){Start};
-\node[Box3,below=0.52 of B1](B2){Is privacy\\ critical?};
-\node[Box, left=of B2](B3){Cloud Processing Allowed};
-\node[Box, right=of B2](B4){Local Processing Preferred};
-%
-\node[Box3,below=of B2](2B1){Is low latency\\ required ($<$10 ms)?};
-\node[Box, left=of 2B1](2B2){Latency\\ Tolerant};
-\node[Box, right=of 2B1](2B3){Tiny or\\ Edge ML};
-%
-\node[Box3,below=of 2B1](3B1){Does the model require significant compute?};
-\node[Box, left=of 3B1](3B2){Heavy\\ Compute};
-\node[Box, right=of 3B1](3B3){Lightweight Processing};
-%
-\node[Box3,below=of 3B1](4B1){Are there strict\\ cost constraints?};
-\node[Box,left=of 4B1](4B2){Flexible\\ Budget};
-\node[Box,right=of 4B1](4B3){Low-Cost\\ Options};
-%
-\node[start,below =1.85 of 4B2](5B1){Cloud ML};
-\node[start,below =1.85 of 4B3](5B4){Tiny ML};
-\node[start](5B2) at($(5B1.east)!0.28!(5B4.west)$){Edge ML};
-\node[start](5B3) at($(5B1.east)!0.73!(5B4.west)$){Mobile ML};
-%arrows
-\draw[Line](B1)--(B2);
-\draw[Line](B2)--node[Text,pos=0.2]{No}(B3);
-\draw[Line](B2)--node[Text,pos=0.2]{Yes}(B4);
-\draw[Line](2B1)--node[Text,pos=0.2]{No}(2B2);
-\draw[Line](2B1)--node[Text,pos=0.2]{Yes}(2B3);
-\draw[Line](3B1)--node[Text,pos=0.2]{Yes}(3B2);
-\draw[Line](3B1)--node[Text,pos=0.2]{No}(3B3);
-\draw[Line](4B1)--node[Text,pos=0.2]{No}(4B2);
-\draw[Line](4B1)--node[Text,pos=0.2]{Yes}(4B3);
-%
-\draw[Line](B3.south)--++(0,-13mm)-|(2B1);
-\draw[Line](B4.south)--++(0,-13mm)-|(2B1);
-\draw[Line](2B2.south)--++(0,-13mm)-|(3B1);
-\draw[Line](2B3.south)--++(0,-13mm)-|(3B1);
-\draw[Line](3B3.south)--++(0,-13mm)-|(4B1);
-%
-\draw[Line](4B3.south)--++(0,-6mm)-|(5B4);
-\draw[Line](4B3.south)--++(0,-6mm)-|(5B3);
-\draw[Line](4B2.south)--++(0,-6mm)-|(5B2);
-
-\draw[Line](3B2.west)--++(-5mm,0)|-(5B1);
-
-\begin{scope}[on background layer,font=\footnotesize\sffamily\bfseries]
-\node[draw=GreenLine,inner xsep=8mm,inner ysep=1mm,yshift=1mm,
-fill=green!02,fit=(B1)(B3)(B4)(B2),  minimum width=155mm, line width=0.35pt](BB1){};
-%
-\node[draw=BackLine,inner xsep=8mm,inner ysep=3mm,yshift=1mm,
-fill=BackColor!10,fit=(2B1)(2B2)(2B3),  minimum width=155mm, line width=0.35pt](BB2){};
-%
-\node[draw=RedLine,inner xsep=8mm,inner ysep=3mm,yshift=1mm,
-fill=magenta!02,fit=(3B1)(3B2)(3B3),  minimum width=155mm, line width=0.35pt](BB3){};
-%
-\node[draw=BrownLine,inner xsep=8mm,inner ysep=3mm,yshift=1mm,
-fill=BrownL!07,fit=(4B1)(4B2)(4B3),  minimum width=155mm, line width=0.35pt](BB4){};
-%
-\node[draw=BlueLine,inner xsep=8mm,inner ysep=6mm,yshift=-0.85mm,
-fill=cyan!03,fit=(5B1)(5B4),  minimum width=155mm, line width=0.35pt](BB5){};
-%
-\node[below=3pt of BB1.north east,anchor=north east]{Layer: Privacy};
-\node[below=3pt of BB2.north east,anchor=north east]{Layer: Performance};
-\node[below=3pt of BB3.north east,anchor=north east]{Layer: Compute Needs};
-\node[below=3pt of BB4.north east,anchor=north east]{Layer: Cost};
-\node[above=0pt of BB5.south east,anchor=south east]{Layer: Deployment Options};
-\end{scope}
+\node[Filter] (start) {Candidate set\\Cloud, edge, mobile, TinyML};
+\node[Filter,below=10mm of start] (privacy) {Privacy gate\\Retain permitted data paths};
+\node[Filter,below=10mm of privacy] (latency) {Latency gate\\Retain paths not ruled out by the deadline};
+\node[Filter,below=10mm of latency] (resource) {Resource gate\\Retain candidates with sufficient memory, sustained compute, and energy};
+\node[Filter,below=10mm of resource] (cost) {Cost gate\\Compare matched lifecycle budgets};
+\node[Result,below=10mm of cost] (remaining) {Remaining candidates only\\Validate complete paths and task quality};
+\node[Exclusion,right=12mm of privacy] (p) {Exclude forbidden transmission or processing};
+\node[Exclusion,right=12mm of latency] (l) {Exclude paths whose lower bounds already exceed the deadline};
+\node[Exclusion,right=12mm of resource] (r) {Exclude insufficient capacity or sustained resource budgets};
+\node[Exclusion,right=12mm of cost] (c) {Exclude budgets above the allowed lifecycle cost};
+\node[Exclusion,right=12mm of remaining] (empty) {If the set is empty at any gate:\\redesign or partition the workload};
+\draw[Line] (start)--(privacy);
+\draw[Line] (privacy)--(latency);
+\draw[Line] (latency)--(resource);
+\draw[Line] (resource)--(cost);
+\draw[Line] (cost)--(remaining);
+\draw[Line] (privacy)--(p);
+\draw[Line] (latency)--(l);
+\draw[Line] (resource)--(r);
+\draw[Line] (cost)--(c);
 \end{tikzpicture}}
 ```
 
 :::
 
-The flowchart functions as a coarse-grained filter rather than a single-path deterministic algorithm. Upstream gates impose hard physical and regulatory constraints that eliminate entire branches regardless of downstream desirability. If regulatory rules or data sovereignty forbid off-device transmission, remote cloud processing is eliminated immediately. Similarly, if physical deadline requirements fall below network round-trip times, network-dependent paradigms are ruled out regardless of server compute capacity. As branches reconverge at the cost layer—where both mobile ML and TinyML emerge as low-cost options—the framework narrows the design space to a manageable subset of candidates for detailed benchmarking. An automotive emergency braking scenario demonstrates how the latency gate binds before compute capacity or cost enter consideration.
+The flowchart carries a remaining candidate set through all four gates. If regulatory rules or data sovereignty forbid off-device transmission, remote cloud processing stays excluded when compute demand is considered. If a network round-trip lower bound exceeds the deadline, additional remote compute cannot restore that path. Cost compares only the survivors, and an empty set calls for changing the workload or partitioning it across tiers. Passing a lower-bound latency screen still requires complete-path validation. An automotive emergency braking scenario demonstrates how the latency gate binds before compute capacity or cost enter consideration.
 
 ```{python}
 #| echo: false
@@ -3646,11 +3496,11 @@ class BrakingDistance:
 
 **Diagnosis**: At `{python} BrakingDistance.speed_kmh_str`, the vehicle covers `{python} BrakingDistance.distance_m_str` during the `{python} BrakingDistance.latency_str` budget, so every millisecond of delay is distance traveled before braking begins. The scenario assumes 50–150 ms of network round-trip delay for cloud offload, which consumes half the budget at best and more than all of it at worst before any detection runs. Local object detection on an automotive edge accelerator takes 10–30 ms; at `{python} BrakingDistance.detection_gflop_str` GFLOPs per frame and `{python} BrakingDistance.detection_fps_str`, that accelerator must sustain `{python} BrakingDistance.sustained_gflops_str` GFLOP/s.
 
-**Systems lesson**: Hard real-time safety constraints eliminate cloud offloading regardless of compute availability. Latency bounds dictate an Edge ML deployment architecture, reserving cloud connections for offline model training and telemetry aggregation.
+**Systems lesson**: The stated network-delay range cannot guarantee the deadline, so the latency gate excludes that cloud path. The local candidates remain subject to the resource gate: the pedestrian detector must fit memory and sustain the stated frame rate within its power budget. An automotive edge accelerator remains a candidate under these assumptions; its complete sensing-to-braking path still needs validation. Cloud connections can support offline training and telemetry without reentering the emergency decision path.
 
 :::
 
-Passing the physical and economic screening gates establishes technical feasibility, but an architect must also account for operational maintainability. Deploying a model across thousands of edge nodes or millions of microcontrollers introduces sustained lifecycle overhead: automated firmware updates, out-of-band telemetry, distributed drift monitoring, and hardware failure recovery. An organization equipped for cloud operations may lack the embedded toolchains and physical testing infrastructure required to support edge or TinyML targets at scale.
+Passing these screening gates leaves candidates for detailed validation, but an architect must also account for operational maintainability. Deploying a model across thousands of edge nodes or millions of microcontrollers introduces sustained lifecycle overhead: automated firmware updates, out-of-band telemetry, distributed drift monitoring, and hardware failure recovery. An organization equipped for cloud operations may lack the embedded toolchains and physical testing infrastructure required to support edge or TinyML targets at scale.
 
 Beyond the operational demands of specific hardware tiers lies a prior systems question: whether the feature justifies a machine learning deployment at all. Deep neural networks impose a substantial maintenance burden that traditional software avoids. Before committing to any ML architecture, an engineer must evaluate whether a deterministic heuristic can solve the problem at a fraction of the operational cost.
 
@@ -3676,7 +3526,7 @@ A deployment choice must first pass the physical gates, then justify its added c
 
 :::
 
-Navigating these trade-offs demonstrates that paradigm selection is an architectural optimization bounded by the physical invariants of computation, communication, and storage. While the decision framework establishes baseline feasibility, real-world applications often present mutually incompatible constraints. An intelligent system may demand petabyte-scale training capacity alongside sub-millisecond response times and offline privacy. When no individual tier can satisfy these conflicting physical boundaries alone, systems engineering bridges the gap by partitioning the workload across multiple operating environments.
+Navigating these trade-offs demonstrates that paradigm selection is an architectural optimization bounded by the physical invariants of computation, communication, and storage. While the decision framework narrows the feasible design space, real-world applications often present mutually incompatible constraints. An intelligent system may demand petabyte-scale training capacity alongside sub-millisecond response times and offline privacy. When no individual tier can satisfy these conflicting physical boundaries alone, systems engineering bridges the gap by partitioning the workload across multiple operating environments.
 
 ## Hybrid Architectures {#sec-ml-systems-hybrid-architectures-combining-paradigms-7cdd}
 
@@ -3702,7 +3552,7 @@ Under a **train-serve split**\index{Train-serve split!economics}, training execu
 
 :::
 
-Under **hierarchical processing**\index{Hierarchical processing!data flow}, computation cascades across tiers to progressively filter and aggregate data, matching communication volume to available interconnect bandwidth. Sensor streams generated at the physical periphery often exceed wide-area network (WAN) uplink capacity; continuously streaming raw, uncompressed telemetry to a data center saturates network links and wastes radio power. To prevent network saturation, early tiers filter data locally: TinyML microcontrollers run low-power anomaly detectors, edge gateways aggregate and correlate temporal features across multiple sensors, and cloud clusters ingest only anomalous events or aggregated summaries for global analytics. During inference serving, hierarchical processing frequently takes the form of a confidence cascade. A compact, low-latency model on the local device evaluates the input first. If its prediction confidence exceeds a calibrated confidence threshold, the device returns the result immediately, bypassing the network entirely. Only ambiguous or low-confidence inputs trigger a WAN payload transfer to a larger cloud model, minimizing median service latency while maintaining peak model accuracy.
+Under **hierarchical processing**\index{Hierarchical processing!data flow}, computation cascades across tiers to progressively filter and aggregate data, matching communication volume to available interconnect bandwidth. Sensor streams generated at the physical periphery often exceed wide-area network (WAN) uplink capacity; continuously streaming raw, uncompressed telemetry to a data center saturates network links and wastes radio power. To prevent network saturation, early tiers filter data locally: TinyML microcontrollers run low-power anomaly detectors, edge gateways aggregate and correlate temporal features across multiple sensors, and cloud clusters ingest only anomalous events or aggregated summaries for global analytics. During inference serving, hierarchical processing frequently takes the form of a confidence cascade. A compact, low-latency model on the local device evaluates the input first. If its prediction confidence exceeds a calibrated confidence threshold, the device returns the result immediately, bypassing the network entirely. Only ambiguous or low-confidence inputs trigger a WAN payload transfer to a larger cloud model. The cascade seeks lower median latency at the required task quality, but confident local errors can bypass escalation. Representative evaluation must establish the routed system's accuracy, error costs, and escalation frequency before accepting that trade-off.
 
 Under **progressive deployment**\index{Progressive deployment!model compression}, an engineering team derives a family of specialized model variants from a unified architecture or training corpus, tailoring each variant to the memory capacity, arithmetic intensity, and thermal limits of a specific tier. Rather than forcing a single model onto every device, developers produce tier-specific artifacts and evaluate the quality lost or retained as resource demands fall. The compression mechanisms are developed later; the placement decision here depends on whether each artifact meets its task and hardware constraints. For a shared image-classification task, an edge server and a phone can use different members of a model family, each evaluated against the same task requirements and its own resource budget. A voice interface that divides wake-word detection, acoustic processing, and language understanding among tiers instead illustrates hierarchical processing across different tasks. Such a system can also use tier-specific variants within a task, combining the patterns.
 
@@ -4216,7 +4066,7 @@ filllcolor=BrownL!30,  Linewidth=1.0pt}};
 
 :::
 
-This architectural convergence explains why engineering optimizations transfer bidirectionally across hardware scales: they target the same underlying physical bottlenecks. Across all tiers, reading an operand from off-chip memory incurs orders of magnitude higher energy and latency costs than performing an arithmetic operation. Because the memory wall governs both an embedded microcontroller and a warehouse-scale accelerator, techniques pioneered under extreme edge constraints directly relieve bottlenecks in the data center. Lower-precision numerical representations (such as FP8, INT8, and INT4), originally designed to fit model weights into megabytes of mobile DRAM or kilobytes of microcontroller SRAM, serve an identical economic purpose in cloud clusters: cutting DRAM traffic in half and multiplying the effective throughput of the accelerator's matrix units. Similarly, kernel fusion (executing a chain of operations in one pass so that intermediate results stay on chip) and static memory staging developed to prevent off-chip spills on mobile SoCs directly reduce HBM traffic during cloud autoregressive decoding. In reverse, techniques for partitioning computational graphs across distributed cloud clusters provide the foundational formalisms for splitting pipeline stages across heterogeneous mobile SoCs containing discrete CPUs, GPUs, and neural processing units.
+This architectural convergence explains why engineering optimizations transfer bidirectionally across hardware scales: they target the same underlying physical bottlenecks. Off-chip memory access can cost substantially more energy and latency than arithmetic, although the ratio depends on the memory level and operation. Lower-precision numerical representations (such as FP8, INT8, and INT4) can reduce storage and traffic in both local devices and cloud accelerators. The reduction depends on the source and destination widths and on the share of traffic stored in that format: converting 16-bit values to 8-bit values halves those values' bytes, not necessarily the pipeline's total DRAM traffic. Faster arithmetic requires supported operators and kernels on the target hardware, and the resulting artifact must retain acceptable task quality. Similarly, kernel fusion (executing a chain of operations in one pass so that intermediate results stay on chip) and static memory staging can reduce off-chip transfers when the runtime and memory capacity permit them. In reverse, techniques for partitioning computational graphs across distributed cloud clusters also inform the division of pipeline stages across heterogeneous mobile SoCs containing CPUs, GPUs, and neural processing units.
 
 The shared systems foundation extends through data engineering, model compression, and operational lifecycles. These engineering principles apply whether the execution target is a multi-node TPU pod or an ultra-low-power ESP32 microcontroller. Because the foundational abstractions remain invariant, so do their vulnerabilities: data distribution drift, model staleness, and telemetry degradation recur at every tier, requiring uniform monitoring discipline across the entire hybrid hierarchy.
 
@@ -4405,7 +4255,7 @@ class TcoPitfallCalc:
 
 **Pitfall**: *Minimizing computational resources minimizes total cost.*
 
-Optimizing per-inference compute resources in isolation often increases operational expenditure and slows deployment velocity. As the decision framework in @sec-ml-systems-decision-framework-241f emphasizes, architectural selection requires evaluating total cost of ownership (TCO) across the entire system lifecycle rather than raw server bills. In this scenario, a cloud inference service costing `{python} TcoPitfallCalc.cloud_compute_usd_str` in compute appears expensive compared to `{python} TcoPitfallCalc.edge_hw_usd_str` in amortized edge hardware. However, a distributed edge fleet introduces recurring operational expenses: network engineering (`{python} TcoPitfallCalc.edge_network_usd_str`), field hardware maintenance (`{python} TcoPitfallCalc.edge_maint_usd_str`), and fleet reliability engineering (`{python} TcoPitfallCalc.edge_reliability_usd_str`). These push total edge operational costs to `{python} TcoPitfallCalc.edge_total_usd_str`, a `{python} TcoPitfallCalc.tco_ratio_mult_str` increase over the cloud baseline. Unlike the single-server comparison in napkin math \ref{nbk-ml-systems-cloud-vs-edge-tco}, this scenario operates a distributed fleet, where network, maintenance, and reliability labor scale with the number of sites. Furthermore, if a cloud-managed service reaches production in two months while custom edge infrastructure requires six, the four-month delay introduces severe opportunity costs. Sound systems engineering balances compute efficiency against developer velocity, fleet manageability, and operational maintenance.
+Optimizing per-inference compute resources in isolation often increases operational expenditure and slows deployment velocity. As the decision framework in @sec-ml-systems-decision-framework-241f emphasizes, architectural selection requires evaluating total cost of ownership (TCO) across the entire system lifecycle rather than raw server bills. In this scenario, a cloud inference service costing `{python} TcoPitfallCalc.cloud_compute_usd_str` in compute appears expensive compared to `{python} TcoPitfallCalc.edge_hw_usd_str` in amortized edge hardware. However, a distributed edge fleet introduces recurring operational expenses: network engineering (`{python} TcoPitfallCalc.edge_network_usd_str`), field hardware maintenance (`{python} TcoPitfallCalc.edge_maint_usd_str`), and fleet reliability engineering (`{python} TcoPitfallCalc.edge_reliability_usd_str`). Together with hardware amortization, these bring the listed edge budget to `{python} TcoPitfallCalc.edge_total_usd_str`, erasing the apparent hardware-only saving. The cloud figure includes compute alone, so the two totals do not establish a total-cost ranking; cloud operating costs and comparable service capacity remain to be priced. Unlike the single-server comparison in napkin math \ref{nbk-ml-systems-cloud-vs-edge-tco}, this scenario operates a distributed fleet, where network, maintenance, and reliability labor scale with the number of sites. Furthermore, if a cloud-managed service reaches production in two months while custom edge infrastructure requires six, the four-month delay introduces severe opportunity costs. Sound systems engineering balances compute efficiency against developer velocity, fleet manageability, and operational maintenance.
 
 :::
 

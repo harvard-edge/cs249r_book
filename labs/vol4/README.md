@@ -18,7 +18,7 @@ When a chatbot makes a mistake, you retype the prompt. When a robot makes a mist
 
 ![The control loop: the camera feeds a learned policy on Linux, which proposes an action across the authority boundary; the STM32 governor permits, clamps, or vetoes it before it reaches the SO-101 arm, and the next image closes the loop.](assets/images/vol4-control-loop.svg)
 
-The four logged actions (`a_req`, `a_map`, `a_enf`, `a_meas`) and the bench wiring are defined once, in the [Station Reference Card](labs/station-reference.md). The pass standard for every lab is the scope test in the [Competency Card](curriculum/student-competencies.md).
+The four logged actions (`a_req`, `a_map`, `a_enf`, `a_meas`) and the bench wiring are defined once, in the [Station Reference Card](labs/station-reference.md). The course-level graduation standard is the scope test in the [Competency Card](curriculum/student-competencies.md); each lab contributes the competencies needed to demonstrate it.
 
 ---
 

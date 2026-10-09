@@ -3,7 +3,7 @@
 **Status:** `skeleton`\
 **Weeks:** 7–8 (Parts 4A, 4B)\
 **Reading:** [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd), [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd)\
-**Competencies:** `B1`, `C1`\
+**Competencies:** `A3` (full feedback-loop evidence), `B1`, `B3` (training evidence), `C1`\
 **Due:** end of Week 8, with your capstone proposal
 
 ---
@@ -69,14 +69,14 @@ TBD (staff)
 | # | Evidence | Threshold |
 |:---:|:---|:---|
 | 1 | **Dataset and dataset card** | TBD (staff) |
-| 2 | **Fine-tuning converges** | TBD (staff) |
+| 2 | **Fine-tuning training/validation curves and pinned model artifact** | TBD (staff) |
 | 3 | **Sim-only versus fine-tuned comparison** | TBD (staff) |
 | 4 | **Untethered loop and success rate** | TBD (staff) |
-| 5 | **Loop-latency breakdown** | TBD (staff) |
+| 5 | **Loop-latency breakdown and histogram, aligned camera/joint timestamps, and stale-data rejection trace** | TBD (staff) |
 | 6 | **Four-tap trace of an autonomous reach** | TBD (staff) |
 | 7 | **Capstone proposal** | TBD (staff) |
 
-*Staff signs off `B1` and `C1` on the team's [Competency Card](../curriculum/student-competencies.md).*
+*Staff signs off `B1` and `C1`, completes `A3` with the full feedback-loop timing evidence, and completes `B3` with the training/validation evidence on the team's [Competency Card](../curriculum/student-competencies.md).*
 
 ---
 

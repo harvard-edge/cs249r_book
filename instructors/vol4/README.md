@@ -22,7 +22,7 @@ This seminar is intended for advanced undergraduate and graduate students in com
 - Use basic vectors, algebra, probability, and rates of change to reason about measurements and motion.
 - Read a system diagram or log and identify where data, commands, and delays enter a computation.
 
-Prior experience with robot arms, LeRobot, microcontroller firmware, or advanced control theory is helpful but not required. The course develops those connections through measurements, simulation, data collection, policy deployment, and supervised experiments. Students should expect to learn from teammates whose background differs from their own.
+C and prior experience with robot arms, LeRobot, microcontroller firmware, or advanced control theory are helpful but not required. Staff provide the baseline firmware and support its extension. The course develops those connections through measurements, simulation, data collection, policy deployment, and supervised experiments. Students should expect to learn from teammates whose background differs from their own.
 
 **Before week 1:** Read the Volume IV [reader guide and prerequisites](../../books/vol4/frontmatter/prerequisites.qmd) and [Chapter 1](../../books/vol4/01_boundary/01_boundary.qmd). If you want a refresher, the book includes appendices on [machine learning](../../books/vol4/backmatter/appendix_ml.qmd), [systems](../../books/vol4/backmatter/appendix_systems.qmd), and [control](../../books/vol4/backmatter/appendix_control.qmd). You do not need to master every appendix before the seminar begins.
 

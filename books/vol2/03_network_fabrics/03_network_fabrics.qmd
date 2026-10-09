@@ -47,7 +47,7 @@ A single accelerator can perform trillions of operations per second, but distrib
 - Compare high-performance transport protocols by latency, loss-recovery behavior, and operational complexity
 - Compare network topologies using $\BisectionBandwidth$, hop count, and the workload's collective communication pattern
 - Evaluate congestion-control mechanisms and their impact on tail latency during distributed training
-- Select network resource partitions and traffic-isolation policies for concurrent training and inference workloads
+- Compare network partitioning and traffic-isolation mechanisms for concurrent training and inference workloads
 - Diagnose network performance bottlenecks using RDMA counters, link-level telemetry, and bandwidth testing tools
 
 :::
@@ -607,10 +607,10 @@ This signaling shift highlights a key architectural rule: doubling line rate wit
 # │       pluggable-optics power (the old prose hand-typed 10 W/link — the
 # │       CPO value — and derived 200 kW where the registry 20 W gives 400 kW,
 # │       contradicting the OpticalDividend cell later in this chapter).
-# │ Show: Link count, per-link power, total cabling cost, total optics power.
+# │ Show: Link count, power per selected endpoint, cabling cost, endpoint power subtotal.
 # │ How: Derive the spine link count from the 10K training cluster; per-link
 # │      optics, DAC, and AOC prices come from Infrastructure.Pricing.Network;
-# │      power per link is Systems.SwitchFabric.OpticsPluggable400G; rack power
+# │      one selected spine-side module per link uses OpticsPluggable400G; rack power
 # │      bounds come from Infrastructure.Racks.AI_Standard / AI_High.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -623,7 +623,7 @@ class SpineOpticsCost:
     link_cost = Infrastructure.Pricing.Network.OpticsPerLinkUsd.rate  # per-link optics cost
     dac_cost = Infrastructure.Pricing.Network.DacCableUsd.rate  # passive copper cable
     aoc_cost = Infrastructure.Pricing.Network.AocCableUsd.rate  # active optical cable
-    link_power = Systems.SwitchFabric.OpticsPluggable400G
+    link_power = Systems.SwitchFabric.OpticsPluggable400G  # one selected spine-side module per link; opposite end excluded
     rack_power_low = Infrastructure.Racks.AI_Standard.power_kw * kW  # dense AI rack lower bound
     rack_power_high = Infrastructure.Racks.AI_High.power_kw * kW  # dense AI rack upper bound
 
@@ -632,7 +632,7 @@ class SpineOpticsCost:
     total_power = n_links * link_power
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(total_power.to(kW).magnitude == 400, "20,000 pluggable links at registry power should draw 400 kW")
+    check(total_power.to(kW).magnitude == 400, "20,000 selected spine-side modules at registry power should draw 400 kW")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     cluster_gpus_str = fmt_count(cluster_gpus, label="GPU", commas=True)
@@ -664,7 +664,7 @@ The high-speed copper and optical paths considered here both include FEC[^fn-fec
 
 ::: {#psp-network-fabrics-cost-distance .callout-perspective title="The cost of distance"}
 
-In an ML fleet, distance is money. Assuming two spine-layer optical links per accelerator, a cluster of `{python} SpineOpticsCost.cluster_gpus_str` requires ~`{python} SpineOpticsCost.n_links_str` optical links at the spine layer alone. At `{python} SpineOpticsCost.link_cost_usd_str` each with `{python} SpineOpticsCost.link_power_w_str` per pluggable link\index{Pluggable optics!transceiver power}, that represents `{python} SpineOpticsCost.total_cost_musd_str` in cabling and `{python} SpineOpticsCost.total_power_kw_str` of continuous power for transceivers alone. The cost dictates cluster geometry\index{Cluster!geometry}: architects pack accelerators as densely as possible (`{python} SpineOpticsCost.rack_power_range_str` per rack) to maximize cheap copper and minimize expensive optics.
+In an ML fleet, distance is money. Assuming two spine-layer optical links per accelerator, a cluster of `{python} SpineOpticsCost.cluster_gpus_str` requires ~`{python} SpineOpticsCost.n_links_str` optical links at the spine layer alone. At `{python} SpineOpticsCost.link_cost_usd_str` per complete link, that represents `{python} SpineOpticsCost.total_cost_musd_str` in cabling. For power, count one selected spine-side pluggable module per link at `{python} SpineOpticsCost.link_power_w_str` per module\index{Pluggable optics!transceiver power}, giving `{python} SpineOpticsCost.total_power_kw_str` for those endpoints alone. Each optical link also has a module at its opposite end; this subtotal excludes those modules, switch electronics, and cooling, so it is not the full fabric power budget. The cost dictates cluster geometry\index{Cluster!geometry}: architects pack accelerators as densely as possible (`{python} SpineOpticsCost.rack_power_range_str` per rack) to maximize cheap copper and minimize expensive optics.
 
 :::
 
@@ -681,7 +681,7 @@ In an ML fleet, distance is money. Assuming two spine-layer optical links per ac
 # │
 # │ Goal: Quantify the interconnect power draw for the running-example cluster
 # │       and express it as a fraction of the GPU power budget.
-# │ Show: 350 GB AllReduce, ~3,000 links, 25 W/port, 75 kW interconnect,
+# │ Show: 350 GB AllReduce, ~3,000 links, one selected 25 W port/link, 75 kW subtotal,
 # │       ~10 percent of the accelerator power budget.
 # │ How: gradient = GPT3 params × 2 bytes (FP16); link count and per-port power
 # │      are scenario assumptions; GPU power budget = total_accelerators × TDP.
@@ -697,7 +697,7 @@ class SerDesPowerBudget:
     h100_tdp = Hardware.Cloud.H100.tdp
     gradient = Models.Language.GPT3.parameters * (2 * byte / param)  # 175B FP16 AllReduce
     n_links = 3000  # scenario assumption: high-speed links to sustain full BW_bisect
-    port_power = 25 * watt  # scenario assumption: combined SerDes + optical transceiver per port
+    port_power = 25 * watt  # scenario assumption: combined SerDes + optics at one selected switch-side port per link
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     interconnect_power = n_links * port_power
@@ -706,7 +706,7 @@ class SerDesPowerBudget:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(gradient.to(GB).magnitude - 350) < 1e-6, "175B FP16 AllReduce should be 350 GB")
-    check(interconnect_power.to(kW).magnitude == 75, "3,000 links at 25 W should draw 75 kW")
+    check(interconnect_power.to(kW).magnitude == 75, "3,000 selected switch-side ports at 25 W should draw 75 kW")
     check(0.10 < power_fraction < 0.11, f"Interconnect should be ~10 percent of GPU power, got {power_fraction:.3f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -717,7 +717,7 @@ class SerDesPowerBudget:
     power_frac_pct_str = fmt_percent(power_fraction, precision=1, commas=False, style='prose')
 ```
 
-Every port depends on a **serializer/deserializer (SerDes)**\index{SerDes!definition}\index{Serializer/Deserializer|see{SerDes}} circuit that converts parallel data from the switch application-specific integrated circuit (ASIC) into a serial stream. Its power cost accumulates across the provisioned ports. For the `{python} NetworkWireClusterRecap.n_gpus_str` reference cluster, assume a full-$\BisectionBandwidth$ fabric with roughly `{python} SerDesPowerBudget.n_links_str` high-speed links across its host and switch tiers. Each `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` port is assigned `{python} SerDesPowerBudget.port_power_w_str`, more than the `{python} SpineOpticsCost.link_power_w_str` pluggable-module figure in the cost-of-distance estimate because it also counts the switch-side SerDes that drives the module. The model totals `{python} SerDesPowerBudget.interconnect_kw_str`, equivalent to `{python} SerDesPowerBudget.power_frac_pct_str` of the accelerators' combined thermal design power. This comparison isolates the assumed port-power budget; it does not establish the fraction of measured cluster energy consumed by networking.
+Every port depends on a **serializer/deserializer (SerDes)**\index{SerDes!definition}\index{Serializer/Deserializer|see{SerDes}} circuit that converts parallel data from the switch application-specific integrated circuit (ASIC) into a serial stream. Its power cost accumulates across the provisioned ports. For the `{python} NetworkWireClusterRecap.n_gpus_str` reference cluster, assume a full-$\BisectionBandwidth$ fabric with roughly `{python} SerDesPowerBudget.n_links_str` high-speed links across its host and switch tiers. Count one selected switch-side port per link in this power subtotal. Each counted `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` port is assigned `{python} SerDesPowerBudget.port_power_w_str`, more than the `{python} SpineOpticsCost.link_power_w_str` pluggable-module figure in the cost-of-distance estimate because it also counts the switch-side SerDes that drives the module. The model totals `{python} SerDesPowerBudget.interconnect_kw_str`, equivalent to `{python} SerDesPowerBudget.power_frac_pct_str` of the accelerators' combined thermal design power. This comparison isolates the assumed power of the selected switch-side ports, excluding the opposite endpoints and the rest of the switch chassis; it does not establish total fabric power or the fraction of measured cluster energy consumed by networking.
 
 ```{python}
 #| echo: false
@@ -2063,9 +2063,9 @@ A directed cycle in the buffer dependency graph is a necessary condition for a c
 
 $$\PacketBuffer_1 \to \PacketBuffer_2 \to \dots \to \PacketBuffer_k \to \PacketBuffer_1$$ {#eq-network-buffer-dependency-cycle}
 
-When each buffer in the cycle fills beyond its configured pause threshold, each port asserts a PFC PAUSE frame to its predecessor. Because no buffer can advance a packet into a paused successor, no buffer can drain, and no port can de-assert its PAUSE signal. The entire cycle freezes permanently. @Fig-pfc-credit-deadlock models this mutual protocol interlock across a four-switch ring whose queues ($\PacketBuffer_1$ through $\PacketBuffer_4$) are completely full. Tracing the ring reveals an intractable counter-rotational deadlock: while solid gray arrows trace packet forwarding dependencies advancing clockwise ($\PacketBuffer_1 \to \PacketBuffer_2 \to \PacketBuffer_3 \to \PacketBuffer_4 \to \PacketBuffer_1$), dashed red PAUSE frames propagate counterclockwise. Each switch blocks the exact upstream neighbor it depends on to make forward progress, permanently freezing all four queues until an external watchdog intervenes to drop frames.
+When each buffer in the cycle fills beyond its configured pause threshold, each port asserts a PFC PAUSE frame to its predecessor. Because no buffer can advance a packet into a paused successor, no buffer can drain, and no port can de-assert its PAUSE signal. The entire cycle freezes permanently. @Fig-pfc-credit-deadlock models this mutual protocol interlock across a four-switch ring whose queues ($\PacketBuffer_1$ through $\PacketBuffer_4$) are completely full. Tracing the ring reveals an intractable counter-rotational deadlock: while solid gray arrows trace packet forwarding dependencies advancing clockwise ($\PacketBuffer_1 \to \PacketBuffer_2 \to \PacketBuffer_3 \to \PacketBuffer_4 \to \PacketBuffer_1$), dashed red PAUSE frames propagate counterclockwise. Each full queue pauses its upstream predecessor while waiting for its downstream successor to drain, permanently freezing all four queues until an external watchdog intervenes to drop frames.
 
-::: {#fig-pfc-credit-deadlock fig-env="figure" fig-pos="htb" fig-cap="**A PFC deadlock from a cyclic buffer dependency**: Four switch queues form the cycle of @eq-network-buffer-dependency-cycle. Follow the solid arrows clockwise: each full buffer holds packets that need space in the next. The dashed PAUSE frames run counterclockwise, so each switch blocks exactly the upstream port it depends on, and no queue can drain until a watchdog drops packets." fig-alt="Four switch boxes arranged in a square, each containing a full red buffer labeled b1 to b4. Solid gray arrows run clockwise from switch 1 to 2 to 3 to 4 and back to 1, labeled b1 to b2, b2 to b3, b3 to b4, and b4 to b1. Dashed red arrows labeled PAUSE run counterclockwise between the same switches. A key at the bottom explains both arrow types."}
+::: {#fig-pfc-credit-deadlock fig-env="figure" fig-pos="htb" fig-cap="**A PFC deadlock from a cyclic buffer dependency**: Four switch queues form the cycle of @eq-network-buffer-dependency-cycle. Follow the solid arrows clockwise: each full buffer holds packets that need space in the next. The dashed PAUSE frames run counterclockwise, so each full queue pauses its upstream predecessor while awaiting space in its downstream successor, and no queue can drain until a watchdog drops packets." fig-alt="Four switch boxes arranged in a square, each containing a full red buffer labeled b1 to b4. Solid gray arrows run clockwise from switch 1 to 2 to 3 to 4 and back to 1, labeled b1 to b2, b2 to b3, b3 to b4, and b4 to b1. Dashed red arrows labeled PAUSE run counterclockwise between the same switches. A key at the bottom explains both arrow types."}
 ![](images/svg/pfc-credit-deadlock.svg)
 :::
 
@@ -2835,7 +2835,7 @@ class OpticalDividend:
 
 :::
 
-The spine example for `{python} SpineOpticsCost.cluster_gpus_str` assigns `{python} SpineOpticsCost.total_power_kw_str` to pluggable optics. Applying the same fractional saving would require a CPO implementation with the assumed per-link power and capacity. Integration also changes serviceability: replacing a failed optical component may involve a larger assembly than swapping a pluggable module. The energy benefit must be evaluated alongside packaging, repair, and spare-capacity costs.
+The spine example for `{python} SpineOpticsCost.cluster_gpus_str` assigns `{python} SpineOpticsCost.total_power_kw_str` to pluggable optics. That subtotal counts only the selected spine-side endpoints. Applying the same fractional saving to those endpoints would require a CPO implementation with the assumed per-port power and capacity; opposite-end optics remain outside the comparison. Integration also changes serviceability: replacing a failed optical component may involve a larger assembly than swapping a pluggable module. The energy benefit must be evaluated alongside packaging, repair, and spare-capacity costs.
 
 For ML infrastructure, CPO\index{Co-packaged optics!bandwidth hierarchy flattening} could flatten the bandwidth hierarchy by narrowing the gap between intra-node and inter-node bandwidth. If inter-node links achieve bandwidth comparable to NVLink-class local fabrics (hundreds of GB/s per GPU), the bandwidth penalty for extending tensor parallelism beyond a single node would shrink. Cross-node tensor parallelism would then become economical for more workloads, provided that startup latency and collective frequency also fit the step-time budget.
 

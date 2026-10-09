@@ -257,21 +257,21 @@ $\TreeAllReduceCompletionTime \approx$ `{python} CommCollectives.tree_time_ms_st
 
 ### AllGather {#sec-appdx-comm-foundations-allgather}
 
-AllGather is the complement of ReduceScatter: each GPU starts with a $\CollectivePayloadSize/\DeviceCount$-sized shard and ends with the complete $\CollectivePayloadSize$-byte tensor. It is the core communication primitive in fully sharded data parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
+AllGather is the complement of ReduceScatter: each GPU starts with a $\CollectiveTensorSize/\DeviceCount$-sized shard and ends with the complete $\CollectiveTensorSize$-byte tensor. It is the core communication primitive in fully sharded data parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
 
 Ring AllGather execution time (@eq-allgather) requires half the transfer volume of AllReduce:
 
-$$ \AllGatherCompletionTime= \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} + (\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-allgather}
+$$ \AllGatherCompletionTime= \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectiveTensorSize}{\LinkBandwidth} + (\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-allgather}
 
-In this model, AllGather takes half the communication time of AllReduce for the same final tensor size and link parameters: it uses one ring pass instead of two. Local reduction work and implementation overheads can change the measured ratio.
+For this comparison, the full gathered tensor has the same byte size as each rank's AllReduce input payload. In this model, AllGather takes half the communication time of AllReduce for that matched tensor size and link parameters: it uses one ring pass instead of two. Local reduction work and implementation overheads can change the measured ratio.
 
 ### ReduceScatter {#sec-appdx-comm-foundations-reducescatter}
 
-ReduceScatter is the dual of AllGather: each GPU starts with a full $\CollectivePayloadSize$-byte tensor and ends with a $\CollectivePayloadSize/\DeviceCount$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
+ReduceScatter is the dual of AllGather: each GPU starts with a full $\CollectiveTensorSize$-byte tensor and ends with a $\CollectiveTensorSize/\DeviceCount$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
 
 Ring ReduceScatter execution time (@eq-reducescatter) provides the gradient sharding primitive:
 
-$$ \ReduceScatterCompletionTime= \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} + (\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-reducescatter}
+$$ \ReduceScatterCompletionTime= \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectiveTensorSize}{\LinkBandwidth} + (\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-reducescatter}
 
 The symmetry is not a coincidence: ring AllReduce decomposes into one ReduceScatter followed by one AllGather, and the costs add up exactly to @eq-ring-allreduce.
 
@@ -303,14 +303,14 @@ With the individual formulas in place, @tbl-collective-summary provides a compac
 |:-------------------------|:-------------------------------------------------------------------------------------------------:|:--------------------------------------------------:|:--------------------------------:|
 | **AllReduce (Ring)**     | $2 \cdot \frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$ |  $2(\DeviceCount-1) \cdot \MessageStartupLatency$  |   Data-parallel gradient sync    |
 | **AllReduce (Tree)**     |             $2\log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$             | $2\log_2 \DeviceCount\cdot \MessageStartupLatency$ |        Small-message sync        |
-| **AllGather (Ring)**     |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |  FSDP parameter reconstruction   |
-| **ReduceScatter (Ring)** |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |   FSDP/ZeRO gradient sharding    |
+| **AllGather (Ring)**     |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectiveTensorSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |  FSDP parameter reconstruction   |
+| **ReduceScatter (Ring)** |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectiveTensorSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |   FSDP/ZeRO gradient sharding    |
 | **AllToAll (Pairwise)**  |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |        MoE expert routing        |
 | **Broadcast (Tree)**     |              $\log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$             | $\log_2 \DeviceCount\cdot \MessageStartupLatency$  | Weight distribution, config sync |
 
-: **Collective Operation Cost Summary**: Bandwidth and latency terms for ring, tree, and pairwise-exchange algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $\DeviceCount$ = GPU count, $\CollectivePayloadSize$ = collective payload size in bytes. {#tbl-collective-summary}
+: **Collective Operation Cost Summary**: Bandwidth and latency terms for ring, tree, and pairwise-exchange algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $\DeviceCount$ = GPU count, $\CollectivePayloadSize$ = per-rank input payload in bytes, and $\CollectiveTensorSize$ = full tensor size in bytes for AllGather and ReduceScatter. {#tbl-collective-summary}
 
-Two patterns emerge from this table. First, the ring and pairwise-exchange models contain the $(\DeviceCount-1)/\DeviceCount$ factor, which approaches 1 for large $\DeviceCount$. Per-rank communication therefore approaches a constant multiple of $\CollectivePayloadSize$: about $2\CollectivePayloadSize$ for ring AllReduce and about $\CollectivePayloadSize$ for ring AllGather, ring ReduceScatter, or pairwise AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $\DeviceCount$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
+Two patterns emerge from this table. First, the ring and pairwise-exchange models contain the $(\DeviceCount-1)/\DeviceCount$ factor, which approaches 1 for large $\DeviceCount$. Per-rank communication therefore approaches a constant multiple of the relevant size: about $2\CollectivePayloadSize$ for ring AllReduce, about $\CollectiveTensorSize$ for ring AllGather or ReduceScatter, and about $\CollectivePayloadSize$ for pairwise AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $\DeviceCount$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
 
 ## Algorithm Selection {#sec-appdx-comm-foundations-algorithm-selection}
 

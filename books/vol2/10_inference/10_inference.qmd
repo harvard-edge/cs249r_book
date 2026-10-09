@@ -633,7 +633,7 @@ The same leverage can hold across application categories with different cost str
 
 The cost structure motivates serving optimization: a reduction in cost per completed request yields recurring savings if workload volume and service quality remain fixed. Lower latency alone does not ensure that billed capacity or other costs fall. @Fig-serving-cost-curve uses constructed cost curves to illustrate how unit cost can change with daily request volume. Against its assumed price of \$0.05 per 1,000 tokens, the optimized curve crosses near $2 \times 10^5$ requests per day, while the unbatched single-GPU curve crosses beyond $3 \times 10^7$ requests. These crossings follow from the assumed curves, not measured profitability or guaranteed effects of INT4 and continuous batching. A deployment needs its own token mix, occupied capacity, and complete cost boundary to establish a break-even point.
 
-::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The serving cost curve**: Illustrative cost model. Cost per 1000 tokens decreases with scale and optimization. Single-GPU serving reaches break-even only at high volume. Multi-GPU batching breaks even at moderate volume. Fully optimized serving (INT4 quantization, continuous batching) achieves profitability at much lower volumes, fundamentally changing the economics of inference." fig-alt="Log-log plot of cost per 1000 tokens vs. daily volume for single-GPU, multi-GPU, and optimized serving with break-even line."}
+::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The serving cost curve**: Constructed unit-cost curves cross an assumed price line at different request volumes. The optimized curve crosses earlier under these assumptions; the crossings do not establish measured profitability or guaranteed savings from quantization and batching." fig-alt="Log-log plot of cost per 1000 tokens vs. daily volume for single-GPU, multi-GPU, and optimized serving with break-even line."}
 
 ```{python}
 #| echo: false
@@ -700,7 +700,7 @@ plt.close()
 
 The cost ranges in @tbl-cost-ratios give a static comparison; @fig-serving-cost-crossover instead accumulates assumed monthly serving expense over a 36-month deployment. Its crossover occurs when the serving portion equals the initial training expense, not when total deployment cost first exceeds training cost. In the plotted recommendation scenario, that happens within days; in the 70B LLM scenario, it takes roughly six weeks. These timings follow from the specified expenses, not from model size or user count alone. A larger training expense, lower traffic, or shorter deployment can change which activity dominates. The comparison motivates evaluating serving efficiency early while keeping workload and quality fixed. For generative LLM services, serving-specific designs can improve throughput, cost, and power use [@patel2024].
 
-::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The serving cost crossover**: Cumulative total deployment cost (initial training plus ongoing serving) for three scenarios. Vertical markers (scenarios A and B) indicate when the serving portion equals the one-time training cost. For high-traffic LLMs, serving cost matches training cost within weeks. For recommendation systems at 100M daily active users, serving dominates within days. Only low-traffic, expensive-to-train models see training cost dominate for extended periods." fig-alt="Area chart showing cumulative total deployment cost over 36 months for three scenarios with crossover points marked"}
+::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The serving cost crossover**: Cumulative total deployment cost (initial training plus ongoing serving) for three scenarios. Vertical markers (scenarios A and B) indicate when the serving portion equals the one-time training cost. In the two high-traffic scenarios, serving expense matches training expense within weeks or days. In the low-traffic scenario, training expense remains larger over the plotted period. These differences follow from the specified training costs, traffic, and unit serving prices." fig-alt="Area chart showing cumulative total deployment cost over 36 months for three scenarios with crossover points marked"}
 
 ```{python}
 #| echo: false
@@ -860,7 +860,7 @@ Verify your understanding of where specific optimizations sit within the serving
 
 - [ ] **Replica level**: identify the hierarchy level at which KV-cache paging reduces GPU memory waste, and explain why that raises concurrent request capacity rather than single-request latency.
 - [ ] **Caching level**: distinguish response caching, which shortens one request's path, from KV-cache paging, which raises a replica's capacity, and place each in the hierarchy.
-- [ ] **Load balancing**: explain why service-level load balancing targets aggregate capacity across replicas rather than the latency of any single request.
+- [ ] **Load balancing**: identify why load balancing belongs at the service level and explain how its choice of replica can affect both aggregate goodput and a request's queueing delay.
 - [ ] **Isolation level**: evaluate the claim that multi-tenancy and resource isolation are primarily request-level concerns.
 
 :::
@@ -941,7 +941,7 @@ The scaling divide is therefore an interface and cache-policy decision. Every li
 | **Topology**   |       Single-GPU replicas       |        Tensor/pipeline parallel       | Hybrid CPU-GPU sharding               |
 | **State**      |            Stateless            | Request state; optional session cache | Stateless or session features         |
 
-: **Serving architecture dimensions by workload type**: Each workload's constraint profile determines the optimal design point along five architectural dimensions. Selecting a serving system amounts to choosing the combination that matches the workload's constraints. {#tbl-serving-architecture-dimensions}
+: **Serving architecture dimensions by workload type**: The rows identify candidate design choices along five architectural dimensions. The workload's state, scheduling, and hardware constraints guide selection; the service contract determines whether a combination supplies useful capacity. {#tbl-serving-architecture-dimensions}
 
 ::: {#chk-inference-serving-dimensions .callout-checkpoint title="Serving dimensions"}
 
@@ -970,7 +970,7 @@ Although recommendation workloads often dominate consumer inference volume (@sec
 
 Batching efficiency depends on how computation scales with batch size relative to memory and communication constraints. The execution timeline in @fig-batching-strategies separates waiting to form a batch from waiting for the accelerator to become available. Unbatched serving adds no batch-formation delay, but later requests can still queue behind earlier forward passes. Static batching consolidates all four illustrated requests into one pass, adding formation delay and padding to accommodate different input lengths. Dynamic batching closes formation windows at fixed time intervals ($\FiniteChange \TimeInstant$), producing two passes with two requests each in this example. The window limits intentional formation delay; it does not bound total queueing when ready batches arrive faster than the server can execute them.
 
-::: {#fig-batching-strategies fig-env="figure" fig-pos="htb" fig-cap="**Batching strategies compared**: Four requests of different lengths arrive one time unit apart under three policies; the timings are illustrative. (a) Without batching, each request receives its own forward pass, so later arrivals queue behind earlier ones and the GPU runs four passes. (b) Static batching holds every request until the batch of four is full, then runs one pass padded to the longest request; early arrivals pay the longest wait. (c) Dynamic batching dispatches whatever has arrived when a short window closes, bounding each wait while still sharing each pass between two requests." fig-alt="Three stacked timelines labeled (a) no batching, (b) static batching, and (c) dynamic batching. Each shows four request rows R1 to R4 with arrival ticks, gray wait segments, blue forward-pass segments, and hatched padding, above a GPU row. The GPU row shows four single-request passes in (a), one four-request pass in (b), and two two-request passes in (c). Dashed violet lines mark when each batch is dispatched."}
+::: {#fig-batching-strategies fig-env="figure" fig-pos="htb" fig-cap="**Batching strategies compared**: Four requests of different lengths arrive one time unit apart under three policies; the timings are illustrative. (a) Without batching, each request receives its own forward pass, so later arrivals queue behind earlier ones and the GPU runs four passes. (b) Static batching holds every request until the batch of four is full, then runs one pass padded to the longest request; early arrivals pay the longest wait. (c) Dynamic batching dispatches whatever has arrived when a short window closes, limiting intentional formation delay in this timeline while sharing each pass between two requests. Waiting for an occupied worker remains a separate source of delay." fig-alt="Three stacked timelines labeled (a) no batching, (b) static batching, and (c) dynamic batching. Each shows four request rows R1 to R4 with arrival ticks, gray wait segments, blue forward-pass segments, and hatched padding, above a GPU row. The GPU row shows four single-request passes in (a), one four-request pass in (b), and two two-request passes in (c). Dashed violet lines mark when each batch is dispatched."}
 ![](images/svg/batching-strategies.svg){width="100%"}
 
 <!--
@@ -1330,7 +1330,7 @@ The resulting batching efficiency curve\index{Batching!efficiency curve} shows d
 ```
 ![](images/svg/inference_batching_knee.svg){width="100%" fig-alt="A curve that stays nearly flat and then climbs steeply, with a red dot at the knee and a red wash shading the region past it."}
 
-*Past the knee, bigger batches spend latency without buying throughput.*
+*Past the knee, larger batches buy diminishing throughput gains at increasing execution latency.*
 :::
 
 The execution-only feasibility condition is $\BatchServiceTime(\BatchSize) \le \text{SLO}$\index{SLO!batch size trade-off}. In a live service, execution receives only the budget remaining after routing, queueing, batch formation, and response delivery. The batch-size decision must therefore use that remaining budget rather than consume the full SLO. The following example contrasts a vision workload with a relatively high $\MarginalRequestServiceTime$ and an LLM decode workload with a high $\BatchFixedOverheadTime$ from weight loading, showing how those measured costs change the tuning decision.
@@ -1423,11 +1423,11 @@ Translating these batch-level equations into system-wide capacity planning requi
 # │ Context: @thrm-inference-littles-law-inference theorem callout —
 # │          the Application, Capacity Planning, and Verification prose below.
 # │
-# │ Goal:    Apply Little's Law (Q = λ·T) to size a serving fleet against an SLO.
-# │ Show:    Required concurrency, per-replica throughput, throughput-only lower
-# │          bound, SLO-sized replica count, and resulting headroom.
-# │ How:     Scenario throughput target and latency SLO give required concurrency;
-# │          replica batch/latency give per-replica throughput and replica count.
+# │ Goal:    Separate mean in-system occupancy from executing batch positions.
+# │ Show:    Mean in-flight work, per-replica throughput, throughput-only lower
+# │          bound, utilization-sized replica count, and executing occupancy.
+# │ How:     Arrival rate and mean latency give in-flight work; batch service
+# │          time and a separate utilization target give the candidate fleet.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
@@ -1436,43 +1436,47 @@ from mlsysim.fmt import check, fmt_int, fmt_math, fmt_percent, fmt_time
 class LittlesLawExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
     target_throughput = 1000  # scenario assumption: target requests/sec
-    latency_slo = 0.1 * second  # scenario assumption: per-request latency SLO
+    mean_latency = 0.1 * second  # scenario assumption: mean end-to-end latency
     batch_size = 8  # scenario assumption: per-replica batch size
-    replica_latency = 0.08 * second  # scenario assumption: per-replica latency
+    batch_service_time = 0.08 * second  # scenario assumption: batch execution time
+    utilization_target = 0.8  # scenario assumption: maximum mean service utilization
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    latency_slo_s = latency_slo.to(second).magnitude
-    replica_latency_s = replica_latency.to(second).magnitude
-    required_concurrency = int(target_throughput * latency_slo_s)
-    replica_throughput = int(batch_size / replica_latency_s)
+    mean_latency_s = mean_latency.to(second).magnitude
+    batch_service_time_s = batch_service_time.to(second).magnitude
+    mean_inflight = int(target_throughput * mean_latency_s)
+    replica_throughput = int(batch_size / batch_service_time_s)
     throughput_floor = math.ceil(target_throughput / replica_throughput)
-    slo_replicas = math.ceil(required_concurrency / batch_size)
-    replicas_needed = max(throughput_floor, slo_replicas)
-    total_concurrency = replicas_needed * batch_size
-    concurrency_headroom = total_concurrency - required_concurrency
+    replicas_needed = math.ceil(target_throughput / (utilization_target * replica_throughput))
+    executing_positions = replicas_needed * batch_size
+    mean_executing = int(target_throughput * batch_service_time_s)
+    mean_waiting = mean_inflight - mean_executing
     service_utilization = target_throughput / (replicas_needed * replica_throughput)
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(required_concurrency == 100, "required concurrency should be 100")
+    check(mean_inflight == 100, "Mean in-flight work should be 100 requests")
     check(throughput_floor == 10, "Throughput-only lower bound should be 10 replicas")
-    check(replicas_needed == 13, "SLO-sized replica count should be 13")
-    check(concurrency_headroom == 4, "concurrency headroom should be 4")
+    check(replicas_needed == 13, "Utilization-sized candidate should be 13 replicas")
+    check(mean_executing == 80 and mean_waiting == 20, "Mean occupancy must separate execution and waiting")
+    check(service_utilization <= utilization_target, "Candidate must satisfy the mean utilization target")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    required_concurrency_math = fmt_math(rf"\RequestConcurrency = {target_throughput} \times {latency_slo_s} =")
-    required_concurrency_str = fmt_int(required_concurrency, commas=False)
-    replica_throughput_calc_math = fmt_math(rf"{batch_size}/{replica_latency_s} =")
+    mean_inflight_calc_math = fmt_math(rf"{target_throughput} \times {mean_latency_s} =")
+    mean_inflight_str = fmt_int(mean_inflight, commas=False)
+    replica_throughput_calc_math = fmt_math(rf"{batch_size}/{batch_service_time_s} =")
     replica_throughput_str = fmt_int(replica_throughput, commas=False)
     throughput_floor_calc_math = fmt_math(rf"\lceil {target_throughput}/{replica_throughput}\rceil =")
     throughput_floor_str = fmt_int(throughput_floor, commas=False)
-    slo_replicas_calc_math = fmt_math(rf"\lceil {required_concurrency}/{batch_size}\rceil =")
+    replicas_needed_calc_math = fmt_math(rf"\lceil {target_throughput}/({utilization_target} \times {replica_throughput})\rceil =")
     replicas_needed_str = fmt_int(replicas_needed, commas=False)
-    total_concurrency_calc_math = fmt_math(rf"{replicas_needed}\text{{ replicas}} \times {batch_size}\text{{ batch}} =")
-    total_concurrency_str = fmt_int(total_concurrency, commas=False)
-    concurrency_headroom_str = fmt_int(concurrency_headroom, commas=False)
+    executing_positions_calc_math = fmt_math(rf"{replicas_needed}\text{{ replicas}} \times {batch_size}\text{{ batch positions}} =")
+    executing_positions_str = fmt_int(executing_positions, commas=False)
+    mean_executing_str = fmt_int(mean_executing, commas=False)
+    mean_waiting_str = fmt_int(mean_waiting, commas=False)
+    utilization_target_pct_str = fmt_percent(utilization_target, precision=0, commas=False, style="prose")
     service_utilization_pct_str = fmt_percent(service_utilization, precision=1, commas=False, style="prose")
     target_throughput_str = fmt_int(target_throughput)
-    latency_slo_ms_str = fmt_time(latency_slo, millisecond, precision=0, commas=False)
-    latency_slo_s_str = fmt_time(latency_slo, second, precision=1, commas=False)
+    mean_latency_ms_str = fmt_time(mean_latency, millisecond, precision=0, commas=False)
+    mean_latency_s_str = fmt_time(mean_latency, second, precision=1, commas=False)
     batch_size_str = fmt_int(batch_size, commas=False)
-    replica_latency_ms_str = fmt_time(replica_latency, millisecond, precision=0, commas=False)
+    batch_service_time_ms_str = fmt_time(batch_service_time, millisecond, precision=0, commas=False)
 ```
 
 ::: {#thrm-inference-littles-law-inference .callout-theorem title="Little's Law for inference"}
@@ -1481,22 +1485,22 @@ class LittlesLawExample:
 
 $$ \RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystem $$
 
-**Application**: Concurrency planning. For this illustrative estimate, assume the mean end-to-end latency equals the numerical latency target below. A percentile SLO cannot generally be substituted for the mean in Little's Law.
+**Application**: Concurrency planning. This idealized service counts only batch formation, queueing, and execution in its end-to-end latency; routing and response delivery add no delay. Assume the mean latency given below and full execution batches of the stated size. A percentile SLO cannot generally be substituted for the mean in Little's Law.
 
 - **Target Throughput** $(\ArrivalRate)$: `{python} LittlesLawExample.target_throughput_str` requests/sec
-- **Assumed mean latency** $(\RequestTimeInSystem)$: `{python} LittlesLawExample.latency_slo_ms_str` (`{python} LittlesLawExample.latency_slo_s_str`)
+- **Assumed mean latency** $(\RequestTimeInSystem)$: `{python} LittlesLawExample.mean_latency_ms_str` (`{python} LittlesLawExample.mean_latency_s_str`)
 
-**Required Concurrency** $(\RequestConcurrency)$: `{python} LittlesLawExample.required_concurrency_math` `{python} LittlesLawExample.required_concurrency_str` concurrent requests
+**Mean in-flight work** $(\RequestConcurrency)$: `{python} LittlesLawExample.mean_inflight_calc_math` `{python} LittlesLawExample.mean_inflight_str` concurrent requests
 
 **Capacity Planning**\index{Capacity Planning}:
-If a single GPU replica handles batch size `{python} LittlesLawExample.batch_size_str` with `{python} LittlesLawExample.replica_latency_ms_str` latency:
+If a single GPU replica executes batches of `{python} LittlesLawExample.batch_size_str` in `{python} LittlesLawExample.batch_service_time_ms_str`, and the fleet targets at most `{python} LittlesLawExample.utilization_target_pct_str` mean service utilization:
 
 1. Replica Throughput $=$ `{python} LittlesLawExample.replica_throughput_calc_math` `{python} LittlesLawExample.replica_throughput_str` req/s
 2. Throughput-only lower bound $=$ `{python} LittlesLawExample.throughput_floor_calc_math` `{python} LittlesLawExample.throughput_floor_str` replicas
-3. Illustrative headroom-sized replica count $=$ `{python} LittlesLawExample.slo_replicas_calc_math` `{python} LittlesLawExample.replicas_needed_str` replicas
+3. Illustrative headroom-sized replica count $=$ `{python} LittlesLawExample.replicas_needed_calc_math` `{python} LittlesLawExample.replicas_needed_str` replicas
 
 **Verification**:
-Total system concurrency $=$ `{python} LittlesLawExample.total_concurrency_calc_math` `{python} LittlesLawExample.total_concurrency_str`, which leaves `{python} LittlesLawExample.concurrency_headroom_str` request slots above the `{python} LittlesLawExample.required_concurrency_str` required by Little's Law. The throughput-only lower bound would run at the stability boundary; the headroom-sized fleet runs at about `{python} LittlesLawExample.service_utilization_pct_str` service utilization, leaving finite headroom for queueing variance. This arithmetic does not prove a percentile latency SLO; that requires an arrival/service model or a measured load test.
+Maximum executing positions $=$ `{python} LittlesLawExample.executing_positions_calc_math` `{python} LittlesLawExample.executing_positions_str`. These positions do not include requests waiting for execution or batch formation. Under the assumed fixed batch service time, Little's Law on the execution boundary gives `{python} LittlesLawExample.mean_executing_str` requests executing on average; the remaining `{python} LittlesLawExample.mean_waiting_str` of the assumed mean in-flight population are waiting or accumulating. The throughput-only lower bound would run at the stability boundary; the utilization-sized candidate runs at about `{python} LittlesLawExample.service_utilization_pct_str` service utilization. The assumed mean latency still needs validation, and this arithmetic does not prove a percentile latency SLO; that requires an arrival/service model or a measured load test.
 
 :::
 
@@ -2492,9 +2496,9 @@ where $\ActiveParameterCount$ is the active parameter count, $\SustainedMemoryBa
 
 **Scenario**: An LLM inference server receives a mix of long input prompts ($10{,}000+$ tokens) and interactive short decode requests [@agrawal2024sarathi].
 
-**Diagnosis**: Un-chunked prompt prefills monopolize GPU compute engines for hundreds of milliseconds, blocking decode steps for concurrent requests and triggering severe TBT spikes.
+**Diagnosis**: When the worker schedules a full long-prompt prefill before returning to decode, that prefill can occupy execution for hundreds of milliseconds and create a TBT spike for active streams.
 
-**Systems lesson**: Chunking moves the cost of a long prompt rather than removing it. At $512$ tokens per chunk, a $10{,}000$-token prompt needs at least $\lceil 10{,}000/512 \rceil = 20$ iterations to finish its prefill. Active streams then see at most one chunk of prefill work per decode step, while the long request's own time to first token stretches across those 20 iterations. The chunk budget sets that exchange between other streams' TBT and the long prompt's TTFT, so it must be tuned against both measured tails.
+**Systems lesson**: Chunking moves the cost of a long prompt rather than removing it. At $512$ tokens per chunk, a $10{,}000$-token prompt needs at least $\lceil 10{,}000/512 \rceil = 20$ iterations to finish its prefill. With this prompt as the only prefill request, active streams share each decode iteration with at most one of its chunks, while the prompt's own time to first token stretches across those 20 iterations. Multiple waiting prompts can contribute additional chunks within the total iteration budget. The chunk budget sets that exchange between other streams' TBT and the long prompt's TTFT, so it must be tuned against both measured tails.
 
 :::
 
@@ -2849,7 +2853,7 @@ The batching strategies to this point focus on scheduling work under a chosen re
 ::: {.column-margin}
 ![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times."}
 
-*Reasoning expands latency about 128 times over fast pattern-matching.*
+*The illustrated serial reasoning budget expands latency about 128 times over the fast response.*
 :::
 
 Test-time scaling turns reasoning into a serving resource. The scaling laws that motivate the fleet were first measured for pretraining, where quality improves as a power law in parameters, data, and training compute. The same pattern has a third regime in which quality rises with the compute spent on each query at inference time. For a serving fleet that regime moves the scaling curve out of the training cluster and into the request path. Every increment of quality bought this way is paid on every request for the lifetime of the deployment, the recurring cost that the serving cost dominance law (principle \ref{pri-serving-cost-dominance}) already prices. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Whether that extra work buys quality is an empirical question. Capability studies describe abilities that appear abruptly with scale [@wei2022emergent], while later analysis cautions that some apparent jumps are artifacts of the metric chosen [@schaeffer2023mirage], so a serving budget should rest on measured quality gains for the workload rather than on the expectation of a jump.
@@ -2925,7 +2929,7 @@ Verify your understanding of different batching mechanics:
 
 :::
 
-The end-to-end traversal diagrammed in @fig-inference-lifecycle provides the final operational check on batching selection: noncompute stages such as host serialization, queuing, and network routing consume a substantial fraction of the latency budget, so batch formation and execution must be budgeted across the full pipeline rather than against accelerator runtime alone. A decision framework guides strategy selection:
+The end-to-end traversal diagrammed in @fig-inference-lifecycle provides the final operational check on batching selection: noncompute stages such as host serialization, queuing, and network routing consume a substantial fraction of the latency budget, so batch formation and execution must be budgeted across the full pipeline rather than against accelerator runtime alone. The following questions identify candidate policies; memory admission, arrivals, and the remaining latency budget determine their usable settings:
 
 ```
 Is it autoregressive text generation?
@@ -4980,7 +4984,7 @@ The feed-forward layer (typically two linear transformations with activation) pa
 
 The communication pattern for tensor-parallel inference follows a two-phase synchronization per layer. @Fig-tensor-parallel-flow diagrams this execution flow across two GPU ranks, isolating how column-row GEMM decompositions confine cross-device synchronization to two AllReduce barriers over NVLink, one after the multi-head attention projection and one after the feed-forward layer.
 
-::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism for inference**: Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This approach reduces latency for large models but adds two collectives per layer, which in latency-critical decode keep tensor-parallel groups on high-bandwidth, low-latency interconnects such as NVLink." fig-alt="Two-column diagram for GPU 0 and GPU 1. Top: Attention layer with heads split across GPUs feeding into AllReduce. Bottom: Feed-forward layer showing column-row split pattern with final AllReduce synchronization."}
+::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism for inference**: Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This partition can reduce latency when saved compute exceeds communication cost. The illustrated two-collective layer uses a fast local interconnect; its NVLink label is aggregate bidirectional bandwidth, not the per-direction transfer rate." fig-alt="Two-column diagram for GPU 0 and GPU 1. Top: Attention layer with heads split across GPUs feeding into AllReduce. Bottom: Feed-forward layer showing column-row split pattern with final AllReduce synchronization."}
 
 ```{.tikz}
 \providecolor{DarkNavy}{HTML}{1E293B}%
@@ -5706,7 +5710,7 @@ $$\text{Output} = \sum_{i \in \text{top-}k} {\RouterGateProbability}_i \cdot \te
 
 An even expert placement assigns each device $\ExpertCount/\DeviceCount$ experts, where $\DeviceCount$ is the number of expert-parallel devices. @Fig-moe-routing traces the path for a token: a top-2 softmax gating router selects expert destinations, an AllToAll dispatch sends the token representations to those ranks, and an AllToAll gather returns outputs for weighted recombination. An expert not selected by this token may process another token in the batch, so the illustration does not imply that every unselected device is idle.
 
-::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) routing**: Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-$\RoutedExpertCount$ experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts, the selected experts process the tokens in parallel while experts unselected by this token may serve other tokens, and a second AllToAll step gathers the results for the weighted sum. This pattern enables massive model capacity but introduces all-to-all communication overhead." fig-alt="Diagram of MoE token routing. A gating router selects the top-2 experts. Orange arrows labeled All-to-All Dispatch carry the token to Expert A on device 0 and Expert B on device 2, while Expert C on device 1 is shown dashed because this token does not select it. Blue arrows labeled All-to-All Gather return the expert outputs to a weighted sum that produces the output vector."}
+::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) routing**: Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-$\RoutedExpertCount$ experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts, the selected experts process the tokens in parallel while experts unselected by this token may serve other tokens, and a second AllToAll step gathers the results for the weighted sum. The idle label refers only to the illustrated token; an unselected expert can still process other tokens in the batch. Distributed expert capacity adds all-to-all communication overhead." fig-alt="Diagram of MoE token routing. A gating router selects the top-2 experts. Orange arrows labeled All-to-All Dispatch carry the token to Expert A on device 0 and Expert B on device 2, while Expert C on device 1 is shown dashed because this token does not select it. Blue arrows labeled All-to-All Gather return the expert outputs to a weighted sum that produces the output vector."}
 
 ```{.tikz}
 \providecolor{DarkNavy}{HTML}{1E293B}%
@@ -6620,15 +6624,21 @@ The procedure is deliberately small, but the load signal must match the serving 
 \begin{algorithm}
 \caption{Power-of-two choices request routing}
 \begin{algorithmic}
-\Require replica set $\mathcal{S}$; request $r$; capacity weights $w_s$; per-replica work signal $W_s$ (queue length, active tokens, predicted work, or KV-cache occupancy)
-\Ensure a selected replica for $r$
-\State sample two candidate replicas $s_a, s_b$ from $\mathcal{S}$ \Comment{capacity-weighted}
-\State query $W_{s_a}, W_{s_b}$; estimate incremental work $\hat{c}(r)$ (expected output tokens or KV pages)
-\State $u_s \gets (W_s + \hat{c}(r)) / w_s$ for $s \in \{s_a, s_b\}$ \Comment{post-admission load}
-\State $s^\star \gets$ candidate with smaller $u_s$ \Comment{ties: cache affinity}
-\State route $r$ to $s^\star$
-\State update $s^\star$'s local admission state
-\State \Return $s^\star$
+\Require eligible replica set $\mathcal{S}$; request $r$; positive capacity weights $w_s$; per-replica work signal $W_s$ (queue length, active tokens, predicted work, or KV-cache occupancy); finite attempt budget
+\Ensure an admitting replica for $r$, or an overload rejection
+\For{each allowed attempt}
+    \If{$\mathcal{S}$ is empty}
+        \State \Return overload rejection
+    \EndIf
+    \State sample two candidate replicas $s_a, s_b$ from $\mathcal{S}$ with replacement \Comment{capacity-weighted}
+    \State query $W_{s_a}, W_{s_b}$; estimate incremental work $\hat{c}(r)$ (expected output tokens or KV pages)
+    \State $u_s \gets (W_s + \hat{c}(r)) / w_s$ for $s \in \{s_a, s_b\}$ \Comment{post-admission load}
+    \State $s^\star \gets$ candidate with smaller $u_s$ \Comment{ties: cache affinity}
+    \If{$s^\star$ atomically admits $r$ and reserves its local capacity}
+        \State \Return $s^\star$
+    \EndIf
+\EndFor
+\State \Return overload rejection
 \end{algorithmic}
 \end{algorithm}
 ```
@@ -6804,7 +6814,7 @@ A sharded replica is one routing destination even though several devices execute
 
 @Fig-shard-group-scaling diagrams this two-tier scaling topology: an external load balancer distributes incoming queries across independent multi-GPU shard groups using round-robin, two-choice, or session-affinity policies, while intra-node NVLink AllReduce synchronization remains strictly encapsulated within each replica node.
 
-::: {#fig-shard-group-scaling fig-env="figure" fig-pos="htb" fig-cap="**Horizontal scaling with shard groups**: The load balancer treats each shard group as a single logical inference server and chooses among groups by round-robin, two-choice, or session-affinity routing. Within a group, eight GPUs hold the tensor-parallel weight shards and join partial results with an NVLink AllReduce inside every layer, which the router never sees. Adding groups raises aggregate throughput; the group's internal parallelism sets per-request latency." fig-alt="Requests 1, 2, through N feed a violet Load balancer box listing round-robin, two-choice, or session affinity. Its arrows fan out to three cards, Shard group 0, 1, and N, each labeled one replica, TP = 8, one node. Each card contains a strip of eight numbered GPU cells above an amber bar reading NVLink AllReduce inside every layer. An arrow along the bottom reads add shard groups to scale throughput; the router never sees the AllReduce."}
+::: {#fig-shard-group-scaling fig-env="figure" fig-pos="htb" fig-cap="**Horizontal scaling with shard groups**: The load balancer treats each shard group as a single logical inference server and chooses among groups by round-robin, two-choice, or session-affinity routing. Within a group, eight GPUs hold the tensor-parallel weight shards and join partial results with an NVLink AllReduce inside every layer, which the router never sees. Adding ready groups raises aggregate capacity; the group's internal parallelism affects per-request latency." fig-alt="Requests 1, 2, through N feed a violet Load balancer box listing round-robin, two-choice, or session affinity. Its arrows fan out to three cards, Shard group 0, 1, and N, each labeled one replica, TP = 8, one node. Each card contains a strip of eight numbered GPU cells above an amber bar reading NVLink AllReduce inside every layer. An arrow along the bottom reads add shard groups to scale throughput; the router never sees the AllReduce."}
 ![](images/svg/shard-group-scaling.svg)
 
 <!--
@@ -7628,7 +7638,7 @@ class ColdStartTimeline:
 
 Example \ref{exmp-inference-predictive-scaling-traffic} illustrates the opportunity to prepare capacity before demand arrives. @Fig-predictive-reactive-scaling depicts a forecast that anticipates the surge, while the reactive curve starts later and temporarily lacks capacity. Whether that deficit produces queueing, rejection, or missed deadlines depends on admission and existing headroom. The predictive curve illustrates a successful forecast, not a guarantee that future demand or startup time will match it.
 
-::: {#fig-predictive-reactive-scaling fig-env="figure" fig-pos="htb" fig-cap="**Predictive vs. reactive scaling**: Reactive scaling (red line) responds to traffic spikes after they occur, leaving a capacity deficit during cold start in this scenario. Predictive scaling (blue line) anticipates traffic and begins provisioning capacity before the spike arrives, avoiding that deficit when the forecast and startup assumptions hold." fig-alt="Time-series plot with traffic curve, reactive capacity lagging behind the spike, and predictive capacity scaling ahead of it."}
+::: {#fig-predictive-reactive-scaling fig-env="figure" fig-pos="htb" fig-cap="**Predictive vs. reactive scaling**: Reactive scaling (red line) responds to traffic spikes after they occur, leaving a capacity deficit during cold start in this scenario. Predictive scaling (blue line) anticipates traffic and begins provisioning capacity before the spike arrives, reducing the startup deficit in the illustrated forecast. Its early ramp does not eliminate every interval when demand exceeds capacity." fig-alt="Time-series plot with traffic curve, reactive capacity lagging behind the spike, and predictive capacity scaling ahead of it."}
 
 ```{python}
 #| echo: false
@@ -7687,18 +7697,18 @@ ax.plot(
     zorder=5,
 )
 
-# Shaded deficit (SLO violation)
-slo_mask = traffic > reactive
+# Shaded capacity deficit during startup
+deficit_mask = traffic > reactive
 ax.fill_between(
     t,
     reactive,
     traffic,
-    where=slo_mask,
+    where=deficit_mask,
     color=COLORS['RedFill'],
     edgecolor=c_red,
     hatch='///',
     alpha=0.4,
-    label='SLO Violation Deficit (Under-provisioned)',
+    label='Capacity Deficit During Startup',
     zorder=2,
 )
 
@@ -7716,7 +7726,7 @@ ax.fill_between(
 
 # Annotations with clean arrow placements
 ax.annotate(
-    'SLO VIOLATION DEFICIT\n(Cold-start latency & dropped requests)',
+    'CAPACITY DEFICIT\n(During replica startup)',
     xy=(4.4, 2.8),
     xytext=(2.2, 3.6),
     fontsize=8.0,
@@ -7733,7 +7743,7 @@ ax.annotate(
 )
 
 ax.annotate(
-    'Predictive Scale-Up\n(Capacity ready on-time)',
+    'Predictive Scale-Up\n(Earlier capacity ramp)',
     xy=(3.5, 1.8),
     xytext=(1.8, 2.0),
     fontsize=8.0,
@@ -8445,7 +8455,7 @@ Single-region deployment couples every user to the same geographic site and regi
 | **Tokyo**         |       150 ms       |          10 ms          |
 | **Sydney**        |       200 ms       |          10 ms          |
 
-: **Network RTT by user location**: A single US-East deployment imposes a 75 to 200 ms RTT on European, Asian, and Australian users, an order of magnitude above the local-region floor. For interactive workloads where each request makes several model calls, this latency floor compounds quickly, motivating multi-region deployment for any globally distributed user base. {#tbl-rtt-by-user-location tbl-colwidths="[34,33,33]"}
+: **Network RTT by user location**: A single US-East deployment imposes a 75 to 200 ms RTT on European, Asian, and Australian users, an order of magnitude above the local-region floor. Sequential calls that cross this boundary can add repeated wide-area delay. Regional replicas can reduce that exposed delay when placement policy, workload volume, and available capacity justify them. {#tbl-rtt-by-user-location tbl-colwidths="[34,33,33]"}
 
 Network delays compound when a request makes sequential calls across the distant boundary; multiple model calls inside one backend region do not each pay another client-to-region RTT. Regional replication can shorten that path and separate failure domains. Data-placement policies also constrain eligible destinations. The General Data Protection Regulation permits international transfers under specified conditions rather than requiring blanket EU-only processing; applicable law and contractual commitments must be translated into explicit placement rules. Regional replicas, edge caches, and cross-region sharding then trade capacity, communication, and coordination within those rules.
 
@@ -8918,19 +8928,27 @@ Because cross-region sharding is so costly on the steady-state path, most produc
 
 When a region becomes unavailable, failover must choose a healthy destination permitted to process the request and able to absorb its work. @Lst-active-failover illustrates a simplified timeout fallback. A production policy must also preserve the request's remaining deadline, version requirements, and data-placement constraints when selecting the secondary region.
 
-::: {#lst-active-failover lst-cap="**Active-Active Failover**: Global routing implementation that attempts the primary regional endpoint with a strict timeout before falling back to the secondary healthy region." lst-pos="H"}
+::: {#lst-active-failover lst-cap="**Active-Active Failover**: A bounded retry policy selects eligible regions and limits each attempt to the remaining request deadline." lst-pos="H"}
 
 ```{.python}
-# Simplified global routing logic
+# Eligibility includes placement, version, readiness, and capacity.
 def route_request(user_region, request):
-    primary = get_nearest_healthy_region(user_region)
-    secondary = get_second_nearest_healthy_region(user_region)
-
-    try:
-        return call_region(primary, request, timeout=2.0)
-    except (Timeout, RegionUnavailable):
-        # Failover with increased latency
-        return call_region(secondary, request, timeout=5.0)
+    attempted = set()
+    for attempt_budget in (2.0, 5.0):
+        remaining = request.deadline - monotonic_time()
+        regions = eligible_regions(request, excluding=attempted)
+        if remaining <= 0 or not regions:
+            break
+        region = nearest_region(user_region, regions)
+        attempted.add(region)
+        try:
+            # The endpoint atomically admits work and enforces the deadline.
+            return call_region(region, request,
+                               timeout=min(attempt_budget, remaining))
+        except (Timeout, RegionUnavailable, AdmissionRejected):
+            # Cancel abandoned work; retries require replay-safe semantics.
+            cancel_attempt(region, request)
+    return unavailable_or_deadline_exceeded(request)
 ```
 
 :::
@@ -8955,16 +8973,17 @@ GPU pricing varies by provider, contract, region, and time. @Tbl-gpu-region-pric
 
 Cost-aware routing compares eligible regions for latency-tolerant work (@lst-cost-aware-routing). GPU price alone is insufficient: transfer charges, startup and idle capacity, retries, and achieved useful throughput determine the cost of completing the workload. Deadline and data-placement constraints must filter destinations before that comparison.
 
-::: {#lst-cost-aware-routing lst-cap="**Cost-Aware Routing**: Priority-based request router that dispatches low-priority batch requests to the lowest-cost region with available capacity while routing latency-sensitive interactive traffic to the nearest region."}
+::: {#lst-cost-aware-routing lst-cap="**Cost-Aware Routing**: The router filters eligible destinations before comparing completion cost for low-priority work or proximity for interactive work."}
 
 ```{.python}
 def route_batch_request(request):
+    # Filter by placement, version, readiness, capacity, and deadline.
+    regions = eligible_regions(request)
+    if not regions:
+        return no_feasible_destination(request)
     if request.priority == "low":
-        # Route to cheapest region with capacity
-        return get_cheapest_region_with_capacity()
-    else:
-        # Route to nearest region
-        return get_nearest_region(request.user_location)
+        return lowest_completion_cost_region(request, regions)
+    return nearest_region(request.user_location, regions)
 ```
 
 :::

@@ -104,14 +104,14 @@ As the number of models grows, shared dependencies can create **operational comp
 
 | **Operational Aspect**         | **Single Model** |  **10 Models**   |        **100 Models**        |
 |:-------------------------------|:----------------:|:----------------:|:----------------------------:|
-| **Deployment coordination**    |       None       |      Ad hoc      |        Critical path         |
-| **Shared data dependencies**   |       None       |   Some overlap   |         Dense graph          |
+| **Deployment coordination**    |    Team-local    |      Ad hoc      |        Critical path         |
+| **Shared data dependencies**   | Within pipeline  |   Some overlap   |         Dense graph          |
 | **Monitoring dashboards**      |        1         |        10        |         Unmanageable         |
 | **On-call rotation scope**     |   Single team    |  Multiple teams  |      Organization-wide       |
 | **Infrastructure utilization** |    Often idle    | Moderate sharing |     Efficiency critical      |
 | **Debugging complexity**       |      Local       |    Cross-team    | Distributed tracing required |
 
-: **Operational complexity growth at scale**: Six dimensions of operational complexity across 1, 10, and 100 models. Deployment coordination evolves from nonexistent to critical path, monitoring dashboards become unmanageable without aggregation, and debugging shifts from local investigation to organization-wide distributed tracing requirements. {#tbl-ops-scale-complexity}
+: **Operational complexity growth at scale**: Illustrative challenges across 1, 10, and 100 models. Even one model requires deployment coordination and depends on its data pipeline. Shared dependencies can make releases a fleet-wide critical path, dashboards require aggregation, and debugging span team boundaries; actual complexity depends on coupling and ownership. {#tbl-ops-scale-complexity}
 
 ```{python}
 #| echo: false
@@ -192,7 +192,7 @@ As a fleet accumulates shared dependencies, system-level coordination can become
 
 :::
 
-@Fig-n-models-complexity sketches operational load across production model counts on a logarithmic scale, with one assumed growth shape per source of work. Alerts grow linearly because each model brings its own fixed set of monitored metrics. Deployment coordination grows as $\ProductionModelCount\log \ProductionModelCount$, the cost of ordering $\ProductionModelCount$ releases against one another much as a sort orders a list. Dependency conflicts grow quadratically because any pair of models sharing a feature or data source can collide, and $\ProductionModelCount$ models form roughly $\ProductionModelCount^2/2$ pairs. Under these shapes the total crosses the team-capacity ceiling near 50 models. The shapes are a sketch, not measurements, so the crossing marks where repeated work outgrows a team rather than a threshold a real organization can read off the plot; measured dependency density, engineering effort, and remediation cost decide when platform engineering pays.
+@Fig-n-models-complexity sketches operational load across production model counts on a logarithmic scale, with one assumed growth shape per source of work. Alerts grow linearly because each model brings its own fixed set of monitored metrics. The sketch assigns deployment coordination an intermediate $\ProductionModelCount \log \ProductionModelCount$ growth shape; this is an illustrative assumption rather than a release-scheduling complexity bound. A dense dependency graph motivates the quadratic conflict curve because $\ProductionModelCount$ models form roughly $\ProductionModelCount^2/2$ possible pairs; the recorded dependencies determine which pairs can actually conflict. Under these shapes the total crosses the team-capacity ceiling near 50 models. The shapes are a sketch, not measurements, so the crossing marks where repeated work outgrows a team rather than a threshold a real organization can read off the plot; measured dependency density, engineering effort, and remediation cost decide when platform engineering pays.
 
 ::: {#fig-n-models-complexity fig-env="figure" fig-pos="htb" fig-cap="**The N-models complexity explosion**: The curves show monitoring alerts growing linearly with model count, deployment coordination growing as $\mathcal{O}(\ProductionModelCount \log \ProductionModelCount)$, and dependency conflicts growing quadratically as models share features and data sources. Under these assumed shapes, the total operational load crosses team capacity around 50 models, sketching the transition from artisanal model management to platform-required operations." fig-alt="Log-scale plot showing linear, model-count-log-model-count, and quadratic curves with total operational load crossing team capacity at 50 models, with Artisanal, Growing Pains, and Platform Required zones."}
 
@@ -775,7 +775,7 @@ The worked example applies that threshold logic to rank debt by the capacity eac
 
 An ML platform team supporting 40 production models with 15 engineers faces deployment velocity problems. New models require 6 weeks to reach production, frustrating both platform and model teams. The audit estimates how much capacity each repair could release and compares that benefit with implementation effort and operational risk. A highly visible symptom is a starting point for measurement, not sufficient evidence of priority.
 
-The audit applies the measurement map of @tbl-ops-scale-debt-measurement-map to the deployment-velocity complaint, so it records in @tbl-ml-debt-audit-inputs the three categories that the team's release and incident symptoms point to before scoring them: configuration debt, model debt in the form of pipeline glue code, and infrastructure debt in the form of fragmented monitoring. Data debt, the fourth category, would surface through data incidents rather than release delay and falls outside this audit's scope. Each row pairs an operational symptom with the impact measure that makes the debt comparable across teams.
+The audit applies the measurement map of @tbl-ops-scale-debt-measurement-map to the deployment-velocity complaint, so it records in @tbl-ml-debt-audit-inputs the three categories that the team's release and incident symptoms point to before scoring them: configuration debt, model debt in the form of pipeline glue code, and infrastructure debt in the form of fragmented monitoring. Data debt can also delay releases, but this audit has not attributed the observed delay to data incidents and leaves that category outside its scope. Each row pairs an operational symptom with the impact measure that makes the debt comparable across teams.
 
 ```{python}
 #| echo: false
@@ -1120,7 +1120,7 @@ Deploying an ensemble update requires evaluating its effect on the composed syst
 | **Staged Rollout**   | 5% → 25% → 50% → 100%                                                | 24--72 hours | Business metric degradation            |
 | **Soak**             | Full traffic, extended monitoring                                    |  7--14 days  | Delayed effects emerge                 |
 
-: **Staged ensemble deployment pattern**: Four-phase rollout for updating recommendation ensemble components. Shadow deployment (24--48 hours) validates behavior without user impact, canary (1 percent traffic, 4--8 hours) enables statistical regression detection, staged rollout progressively increases exposure, and soak period (7--14 days) catches delayed interaction effects. {#tbl-ops-scale-ensemble-deploy}
+: **Staged ensemble deployment pattern**: Four-phase rollout for updating recommendation ensemble components. Shadow deployment (24--48 hours) compares behavior without serving candidate outputs; resource isolation and outcome evidence bound what it establishes. Canary (1 percent traffic, 4--8 hours) enables statistical regression detection, staged rollout progressively increases exposure, and soak period (7--14 days) catches delayed interaction effects. {#tbl-ops-scale-ensemble-deploy}
 
 The extended timeline reflects the difficulty of detecting regressions in ensemble systems. A component change that improves its local metrics might degrade system-level performance through subtle interactions with other components.
 
@@ -1204,7 +1204,7 @@ At fleet scale, the concern shifts from detecting training-serving skew in a sin
 
 The dual-store pattern resolves the tension between high-throughput batch training scans and low-latency serving lookups by splitting storage while sharing definitions. One materialization engine, governed by versioned feature definitions, writes ingested batch and stream data into an offline analytical store for historical joins and an online key-value store for point lookups (@fig-feature-store-architecture).
 
-::: {#fig-feature-store-architecture fig-env="figure" fig-pos="htb" fig-cap="**Feature store architecture**: A dual-store architecture resolves the conflict between training (high-throughput batch scans) and serving (low-latency point lookups). One set of feature definitions drives materialization from batch and streaming sources into an offline store, which keeps full history for point-in-time training joins (the throughput path, top), and an online store, which keeps the latest value per entity for serving lookups (the latency path, bottom). Because both stores are written from the same definitions, training and serving see the same feature meaning." fig-alt="A violet feature definitions box sends a dashed arrow into a green materialization box listing batch, streaming, and on-demand. Batch data and event streams feed materialization from the left. Materialization writes to a green offline store, labeled full history, scans, which feeds a blue training box, labeled point-in-time joins, and to a green online store, labeled latest values, key-value, which feeds a blue serving box, labeled point lookups."}
+::: {#fig-feature-store-architecture fig-env="figure" fig-pos="htb" fig-cap="**Feature store architecture**: A dual-store architecture resolves the conflict between training (high-throughput batch scans) and serving (low-latency point lookups). One set of feature definitions drives materialization from batch and streaming sources into an offline store, which keeps full history for point-in-time training joins (the throughput path, top), and an online store, which keeps the latest value per entity for serving lookups (the latency path, bottom). Shared definitions support compatible feature meanings; materialization and historical-availability checks must verify that contract." fig-alt="A violet feature definitions box sends a dashed arrow into a green materialization box listing batch, streaming, and on-demand. Batch data and event streams feed materialization from the left. Materialization writes to a green offline store, labeled full history, scans, which feeds a blue training box, labeled point-in-time joins, and to a green online store, labeled latest values, key-value, which feeds a blue serving box, labeled point lookups."}
 ![](images/svg/feature-store-architecture.svg)
 
 :::
@@ -1297,9 +1297,9 @@ The difference in relative lift between hourly and real-time features is 2.1 per
 
 Under the constructed lifts in @tbl-feature-freshness-engagement, moving from hourly to real-time features adds 2.1 percentage points of engagement lift. Treat that lift as \$10 million in annual engagement value and apply it to the choice between streaming and batch infrastructure.
 
-- [ ] **Freshness break-even**: determine the maximum annual cost of a real-time feature pipeline that still breaks even on the 2.1-point lift, holding the \$10 million engagement value constant, and state the cost threshold under which streaming is a clear win.
+- [ ] **Freshness break-even**: determine the maximum annual incremental cost of a real-time feature pipeline relative to the hourly path that still breaks even on the 2.1-point lift, holding the \$10 million engagement value constant, and state the cost threshold under which streaming is a clear win.
 - [ ] **Lift per point**: compare the additional engagement lift for the daily-to-hourly, hourly-to-near-real-time, and near-real-time-to-real-time transitions, and identify the incremental pipeline-cost estimates needed to choose among them.
-- [ ] **Scaling to users**: if the \$10 million annual engagement value scales linearly with platform user count, determine the break-even user count as a fraction of the current population for a \$5 million per year streaming feature platform, state the range where it does not pay off, and choose an alternative architecture from @tbl-ops-scale-feature-freshness.
+- [ ] **Scaling to users**: if the \$10 million annual engagement value scales linearly with platform user count, determine the break-even user count as a fraction of the current population for a streaming feature platform costing an additional \$5 million per year relative to the hourly path, state the range where it does not pay off, and choose an alternative architecture from @tbl-ops-scale-feature-freshness.
 
 :::
 
@@ -1470,7 +1470,7 @@ class FeatureStoreLatency:
     daily_recommendations_str = fmt_count(daily_recommendations, scale="billion", precision=0, scale_style="word", label="daily recommendation")
     features_per_recommendation_str = fmt_count(features_per_recommendation, commas=False, label="feature")
     lookups_per_day_str = fmt_count(lookups_per_day, scale="billion", precision=0, scale_style="word", label="feature lookup")
-    avg_lookup_rate_str = fmt_rate(avg_lookups_per_s, "requests/s", scale="M", precision=2, commas=False)
+    avg_lookup_rate_str = fmt_count(avg_lookups_per_s, scale="million", precision=2, commas=False, scale_style="word", label="feature lookup") + " per second"
     peak_traffic_range_mult_str = fmt_multiple_range(peak_traffic_min, peak_traffic_max, precision=0, commas=False)
     recommendation_budget_ms_str = fmt_time(recommendation_budget_ms, "millisecond", precision=0, commas=False)
     feature_budget_range_ms_str = fmt_time_range(feature_budget_min_ms, feature_budget_max_ms, "millisecond", precision=0, commas=False)
@@ -1478,7 +1478,7 @@ class FeatureStoreLatency:
     store_lookup_range_ms_str = fmt_time_range(store_lookup_min_ms, store_lookup_max_ms, "millisecond", precision=0, commas=False)
 ```
 
-The arithmetic behind a large recommender explains why feature stores become serving infrastructure rather than a metadata convenience. `{python} FeatureStoreLatency.daily_recommendations_str` with `{python} FeatureStoreLatency.features_per_recommendation_str` per recommendation produces `{python} FeatureStoreLatency.lookups_per_day_str` per day. That average load is roughly `{python} FeatureStoreLatency.avg_lookup_rate_str` before peak traffic. A planning envelope of `{python} FeatureStoreLatency.peak_traffic_range_mult_str` the mean raises the required capacity accordingly; observed request patterns must establish the appropriate peak allowance.
+The arithmetic behind a large recommender explains why feature stores become serving infrastructure rather than a metadata convenience. `{python} FeatureStoreLatency.daily_recommendations_str` with `{python} FeatureStoreLatency.features_per_recommendation_str` per recommendation produces `{python} FeatureStoreLatency.lookups_per_day_str` per day. That average load is roughly `{python} FeatureStoreLatency.avg_lookup_rate_str` before peak traffic. This counts feature-value accesses rather than backend requests; batching and cache reuse determine how many requests reach the store. A planning envelope of `{python} FeatureStoreLatency.peak_traffic_range_mult_str` the mean raises the required capacity accordingly; observed request patterns must establish the appropriate peak allowance.
 
 Feature retrieval must fit inside the overall latency budget because lookup time on the critical path leaves less time for ranking. If the recommendation budget is `{python} FeatureStoreLatency.recommendation_budget_ms_str`, the feature store may receive only `{python} FeatureStoreLatency.feature_budget_range_ms_str`. Network overhead can consume `{python} FeatureStoreLatency.network_overhead_range_ms_str` of that allocation, leaving roughly `{python} FeatureStoreLatency.store_lookup_range_ms_str` for the store lookup itself. In-memory storage or caching, bounded batching, and placement near the serving fleet are candidate mechanisms. The selected design must meet the remaining lookup budget under peak load.
 
@@ -1576,7 +1576,7 @@ class DataQualityIncident:
     feature_shift_threshold_pct_str = fmt_percent(feature_shift_threshold, precision=0, commas=False, style="prose")
 ```
 
-A recommendation model's click-through rate (CTR) drops `{python} DataQualityIncident.ctr_drop_pct_str` over `{python} DataQualityIncident.incident_days_str`. Initial hypothesis focuses on model drift, but data quality investigation reveals the root cause.
+A recommendation model's click-through rate (CTR) drops `{python} DataQualityIncident.ctr_drop_pct_str` over `{python} DataQualityIncident.incident_days_str`. The initial hypothesis focuses on model drift, but the constructed investigation reveals a feature computation defect.
 
 ::: {.column-margin}
 ```{=latex}
@@ -1587,7 +1587,9 @@ A recommendation model's click-through rate (CTR) drops `{python} DataQualityInc
 *Automated alerts cut detection from five days to four hours.*
 :::
 
-The investigation starts with the model symptom and then works backward through the data path. Model metrics\index{Lineage!model metrics} confirm that CTR declined from `{python} DataQualityIncident.ctr_before_pct_str` to `{python} DataQualityIncident.ctr_after_pct_str`, but freshness checks\index{Data!data freshness} show that features still arrive within the `{python} DataQualityIncident.freshness_slo_hr_str` SLO. That weakens the stale-pipeline hypothesis only if source progress, event-time coverage, and the affected entities are also verified; refresh age alone cannot exclude stale inputs. The investigation therefore tests semantic change as well. Distribution analysis then shows the mean of `user_engagement_score`, the shared feature whose redefinition @sec-ml-operations-scale-feature-versioning-lineage-624c used to motivate versioning, shifting from `{python} DataQualityIncident.engagement_before_str` to `{python} DataQualityIncident.engagement_after_str`, a `{python} DataQualityIncident.engagement_decline_pct_str` decline, and lineage tracking\index{Lineage!pipeline tracking}\index{Lineage tracking!provenance} ties the shift to an upstream pipeline version deployed `{python} DataQualityIncident.incident_days_str` earlier. The root cause is not model drift but a feature computation bug in the new pipeline version, the same class of silent semantic change that feature versioning is meant to name before release.
+The investigation starts with the model symptom and then works backward through the data path. Model metrics\index{Lineage!model metrics} confirm that CTR declined from `{python} DataQualityIncident.ctr_before_pct_str` to `{python} DataQualityIncident.ctr_after_pct_str`, but freshness checks\index{Data!data freshness} show that features still arrive within the `{python} DataQualityIncident.freshness_slo_hr_str` SLO. That weakens the stale-pipeline hypothesis only if source progress, event-time coverage, and the affected entities are also verified; refresh age alone cannot exclude stale inputs. The investigation therefore tests semantic change as well. Distribution analysis then shows the mean of `user_engagement_score`, the shared feature whose redefinition @sec-ml-operations-scale-feature-versioning-lineage-624c used to motivate versioning, shifting from `{python} DataQualityIncident.engagement_before_str` to `{python} DataQualityIncident.engagement_after_str`, a `{python} DataQualityIncident.engagement_decline_pct_str` decline, and lineage tracking\index{Lineage!pipeline tracking}\index{Lineage tracking!provenance} ties the shift to an upstream pipeline version deployed `{python} DataQualityIncident.incident_days_str` earlier.
+
+The shift and deployment history make the new pipeline a candidate cause; a changed population could also move the mean. Replaying the same source records through both pipeline versions with identical event cutoffs isolates the computation. In this scenario, the new version uses a different aggregation window even though its declared feature definition is unchanged, while the previous version matches that definition. This same-record comparison establishes a feature computation defect. The defect is the same class of silent semantic change that feature versioning is meant to name before release; the marginal distribution alone would not establish it.
 
 Assuming revenue falls in proportion to CTR and traffic is uniform over the interval, the modeled impact is `{python} DataQualityIncident.ctr_drop_pct_str` of `{python} DataQualityIncident.weekly_revenue_usd_str`/week over `{python} DataQualityIncident.incident_days_str`, producing `{python} DataQualityIncident.revenue_impact_usd_str` in lost revenue. If automated alerts and effective containment shorten exposure to `{python} DataQualityIncident.alert_detection_hr_str`, the modeled impact falls by `{python} DataQualityIncident.impact_reduction_pct_str`. The resolution restores the previous pipeline and compatible model-feature state. A distribution validation gate then blocks unexplained feature shifts exceeding the scenario's `{python} DataQualityIncident.feature_shift_threshold_pct_str` threshold; semantic tests remain necessary for bugs that do not cross that band.
 
@@ -2213,7 +2215,7 @@ For an equally allocated comparison of two proportions, a normal-approximation s
 
 $$\RequiredUsersPerVariant = \frac{(\ConfidenceCriticalQuantile + \PowerCriticalQuantile)^2 \times 2\BaselineConversionRate(1-\BaselineConversionRate)}{\MinimumDetectableEffect^2}$$ {#eq-ops-scale-ab-sample-size}
 
-where $\ConfidenceCriticalQuantile$ is the two-sided critical value for significance level $\HypothesisTestSignificanceLevel$ (typically 1.96 for $\HypothesisTestSignificanceLevel = 0.05$), $\PowerCriticalQuantile$ is the critical value for power (typically 0.84 for 80 percent power), $\BaselineConversionRate$ is the baseline rate, and $\MinimumDetectableEffect$ is the minimum detectable effect as an absolute difference.
+where $\ConfidenceCriticalQuantile$ is the two-sided critical value for significance level $\HypothesisTestSignificanceLevel$ (typically 1.96 for $\HypothesisTestSignificanceLevel = 0.05$), $\PowerCriticalQuantile$ is the critical value for power (typically 0.84 for 80 percent power), $\BaselineConversionRate$ is the baseline rate, and $\MinimumDetectableEffect$ is the minimum detectable effect as an absolute difference. Both critical values use the positive upper-tail convention: the upper-tail areas are $\HypothesisTestSignificanceLevel/2$ and $\HypothesisTestFalseNegativeRate$, respectively.
 
 Once data is collected, a two-proportion z-test determines if the observed difference is statistically significant. @Eq-ab-ztest computes the test statistic as the difference in observed rates normalized by the pooled standard error:
 
@@ -2344,7 +2346,7 @@ $$\SequentialLikelihoodRatio = \frac{\ProbabilityFunction(\SequentialTestObserva
 
 Using approximate Wald boundaries, stop and reject $\StatisticalHypothesis_0$ if $\SequentialLikelihoodRatio \geq \frac{1-\HypothesisTestFalseNegativeRate}{\HypothesisTestSignificanceLevel}$, stop and accept $\StatisticalHypothesis_0$ if $\SequentialLikelihoodRatio \leq \frac{\HypothesisTestFalseNegativeRate}{1-\HypothesisTestSignificanceLevel}$, otherwise continue collecting data.
 
-For large-scale A/B testing, group sequential methods divide the experiment into planned analysis stages. At each stage, compare test statistic to adjusted thresholds that maintain overall $\HypothesisTestSignificanceLevel$. The boundary family decides how that error budget is spent across the looks. An O'Brien-Fleming boundary spends almost none of it early, demanding overwhelming evidence to stop at the first looks and keeping the final threshold close to the fixed-sample value. A Pocock boundary spends it evenly, applying the same stricter threshold at every look. For a canary whose guardrail metric is checked every hour, the evaluation contract must name one of these boundaries as its stop rule; comparing each hourly look against the single-look 1.96 reintroduces the inflation the design exists to prevent.
+For large-scale A/B testing, group sequential methods divide the experiment into planned analysis stages. At each stage, compare test statistic to adjusted thresholds that maintain overall $\HypothesisTestSignificanceLevel$. The boundary family decides how that error budget is spent across the looks. An O'Brien-Fleming boundary spends almost none of it early, demanding overwhelming evidence to stop at the first looks and keeping the final threshold close to the fixed-sample value. A Pocock boundary spends it evenly, applying the same stricter threshold at every look. For a canary whose guardrail metric is checked every hour, the evaluation contract must prespecify a valid sequential stopping rule, such as one of these boundaries; comparing each hourly look against the single-look 1.96 reintroduces the inflation the design exists to prevent.
 
 #### Practical implementation considerations {#sec-ml-operations-scale-practical-implementation-considerations-5684}
 
@@ -2667,7 +2669,7 @@ class FalseAlarmTax:
 ::: {.column-margin}
 ![](images/svg/vol2_ops_scale_margin_003.svg){width="100%" fig-alt="Red saturating curve labeled 1 minus (1 minus alpha fp) to the N tests, rising with the number of tests N tests toward a gray line at 1, annotated near 1."}
 
-*As tests multiply, false alerts become mathematically inevitable.*
+*Across independent null checks, the probability of at least one false alert approaches certainty as tests multiply.*
 :::
 
 ::: {#nbk-ops-scale-false-alarm-tax .callout-notebook title="The false alarm tax"}
@@ -3040,8 +3042,15 @@ Step 3: Check feature pipeline status
 
 Step 4: Investigate Kafka cluster
         → Broker disk 95% full on partition 7
-        → Root cause identified
+        → Storage pressure is a leading hypothesis, not yet a confirmed cause
+
+Step 5: Test the storage-pressure hypothesis
+        → Write stalls on the affected broker coincide with stalled ingestion
+        → Bounded capacity recovery preserves committed data and consumer offsets
+        → Consumer progress and feature freshness recover without a model change
 ```
+
+The recovery evidence supports storage pressure as the ingestion bottleneck in this scenario. Responders still monitor engagement and delayed quality outcomes after freshness recovers; restoring pipeline progress does not by itself prove that all user impact has ended.
 
 When measured accuracy drops, responders first verify the evaluation signal and then investigate changes in data, model behavior, and execution. Four recurring hypotheses within data and model incidents guide that investigation. Data drift\index{Incident classification!data drift}\index{Data drift!incident classification} is an input-distribution change, such as evolving demographics or seasonality, whose quality effect requires outcome evidence. Feature staleness\index{Incident classification!feature staleness}\index{Feature store!feature staleness} arises when ingestion or pipeline delays leave predictions using outdated inputs. Model decay\index{Incident classification!model decay}\index{Model decay!incident classification} can reflect concept drift, where changed input-output relationships reduce the usefulness of learned parameters. Upstream model changes\index{Incident classification!upstream model change}\index{Model dependency!upstream changes} can invalidate representation assumptions across downstream consumers. These hypotheses are not exhaustive; label defects, configuration changes, and numerical faults can also alter measured accuracy.
 
@@ -3084,7 +3093,7 @@ The reusable structure is a diagnostic flow, not a document template. For a reco
 |:---------------------|:--------------------------------------------------|:-------------------------------------------------------|
 | Detect user impact   | Which product or cohort is degraded?              | CTR, conversion, retention, revenue, or complaint rate |
 | Localize dependency  | Did a shared service change for many models?      | Feature freshness, model registry, regional health     |
-| Bound blast radius   | Can traffic be reduced, shadowed, or rolled back? | Canary metrics, rollback target, serving saturation    |
+| Bound blast radius   | Can traffic be reduced, routed to a fallback, or rolled back? | Canary metrics, rollback target, serving saturation    |
 | Escalate by evidence | Which team owns the failed control?               | Data pipeline, platform, serving, or model owner       |
 | Learn from the gap   | Which missing signal would have caught it sooner? | Freshness gate, slice alert, deployment guardrail      |
 
@@ -3103,7 +3112,7 @@ The useful PIR fields are the ones that force a control decision. Duration and i
 | How long was user impact visible? | Whether detection latency or mitigation latency dominated the incident.         |
 | Which dependency failed first?    | Whether the missing control belongs to data, platform, serving, or model code.  |
 | Which signal arrived too late?    | Whether a new freshness, slice, saturation, or canary guard is needed.          |
-| What would have bounded impact?   | Whether rollback, traffic shadowing, admission control, or fallback was absent. |
+| What would have bounded impact?   | Whether rollback, exposure limits, admission control, or fallback was absent. |
 | Who owns the next control?        | Whether the review changes the platform rather than only recording blame.       |
 
 : **PIR control questions**: A post-incident review is valuable when it converts an incident timeline into a stronger platform invariant. {#tbl-pir-control-questions tbl-colwidths="[34,66]"}
@@ -3148,12 +3157,12 @@ Rotation design determines whether the team can sustain that diagnostic burden. 
 
 | **Aspect**              | **Recommendation**                                               |
 |:------------------------|:-----------------------------------------------------------------|
-| **Rotation length**     | 1 week (shorter causes context switching, longer causes burnout) |
+| **Rotation length**     | Start with 1 week; adapt to page load, staffing, and recovery work |
 | **Primary + secondary** | Always have backup; ML incidents often require multiple experts  |
 | **Handoff overlap**     | 30 min overlap for incident context transfer                     |
-| **Follow-the-sun**      | For global teams, hand off with timezone; 8-hour shifts maximum  |
+| **Follow-the-sun**      | Target 8-hour regional shifts, with explicit handoffs and backup |
 
-: **On-call rotation design**: Industry-practice guidelines for rotation length, primary/secondary coverage, handoff overlap, and follow-the-sun handoffs in ML on-call. The recommendations balance context-switching cost (shorter rotations) against burnout risk (longer rotations) while ensuring expertise overlap for complex ML incidents. {#tbl-oncall-rotation-design}
+: **On-call rotation design**: An illustrative starting policy for rotation length, backup coverage, and handoffs. Review interruption burden, recovery work, staffing, and context-transfer quality to determine whether the policy is sustainable; rotation length alone does not establish burnout risk. {#tbl-oncall-rotation-design}
 
 Alert fatigue poses a persistent risk to on-call effectiveness. Warning signs include engineers discounting notifications, slower acknowledgment, and repeated pages with no useful response. Teams should review drift, freshness, latency, and business-metric thresholds against observed false alarms and missed incidents, and group related alarms without suppressing independent urgent failures. A quarterly review and an alert-to-action target above 80 percent are illustrative policy choices; major workload changes or incidents can require earlier recalibration. Each page should identify its owner, diagnostic evidence, and runbook. The aim is actionable response across model, data, and infrastructure failures, not only ML-specific intervention.
 
@@ -3300,7 +3309,7 @@ Use daily cluster spend (`{python} GpuClusterEfficiency.daily_spend_str`) and us
 
 - [ ] **Underutilization cost**: calculate the annual cost of underutilization for the 100-GPU cluster at 65 percent utilization, the cost after optimization to 80 percent, and the annual value of recovered capacity. State when that value would become cash savings.
 - [ ] **Queue dynamics**: Little's Law (theorem \ref{thrm-inference-littles-law-inference}) holds for any stable queue, not only serving requests. Applied to the training-job queue, the average number of jobs waiting equals the job arrival rate times the average queue wait. Calculate the job arrival rate for a 4-hour average wait with 100 jobs in queue and explain what additional job-size, service-time, and arrival-pattern measurements are needed to choose expansion or utilization optimization.
-- [ ] **Savings vs. platform**: compare the annual recovered-capacity value from cluster optimization to the \$2M/year platform investment scenario and determine the fleet size where cluster-efficiency optimization alone justifies the platform investment, holding all other per-model savings constant.
+- [ ] **Savings vs. platform**: compare the annual recovered-capacity value from cluster optimization to the \$2M/year platform investment scenario. Holding the utilization gain and chargeback rate fixed, determine the GPU count where annual recovered-capacity value equals that investment, and state what must happen for the capacity value to become cash savings.
 
 :::
 
@@ -4834,7 +4843,7 @@ If this model requires quarterly retraining, annual training cost reaches approx
 ::: {.column-margin}
 ![](images/svg/ops_scale_tco_dominance.svg){width="100%" fig-alt="Stacked bar of the four TCO terms labeled T for training, Inf for inference, Da for data, and It for iteration. Inference is the widest segment and is shaded orange; the others are gray."}
 
-*At production scale, serving (infer) dominates total cost of ownership.*
+*Serving can dominate lifecycle cost when cumulative demand outweighs training and iteration costs.*
 :::
 
 Inference costs can dominate when cumulative serving demand outweighs training and iteration costs. @Eq-ops-scale-inference-cost estimates continuously provisioned capacity from average daily demand and sustained per-GPU throughput measured under representative batching, the target latency SLO, and operating headroom. Daily volume alone does not size traffic peaks; the estimate requires a separate check against the arrival pattern, workload mix, and scaling response:
@@ -5004,7 +5013,7 @@ class TcoComparison:
 | **Total TCO**      |    **`{python} TcoComparison.s_total_usd_str`**    |    **`{python} TcoComparison.p_total_usd_str`**    | **`{python} TcoComparison.total_scale_factor_mult_str`**                                |
 | **Dominant Cost**  | Iteration (`{python} TcoComparison.s_dom_tbl_str`) | Inference (`{python} TcoComparison.p_dom_tbl_str`) |                                                                                         |
 
-: **TCO comparison: startup vs. production company**: Cost structure shifts dramatically with scale. Startups are dominated by iteration costs (engineering salaries for experimentation), while production companies see inference costs dominate as serving volume grows. The 100$\times$ user increase yields only a `{python} TcoComparison.total_scale_factor_mult_str` TCO increase because the startup baseline is mostly salaries, even though inference grows faster than users. Data costs grow `{python} TcoComparison.data_scale_factor_mult_str`, faster than users, in a scenario that also stores features for 50 models and retrains weekly. {#tbl-ops-tco-comparison}
+: **TCO comparison: startup vs. production company**: In these constructed budgets, iteration costs dominate the startup scenario, while inference is the largest component in the production scenario. The comparison changes traffic, model count, retraining cadence, and staffing together; it does not isolate the effect of scale. The 100$\times$ user increase yields only a `{python} TcoComparison.total_scale_factor_mult_str` TCO increase because the startup baseline is mostly salaries, even though inference grows faster than users. Data costs grow `{python} TcoComparison.data_scale_factor_mult_str`, faster than users, in a scenario that also stores features for 50 models and retrains weekly. {#tbl-ops-tco-comparison}
 
 In these scenarios, the startup assigns `{python} TcoComparison.s_dom_str` to iteration, while the production company assigns `{python} TcoComparison.p_dom_str` to inference. Total TCO rises `{python} TcoComparison.total_scale_factor_mult_str` for 100$\times$ the users, but that does not establish cheaper serving per user. The assumed inference bill rises `{python} TcoComparison.inference_scale_factor_mult_str`, while the salary-heavy startup baseline makes the total ratio smaller. The data bill rises `{python} TcoComparison.data_scale_factor_mult_str` for 100$\times$ the users. The production scenario also stores and processes features for 50 models rather than one and retrains its high-velocity models weekly rather than monthly, so its storage, egress, and processing volumes (@eq-data-cost) can each grow faster than the user count; the assumed budgets do not say how much each term contributes. The production company also runs 10$\times$ as many experiments at `{python} TcoComparison.iteration_scale_factor_mult_str` the iteration cost. These assumed budgets show why measured cost structure matters; they do not isolate model count, feature complexity, or automation as the cause of any ratio.
 
@@ -5032,17 +5041,17 @@ $$\OptimizationBreakevenTime= \frac{\OptimizationImplementationCost}{\MonthlyOpt
 
 where $\OptimizationImplementationCost$ is the one-time implementation and validation cost and $\MonthlyOptimizationSavings$ is positive monthly savings net of added operating and maintenance costs. This simple payback assumes savings remain constant over the interval; recovered capacity counts as cash savings only when it reduces expenditure or avoids a planned purchase.
 
-The breakeven equation helps compare specific investments once their implementation costs and recurring savings are estimated. The dominant cost component suggests where to look first, but does not rule out a valuable smaller intervention elsewhere. @Tbl-tco-cost-structure-decisions offers illustrative postures and payback thresholds; actual investment criteria also depend on service risk, expected workload lifetime, and available engineering capacity.
+The breakeven equation helps compare specific investments once their implementation costs and recurring savings are estimated. The dominant cost component suggests where to look first, but does not rule out a valuable smaller intervention elsewhere. @Tbl-tco-cost-structure-decisions offers investigation starting points and illustrative policy thresholds; actual investment criteria also depend on service risk, expected workload lifetime, and available engineering capacity.
 
-| **Dominant cost structure**                               | **Operating context** | **Optimization posture**                                                                                                                                                                                                                                        | **Payback threshold**                           |
-|:----------------------------------------------------------|:----------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------|
-| Iteration costs dominate ($\IterationCost> 50\%$ of TCO)  | Early stage           | Optimize for development velocity, accept higher per-inference costs while experiments are still changing, and invest in experiment infrastructure that shortens the time per experiment. Defer infrastructure efficiency work until the cost structure shifts. | Defer unless it directly accelerates iteration. |
-| Training costs dominate ($\TrainingCost > 40\%$ of TCO)   | Growth stage          | Invest in training efficiency through mixed precision, gradient checkpointing, spot instances with checkpoint-and-resume, and architecture changes that reduce training time.                                                                                   | 3--6 month payback is acceptable.               |
-| Inference costs dominate ($\InferenceCost > 40\%$ of TCO) | Scale stage           | Prioritize serving optimization through quantization, batching, caching, and distillation because model optimization ROI is highest when every query repeats the savings.                                                                                       | 1--3 month payback is required.                 |
+| **Dominant cost structure**                                 | **Operating context** | **Optimization posture** | **Payback threshold** |
+|:------------------------------------------------------------|:----------------------|:-------------------------|:----------------------|
+| Iteration costs dominate ($\IterationCost > 50\%$ of TCO) | Experiment-heavy workload | Investigate experiment infrastructure that shortens iteration time. Compare infrastructure efficiency candidates when their savings or capacity value justify the engineering effort. | Evaluate candidate value; iteration cost share alone does not set a payback bar. |
+| Training costs dominate ($\TrainingCost > 40\%$ of TCO) | Repeated training campaigns | Investigate mixed precision, gradient checkpointing, checkpoint-and-resume on spot instances, and architecture changes against quality and completion requirements. | An illustrative policy accepts 3--6 months only if the candidate remains useful beyond payback. |
+| Inference costs dominate ($\InferenceCost > 40\%$ of TCO) | High-volume serving | Investigate quantization, batching, caching, and distillation where repeated queries can realize savings within quality and latency constraints. | An illustrative policy requires 1--3 months; the actual bar depends on candidate lifetime and risk. |
 
-: **Cost-structure decision rules**: Optimization posture changes as TCO shifts from iteration-dominated to training-dominated to inference-dominated. {#tbl-tco-cost-structure-decisions}
+: **Cost-structure decision rules**: Measured cost shares guide investigation. Candidate savings, useful lifetime, and operational risk determine whether an investment satisfies the organization's policy. {#tbl-tco-cost-structure-decisions}
 
-The shorter payback bar in the inference row follows from two properties of serving. Savings recur with every query, so a sound serving optimization on a large inference bill repays quickly, and a candidate that cannot clear a short bar is usually a weak one. Serving configurations also have short lives: a model refresh, a new accelerator generation, or a change in request mix can retire the optimized path before a long payback completes. A training-efficiency investment, by contrast, applies to every future run of a pipeline that changes more slowly, so it can tolerate a longer horizon.
+The numerical payback bars in the table represent an illustrative investment policy, not a consequence of training or serving alone. Repeated queries can make serving savings accumulate quickly, but a model refresh or request-mix change can retire the optimized path before payback. A reusable training pipeline may support a longer horizon, while a one-off training campaign may not. For either workload, compare net savings over the candidate's expected useful lifetime with implementation cost and risk; a dominant cost category does not guarantee that its next optimization has the highest value.
 
 #### Optimization investment decisions {#sec-ml-operations-scale-worked-example-optimization-investment-decision-cc81}
 
@@ -5098,14 +5107,14 @@ Breakeven in 2 weeks makes this investment attractive if validation confirms acc
 
 The training optimization has longer payback and smaller absolute savings in this scenario. Those results favor the inference investment if both satisfy their quality and reliability requirements and compete for the same engineering capacity. @Tbl-optimization-priority extends that reasoning into starting points for investigation, subject to each candidate's measured benefit, implementation cost, and operational risk:
 
-| **Dominant Cost**    |  **First Priority** |   **Second Priority**    |          **Avoid**          |
-|:---------------------|:-------------------:|:------------------------:|:---------------------------:|
-| **Iteration (>50%)** | Experiment velocity |    Developer tooling     | Infrastructure optimization |
-| **Training (>40%)**  | Training efficiency | Spot/preemptible compute |   Over-engineering serving  |
-| **Inference (>40%)** |  Model optimization |  Serving infrastructure  |     Excessive retraining    |
-| **Data (>30%)**      |   Storage tiering   |     Egress reduction     | Premature feature expansion |
+| **Dominant Cost**    | **Investigation Starting Point** | **Other Candidates** | **Risk to Evaluate** |
+|:---------------------|:--------------------------------:|:--------------------:|:--------------------:|
+| **Iteration (>50%)** | Experiment velocity | Developer tooling and infrastructure efficiency | Engineering effort that does not repay through faster iteration or realized savings |
+| **Training (>40%)** | Training efficiency | Spot/preemptible compute and shared serving improvements | Recovery overhead, completion risk, and useful investment lifetime |
+| **Inference (>40%)** | Model optimization | Serving infrastructure and retraining policy | Quality loss, latency changes, and workload lifetime |
+| **Data (>30%)** | Storage tiering | Egress reduction and feature simplification | Retention, freshness, and downstream quality requirements |
 
-: **Optimization priority matrix**: Match optimization investments to current cost structure. When iteration dominates, invest in developer velocity, not infrastructure. When inference dominates, model optimization yields fastest payback. Data-dominated cost structures (unusual but possible with large feature stores) require storage and transfer optimization before model improvements. {#tbl-optimization-priority}
+: **Optimization priority matrix**: Current cost structure identifies starting points for investigation. Compare feasible candidates across categories using measured net benefit, implementation cost, useful lifetime, and operational risk before assigning engineering capacity. {#tbl-optimization-priority}
 
 #### TCO-driven architecture decisions {#sec-ml-operations-scale-tcodriven-architecture-decisions-2fea}
 
