@@ -1,3 +1,7 @@
+---
+notation-local: [\BreakEvenParseFailureRate, \CatalogDefinitionTokens, \CatalogStagingCallCount, \ConstrainedCallLatency, \DefinitionSerializedSize, \FirstCatalogDefinitionCount, \FirstCatalogDefinitionSize, \ModelCallIndex, \PerTokenMaskingTime, \RepairTurnLatency, \SecondCatalogDefinitionCount, \SecondCatalogDefinitionSize, \StagedDefinitionCount, \UnconstrainedCallLatency, \UnconstrainedParseFailureRate]
+---
+
 # Typed Tool Interfaces {#sec-vol3-app-b-tool-design}
 []{#sec-vol3-app-tool-design}
 
@@ -92,19 +96,19 @@ The last row can matter for latency when generated output lies on the critical p
 
 A model that samples freely can emit malformed arguments. Under a supported grammar and correct masking, a generation that reaches an accepting completion belongs to that grammar; truncation or interruption does not supply a complete valid call (@sec-vol3-foundation-model-grammar-constrained, @sec-vol3-appendix-math-dfa). @Sec-vol3-appendix-inference-decode-loop develops mask placement and storage. Here the narrower question is whether masking overhead is lower than the expected latency of one repair under a stipulated comparison.
 
-Let a tool call carry $\OutputLength$ output tokens at $\PertokenDecodeTime$ per token, let masking add $t_{\text{mask}}$ per token, let $p_{\text{err}}$ be the rate at which unconstrained calls fail to parse, and let a repair turn cost $T_{\text{repair}}$ of latency, including the re-sent context and the regenerated call. The expected latency without constraints, allowing one repair, is
+Let a tool call carry $\OutputLength$ output tokens at $\PerTokenDecodeTime$ per token, let masking add $\PerTokenMaskingTime$ per token, let $\UnconstrainedParseFailureRate$ be the rate at which unconstrained calls fail to parse, and let a repair turn cost $\RepairTurnLatency$ of latency, including the re-sent context and the regenerated call. The expected latency without constraints, allowing one repair, is
 
-$$\mathbb{E}[T_{\text{free}}] = \OutputLength \, \PertokenDecodeTime + p_{\text{err}} \, T_{\text{repair}}$$
+$$\mathbb{E}[\UnconstrainedCallLatency] = \OutputLength \, \PerTokenDecodeTime + \UnconstrainedParseFailureRate \, \RepairTurnLatency$$
 
 and with constraints it is
 
-$$T_{\text{constrained}} = \OutputLength \, (\PertokenDecodeTime + t_{\text{mask}})$$
+$$\ConstrainedCallLatency = \OutputLength \, (\PerTokenDecodeTime + \PerTokenMaskingTime)$$
 
 Setting the two equal gives the break-even error rate
 
-$$p_{\text{break}} = \frac{\OutputLength \, t_{\text{mask}}}{T_{\text{repair}}}$$
+$$\BreakEvenParseFailureRate = \frac{\OutputLength \, \PerTokenMaskingTime}{\RepairTurnLatency}$$
 
-Under this model, constraining reduces expected latency when the malformation rate exceeds $p_{\text{break}}$. Measure the inputs for the actual model, schema, and prompt, and express both time terms in the same unit. The ratio is dimensionless. If it exceeds one, eliminating every parse failure would still not repay the stipulated mask overhead; if repair latency is zero, the ratio is undefined and the original latency expressions should be compared directly.
+Under this model, constraining reduces expected latency when the malformation rate exceeds $\BreakEvenParseFailureRate$. Measure the inputs for the actual model, schema, and prompt, and express both time terms in the same unit. The ratio is dimensionless. If it exceeds one, eliminating every parse failure would still not repay the stipulated mask overhead; if repair latency is zero, the ratio is undefined and the original latency expressions should be compared directly.
 
 The comparison holds generated length and base decode cost fixed and includes at most one repair. It omits schema-compilation and setup costs; include those when they are not already amortized or shared. A policy that stops quickly after a failed repair may look faster while completing fewer tasks. Use the break-even only among candidates with comparable task quality and completion requirements, and measure residual malformed or interrupted outputs rather than assuming that every constrained call completes.
 
@@ -137,11 +141,11 @@ A reconciliation probe supplies scoped evidence. Finding the pre-dispatch state 
 
 ### The capability check
 
-The tuple $\Gamma=(\mathcal{R}_\Gamma,\mathcal{O}_\Gamma,\phi_\Gamma,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes rights $\mathcal{R}_\Gamma$, objects $\mathcal{O}_\Gamma$, condition predicate $\phi_\Gamma$, and expiry time $\GrantExpiryTime$. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
+The tuple $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
 
-For delegation, let $\mathcal{A}(\Gamma)$ denote the accesses a grant permits. A derived child must satisfy
+For delegation, let $\GrantAllowedAccesses(\CapabilityGrant)$ denote the accesses a grant permits. A derived child must satisfy
 
-$$\mathcal{A}(\Gamma_{\text{child}})\subseteq\mathcal{A}(\Gamma_{\text{parent}}).$$
+$$\GrantAllowedAccesses(\ChildCapabilityGrant)\subseteq\GrantAllowedAccesses(\ParentCapabilityGrant).$$
 
 An issuer must authenticate the parent and validate the proposed narrowing before issuing a child. It must preserve associations between rights, objects, and conditions, not merely compare unrelated sets of names. Holding a narrower child does not revoke a broader parent. Several children must share the parent's aggregate resource allowance rather than each receiving an independent copy of its budget (@sec-vol3-multiagent-authority).
 
@@ -155,25 +159,25 @@ A catalog can expose separate service operations or combine work behind more gen
 
 ### The token cost of a catalog
 
-Suppose every one of $N$ model calls stages the same $n_{\text{def}}$ definitions, contributing an average of $S$ tokens each in the final serialization. Excluding other request content, this fixed-catalog policy sends
+Suppose every one of $\CatalogStagingCallCount$ model calls stages the same $\StagedDefinitionCount$ definitions, contributing an average of $\DefinitionSerializedSize$ tokens each in the final serialization. Excluding other request content, this fixed-catalog policy sends
 
-$$S_{\text{catalog}} = N \cdot n_{\text{def}} \cdot S$$ {#eq-vol3-app-b-catalog-tokens}
+$$\CatalogDefinitionTokens = \CatalogStagingCallCount \cdot \StagedDefinitionCount \cdot \DefinitionSerializedSize$$ {#eq-vol3-app-b-catalog-tokens}
 
-tokens of tool definitions. For two fixed catalogs under the same call count, their token ratio is $n_{\text{def},A} S_A/(n_{\text{def},B} S_B)$. Fewer definitions reduce catalog tokens only when their combined serialized size is smaller. A general interface with a long instruction manual can cost more than several concise specialized interfaces.
+tokens of tool definitions. For two fixed catalogs under the same call count, their token ratio is $\FirstCatalogDefinitionCount \FirstCatalogDefinitionSize/(\SecondCatalogDefinitionCount \SecondCatalogDefinitionSize)$. Fewer definitions reduce catalog tokens only when their combined serialized size is smaller. A general interface with a long instruction manual can cost more than several concise specialized interfaces.
 
-On-demand staging changes the per-call count. If call $i$ stages $n_{\text{def},i}$ definitions with mean serialized contribution $S_i$, replace the product in @eq-vol3-app-b-catalog-tokens with $\sum_{i=1}^{N} n_{\text{def},i} S_i$. Record the tokenizer and serialization convention, including any shared framing, so the estimates can be checked against actual requests. Selection calls and catalog-discovery observations need separate accounting. Neither formula establishes equal functionality, grants, selection quality, or task outcomes.
+On-demand staging changes the per-call count. If call $\ModelCallIndex$ stages ${\StagedDefinitionCount}_i$ definitions with mean serialized contribution $\DefinitionSerializedSize_i$, replace the product in @eq-vol3-app-b-catalog-tokens with $\sum_{i=1}^{\CatalogStagingCallCount} {\StagedDefinitionCount}_i \DefinitionSerializedSize_i$. Record the tokenizer and serialization convention, including any shared framing, so the estimates can be checked against actual requests. Selection calls and catalog-discovery observations need separate accounting. Neither formula establishes equal functionality, grants, selection quality, or task outcomes.
 
 Compatible available prefix state can reduce recomputation, and qualifying cached-input billing can reduce price, without releasing logical context capacity. A changed descriptor affects reuse from its first divergence, not necessarily the entire earlier prefix (@sec-vol3-context-engineering-staging).
 
 @Tbl-vol3-app-b-deep-vs-shallow sets the two catalog shapes side by side on these costs and on where authority is enforced.
 
-| Dimension             | Many narrow tools                                        | A few general tools                                            | Consequence                                                               |
-|:----------------------|:---------------------------------------------------------|:---------------------------------------------------------------|:--------------------------------------------------------------------------|
-| **Interface surface** | More operation-specific names                            | Fewer names with more expressive arguments                     | Count alternatives and argument complexity separately                     |
-| **Definition tokens** | Depends on staged count and serialized size              | Depends on staged count and serialized size                    | Measure $n_{\text{def},i} S_i$ rather than inferring cost from tool count |
-| **Selection**         | More interfaces may offer task-specific choices          | Fewer interfaces may require more argument composition         | Compare selection and argument errors under the same workload             |
-| **Observations**      | Can expose task-specific structured results              | Can expose a shared result envelope                            | Either design must preserve status, scope, and omissions                  |
-| **Enforcement**       | Per-operation checks can coexist with shared containment | Expressive operations require limits on their possible effects | Both need authorization and execution enforcement                         |
+| Dimension             | Many narrow tools                                        | A few general tools                                            | Consequence                                                                                                 |
+|:----------------------|:---------------------------------------------------------|:---------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|
+| **Interface surface** | More operation-specific names                            | Fewer names with more expressive arguments                     | Count alternatives and argument complexity separately                                                       |
+| **Definition tokens** | Depends on staged count and serialized size              | Depends on staged count and serialized size                    | Measure ${\StagedDefinitionCount}_i \DefinitionSerializedSize_i$ rather than inferring cost from tool count |
+| **Selection**         | More interfaces may offer task-specific choices          | Fewer interfaces may require more argument composition         | Compare selection and argument errors under the same workload                                               |
+| **Observations**      | Can expose task-specific structured results              | Can expose a shared result envelope                            | Either design must preserve status, scope, and omissions                                                    |
+| **Enforcement**       | Per-operation checks can coexist with shared containment | Expressive operations require limits on their possible effects | Both need authorization and execution enforcement                                                           |
 
 : **Narrow Versus General Tool Catalogs**: How catalog shape affects definition tokens, tool selection, observations, and where authority is enforced. {#tbl-vol3-app-b-deep-vs-shallow tbl-colwidths="[18,26,26,30]"}
 

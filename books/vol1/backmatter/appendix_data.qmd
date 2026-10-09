@@ -1,5 +1,6 @@
 ---
 engine: jupyter
+notation-local: [\BroadcastTableSize, \DiscreteOutcome, \DiscreteRandomVariable, \LogisticProbability, \LogitVector, \MatchingRowCount, \NormalizingClassIndex, \RelationalSelection, \SessionRequestCount, \TableRowCount]
 ---
 
 # Data Foundations {#sec-appdx-data-foundations dropcap="chapter-opening"}
@@ -10,7 +11,7 @@ Data problems rarely present as data problems; they surface as a training run th
 
 This appendix is designed as a reference. Reach for it when debugging "slow training," "low accelerator utilization," or "production accuracy drift" calls for the quickest path from symptom to measurement.
 
-Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
+Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
 
 - **When data will not move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0.
 - **When the accelerator is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
@@ -104,7 +105,7 @@ Data gravity[^fn-data-gravity-anchor] is a metaphor grounded in transfer-time ca
 
 [^fn-data-gravity-anchor]: **Data gravity**\index{Data gravity!appendix refresher}: Coined by Dave McCrory\index{McCrory, Dave|seealso{Data gravity}} in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics [@mccrory2010datagravity]. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
 
-The ideal line-rate transfer time is $T = \DataVolume/\Bandwidth$ after converting data volume and bandwidth to compatible units (the calculations below convert decimal bytes and bits per second explicitly). For the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320. @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
+The ideal line-rate transfer time is $\DatasetTransferTime= \DataVolume/\Bandwidth$ after converting data volume and bandwidth to compatible units (the calculations below convert decimal bytes and bits per second explicitly). For the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320. @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
 
 | **Data Volume** |       **1 Gbps (Standard WAN)**       |       **10 Gbps (High-End WAN)**       |      **100 Gbps (Direct Connect)**      |       **Truck (Illustrative)**       |
 |:----------------|:-------------------------------------:|:--------------------------------------:|:---------------------------------------:|:------------------------------------:|
@@ -321,15 +322,15 @@ class DataAlgebra:
 
 Feature engineering turns raw records into the columns a model can learn from, and that transformation is usually a dataflow problem before it is a modeling problem. A pipeline first narrows the population, then chooses the features, then attaches context from other tables. Those three moves correspond to three Structured Query Language (SQL)\index{Structured query language!feature pipeline primitives}\index{SQL!feature pipeline primitives} primitives, and their computational cost determines whether the feature job stays local, scans unnecessary bytes, or turns into a network shuffle.
 
-1.  **Selection ($\sigma$)**: Filtering rows (for example, `WHERE age > 30`).
-    *   **Cost**: For a table of $N$ rows, $\mathcal{O}(\log N + K)$ if a B-tree index lookup returns $K$ rows; $\mathcal{O}(N)$ for a full scan.
+1.  **Selection ($\RelationalSelection$)**: Filtering rows (for example, `WHERE age > 30`).
+    *   **Cost**: For a table of $\TableRowCount$ rows, $\mathcal{O}(\log \TableRowCount+ \MatchingRowCount)$ if a B-tree index lookup returns $\MatchingRowCount$ rows; $\mathcal{O}(\TableRowCount)$ for a full scan.
 2.  **Projection ($\pi$)**: Selecting columns (for example, `SELECT age`).
     *   **Cost**: Selected chunks plus decoding and metadata in columnar formats. This row-format example reads `{python} DataAlgebra.row_size_kb_str` for a `{python} DataAlgebra.int_size_bytes_value_str`-byte integer, wasting `{python} DataAlgebra.waste_pct_str` of the read.
 3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
     *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
         *   **Cost**: Reshuffling both `{python} DataAlgebra.join_table_tb_str` tables moves about `{python} DataAlgebra.join_network_tb_str`; partitioning and locality can reduce this.
     *   **Broadcast Join**: One small table is sent to all workers.
-        *   **Cost**: $s_{\text{table}}(\WorkerCountWorkers-1)$ bytes; the $s_{\text{table}}$-byte table must fit on each of $\WorkerCountWorkers$ workers.
+        *   **Cost**: $\BroadcastTableSize(\WorkerCount-1)$ bytes; the $\BroadcastTableSize$-byte table must fit on each of $\WorkerCount$ workers.
 
 Understanding data formats, serialization costs, and algebraic primitives tells how to move data efficiently. Even a perfectly engineered pipeline, however, can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
 
@@ -408,7 +409,7 @@ class TailLatency:
 
 ::: {#nbk-appendix-data-median-experience .callout-notebook title="The median experience"}
 
-For $N_{\text{session}} = 100$ independent requests, each with a 0.01 chance of being slow, the probability of at least one p99-tail event is `{python} TailLatency.p_slow_math`.
+For $\SessionRequestCount= 100$ independent requests, each with a 0.01 chance of being slow, the probability of at least one p99-tail event is `{python} TailLatency.p_slow_math`.
 
 **Systems insight**: Under this model, a 100-request session is more likely than not to include an event beyond p99. Correlated slowdowns can change this probability [@dean2013].
 
@@ -418,8 +419,8 @@ For $N_{\text{session}} = 100$ independent requests, each with a 0.01 chance of 
 
 Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the entire shape of the distribution. Detecting drift between the serving distribution ($\CurrentDistribution$) and training distribution ($\TrainingDistribution$) requires measuring the "distance" between distributions.
 
-For discrete outcomes $x$, @eq-appdx-data-kl-divergence expresses KL divergence\index{Kullback-Leibler divergence!appendix refresher}[^fn-kl-divergence-relative] as the expected extra coding cost of approximating $\CurrentDistribution$ with $\TrainingDistribution$ [@kullback1951; @cover2006]. The displayed form is finite only when $\TrainingDistribution(x) > 0$ wherever $\CurrentDistribution(x) > 0$; production implementations therefore need explicit smoothing or zero handling.
-$$ \mathcal{D}_{\text{KL}}(\CurrentDistribution \lVert \TrainingDistribution) = \sum_x \CurrentDistribution(x) \log \frac{\CurrentDistribution(x)}{\TrainingDistribution(x)} $$ {#eq-appdx-data-kl-divergence}
+For discrete outcomes $\DiscreteOutcome$, @eq-appdx-data-kl-divergence expresses KL divergence\index{Kullback-Leibler divergence!appendix refresher}[^fn-kl-divergence-relative] as the expected extra coding cost of approximating $\CurrentDistribution$ with $\TrainingDistribution$ [@kullback1951; @cover2006]. The displayed form is finite only when $\TrainingDistribution(\DiscreteOutcome) > 0$ wherever $\CurrentDistribution(\DiscreteOutcome) > 0$; production implementations therefore need explicit smoothing or zero handling.
+$$ \KlDivergence(\CurrentDistribution \lVert \TrainingDistribution) = \sum_\DiscreteOutcome\CurrentDistribution(\DiscreteOutcome) \log \frac{\CurrentDistribution(\DiscreteOutcome)}{\TrainingDistribution(\DiscreteOutcome)} $$ {#eq-appdx-data-kl-divergence}
 
 ```{python}
 #| echo: false
@@ -567,7 +568,7 @@ print(r"\vspace{-6mm}")
 print(KLDrift.kl_pq_calc_eq)
 ```
 
-Notice the asymmetry: $\mathcal{D}_{\text{KL}}(\TrainingDistribution \lVert \CurrentDistribution) \neq \mathcal{D}_{\text{KL}}(\CurrentDistribution \lVert \TrainingDistribution)$. The population stability index (PSI)\index{Population stability index!appendix refresher} symmetrizes this; the calculation below uses natural logarithms:
+Notice the asymmetry: $\KlDivergence(\TrainingDistribution \lVert \CurrentDistribution) \neq \KlDivergence(\CurrentDistribution \lVert \TrainingDistribution)$. The population stability index (PSI)\index{Population stability index!appendix refresher} symmetrizes this; the calculation below uses natural logarithms:
 ```{python}
 #| echo: false
 #| output: asis
@@ -605,7 +606,7 @@ class PsiThreshold:
 
 The threshold remains illustrative: its meaning depends on sample size, binning, smoothing, and zero handling, and retraining requires model-quality evidence.
 
-[^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\mathcal{D}_{\text{KL}}(\CurrentDistribution \lVert \TrainingDistribution)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
+[^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\KlDivergence(\CurrentDistribution \lVert \TrainingDistribution)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
 
 Both KL divergence and PSI are grounded in a deeper framework—information theory\index{Information theory}—which provides the units and bounds that make these metrics principled rather than *ad hoc*.
 
@@ -613,7 +614,7 @@ Both KL divergence and PSI are grounded in a deeper framework—information theo
 
 A training run can consume more examples, run longer, and still stop improving if the added data carries too little useful signal. At that point, the bottleneck is not only compute or bandwidth; it is the amount of information the data pipeline delivers to the learner. @Sec-appdx-dam-taxonomy-information-roofline-destination-6426 treats that data quality limit as a diagnostic constraint, and information theory provides the units for reasoning about it.
 
-* **Entropy ($H$)**\index{Entropy!definition}:[^fn-entropy-information-theory] The average uncertainty in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy only over a fixed finite support. This connects directly to KL divergence above: $\mathcal{D}_{\text{KL}}$ measures the excess coding cost of using the wrong distribution.
+* **Entropy ($\ShannonEntropy$)**\index{Entropy!definition}:[^fn-entropy-information-theory] The average uncertainty in a distribution, defined as $\ShannonEntropy(\DiscreteRandomVariable) = -\sum \ProbabilityFunction(\DiscreteOutcome) \log \ProbabilityFunction(\DiscreteOutcome)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy only over a fixed finite support. This connects directly to KL divergence above: $\KlDivergence$ measures the excess coding cost of using the wrong distribution.
 * **Information density**\index{Information density!definition}: Used here as a book-level heuristic for useful learning signal per unit of storage, not as a standard information-theory quantity.
 * **Signal-to-noise ratio (SNR)**\index{Signal-to-noise ratio!definition}: The ratio of signal power to noise power. In ML, the book uses low SNR qualitatively for data in which task-relevant structure is weak relative to noise; adding compute cannot compensate for missing task-relevant signal.
 
@@ -637,15 +638,15 @@ class LogitOverflowExample:
     logit_val_str = fmt(logit_val, precision=0, commas=False)
 ```
 
-Neural-network classifiers commonly output a vector of *logits*\index{Logits!appendix refresher}[^fn-logit-unnormalized-score] $\mathbf{z}$ (unnormalized scores). For class index $i$, softmax\index{Softmax!appendix refresher} normalizes $z_i$ over all class indices $j$ to produce a probability:
+Neural-network classifiers commonly output a vector of *logits*\index{Logits!appendix refresher}[^fn-logit-unnormalized-score] $\LogitVector$ (unnormalized scores). For class index $\ClassIndex$, softmax\index{Softmax!appendix refresher} normalizes $\OutputLogit_{\ClassIndex}$ over all class indices $\NormalizingClassIndex$ to produce a probability:
 
-$$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
+$$ \text{Softmax}(\OutputLogit_{\ClassIndex}) = \frac{e^{\OutputLogit_{\ClassIndex}}}{\sum_{\NormalizingClassIndex} e^{\OutputLogit_{\NormalizingClassIndex}}} $$
 
-[^fn-logit-unnormalized-score]: **Logit**\index{Logits!logit function}: Joseph Berkson\index{Berkson, Joseph|seealso{Logits}} coined the term in 1944 by analogy with *probit*. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(p) = \log(p/(1-p))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
+[^fn-logit-unnormalized-score]: **Logit**\index{Logits!logit function}: Joseph Berkson\index{Berkson, Joseph|seealso{Logits}} coined the term in 1944 by analogy with *probit*. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(\LogisticProbability) = \log(\LogisticProbability/(1-\LogisticProbability))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
 
-The problem is that if $z_i$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{z_i}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The solution is to compute in log-space: the "Log-Sum-Exp" trick\index{Log-sum-exp trick!appendix refresher} allows us to compute $\log\left(\sum e^{z_j}\right)$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp-numerical-stability]
+The problem is that if $\OutputLogit_{\ClassIndex}$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{\OutputLogit_{\ClassIndex}}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The solution is to compute in log-space: the "Log-Sum-Exp" trick\index{Log-sum-exp trick!appendix refresher} allows us to compute $\log\left(\sum_{\NormalizingClassIndex} e^{\OutputLogit_{\NormalizingClassIndex}}\right)$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp-numerical-stability]
 
-[^fn-logsumexp-numerical-stability]: **Log-sum-exp**\index{Log-sum-exp trick!appendix refresher}: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{x_i}\right) = a + \log\left(\sum e^{x_i - a}\right)$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
+[^fn-logsumexp-numerical-stability]: **Log-sum-exp**\index{Log-sum-exp trick!appendix refresher}: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex}}\right) = \SoftmaxRowMaximum + \log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum}\right)$, where $\SoftmaxRowMaximum = \max(\OutputLogit_{\NormalizingClassIndex})$. Shifted values $\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum$ are $\le 0$, ensuring exponentials never overflow.
 
 A small worked example shows why this trick matters in practice, even for large but realistic logit values:
 
@@ -693,9 +694,9 @@ class LogSumExp:
     check(all(0 <= s <= 1 for s in softmax), "Softmax values must be in [0,1]")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    # Use \lbrack/\rbrack for LaTeX math; fmt_math wraps in $...$ so prose needs no extra delimiters
+    # fmt_math wraps in $...$ so prose needs no extra delimiters
     # Renamed from z_str → z_math (canonical _math suffix for fmt_math result)
-    z_math = fmt_math(f"\\lbrack {z[0]}, {z[1]}, {z[2]} \\rbrack")
+    z_math = fmt_math(f"[{z[0]}, {z[1]}, {z[2]}]")
     a_str = fmt(a, precision=0, commas=False)
 
     # Naive exponentials in scientific notation
@@ -709,9 +710,9 @@ class LogSumExp:
     _naive1 = fmt_math(_sci(naive_exp[1]))
     _naive2 = fmt_math(_sci(naive_exp[2]))
 
-    # Shifted logits (use \lbrack/\rbrack for LaTeX math); fmt_math wraps in $...$
+    # Shifted logits; fmt_math wraps in $...$
     # Renamed from shifted_str → shifted_math (canonical _math suffix for fmt_math result)
-    shifted_math = fmt_math(f"\\lbrack {shifted[0]}, {shifted[1]}, {shifted[2]} \\rbrack")
+    shifted_math = fmt_math(f"[{shifted[0]}, {shifted[1]}, {shifted[2]}]")
 
     # Stable exponentials — internal interpolation helpers only (drop _str suffix).
     _sexp0 = f"{stable_exp[0]:.3f}"
@@ -740,16 +741,16 @@ class LogSumExp:
     log_sum_math = fmt_math(f"+ \\log({stable_sum:.3f}) = {lse:.3f}")
 
     sm_math = fmt_math(
-        f"\\lbrack {stable_exp[0]:.3f}/{stable_sum:.3f},\\; "
+        f"[{stable_exp[0]:.3f}/{stable_sum:.3f},\\; "
         f"{stable_exp[1]:.3f}/{stable_sum:.3f},\\; "
-        f"{stable_exp[2]:.1f}/{stable_sum:.3f} \\rbrack = "
-        f"\\lbrack {softmax[0]:.3f},\\; {softmax[1]:.3f},\\; {softmax[2]:.3f} \\rbrack"
+        f"{stable_exp[2]:.1f}/{stable_sum:.3f}] = "
+        f"[{softmax[0]:.3f},\\; {softmax[1]:.3f},\\; {softmax[2]:.3f}]"
     )
 ```
 
 ::: {#nbk-appendix-data-log-sum-exp-action .callout-notebook title="Log-sum-exp in action"}
 
-**Setup**: A three-class classifier outputs logits $\mathbf{z} =$ `{python} LogSumExp.z_math`.
+**Setup**: A three-class classifier outputs logits $\LogitVector=$ `{python} LogSumExp.z_math`.
 
 **Without the trick (naive softmax)**:
 $$\text{
@@ -757,9 +758,9 @@ $$\text{
 
 These numbers are representable in FP64 but overflow FP32 (max $\approx 3.4 \times 10^{38}$). With FP16 (max $\approx 65{,}504$), even $e^{12}$ overflows. Raw logits rarely reach magnitude 100, but large intermediate values do arise (for example, unscaled attention scores or overconfident outputs), and because FP16 and BF16 are the standard training precisions, a naive softmax risks overflow often enough that the stable form is used by default.
 
-**With the trick**: Subtract $a = \max(\mathbf{z}) =$ `{python} LogSumExp.a_str`:
+**With the trick**: Subtract $\SoftmaxRowMaximum = \max(\LogitVector) =$ `{python} LogSumExp.a_str`:
 
-Shifted logits: $\mathbf{z} - a =$ `{python} LogSumExp.shifted_math`
+Shifted logits: $\LogitVector- \SoftmaxRowMaximum =$ `{python} LogSumExp.shifted_math`
 
 Exponentials: `{python} LogSumExp.stable_exp0_math`, `{python} LogSumExp.stable_exp1_math`, `{python} LogSumExp.stable_exp2_math`
 

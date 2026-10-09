@@ -12,8 +12,8 @@ The following principles preview the trade-offs developed in Part II, and the ch
 
 ::: {#pri-universal-scaling .callout-principle title="The universal scaling law"}
 
-**Invariant**: Within empirically validated regimes, foundation-model loss ($\mathcal{L}$) follows approximate power-law relationships with a resource quantity $X$ such as training compute, dataset size, or parameter count. The exponent $\ScalingExponentScale$ depends on the fitted regime. The single-resource simplification used to illustrate diminishing returns is:
-$$ \mathcal{L}(X) \propto X^{-\ScalingExponentScale} $$
+**Invariant**: Within empirically validated regimes, foundation-model loss ($\ScalingLawLoss$) follows approximate power-law relationships with a resource quantity $\ScaledResource$ such as training compute, dataset size, or parameter count. The exponent $\ScalingExponent$ depends on the fitted regime. The single-resource simplification used to illustrate diminishing returns is:
+$$ \ScalingLawLoss(\ScaledResource) \propto \ScaledResource^{-\ScalingExponent} $$
 
 **Implication**: Within a fixed scaling regime, reducing loss further requires increasing resources. The diminishing return helps explain the move from single-server training to warehouse-scale clusters. Architecture, data quality, and training methods can change that regime, so a fitted scaling relation guides resource planning without guaranteeing improvements on every task.
 
@@ -27,10 +27,10 @@ That demand for scale turns each training step into a negotiation between faster
 
 ::: {#pri-distributed-step-time .callout-principle title="The fleet law (distributed step time law)"}
 
-**Invariant**: Under ideal partitioning of a fixed amount of work across $N$ workers or accelerators, the step-time model adds computation, communication, and synchronization, then subtracts the portion hidden by overlap, with $0 \le \OverlappedTime \le \min\!\left(\frac{\IronlawTermTimesCompute}{N}, \CommunicationTime + \SynchronizationTime\right)$.
-$$ \DistributedStepTime = \frac{\IronlawTermTimesCompute}{N} + \CommunicationTime + \SynchronizationTime - \OverlappedTime $$
+**Invariant**: Under ideal partitioning of a fixed amount of work across $\DeviceCount$ workers or accelerators, the step-time model adds computation, communication, and synchronization, then subtracts the portion hidden by overlap, with $0 \le \OverlappedTime \le \min\!\left(\frac{\IronLawComputeTime}{\DeviceCount}, \CommunicationTime(\DeviceCount) + \SynchronizationTime(\DeviceCount)\right)$.
+$$ \DistributedStepTime(\DeviceCount) = \frac{\IronLawComputeTime}{\DeviceCount} + \CommunicationTime(\DeviceCount) + \SynchronizationTime(\DeviceCount) - \OverlappedTime $$
 
-**Implication**: Scaling is a race between parallelizable compute (which shrinks with $N$ under ideal partitioning), communication overhead, and synchronization overhead. To scale efficiently, algorithms must reduce or amortize $\CommunicationTime$ and $\SynchronizationTime$ (for example, through gradient accumulation, which alters the effective batch and convergence regime, or through compression, which can introduce numerical error) and maximize $\OverlappedTime$ through communication hiding and pipelined execution.
+**Implication**: Scaling is a race between parallelizable compute (which shrinks with $\DeviceCount$ under ideal partitioning), communication overhead, and synchronization overhead. To scale efficiently, algorithms must reduce or amortize $\CommunicationTime(\DeviceCount)$ and $\SynchronizationTime(\DeviceCount)$ (for example, through gradient accumulation, which alters the effective batch and convergence regime, or through compression, which can introduce numerical error) and maximize $\OverlappedTime$ through communication hiding and pipelined execution.
 
 :::
 
@@ -39,10 +39,10 @@ The Fleet Law predicts the time of one step; the scaling efficiency bound measur
 ::: {#pri-scaling-efficiency .callout-principle title="The scaling efficiency bound"}
 
 **Invariant**: For a fixed amount of training work, adding nodes reduces the computation assigned to each node, but the communication and synchronization terms of the Fleet Law limit the resulting speedup.
-$$ \ScalingEfficiency = \frac{\SingledeviceTimeOne}{N \times \NdeviceTime} $$
-Here, $\SingledeviceTimeOne$ and $\NdeviceTime$ are the times to complete the same work on one and $N$ devices, respectively. The ratio measures achieved speedup as a fraction of ideal linear speedup.
+$$ \ScalingEfficiency = \frac{\SingleDeviceRunTime}{\DeviceCount\times \MultiDeviceRunTime} $$
+Here, $\SingleDeviceRunTime$ and $\MultiDeviceRunTime$ are the times to complete the same work on one and $\DeviceCount$ devices, respectively. The ratio measures achieved speedup as a fraction of ideal linear speedup.
 
-**Implication**: Perfect linear scaling ($\ScalingEfficiency = 1.0$) is the ideal baseline, not a practical target. Real systems fall short of it by an amount that depends on the workload, the fabric, and the parallelism layout, and the shortfall tends to grow with $N$. The gap between $\ScalingEfficiency = 1.0$ and the achieved efficiency captures losses from communication and coordination as well as load imbalance or other limits on parallel execution.
+**Implication**: Perfect linear scaling ($\ScalingEfficiency = 1.0$) is the ideal baseline, not a practical target. Real systems fall short of it by an amount that depends on the workload, the fabric, and the parallelism layout, and the shortfall tends to grow with $\DeviceCount$. The gap between $\ScalingEfficiency = 1.0$ and the achieved efficiency captures losses from communication and coordination as well as load imbalance or other limits on parallel execution.
 
 :::
 
@@ -50,8 +50,8 @@ Even when communication and coordination are tuned, a larger fleet fails often e
 
 ::: {#pri-young-daly .callout-principle title="The Young-Daly checkpoint law"}
 
-**Invariant**: The first-order checkpoint model balances the cost of writing the checkpoint ($\CheckpointWriteTime$) against the expected cost of reworking lost progress due to system-level failures ($\MeanTimeBetweenFailures_{\text{system}}$). For long runs with approximately constant failure rates and checkpoint write times small relative to MTBF, its optimal checkpoint interval ($\OptimalCheckpointIntervalCkpt$) is:
-$$ \OptimalCheckpointIntervalCkpt = \sqrt{2 \cdot \CheckpointWriteTime \cdot \MeanTimeBetweenFailures_{\text{system}}} $$
+**Invariant**: The first-order checkpoint model balances the cost of writing the checkpoint ($\CheckpointWriteTime$) against the expected cost of reworking lost progress due to system-level failures ($\SystemMtbf$). For long runs with approximately constant failure rates and checkpoint write times small relative to MTBF, its optimal checkpoint interval ($\OptimalCheckpointInterval$) is:
+$$ \OptimalCheckpointInterval = \sqrt{2 \cdot \CheckpointWriteTime \cdot \SystemMtbf} $$
 
 **Implication**: Checkpointing consumes time and storage bandwidth. When more participating components reduce job MTBF, the model favors shorter intervals; faster checkpoint writes can reduce that overhead. Correlated failures, variable write times, and recovery requirements need additional analysis before the interval becomes an operational schedule.
 
@@ -63,7 +63,7 @@ Fault tolerance illustrates why reducing one cost requires checking the others. 
 
 **Invariant**: Distributed ML optimizations often relocate overhead among Compute, Communication, and Coordination (the C$^3$ taxonomy). Reducing one term can increase another, so designs must evaluate all three.
 
-**Implication**: Asynchronous training can eliminate global coordination barriers ($\SynchronizationTime \to 0$) but may introduce gradient staleness that manifests as additional training iterations ($\IronlawTermTimesCompute \uparrow$). Pipeline parallelism can reduce communication volume relative to finer-grained model partitioning but adds pipeline bubble time ($\SynchronizationTime \uparrow$). The C$^3$ taxonomy reveals where each design pays its overhead.
+**Implication**: Asynchronous training can eliminate global coordination barriers ($\SynchronizationTime(\DeviceCount) \to 0$) but may introduce gradient staleness that manifests as additional training iterations ($\IronLawComputeTime \uparrow$). Pipeline parallelism can reduce communication volume relative to finer-grained model partitioning but adds pipeline bubble time ($\SynchronizationTime(\DeviceCount) \uparrow$). The C$^3$ taxonomy reveals where each design pays its overhead.
 
 :::
 
@@ -77,4 +77,4 @@ Accounting for overhead inside one job leaves a fleet-level question open, becau
 
 :::
 
-Part II develops these previews in dependency order. Distributed training establishes how to partition a workload and what information the partitions must exchange. Collective communication then explains how groups of workers combine and redistribute that information efficiently. Fault tolerance protects the resulting progress against failure, and fleet orchestration allocates shared resources to jobs with those communication and recovery needs, admitting only allocations the jobs can actually use. In fleet-law terms, distributed training decides how $\IronlawTermTimesCompute/N$ is divided and what $\CommunicationTime$ that division incurs, collective communication shrinks $\CommunicationTime$ and enlarges $\OverlappedTime$, and fault tolerance and orchestration bound the synchronization and recovery time that no partitioning can remove. The same chapters also set the fleet-level envelope for serving, since replicas draw on the same scheduler, share the same failure rates, and need the same recovery machinery. Together, they develop the algorithmic and operational discipline that turns the physical fleet of Part I into a working distributed system.
+Part II develops these previews in dependency order. Distributed training establishes how to partition a workload and what information the partitions must exchange. Collective communication then explains how groups of workers combine and redistribute that information efficiently. Fault tolerance protects the resulting progress against failure, and fleet orchestration allocates shared resources to jobs with those communication and recovery needs, admitting only allocations the jobs can actually use. In fleet-law terms, distributed training decides how $\IronLawComputeTime/\DeviceCount$ is divided and what $\CommunicationTime(\DeviceCount)$ that division incurs, collective communication shrinks $\CommunicationTime(\DeviceCount)$ and enlarges $\OverlappedTime$, and fault tolerance and orchestration bound the synchronization and recovery time that no partitioning can remove. The same chapters also set the fleet-level envelope for serving, since replicas draw on the same scheduler, share the same failure rates, and need the same recovery machinery. Together, they develop the algorithmic and operational discipline that turns the physical fleet of Part I into a working distributed system.

@@ -1,5 +1,6 @@
 ---
 engine: jupyter
+notation-local: [\BufferIndex]
 ---
 
 # Single-Machine Foundations {#sec-appdx-dam-taxonomy}
@@ -100,11 +101,11 @@ The Data · Algorithm · Machine (D·A·M) taxonomy is the diagnostic framework 
 
 The taxonomy maps directly to the iron law of ML systems, introduced in @sec-vol2-introduction-fleet-law. @Tbl-v2-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
 
-| **Axis**          |          **Role**          | **Physical Constraint**  | **High-Leverage Optimization** |
-|:------------------|:--------------------------:|:------------------------:|:------------------------------:|
-| **Data (D)**      | **Information** (The Fuel) | Bandwidth ($\Bandwidth$) |   I/O Pipeline Optimization    |
-| **Algorithm (A)** | **Logic** (The Blueprint)  |     Operations ($O$)     |       Model Compression        |
-| **Machine (M)**   |  **Physics** (The Engine)  | Throughput ($\PeakRate$) |     Hardware Acceleration      |
+| **Axis**          |          **Role**          |  **Physical Constraint**   | **High-Leverage Optimization** |
+|:------------------|:--------------------------:|:--------------------------:|:------------------------------:|
+| **Data (D)**      | **Information** (The Fuel) |  Bandwidth ($\Bandwidth$)  |   I/O Pipeline Optimization    |
+| **Algorithm (A)** | **Logic** (The Blueprint)  | Operations ($\Operations$) |       Model Compression        |
+| **Machine (M)**   |  **Physics** (The Engine)  |  Throughput ($\PeakRate$)  |     Hardware Acceleration      |
 
 : **D·A·M Axis Reference**: Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint is binding, then follow the optimization lever. {#tbl-v2-dam-components-ref}
 
@@ -112,15 +113,15 @@ The taxonomy maps directly to the iron law of ML systems, introduced in @sec-vol
 
 With the three axes named, the next step is to connect them to time. The performance of any ML task is governed by the distribution of work across the D·A·M axes, and the iron law mapping reveals which component's variables dominate execution:
 
-$$ T = \underbrace{ \frac{\DataVolume}{\Bandwidth} }_{\text{Data (D)}} + \underbrace{ \frac{O}{\PeakRate \cdot \EfficiencyHw} }_{\text{Algorithm (A)/Machine (M)}} + \underbrace{ \Latency }_{\text{Overhead}} $$
+$$ \Time= \underbrace{ \frac{\DataVolume}{\Bandwidth} }_{\text{Data (D)}} + \underbrace{ \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} }_{\text{Algorithm (A)/Machine (M)}} + \underbrace{ \Latency }_{\text{Overhead}} $$
 
-Algorithm and Machine share the compute term and are separated by which variable the engineer controls. Reducing the total operations ($O$) is an algorithm lever, while improving the hardware's peak throughput ($\PeakRate$) or utilization ($\EfficiencyHw$) is a machine lever.
+Algorithm and Machine share the compute term and are separated by which variable the engineer controls. Reducing the total operations ($\Operations$) is an algorithm lever, while improving the hardware's peak throughput ($\PeakRate$) or utilization ($\EfficiencyHw$) is a machine lever.
 
 ### D·A·M coordination from sum to max {#sec-appdx-dam-taxonomy-dam-coordination-sum-max}
 
 The additive iron law represents **Sequential Execution**\index{Sequential execution!D·A·M coordination}, the worst case where Data, Algorithm, and Machine take turns. Overlap can move the sum toward a max, with perfect overlap defining the ideal lower bound:
 
-$$ T_{\text{sequential}} = \frac{\DataVolume}{\Bandwidth} + \frac{O}{\PeakRate \cdot \EfficiencyHw} + \Latency \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} \geq \max\left(\frac{\DataVolume}{\Bandwidth},\; \frac{O}{\PeakRate \cdot \EfficiencyHw}\right) + \Latency $$
+$$ \SequentialExecutionTime= \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency \quad \xrightarrow{\text{overlap}} \quad \PipelinedExecutionTime\geq \max\left(\frac{\DataVolume}{\Bandwidth},\; \frac{\Operations}{\PeakRate \cdot \EfficiencyHw}\right) + \Latency $$
 
 The systems engineer's job is to make these components run in parallel, not in series. @Tbl-v2-dam-overlap summarizes key D·A·M coordination techniques:
 
@@ -129,13 +130,13 @@ The systems engineer's job is to make these components run in parallel, not in s
 | **Prefetching**         |         D overlaps M         | DataLoader with `prefetch_factor`, `pin_memory=True`                                            |
 | **CUDA Streams**        |         D overlaps M         | Separate streams for H2D transfer and compute                                                   |
 | **Async Gradient Sync** | M (communication) overlaps A | Overlap gradient AllReduce with remaining backward computation as gradient buckets become ready |
-| **Double Buffering**    |         D overlaps M         | Fill buffer $i+1$ while computing on buffer $i$                                                 |
+| **Double Buffering**    |         D overlaps M         | Fill buffer $\BufferIndex+1$ while computing on buffer $\BufferIndex$                           |
 
 : **D·A·M Overlap Techniques**: Each technique allows one D·A·M axis to execute while another is in flight, converting the iron law's additive terms into overlapped terms. {#tbl-v2-dam-overlap}
 
 ## Arithmetic Intensity Boundary {#sec-appdx-dam-taxonomy-arithmetic-intensity-boundary}
 
-This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by arithmetic intensity[^fn-intensity-v2-ratio] ($I$) of the workload.
+This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by arithmetic intensity[^fn-intensity-v2-ratio] ($\ArithmeticIntensity$) of the workload.
 
 [^fn-intensity-v2-ratio]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($\PeakRate/\Bandwidth$).
 
@@ -148,23 +149,23 @@ The symptoms below are screening signals, not diagnoses. A workload whose arithm
 
 ### The roofline bound {#sec-appdx-dam-taxonomy-roofline}
 
-Arithmetic intensity is a property of the workload and its implementation, not of the hardware. A large matrix multiply reuses each weight it loads across many multiply-accumulates and so has high intensity; an element-wise operation, or the generation of a single token, uses each loaded value only once or twice. The ridge point belongs to a simple upper bound on single-device throughput, the roofline model\index{Roofline Model!single-machine recap} [@williams2009]. A kernel with arithmetic intensity $I$, running on a device with peak compute rate $\PeakRate$ and memory bandwidth $\Bandwidth$, can attain at most
+Arithmetic intensity is a property of the workload and its implementation, not of the hardware. A large matrix multiply reuses each weight it loads across many multiply-accumulates and so has high intensity; an element-wise operation, or the generation of a single token, uses each loaded value only once or twice. The ridge point belongs to a simple upper bound on single-device throughput, the roofline model\index{Roofline Model!single-machine recap} [@williams2009]. A kernel with arithmetic intensity $\ArithmeticIntensity$, running on a device with peak compute rate $\PeakRate$ and memory bandwidth $\Bandwidth$, can attain at most
 
-$$ \AttainableComputeRate(I) = \min\!\left(\PeakRate,\; I \times \Bandwidth\right) $$ {#eq-appdx-dam-roofline}
+$$ \AttainableComputeRate(\ArithmeticIntensity) = \min\!\left(\PeakRate,\; \ArithmeticIntensity\times \Bandwidth\right) $$ {#eq-appdx-dam-roofline}
 
-On log-log axes, the bound is a bandwidth roof of slope one ($I \times \Bandwidth$) that meets a flat compute roof ($\PeakRate$) at the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$. Left of the ridge, a kernel is memory bound, and only more bandwidth or fewer bytes per operation raises its ceiling. Right of the ridge, it is compute bound, and only a faster or better-utilized datapath helps. In D·A·M terms, the bandwidth roof belongs to the Data axis, the compute roof to the Machine axis, and the Algorithm axis decides where on the intensity axis the kernel sits. The roofline is a ceiling, not a prediction. A kernel far below both roofs is limited by something the model omits, such as launch overhead, synchronization, or low occupancy.
+On log-log axes, the bound is a bandwidth roof of slope one ($\ArithmeticIntensity\times \Bandwidth$) that meets a flat compute roof ($\PeakRate$) at the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$. Left of the ridge, a kernel is memory bound, and only more bandwidth or fewer bytes per operation raises its ceiling. Right of the ridge, it is compute bound, and only a faster or better-utilized datapath helps. In D·A·M terms, the bandwidth roof belongs to the Data axis, the compute roof to the Machine axis, and the Algorithm axis decides where on the intensity axis the kernel sits. The roofline is a ceiling, not a prediction. A kernel far below both roofs is limited by something the model omits, such as launch overhead, synchronization, or low occupancy.
 
-For an H100, the book's hardware constants give a dense FP16 peak of `{python} DAMTaxonomy.h100_peak_tflops_str` and a high-bandwidth memory (HBM) bandwidth of `{python} DAMTaxonomy.h100_hbm_tbs_str`, which places the ridge at about `{python} DAMTaxonomy.h100_ridge_str`. Batch-1 decode of a 7-billion-parameter language model stored in 16-bit precision performs about two operations per parameter for each generated token (one multiply and one add) and must read every two-byte weight once, so its intensity is about `{python} DAMTaxonomy.roof_decode_intensity_str`. @Eq-appdx-dam-roofline then caps attainable throughput at `{python} DAMTaxonomy.roof_decode_attainable_str`, roughly `{python} DAMTaxonomy.roof_decode_pct_str` of peak, however well the kernels are written. Serving $B$ sequences in one decode step reuses each loaded weight $B$ times and raises the intensity to roughly $B$ FLOP/byte, until key-value cache traffic, which grows with batch size and context length, begins to dominate the bytes moved. That arithmetic is why batching is the first lever of every serving system. @Sec-appdx-fleet-foundations-comm-compute-ratio carries the same reasoning to the network, where interconnect bandwidth takes the place of HBM bandwidth.
+For an H100, the book's hardware constants give a dense FP16 peak of `{python} DAMTaxonomy.h100_peak_tflops_str` and a high-bandwidth memory (HBM) bandwidth of `{python} DAMTaxonomy.h100_hbm_tbs_str`, which places the ridge at about `{python} DAMTaxonomy.h100_ridge_str`. Batch-1 decode of a 7-billion-parameter language model stored in 16-bit precision performs about two operations per parameter for each generated token (one multiply and one add) and must read every two-byte weight once, so its intensity is about `{python} DAMTaxonomy.roof_decode_intensity_str`. @Eq-appdx-dam-roofline then caps attainable throughput at `{python} DAMTaxonomy.roof_decode_attainable_str`, roughly `{python} DAMTaxonomy.roof_decode_pct_str` of peak, however well the kernels are written. Serving $\BatchSize$ sequences in one decode step reuses each loaded weight $\BatchSize$ times and raises the intensity to roughly $\BatchSize$ FLOP/byte, until key-value cache traffic, which grows with batch size and context length, begins to dominate the bytes moved. That arithmetic is why batching is the first lever of every serving system. @Sec-appdx-fleet-foundations-comm-compute-ratio carries the same reasoning to the network, where interconnect bandwidth takes the place of HBM bandwidth.
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
 
 Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimizations help and which ones are wasted:
 
-| **If the workload is...** |          **Dominant Term**          | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
-|:--------------------------|:-----------------------------------:|:------------------------------------------------------------------------|:---------------------------------------------------|
-| **Memory-Bound**          |       $\DataVolume/\Bandwidth$      | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
-| **Compute-Bound**         | $O/(\PeakRate \cdot \EfficiencyHw)$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (not binding)                |
-| **Latency-Bound**         |              $\Latency$             | Batching requests, kernel fusion, async dispatch                        | Neither compute nor bandwidth (overhead dominates) |
+| **If the workload is...** |               **Dominant Term**               | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
+|:--------------------------|:---------------------------------------------:|:------------------------------------------------------------------------|:---------------------------------------------------|
+| **Memory-Bound**          |            $\DataVolume/\Bandwidth$           | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
+| **Compute-Bound**         | $\Operations/(\PeakRate \cdot \EfficiencyHw)$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (not binding)                |
+| **Latency-Bound**         |                   $\Latency$                  | Batching requests, kernel fusion, async dispatch                        | Neither compute nor bandwidth (overhead dominates) |
 
 : **What Works vs. What Is Wasted**: Optimizing the wrong term yields limited improvement and poor cost efficiency. A memory-bound model will not speed up from more peak FLOP/s alone; it needs higher arithmetic intensity, less data movement, or a faster memory subsystem. {#tbl-v2-bottleneck-actions}
 
@@ -289,17 +290,17 @@ Activations are the other large consumer of training memory. The intermediate te
 
 ## Transformer Arithmetic {#sec-appdx-dam-taxonomy-transformer-arithmetic}
 
-Most worked examples in this book use decoder-only transformers, and three counting rules cover nearly all of their arithmetic. The symbols follow the book's deep learning notation, with $P$ parameters, $D$ training tokens, $\NumberOfLayers$ layers, hidden dimension $d$, and sequence length $S$.
+Most worked examples in this book use decoder-only transformers, and three counting rules cover nearly all of their arithmetic. The symbols follow the book's deep learning notation, with $\Parameters$ parameters, $\DatasetSize$ training tokens, $\LayerCount$ layers, hidden dimension $\HiddenDimension$, and sequence length $\SequenceLength$.
 
-Each transformer layer holds four $d \times d$ attention projections and a feed-forward block that expands to $4d$ and back, about $12d^2$ weights in total, so a model has roughly $P \approx 12 \NumberOfLayers d^2$ parameters excluding embeddings. GPT-3 has $\NumberOfLayers =$ `{python} SingleMachineRecap.layers_str` and $d =$ `{python} SingleMachineRecap.hidden_str`, which gives `{python} SingleMachineRecap.layer_params_b_str` against its published `{python} SingleMachineRecap.params_b_str`.
+Each transformer layer holds four $\HiddenDimension\times \HiddenDimension$ attention projections and a feed-forward block that expands to $4\HiddenDimension$ and back, about $12\HiddenDimension^2$ weights in total, so a model has roughly $\Parameters\approx 12 \LayerCount \HiddenDimension^2$ parameters excluding embeddings. GPT-3 has $\LayerCount =$ `{python} SingleMachineRecap.layers_str` and $\HiddenDimension=$ `{python} SingleMachineRecap.hidden_str`, which gives `{python} SingleMachineRecap.layer_params_b_str` against its published `{python} SingleMachineRecap.params_b_str`.
 
-Every weight contributes one multiply and one add per token, so a forward pass costs about $2P$ FLOPs per token. The backward pass computes gradients with respect to both activations and weights and costs about twice the forward pass, so training costs about $6P$ FLOPs per token and
+Every weight contributes one multiply and one add per token, so a forward pass costs about $2\Parameters$ FLOPs per token. The backward pass computes gradients with respect to both activations and weights and costs about twice the forward pass, so training costs about $6\Parameters$ FLOPs per token and
 
-$$ \TrainingCompute \approx 6PD $$ {#eq-appdx-dam-training-flops}
+$$ \TrainingCompute \approx 6\Parameters \DatasetSize$$ {#eq-appdx-dam-training-flops}
 
-in total. For GPT-3, trained on `{python} SingleMachineRecap.tokens_b_str` billion tokens, @eq-appdx-dam-training-flops gives `{python} SingleMachineRecap.train_flops_str`, within 1 percent of the reported `{python} SingleMachineRecap.registry_flops_str`. The rule omits the attention-score products, which add at most about $S/(6d)$ to the weight FLOPs, or `{python} SingleMachineRecap.attn_pct_str` for GPT-3 at $S =$ `{python} SingleMachineRecap.seq_len_str`. That fraction stays small while the context is short compared with the hidden width and grows with long contexts.
+in total. For GPT-3, trained on `{python} SingleMachineRecap.tokens_b_str` billion tokens, @eq-appdx-dam-training-flops gives `{python} SingleMachineRecap.train_flops_str`, within 1 percent of the reported `{python} SingleMachineRecap.registry_flops_str`. The rule omits the attention-score products, which add at most about $\SequenceLength/(6\HiddenDimension)$ to the weight FLOPs, or `{python} SingleMachineRecap.attn_pct_str` for GPT-3 at $\SequenceLength=$ `{python} SingleMachineRecap.seq_len_str`. That fraction stays small while the context is short compared with the hidden width and grows with long contexts.
 
-Serving an autoregressive model has two phases with different physics. *Prefill* processes the whole prompt at once as matrix-matrix products, so its arithmetic intensity is high and it tends to be compute bound. *Decode* generates one token per step for each sequence as matrix-vector products; at batch size 1 it reads every weight to perform two FLOPs per weight, the memory-bound regime that the roofline example above quantifies. To avoid recomputing attention over the whole prefix at every step, decode stores each layer's keys and values in a **key-value (KV) cache**\index{KV cache!appendix refresher} of $2 \NumberOfLayers d \, \ElementStorageSize$ bytes per token for standard multihead attention, or `{python} SingleMachineRecap.kv_per_token_str` per token for GPT-3 in FP16. @Sec-appdx-inference-scale-kv-cache-fundamentals-2ccd sizes that cache against device memory.
+Serving an autoregressive model has two phases with different physics. *Prefill* processes the whole prompt at once as matrix-matrix products, so its arithmetic intensity is high and it tends to be compute bound. *Decode* generates one token per step for each sequence as matrix-vector products; at batch size 1 it reads every weight to perform two FLOPs per weight, the memory-bound regime that the roofline example above quantifies. To avoid recomputing attention over the whole prefix at every step, decode stores each layer's keys and values in a **key-value (KV) cache**\index{KV cache!appendix refresher} of $2 \LayerCount \HiddenDimension\, \ElementStorageSize$ bytes per token for standard multihead attention, or `{python} SingleMachineRecap.kv_per_token_str` per token for GPT-3 in FP16. @Sec-appdx-inference-scale-kv-cache-fundamentals-2ccd sizes that cache against device memory.
 
 ## Tooling Map {#sec-appdx-dam-taxonomy-tooling-map}
 
@@ -335,11 +336,11 @@ These single-node grades become most useful when they are carried forward into d
 
 @Tbl-appendix-dam-axis-node-to-fleet maps each axis from its node-level focus to its fleet-scale transformation:
 
-| **Axis**          | **Node-Level Focus (D·A·M)** | **Fleet-Scale Transformation**                                                                                                |
-|:------------------|:----------------------------:|:------------------------------------------------------------------------------------------------------------------------------|
-| **Data (D)**      |  I/O Bandwidth (Disk/PCIe)   | **The communication wall**: the bottleneck shifts from local storage to the bisection bandwidth of the network fabric.        |
-| **Algorithm (A)** |    Model Depth/Ops Count     | **The parallelism strategy**: the logic now includes how computation is partitioned across $N$ devices (3D parallelism).      |
-| **Machine (M)**   |      Peak TFLOP/s, HBM       | **The power and reliability wall**: the constraint is no longer just silicon speed, but watts per rack and cluster-wide MTBF. |
+| **Axis**          | **Node-Level Focus (D·A·M)** | **Fleet-Scale Transformation**                                                                                                      |
+|:------------------|:----------------------------:|:------------------------------------------------------------------------------------------------------------------------------------|
+| **Data (D)**      |  I/O Bandwidth (Disk/PCIe)   | **The communication wall**: the bottleneck shifts from local storage to the bisection bandwidth of the network fabric.              |
+| **Algorithm (A)** |    Model Depth/Ops Count     | **The parallelism strategy**: the logic now includes how computation is partitioned across $\DeviceCount$ devices (3D parallelism). |
+| **Machine (M)**   |      Peak TFLOP/s, HBM       | **The power and reliability wall**: the constraint is no longer just silicon speed, but watts per rack and cluster-wide MTBF.       |
 
 : **D·A·M Constraints from Node to Fleet**: How each axis of the D·A·M taxonomy shifts when scaling from a single node to a multi-node fleet. The node-level focus (left) gives way to a qualitatively different fleet-scale constraint (right); the bottleneck migrates from local resource to global coordination cost. {#tbl-appendix-dam-axis-node-to-fleet}
 
@@ -347,9 +348,9 @@ These single-node grades become most useful when they are carried forward into d
 
 While D·A·M diagnoses the *components* of a single node, the C$^3$ taxonomy (@sec-appdx-c3-taxonomy) diagnoses the *interactions* of the fleet.
 
-1.  **Compute ($C_1$)** inherits the Algorithm and Machine axes, now evaluated per device after the work is partitioned across $N$ devices.
-2.  **Communication ($C_2$)** inherits the Data axis, but is governed by network bandwidth, topology, and, over long distances, the speed of light rather than by local I/O alone.
-3.  **Coordination ($C_3$)** makes coordination costs explicit at fleet scale. Synchronization, checkpoints, and failure recovery also occur on one node, but distribution expands their scope and couples them to other machines.
+1.  **Compute ($\OperationalTaxonomyDimension_1$)** inherits the Algorithm and Machine axes, now evaluated per device after the work is partitioned across $\DeviceCount$ devices.
+2.  **Communication ($\OperationalTaxonomyDimension_2$)** inherits the Data axis, but is governed by network bandwidth, topology, and, over long distances, the speed of light rather than by local I/O alone.
+3.  **Coordination ($\OperationalTaxonomyDimension_3$)** makes coordination costs explicit at fleet scale. Synchronization, checkpoints, and failure recovery also occur on one node, but distribution expands their scope and couples them to other machines.
 
 This progression exposes cases where higher single-node MFU comes at the expense of scaling efficiency, so the complete fleet outcome can determine the choice. The node is optimized to serve the fleet.
 
@@ -362,7 +363,7 @@ The D·A·M taxonomy provides the diagnostic baseline for every ML systems analy
 * **Identify the dominant axis**: Decide whether Data, Algorithm, or Machine is the binding constraint before proposing any optimization.
 * **Profile arithmetic intensity**: Arithmetic intensity, read against the roofline's ridge point, quantitatively distinguishes between Data-bound and Machine-bound regimes.
 * **Use the iron law**: The iron law transforms vague symptoms into specific term-based bottlenecks.
-* **Count bytes and FLOPs per parameter**: Mixed-precision Adam training holds `{python} SingleMachineRecap.state_bpp_str` bytes per parameter (`{python} SingleMachineRecap.ckpt_bpp_str` in a checkpoint), and dense transformer training costs about $6PD$ FLOPs. These two rules size most memory and compute budgets in the chapters.
+* **Count bytes and FLOPs per parameter**: Mixed-precision Adam training holds `{python} SingleMachineRecap.state_bpp_str` bytes per parameter (`{python} SingleMachineRecap.ckpt_bpp_str` in a checkpoint), and dense transformer training costs about $6\Parameters \DatasetSize$ FLOPs. These two rules size most memory and compute budgets in the chapters.
 * **Grade with the scorecard**: The Data-Algorithm-Machine scorecard standardizes "good" performance before moving to fleet scale.
 
 :::

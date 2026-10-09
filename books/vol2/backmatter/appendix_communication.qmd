@@ -1,23 +1,24 @@
 ---
 engine: jupyter
+notation-local: [\AllGatherCompletionTime, \BroadcastCompletionTime, \InterleavedPipelineBubbleFraction, \ReduceScatterCompletionTime]
 ---
 
 # Communication Foundations {#sec-appdx-communication-foundations}
 
-Distributed training spends a substantial fraction of execution time synchronizing gradients, redistributing activations, and routing tokens across network fabrics. Rather than cluttering chapter text with step-by-step proofs, this appendix provides the quantitative communication cost models used throughout the book: point-to-point formulations ($\alpha$-$\beta$ and LogGP), collective execution bounds (AllReduce, AllGather, ReduceScatter, AllToAll), pipeline bubble math, and gradient compression thresholds.
+Distributed training spends a substantial fraction of execution time synchronizing gradients, redistributing activations, and routing tokens across network fabrics. Rather than cluttering chapter text with step-by-step proofs, this appendix provides the quantitative communication cost models used throughout the book: point-to-point formulations ($\MessageStartupLatency$-$\LinkBandwidth$ and LogGP), collective execution bounds (AllReduce, AllGather, ReduceScatter, AllToAll), pipeline bubble math, and gradient compression thresholds.
 
 ## How to Use This Appendix {.unnumbered}
 
 This appendix is designed as a reference when translating a distributed training symptom ("AllReduce is slow," "pipeline bubbles are killing throughput," "should we compress gradients?") into a quantitative diagnosis.
 
-Conventions used here follow the book-wide notation: $\alpha$ denotes per-message startup latency, $\beta$ denotes link bandwidth in bytes per second, $n$ denotes point-to-point message size, $\CrossoverPoint$ denotes the $\alpha$-$\beta$ crossover point, $N$ denotes the number of participating GPUs, and $M$ denotes collective payload size in bytes.
+Conventions used here follow the book-wide notation: $\MessageStartupLatency$ denotes per-message startup latency, $\LinkBandwidth$ denotes link bandwidth in bytes per second, $\PointToPointMessageSize$ denotes point-to-point message size, $\LatencyBandwidthCrossoverSize$ denotes the $\MessageStartupLatency$-$\LinkBandwidth$ crossover point, $\DeviceCount$ denotes the number of participating GPUs, and $\CollectivePayloadSize$ denotes collective payload size in bytes.
 
 - **When AllReduce is slow**: Use @sec-appdx-comm-foundations-collective-complexity to compute the expected time and compare ring vs. tree costs.
 - **When choosing ring vs. tree**: Use @sec-appdx-comm-foundations-algorithm-selection and the crossover analysis to match algorithm to message size.
 - **When pipeline bubbles dominate**: Use @sec-appdx-comm-foundations-pipeline-arithmetic to compute bubble fraction and determine the required microbatch count.
 - **When gradient compression is proposed**: Use @sec-appdx-comm-foundations-compression to run the break-even calculation before committing engineering effort.
 
-## The $\alpha$-$\beta$ Communication Model {#sec-appdx-comm-foundations-alpha-beta}
+## The $\MessageStartupLatency$-$\LinkBandwidth$ Communication Model {#sec-appdx-comm-foundations-alpha-beta}
 
 ```{python}
 #| echo: false
@@ -95,27 +96,27 @@ class CommAlphaBeta:
 
 ::: {#psp-appendix-communication-alpha-beta-model-matters .callout-perspective title="Why this matters"}
 
-Estimating how long a gradient synchronization will take across `{python} CommAlphaBeta.ring_n_str` must happen before committing to a cluster topology. The $\alpha$-$\beta$ model is the "roofline for networks": it gives a first-order prediction of transfer time from just two hardware parameters and the message size.
+Estimating how long a gradient synchronization will take across `{python} CommAlphaBeta.ring_n_str` must happen before committing to a cluster topology. The $\MessageStartupLatency$-$\LinkBandwidth$ model is the "roofline for networks": it gives a first-order prediction of transfer time from just two hardware parameters and the message size.
 
 :::
 
 Every point-to-point transfer on a network follows the same fundamental pattern: the sender pays a fixed startup cost to initiate the message, then transmits the payload at a rate determined by the link's bandwidth. This two-parameter model captures the essential physics of network communication.
 
-The **$\alpha$-$\beta$ model** (@eq-alpha-beta) predicts the time to transfer a point-to-point message of $n$ bytes:
+The **$\MessageStartupLatency$-$\LinkBandwidth$ model** (@eq-alpha-beta) predicts the time to transfer a point-to-point message of $\PointToPointMessageSize$ bytes:
 
-$$ T(n) = \alpha + \frac{n}{\beta} $$ {#eq-alpha-beta}
+$$ \PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \frac{\PointToPointMessageSize}{\LinkBandwidth} $$ {#eq-alpha-beta}
 
 where:
 
-- $\alpha$ is the **Startup Latency**\index{Alpha-Beta Model!startup latency} (seconds), the fixed cost of initiating a message, including software overhead, network interface card (NIC) processing, and routing setup
-- $\beta$ is the **Link Bandwidth**\index{Alpha-Beta Model!link bandwidth} (bytes/s), the sustained data rate after startup
-- $n$ is the **Message Size**\index{Alpha-Beta Model!message size} (bytes)
+- $\MessageStartupLatency$ is the **Startup Latency**\index{Alpha-Beta Model!startup latency} (seconds), the fixed cost of initiating a message, including software overhead, network interface card (NIC) processing, and routing setup
+- $\LinkBandwidth$ is the **Link Bandwidth**\index{Alpha-Beta Model!link bandwidth} (bytes/s), the sustained data rate after startup
+- $\PointToPointMessageSize$ is the **Message Size**\index{Alpha-Beta Model!message size} (bytes)
 
-The model decomposes every transfer into exactly two costs: a per-message tax ($\alpha$) paid regardless of size, and a per-byte tax ($n/\beta$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-appdx-comm-foundations-algorithm-selection.
+The model decomposes every transfer into exactly two costs: a per-message tax ($\MessageStartupLatency$) paid regardless of size, and a per-byte tax ($\PointToPointMessageSize/\LinkBandwidth$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-appdx-comm-foundations-algorithm-selection.
 
-Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the baseline $\alpha$ and $\beta$ values for hardware commonly found in ML clusters:
+Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the baseline $\MessageStartupLatency$ and $\LinkBandwidth$ values for hardware commonly found in ML clusters:
 
-| **Interconnect**                                              |            **$\alpha$ (Latency)**            |              **$\beta$ (Bandwidth)**              | **Typical Role**                 |
+| **Interconnect**                                              |    **$\MessageStartupLatency$ (Latency)**    |          **$\LinkBandwidth$ (Bandwidth)**         | **Typical Role**                 |
 |:--------------------------------------------------------------|:--------------------------------------------:|:-------------------------------------------------:|:---------------------------------|
 | **NVLink 4.0 (H100)**                                         |  `{python} CommAlphaBeta.nvlink_lat_ns_str`  |  `{python} CommAlphaBeta.nvlink_bw_gb_per_s_str`  | Intra-node GPU-to-GPU            |
 | **PCIe Gen5**                                                 |   `{python} CommAlphaBeta.pcie_lat_ns_str`   |   `{python} CommAlphaBeta.pcie_bw_gb_per_s_str`   | CPU-GPU, NIC-GPU                 |
@@ -124,27 +125,27 @@ Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the base
 | **RoCE v2 (`{python} CommAlphaBeta.roce_line_str`)**          |  `{python} CommAlphaBeta.roce_alpha_us_str`  |  `{python} CommAlphaBeta.roce_beta_gb_per_s_str`  | Inter-node (Ethernet clusters)   |
 | **TCP/IP (Ethernet)**                                         |  `{python} CommAlphaBeta.tcp_alpha_us_str`   |                       Varies                      | Control plane, non-RDMA fallback |
 
-: **$\alpha$-$\beta$ Parameters by Interconnect**: Startup latency and sustained bandwidth for interconnects used in ML clusters. The $\beta$ column uses one-way or per-direction bandwidth, so the H100 NVLink entry is half of the `{python} CommAlphaBeta.nvlink_h100_total_gb_per_s_str` bidirectional aggregate specification. The InfiniBand NDR $\alpha$ is the per-message base latency of the $\alpha$-$\beta$ model, which is smaller than the fabric's end-to-end one-way latency; the other rows are end-to-end startup latencies, so compare NDR with them only loosely. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. {#tbl-alpha-beta-params}
+: **$\MessageStartupLatency$-$\LinkBandwidth$ Parameters by Interconnect**: Startup latency and sustained bandwidth for interconnects used in ML clusters. The $\LinkBandwidth$ column uses one-way or per-direction bandwidth, so the H100 NVLink entry is half of the `{python} CommAlphaBeta.nvlink_h100_total_gb_per_s_str` bidirectional aggregate specification. The InfiniBand NDR $\MessageStartupLatency$ is the per-message base latency of the $\MessageStartupLatency$-$\LinkBandwidth$ model, which is smaller than the fabric's end-to-end one-way latency; the other rows are end-to-end startup latencies, so compare NDR with them only loosely. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. {#tbl-alpha-beta-params}
 
 ### Latency-dominated vs. bandwidth-dominated regimes {#sec-appdx-comm-foundations-regimes}
 
-The $\alpha$-$\beta$ model reveals two distinct operating regimes. For small messages, the startup latency $\alpha$ dominates, and the link spends most of its time starting transfers rather than sustaining them. For large messages, the bandwidth term $n/\beta$ dominates, and the startup cost becomes negligible.
+The $\MessageStartupLatency$-$\LinkBandwidth$ model reveals two distinct operating regimes. For small messages, the startup latency $\MessageStartupLatency$ dominates, and the link spends most of its time starting transfers rather than sustaining them. For large messages, the bandwidth term $\PointToPointMessageSize/\LinkBandwidth$ dominates, and the startup cost becomes negligible.
 
-The **Crossover Message Size**\index{Alpha-Beta Model!crossover message size} $\CrossoverPoint$, defined by @eq-crossover, is the point where both terms contribute equally:
+The **Crossover Message Size**\index{Alpha-Beta Model!crossover message size} $\LatencyBandwidthCrossoverSize$, defined by @eq-crossover, is the point where both terms contribute equally:
 
-$$ \CrossoverPoint = \alpha \times \beta $$ {#eq-crossover}
+$$ \LatencyBandwidthCrossoverSize = \MessageStartupLatency\times \LinkBandwidth$$ {#eq-crossover}
 
-Below $\CrossoverPoint$, communication is **Latency-Dominated**\index{Latency-dominated communication}: sending more small messages wastes time on repeated startups. Above $\CrossoverPoint$, communication is **Bandwidth-Dominated**\index{Bandwidth-dominated communication}: payload transfer dominates; reducing bytes or increasing effective bandwidth can lower its cost.
+Below $\LatencyBandwidthCrossoverSize$, communication is **Latency-Dominated**\index{Latency-dominated communication}: sending more small messages wastes time on repeated startups. Above $\LatencyBandwidthCrossoverSize$, communication is **Bandwidth-Dominated**\index{Bandwidth-dominated communication}: payload transfer dominates; reducing bytes or increasing effective bandwidth can lower its cost.
 
 ::: {#nbk-appendix-communication-crossover-infiniband-ndr .callout-notebook title="Worked example: Crossover on InfiniBand NDR"}
 
-**Setup**: InfiniBand NDR has $\alpha$ = `{python} CommAlphaBeta.ib_ndr_alpha_us_str` and $\beta$ = `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str`.
+**Setup**: InfiniBand NDR has $\MessageStartupLatency$ = `{python} CommAlphaBeta.ib_ndr_alpha_us_str` and $\LinkBandwidth$ = `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str`.
 
 **Question**: At what message size does the bandwidth term equal the latency term?
 
 **Math**:
 
-$\CrossoverPoint = \alpha \times \beta =$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\times$ `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` $=$ `{python} CommAlphaBeta.crossover_kb_str`
+$\LatencyBandwidthCrossoverSize = \MessageStartupLatency\times \LinkBandwidth=$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\times$ `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` $=$ `{python} CommAlphaBeta.crossover_kb_str`
 
 **Analysis**: Messages smaller than `{python} CommAlphaBeta.crossover_kb_str` are latency-dominated on IB NDR. Gradient tensors from a single layer of a large model are typically `{python} CommAlphaBeta.grad_layer_mb_range_str`, well above this threshold. Control messages, heartbeats, and barrier synchronizations, however, are well below it.
 
@@ -154,19 +155,19 @@ $\CrossoverPoint = \alpha \times \beta =$ `{python} CommAlphaBeta.ib_ndr_alpha_u
 
 ### The LogGP model extension {#sec-appdx-comm-foundations-loggp}
 
-The $\alpha$-$\beta$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP Model**\index{LogGP model} [@alexandrov1995] extends LogP with a long-message gap parameter:
+The $\MessageStartupLatency$-$\LinkBandwidth$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP Model**\index{LogGP model} [@alexandrov1995] extends LogP with a long-message gap parameter:
 
-- **$g$ (gap)**: The minimum interval between consecutive message injections at the sender. This models the NIC's injection rate limit.
-- **$\SenderOverhead$, $\ReceiverOverheadRecv$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
+- **$\MessageInjectionGap$ (gap)**: The minimum interval between consecutive message injections at the sender. This models the NIC's injection rate limit.
+- **$\SenderOverhead$, $\ReceiverOverhead$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
 
-For a long message of $n$ bytes, LogGP models transfer time as approximately:
-$$\LoggpLongmessageTime \approx \SenderOverhead + \LogploggpNetworkLatency + (n - 1)G + \ReceiverOverheadRecv$$
+For a long message of $\PointToPointMessageSize$ bytes, LogGP models transfer time as approximately:
+$$\LoggpLongMessageTime(\PointToPointMessageSize) \approx \SenderOverhead + \LogpNetworkLatency + (\PointToPointMessageSize- 1)\LongMessageGapPerByte+ \ReceiverOverhead$$
 
-where $\LogploggpNetworkLatency$ is the network latency, $\SenderOverhead$ and $\ReceiverOverheadRecv$ are sender and receiver overheads, $G$ is the gap per byte for long messages, and $g$ controls the minimum interval between consecutive message injections. Informal alpha-beta-style approximations can be useful for ML profiling, but the standard LogGP model keeps these gap parameters distinct from a simple bandwidth term.
+where $\LogpNetworkLatency$ is the network latency, $\SenderOverhead$ and $\ReceiverOverhead$ are sender and receiver overheads, $\LongMessageGapPerByte$ is the gap per byte for long messages, and $\MessageInjectionGap$ controls the minimum interval between consecutive message injections. Informal alpha-beta-style approximations can be useful for ML profiling, but the standard LogGP model keeps these gap parameters distinct from a simple bandwidth term.
 
-In most ML training scenarios, the $\alpha$-$\beta$ model is sufficient because gradient tensors are large enough that pipelining effects are secondary to raw bandwidth. The LogGP model becomes important when analyzing the overhead of many small control messages or when modeling the interaction between communication and computation overlap, situations that arise in fine-grained pipeline parallelism and asynchronous gradient updates.
+In most ML training scenarios, the $\MessageStartupLatency$-$\LinkBandwidth$ model is sufficient because gradient tensors are large enough that pipelining effects are secondary to raw bandwidth. The LogGP model becomes important when analyzing the overhead of many small control messages or when modeling the interaction between communication and computation overlap, situations that arise in fine-grained pipeline parallelism and asynchronous gradient updates.
 
-The $\alpha$-$\beta$ model describes point-to-point transfers. Collective operations, in which all GPUs participate, compose multiple point-to-point transfers, and their cost formulas derive directly from the model above.
+The $\MessageStartupLatency$-$\LinkBandwidth$ model describes point-to-point transfers. Collective operations, in which all GPUs participate, compose multiple point-to-point transfers, and their cost formulas derive directly from the model above.
 
 ## Collective Operation Complexity {#sec-appdx-comm-foundations-collective-complexity}
 
@@ -176,21 +177,21 @@ Every distributed training step ends with a collective synchronization. The cost
 
 :::
 
-Collective operations move data between all $N$ GPUs simultaneously. Each collective has a characteristic bandwidth term (how much data flows) and latency term (how many sequential message steps are required). The formulas below use the **Bandwidth-Optimal Ring Algorithm**\index{Ring algorithm!bandwidth optimal} unless otherwise noted; @sec-appdx-comm-foundations-algorithm-selection discusses when other algorithms are preferable.
+Collective operations move data between all $\DeviceCount$ GPUs simultaneously. Each collective has a characteristic bandwidth term (how much data flows) and latency term (how many sequential message steps are required). The formulas below use the **Bandwidth-Optimal Ring Algorithm**\index{Ring algorithm!bandwidth optimal} unless otherwise noted; @sec-appdx-comm-foundations-algorithm-selection discusses when other algorithms are preferable.
 
 ### AllReduce {#sec-appdx-comm-foundations-allreduce}
 
-AllReduce is the workhorse of data-parallel training: every GPU starts with a local gradient tensor of size $M$ bytes and ends with the globally reduced (summed) result. The ring algorithm decomposes AllReduce into a ReduceScatter phase followed by an AllGather phase. Ring AllReduce time is given by @eq-ring-allreduce:
+AllReduce is the workhorse of data-parallel training: every GPU starts with a local gradient tensor of size $\CollectivePayloadSize$ bytes and ends with the globally reduced (summed) result. The ring algorithm decomposes AllReduce into a ReduceScatter phase followed by an AllGather phase. Ring AllReduce time is given by @eq-ring-allreduce:
 
-$$ \CollectiveCompletionTimeRing = 2 \cdot \frac{N - 1}{N} \cdot \frac{M}{\beta} + 2(N - 1) \cdot \alpha $$ {#eq-ring-allreduce}
+$$ \RingAllReduceCompletionTime = 2 \cdot \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} + 2(\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-ring-allreduce}
 
-The factor $2(N-1)/N$ approaches 2 as $N$ grows. Each rank sends that factor times $M$ bytes and receives the same amount. With full-duplex links, sending and receiving overlap; $\beta$ is the effective bandwidth in one direction, so sent-plus-received bytes must not be divided by that one-direction rate. The latency term grows linearly with $N$, which makes the ring algorithm expensive in latency for large GPU counts.
+The factor $2(\DeviceCount-1)/\DeviceCount$ approaches 2 as $\DeviceCount$ grows. Each rank sends that factor times $\CollectivePayloadSize$ bytes and receives the same amount. With full-duplex links, sending and receiving overlap; $\LinkBandwidth$ is the effective bandwidth in one direction, so sent-plus-received bytes must not be divided by that one-direction rate. The latency term grows linearly with $\DeviceCount$, which makes the ring algorithm expensive in latency for large GPU counts.
 
-Tree AllReduce trades that linear latency growth for logarithmic depth. @Eq-tree-allreduce charges both the bandwidth and the latency term once per tree level, $2 \log_2 N$ times in total:
+Tree AllReduce trades that linear latency growth for logarithmic depth. @Eq-tree-allreduce charges both the bandwidth and the latency term once per tree level, $2 \log_2 \DeviceCount$ times in total:
 
-$$ \CollectiveCompletionTimeTree = 2 \log_2 N \cdot \frac{M}{\beta} + 2 \log_2 N \cdot \alpha $$ {#eq-tree-allreduce}
+$$ \TreeAllReduceCompletionTime = 2 \log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} + 2 \log_2 \DeviceCount\cdot \MessageStartupLatency$$ {#eq-tree-allreduce}
 
-This unsegmented tree algorithm trades bandwidth efficiency for latency efficiency: the latency term grows as $\log_2 N$ instead of $N$, but the bandwidth term sends the full message $M$ at each tree level instead of $M/N$ chunks.
+This unsegmented tree algorithm trades bandwidth efficiency for latency efficiency: the latency term grows as $\log_2 \DeviceCount$ instead of $\DeviceCount$, but the bandwidth term sends the full message $\CollectivePayloadSize$ at each tree level instead of $\CollectivePayloadSize/\DeviceCount$ chunks.
 
 ```{python}
 #| echo: false
@@ -236,17 +237,17 @@ class CommCollectives:
 
 ::: {#nbk-appendix-communication-ring-vs-tree-allreduce .callout-notebook title="Worked example: Ring vs. tree AllReduce"}
 
-**Setup**: `{python} CommCollectives.ring_n_str` H100 GPUs connected via InfiniBand NDR ($\alpha$ = `{python} CommCollectives.ib_ndr_alpha_us_str`, $\beta$ = `{python} CommCollectives.ib_ndr_beta_gb_per_s_str`). The gradient tensor is `{python} CommCollectives.ring_msg_gb_str` (a `{python} CommCollectives.ring_msg_params_m_str`-parameter model in FP16).
+**Setup**: `{python} CommCollectives.ring_n_str` H100 GPUs connected via InfiniBand NDR ($\MessageStartupLatency$ = `{python} CommCollectives.ib_ndr_alpha_us_str`, $\LinkBandwidth$ = `{python} CommCollectives.ib_ndr_beta_gb_per_s_str`). The gradient tensor is `{python} CommCollectives.ring_msg_gb_str` (a `{python} CommCollectives.ring_msg_params_m_str`-parameter model in FP16).
 
 **Question**: How long does AllReduce take with ring vs. tree?
 
 **Ring AllReduce**:
 
-$\CollectiveCompletionTimeRing \approx$ `{python} CommCollectives.ring_time_ms_str`
+$\RingAllReduceCompletionTime \approx$ `{python} CommCollectives.ring_time_ms_str`
 
 **Tree AllReduce**:
 
-$\CollectiveCompletionTimeTree \approx$ `{python} CommCollectives.tree_time_ms_str`
+$\TreeAllReduceCompletionTime \approx$ `{python} CommCollectives.tree_time_ms_str`
 
 **Analysis**: For this `{python} CommCollectives.ring_msg_gb_str` message, ring AllReduce takes `{python} CommCollectives.ring_time_ms_str`, and tree takes `{python} CommCollectives.tree_time_ms_str`. The ring is significantly faster because it distributes the bandwidth load across all links. The tree's logarithmic latency advantage is negligible compared to its bandwidth penalty for large messages.
 
@@ -256,60 +257,60 @@ $\CollectiveCompletionTimeTree \approx$ `{python} CommCollectives.tree_time_ms_s
 
 ### AllGather {#sec-appdx-comm-foundations-allgather}
 
-AllGather is the complement of ReduceScatter: each GPU starts with a $M/N$-sized shard and ends with the complete $M$-byte tensor. It is the core communication primitive in fully sharded data parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
+AllGather is the complement of ReduceScatter: each GPU starts with a $\CollectivePayloadSize/\DeviceCount$-sized shard and ends with the complete $\CollectivePayloadSize$-byte tensor. It is the core communication primitive in fully sharded data parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
 
 Ring AllGather execution time (@eq-allgather) requires half the transfer volume of AllReduce:
 
-$$ T_{\text{allgather}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-allgather}
+$$ \AllGatherCompletionTime= \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} + (\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-allgather}
 
 In this model, AllGather takes half the communication time of AllReduce for the same final tensor size and link parameters: it uses one ring pass instead of two. Local reduction work and implementation overheads can change the measured ratio.
 
 ### ReduceScatter {#sec-appdx-comm-foundations-reducescatter}
 
-ReduceScatter is the dual of AllGather: each GPU starts with a full $M$-byte tensor and ends with a $M/N$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
+ReduceScatter is the dual of AllGather: each GPU starts with a full $\CollectivePayloadSize$-byte tensor and ends with a $\CollectivePayloadSize/\DeviceCount$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
 
 Ring ReduceScatter execution time (@eq-reducescatter) provides the gradient sharding primitive:
 
-$$ T_{\text{reducescatter}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-reducescatter}
+$$ \ReduceScatterCompletionTime= \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} + (\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-reducescatter}
 
 The symmetry is not a coincidence: ring AllReduce decomposes into one ReduceScatter followed by one AllGather, and the costs add up exactly to @eq-ring-allreduce.
 
 ### AllToAll {#sec-appdx-comm-foundations-alltoall}
 
-AllToAll is the most general collective: each GPU sends a distinct $M/N$-sized chunk to every other GPU, and receives a distinct chunk from each. It is the routing primitive for mixture-of-experts (MoE) architectures, where tokens must be dispatched to the correct expert and the results gathered back.
+AllToAll is the most general collective: each GPU sends a distinct $\CollectivePayloadSize/\DeviceCount$-sized chunk to every other GPU, and receives a distinct chunk from each. It is the routing primitive for mixture-of-experts (MoE) architectures, where tokens must be dispatched to the correct expert and the results gathered back.
 
 Pairwise-exchange AllToAll execution time (@eq-alltoall) trades personalized data chunks across peers:
 
-$$ T_{\text{alltoall}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-alltoall}
+$$ \AllToAllCompletionTime= \frac{\DeviceCount- 1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth} + (\DeviceCount- 1) \cdot \MessageStartupLatency$$ {#eq-alltoall}
 
 Although the formula matches AllGather and ReduceScatter in form, the communication pattern is fundamentally different: AllToAll is a personalized exchange (each GPU sends different data to each peer), which makes it harder to overlap with computation and more sensitive to network congestion.
 
 ### Broadcast {#sec-appdx-comm-foundations-broadcast}
 
-Broadcast sends a single $M$-byte tensor from one root GPU to all $N - 1$ others. It is used for distributing initial model weights, updated learning rates, and configuration changes during training.
+Broadcast sends a single $\CollectivePayloadSize$-byte tensor from one root GPU to all $\DeviceCount- 1$ others. It is used for distributing initial model weights, updated learning rates, and configuration changes during training.
 
 Tree Broadcast execution time (@eq-broadcast) scales logarithmically with the participating GPU count:
 
-$$ T_{\text{broadcast}} = \log_2 N \left(\alpha + \frac{M}{\beta}\right) $$ {#eq-broadcast}
+$$ \BroadcastCompletionTime= \log_2 \DeviceCount\left(\MessageStartupLatency+ \frac{\CollectivePayloadSize}{\LinkBandwidth}\right) $$ {#eq-broadcast}
 
-Broadcast is inherently asymmetric (one sender, many receivers), which makes a tree topology natural. In an unsegmented tree broadcast, the full $M$-byte payload is forwarded at each tree level, so both the latency and bandwidth terms appear along the $\log_2 N$-level critical path. Segmented or scatter-allgather broadcast variants can reduce the bandwidth term, but they require a different algorithm-specific model.
+Broadcast is inherently asymmetric (one sender, many receivers), which makes a tree topology natural. In an unsegmented tree broadcast, the full $\CollectivePayloadSize$-byte payload is forwarded at each tree level, so both the latency and bandwidth terms appear along the $\log_2 \DeviceCount$-level critical path. Segmented or scatter-allgather broadcast variants can reduce the bandwidth term, but they require a different algorithm-specific model.
 
 ### Collective complexity summary {.unnumbered}
 
 With the individual formulas in place, @tbl-collective-summary provides a compact reference for comparing the cost structure of each collective operation.
 
-| **Operation**            |               **Bandwidth Term**              |     **Latency Term**     |       **Primary Use Case**       |
-|:-------------------------|:---------------------------------------------:|:------------------------:|:--------------------------------:|
-| **AllReduce (Ring)**     | $2 \cdot \frac{N-1}{N} \cdot \frac{M}{\beta}$ |  $2(N-1) \cdot \alpha$   |   Data-parallel gradient sync    |
-| **AllReduce (Tree)**     |       $2\log_2 N \cdot \frac{M}{\beta}$       | $2\log_2 N \cdot \alpha$ |        Small-message sync        |
-| **AllGather (Ring)**     |     $\frac{N-1}{N} \cdot \frac{M}{\beta}$     |   $(N-1) \cdot \alpha$   |  FSDP parameter reconstruction   |
-| **ReduceScatter (Ring)** |     $\frac{N-1}{N} \cdot \frac{M}{\beta}$     |   $(N-1) \cdot \alpha$   |   FSDP/ZeRO gradient sharding    |
-| **AllToAll (Pairwise)**  |     $\frac{N-1}{N} \cdot \frac{M}{\beta}$     |   $(N-1) \cdot \alpha$   |        MoE expert routing        |
-| **Broadcast (Tree)**     |        $\log_2 N \cdot \frac{M}{\beta}$       | $\log_2 N \cdot \alpha$  | Weight distribution, config sync |
+| **Operation**            |                                         **Bandwidth Term**                                        |                  **Latency Term**                  |       **Primary Use Case**       |
+|:-------------------------|:-------------------------------------------------------------------------------------------------:|:--------------------------------------------------:|:--------------------------------:|
+| **AllReduce (Ring)**     | $2 \cdot \frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$ |  $2(\DeviceCount-1) \cdot \MessageStartupLatency$  |   Data-parallel gradient sync    |
+| **AllReduce (Tree)**     |             $2\log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$             | $2\log_2 \DeviceCount\cdot \MessageStartupLatency$ |        Small-message sync        |
+| **AllGather (Ring)**     |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |  FSDP parameter reconstruction   |
+| **ReduceScatter (Ring)** |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |   FSDP/ZeRO gradient sharding    |
+| **AllToAll (Pairwise)**  |     $\frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$     |  $(\DeviceCount-1) \cdot \MessageStartupLatency$   |        MoE expert routing        |
+| **Broadcast (Tree)**     |              $\log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$             | $\log_2 \DeviceCount\cdot \MessageStartupLatency$  | Weight distribution, config sync |
 
-: **Collective Operation Cost Summary**: Bandwidth and latency terms for ring, tree, and pairwise-exchange algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $N$ = GPU count, $M$ = collective payload size in bytes. {#tbl-collective-summary}
+: **Collective Operation Cost Summary**: Bandwidth and latency terms for ring, tree, and pairwise-exchange algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $\DeviceCount$ = GPU count, $\CollectivePayloadSize$ = collective payload size in bytes. {#tbl-collective-summary}
 
-Two patterns emerge from this table. First, the ring and pairwise-exchange models contain the $(N-1)/N$ factor, which approaches 1 for large $N$. Per-rank communication therefore approaches a constant multiple of $M$: about $2M$ for ring AllReduce and about $M$ for ring AllGather, ring ReduceScatter, or pairwise AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $N$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
+Two patterns emerge from this table. First, the ring and pairwise-exchange models contain the $(\DeviceCount-1)/\DeviceCount$ factor, which approaches 1 for large $\DeviceCount$. Per-rank communication therefore approaches a constant multiple of $\CollectivePayloadSize$: about $2\CollectivePayloadSize$ for ring AllReduce and about $\CollectivePayloadSize$ for ring AllGather, ring ReduceScatter, or pairwise AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $\DeviceCount$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
 
 ## Algorithm Selection {#sec-appdx-comm-foundations-algorithm-selection}
 
@@ -321,26 +322,26 @@ NCCL automatically selects a collective algorithm based on message size and GPU 
 
 ### Ring vs. tree vs. recursive halving-doubling {#sec-appdx-comm-foundations-ring-vs-tree}
 
-The ring algorithm minimizes bandwidth usage but pays a latency cost that grows linearly with $N$. The tree algorithm minimizes latency but wastes bandwidth because it sends the full message at each level. Recursive halving-doubling splits the difference: it uses halving (like a tree) for the reduce phase and doubling for the gather phase, achieving near-optimal bandwidth with $\mathcal{O}(\log N)$ latency steps.
+The ring algorithm minimizes bandwidth usage but pays a latency cost that grows linearly with $\DeviceCount$. The tree algorithm minimizes latency but wastes bandwidth because it sends the full message at each level. Recursive halving-doubling splits the difference: it uses halving (like a tree) for the reduce phase and doubling for the gather phase, achieving near-optimal bandwidth with $\mathcal{O}(\log \DeviceCount)$ latency steps.
 
 The decision boundary between ring and tree depends on both message size and participant count. For the power-of-two case modeled by @eq-ring-allreduce and @eq-tree-allreduce, equating the two times gives the crossover in @eq-ring-tree-crossover:
 
-$$ \RingtreeCrossoverPayload(N) = \CrossoverPoint \times \frac{(N-1)-\log_2 N}{\log_2 N-(N-1)/N}, \qquad \CrossoverPoint=\alpha\beta $$ {#eq-ring-tree-crossover}
+$$ \RingTreeCrossoverPayload(\DeviceCount) = \LatencyBandwidthCrossoverSize \times \frac{(\DeviceCount-1)-\log_2 \DeviceCount}{\log_2 \DeviceCount-(\DeviceCount-1)/\DeviceCount}, \qquad \LatencyBandwidthCrossoverSize=\MessageStartupLatency\LinkBandwidth$$ {#eq-ring-tree-crossover}
 
-- **$M > \RingtreeCrossoverPayload(N)$** (large gradients): The ring has the lower modeled cost because its smaller bandwidth coefficient outweighs its additional startup steps.
-- **$M < \RingtreeCrossoverPayload(N)$** (barriers, scalars): The tree has the lower modeled cost because its logarithmic startup term outweighs its additional bandwidth cost.
-- **$M \approx \RingtreeCrossoverPayload(N)$** (medium tensors): The two modeled costs are similar, so benchmark them alongside recursive halving-doubling on the target topology.
+- **$\CollectivePayloadSize> \RingTreeCrossoverPayload(\DeviceCount)$** (large gradients): The ring has the lower modeled cost because its smaller bandwidth coefficient outweighs its additional startup steps.
+- **$\CollectivePayloadSize< \RingTreeCrossoverPayload(\DeviceCount)$** (barriers, scalars): The tree has the lower modeled cost because its logarithmic startup term outweighs its additional bandwidth cost.
+- **$\CollectivePayloadSize\approx \RingTreeCrossoverPayload(\DeviceCount)$** (medium tensors): The two modeled costs are similar, so benchmark them alongside recursive halving-doubling on the target topology.
 
 @Tbl-algorithm-selection provides guidance for choosing the right algorithm.
 
-| **Regime**                                   |                **Ring**               |                **Tree**                | **Recursive Halving-Doubling**                              |
-|:---------------------------------------------|:-------------------------------------:|:--------------------------------------:|:------------------------------------------------------------|
-| **$M > \RingtreeCrossoverPayload(N)$**       | Lower cost under the displayed models |         Higher bandwidth term          | Candidate with near-optimal bandwidth and logarithmic steps |
-| **$M < \RingtreeCrossoverPayload(N)$**       |       Higher linear startup term      | Lower cost under the displayed models  | Candidate with logarithmic startup steps                    |
-| **$M \approx \RingtreeCrossoverPayload(N)$** |    Benchmark on the target topology   |    Benchmark on the target topology    | Benchmark on the target topology                            |
-| **Power-of-2 $N$**                           |           Works for any $N$           | Matches the displayed $\log_2 N$ model | Requires $N = 2^k$                                          |
+| **Regime**                                                                  |                **Ring**               |                      **Tree**                     | **Recursive Halving-Doubling**                              |
+|:----------------------------------------------------------------------------|:-------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------|
+| **$\CollectivePayloadSize> \RingTreeCrossoverPayload(\DeviceCount)$**       | Lower cost under the displayed models |               Higher bandwidth term               | Candidate with near-optimal bandwidth and logarithmic steps |
+| **$\CollectivePayloadSize< \RingTreeCrossoverPayload(\DeviceCount)$**       |       Higher linear startup term      |       Lower cost under the displayed models       | Candidate with logarithmic startup steps                    |
+| **$\CollectivePayloadSize\approx \RingTreeCrossoverPayload(\DeviceCount)$** |    Benchmark on the target topology   |          Benchmark on the target topology         | Benchmark on the target topology                            |
+| **Power-of-2 $\DeviceCount$**                                               |      Works for any $\DeviceCount$     | Matches the displayed $\log_2 \DeviceCount$ model | Requires $\DeviceCount= 2^\RankCountBinaryExponent$         |
 
-: **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling relative to the participant-dependent ring-tree crossover $\RingtreeCrossoverPayload(N)$ in @eq-ring-tree-crossover. {#tbl-algorithm-selection}
+: **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling relative to the participant-dependent ring-tree crossover $\RingTreeCrossoverPayload(\DeviceCount)$ in @eq-ring-tree-crossover. {#tbl-algorithm-selection}
 
 ### Hierarchical AllReduce {#sec-appdx-comm-foundations-hierarchical}
 
@@ -392,15 +393,15 @@ Pipeline parallelism splits a model across multiple GPUs so that each GPU holds 
 
 ### Bubble fraction {#sec-appdx-comm-foundations-bubble-fraction}
 
-In a pipeline with $\PipelineparallelDegreePp$ stages and $m$ microbatches, @eq-pipeline-bubble defines the **Bubble Fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
+In a pipeline with $\PipelineParallelDegree$ stages and $\MicrobatchCount$ microbatches, @eq-pipeline-bubble defines the **Bubble Fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
 
-$$ \PipelineBubbleFraction = \frac{\PipelineparallelDegreePp - 1}{\PipelineparallelDegreePp - 1 + m} $$ {#eq-pipeline-bubble}
+$$ \PipelineBubbleFraction = \frac{\PipelineParallelDegree - 1}{\PipelineParallelDegree - 1 + \MicrobatchCount} $$ {#eq-pipeline-bubble}
 
 For balanced stages with negligible transfer overhead, this formula applies to both GPipe (where all forward passes complete before any backward pass begins) and 1F1B (one-forward-one-backward interleaving). The 1F1B schedule has the same asymptotic bubble fraction but uses less peak memory because it retires microbatches earlier.
 
 The bubble fraction depends on the ratio of stages to microbatches. Adding more microbatches (for a fixed number of stages) amortizes the pipeline fill and drain across more useful work.
 
-Rule of thumb: Keeping bubble overhead at or below 20 percent requires $m \geq 4(\PipelineparallelDegreePp - 1)$; strictly below 20 percent requires $m > 4(\PipelineparallelDegreePp - 1)$. The practical rule $m \geq 4\PipelineparallelDegreePp$ is a convenient conservative target.
+Rule of thumb: Keeping bubble overhead at or below 20 percent requires $\MicrobatchCount\geq 4(\PipelineParallelDegree - 1)$; strictly below 20 percent requires $\MicrobatchCount> 4(\PipelineParallelDegree - 1)$. The practical rule $\MicrobatchCount\geq 4\PipelineParallelDegree$ is a convenient conservative target.
 
 Pipeline depth and microbatch count (@tbl-pipeline-bubble) govern the effective bubble fraction.
 
@@ -446,22 +447,22 @@ class CommPipeline:
     bubble_p8_m64_pct_str = fmt_percent(bubble_p8_m64, precision=1, commas=False, style='symbol')
 ```
 
-| **Pipeline Stages ($\PipelineparallelDegreePp$)** |                 **$m$ = 8**                  |                  **$m$ = 16**                 |                  **$m$ = 32**                 |                  **$m$ = 64**                 |
-|:--------------------------------------------------|:--------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|
-| **$\PipelineparallelDegreePp$ = 4**               | `{python} CommPipeline.bubble_p4_m8_pct_str` | `{python} CommPipeline.bubble_p4_m16_pct_str` | `{python} CommPipeline.bubble_p4_m32_pct_str` | `{python} CommPipeline.bubble_p4_m64_pct_str` |
-| **$\PipelineparallelDegreePp$ = 8**               | `{python} CommPipeline.bubble_p8_m8_pct_str` | `{python} CommPipeline.bubble_p8_m16_pct_str` | `{python} CommPipeline.bubble_p8_m32_pct_str` | `{python} CommPipeline.bubble_p8_m64_pct_str` |
+| **Pipeline Stages ($\PipelineParallelDegree$)** |          **$\MicrobatchCount$ = 8**          |          **$\MicrobatchCount$ = 16**          |          **$\MicrobatchCount$ = 32**          |          **$\MicrobatchCount$ = 64**          |
+|:------------------------------------------------|:--------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|
+| **$\PipelineParallelDegree$ = 4**               | `{python} CommPipeline.bubble_p4_m8_pct_str` | `{python} CommPipeline.bubble_p4_m16_pct_str` | `{python} CommPipeline.bubble_p4_m32_pct_str` | `{python} CommPipeline.bubble_p4_m64_pct_str` |
+| **$\PipelineParallelDegree$ = 8**               | `{python} CommPipeline.bubble_p8_m8_pct_str` | `{python} CommPipeline.bubble_p8_m16_pct_str` | `{python} CommPipeline.bubble_p8_m32_pct_str` | `{python} CommPipeline.bubble_p8_m64_pct_str` |
 
-: **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. The conservative choice $m \geq 4\PipelineparallelDegreePp$ keeps the modeled fraction below 20 percent. {#tbl-pipeline-bubble}
+: **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. The conservative choice $\MicrobatchCount\geq 4\PipelineParallelDegree$ keeps the modeled fraction below 20 percent. {#tbl-pipeline-bubble}
 
 As the table demonstrates, scaling to deeper pipelines requires proportionally more microbatches to maintain high accelerator utilization. When activation memory bounds limit the microbatch count, systems must adopt alternative scheduling strategies to mitigate bubble overhead.
 
 ### Interleaved scheduling {#sec-appdx-comm-foundations-interleaved}
 
-Interleaved scheduling (used in Megatron-LM) assigns $\VirtualPipelineStagesPerDevice$ virtual stages to each physical GPU instead of one. Each GPU processes $\VirtualPipelineStagesPerDevice$ nonconsecutive chunks of the model, which means the pipeline has $\PipelineparallelDegreePp \times \VirtualPipelineStagesPerDevice$ virtual stages but the bubble overhead uses the original $\PipelineparallelDegreePp$, as @eq-interleaved-bubble shows:
+Interleaved scheduling (used in Megatron-LM) assigns $\VirtualPipelineStagesPerDevice$ virtual stages to each physical GPU instead of one. Each GPU processes $\VirtualPipelineStagesPerDevice$ nonconsecutive chunks of the model, which means the pipeline has $\PipelineParallelDegree \times \VirtualPipelineStagesPerDevice$ virtual stages but the bubble overhead uses the original $\PipelineParallelDegree$, as @eq-interleaved-bubble shows:
 
-$$ b_{\text{interleaved}} = \frac{\PipelineparallelDegreePp - 1}{\PipelineparallelDegreePp - 1 + m \times \VirtualPipelineStagesPerDevice} $$ {#eq-interleaved-bubble}
+$$ \InterleavedPipelineBubbleFraction= \frac{\PipelineParallelDegree - 1}{\PipelineParallelDegree - 1 + \MicrobatchCount\times \VirtualPipelineStagesPerDevice} $$ {#eq-interleaved-bubble}
 
-The microbatch term in the denominator is multiplied by $\VirtualPipelineStagesPerDevice$ compared to @eq-pipeline-bubble, so the bubble reduction approaches $\VirtualPipelineStagesPerDevice$ when $m$ dominates $\PipelineparallelDegreePp - 1$. For $\PipelineparallelDegreePp$ = 8, $m$ = 16, and $\VirtualPipelineStagesPerDevice$ = 4, the bubble fraction drops from `{python} CommPipeline.bubble_std_pct_str` to `{python} CommPipeline.bubble_interleaved_pct_str`, a `{python} CommPipeline.interleaved_bubble_reduction_mult_str` reduction that comes at the cost of more frequent, smaller communication between stages.
+The microbatch term in the denominator is multiplied by $\VirtualPipelineStagesPerDevice$ compared to @eq-pipeline-bubble, so the bubble reduction approaches $\VirtualPipelineStagesPerDevice$ when $\MicrobatchCount$ dominates $\PipelineParallelDegree - 1$. For $\PipelineParallelDegree$ = 8, $\MicrobatchCount$ = 16, and $\VirtualPipelineStagesPerDevice$ = 4, the bubble fraction drops from `{python} CommPipeline.bubble_std_pct_str` to `{python} CommPipeline.bubble_interleaved_pct_str`, a `{python} CommPipeline.interleaved_bubble_reduction_mult_str` reduction that comes at the cost of more frequent, smaller communication between stages.
 
 Interleaved scheduling highlights a recurring theme in distributed ML: communication granularity is a tunable knob. Smaller, more frequent transfers improve overlap and reduce idle time, but increase the aggregate latency overhead. The same trade-off governs gradient compression.
 
@@ -475,15 +476,15 @@ Gradient compression promises to reduce communication volume by 10--1000$\times$
 
 ### The compression equation {#sec-appdx-comm-foundations-compression-equation}
 
-Gradient compression replaces the original $M$-byte gradient with a compressed representation of size $M/\CompressionRatio$, where $\CompressionRatio$ is the compression ratio. @Eq-compression-total expresses the total time with compression:
+Gradient compression replaces the original $\CollectivePayloadSize$-byte gradient with a compressed representation of size $\CollectivePayloadSize/\CompressionRatio$, where $\CompressionRatio$ is the compression ratio. @Eq-compression-total expresses the total time with compression:
 
-$$ \CompressedCommunicationTime = \CodecEncodeTime + T_{\text{transfer}}\!\left(\frac{M}{\CompressionRatio}\right) + \CodecDecodeTime $$ {#eq-compression-total}
+$$ \CompressedCommunicationTime = \CodecEncodeTime + \TransferTimeForPayload\!\left(\frac{\CollectivePayloadSize}{\CompressionRatio}\right) + \CodecDecodeTime $$ {#eq-compression-total}
 
-Compression is beneficial when $\CompressedCommunicationTime < T_{\text{transfer}}(M)$. Rearranging this inequality yields the break-even condition in @eq-compression-breakeven:
+Compression is beneficial when $\CompressedCommunicationTime < \TransferTimeForPayload(\CollectivePayloadSize)$. Rearranging this inequality yields the break-even condition in @eq-compression-breakeven:
 
-$$ \CodecEncodeTime + \CodecDecodeTime < T_{\text{transfer}}(M) - T_{\text{transfer}}\!\left(\frac{M}{\CompressionRatio}\right) $$ {#eq-compression-breakeven}
+$$ \CodecEncodeTime + \CodecDecodeTime < \TransferTimeForPayload(\CollectivePayloadSize) - \TransferTimeForPayload\!\left(\frac{\CollectivePayloadSize}{\CompressionRatio}\right) $$ {#eq-compression-breakeven}
 
-In the bandwidth-dominated regime ($M \gg \CrossoverPoint$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{transfer}}(M) \times (1 - 1/\CompressionRatio)$. For high compression ratios ($\CompressionRatio \gg 1$), this approaches $T_{\text{transfer}}(M)$, so compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
+In the bandwidth-dominated regime ($\CollectivePayloadSize\gg \LatencyBandwidthCrossoverSize$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $\TransferTimeForPayload(\CollectivePayloadSize) \times (1 - 1/\CompressionRatio)$. For high compression ratios ($\CompressionRatio \gg 1$), this approaches $\TransferTimeForPayload(\CollectivePayloadSize)$, so compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
 
 ```{python}
 #| echo: false
@@ -588,10 +589,10 @@ Break-even codec overhead limits (@tbl-compression-breakeven) scale with compres
 | **64$\times$**                              |  `{python} CommCompression.breakeven_64_10_str` |  `{python} CommCompression.breakeven_64_40_str` | `{python} CommCompression.breakeven_64_100_str`  |
 | **256$\times$**                             | `{python} CommCompression.breakeven_256_10_str` | `{python} CommCompression.breakeven_256_40_str` | `{python} CommCompression.breakeven_256_100_str` |
 
-: **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as the actual collective-time difference $T_{\text{transfer}}(M)-T_{\text{transfer}}(M/\CompressionRatio)$. The shared startup latency cancels, so even at high compression ratios it is not part of the codec budget. {#tbl-compression-breakeven}
+: **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as the actual collective-time difference $\TransferTimeForPayload(\CollectivePayloadSize)-\TransferTimeForPayload(\CollectivePayloadSize/\CompressionRatio)$. The shared startup latency cancels, so even at high compression ratios it is not part of the codec budget. {#tbl-compression-breakeven}
 
 Ultimately, these break-even limits show that gradient compression delivers the highest net benefit on lower-bandwidth interconnects where transfer times dominate. On high-speed fabrics, the tolerable codec overhead budget is tightly constrained, requiring lightweight quantization or sparsification algorithms.
 
 ## Summary {.unnumbered}
 
-The communication models in this appendix rest on two hardware parameters, the startup latency $\alpha$ and the bandwidth $\beta$ of the $\alpha$-$\beta$ model (principle \ref{pri-alpha-beta-model}), and on two workload parameters, the payload ($n$ or $M$) and, for collectives, the participant count $N$. The crossover size $\CrossoverPoint = \alpha\beta$ separates latency-dominated from bandwidth-dominated transfers. Ring collectives carry a $(N-1)/N$ bandwidth factor and a latency term linear in $N$, while tree algorithms trade bandwidth for logarithmic latency, so message size relative to the crossover $\RingtreeCrossoverPayload(N)$ selects the algorithm. Pipeline parallelism adds the bubble fraction $\PipelineBubbleFraction = (\PipelineparallelDegreePp-1)/(\PipelineparallelDegreePp-1+m)$, which the rule $m \geq 4\PipelineparallelDegreePp$ keeps below 20 percent, and gradient compression pays only when codec overhead is smaller than the communication time it saves and convergence is unaffected. Measuring $\alpha$ and $\beta$ for a cluster therefore yields a first-order prediction of its communication overhead.
+The communication models in this appendix rest on two hardware parameters, the startup latency $\MessageStartupLatency$ and the bandwidth $\LinkBandwidth$ of the $\MessageStartupLatency$-$\LinkBandwidth$ model (principle \ref{pri-alpha-beta-model}), and on two workload parameters, the payload ($\PointToPointMessageSize$ or $\CollectivePayloadSize$) and, for collectives, the participant count $\DeviceCount$. The crossover size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\LinkBandwidth$ separates latency-dominated from bandwidth-dominated transfers. Ring collectives carry a $(\DeviceCount-1)/\DeviceCount$ bandwidth factor and a latency term linear in $\DeviceCount$, while tree algorithms trade bandwidth for logarithmic latency, so message size relative to the crossover $\RingTreeCrossoverPayload(\DeviceCount)$ selects the algorithm. Pipeline parallelism adds the bubble fraction $\PipelineBubbleFraction = (\PipelineParallelDegree-1)/(\PipelineParallelDegree-1+\MicrobatchCount)$, which the rule $\MicrobatchCount\geq 4\PipelineParallelDegree$ keeps below 20 percent, and gradient compression pays only when codec overhead is smaller than the communication time it saves and convergence is unaffected. Measuring $\MessageStartupLatency$ and $\LinkBandwidth$ for a cluster therefore yields a first-order prediction of its communication overhead.
