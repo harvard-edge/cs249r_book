@@ -303,7 +303,7 @@ class MemoryWallTrend:
 
 The first signal, memory exhaustion, has a long history, traced in @fig-memory-wall-trend. Over the plotted span, single-accelerator memory grew about `{python} MemoryWallTrend.gpu_growth_mult_str` from the `{python} MemoryWallTrend.first_gpu_str` to the `{python} MemoryWallTrend.last_gpu_str`, while the memory needed to train a state-of-the-art model grew by roughly `{python} MemoryWallTrend.demand_orders_str` orders of magnitude. Among the plotted models, the curves cross in `{python} MemoryWallTrend.crossover_year_str` at GPT-3, whose training state exceeded the largest accelerator then available by about `{python} MemoryWallTrend.crossover_gap_mult_str`. The real crossing came earlier than the plot shows. By the `{python} DenseLLMReferenceFacts.bytes_per_param_str`-bytes-per-parameter convention above, any model beyond roughly `{python} DenseLLMReferenceFacts.crossover_params_str` parameters already overflows one `{python} DenseLLMReferenceFacts.h100_mem_gb_str` device, and models between the plotted points, such as the 2019 Megatron-LM model developed with tensor parallelism [@shoeybi2019megatron], were partitioned for that reason. GPT-3 marks where the gap passed an order of magnitude, and every later plotted frontier model also sits far above the capacity curve. For those models, spreading state beyond one device's memory is a precondition for training at all rather than a way to train faster.
 
-::: {#fig-memory-wall-trend fig-env="figure" fig-pos="htb" fig-cap="**The memory wall**: Accelerator memory capacity plotted against the memory a state-of-the-art model needs to train. Capacity climbs steadily while demand climbs faster, and the widening gap is why weights, gradients, and optimizer state must be split across devices rather than merely compressed." fig-alt="Log-scale line chart from 2012 to 2024. A dashed blue series of single-accelerator memory rises from 5 GB (K20) to 192 GB (B200). A red series of the memory needed to train frontier models rises far faster, crossing above accelerator memory between GPT-2 (2019) and GPT-3 (2020), and a light red band shades the widening gap through Llama 3 in 2024."}
+::: {#fig-memory-wall-trend fig-env="figure" fig-pos="htb" fig-cap="**The memory wall**: Accelerator memory capacity plotted against the memory a state-of-the-art model needs to train. Capacity climbs steadily while demand climbs faster, and the widening gap is why weights, gradients, and optimizer state must be split across devices rather than merely compressed." fig-alt="Log-scale line chart from 2012 to 2024. A dashed blue series of single-accelerator memory rises from 5 GB (K20) to 192 GB (B200). A red series of the memory needed to train frontier models rises far faster, crossing above accelerator memory between GPT-2 (2019) and GPT-3 (2020), and a light red band labeled split across devices shades the widening gap through Llama 3 in 2024. GPT-3 is circled and annotated as the first plotted model beyond one accelerator, about 35 times the largest of its year. Arrows at the right span the growth of each series, about 38 times in capacity and about 4 orders of magnitude in demand. The two series are labeled directly rather than with a legend."}
 
 ```{python}
 #| echo: false
@@ -323,24 +323,26 @@ fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.6))
 
 # Demand: memory a state-of-the-art model needs to train (accelerating threat, red).
 ax.plot(df_models['Year'], df_models['Memory_GB'], color=COLORS['RedLine'], lw=1.2, alpha=0.6, zorder=2)
-ax.scatter(df_models['Year'], df_models['Memory_GB'], color=COLORS['RedLine'], s=40, zorder=3, label='Memory to train the model')
+ax.scatter(df_models['Year'], df_models['Memory_GB'], color=COLORS['RedLine'], s=40, zorder=3)
 # Capacity: one accelerator's memory (memory capacity, blue, square markers, dashed).
 ax.plot(df_gpus['Year'], df_gpus['Memory_GB'], color=COLORS['BlueLine'], lw=1.2, ls='--', alpha=0.7, zorder=2)
-ax.scatter(df_gpus['Year'], df_gpus['Memory_GB'], color=COLORS['BlueLine'], marker='s', s=34, zorder=3, label='Single-accelerator memory')
+ax.scatter(df_gpus['Year'], df_gpus['Memory_GB'], color=COLORS['BlueLine'], marker='s', s=34, zorder=3)
 
 # Shade the gap where demand exceeds capacity (log-linear interpolation of both series).
 _yrs = np.linspace(2019, 2024, 200)
 _dem = np.exp(np.interp(_yrs, df_models.sort_values('Year')['Year'], np.log(df_models.sort_values('Year')['Memory_GB'])))
 _cap = np.exp(np.interp(_yrs, df_gpus['Year'], np.log(df_gpus['Memory_GB'])))
 ax.fill_between(_yrs, _cap, _dem, where=_dem > _cap, interpolate=True, color=COLORS['RedL'], alpha=0.45, lw=0, zorder=1)
+ax.text(2022.2, 900, "split across\ndevices", ha='center', va='center', fontsize=10, style='italic', color=COLORS['RedLine'], zorder=4)
 
-# Direct labels; a few nudged to clear the series lines and each other.
+# Point labels; a few nudged to clear the series lines and each other.
 model_off = {
     'AlexNet': (0, -9, 'center'),
     'VGG-16': (0, 7, 'center'),
     'ResNet-152': (0, -9, 'center'),
     'BERT-Large': (6, -6, 'left'),
     'GPT-2': (-7, 0, 'right'),
+    'GPT-3': (-9, 2, 'right'),
     'Llama 3 (405B)': (0, -9, 'center'),
 }
 for _, row in df_models.iterrows():
@@ -351,8 +353,8 @@ for _, row in df_models.iterrows():
         textcoords="offset points",
         xytext=(dx, dy),
         ha=ha,
-        va='bottom' if dy > 0 else ('top' if dy < 0 else 'center'),
-        fontsize=8.5,
+        va='bottom' if dy > 2 else ('top' if dy < 0 else 'center'),
+        fontsize=10,
         color=COLORS['RedLine'],
     )
 gpu_off = {'K20': (0, 8), 'K80': (0, 8)}
@@ -365,17 +367,56 @@ for _, row in df_gpus.iterrows():
         xytext=(dx, dy),
         ha='center',
         va='bottom' if dy > 0 else 'top',
-        fontsize=8.5,
+        fontsize=10,
         color=COLORS['BlueLine'],
     )
+
+# Crossover: the first plotted model whose training state exceeds the largest accelerator of its year.
+_xo = df_models[df_models['Name'] == 'GPT-3'].iloc[0]
+ax.scatter([_xo['Year']], [_xo['Memory_GB']], s=150, facecolors='none', edgecolors=COLORS['RedLine'], linewidths=1.3, zorder=4)
+ax.annotate(
+    f"first plotted model beyond one accelerator,\n\u2248{round(MemoryWallTrend.crossover_gap)}\u00d7 the largest of its year",
+    (_xo['Year'], _xo['Memory_GB']),
+    textcoords="offset points",
+    xytext=(16, 40),
+    ha='right',
+    va='bottom',
+    fontsize=10,
+    color=COLORS['primary'],
+    arrowprops=dict(arrowstyle='-', color=COLORS['primary'], lw=0.7, shrinkA=1, shrinkB=7, relpos=(1.0, 0.0)),
+)
+
+# Growth spans at the right edge: capacity K20 to B200, demand across the plotted models.
+def _span(x, lo, hi, color, label):
+    ax.annotate('', xy=(x, hi), xytext=(x, lo), arrowprops=dict(arrowstyle='<->', color=color, lw=1.0, shrinkA=0, shrinkB=0))
+    ax.text(x + 0.25, np.sqrt(lo * hi), label, ha='left', va='center', fontsize=10, color=color, fontweight='bold')
+
+_span(
+    2025.0, df_gpus['Memory_GB'].min(), df_gpus['Memory_GB'].max(), COLORS['BlueLine'], f"\u2248{round(MemoryWallTrend.gpu_growth)}\u00d7\ncapacity"
+)
+_span(
+    2027.3,
+    df_models['Memory_GB'].min(),
+    df_models['Memory_GB'].max(),
+    COLORS['RedLine'],
+    f"\u2248{round(MemoryWallTrend.demand_orders)} orders\nof magnitude\ndemand",
+)
+
+# Series names as direct labels instead of a legend.
+ax.text(2012.0, 2.0e3, "memory to train\nthe model", color=COLORS['RedLine'], fontsize=11, fontweight='bold', ha='left', va='center')
+ax.text(2012.0, 62, "one accelerator's\nmemory", color=COLORS['BlueLine'], fontsize=11, fontweight='bold', ha='left', va='center')
 
 ax.set_yscale('log')
 ax.set_xlabel("Year")
 ax.set_ylabel("Memory (GB, log scale)")
 ax.grid(False, which="minor")
 ax.grid(False, axis='x')  # horizontal grid only: year gridlines would cut through point labels
-ax.legend(loc='upper left', frameon=False)
-ax.margins(x=0.08, y=0.12)
+ax.set_xlim(2011.2, 2029.6)
+ax.spines['bottom'].set_bounds(2011.2, 2024.8)
+ax.set_xticks(range(2012, 2025, 2))
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+ax.margins(y=0.12)
 plt.tight_layout()
 plt.show()
 plt.close()
@@ -453,7 +494,7 @@ Each rung of the scaling path inherits earlier challenges. A single GPU already 
 
 The leap to multi-node training adds network communication overhead, fault tolerance requirements, and cluster orchestration\index{Cluster orchestration!distributed training}. Because each stage compounds the previous one's bottlenecks, single-GPU performance must be optimized before scaling out, so inefficiency does not multiply across the fleet. Although frameworks abstract away much of this through sharded data parallelism and communication libraries, implementing distributed training efficiently still demands careful network configuration (InfiniBand tuning, topology-aware routing), infrastructure management through cluster schedulers, and debugging of nonlocal issues such as synchronization hangs and communication bottlenecks. @Fig-3d-parallelism-cube maps this design space onto a 3D decomposition grid ($\DeviceCount= \DataParallelDegree \times \PipelineParallelDegree \times \TensorParallelDegree$), partitioning cluster execution across tensor parallelism ($\TensorParallelDegree$, intra-layer sharding), pipeline parallelism ($\PipelineParallelDegree$, sequential stage partitioning), and data parallelism ($\DataParallelDegree$, batch replication), where each individual cell represents a single accelerator coordinate.
 
-::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The configuration space decomposes cluster training across three orthogonal axes: tensor parallelism ($\TensorParallelDegree$, intra-layer sharding), pipeline parallelism ($\PipelineParallelDegree$, sequential stage partitioning), and data parallelism ($\DataParallelDegree$, batch replication). Each cell is one accelerator, identified by its $(\DataParallelDegree, \PipelineParallelDegree, \TensorParallelDegree)$ coordinate, so the cube holds $\DeviceCount = \DataParallelDegree \times \PipelineParallelDegree \times \TensorParallelDegree$ devices. A feasible point must jointly satisfy model divisibility, per-device memory limits, and the network hierarchy that carries each axis's traffic." fig-alt="Cube divided into a four-by-four-by-four grid of cells with the tensor axis along the width, the pipeline axis along the height, and the data axis along the depth; one front corner cell is shaded and labeled as one GPU per (N DP, N PP, N TP) cell. A label reads N equals N DP times N PP times N TP."}
+::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The configuration space decomposes cluster training across three orthogonal axes: tensor parallelism ($\TensorParallelDegree$, intra-layer sharding), pipeline parallelism ($\PipelineParallelDegree$, sequential stage partitioning), and data parallelism ($\DataParallelDegree$, batch replication). Each cell is one accelerator, identified by its $(\DataParallelDegree, \PipelineParallelDegree, \TensorParallelDegree)$ coordinate, so the cube holds $\DeviceCount = \DataParallelDegree \times \PipelineParallelDegree \times \TensorParallelDegree$ devices. A feasible point must jointly satisfy model divisibility, per-device memory limits, and the network hierarchy that carries each axis's traffic." fig-alt="Cube divided into a four-by-four-by-four grid of cells, one cell per GPU, with the tensor axis along the width (within a layer, fast domain), the pipeline axis along the height (stages, activations), and the data axis along the depth (replicas, gradients). The front bottom right cell is solid navy and marked as one GPU. The cells it communicates with are tinted: the rest of its bottom row is labeled tensor group, the rest of its column is labeled pipeline group, and the cells behind it along the depth are labeled data group. A label reads N equals N DP times N PP times N TP."}
 ![](images/svg/3d-parallelism-cube.svg)
 
 <!--
@@ -768,7 +809,7 @@ The method parallels gradient accumulation\index{Gradient accumulation!single-de
 
 The implementation details matter because the SGD equivalence only holds when each phase preserves the intended aggregate sampling and weighting, complete local gradient contributions, and a single synchronized update. The concrete workflow follows the dataflow from assigning local batches to synchronizing the computed gradients. @Fig-dist-train-data-parallelism diagrams this five-stage execution pipeline across four GPU swimlanes, tracking how identical model replicas ingest disjoint batch shards, compute local gradients ($\MinibatchGradient_0$--$\MinibatchGradient_3$), and synchronize through a ring AllReduce collective before applying uniform parameter updates.
 
-::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) partition the global batch, (2) assign sharded mini-batches to individual GPUs, (3) compute independent forward and backward passes to produce local gradients $\MinibatchGradient_i$, (4) execute an AllReduce collective across the cluster to obtain the average gradient $\GlobalBatchGradient$, and (5) update parameters identically across all devices. This strategy preserves the mathematical semantics of single-device SGD while distributing the compute burden." fig-alt="Five-stage data-parallel workflow diagram showing global batch partitioning, local forward and backward computation across four GPU swimlanes, an AllReduce block that averages the four gradients, and synchronized parameter updates."}
+::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) partition the global batch, (2) assign sharded mini-batches to individual GPUs, (3) compute independent forward and backward passes to produce local gradients $\MinibatchGradient_i$, (4) execute an AllReduce collective across the cluster to obtain the average gradient $\GlobalBatchGradient$, and (5) update parameters identically across all devices. This strategy preserves the mathematical semantics of single-device SGD while distributing the compute burden." fig-alt="Five-stage data-parallel workflow across four GPU swimlanes. A green global batch of B equals 128, drawn as sixteen sample tiles in four groups, sends one group of 32 samples to each GPU. Each GPU card holds an identical four-layer model replica and runs forward and backward passes, producing a small signed bar vector g0 to g3 whose bars differ from lane to lane. All four vectors enter one tall amber AllReduce block labeled g global equals one over N times the sum of g i, ring. Every lane then shows the same averaged bar vector g global feeding an update theta card, with the note identical theta on every GPU."}
 ![](images/svg/data-parallel-flow.svg)
 
 <!--
@@ -1158,7 +1199,7 @@ class HierarchicalAllReduceDebug:
 
 Stepping back from that specific cluster to the architectural design space, @fig-coll-comm diagrams three synchronization topologies: the bandwidth-optimal ring AllReduce that circulates chunks along neighbor links ($2(\DeviceCount-1)/\DeviceCount$ volume), the centralized parameter server constrained by network interface card (NIC) saturation at the server node, and the dense mesh of logical All-to-All peer traffic ($\DeviceCount(\DeviceCount-1)$ messages). In dense synchronous data-parallel settings, ring AllReduce avoids a single reducer bottleneck by distributing traffic evenly across participating links, as Baidu's implementation illustrates [@gibiansky2017baidu].
 
-::: {#fig-coll-comm fig-env="figure" fig-pos="htb" fig-cap="**Communication patterns and their costs**: Ring AllReduce and a parameter server illustrate two ways to aggregate updates. All-to-All instead routes distinct data to each peer; the complete graph shows logical destinations, not a requirement for dedicated physical links. A switched fabric can carry this traffic, with cost determined by message size, routes, and contention." fig-alt="Three panels. Ring AllReduce: four GPUs pass data to their neighbors around a ring, labeled 2 times N minus 1 over N times M per GPU. Parameter server: four workers each push to and pull from one server through a single highlighted server NIC, labeled 2M per worker. Logical All-to-All: lines join every pair of four GPUs, labeled N times N minus 1 messages, logical pairs rather than physical wires."}
+::: {#fig-coll-comm fig-env="figure" fig-pos="htb" fig-cap="**Communication patterns and their costs**: Ring AllReduce and a parameter server illustrate two ways to aggregate updates. All-to-All instead routes distinct data to each peer; the complete graph shows logical destinations, not a requirement for dedicated physical links. A switched fabric can carry this traffic, with cost determined by message size, routes, and contention." fig-alt="Three panels. Ring AllReduce: four GPUs, each holding its gradient as four chunk cells, pass one numbered chunk to the next neighbor around a ring, with equal-weight arrows on every link, labeled 2 times N minus 1 over N times M per GPU, load spread over all links. Parameter server: four workers exchange data with a shared bus that feeds one thick red trunk into a highlighted red server NIC beneath the server, labeled 2M per worker, all traffic through one NIC. Logical All-to-All: four GPUs with four chunk cells each, joined by twelve directed arrows, one per ordered pair, labeled N times N minus 1 messages, logical pairs rather than physical wires."}
 ![](images/svg/gradient-sync-topologies.svg)
 
 :::
@@ -1197,7 +1238,7 @@ The key trade-offs across synchronization models are summarized in @tbl-sync-mod
 
 @Fig-sync-model-timeline sequences execution traces for four workers across BSP, SSP, and ASP, isolating how global barriers force faster workers into idle wait blocks while straggler W3 completes, how bounded slack ($\StalenessBound=1$) throttles drift with brief pauses, and how asynchronous updates remove the global barrier without imposing a finite staleness bound. Communication and resource contention can still leave workers waiting.
 
-::: {#fig-sync-model-timeline fig-env="figure" fig-pos="htb" fig-cap="**Distributed synchronization models**: The timelines compare three synchronization strategies. Top: bulk synchronous parallel (BSP) forces all workers to wait at a global barrier every step. Middle: stale synchronous parallel (SSP) allows workers to proceed up to $\StalenessBound$ steps ahead of the slowest worker. Bottom: asynchronous parallel (ASP) execution removes the global update barrier while allowing gradient staleness; communication and resource contention can still delay progress." fig-alt="Timeline diagram with three panels of four worker rows, in which worker W3 takes longer per iteration than the others. Top, BSP: after every iteration the faster workers sit in dashed wait blocks until W3 reaches a global barrier. Middle, SSP with s equal to 1: the faster workers run freely until they would lead W3 by more than one iteration, then pause briefly. Bottom, ASP: every worker runs without waiting, so the faster workers finish eight iterations while W3 finishes six."}
+::: {#fig-sync-model-timeline fig-env="figure" fig-pos="htb" fig-cap="**Distributed synchronization models**: The timelines compare three synchronization strategies. Top: bulk synchronous parallel (BSP) forces all workers to wait at a global barrier every step. Middle: stale synchronous parallel (SSP) allows workers to proceed up to $\StalenessBound$ steps ahead of the slowest worker. Bottom: asynchronous parallel (ASP) execution removes the global update barrier while allowing gradient staleness; communication and resource contention can still delay progress." fig-alt="Timeline diagram with three panels of four worker rows, in which worker W3 takes longer per iteration than the others. Top, BSP: after every iteration the faster workers sit in red-hatched wait blocks until W3, labeled slow in red, reaches a global barrier. Middle, SSP with s equal to 1: the faster workers run freely until they would lead W3 by more than one iteration, then pause briefly. Bottom, ASP: every worker runs without waiting, so the faster workers finish eight iterations while W3 finishes six."}
 ![](images/svg/sync-model-timeline.svg){width=100%}
 
 <!--
@@ -1899,14 +1940,14 @@ Per-GPU Memory:
 
 ZeRO reaches that result in stages, and the intermediate stages matter because each one buys memory with a different communication pattern. Optimizer sharding alone (ZeRO-1) already brings the replicated footprint of the same model under the accelerator ceiling, because optimizer state is three-quarters of it; gradient sharding (ZeRO-2) and parameter sharding (ZeRO-3/FSDP) continue toward the fully sharded figure (@fig-zero-memory). @Tbl-zero-stages pairs each stage with the collectives it uses.
 
-::: {#fig-zero-memory fig-env="figure" fig-pos="htb" fig-cap="**ZeRO memory reduction**: Standard data parallelism (DDP) replicates all model states across every GPU. ZeRO progressively partitions these states: ZeRO-1 shards optimizer states, ZeRO-2 adds gradient sharding, and ZeRO-3 shards the parameters themselves. ZeRO-3 achieves linear memory scaling, enabling models with 100B+ parameters to fit on accelerators that could not hold the replicated state." fig-alt="Stacked bar chart of per-GPU memory for optimizer state, gradients, and weights, shaded from darker to lighter blue, under DDP, ZeRO-1, ZeRO-2, and ZeRO-3. Totals fall from 112 GB to 29.3, 15.5, and 1.75 GB; a dashed line at 80 GB accelerator memory shows that only DDP exceeds it."}
+::: {#fig-zero-memory fig-env="figure" fig-pos="htb" fig-cap="**ZeRO memory reduction**: Standard data parallelism (DDP) replicates all model states across every GPU. ZeRO progressively partitions these states: ZeRO-1 shards optimizer states, ZeRO-2 adds gradient sharding, and ZeRO-3 shards the parameters themselves; each dashed outline marks the replicated stack a stage no longer holds. ZeRO-3 achieves linear memory scaling, enabling models with 100B+ parameters to fit on accelerators that could not hold the replicated state." fig-alt="Stacked bar chart of per-GPU memory for optimizer state, gradients, and weights, shaded from darker to lighter blue, under DDP, ZeRO-1, ZeRO-2, and ZeRO-3. Totals fall from 112 GB to 29.3, 15.5, and 1.75 GB; a red dashed line at 80 GB accelerator memory, with the region above it washed light red, shows that only DDP exceeds it. Behind each ZeRO bar a dashed gray outline at the 112 GB DDP height marks the replicated state that stage no longer holds on the GPU."}
 ```{python}
 #| echo: false
 #| warning: false
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9.6, 4.6))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.2, 4.4))
 
 stages = [
     'DDP\n(full replication)',
@@ -1915,7 +1956,7 @@ stages = [
     'ZeRO-3 / FSDP\n(+ shard parameters)',
 ]
 x = np.arange(len(stages))
-width = 0.52
+width = 0.6
 
 # Registry-backed values from DistTrainA100Memory (Llama-2 7B, 16 B/param, N GPUs).
 _M = DistTrainA100Memory
@@ -1944,9 +1985,26 @@ ax.bar(x, weights, bottom=opt_states + gradients, color=RAMP['W'], label=f'Weigh
 
 totals = opt_states + gradients + weights
 
-# The one limit in the figure: a single accelerator's memory.
+# Ghost of the fully replicated stack behind each ZeRO stage: what sharding removed from this GPU.
+ax.bar(x[1:], [totals[0]] * 3, width=width, fill=False, edgecolor=COLORS['grid'], linestyle=(0, (3, 2)), linewidth=1.0, zorder=2)
+
+# The one limit in the figure: a single accelerator's memory, with the over-capacity zone washed red.
+ax.axhspan(_cap_gb, 138, color=COLORS['RedL'], alpha=0.35, lw=0, zorder=0)
 ax.axhline(_cap_gb, color=COLORS['RedLine'], linestyle='--', linewidth=1.3, zorder=4)
-ax.text(x[-1] + width / 2, _cap_gb + 1.5, f'{_cap_gb:.0f} GB accelerator memory', color=COLORS['RedLine'], fontsize=9, ha='right', va='bottom')
+# One-line label just above the limit, right of the DDP bar; its backing matches the
+# red wash so the ghost outline it crosses is masked instead of struck through.
+_wash = tuple(0.35 * c + 0.65 for c in to_rgba(COLORS['RedL'])[:3])
+ax.text(
+    0.35,
+    _cap_gb + 1.2,
+    f'{_cap_gb:.0f} GB accelerator memory',
+    color=COLORS['RedLine'],
+    fontsize=10,
+    ha='left',
+    va='bottom',
+    zorder=5,
+    bbox=dict(boxstyle='square,pad=0.15', facecolor=_wash, edgecolor='none'),
+)
 
 # Totals above each bar, with the reduction relative to DDP.
 subs = [
@@ -1957,15 +2015,15 @@ subs = [
 ]
 for i, sub in enumerate(subs):
     fmt = '.2f' if i == 3 else '.1f'
-    ax.text(x[i], totals[i] + 3.0, f'{totals[i]:{fmt}} GB', color=COLORS['primary'], fontsize=9.5, fontweight='bold', ha='center', va='bottom')
+    ax.text(x[i], totals[i] + 3.0, f'{totals[i]:{fmt}} GB', color=COLORS['primary'], fontsize=10.5, fontweight='bold', ha='center', va='bottom')
     if i == 0:
         # The warning sits beside the total it qualifies.
-        ax.text(x[i] + 0.2, totals[i] + 3.0, sub, color=COLORS['RedLine'], fontsize=8.5, ha='left', va='bottom')
+        ax.text(x[i] + 0.34, totals[i] + 3.0, sub, color=COLORS['RedLine'], fontsize=10, ha='left', va='bottom')
     else:
-        ax.text(x[i], totals[i] + 3.0 + 7.5, sub, color=COLORS['secondary'], fontsize=8.5, ha='center', va='bottom')
+        ax.text(x[i], totals[i] + 3.0 + 8.0, sub, color=COLORS['secondary'], fontsize=10, ha='center', va='bottom')
 
 # Segment labels where the segments are tall enough to hold text.
-seg_txt = dict(fontsize=8.5, ha='center', va='center', color=COLORS['primary'])
+seg_txt = dict(fontsize=10, ha='center', va='center', color=COLORS['primary'])
 ax.text(x[0], _opt_gb / 2, f'O {_opt_gb:.0f} GB', **seg_txt)
 ax.text(x[0], _opt_gb + _w_gb / 2, f'G {_w_gb:.0f} GB', **seg_txt)
 ax.text(x[0], _opt_gb + 1.5 * _w_gb, f'W {_w_gb:.0f} GB', **seg_txt)
@@ -1976,22 +2034,22 @@ ax.text(x[2], opt_states[2] + gradients[2] + _w_gb / 2, f'W {_w_gb:.0f} GB', **s
 ax.text(
     0.99,
     0.97,
-    f'{_M.params_b:.0f}B-parameter model, {_M.bytes_per_param_val:.0f} B/param, $N$ = {_n} GPUs',
+    f'{_M.params_b:.0f}B-parameter model, $N$ = {_n} GPUs, {_M.bytes_per_param_val:.0f} B/param:\nweights W {_M.bytes_fp16_val:.0f} B + gradients G {_M.bytes_fp16_val:.0f} B + optimizer state O {_M.bytes_optimizer_val:.0f} B',
     transform=ax.transAxes,
-    fontsize=8.5,
+    fontsize=10,
     color=COLORS['secondary'],
     ha='right',
     va='top',
 )
 
 ax.set_ylim(0, 138)
-ax.set_xlim(-0.5, 3.5)
+ax.set_xlim(-0.45, 3.4)
 ax.set_ylabel('Per-GPU memory (GB)')
 ax.set_xticks(x)
 ax.set_xticklabels(stages)
 ax.grid(False)  # every bar carries its own total; no gridlines to cut the labels
-_h, _l = ax.get_legend_handles_labels()
-ax.legend(_h[::-1], _l[::-1], loc='upper right', bbox_to_anchor=(1.0, 0.91), frameon=False, fontsize=8.5)
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
 
 plt.tight_layout()
 ```
@@ -2440,7 +2498,7 @@ That baseline fraction is not the synchronization share a profiler reports for a
 
 @Fig-scaling-tax illustrates this scaling tax\index{Scaling tax!communication overhead} up to 512 GPUs on log-log axes, complementing the scaling efficiency bound (principle \ref{pri-scaling-efficiency}). In this illustrative fixed-residual model, a small baseline fraction ($\SerialFraction= 0.1\%$) stays closer to ideal scaling than a larger fraction ($\SerialFraction= 1\%$). A residual equal to a tenth of baseline time ($\SerialFraction= 0.10$) limits asymptotic speedup to $1/\SerialFraction= 10\times$. Actual collective and coordination costs can change with worker count, so predicting a training run requires the more explicit Fleet Law below.
 
-::: {#fig-scaling-tax fig-env="figure" fig-pos="htb" fig-cap="**The scaling tax**: Effective speedup $\DeviceCount/(1+(\DeviceCount-1)\SerialFraction)$ against GPU count on log-log axes, for illustrative fixed residual fractions $\SerialFraction$ of baseline step time. Ideal scaling (dashed) is linear. Each curve bends away from it and flattens near $1/\SerialFraction$: at 512 GPUs, $\SerialFraction$ = 0.1 percent still delivers about two-thirds of ideal speedup, 1 percent about one-sixth, and 10 percent under 10$\times$ in total. Darker curves carry larger $\SerialFraction$." fig-alt="Log-log line chart of effective speedup against GPU count from 1 to 512. A dashed diagonal marks ideal linear speedup. Three curves for r of 0.1, 1, and 10 percent bend below it and flatten, the darker curves flattening earlier and lower; a label marks the scaling wall on the lowest curve."}
+::: {#fig-scaling-tax fig-env="figure" fig-pos="htb" fig-cap="**The scaling tax**: Effective speedup $\DeviceCount/(1+(\DeviceCount-1)\SerialFraction)$ against GPU count on log-log axes, for illustrative fixed residual fractions $\SerialFraction$ of baseline step time. Ideal scaling (dashed) is linear. Each curve bends away from it and flattens near $1/\SerialFraction$: at 512 GPUs, $\SerialFraction$ = 0.1 percent still delivers about two-thirds of ideal speedup, 1 percent about one-sixth, and 10 percent under 10$\times$ in total. Darker curves carry larger $\SerialFraction$." fig-alt="Log-log line chart of effective speedup against GPU count from 1 to 512. A dashed diagonal marks ideal linear speedup. Three curves for r of 0.1, 1, and 10 percent bend below it and flatten, the darker curves flattening earlier and lower. Dotted horizontal lines mark the ceilings 1 over r equals 10 and 100 that the 10 percent and 1 percent curves approach, and a pale amber band between ideal and the 10 percent curve is labeled scaling tax at r equals 10 percent."}
 
 ```{python}
 #| echo: false
@@ -2477,8 +2535,8 @@ N = np.array([1, 2, 4, 8, 16, 32, 64, 128, 256, 512])
 scenarios = [
     {'r': 0.0, 'name': 'ideal linear', 'color': 'black', 'style': '--', 'marker': ''},
     {'r': 0.001, 'name': '$r$ = 0.1%', 'color': '#f59e0b', 'style': '-', 'marker': 'o'},
-    {'r': 0.01, 'name': '$r$ = 1%', 'color': '#d97706', 'style': '-', 'marker': 's'},
-    {'r': 0.10, 'name': '$r$ = 10%', 'color': '#92400e', 'style': '-', 'marker': '^'},
+    {'r': 0.01, 'name': '$r$ = 1%\nceiling 1/$r$ = 100', 'color': '#d97706', 'style': '-', 'marker': 's'},
+    {'r': 0.10, 'name': '$r$ = 10%\nceiling 1/$r$ = 10', 'color': '#92400e', 'style': '-', 'marker': '^'},
 ]
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
@@ -2502,7 +2560,8 @@ for sc in scenarios:
         textcoords='offset points',
         va='center',
         ha='left',
-        fontsize=9,
+        linespacing=1.15,
+        fontsize=10,
         color=COLORS['primary'] if ideal else sc['color'],
         bbox=dict(boxstyle='square,pad=0.15', fc='white', ec='none'),
     )
@@ -2515,25 +2574,22 @@ ax.set_xticklabels(N)
 ax.set_yticks(N)
 ax.set_yticklabels(N)
 ax.minorticks_off()
-ax.set_xlim(0.8, 512 * 3.2)
+ax.set_xlim(0.8, 512 * 4.4)
 ax.set_xlabel('Number of GPUs ($N$)')
 ax.set_ylabel('Effective speedup')
 for _sp in ('top', 'right'):
     ax.spines[_sp].set_visible(False)
 
-# The flattening of the largest-r curve: the scaling wall near 1/r.
-ax.annotate(
-    "scaling wall",
-    # Placed between the N=64 and N=128 gridline columns so neither the
-    # label nor the arrow rides a gridline.
-    xy=(90, 90 / (1 + 89 * 0.10)),
-    xytext=(90, 3.2),
-    ha='center',
-    color=COLORS['secondary'],
-    bbox=dict(boxstyle='square,pad=0.15', fc='white', ec='none'),
-    arrowprops=dict(arrowstyle='->', color=COLORS['secondary'], lw=0.9, shrinkB=4),
-    fontsize=9,
-)
+# The flattening near 1/r: a dotted ceiling for each of the two curves that reach one on
+# this axis, drawn only from where that curve bends toward it (so it crosses no other
+# series) to the right edge, where the curve's own end label names it.
+for _r, _c, _n0 in ((0.10, '#92400e', 16), (0.01, '#d97706', 160)):
+    ax.hlines(1 / _r, _n0, 512, colors=_c, linestyles=(0, (1, 2.5)), linewidth=1.1, zorder=1)
+
+# The scaling tax itself: the speedup the largest-r curve gives up relative to ideal.
+_Nd = np.logspace(0, 9, 200, base=2)
+ax.fill_between(_Nd, np.vectorize(calc_strong_scaling_speedup)(_Nd, 0.10), _Nd, color='#fef3c7', alpha=0.7, lw=0, zorder=0)
+ax.text(150, 24, "scaling tax\nat $r$ = 10%", ha='center', va='center', fontsize=10, color='#92400e', style='italic')
 plt.tight_layout()
 
 plt.show()
@@ -2765,7 +2821,7 @@ The gradient-noise model separates statistical efficiency from hardware efficien
 
 @Fig-critical-batch-size plots this gradient-noise trade-off on log-log axes, tracking the divergence between optimization step count and total sample consumption. Below the critical threshold ($\BatchSize/\CriticalBatchSize< 1$), increasing batch size yields near-linear reductions in optimization steps with negligible sample waste; past the crossover point at $\BatchSize/\CriticalBatchSize= 1$ (where both normalized costs equal 2), the step count curve asymptotically flattens toward 1 while total examples processed climb steeply along the $1 + \BatchSize/\CriticalBatchSize$ trajectory.
 
-::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Statistical cost of larger batches**: A normalized illustration of the gradient-noise trade-off model, with batch size divided by the fitted critical batch. Optimization steps approach a lower limit as batches grow, while total examples processed increase. The crossover is not a hardware-throughput optimum or a measured threshold for a particular model [@mccandlish2018empirical]." fig-alt="Two curves on logarithmic axes. Normalized optimization steps decrease toward one as normalized batch increases; normalized sample use increases from one. Both curves equal two at batch divided by critical batch equal to one."}
+::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Statistical cost of larger batches**: A normalized illustration of the gradient-noise trade-off model, with batch size divided by the fitted critical batch. Optimization steps approach a lower limit as batches grow, while total examples processed increase. The crossover is not a hardware-throughput optimum or a measured threshold for a particular model [@mccandlish2018empirical]." fig-alt="Two curves on logarithmic axes. Normalized optimization steps decrease toward one as normalized batch increases; normalized sample use increases from one. Both curves equal two at batch divided by critical batch equal to one, marked as the crossover. The region above the critical batch is shaded light gray; labels name the two regimes, steps falling almost proportionally with few extra samples below the critical batch, and steps flattening toward the minimum while samples keep climbing above it. Each curve is labeled directly."}
 ```{python}
 #| echo: false
 # ┌── CRITICAL BATCH TRADE-OFF (FIGURE) ─────────────────────────────────────
@@ -2786,27 +2842,55 @@ normalized_samples = 1 + normalized_batch
 check(np.all(np.diff(normalized_steps) < 0), "Step count decreases with batch size")
 check(np.all(np.diff(normalized_samples) > 0), "Sample use increases with batch size")
 check(np.allclose((normalized_steps - 1) * (normalized_samples - 1), 1), "Normalized trade-off identity")
-ax.loglog(normalized_batch, normalized_steps, color=viz.COLORS['BlueLine'], linewidth=2.0, label='Optimization steps / minimum steps')
-ax.loglog(
-    normalized_batch, normalized_samples, color=viz.COLORS['OrangeLine'], linestyle='--', linewidth=2.0, label='Examples processed / minimum examples'
-)
+# Regime backdrop: left of B* steps fall almost proportionally; right of it they flatten while samples climb.
+ax.axvspan(1, 100, color=viz.COLORS['grid'], alpha=0.18, lw=0, zorder=0)
+ax.axhline(1, color=viz.COLORS['grid'], linewidth=1.0, zorder=1)
+ax.loglog(normalized_batch, normalized_steps, color=viz.COLORS['BlueLine'], linewidth=2.0, zorder=3)
+ax.loglog(normalized_batch, normalized_samples, color=viz.COLORS['OrangeLine'], linestyle='--', linewidth=2.0, zorder=3)
 ax.plot([1, 1], [0.9, 2], color=viz.COLORS['primary'], linestyle=':', linewidth=1.2)
 ax.scatter([1], [2], color=viz.COLORS['primary'], zorder=5)
-ax.text(
-    1.45,
-    2.0,
+ax.annotate(
     'crossover, both costs = 2',
+    xy=(1, 2),
+    xytext=(2.7, 2.35),
     ha='left',
     va='center',
-    fontsize=9,
+    fontsize=10,
     color=viz.COLORS['primary'],
-    bbox=dict(facecolor='white', edgecolor='none', pad=1),
     zorder=6,
+    arrowprops=dict(arrowstyle='-', color=viz.COLORS['primary'], lw=0.7, shrinkA=2, shrinkB=5),
+)
+# Direct series labels, placed along each curve.
+ax.text(0.13, 14, 'optimization steps\n/ minimum steps', ha='left', va='bottom', fontsize=10.5, fontweight='bold', color=viz.COLORS['BlueLine'])
+ax.text(70, 3.6, 'examples processed\n/ minimum examples', ha='right', va='center', fontsize=10.5, fontweight='bold', color=viz.COLORS['OrangeLine'])
+# Regime names the prose uses.
+ax.text(
+    0.05,
+    3.1,
+    'below $B^*$: steps fall almost\nproportionally, few extra samples',
+    ha='center',
+    va='center',
+    fontsize=10,
+    color=viz.COLORS['primary'],
+    style='italic',
+)
+ax.text(
+    10,
+    100,
+    'above $B^*$: steps flatten toward\nthe minimum, samples keep climbing',
+    ha='center',
+    va='top',
+    fontsize=10,
+    color=viz.COLORS['primary'],
+    style='italic',
 )
 ax.set_xlabel(r'Batch size / critical batch size ($B/B^*$)')
 ax.set_ylabel('Normalized cost to the same target quality')
 ax.set_ylim(0.9, 130)
-ax.legend(loc='upper center', fontsize=9, frameon=True, facecolor='white', edgecolor='none', framealpha=1)
+ax.set_xlim(0.009, 110)
+ax.grid(False, which='minor')
+for _sp in ('top', 'right'):
+    ax.spines[_sp].set_visible(False)
 fig.tight_layout()
 plt.show()
 plt.close(fig)
@@ -3028,7 +3112,7 @@ Despite higher parallelism, 64-GPU training costs more per run due to communicat
 
 Communication savings matter only through the resulting time and cost to achieve target model quality. In the preceding scenario, the 8-worker BSP configuration minimizes cost (`{python} ScalingWorkers.cost_8_str`) at the expense of runtime, and scaling to 64 workers under BSP buys a much shorter run for `{python} ScalingWorkers.cost_64bsp_str`. The 64-worker SSP run saves communication per iteration yet finishes later and costs more (`{python} ScalingWorkers.cost_64ssp_str`), because its stale updates need extra iterations to reach the same target. @Fig-comm-convergence-tradeoff places the three runs on the cost-time plane, where BSP at 64 workers dominates SSP on both axes.
 
-::: {#fig-comm-convergence-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Cost and time in the illustrative scaling scenario**: Points reuse the assumed convergence counts and step times in the preceding notebook. The eight-worker configuration costs less but finishes later; the assumed sixty-four-worker SSP configuration is dominated by BSP in both cost and time. This is not a universal ranking of synchronization methods." fig-alt="Scatter plot of job time in minutes against cost in dollars for the preceding hypothetical example, with BSP runs as filled circles and the SSP run as an open circle. Eight-worker BSP is slower and cheaper. The sixty-four-worker SSP point sits just above and to the right of the sixty-four-worker BSP point, labeled as dominated by sixty-four-worker BSP."}
+::: {#fig-comm-convergence-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Cost and time in the illustrative scaling scenario**: Points reuse the assumed convergence counts and step times in the preceding notebook. The eight-worker configuration costs less but finishes later; the assumed sixty-four-worker SSP configuration is dominated by BSP in both cost and time. This is not a universal ranking of synchronization methods." fig-alt="Scatter plot of job time in minutes, on a log scale, against cost in dollars for the preceding hypothetical example, with BSP runs as filled circles and the SSP run as an open circle. Eight-worker BSP is slower and cheaper. A dashed staircase through the two BSP points bounds a light gray region labeled dominated, slower and costlier than a BSP run. The sixty-four-worker SSP point sits inside that region, just above and to the right of the sixty-four-worker BSP point, while the white area below the staircase is labeled not dominated by either BSP run."}
 ```{python}
 #| echo: false
 # ┌── SCALING SCENARIO COST–TIME (FIGURE) ──────────────────────────────────
@@ -3047,33 +3131,65 @@ job_minutes = [
 ]
 job_costs = [ScalingWorkers.cost_8, ScalingWorkers.cost_64bsp, ScalingWorkers.cost_64ssp]
 labels = ['8 workers, BSP', '64 workers, BSP', '64 workers, SSP']
+x_lo, x_max = min(job_minutes) * 0.75, max(job_minutes) * 1.15
+y_lo, y_hi = min(job_costs) * 0.93, max(job_costs) * 1.08
+ax.set_xscale('log')  # log time keeps the two 64-worker runs, about a minute apart, visibly distinct
+
+# Region dominated by a BSP run (slower AND costlier than one of them), bounded by the staircase frontier.
+(_ta, _ca), (_tb, _cb) = (job_minutes[1], job_costs[1]), (job_minutes[0], job_costs[0])
+ax.fill_between([_ta, _tb, _tb, x_max], [_ca, _ca, _cb, _cb], y_hi, step=None, color=COLORS['grid'], alpha=0.35, lw=0, zorder=0)
+ax.plot([_ta, _ta], [y_hi, _ca], color=COLORS['primary'], lw=1.0, ls=(0, (4, 3)), zorder=2)
+ax.plot([_ta, _tb, _tb, _tb], [_ca, _ca, _cb, _cb], color=COLORS['primary'], lw=1.0, ls=(0, (4, 3)), zorder=2)
+ax.plot([_tb, x_max], [_cb, _cb], color=COLORS['primary'], lw=1.0, ls=(0, (4, 3)), zorder=2)
+ax.text(
+    (_ta * _tb) ** 0.5,
+    y_hi - 0.8,
+    'dominated: slower and costlier than a BSP run',
+    ha='center',
+    va='top',
+    fontsize=10,
+    style='italic',
+    color=COLORS['secondary'],
+)
+# Everything below the staircase is not dominated by either BSP run.
+ax.text(
+    (_ta * _tb) ** 0.5,
+    (_ca + _cb) / 2,
+    'not dominated by\neither BSP run',
+    ha='center',
+    va='center',
+    fontsize=10,
+    style='italic',
+    color=COLORS['secondary'],
+)
+
 # Configurations are categories, not resources: one neutral color, filled = BSP, open = SSP.
 filled = [True, True, False]
-offsets = [(-100, 12), (12, -6), (12, 3)]
-for x, y, label, solid, offset in zip(job_minutes, job_costs, labels, filled, offsets):
-    ax.scatter(x, y, s=55, facecolor=COLORS['primary'] if solid else 'white', edgecolor=COLORS['primary'], linewidth=1.5, zorder=4)
+offsets = [(-10, 0), (8, -8), (10, 0)]
+has = ['right', 'left', 'left']
+for x, y, label, solid, offset, ha in zip(job_minutes, job_costs, labels, filled, offsets, has):
+    ax.scatter(x, y, s=60, facecolor=COLORS['primary'] if solid else 'white', edgecolor=COLORS['primary'], linewidth=1.5, zorder=4)
     ax.annotate(
-        label, (x, y), xytext=offset, textcoords='offset points', fontsize=9, color=COLORS['primary'], va='bottom' if offset[1] > 0 else 'top'
+        label,
+        (x, y),
+        xytext=offset,
+        textcoords='offset points',
+        fontsize=10.5,
+        fontweight='bold',
+        color=COLORS['primary'],
+        ha=ha,
+        va='bottom' if offset[1] > 0 else ('top' if offset[1] < 0 else 'center'),
     )
-# Dominance cue, attached to the point it describes: SSP is slower and costlier than 64-worker BSP.
-ax.annotate(
-    'dominated by 64 workers, BSP',
-    (job_minutes[2], job_costs[2]),
-    xytext=(12, -3),
-    textcoords='offset points',
-    fontsize=8.5,
-    style='italic',
-    va='top',
-    color=COLORS['primary'],
-    alpha=0.7,
-)
-x_max = max(job_minutes) * 1.12
-y_lo, y_hi = min(job_costs) * 0.88, max(job_costs) * 1.12
-ax.set_xlabel('Time to assumed target quality (minutes)')
+ax.set_xlabel('Time to assumed target quality (minutes, log scale)')
 ax.set_ylabel('Allocated GPU cost (dollars)')
-ax.set_xlim(0, x_max)
+ax.set_xlim(x_lo, x_max)
+ax.set_xticks([15, 20, 30, 50, 100])
+ax.set_xticks([], minor=True)
+ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}'))
 ax.set_ylim(y_lo, y_hi)
 ax.grid(False)  # three points; direct labels carry the values
+for _sp in ('top', 'right'):
+    ax.spines[_sp].set_visible(False)
 fig.tight_layout()
 plt.show()
 plt.close(fig)
@@ -3405,7 +3521,7 @@ Partitioning strategy determines which cost the model pays after memory no longe
 
 Layer-wise partitioning is the least invasive model cut: it saves memory by assigning consecutive layers to separate devices, but it preserves the model's sequential dependence. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @Fig-dist-layers-blocks diagrams this partitioning for a 16-layer transformer across four GPUs: panel (a) maps the weight footprint reduction to one-quarter per device alongside forward activation and backward gradient transfers across stage boundaries, while panel (b) charts the resulting execution timeline, revealing that each GPU remains idle for six of eight time slots without microbatch pipelining.
 
-::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-wise model parallelism**: (a) A 16-layer transformer placed four consecutive layers per GPU, cutting each GPU's weight footprint to one-quarter of the model. Forward activations cross each stage boundary left to right; gradients return right to left. (b) Without microbatching, one batch visits the stages in turn, forward (F) and then backward (B) in reverse, in equal schematic time slots, so each GPU works in only 2 of 8 slots. The microbatched schedule in @fig-pipeline-parallelism fills much of that idle time." fig-alt="Panel a: an input box, four GPU cards holding layers 1 to 4, 5 to 8, 9 to 12, and 13 to 16, and a loss box, joined by solid gray forward-activation arrows and dashed gray gradient arrows. Panel b: a four-row, eight-slot timeline in which a single light-blue forward cell steps diagonally down from GPU 0 to GPU 3 and a single darker-blue backward cell steps back up, leaving every other cell empty."}
+::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-wise model parallelism**: (a) A 16-layer transformer placed four consecutive layers per GPU, cutting each GPU's weight footprint to one-quarter of the model. Forward activations cross each stage boundary left to right; gradients return right to left. (b) Without microbatching, one batch visits the stages in turn, forward (F) and then backward (B) in reverse, in equal schematic time slots, so each GPU works in only 2 of 8 slots. The microbatched schedule in @fig-pipeline-parallelism fills much of that idle time." fig-alt="Panel a: an input box, four GPU cards holding layers 1 to 4, 5 to 8, 9 to 12, and 13 to 16, and a loss box, joined by solid gray forward-activation arrows and dashed gray gradient arrows. Panel b: a four-row, eight-slot timeline in which a single light-blue forward cell steps diagonally down from GPU 0 to GPU 3 and a single darker-blue backward cell steps back up, leaving every other cell idle and hatched red. A small bar beside each row splits into 2 busy and 6 idle segments, labeled busy 2 of 8."}
 ![](images/svg/layer-wise-partitioning.svg)
 
 <!--
@@ -3795,7 +3911,7 @@ class PipelineBubble:
 
 @Fig-pipeline-parallelism sequences a four-stage pipeline processing four microbatches ($\PipelineParallelDegree=4, \MicrobatchCount=4$) under a GPipe schedule: dividing the global batch into discrete microbatches allows forward passes to overlap diagonally across stages before backward passes unfold in reverse order. While microbatching raises hardware utilization above naive sequential placement, pipeline fill ($\PipelineTimeSlot_1$--$\PipelineTimeSlot_3$) and drain ($\PipelineTimeSlot_{12}$--$\PipelineTimeSlot_{14}$) bubbles still leave each device idle for 6 of 14 time slots.
 
-::: {#fig-pipeline-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Pipeline parallelism schedule**: A 4-stage pipeline processes 4 microbatches with all forward passes (F) before any backward pass (B), as in GPipe. Rows are pipeline stages and columns are equal time slots. Each backward pass enters a stage only after the next stage has produced that microbatch's gradient, so every stage idles $\PipelineParallelDegree-1$ slots in the forward phase and $\PipelineParallelDegree-1$ in the backward phase, 6 of 14 slots in all." fig-alt="Pipeline schedule grid with four GPU rows and fourteen time slots. Light blue forward cells for microbatches 1 to 4 step diagonally down and right; darker blue backward cells in reverse microbatch order step diagonally up and right from the last stage; idle cells fill the rest of the grid, with the fill slots t1 to t3 and drain slots t12 to t14 bracketed below it. A legend identifies forward, backward, and idle cells."}
+::: {#fig-pipeline-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Pipeline parallelism schedule**: A 4-stage pipeline processes 4 microbatches with all forward passes (F) before any backward pass (B), as in GPipe. Rows are pipeline stages and columns are equal time slots. Each backward pass enters a stage only after the next stage has produced that microbatch's gradient, so every stage idles $\PipelineParallelDegree-1$ slots in the forward phase and $\PipelineParallelDegree-1$ in the backward phase, 6 of 14 slots in all." fig-alt="Pipeline schedule grid with four GPU rows and fourteen time slots. Light blue forward cells for microbatches 1 to 4 step diagonally down and right; darker blue backward cells in reverse microbatch order step diagonally up and right from the last stage; the idle bubble cells that fill the rest of the grid are hatched red, forming triangles at the start and end of the schedule and a diamond in the middle, with the fill slots t1 to t3 and drain slots t12 to t14 bracketed below. At the right, a small bar per stage splits into 8 busy and 6 idle segments, labeled 6 of 14 idle. A legend identifies forward, backward, and idle cells."}
 ![](images/svg/pipeline-parallelism.svg)
 
 <!--
@@ -4209,7 +4325,7 @@ Each GPU computes its partition independently. The concatenation in the equation
 $$\LayerOutputMatrix= \LayerInputMatrix\WeightMatrix= \LayerInputMatrix_1 \WeightMatrix_1 + \LayerInputMatrix_2 \WeightMatrix_2$$
 Each GPU computes a partial sum, and the system pays one AllReduce to combine the partial outputs.
 
-::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Matrix partitioning under tensor parallelism**: A Megatron-LM layer pair on two GPUs, read left to right. The first layer (for example, QKV or the first feed-forward layer) is split by columns, $\ColumnParallelWeightMatrix = [\ColumnParallelWeightMatrix_1 \mid \ColumnParallelWeightMatrix_2]$, so each GPU computes its own slice $\LayerOutputMatrix_i$ of the replicated input's output. The second layer is split by rows, $\RowParallelWeightMatrix = [\RowParallelWeightMatrix_1 ; \RowParallelWeightMatrix_2]$, so each slice feeds its matching shard on the same GPU without communication. The only collective is the amber AllReduce that sums the partial outputs $\RowParallelOutputMatrix_1 + \RowParallelOutputMatrix_2$, leaving the full result on both GPUs." fig-alt="Flow diagram on two GPU lanes. A replicated input X fans out to column-shard boxes Y1 equals X A1 and Y2 equals X A2, each feeding a row-shard box Z1 equals Y1 B1 and Z2 equals Y2 B2 on the same lane, labeled stays local. Both partial sums enter one AllReduce box that outputs Z on both GPUs."}
+::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Matrix partitioning under tensor parallelism**: A Megatron-LM layer pair on two GPUs, read left to right. The first layer (for example, QKV or the first feed-forward layer) is split by columns, $\ColumnParallelWeightMatrix = [\ColumnParallelWeightMatrix_1 \mid \ColumnParallelWeightMatrix_2]$, so each GPU computes its own slice $\LayerOutputMatrix_i$ of the replicated input's output. The second layer is split by rows, $\RowParallelWeightMatrix = [\RowParallelWeightMatrix_1 ; \RowParallelWeightMatrix_2]$, so each slice feeds its matching shard on the same GPU without communication. The only collective is the amber AllReduce that sums the partial outputs $\RowParallelOutputMatrix_1 + \RowParallelOutputMatrix_2$, leaving the full result on both GPUs." fig-alt="Two GPU lanes, each written as a matrix equation with rectangles drawn to shape. On each lane a replicated input matrix X multiplies weight matrix A, of which the GPU holds only one column half, A1 or A2, the other half dashed. The result is one column slice, Y1 or Y2, which multiplies the matching row half of B, B1 on top for GPU 0 and B2 below for GPU 1, giving a full-size partial sum Z1 or Z2; a note between the lanes reads no communication. Both partial sums enter one amber AllReduce bar spanning the lanes, which outputs the full Z on each GPU."}
 ![](images/svg/tensor-parallel-split.svg)
 
 <!--
@@ -4583,7 +4699,7 @@ While tensor parallelism splits dense operations, expert parallelism\index{Exper
 
 In a distributed setting, experts are partitioned across workers, with each rank hosting a disjoint subset of expert networks. @Fig-moe-all-to-all-routing traces this token routing cycle across four ranks: after top-$\RoutedExpertCount$ gating selects destination experts, an All-to-All dispatch shuffles tokens across the fabric to the hosting ranks, expert FFNs compute locally, and a second All-to-All return routes the processed activations back to the originating ranks to form the gate-weighted sum. The backward pass repeats both exchanges in reverse order: output gradients travel to the ranks hosting the experts, and input gradients return to the ranks that own the tokens.
 
-::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) AllToAll routing**: Expert parallelism on four ranks, one expert per rank, read left to right. Each rank's gate picks the top-$\RoutedExpertCount$ experts for its tokens; the first All-to-All dispatches every token to the rank that hosts its expert, the experts compute, and a second All-to-All returns the results so each rank can form the gate-weighted sum for its own tokens. In both exchanges every rank may send to every other rank, which is why the pattern stresses the fabric's bisection bandwidth." fig-alt="Five columns: four rank boxes labeled top-k gate, an amber dispatch box in which lines connect every input row to every output row, four blue expert boxes each on its own rank, a second amber All-to-All return box with the same crossing lines, and four rank boxes that combine their tokens."}
+::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) AllToAll routing**: Expert parallelism on four ranks, one expert per rank, read left to right and drawn for top-1 routing with one token traced. Each rank's gate picks the top-$\RoutedExpertCount$ experts for its tokens; the first All-to-All dispatches every token to the rank that hosts its expert, the experts compute, and a second All-to-All returns the results so each rank can form the gate-weighted sum for its own tokens. In both exchanges every rank may send to every other rank, which is why the pattern stresses the fabric's bisection bandwidth." fig-alt="Five columns over four rows. On the left, ranks 0 to 3 each hold four token chips lettered a to p. An amber dispatch band carries one line per token to the blue expert box on the rank its gate chose, so Expert 0 holds tokens b, g, i, p, Expert 1 holds d, e, k, n, Expert 2 holds a, h, j, o, and Expert 3 holds c, f, l, m, one token from every rank. A second amber return band carries each token back to its home rank, where the four chips reappear in their original order shaded blue. The route of token a, from rank 0 to Expert 2 and back, is drawn heavier."}
 ![](images/svg/moe-all-to-all-routing.svg){width=100%}
 
 <!--
@@ -5324,7 +5440,7 @@ class MfuProgression:
 
 A projected MFU needs comparison with measured execution. @Fig-mfu-progression places reported MFU\index{Model FLOPs Utilization!distributed training} from 2020–2024 systems against an illustrative 50 percent reference line. GPT-3's `{python} MfuProgression.gpt3_mfu_str` and PaLM's `{python} MfuProgression.palm_mfu_str`\index{PaLM!MFU efficiency} describe different hardware and workload configurations; their difference does not isolate the effect of parallelism or overlap. Llama 3's reported result at `{python} MfuProgression.llama3_16k_gpus_str` H100 GPUs (`{python} MfuProgression.llama3_16k_mfu_str`) is lower than at `{python} MfuProgression.llama3_8k_gpus_str` GPUs (`{python} MfuProgression.llama3_8k_mfu_str`)\index{Llama 3!MFU scaling tax}. Interpreting that change requires the batch, configuration, precision convention, and measurement window alongside device count.
 
-::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU progression**: Model FLOPs Utilization across published training systems, ordered chronologically. Reported MFU rises from `{python} MfuProgression.gpt3_mfu_str` (GPT-3, 2020) to `{python} MfuProgression.palm_mfu_str` (PaLM, 2022), with later illustrated runs near 40--45 percent. These systems differ in hardware and workload, so the comparison does not isolate the effect of parallelism or overlap. The Llama 3 data points show lower reported MFU at the larger scale: MFU drops from `{python} MfuProgression.llama3_8k_mfu_str` at `{python} MfuProgression.llama3_8k_gpus_str` GPUs to `{python} MfuProgression.llama3_16k_mfu_str` at `{python} MfuProgression.llama3_16k_gpus_str` GPUs. Interpreting the difference requires the batch, execution configuration, and measurement convention. Data sources: @chowdhery2022palm, @dubey2024llama." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent. A dashed line marks 50 percent of peak, and a bracket notes that the Llama 3 run on twice the GPUs reports lower MFU."}
+::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU progression**: Model FLOPs Utilization across published training systems, ordered chronologically. Reported MFU rises from `{python} MfuProgression.gpt3_mfu_str` (GPT-3, 2020) to `{python} MfuProgression.palm_mfu_str` (PaLM, 2022), with later illustrated runs near 40--45 percent. These systems differ in hardware and workload, so the comparison does not isolate the effect of parallelism or overlap. The Llama 3 data points show lower reported MFU at the larger scale: MFU drops from `{python} MfuProgression.llama3_8k_mfu_str` at `{python} MfuProgression.llama3_8k_gpus_str` GPUs to `{python} MfuProgression.llama3_16k_mfu_str` at `{python} MfuProgression.llama3_16k_gpus_str` GPUs. Interpreting the difference requires the batch, execution configuration, and measurement convention. Data sources: @chowdhery2022palm, @dubey2024llama." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent. Each orange bar sits inside a light gray track that runs to 100 percent of peak, the remainder labeled unused share of peak. A dashed line marks 50 percent of peak, and a bracket notes that the Llama 3 run on twice the GPUs reports lower MFU."}
 
 ```{python}
 #| echo: false
@@ -5364,38 +5480,47 @@ systems = [
 mfu_values = [round(100 * v, 1) for v in (_R.gpt3_mfu, _R.mtnlg_mfu, _R.gopher_mfu, _R.palm_mfu, _R.llama3_8k_mfu, _R.llama3_16k_mfu)]
 
 y_pos = np.arange(len(systems))
-# One series, one color: the hardware generation is already in each label.
-bars = ax.barh(y_pos, mfu_values, color=COLORS['BlueL'], edgecolor=COLORS['BlueLine'], height=0.58, linewidth=1.0, zorder=3)
+# Each bar is drawn inside a full-length track = 100% of peak, so the unused share of peak is visible.
+ax.barh(y_pos, [100] * len(y_pos), color=COLORS['grid'], alpha=0.25, edgecolor=COLORS['grid'], height=0.58, linewidth=0.8, zorder=2)
+ax.text(99, 0, 'unused share of peak', va='center', ha='right', fontsize=10, style='italic', color=COLORS['secondary'], zorder=4)
+# One series, one color: MFU is compute utilization, so the compute hue (orange);
+# the hardware generation is already in each label.
+bars = ax.barh(y_pos, mfu_values, color=COLORS['OrangeL'], edgecolor=COLORS['OrangeLine'], height=0.58, linewidth=1.0, zorder=3)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 # Value labels sit inside each bar's right end, clear of the reference line.
 for i, val in enumerate(mfu_values):
-    ax.text(val - 0.8, i, f'{val}%', va='center', ha='right', fontsize=9, fontweight='bold', color=COLORS['primary'], zorder=4)
+    ax.text(val - 0.8, i, f'{val}%', va='center', ha='right', fontsize=10, fontweight='bold', color=COLORS['primary'], zorder=4)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 # Illustrative 50 percent reference line (not a hardware limit, so neutral gray).
 ax.axvline(x=50, color=COLORS['secondary'], linestyle='--', linewidth=1.1, zorder=2)
-ax.text(50.6, -0.55, '50% of peak', fontsize=8.5, color=COLORS['secondary'], va='center', ha='left')
+ax.text(50.6, -0.6, '50% of peak', fontsize=10, color=COLORS['secondary'], va='center', ha='left')
+ax.text(99.5, -0.6, 'peak', fontsize=10, color=COLORS['secondary'], va='center', ha='right')
 
 # The two Llama 3 runs: same model, twice the GPUs, lower reported MFU.
 ax.plot([43.6, 44.3, 44.3, 41.6], [4, 4, 5, 5], color=COLORS['secondary'], lw=1.0, zorder=3)
+# The note sits just right of the bracket it explains, in the gap between the two tracks;
+# its white backing breaks the 50% reference line where the two cross.
 ax.text(
-    44.3,
-    5.5,
+    45.2,
+    4.5,
     f'{_R.llama3_8k_gpus // 1024}K to {_R.llama3_16k_gpus // 1024}K GPUs, lower MFU',
-    fontsize=8.5,
+    fontsize=10,
     color=COLORS['secondary'],
     va='center',
-    ha='right',
+    ha='left',
     zorder=4,
     bbox=dict(facecolor='white', edgecolor='none', pad=1.0),
 )
 
 ax.set_yticks(y_pos)
-ax.set_yticklabels(systems, fontsize=9)
+ax.set_yticklabels(systems, fontsize=10)
 ax.set_xlabel('Model FLOPs Utilization (%)')
-ax.set_xlim(0, 64)
-ax.set_ylim(5.85, -0.9)
+ax.set_xlim(0, 100)
+for _sp in ('top', 'right'):
+    ax.spines[_sp].set_visible(False)
+ax.set_ylim(5.5, -0.9)
 ax.grid(axis='y', visible=False)
 
 plt.tight_layout()
@@ -5477,7 +5602,7 @@ class DistTrainH100Capacity:
 
 The single-model pretraining baseline becomes a multi-role loop in PPO\index{Proximal policy optimization!model asymmetry}\index{PPO|see{Proximal policy optimization}} [@schulman2017proximal], as used in InstructGPT-style systems [@ouyang2022instructgpt]. @Tbl-rlhf-model-coordination-roles separates policy, reference, reward, and value roles by execution mode and memory burden. In @fig-rlhf-ppo-step, the policy $\Policy$ generates responses for scoring by the frozen reference and reward models and evaluation by the value model $\CriticModel$. The penalized reward ($\ResponseReward- \KlPenaltyCoefficient\,\text{KL}$) subtracts a Kullback–Leibler divergence penalty, weighted by a coefficient $\KlPenaltyCoefficient$ unrelated to link bandwidth $\LinkBandwidth$, to discourage drift from the reference. Generalized advantage estimation (GAE) combines rewards and value estimates to judge how much better a response was than expected. Those estimates guide policy updates; the value model learns to predict returns, the cumulative discounted reward that follows each generated token. Reference and reward models remain forward-only in this loop, and shared-backbone implementations can combine roles without changing their distinct responsibilities.
 
-::: {#fig-rlhf-ppo-step fig-env="figure" fig-pos="htb" fig-cap="**One PPO-style RLHF step**: The policy generates responses to a batch of prompts. The frozen reference model supplies log-probabilities for the KL penalty, the frozen reward model supplies a scalar score, and the trained value model supplies value estimates. The penalized reward and value estimates form advantages, which update the policy and value models. Blue boxes carry gradients and optimizer state; slate boxes run forward passes only, which is the asymmetry that drives placement." fig-alt="Flow diagram. Prompts feed a blue Policy box, whose responses fan out to three boxes: Reference (slate, log-probs for KL), Reward model (slate, scalar score r), and Value model (blue, value estimates). Their outputs merge into an Advantages box labeled r minus beta KL, GAE. A blue return line labeled PPO update feeds back into the Policy and Value boxes. A legend marks blue as trained and slate as frozen."}
+::: {#fig-rlhf-ppo-step fig-env="figure" fig-pos="htb" fig-cap="**One PPO-style RLHF step**: The policy generates responses to a batch of prompts. The frozen reference model supplies log-probabilities for the KL penalty, the frozen reward model supplies a scalar score, and the trained value model supplies value estimates. The penalized reward and value estimates form advantages, which update the policy and value models. Blue cards carry gradients and optimizer state; slate cards run forward passes only and hold weights alone, as each card's weight, gradient, and optimizer-state strip shows; strip widths follow the 2, 2, and 12 bytes per parameter of mixed-precision Adam, unlike the equal-width columns of @fig-zero-partitioning. That asymmetry drives placement." fig-alt="Flow diagram. Prompts feed a blue Policy card, whose responses fan out to three cards: Reference (slate, log-probs for KL), Reward model (slate, scalar score r), and Value model (blue, value estimates). Each card carries a strip of weight, gradient, and optimizer-state tiles sized 2 to 2 to 12: the blue Policy and Value cards fill all three tiles, while the slate Reference and Reward cards fill only the weight tile and show gradients and optimizer state as dashed empty outlines. The three scoring outputs merge into an Advantages box labeled r minus beta KL, GAE, and a blue return line labeled PPO update feeds gradients back to the Policy and Value cards only."}
 ![](images/svg/rlhf-ppo-coordination.svg)
 
 :::
@@ -5756,7 +5881,7 @@ The canonical 3D core does not exhaust the partitioning space. Sequence parallel
 
 @Fig-parallelism-flowchart sketches candidate choices from memory fit and execution structure. Its single-device branch asks whether throughput and input delivery meet the target; the complete dataset need not reside in accelerator memory. Layer depth, an oversized operation, and replicated state suggest pipeline, tensor, and sharded data parallelism respectively, subject to the feasibility tests in @tbl-parallelism-compare. A 3D layout ($\text{TP} \times \text{PP} \times \text{DP}$) combines these choices when needed. Before accepting any branch, check peak memory, global batch, communication service time, and load balance together; bandwidth is a feasibility constraint throughout the decision, not an afterthought.
 
-::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision framework**: A selection guide that begins with memory fit. For a model that fits on one device, evaluate data parallelism against the throughput target and input-delivery budget; the complete dataset need not fit in accelerator memory. A model that does not fit is routed by the structure that breaks the budget, with sequential depth leading to pipeline parallelism, an oversized single layer to tensor parallelism, and otherwise sharded data parallelism (FSDP/ZeRO). Combine parallelism axes when the workload requires them. Peak memory, global batch, bandwidth, and workload imbalance constrain every candidate." fig-alt="Decision tree flowchart. From the workload profile, diamonds ask whether the model fits on one GPU, whether one GPU meets the target, whether the layer stack is deep, and whether a single layer is too large. Outcomes are single device, data parallel, pipeline parallel, tensor parallel, or sharded data parallel (FSDP, ZeRO). Dashed lines from the four parallel outcomes lead to a box that combines axes as TP times PP times DP."}
+::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision framework**: A selection guide that begins with memory fit. For a model that fits on one device, evaluate data parallelism against the throughput target and input-delivery budget; the complete dataset need not fit in accelerator memory. A model that does not fit is routed by the structure that breaks the budget, with sequential depth leading to pipeline parallelism, an oversized single layer to tensor parallelism, and otherwise sharded data parallelism (FSDP/ZeRO). Combine parallelism axes when the workload requires them. Peak memory, global batch, bandwidth, and workload imbalance constrain every candidate." fig-alt="Decision tree flowchart. From the workload profile, diamonds ask whether the model fits on one GPU, whether one GPU meets the target, whether the layer stack is deep, and whether a single layer is too large. Outcomes are single device, data parallel, pipeline parallel, tensor parallel, or sharded data parallel (FSDP, ZeRO), each with a small glyph of layer bars inside GPU frames: one full stack for a single device, three full copies for data parallel, two frames holding upper and lower layer groups for pipeline parallel, two frames each holding one half of every layer for tensor parallel, and three frames each holding a different one-third slice of every layer, the rest dashed, for sharded data parallel. Dashed lines from the four parallel outcomes lead to a box that combines axes as TP times PP times DP."}
 ![](images/svg/parallelism-flowchart.svg){width=100%}
 
 <!--

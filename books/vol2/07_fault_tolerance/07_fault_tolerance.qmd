@@ -190,7 +190,7 @@ The consequence is a gap between failure cadence and job length. At `{python} Fl
 
 Scale and reliability diverge sharply across training generations. By pairing accelerator counts (left axis, log scale) with modeled system MTBF (opposing right axis), @fig-cluster-scaling-trend tracks how training fleets expanded by four orders of magnitude from 2012 (AlexNet on two GPUs) to 2024 (Llama 3 on over 16,000 GPUs), driven by the compute budgets that scaling laws reward (@sec-vol2-intro-ai-scaling-laws-a043). Applying the same per-device planning rate across those sizes compresses system MTBF from tens of thousands of hours to under ten hours. The opposing axis illustrates the scaling model rather than a history of measured failure rates, showing why recovery becomes an active scheduling constraint.
 
-::: {#fig-cluster-scaling-trend fig-env="figure" fig-pos="htb" fig-cap="**The rise of fleet-scale training**: Accelerator count for state-of-the-art training runs from 2012 to 2024, with system mean time between failures on the opposing axis. Cluster size rises about four orders of magnitude and system MTBF falls correspondingly, which is what turns fault tolerance from a reliability feature into a scheduling constraint." fig-alt="Log-scale chart of training cluster accelerator count from 2012 to 2024 with a second axis for system mean time between failures. Accelerator count rises about four orders of magnitude while system MTBF falls correspondingly."}
+::: {#fig-cluster-scaling-trend fig-env="figure" fig-pos="htb" fig-cap="**The rise of fleet-scale training**: Accelerator count for state-of-the-art training runs from 2012 to 2024, with system mean time between failures on the opposing axis. Cluster size rises about four orders of magnitude and system MTBF falls correspondingly, which is what turns fault tolerance from a reliability feature into a scheduling constraint." fig-alt="Log-scale scatter of training cluster accelerator count from 2012 (AlexNet, 2 GPUs) to 2024 (Llama 3, 16,384 GPUs) with a second axis for system mean time between failures. A red-shaded band with a dashed boundary marks the region where system MTBF falls under 10 hours; PaLM, GPT-4, and Llama 3 sit inside it. A double-headed arrow at the right spans AlexNet to Llama 3 and is labeled about 10 to the 4th times."}
 
 ```{python}
 #| echo: false
@@ -221,7 +221,7 @@ for idx, row in df.iterrows():
         # Upper-left keeps the label off the rising GPT-2 -> GPT-3 segment.
         x_offset, y_offset, ha = -6, 6, 'right'
     ax1.annotate(
-        row['model'], (row['year'], row['accelerators']), xytext=(x_offset, y_offset), textcoords='offset points', ha=ha, fontsize=8, alpha=0.9
+        row['model'], (row['year'], row['accelerators']), xytext=(x_offset, y_offset), textcoords='offset points', ha=ha, fontsize=10, alpha=0.9
     )
 
 ax1.set_yscale('log')
@@ -257,6 +257,30 @@ def format_mtbf(x, pos):
     return f'{x:.1f}'
 
 ax2.yaxis.set_major_formatter(FuncFormatter(format_mtbf))
+
+# Regime the prose names: system MTBF under ten hours, i.e. N above MTTF / 10.
+n_10h = gpu_mttf_h / 10
+ytop = ax1.get_ylim()[1]
+ax1.axhspan(n_10h, ytop, color=COLORS['RedL'], alpha=0.45, zorder=0, lw=0)
+ax1.axhline(n_10h, color=color_mtbf, lw=0.8, ls='--', zorder=1)
+ax1.text(2010.75, n_10h * 1.25, 'system MTBF under 10 h', color=color_mtbf, fontsize=10, fontweight='bold', ha='left', va='bottom')
+ax1.set_ylim(top=ytop)
+
+# Span of the trend: AlexNet (2012) to Llama 3 (2024), about four orders of magnitude.
+first, last = df_sorted.iloc[0], df_sorted.iloc[-1]
+x_span = last['year'] + 0.9
+ax1.annotate(
+    '', xy=(x_span, last['accelerators']), xytext=(x_span, first['accelerators']), arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.0)
+)
+ax1.text(
+    x_span - 0.2,
+    (first['accelerators'] * last['accelerators']) ** 0.5,
+    r"$\sim\!10^{4}\times$",
+    ha='right',
+    va='center',
+    fontsize=10,
+    color=COLORS['primary'],
+)
 
 fig.tight_layout()
 
@@ -685,11 +709,12 @@ kokolis_mttf = [
     float(_fo.Kokolis16KGpuProjectedMttfHours),
     float(_fo.Kokolis131KGpuProjectedMttfHours),
 ]  # hours
+# Direct labels carry the measured/projected distinction (no legend).
 kokolis_labels = [
-    f'{kokolis_gpus[0]:,.0f} GPUs, {kokolis_mttf[0] / 24:.1f} days',
-    f'{kokolis_gpus[1]:,.0f} GPUs, {kokolis_mttf[1]:.1f} h',
-    f'{kokolis_gpus[2]:,.0f} GPUs, {kokolis_mttf[2]:.1f} h',
-    f'{kokolis_gpus[3] / 1000:.0f}K GPUs, {kokolis_mttf[3] * 60:.0f} min',
+    f'Meta RSC, {kokolis_gpus[0]:,.0f} GPUs\n{kokolis_mttf[0] / 24:.1f} days (measured)',
+    f'{kokolis_gpus[1]:,.0f} GPUs, {kokolis_mttf[1]:.1f} h\n(measured)',
+    f'{kokolis_gpus[2]:,.0f} GPUs, {kokolis_mttf[2]:.1f} h\n(projected)',
+    f'{kokolis_gpus[3] / 1000:.0f}K GPUs, {kokolis_mttf[3] * 60:.0f} min\n(projected)',
 ]
 
 # Measured RSC points are filled; fitted projections are hollow.
@@ -716,11 +741,11 @@ ax.scatter(
     label='Meta RSC, projected (Kokolis et al. 2025)',
 )
 # Label Kokolis points (offsets in points; text sits beside, not on, the 1/N line)
-label_pos = {0: (0, -16, 'center'), 1: (-10, -4, 'right'), 2: (-10, -16, 'right'), 3: (-10, -4, 'right')}
+label_pos = {0: (-7, -10, 'left', 'top'), 1: (-10, 0, 'right', 'center'), 2: (-10, -6, 'right', 'top'), 3: (-10, 0, 'right', 'center')}
 
 for i, (x, y, lbl) in enumerate(zip(kokolis_gpus, kokolis_mttf, kokolis_labels)):
-    dx, dy, ha = label_pos[i]
-    ax.annotate(lbl, xy=(x, y), xytext=(dx, dy), textcoords='offset points', fontsize=8, ha=ha, color=COLORS['BlueLine'])
+    dx, dy, ha, va = label_pos[i]
+    ax.annotate(lbl, xy=(x, y), xytext=(dx, dy), textcoords='offset points', fontsize=10, ha=ha, va=va, linespacing=1.15, color=COLORS['BlueLine'])
 
 # VERIFIED DATA: Meta Llama 3 (arXiv:2407.21783), via PublishedFailureRates
 # (unexpected interruptions over the snapshot window -> observed MTTF)
@@ -741,12 +766,14 @@ ax.scatter(
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate(
-    f'Llama 3, {PublishedFailureRates.llama_interruptions_str} interruptions\n'
-    f'in {PublishedFailureRates.llama_days_str} days, {PublishedFailureRates.llama_mttf_h:.1f} h',
+    f'Llama 3, {PublishedFailureRates.llama_mttf_h:.1f} h (measured)\n'
+    f'{PublishedFailureRates.llama_interruptions_str} interruptions\n'
+    f'in {PublishedFailureRates.llama_days_str} days',
     xy=(PublishedFailureRates.llama_gpus, PublishedFailureRates.llama_mttf_h),
     xytext=(10, 6),
     textcoords='offset points',
-    fontsize=8,
+    fontsize=10,
+    linespacing=1.15,
     ha='left',
     va='bottom',
     color=COLORS['primary'],
@@ -756,7 +783,7 @@ ax.annotate(
 durations = [(24, '1 day'), (168, '1 week'), (2160, '3 months')]
 for hrs, lbl in durations:
     ax.axhline(y=hrs, color=COLORS['secondary'], linestyle=':', linewidth=0.8, alpha=0.6, zorder=0)
-    ax.text(200000, hrs * 1.12, lbl, fontsize=8, color=COLORS['secondary'], ha='right')
+    ax.text(450000, hrs * 1.12, lbl, fontsize=10, color=COLORS['secondary'], ha='right')
 
 # The 16K-GPU failure cadence bracketed by the projection and the measurement
 # Confined to the 16K-GPU column so the bracket reads as a claim about that scale only.
@@ -765,7 +792,7 @@ ax.text(
     1.05e4,
     np.sqrt(kokolis_mttf[2] * PublishedFailureRates.llama_mttf_h),
     'failure every 2 to 3 h',
-    fontsize=8,
+    fontsize=10,
     color=COLORS['RedLine'],
     va='center',
     ha='right',
@@ -775,9 +802,28 @@ ax.set_xscale('log')
 ax.set_yscale('log')
 ax.set_xlabel('GPU count (N)')
 ax.set_ylabel('Mean time to failure (hours)')
-ax.set_xlim(3, 300000)
+ax.set_xlim(3, 500000)
 ax.set_ylim(0.1, 5000)
-ax.legend(loc='lower left', fontsize=8, frameon=True, facecolor='white', framealpha=1.0, edgecolor=COLORS['grid'], fancybox=False, borderpad=0.6)
+# Direct label on the 1/N reference line, rotated to its on-screen slope.
+_lx = 150.0
+_ly = Systems.Reliability.Gpu.mttf_hours / _lx
+fig.canvas.draw()
+_p0 = ax.transData.transform((_lx, _ly))
+_p1 = ax.transData.transform((_lx * 10, _ly / 10))
+_ang = np.degrees(np.arctan2(_p1[1] - _p0[1], _p1[0] - _p0[0]))
+ax.annotate(
+    f'theoretical {Systems.Reliability.Gpu.mttf_hours:,.0f} h / N',
+    xy=(_lx, _ly),
+    xytext=(2, -5),
+    textcoords='offset points',
+    rotation=_ang,
+    rotation_mode='anchor',
+    fontsize=10,
+    color=COLORS['secondary'],
+    ha='left',
+    va='top',
+    bbox=dict(facecolor='white', edgecolor='none', pad=0.5),
+)
 
 plt.tight_layout()
 plt.show()
@@ -818,7 +864,7 @@ Where a fail-stop component ceases to participate, a value-corrupting component 
 
 The two models leave different evidence (@fig-failure-types). A fail-stop worker such as W2 falls silent, and its missing heartbeats make it suspect. A Byzantine worker such as W6 keeps sending messages on schedule, so it passes every liveness check while the values it sends are wrong.
 
-::: {#fig-failure-types fig-env="figure" fig-pos="htb" fig-cap="**Fail-stop vs. Byzantine failures**: In the fail-stop model (left), a failed worker simply ceases to send messages, which a timeout flags as suspect without distinguishing a crash from delay or isolation. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (for example, corrupted gradients reported as valid), which can poison the global model state if not detected by redundant validation." fig-alt="Two panels divided by a dashed line. Left, fail-stop: workers W1, W3, and W4 send dashed heartbeat arrows up to a coordinator labeled timeout flags W2; W2 is gray, crossed out in red, labeled crashed, with a dotted line labeled silence. Caption text reads absence of signal is the evidence. Right, Byzantine: workers W5, W7, and W8 send gradient arrows to a coordinator labeled averages all gradients; W6 is outlined in red, labeled looks healthy, and sends a red dashed arrow labeled wrong. Text reads a signal does not prove correctness."}
+::: {#fig-failure-types fig-env="figure" fig-pos="htb" fig-cap="**Fail-stop vs. Byzantine failures**: In the fail-stop model (left), a failed worker simply ceases to send messages, which a timeout flags as suspect without distinguishing a crash from delay or isolation. In the Byzantine model (right), a failed worker continues to participate but sends incorrect data (for example, corrupted gradients reported as valid), which can poison the global model state if not detected by redundant validation." fig-alt="Two panels divided by a dashed line, each showing four worker message streams along a time axis with a liveness column at the right. Left, fail-stop: W1, W3, and W4 emit regular violet heartbeat ticks and get green checks; W2's ticks stop at a red X, a bracket labeled silence runs to a violet diamond labeled timeout, and W2 gets a red X for liveness. Caption text reads silence is the evidence. Right, Byzantine: W5 to W8 send amber gradient squares on the same schedule and all four get green checks, but partway along W6's row its squares turn red. Text reads on time, but wrong."}
 ![](images/svg/failure-types.svg)
 
 :::
@@ -930,7 +976,7 @@ As components age, they enter the wear-out\index{Bathtub curve!wear-out} phase, 
 
 The practical implication for ML systems is that fleet-wide failure rates can depend on age distribution. Under the bathtub model, a new cohort passes through elevated early-life risk, a relatively stable period, and eventual wear-out. Screening, operating conditions, and replacement policy determine how much of that pattern appears in field data. Mixed-age fleets combine cohorts at different stages, so their aggregate hazard need not follow the curve of a single cohort.
 
-::: {#fig-bathtub-curve fig-env="figure" fig-pos="htb" fig-cap="**The bathtub curve**: Hardware failure rates $\ComponentHazardRate(\TimeInstant)$ vary over time. (1) Infant mortality: high failure rate initially due to manufacturing defects. (2) Useful life: constant, low failure rate where random failures dominate. (3) Wear-out: increasing failure rate as components age. Burn-in testing aims to filter out infant mortality failures before deployment." fig-alt="Line graph of failure rate versus component age from days to end of life, showing a bathtub shape across three shaded regions separated by dashed lines: (1) infant mortality in red with a falling rate from manufacturing defects screened by burn-in, (2) useful life in green with a constant rate and a dot marking an MTTF of about 50,000 hours, and (3) wear-out in red with a rising rate from electromigration and thermal fatigue."}
+::: {#fig-bathtub-curve fig-env="figure" fig-pos="htb" fig-cap="**The bathtub curve**: Hardware failure rates $\ComponentHazardRate(\TimeInstant)$ vary over time. (1) Infant mortality: high failure rate initially due to manufacturing defects. (2) Useful life: constant, low failure rate where random failures dominate. (3) Wear-out: increasing failure rate as components age. Burn-in testing aims to filter out infant mortality failures before deployment." fig-alt="Line graph of failure rate versus component age from days to end of life, showing a bathtub shape across three shaded regions separated by dashed lines: (1) infant mortality in red with a falling rate from manufacturing defects screened by burn-in, (2) useful life in green with a constant rate whose flat floor is highlighted and labeled h equals 1 over MTTF, with MTTF about 50,000 hours, and (3) wear-out in red with a rising rate from electromigration and thermal fatigue."}
 
 ```{python}
 #| echo: false
@@ -963,31 +1009,32 @@ y = np.concatenate([y1, y2, y3])
 
 ax.plot(x, y, color=COLORS['primary'], linewidth=2.2, zorder=4)
 
-# Regime names (numbered to match the caption)
+# Regime names (numbered to match the caption), set just above the curve's tallest end
 for xc, name in [(1.75, '(1) Infant mortality'), (6.0, '(2) Useful life'), (10.25, '(3) Wear-out')]:
-    ax.text(xc, 4.85, name, ha='center', va='center', fontsize=9, fontweight='bold', color=COLORS['primary'])
+    ax.text(xc, 3.9, name, ha='center', va='center', fontsize=10, fontweight='bold', color=COLORS['primary'])
 
 # Short regime annotations, set beside the curve
-ax.text(0.95, 2.55, 'manufacturing\ndefects', ha='left', va='center', fontsize=8, color=COLORS['primary'], linespacing=1.3)
-ax.text(0.95, 1.95, 'screened by burn-in', ha='left', va='center', fontsize=8, style='italic', color=COLORS['secondary'])
-ax.text(6.0, 0.95, 'constant rate, random failures', ha='center', va='center', fontsize=8, color=COLORS['primary'])
-ax.text(10.1, 1.15, 'electromigration,\nthermal fatigue', ha='right', va='center', fontsize=8, color=COLORS['primary'], linespacing=1.3)
+ax.text(1.0, 2.25, 'manufacturing defects', ha='left', va='center', fontsize=10, color=COLORS['primary'])
+ax.text(1.0, 1.8, 'screened by burn-in', ha='left', va='center', fontsize=10, style='italic', color=COLORS['secondary'])
+ax.text(6.0, 0.95, 'constant rate, random failures', ha='center', va='center', fontsize=10, color=COLORS['primary'])
+ax.text(10.45, 1.3, 'electromigration,\nthermal fatigue', ha='right', va='center', fontsize=10, color=COLORS['primary'], linespacing=1.3)
 
-# Useful-life MTTF: the flat floor is the constant rate 1/MTTF
-peak_y = y2[0]
-ax.scatter([6.0], [peak_y], color=COLORS['GreenLine'], edgecolor='white', linewidth=1.0, s=36, zorder=5)
+# Useful life: MTTF is a rate level, not an age. Label the flat floor itself,
+# h = 1/MTTF, and mark the level with a thin bracket instead of a point.
+floor_y = y2[0]
+ax.plot([3.9, 8.1], [floor_y, floor_y], color=COLORS['GreenLine'], linewidth=3.2, zorder=5, solid_capstyle='butt')
 ax.text(
     6.0,
-    0.45,
-    f'MTTF ≈ {float(Systems.Reliability.Gpu.mttf_hours):,.0f} h',
+    floor_y + 0.2,
+    rf'$h = 1/\mathrm{{MTTF}}$,  MTTF ≈ {float(Systems.Reliability.Gpu.mttf_hours):,.0f} h',
     ha='center',
-    va='center',
-    fontsize=8,
+    va='bottom',
+    fontsize=10,
     color=COLORS['GreenLine'],
 )
 
 ax.set_xlim(0, 12.0)
-ax.set_ylim(-0.1, 5.2)
+ax.set_ylim(-0.2, 4.25)
 
 ax.set_xticks([0.8, 2.2, 4.8, 7.2, 10.5])
 ax.set_xticklabels(['Days', 'Weeks', 'Months', 'Years', 'End of life'], color=COLORS['primary'])
@@ -1163,7 +1210,7 @@ Fleet scale turns these rare device events into routine operating conditions. Sm
 
 Each persistence class from the taxonomy maps to a different fleet action, from retry for a fault that leaves nothing to repair, through quarantine for one that returns under load, to replacement for one that repeats on every attempt (@fig-fault-tolerance-failure-spectrum). A transient fault\index{Transient fault!fleet response}, as @sec-fault-tolerance-reliability-reliability-transient-failures-57b4 established, leaves no lasting defect from that event, so the fleet's question is only whether its effect escaped. A single-event upset, a voltage droop on an unstable power path [@reddi2013], a timing violation, or a soft error in combinational logic [@mukherjee2005] can corrupt a tensor, packet, or instruction. Detection and correction can prevent propagation; affected state may otherwise require rollback. During training, an undetected error in weights or gradients can compromise convergence and contaminate subsequent checkpoints [@he2023]. During stateless inference, an activation error can remain confined to one request [@mahmoud2020]. If that activation enters retained state such as a KV cache, later outputs can also depend on it.
 
-::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Hardware faults ordered by how long they persist. A transient fault leaves nothing to repair, an intermittent fault returns under the load that exposed it, and a permanent fault repeats on every retry. Persistence decides the fleet response, from retry through quarantine to replacement, and fault tolerance engineering must handle all three to keep a fleet making progress." fig-alt="An arrow labeled fault persistence runs from clears on its own to lasts until repaired above three cards: transient, intermittent, and permanent. Each card gives how the fault behaves, a typical cause, and the fleet response, from retry or roll back, through drain and stress-test, to replace and restore."}
+::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Hardware faults ordered by how long they persist. A transient fault leaves nothing to repair, an intermittent fault returns under the load that exposed it, and a permanent fault repeats on every retry. Persistence decides the fleet response, from retry through quarantine to replacement, and fault tolerance engineering must handle all three to keep a fleet making progress." fig-alt="An arrow labeled fault persistence runs from clears on its own to lasts until repaired above three panels: transient, intermittent, and permanent. Each panel shows a row of eight attempt squares over time, green when an attempt completes and red when it faults. Transient: one red square among greens. Intermittent: gray load bars above the row, and the two attempts under the tallest load bars are red. Permanent: two green squares then all red. Below each row are a typical cause (particle strike, cracked solder joint, stuck-at fault or wear-out) and a response box (retry or roll back, drain and stress-test, replace and restore)."}
 ![](images/svg/failure-spectrum.svg)
 
 :::
@@ -1213,7 +1260,7 @@ Digital hardware implements *deterministic* operations, but physical fault occur
 
 Facebook documented a pervasive SDC issue where a hardware fault caused a valid file to be reported as "size zero" during decompression [@dixit2021silent]; the system "worked" without crashing, but data was silently deleted. In ML, the same failure manifests as valid-looking but numerically corrupted gradients. The pipeline trace in @fig-sdc-example follows a single ALU or memory bit flip as it corrupts an individual tensor entry, taints gradient reduction during the backward pass, commits into weights, and finally surfaces as degraded quality at evaluation. The comparative timelines beneath contrast this silent latency with a standard detected error: while a hardware trap halts within milliseconds to restart cleanly from the last checkpoint, silent corruption commits contaminated state into checkpoints over hours or days before an evaluation alert forces a costly rollback.
 
-::: {#fig-sdc-example fig-env="figure" fig-pos="htb" fig-cap="**Silent data corruption propagation**: A hardware bit flip moves left to right from one wrong tensor value through the backward pass and the weight update, surfacing only at the final stage as degraded model quality. The two timelines below contrast a detected error, which traps within milliseconds and restarts from the last checkpoint, with silent corruption, which is saved into checkpoints for hours or days before an evaluation alert forces a rollback; the gap between the two is the cost of silence." fig-alt="Five red stage boxes in a row linked by arrows: bit flip in memory or ALU, wrong value in one tensor entry, backward pass taints gradients, weight update commits to weights, quality drops seen at evaluation. Below, two timelines share a time axis marked t equals zero, milliseconds, and hours to days. Detected error: a fault dot, a trap dot, then a green restart from checkpoint box. Silent corruption: a fault dot, a long red dashed box reading corrupt state saved into checkpoints, an alert dot, then a green roll back box."}
+::: {#fig-sdc-example fig-env="figure" fig-pos="htb" fig-cap="**Silent data corruption propagation**: A hardware bit flip moves left to right from one wrong tensor value through the backward pass and the weight update, surfacing only at the final stage as degraded model quality. The two timelines below contrast a detected error, which traps within milliseconds and restarts from the last checkpoint, with silent corruption, which is saved into checkpoints for hours or days before an evaluation alert forces a rollback; the gap between the two is the cost of silence." fig-alt="Top, a left-to-right chain linked by red arrows: an 8-bit word with one red bit under a lightning mark labeled bit flip in memory or ALU; a 5 by 5 tensor grid with one red cell labeled wrong value in one tensor entry; a gradient grid where the red cell's row and column are tinted red, labeled backward pass taints gradients; a weight grid whose whole row and column are red, labeled weight update commits to weights; and a small plot whose rising quality curve turns red and falls, labeled quality drops seen at evaluation. Below, two timelines share a time axis marked t equals zero, milliseconds, and hours to days. Detected error: a fault dot, a trap dot, then a green restart from checkpoint box. Silent corruption: a fault dot, a long red dashed span labeled corrupt state saved containing three crossed-out checkpoint squares, an alert dot, then a green roll back box."}
 ![](images/svg/sdc-propagation.svg)
 
 :::
@@ -1407,7 +1454,7 @@ The injection level determines which propagation paths the experiment includes. 
 
 This divergence comes from the multi-tier filtering formalized as error masking [@mohanram2003]. A physical soft error becomes an observable failure only if it passes two screens in turn (@fig-error-masking-ft). The corrupted data must first be read, and the value read must then produce incorrect output or a crash. A hardware disturbance that hits an unused functional unit, is overwritten prior to use, or lands in dynamically dead instructions is silently absorbed within the microarchitecture or runtime [@ko2021]. Because tensor-level mutations inject perturbations downstream of these architectural filters, their empirical error rates must be evaluated at that higher abstraction level.
 
-::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. Beside each masked outcome, three masking causes are listed: unused component, overwritten value, and squashed speculation for the microarchitecture; dead instruction, logical or compare op, and uninfluential branch for software. A dashed arrow labeled software fault injection enters the flow after the first diamond."}
+::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. Beside each masked outcome, three masking causes are listed: unused component, overwritten value, and squashed speculation for the microarchitecture; dead instruction, logical or compare op, and uninfluential branch for software. The failure path, Yes and then Yes from soft error to failure, is drawn as a heavy red spine; the No exits are thin gray arrows. A dashed arrow labeled software fault injection enters the spine after the first diamond, and a shaded region below that point, labeled view of software fault injection, encloses only the second diamond, its masked exit, and the failure."}
 
 ![](images/svg/error-masking.svg){width="88%"}
 
@@ -1658,7 +1705,7 @@ Apply the Young-Daly interval of @eq-ft-young-daly-interval (principle \ref{pri-
 
 The result connects measured or estimated interruption rates to checkpoint policy. At this interval, saving and expected replay together consume approximately `{python} YoungDalyOptimal.overhead_pct_str` of training time in the first-order model, half from writes and half from replay, because at the square-root optimum the two terms of @eq-ft-checkpoint-waste are equal. Plotting those two terms for this cluster shows how forgiving the optimum is (@fig-checkpoint-tradeoff). Write overhead falls hyperbolically and expected rework climbs linearly, so their sum has a shallow floor around `{python} CheckpointTradeoffInputs.tau_opt_min_str`. An interval somewhat off the optimum costs little, while one several times too short or too long costs far more, which is why a rough MTBF estimate still yields a usable schedule.
 
-::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead (dashed blue) falls as the interval lengthens, while expected rework after a failure (dashed red) rises; their sum (solid) is minimized at the Young-Daly interval. The curves use this chapter's 175B running example on its `{python} CheckpointTradeoffInputs.n_gpus_str`-GPU cluster, with a `{python} CheckpointTradeoffInputs.t_write_s_str` checkpoint write and a `{python} CheckpointTradeoffInputs.mtbf_h_str` full-system MTBF, which put the optimum near `{python} CheckpointTradeoffInputs.tau_opt_min_str`. The minimum is shallow, so an interval somewhat off the optimum costs little, while a far shorter or far longer one costs a great deal." fig-alt="Three curves against checkpoint interval in minutes: checkpoint overhead decreasing, rework cost increasing linearly, and total wasted time with a shallow minimum marked near 14 minutes."}
+::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The checkpoint trade-off**: Checkpoint save overhead (dashed blue) falls as the interval lengthens, while expected rework after a failure (dashed red) rises; their sum (solid) is minimized at the Young-Daly interval. The curves use this chapter's 175B running example on its `{python} CheckpointTradeoffInputs.n_gpus_str`-GPU cluster, with a `{python} CheckpointTradeoffInputs.t_write_s_str` checkpoint write and a `{python} CheckpointTradeoffInputs.mtbf_h_str` full-system MTBF, which put the optimum near `{python} CheckpointTradeoffInputs.tau_opt_min_str`. The minimum is shallow, so an interval somewhat off the optimum costs little, while a far shorter or far longer one costs a great deal." fig-alt="Plot of share of wall time wasted against checkpoint interval in minutes. A dashed blue save-overhead curve falls hyperbolically, a dashed red expected-rework line rises linearly, and a solid dark total curve has a shallow minimum marked with a green dot at about 14 minutes and 5.9 percent wasted. A dotted dropline from the minimum passes through an open circle where the two dashed terms cross, labeled terms equal. The background left of the optimum is tinted blue and labeled writes dominate; the background to the right is tinted red and labeled rework dominates. Each curve carries a direct label."}
 
 ```{python}
 #| echo: false
@@ -1687,19 +1734,60 @@ over_rework = tau / (2 * mtbf)
 total_waste = over_ckpt + over_rework
 waste_opt = t_write / tau_opt + tau_opt / (2 * mtbf)
 
-ax.plot(tau * 60, over_ckpt * 100, label='Checkpoint overhead ($T_{\\mathrm{write}}/T_{\\mathrm{ckpt}}$)', color=COLORS['BlueLine'], linestyle='--')
-ax.plot(
-    tau * 60,
-    over_rework * 100,
-    label='Expected rework ($T_{\\mathrm{ckpt}}/(2\\,\\mathrm{MTBF}_{\\mathrm{system}})$)',
-    color=COLORS['RedLine'],
-    linestyle='--',
-)
-ax.plot(tau * 60, total_waste * 100, label='Total wasted time', color=COLORS['primary'], linewidth=2.5)
+x_min = tau * 60
+x_max = tau_opt * 4 * 60
 
-# Young-Daly optimum: green dot with a dropline to the interval axis
+# Regimes on either side of the optimum: writes dominate (left), rework dominates (right).
+ax.axvspan(0, tau_opt * 60, color=COLORS['BlueL'], alpha=0.35, lw=0, zorder=0)
+ax.axvspan(tau_opt * 60, x_max, color=COLORS['RedL'], alpha=0.25, lw=0, zorder=0)
+ax.text(tau_opt * 60 * 0.56, 19.2, 'writes dominate', ha='center', va='top', fontsize=10, fontweight='bold', color=COLORS['BlueLine'])
+ax.text(
+    tau_opt * 60 + (x_max - tau_opt * 60) / 2,
+    19.2,
+    'rework dominates',
+    ha='center',
+    va='top',
+    fontsize=10,
+    fontweight='bold',
+    color=COLORS['RedLine'],
+)
+
+ax.plot(x_min, over_ckpt * 100, color=COLORS['BlueLine'], linestyle='--', linewidth=1.6)
+ax.plot(x_min, over_rework * 100, color=COLORS['RedLine'], linestyle='--', linewidth=1.6)
+ax.plot(x_min, total_waste * 100, color=COLORS['primary'], linewidth=2.5)
+
+# Direct labels at the right end of each curve
+x_lab = x_max * 0.97
+
+def _at(arr):
+    return float(np.interp(x_lab, x_min, arr * 100))
+
+ax.text(x_lab, _at(total_waste) + 0.6, 'total wasted time', ha='right', va='bottom', fontsize=10, fontweight='bold', color=COLORS['primary'])
+x_rw = tau_opt * 60 * 2.6
+ax.text(
+    x_rw,
+    float(np.interp(x_rw, x_min, over_rework * 100)) - 1.3,
+    'expected rework  $T_{\\mathrm{ckpt}}/(2\\,\\mathrm{MTBF}_{\\mathrm{system}})$',
+    ha='left',
+    va='top',
+    fontsize=10,
+    color=COLORS['RedLine'],
+)
+ax.text(
+    x_lab,
+    _at(over_ckpt) + 0.6,
+    'save overhead  $T_{\\mathrm{write}}/T_{\\mathrm{ckpt}}$',
+    ha='right',
+    va='bottom',
+    fontsize=10,
+    color=COLORS['BlueLine'],
+)
+
+# Young-Daly optimum: green dot with a dropline; the two dashed terms cross on the dropline
 ax.plot([tau_opt * 60, tau_opt * 60], [0, waste_opt * 100], color=COLORS['GreenLine'], linestyle=':', linewidth=1.0, zorder=3)
-ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['GreenLine'], edgecolor='white', linewidth=1.0, s=50, zorder=5)
+ax.scatter([tau_opt * 60], [waste_opt * 100 / 2], facecolor='white', edgecolor=COLORS['primary'], linewidth=1.0, s=28, zorder=5)
+ax.text(tau_opt * 60 + 0.5, 1.45, 'terms equal', ha='left', va='center', fontsize=10, color=COLORS['primary'])
+ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['GreenLine'], edgecolor='white', linewidth=1.0, s=55, zorder=5)
 ax.annotate(
     f'$T^*_{{\\mathrm{{ckpt}}}} \\approx {tau_opt * 60:.0f}$ min\n{waste_opt * 100:.1f}% wasted',
     xy=(tau_opt * 60, waste_opt * 100),
@@ -1707,17 +1795,15 @@ ax.annotate(
     textcoords='offset points',
     ha='center',
     va='bottom',
-    fontsize=9,
+    fontsize=10.5,
     color=COLORS['GreenLine'],
 )
 
 ax.set_xlabel('Checkpoint interval $T_{\\mathrm{ckpt}}$ (minutes)')
 ax.set_ylabel('Share of wall time wasted (%)')
-ax.set_xlim(0, tau_opt * 4 * 60)
+ax.set_xlim(0, x_max)
 ax.set_yticks([0, 5, 10, 15, 20])
 ax.set_ylim(0, 20)
-
-ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor=COLORS['grid'], framealpha=1.0, fancybox=False)
 
 plt.tight_layout()
 plt.show()
@@ -1744,7 +1830,7 @@ When assumptions are violated, the optimal interval may shift significantly, but
 
 Along an execution timeline, a training run alternates productive compute intervals ($\CheckpointInterval$) with synchronous save barriers ($\CheckpointWriteTime$), and a failure charges two distinct penalties (@fig-checkpoint-recovery-timeline). Uncheckpointed progress is discarded as lost rework, and the restart latency ($\FailureRecoveryTime$) to reload state and warm up execution pipelines follows before useful work resumes.
 
-::: {#fig-checkpoint-recovery-timeline fig-env="figure" fig-pos="htb" fig-cap="**Checkpoint-recovery timeline**: A training run alternates productive compute (blue) with durable checkpoint writes (green). When a failure strikes, all compute since the last completed checkpoint is lost (red hatching), and the job must then read the checkpoint and restart (red) before productive compute resumes. A failure therefore costs the rework since the last save plus the recovery latency; the Young-Daly interval trades the first of these against the write time paid at every checkpoint." fig-alt="Horizontal timeline: a blue compute block, a green save block, a red-hatched block labeled lost that ends at a red vertical line labeled failure, a red recover block, and a second blue compute block. Brackets beneath label the interval T ckpt, T write, rework since save, and T recovery, and a wider bracket reads cost of one failure equals rework plus recovery."}
+::: {#fig-checkpoint-recovery-timeline fig-env="figure" fig-pos="htb" fig-cap="**Checkpoint-recovery timeline**: A training run alternates productive compute (blue) with durable checkpoint writes (green). When a failure strikes, all compute since the last completed checkpoint is lost (red hatching), and the job must then read the checkpoint and restart (red) before productive compute resumes. A failure therefore costs the rework since the last save plus the recovery latency; the Young-Daly interval trades the first of these against the write time paid at every checkpoint." fig-alt="Top, a horizontal timeline: blue compute, green save, blue compute, green save, a red-hatched block labeled lost that ends at a red vertical line, a red recover block, and a final blue compute block. A bracket above the lost and recover blocks reads cost of one failure; brackets below label T ckpt, T write, rework, and T recovery. Bottom, a progress line on the same time axis rises during compute and stays flat during each save, with green dots marking durable progress at the end of each save. During the lost block the line rises in red, then at the failure a red dashed arrow drops it back to the last durable level, it stays flat through recovery, and it climbs again."}
 ![](images/svg/checkpoint-recovery-timeline.svg)
 
 :::
@@ -2168,7 +2254,7 @@ The decision boundary is the size of the state and the number of writers. Centra
 
 Distributed checkpointing eliminates this coordinator funnel by having each worker persist its own shard directly. @Fig-distributed-checkpoint-architecture contrasts the dataflow topologies: the centralized pattern concentrates traffic at the coordinator's ingress, while the distributed pattern writes in parallel to local NVMe and drains the shards to remote object storage in the background. With fixed per-worker shard sizes and sufficient independent staging bandwidth, adding workers need not lengthen the local write pause. Shared drain capacity and completion coordination can still limit scaling. A coordinator signals when to checkpoint and confirms completion, but state flows directly from workers to storage without aggregation.
 
-::: {#fig-distributed-checkpoint-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed checkpoint architecture**: Centralized vs. sharded checkpoint writes. In the centralized pattern (left), every worker funnels its shard through one coordinator, whose ingress bandwidth and buffering constrain the write path and whose failure halts the save. In the distributed pattern (right), each worker writes its own shard to local NVMe in parallel and a background process drains the shards to remote object storage, so the local blocking write time can remain roughly constant with fixed shard sizes and sufficient staging bandwidth; shared drain capacity still limits completion." fig-alt="Two panels divided by a dashed line. Left, centralized: four workers send red arrows that merge into one coordinator box labeled ingress limit, which writes to shared storage; text below reads write time grows with worker count. Right, distributed: each of four workers writes with a green arrow to its own NVMe drive, and dashed arrows drain the drives to an object store labeled background; text below reads fixed-size shards bound local write work."}
+::: {#fig-distributed-checkpoint-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed checkpoint architecture**: Centralized vs. sharded checkpoint writes. In the centralized pattern (left), every worker funnels its shard through one coordinator, whose ingress bandwidth and buffering constrain the write path and whose failure halts the save. In the distributed pattern (right), each worker writes its own shard to local NVMe in parallel and a background process drains the shards to remote object storage, so the local blocking write time can remain roughly constant with fixed shard sizes and sufficient staging bandwidth; shared drain capacity still limits completion." fig-alt="Two panels divided by a dashed line. Left, centralized: four workers send red arrows that merge into one coordinator box labeled ingress limit, which writes to shared storage; beneath, a timing strip shows the four workers' green shard writes in a staircase, one after another, with a red bracket reading blocking write grows with workers. Right, distributed: each of four workers writes with a green arrow to its own NVMe drive, and dashed arrows drain the drives to an object store labeled background; beneath, the four green shard writes start together and end together under a green bracket labeled blocking, followed by dashed gray bars under a bracket labeled drain in background."}
 ![](images/svg/distributed-checkpoint-architecture.svg)
 
 :::
@@ -2607,7 +2693,7 @@ Suppose a `{python} ElasticNodeLoss.job_gpus_str`-GPU training job loses an `{py
 
 A small example shows the lifecycle in three phases (@fig-elastic-flow). Execution begins with a balanced four-node AllReduce ring at full throughput. When Node 3 drops out, the survivors pause at a rendezvous barrier and reload the last consistent checkpoint. The group then contracts into a three-node ring in which each worker takes a one-third larger data shard, resuming productive training at 75 percent throughput.
 
-::: {#fig-elastic-flow fig-env="figure" fig-pos="htb" fig-cap="**Elastic training recovery**: Read the three phases top to bottom. Rather than restoring the original worker count before resuming, elastic training pauses when a node fails, reloads the last consistent checkpoint, re-forms the ring over the $\DeviceCount-1$ survivors, and redistributes the failed node's data shards among them. The job resumes at reduced throughput (75 percent here, assuming an unchanged per-worker rate), turning a hard failure into a temporary slowdown." fig-alt="Three stacked phase panels joined by downward arrows. Phase 1: four nodes in a ring at 100 percent throughput. Phase 2: node 3 is red and labeled failed, its ring link is dashed, training is paused, and a bar under nodes 0 to 2 reads rendezvous barrier: reload last checkpoint. Phase 3: nodes 0 to 2 form a new three-node ring, each labeled shard +33%, beside an empty dashed slot labeled removed, at 75 percent throughput."}
+::: {#fig-elastic-flow fig-env="figure" fig-pos="htb" fig-cap="**Elastic training recovery**: Read the three phases top to bottom. Rather than restoring the original worker count before resuming, elastic training pauses when a node fails, reloads the last consistent checkpoint, re-forms the ring over the $\DeviceCount-1$ survivors, and redistributes the failed node's data shards among them. The job resumes at reduced throughput (75 percent here, assuming an unchanged per-worker rate), turning a hard failure into a temporary slowdown." fig-alt="Three stacked phase panels joined by downward arrows, each with a ring of nodes at left, columns of data-shard tiles in the middle, and a throughput bar at right. Phase 1: nodes N0 to N3 in an amber ring, three shard tiles per node, throughput bar full at 100 percent. Phase 2: N3 is red, the ring links touching it are red and dashed, N3's three shard tiles are red, a violet box over the surviving columns reads rendezvous plus reload, and the empty throughput bar reads paused. Phase 3: N0, N1, and N2 form a three-node ring, each column holds four tiles with the new top tile in green, a label reads plus 1 shard each (plus 33 percent), N3's column is an empty dashed outline, and the throughput bar is three-quarters full at 75 percent."}
 ![](images/svg/elastic-flow.svg)
 
 <!--
@@ -2914,7 +3000,7 @@ For a single replica, $\ReplicaAvailability= 99\%$ corresponds to 3.65 days of d
 
 The availability equation says how much redundancy can help; the replication topology determines how that redundancy behaves under normal execution and sudden hardware loss. Two fundamental designs make opposite bets (@fig-serving-redundancy). Active-active replication splits ingress traffic evenly across live replicas, one-third each for three, which keeps every device busy but requires spare headroom so the survivors can absorb a failed replica's share. Active-passive replication sends all traffic to a designated primary and keeps a pre-warmed standby whose weights remain loaded in accelerator memory, which makes failover fast at the expense of a device that serves nothing while the primary is healthy.
 
-::: {#fig-serving-redundancy fig-env="figure" fig-pos="htb" fig-cap="**Serving redundancy strategies**: Active-active (left) splits traffic across three replicas, each carrying about one-third, which uses every device but requires enough headroom for the survivors to absorb a failed replica's share. Active-passive (right) sends all traffic to one primary and keeps a warm standby with weights already loaded, which simplifies failover at the cost of capacity that serves nothing while the primary is healthy." fig-alt="Two panels divided by a dashed line. Left, active-active: a load balancer splits requests along three arrows labeled one third to replicas 1, 2, and 3; text below reads survivors must absorb a lost replica load. Right, active-passive: a load balancer sends an arrow labeled all traffic to a primary and a dashed arrow labeled on failure to a dashed warm standby box; text below reads standby holds loaded weights but serves nothing."}
+::: {#fig-serving-redundancy fig-env="figure" fig-pos="htb" fig-cap="**Serving redundancy strategies**: Active-active (left) splits traffic across three replicas, each carrying about one-third, which uses every device but requires enough headroom for the survivors to absorb a failed replica's share. Active-passive (right) sends all traffic to one primary and keeps a warm standby with weights already loaded, which simplifies failover at the cost of capacity that serves nothing while the primary is healthy." fig-alt="Two panels divided by a dashed line. Each replica card holds a blue weights bar and a load gauge whose green fill shows traffic served. Left, active-active: a load balancer splits requests along three violet arrows labeled one third to replicas 1, 2, and 3; each gauge is one-third full, and a bracket under the empty part of the first gauge reads headroom absorbs a failed share. Right, active-passive: a load balancer sends a solid arrow labeled all traffic to a primary whose gauge is full and labeled traffic, and a dashed arrow labeled on failure to a dashed warm standby whose weights are loaded but whose gauge is empty and labeled idle; text below reads loaded, serves nothing."}
 ![](images/svg/serving-redundancy.svg)
 
 :::
@@ -3243,7 +3329,7 @@ Partial failures turn that nondeterminism into a recovery problem. A single mach
 
 Observability supports both immediate mitigation and investigation of the cause. Suppose a recommendation service suddenly violates its latency SLO while the model replicas still report healthy GPU utilization. Metrics establish the timing and scope of the symptom, traces show which service span consumes the request budget, and logs record events inside that service. @Fig-observability-three-pillars connects these streams to operational decisions. A single signal can justify an action, such as shedding load when a queue exceeds its budget. Joining request and trace context with model versions, deployment tags, and time windows strengthens the diagnosis when several causes could explain the same symptom. Correlated evidence narrows those possibilities; it does not by itself prove the physical or software cause.
 
-::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The three pillars of observability**: Diagnosis of fleet failures can combine three signal types. Metrics reveal *when* and *where* a problem occurs (for example, GPU utilization drops). Logs provide the *what* through event context (for example, an out-of-memory exception). Traces expose the *request path* by linking events across the distributed lifecycle (for example, identifying the request that triggered the memory spike). A single signal can justify immediate mitigation; joining signals on shared identifiers strengthens diagnosis without proving the cause." fig-alt="Three boxes labeled metrics, logs, and traces, each with its role and an example: GPU utilization drops, an out-of-memory exception, and the request behind the spike. Arrows lead from all three into a box reading correlate on shared identifiers, listing request, trace, model version, feature version, and deployment, which leads to a recovery action box: shed load, restart replica, roll back, or degrade gracefully."}
+::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The three pillars of observability**: Diagnosis of fleet failures can combine three signal types. Metrics reveal *when* and *where* a problem occurs (for example, GPU utilization drops). Logs provide the *what* through event context (for example, an out-of-memory exception). Traces expose the *request path* by linking events across the distributed lifecycle (for example, identifying the request that triggered the memory spike). A single signal can justify immediate mitigation; joining signals on shared identifiers strengthens diagnosis without proving the cause." fig-alt="Three panels draw each signal in its native form. Metrics, labeled when and where: a GPU utilization time series that runs level and then drops sharply in red. Logs, labeled what happened: a stream of gray log lines with one red monospace line reading OOM exception. Traces, labeled request path: a waterfall of nested span bars with one long span outlined in red. In each panel a dashed violet connector leaves the red anomaly, the end of the utilization drop, the end of the OOM line, and the end of the red span, and runs down as an arrow into a bar reading correlate on shared identifiers, listing request, trace, model version, feature version, and deployment, which leads to a recovery action box: shed load, restart, roll back, or degrade."}
 ![](images/svg/observability-three-pillars.svg)
 
 :::
@@ -3355,7 +3441,7 @@ Combining these observability streams helps detect recurring optimization pathol
 
 A training-loss signature is useful because it narrows the hypotheses that recovery must test. The trajectories in @fig-training-failure-signatures illustrate symptoms, including nonfinite values that need not crash the process. @Tbl-training-failure-response-map pairs spike, plateau, and divergence patterns, plus the silent hang a loss curve cannot show, with a candidate cause and a first response. That pairing guides investigation without treating the curve as a unique diagnosis.
 
-::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Four side-by-side loss-versus-steps panels on a shared loss axis. (A) Normal training: a green curve descending smoothly. (B) Gradient explosion: a descending curve with a red spike segment midway. (C) Loss plateau: a curve that flattens early, with the flat region shaded red. (D) NaN divergence: an oscillating curve that ends at a red X labeled NaN check halts run."}
+::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Four loss-versus-steps panels in a two-by-two grid on a shared loss axis. (A) Normal training: a green curve descending smoothly. Panels B to D repeat that healthy curve as a faint green reference line behind each pathology. (B) Gradient explosion: a descending curve with a red spike segment midway that then rejoins the healthy reference, labeled healthy. (C) Loss plateau: a curve that flattens early, with the gap between it and the healthy reference shaded red and labeled gap to healthy. (D) NaN divergence: an oscillating curve that ends at a red X labeled NaN check halts run."}
 ```{python}
 #| echo: false
 from binder.tools.figures import style as book_style
@@ -3366,7 +3452,9 @@ COLORS = book_style.COLORS
 
 # Four small multiples on one shared loss axis; the healthy curve is green, the
 # pathological curves are neutral with only the failure itself marked in red.
-fig, axes = plt.subplots(1, 4, figsize=(10, 2.9), sharey=True)
+# Laid out 2x2 at book width so every label prints at or above the floor.
+fig, axes2d = plt.subplots(2, 2, figsize=(8, 4.9), sharey=True, sharex=True)
+axes = axes2d.ravel()
 
 steps = np.linspace(0, 100, 200)
 np.random.seed(42)
@@ -3379,7 +3467,8 @@ loss_a = 2.4 * np.exp(-0.035 * steps) + 0.35 + noise
 loss_b = 2.4 * np.exp(-0.035 * steps) + 0.35 + np.random.normal(0, 0.02, len(steps))
 spike_idx = 90
 loss_b[spike_idx : spike_idx + 15] += np.linspace(0, 1.7, 15)
-loss_b[spike_idx + 15 : spike_idx + 35] = np.linspace(loss_b[spike_idx + 14], 1.1, 20)
+# Recovery ramp ends on the curve's own healthy baseline, so the spike rejoins it smoothly.
+loss_b[spike_idx + 15 : spike_idx + 35] = np.linspace(loss_b[spike_idx + 14], loss_b[spike_idx + 35], 21)[:-1]
 
 # PANEL C: Loss Plateau
 loss_c = np.copy(loss_a)
@@ -3398,32 +3487,43 @@ lw = 1.8
 
 ax_a.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=lw)
 
+# Healthy reference: the panel-A curve, drawn faintly behind each pathology so
+# the deviation itself is what the eye reads.
+for ax_ref in (ax_b, ax_c, ax_d):
+    ax_ref.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=1.0, alpha=0.45, zorder=1)
+ax_b.text(54, 0.55, 'healthy', fontsize=10, color=COLORS['GreenLine'], ha='center', va='top')
+
 ax_b.plot(steps, loss_b, color=COLORS['primary'], linewidth=lw)
 seg = slice(spike_idx - 1, spike_idx + 35)
 ax_b.plot(steps[seg], loss_b[seg], color=COLORS['RedLine'], linewidth=lw + 0.4)
 peak = spike_idx + 14
-ax_b.text(steps[peak] + 4, loss_b[peak] + 0.05, 'spike', fontsize=9, color=COLORS['RedLine'], ha='left', va='bottom')
+ax_b.text(steps[peak] + 4, loss_b[peak] + 0.05, 'spike', fontsize=10.5, color=COLORS['RedLine'], ha='left', va='bottom')
 
-ax_c.axvspan(steps[plateau_idx], 100, color=COLORS['RedL'], alpha=0.6, lw=0, zorder=0)
+ax_c.fill_between(steps[plateau_idx:], loss_a[plateau_idx:], loss_c[plateau_idx:], color=COLORS['RedL'], alpha=0.8, lw=0, zorder=0)
 ax_c.plot(steps, loss_c, color=COLORS['primary'], linewidth=lw)
-ax_c.text(70, loss_c[plateau_idx] + 0.35, 'plateau', fontsize=9, color=COLORS['RedLine'], ha='center', va='bottom')
+ax_c.text(70, loss_c[plateau_idx] + 0.3, 'plateau', fontsize=10.5, color=COLORS['RedLine'], ha='center', va='bottom')
+ax_c.text(70, 0.98, 'gap to healthy', fontsize=10.5, color=COLORS['RedLine'], ha='center', va='center')
 
 ax_d.plot(nan_steps, loss_d, color=COLORS['primary'], linewidth=lw)
 ax_d.scatter([nan_steps[-1]], [loss_d[-1]], marker='X', color=COLORS['RedLine'], edgecolor='white', linewidth=0.8, s=70, zorder=6)
-ax_d.text(nan_steps[-1] - 5, loss_d[-1], 'NaN check halts run', fontsize=9, color=COLORS['RedLine'], ha='right', va='center')
+ax_d.text(nan_steps[-1] + 4, loss_d[-1], 'NaN check\nhalts run', fontsize=10.5, linespacing=1.1, color=COLORS['RedLine'], ha='left', va='center')
 
 titles = ['(A) Normal training', '(B) Gradient explosion', '(C) Loss plateau', '(D) NaN divergence']
 for ax, title in zip(axes, titles):
-    ax.set_title(title, fontsize=10, fontweight='bold', color=COLORS['primary'], loc='left', pad=6)
+    ax.set_title(title, fontsize=11.5, fontweight='bold', color=COLORS['primary'], loc='left', pad=6)
     ax.set_xlim(-2, 102)
     ax.set_ylim(0, 3.1)
     ax.set_xticks([0, 50, 100])
-    ax.set_xlabel('Steps')
+    ax.set_yticks([0, 1, 2, 3])
+    ax.tick_params(labelsize=10.5)
     ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
-ax_a.set_ylabel('Loss')
+for ax in (ax_c, ax_d):
+    ax.set_xlabel('Steps', fontsize=11)
+for ax in (ax_a, ax_c):
+    ax.set_ylabel('Loss', fontsize=11)
 
 plt.tight_layout()
-fig.subplots_adjust(wspace=0.12)
+fig.subplots_adjust(wspace=0.08, hspace=0.32)
 plt.show()
 plt.close()
 ```
