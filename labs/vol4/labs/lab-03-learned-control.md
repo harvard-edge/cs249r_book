@@ -12,11 +12,11 @@
 
 **The physical question.** Can a neural network that learned to manipulate objects in simulation control a real robot? Where does it fail, and is the gap in perception (lighting, camera angle), dynamics (friction, backlash, gravity), timing, or the policy itself?
 
-**Purpose.** You can move the robot with hand-derived equations. Now you let it learn from data instead. Vision-Language-Action models take camera images and a language instruction and output motor commands directly. You run a staff-provided VLA in simulation, calibrate the real camera it will see through, deploy the same model to the hardware, and measure what happens. The gap between simulated and physical performance, the **sim2real gap**, is the central lesson.
+**Purpose.** You can move the robot with hand-derived equations. Now you let it learn from data instead. Vision-Language-Action models take camera images and a language instruction and output action proposals. The staff baseline governor checks those proposals before they reach the motors. You run a staff-provided VLA in simulation, calibrate the real camera it will see through, deploy the same model to the hardware, and measure what happens. The gap between simulated and physical performance, the **sim2real gap**, is the central lesson.
 
 **Core concepts:**
 - **The classical wall:** where hand-written control gives way to learning
-- **Vision-Language-Action policies:** one model from pixels and words to motor commands
+- **Vision-Language-Action policies:** one model from pixels and words to action proposals
 - **The learned sim2real gap:** perception, dynamics, timing, and distribution shift
 
 **Your digital twin:** the VLA runs in your twin before it touches the arm. Where the twin and the arm disagree is where to look for the sim2real gap.
@@ -60,7 +60,7 @@ TBD (staff)
 
 TBD (staff)
 
-<!-- STAFF: expected to cover camera configuration and calibration; export and on-board profiling; real hardware trials; the sim2real gap table; camera occlusion, degraded lighting, and shifted-target tests. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
+<!-- STAFF: expected to cover camera configuration and calibration; export and on-board profiling; real hardware trials; the sim2real gap table; camera occlusion, dropout, degraded lighting, and shifted-target tests. Write steps with real commands, what to record, the expected result, and pitfalls from the Student Zero run. -->
 
 ---
 
@@ -69,12 +69,12 @@ TBD (staff)
 | # | Evidence | Threshold |
 |:---:|:---|:---|
 | 1 | **VLA architecture sketch** | TBD (staff) |
-| 2 | **VLA versus IK comparison** | TBD (staff) |
-| 3 | **Camera calibration** | TBD (staff) |
-| 4 | **Export and on-board profile** | TBD (staff) |
+| 2 | **Matched-start VLA, IK, and teleoperation comparison** | TBD (staff) |
+| 3 | **Camera calibration, uncertainty, and sensor-dropout response** | TBD (staff) |
+| 4 | **Export, host-versus-edge numerical parity, memory footprint, and on-board latency profile** | TBD (staff) |
 | 5 | **Sim2real gap table, each failure sorted into perception, dynamics, timing, or distribution shift** | TBD (staff) |
 
-*Staff signs off `A2`, `B2`, and `B3` on the team's [Competency Card](../curriculum/student-competencies.md).*
+*Staff signs off `A2` using this lab's camera-calibration and sensor-loss evidence together with the joint-error and backlash evidence retained from Lab 2, and signs off `B2` from the matched comparison. Staff checks the export/profile component of `B3` on the team's [Competency Card](../curriculum/student-competencies.md); student training/validation evidence completes `B3` in Lab 4.*
 
 ---
 

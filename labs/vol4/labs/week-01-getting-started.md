@@ -52,8 +52,11 @@ TBD (staff)
        laptop to Linux to STM32 to servo, and the two power supplies;
      - the computer: install the course software, set up accounts (GitHub,
        Hugging Face), and connect to the station;
+     - a boot check: record the disarmed startup response under the qualified
+       load and configuration;
      - a first motion check: arm, move one joint at low speed, cut motor
-       power, and confirm nothing moves until re-arm.
+       power, record the response under the qualified load and configuration,
+       and confirm that no new motor command executes until re-arm.
      Keep it low-pressure: a staff member at the bench, every motion through
      the STM32 baseline governor, never the stock USB path. -->
 
@@ -66,7 +69,7 @@ TBD (staff)
 | 1 | **Kit checked and station ready** | TBD (staff) |
 | 2 | **Computer set up and connected to the station** | TBD (staff) |
 | 3 | **Command path sketch:** from your computer to a motor, with each piece labeled | TBD (staff) |
-| 4 | **Safe-stop check:** motor power cut, no motion until re-arm | TBD (staff) |
+| 4 | **Safe-rest check:** measured boot and cutoff responses under the qualified load and configuration; no new motor command until re-arm | TBD (staff) |
 
 *Nothing is graded this week; the station check must be complete before Lab 1.*
 
@@ -74,5 +77,5 @@ TBD (staff)
 
 ## 5. Reflection
 
-1. When you cut motor power, the arm stopped. Which part of the system made that true, and what would happen if it were missing?
+1. What happened when you cut motor power under the qualified load and configuration? Which mechanical and electrical conditions determined the response, and what would change if one were missing?
 2. Your command crossed several pieces of hardware before a motor moved. Which one would you trust least, and why?

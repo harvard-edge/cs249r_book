@@ -42,7 +42,7 @@ By the end of this lab, you will be able to:
 
 **Additional setup:** TBD (staff)
 
-<!-- STAFF: The book does not teach DH or inverse kinematics, so Part 1B needs a short kinematics primer handout. Needs a teleoperation input, a pinned simulator (MuJoCo or PyBullet), and a robot model matching the delivered SO-101. -->
+<!-- STAFF: Part 1B needs kinematics in Week 3, before Chapter 11 is scheduled in Week 9. Provide a station-specific primer, including the chosen DH convention where used, and pointed read-ahead from Chapter 11: Trajectory Planning and the control appendix. Needs a teleoperation input, a pinned simulator (MuJoCo or PyBullet), and a robot model matching the delivered SO-101. -->
 
 ### Part 1A: Measure the Body (Week 2)
 
@@ -71,7 +71,7 @@ TBD (staff)
 | 3 | **IK solver working in simulation** | TBD (staff) |
 | 4 | **Workspace map with singularities marked** | TBD (staff) |
 
-*Staff signs off `A1` on the team's [Competency Card](../curriculum/student-competencies.md).*
+*Staff signs off `A1` on the team's [Competency Card](../curriculum/student-competencies.md), combining this lab's workspace and joint-limit evidence with the boot and power-off response traces retained from Getting Started.*
 
 ---
 

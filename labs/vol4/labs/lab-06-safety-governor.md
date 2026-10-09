@@ -10,14 +10,14 @@
 
 ## 1. Overview
 
-**The physical question.** Can an independent microcontroller keep the arm safe even when the Linux brain crashes, lies, or goes silent, and can you **prove** it by trying to break it?
+**The physical question.** Can an independent microcontroller keep the arm safe even when the Linux brain crashes, lies, or goes silent, and what response claims can you defend from its architecture and declared fault trials?
 
-**Purpose.** Since week 1 the arm has run under a staff-written baseline governor, and you have trusted it without looking inside. Now safety is the subject. In the first week you replace that governor with your own: speed limits, a workspace geofence, and joint limits, and you test why it belongs on the MCU rather than in Linux. In the second week you try to defeat it by freezing the brain, corrupting packets, and cutting power. If you can't break it, you can trust it.
+**Purpose.** Since week 1 the arm has run under a staff-written baseline governor, and you have trusted it without looking inside. Now safety is the subject. In the first week you replace that governor with your own: speed limits, a workspace geofence, and joint limits, and you test why it belongs on the MCU rather than in Linux. In the second week you try to defeat it by freezing the brain, corrupting packets, and cutting power. Passing the declared fault trials supports the corresponding response claims; untested faults and assumptions remain explicit.
 
 **Core concepts:**
 - **Proposal versus permission:** the learned brain proposes; only the governor permits
 - **Placement:** why safety lives on its own silicon
-- **Adversarial verification:** trust what you tried and failed to break
+- **Adversarial verification:** match each response claim to declared faults, reviewed paths, and observed results
 
 **Your digital twin:** attack the governor in the twin before risking the real arm. Which attacks can the twin reproduce, and which only show up on hardware?
 
@@ -32,9 +32,9 @@
 By the end of this lab, you will be able to:
 - Implement deterministic real-time safety barriers on a microcontroller
 - Explain, with a measurement, why the governor runs on the MCU and not on Linux
-- Prove that no software or electrical path reaches the actuators without MCU permission
+- Document the software and electrical command paths, and review and test bypass conditions under the declared architecture and fault assumptions
 - Design and run adversarial fault-injection tests, including a watchdog that purges stale commands
-- Produce telemetry evidence of active safety intervention (`a_enf` ≠ `a_req`)
+- Produce telemetry evidence of active safety intervention by comparing `a_enf` with `a_map` in matched units, coordinates, and timestamps
 
 ---
 
@@ -48,7 +48,7 @@ By the end of this lab, you will be able to:
 
 ### Part 6A: Build the Governor (Week 10)
 
-**Goal:** your governor clamps or vetoes every unsafe proposal. **Checkpoint:** your governor running, a veto log, and the placement result.
+**Goal:** your governor clamps or vetoes proposals outside the declared checked limits. **Checkpoint:** your governor running, a veto log, and the placement result.
 
 TBD (staff)
 
@@ -56,7 +56,7 @@ TBD (staff)
 
 ### Part 6B: Break the Governor (Week 11)
 
-**Goal:** the governor holds under every fault you can devise. **Checkpoint:** fault-injection evidence and a zero-backlog trace.
+**Goal:** the governor meets its declared response limits under the staff-approved fault set. **Checkpoint:** fault-injection evidence and a zero-backlog trace.
 
 TBD (staff)
 
@@ -72,7 +72,7 @@ TBD (staff)
 | 2 | **Placement test** | TBD (staff) |
 | 3 | **Single command path** | TBD (staff) |
 | 4 | **Firmware review** | TBD (staff) |
-| 5 | **Veto trace showing `a_enf` ≠ `a_req`** | TBD (staff) |
+| 5 | **Veto trace comparing `a_enf` with `a_map` under matched command semantics** | TBD (staff) |
 | 6 | **Watchdog timeout and zero backlog on resume** | TBD (staff) |
 | 7 | **Corrupt packet rejection** | TBD (staff) |
 | 8 | **Motor power cutoff** | TBD (staff) |

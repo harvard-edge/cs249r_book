@@ -3,7 +3,7 @@
 **Status:** `skeleton`\
 **Weeks:** 4 (Part 2A)\
 **Reading:** [Chapter 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd)\
-**Competencies:** `A3`\
+**Competencies:** `A3` (clock alignment and stale-telemetry evidence)\
 **Due:** end of Week 4
 
 ---
@@ -60,11 +60,11 @@ TBD (staff)
 | # | Evidence | Threshold |
 |:---:|:---|:---|
 | 1 | **IK reaching on real hardware** | TBD (staff) |
-| 2 | **Sim-vs-real comparison table** | TBD (staff) |
+| 2 | **Sim-vs-real comparison table, including settled-error distributions and backlash** | TBD (staff) |
 | 3 | **RPC bridge latency** | TBD (staff) |
 | 4 | **Four-tap trace of one reach, with Linux and MCU timestamps aligned** | TBD (staff) |
 
-*Staff signs off `A3` on the team's [Competency Card](../curriculum/student-competencies.md).*
+*Staff checks the clock-alignment and stale-telemetry evidence for `A3` on the team's [Competency Card](../curriculum/student-competencies.md). The full visual-feedback-loop evidence completes `A3` in Lab 4.*
 
 ---
 

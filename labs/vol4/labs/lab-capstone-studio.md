@@ -10,9 +10,9 @@
 
 ## 1. Overview
 
-**The physical question.** How does a team defend an evidence-backed release claim for an autonomous machine? Under real physical variability, how do you show where the system is dependable, where it safely abstains, and that it never gets past its governor?
+**The physical question.** How does a team defend an evidence-backed release claim for an autonomous machine? Under real physical variability, how do you show where the system is dependable, where it safely abstains, and how the governor prevents bypass under the declared architecture, reviewed paths, and tested fault conditions?
 
-**Purpose.** Lectures and new labs are over. The final three weeks give each team bench time to run the whole pipeline on a task of its own, survive a peer team's attacks, and defend a written release decision. The thinking starts earlier: you propose the task in week 8 and freeze it in week 10, so the studio weeks go to building and testing, not deciding. A team that concludes its system should *not* be released, and backs that with rigorous evidence, can earn full marks. Showing where a physical system fails is the job.
+**Purpose.** The six-lab sequence is complete; seminar readings continue alongside the capstone. The final three weeks give each team bench time to run the whole pipeline on a task of its own, survive a peer team's attacks, and defend a written release decision. The thinking starts earlier: you propose the task in week 8 and freeze it in week 10, so the studio weeks go to building and testing, not deciding. A team that concludes its system should *not* be released, and backs that with rigorous evidence, can earn full marks. Showing where a physical system fails is the job. A justified refusal supports the release decision; it does not itself demonstrate useful autonomous task completion.
 
 **Core concepts:**
 - **Bounded claims:** a release claim holds only inside the envelope your evidence covers
