@@ -292,7 +292,9 @@ def extract_math(source: str, include_captions: bool = True) -> List[MathSpan]:
     if include_captions:
         for idx, line in attr_lines:
             for m in _CAPTION_ATTR.finditer(line):
-                cap = m.group(2).replace('\\"', '"')
+                # Pandoc unescapes a backslash before ASCII punctuation in a quoted
+                # attribute, so fig-cap="$\\Delta$" is the math $\Delta$
+                cap = re.sub(r'\\([!-/:-@\[-`{-~])', r'\1', m.group(2))
                 for _, col, body, disp in _scan_dollars(cap, cap):
                     spans.append(MathSpan(idx + 1, m.start(2) + col, body, disp, "caption"))
     for s in spans:
@@ -447,7 +449,11 @@ def _index_like(body: str, registry: "Registry") -> bool:
             return False
         rest = rest.replace("\\" + m, "", 1)
     letters = set(re.findall(r"[A-Za-z]", rest))
-    return letters <= set(ex.index) and re.fullmatch(r"[\dA-Za-z+\-,\s]*", rest) is not None
+    # a range (0:T, t:t+H-1) and an indexed index (r_i) are index expressions too
+    return letters <= set(ex.index) and re.fullmatch(r"[\dA-Za-z+\-,:_{}\s]*", rest) is not None
+
+
+_ACCENT = re.compile(r"\\(dot|ddot|dddot|hat|widehat|bar|overline|tilde|widetilde|vec|check|breve|acute|grave|mathring)\b")
 
 
 def _top_level_scripts(latex: str) -> Set[str]:
@@ -477,12 +483,21 @@ def _macro_decoration_ok(mark: str, grp: List[str], registry: "Registry", entry:
     if _decoration_ok(grp, registry.exempt):
         return True
     body = re.sub(r"\\[,;:!]", "", "".join(x for x in grp if not x.isspace()))
+    # a mentioned letter (\Glyph{k}) in a script is a mention, not a symbol
+    body = re.sub(r"\\Glyph\{(?:[^{}]|\{[^{}]*\})*\}", "1", body)
+    if mark == "_" and entry is not None and entry.kind == "function" and body and all(
+            registry.is_macro(m) for m in re.findall(r"\\([A-Za-z]+)", body)) and re.fullmatch(
+            r"(?:\\[A-Za-z]+|[\d,+\-])+", body):
+        return True     # a function's argument written as a subscript (I_x(a, b))
     if mark == "_":
         # an index, or an order statistic's parenthesized rank (p_{(1)})
         if body.startswith("(") and body.endswith(")"):
             body = body[1:-1]
         return _index_like(body, registry)
     if body == "*":
+        return True
+    # the optimum of a transposed or inverted quantity: ^{*\top}, ^{*-1}
+    if body.startswith("*") and len(body) > 1 and _decoration_ok([body[1:]], registry.exempt):
         return True
     # the optimum or a bootstrap replicate of an indexed quantity: ^{*(b)}
     if body.startswith("*(") and body.endswith(")"):
@@ -497,6 +512,8 @@ def _macro_decoration_ok(mark: str, grp: List[str], registry: "Registry", entry:
         if not registry.is_macro(m):
             return False
     rest = re.sub(r"\\[A-Za-z]+", "", rest)
+    # a macro in a power may carry its own index (L_f^{r_i})
+    rest = re.sub(r"_(\{[\dA-Za-z+\-,]*\}|[\dA-Za-z])", lambda m: "" if set(re.findall(r"[A-Za-z]", m.group(1))) <= set(registry.exempt.index) else m.group(0), rest)
     return re.fullmatch(r"[\d+\-./(){}\s]*", rest) is not None
 
 
@@ -509,6 +526,12 @@ def judge(math: str, registry: Registry, scope: Optional[Set[str]] = None) -> Li
     ex = registry.exempt
     toks = tokenize(math)
     found: List[Finding] = []
+    # {\hat{x}_{a}}_i is still a double subscript: TeX unwraps braces around a single accent
+    # atom. An accented macro that carries a subscript takes its index as {\Macro{}}_i.
+    for mt in re.finditer(r"\{\\([A-Za-z]+)\}\s*_", math):
+        e = registry.entries.get(registry.canonical(mt.group(1)))
+        if e is not None and _ACCENT.match(e.latex) and "_" in _top_level_scripts(e.latex):
+            found.append(Finding("{\\%s}_" % mt.group(1), "accent-group", 0, 0))
     # x_\Macro reads only the first token of the macro's LaTeX: with \beta_{\text{lat}}
     # the label lands on x, or LaTeX stops on a double subscript. Scripts take {\Macro}.
     for i, t in enumerate(toks):
@@ -666,15 +689,24 @@ def volume_of(rel: str) -> str:
 
 
 def notation_table_macros(repo: Path, volume: str) -> Set[str]:
-    """Macros listed in the first column of the volume's notation chapter tables."""
+    """Macros in the symbol column of the volume's notation chapter tables (the column the
+    header names "Symbol", the first by default)."""
     path = repo / "books" / volume / "frontmatter" / "notation.qmd"
     if not path.exists():
         return set()
     names: Set[str] = set()
+    col = 1
     for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.lstrip().startswith("|"):
+            col = 1
+            continue
         cells = line.split("|")
-        if line.lstrip().startswith("|") and len(cells) > 2:
-            names |= set(re.findall(r"\\([A-Z][A-Za-z]*)", cells[1]))
+        heads = [re.sub(r"[*\s]", "", c).lower() for c in cells]
+        if "symbol" in heads and "$" not in line:
+            col = heads.index("symbol")
+            continue
+        if len(cells) > col + 1:
+            names |= set(re.findall(r"\\([A-Z][A-Za-z]*)", cells[col]))
     return names
 
 
@@ -769,6 +801,7 @@ _KIND_ADVICE = {
     "greek": "write the macro whose meaning fits",
     "form": "register the bold/calligraphic/accented symbol; its LaTeX carries the form",
     "decorated": "a new subscript, superscript or prime makes a new symbol: register it",
+    "accent-group": "an accented macro with a subscript takes its index as {\\Macro{}}_i: TeX unwraps the braces around a single accent and reports a double subscript",
     "unbraced-script": "a macro used as a subscript or superscript must be braced, x^{\\Macro}: unbraced, LaTeX takes only its first token",
     "double-script": "the macro already carries this script, so LaTeX stops on a double subscript or superscript: group it, {\\Macro}_i",
     "unknown": "neither a registry macro nor a LaTeX built-in: fix the spelling or register the symbol",

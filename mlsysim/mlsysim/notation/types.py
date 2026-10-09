@@ -280,6 +280,8 @@ def convention_problems(s: NotationSymbol) -> List[str]:
         if re.search(r"\([^()]*\)\s*$", s.latex):
             problems.append("LaTeX ends in function arguments: register the bare symbol and write the "
                             "arguments in the chapter (\\CommunicationTime(\\DeviceCount))")
+        if re.search(r"[_^]\\(max|min|sup|inf|lim|log|ln|exp|det|arg|operatorname|text|mathrm|mathbf|frac)\b", s.latex):
+            problems.append("a command used as a subscript or superscript must be braced (\\tau_{\\max}); LaTeX refuses \\tau_\\max")
         if s.kind in ("vector", "matrix") and not _BOLD.search(s.latex):
             problems.append(f"kind '{s.kind}' must render bold (\\mathbf, \\boldsymbol or \\bm)")
         if s.kind == "set" and not _SET.search(s.latex):

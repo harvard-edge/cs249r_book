@@ -82,6 +82,8 @@ def test_decorated_macros():
     assert raws(r"\Time_{k+1} + \Time^{(i)}") == []                 # index expressions
     assert raws(r"\Time_{(1)} \le \Time_{(2)} \le \Time_{(k)}") == []   # order statistics
     assert raws(r"\Time^{*(i)} + \Time_{(\lceil \NumberOfDevices \LinkBandwidth \rceil)}") == []  # bootstrap replicate; rounded rank
+    assert raws(r"\Time_{0:\NumberOfDevices} + \Time_{k:k+1}") == []      # index ranges
+    assert raws(r"\GeneralizedCoordinates^{*\top} + \Time^{\NumberOfDevices_i} + \Time^{(\NumberOfDevices_i)}") == []
     assert raws(r"\LinkBandwidth^{\,i} + \Time^{\,\NumberOfDevices}") == []  # spacing is not a mark
 
 
@@ -89,6 +91,12 @@ def test_index_on_a_subscripted_macro_must_be_grouped():
     # T_{decode}_i is a LaTeX error (double subscript); {T_{decode}}_i renders
     assert raws(r"\DecodeInterval_i") == [(r"\DecodeInterval_{i}", "double-script")]
     assert raws(r"{\DecodeInterval}_i + \DecodeInterval^2") == []
+
+
+def test_an_accented_labeled_macro_takes_its_index_with_an_empty_group():
+    reg = Registry([RegistryEntry("EncoderVelocityEstimate", r"\dot{\theta}_{\text{enc}}", "encoder speed")], {}, BUILTINS)
+    assert [f.kind for f in judge(r"{\EncoderVelocityEstimate}_k", reg)] == ["accent-group"]
+    assert judge(r"{\EncoderVelocityEstimate{}}_k", reg) == []
 
 
 def test_a_macro_used_as_a_script_is_braced():
@@ -122,6 +130,12 @@ def test_captions_are_read():
     src = '::: {#fig-x fig-cap="Speed $v$ at $t$."}\n:::\n'
     assert [(s.text, s.source) for s in extract_math(src)] == [("v", "caption"), ("t", "caption")]
 
+
+
+def test_caption_attribute_backslashes_are_unescaped():
+    # Pandoc reads fig-cap="$\\Delta x$" as the math $\Delta x$ (doubled backslash in a quoted attribute)
+    spans = extract_math('::: {#fig-a fig-cap="Shift $\\\\Delta x$ here."}\n:::\n')
+    assert [s.text for s in spans if s.source == "caption"] == ["\\Delta x"]
 
 def test_fmt_math_and_quiz():
     cell = 'x = fmt_math(r"\\alpha + N")\ny = fmt_math(f"{a} \\\\cdot \\\\beta")\n'
