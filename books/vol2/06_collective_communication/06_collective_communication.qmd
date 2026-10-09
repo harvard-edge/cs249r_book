@@ -152,7 +152,7 @@ Physical constraints govern data movement before algorithms are designed. The sp
 
 Moving data consumes energy across storage arrays, interfaces, serializers, transceivers, and switches. A transfer that starts in local SRAM can stay on-package in high-bandwidth memory (HBM)\index{HBM}\index{High-Bandwidth Memory|see{HBM}}, cross to an intra-node peer GPU, or traverse intermediate switches to a remote node, and each step widens the physical accounting boundary\index{Energy consumption!data movement hierarchy} that an energy estimate must include (@fig-data-movement-hierarchy). Each boundary activates distinct physical components: on-package links, intra-node crossbars, serializers, optical transceivers, and switch fabrics. Distance alone does not determine energy per bit, and an endpoint-only estimate cannot be compared directly with a complete fabric-path estimate. Locality remains useful because it can avoid transfers and active interfaces; the energy saving must be evaluated under the same workload, utilization, and accounting boundary.
 
-::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Data-movement accounting boundaries**: Successively broader paths involve different storage and communication components. The schematic identifies what an energy estimate must include; it assigns no universal distance law or fixed energy multiplier. Compare energy per transferred byte only after specifying endpoints, interfaces, switches, and utilization." fig-alt="Nested physical boundaries from a local SRAM access through package memory, an intra-node peer, and an inter-node fabric path."}
+::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Data-movement accounting boundaries**: Successively broader paths involve different storage and communication components. The schematic identifies what an energy estimate must include; it assigns no universal distance law or fixed energy multiplier. Compare energy per transferred byte only after specifying endpoints, interfaces, switches, and utilization." fig-alt="Three nested boundaries labeled Package, Node, and Fabric path. Local SRAM links to HBM inside the package over an on-package link, HBM links to a peer GPU inside the node over an intra-node link, and the peer GPU links to switches leading to a remote node over an inter-node link."}
 ![](images/svg/data-movement-hierarchy.svg)
 
 <!--
@@ -489,7 +489,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.8))
 
 # ┌── 2. COMPUTE FRACTIONS ─────────────────────────────────────────────────────
 # Assumed teaching scenarios, not hardware measurements. Each row sums to 100.
@@ -501,34 +501,28 @@ sync_pct = [0, 5, 10, 15]
 
 gpu_counts_labels = ['8 GPUs\n(1 node)', '64 GPUs\n(8 nodes)', '512 GPUs\n(64 nodes)', '4,096 GPUs\n(512 nodes)']
 y_pos = np.arange(len(gpu_counts_num))
-bar_height = 0.5
+bar_height = 0.58
 
-# Stacked horizontal bars
-bars_compute = ax.barh(y_pos, compute_pct, height=bar_height, color=COLORS['OrangeLine'], label='Compute', edgecolor='white', linewidth=0.5)
-bars_comm = ax.barh(
-    y_pos, comm_pct, height=bar_height, left=compute_pct, color=COLORS['VioletLine'], label='Communication', edgecolor='white', linewidth=0.5
-)
-bars_sync = ax.barh(
+# Compute (orange) and communication (violet) keep their resource colors;
+# sync/idle is subordinate time, so it is a desaturated neutral, not red.
+seg_style = dict(height=bar_height, edgecolor='white', linewidth=1.0, zorder=3)
+ax.barh(y_pos, compute_pct, color=COLORS['OrangeLine'], label='Compute', **seg_style)
+ax.barh(y_pos, comm_pct, left=compute_pct, color=COLORS['VioletLine'], label='Communication', **seg_style)
+ax.barh(
     y_pos,
     sync_pct,
-    height=bar_height,
     left=[c + m for c, m in zip(compute_pct, comm_pct)],
-    color=COLORS['RedLine'],
-    label='Sync/Idle',
-    edgecolor='white',
-    linewidth=0.5,
+    color=COLORS['secondary'],
+    label='Sync / idle',
+    **seg_style,
 )
-
-# Label each segment with percentage
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for i in range(len(gpu_counts_labels)):
-    # Compute label
-    if compute_pct[i] > 10:
-        ax.text(compute_pct[i] / 2, i, f'{compute_pct[i]:.0f}%', ha='center', va='center', fontsize=9, fontweight='bold', color='white')
-    # Communication label
-    ax.text(compute_pct[i] + comm_pct[i] / 2, i, f'{comm_pct[i]:.0f}%', ha='center', va='center', fontsize=9, fontweight='bold', color='white')
-    # Sync label (only if nonzero)
+    ax.text(compute_pct[i] / 2, i, f'{compute_pct[i]:.0f}%', ha='center', va='center', fontsize=9, fontweight='bold', color='white', zorder=4)
+    ax.text(
+        compute_pct[i] + comm_pct[i] / 2, i, f'{comm_pct[i]:.0f}%', ha='center', va='center', fontsize=9, fontweight='bold', color='white', zorder=4
+    )
     if sync_pct[i] > 0:
         ax.text(
             compute_pct[i] + comm_pct[i] + sync_pct[i] / 2,
@@ -539,18 +533,22 @@ for i in range(len(gpu_counts_labels)):
             fontsize=8,
             fontweight='bold',
             color='white',
+            zorder=4,
         )
-
-# Annotations
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.set_yticks(y_pos)
 ax.set_yticklabels(gpu_counts_labels, fontsize=9)
-ax.set_xlabel('Fraction of Training Step (%)')
-ax.set_xlim(0, 105)
+ax.tick_params(axis='y', length=0)
+ax.set_xlabel('Share of training step (%)')
+ax.set_xlim(0, 100)
+ax.set_xticks([0, 25, 50, 75, 100])
+ax.grid(axis='y', visible=False)
+ax.set_axisbelow(True)
 ax.invert_yaxis()
-ax.set_ylim(len(gpu_counts_labels) - 0.5, -0.7)  # <-- space above top bar
-ax.legend(loc='upper right', fontsize=8, ncol=3)
+for side in ('top', 'right'):
+    ax.spines[side].set_visible(False)
+ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), fontsize=9, ncol=3, frameon=False, handlelength=1.2, columnspacing=1.6)
 
 plt.tight_layout()
 plt.show()
@@ -772,7 +770,7 @@ class InterconnectAlphaBeta:
 
 The same comparison across generations shows that the roughly ninefold per-direction cliff between a GPU's NVLink capacity and its one InfiniBand port, which @sec-compute-bandwidth-hierarchy established for the H100 generation, is not an artifact of one product cycle (@fig-bandwidth-divergence). Every point in the figure is per direction, so NVLink values are half the bidirectional datasheet totals, exactly as for the NVLink 4.0 row of @tbl-interconnect-parameters. A gap of that order has persisted for a decade even as both tiers grew. A GPU's NVLink aggregate and a single network port are different endpoint boundaries, but that persistent gap is why collective design must be hierarchy-aware, because unpartitioned traffic routed across the slower external fabric saturates it long before the local links are busy.
 
-::: {#fig-bandwidth-divergence fig-env="figure" fig-pos="htb" fig-cap="**Interconnect bandwidth conventions**: Selected advertised intra-node and inter-node capacities, expressed per direction. NVLink points sum a GPU's links; PCIe uses one x16 interface, and InfiniBand uses one port. These capacities reveal a hierarchy but are not equal-sized endpoint budgets or achieved collective rates. Algorithm selection additionally requires startup cost, port count, routing, and contention." fig-alt="Historical capacity curves with NVLink normalized from bidirectional totals to one direction, contrasted with PCIe x16 and single-port InfiniBand."}
+::: {#fig-bandwidth-divergence fig-env="figure" fig-pos="htb" fig-cap="**Interconnect bandwidth conventions**: Selected advertised intra-node and inter-node capacities, expressed per direction. NVLink points sum a GPU's links; PCIe uses one x16 interface, and InfiniBand uses one port. These capacities reveal a hierarchy but are not equal-sized endpoint budgets or achieved collective rates. Algorithm selection additionally requires startup cost, port count, routing, and contention." fig-alt="Log-scale line chart of one-way capacity from 2012 to 2024: an orange intra-node curve rising from PCIe 3.0 through NVLink 1.0 to 5.0, and a lower violet curve of single-port InfiniBand from FDR to XDR. A double-headed arrow at 2024 marks the ninefold gap between NVLink 5.0 and InfiniBand XDR."}
 
 ```{python}
 #| echo: false
@@ -793,13 +791,16 @@ ax.plot(
     intra["Year"],
     intra["Bandwidth_GBps"],
     marker='o',
+    markersize=5,
     linestyle='-',
-    linewidth=2.5,
-    color=COLORS.get('OrangeLine', '#D55E00'),
+    linewidth=2,
+    color=COLORS['OrangeLine'],
     label='Intra-node (per GPU / PCIe x16)',
+    zorder=3,
 )
-for i, txt in enumerate(intra["Technology"]):
-    ax.annotate(txt, (intra["Year"].iloc[i], intra["Bandwidth_GBps"].iloc[i]), textcoords="offset points", xytext=(0, 10), ha='center', fontsize=8)
+# Labels sit above-left of each rising point, clear of the incoming segment.
+for yr, bw, txt in zip(intra["Year"], intra["Bandwidth_GBps"], intra["Technology"]):
+    ax.annotate(txt, (yr, bw), textcoords="offset points", xytext=(-6, 6), ha='right', va='bottom', fontsize=8, color=COLORS['primary'])
 
 # Inter-node
 inter = df[df["Type"] == "Inter-node"]
@@ -807,22 +808,37 @@ ax.plot(
     inter["Year"],
     inter["Bandwidth_GBps"],
     marker='s',
+    markersize=5,
     linestyle='-',
-    linewidth=2.5,
-    color=COLORS.get('VioletLine', '#0072B2'),
+    linewidth=2,
+    color=COLORS['VioletLine'],
     label='Inter-node (per InfiniBand port)',
+    zorder=3,
 )
-for i, txt in enumerate(inter["Technology"]):
-    ax.annotate(txt, (inter["Year"].iloc[i], inter["Bandwidth_GBps"].iloc[i]), textcoords="offset points", xytext=(0, -15), ha='center', fontsize=8)
+# Labels sit below-right of each point, clear of the outgoing segment.
+for yr, bw, txt in zip(inter["Year"], inter["Bandwidth_GBps"], inter["Technology"]):
+    ax.annotate(txt, (yr, bw), textcoords="offset points", xytext=(6, -6), ha='left', va='top', fontsize=8, color=COLORS['primary'])
+
+# Gap between the newest intra-node and inter-node points, computed from the data.
+last_year = int(inter["Year"].max())
+hi = float(intra.loc[intra["Year"] == last_year, "Bandwidth_GBps"].iloc[0])
+lo = float(inter.loc[inter["Year"] == last_year, "Bandwidth_GBps"].iloc[0])
+gx = last_year
+ax.annotate('', xy=(gx, hi), xytext=(gx, lo), arrowprops=dict(arrowstyle="<->", color=COLORS["secondary"], lw=1, shrinkA=6, shrinkB=6))
+ax.text(gx + 0.25, (hi * lo) ** 0.5, f'{hi / lo:.0f}\u00d7', ha='left', va='center', fontsize=9, fontweight='bold', color=COLORS['primary'])
 
 ax.set_yscale("log")
 ax.set_ylabel("One-way capacity (GB/s)")
 ax.set_xlabel("Year")
 ax.set_xticks(range(2012, 2026, 2))
-ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
-ax.legend(loc="upper left", fontsize=9)
+ax.set_xlim(2010.8, 2026.2)
+ax.set_ylim(3, 3000)
+ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f'{v:,.0f}'))
+ax.grid(which='minor', visible=False)
+for side in ('top', 'right'):
+    ax.spines[side].set_visible(False)
+ax.legend(loc="upper left", fontsize=9, frameon=False)
 
-ax.margins(x=0.14, y=0.14)
 plt.tight_layout()
 plt.show()
 plt.close()
@@ -1966,7 +1982,7 @@ Plotting the three cost models for a 256-GPU group on a 200 Gbps fabric, over me
 
 : **AllReduce Algorithm Comparison**: Each algorithm occupies a different point in the latency-bandwidth trade-off space. Ring and Butterfly achieve bandwidth optimality with different latency characteristics, while Double Binary Tree combines logarithmic depth with a near-optimal byte term. The Tree row refers to the simple full-message model, not every tree implementation. {#tbl-allreduce-comparison}
 
-::: {#fig-allreduce-crossover fig-env="figure" fig-pos="htb" fig-cap="**Algorithm crossover in collective communication**: Performance analysis of Ring, Tree, and Double Binary Tree AllReduce algorithms across message sizes (1 KB to 10 GB) for a 256-GPU cluster with a 200 Gbps interconnect and $\MessageStartupLatency = 1\\ \MicroUnitPrefix\text{s}$. The Double Binary Tree curve applies modest latency and bandwidth overhead factors (1.2$\times$ and 1.05$\times$) to its ideal cost." fig-alt="Log-log plot of AllReduce time vs. message size for Ring, Tree, and Double Binary Tree algorithms showing latency-dominated and bandwidth-dominated crossover regions."}
+::: {#fig-allreduce-crossover fig-env="figure" fig-pos="htb" fig-cap="**Algorithm crossover in collective communication**: Performance analysis of Ring, Tree, and Double Binary Tree AllReduce algorithms across message sizes (1 KB to 10 GB) for a 256-GPU cluster with a 200 Gbps interconnect and $\MessageStartupLatency = 1\\ \MicroUnitPrefix\text{s}$. The Double Binary Tree curve applies modest latency and bandwidth overhead factors (1.2$\times$ and 1.05$\times$) to its ideal cost." fig-alt="Log-log plot of AllReduce time vs. message size for Ring, Tree, and Double Binary Tree algorithms. A dotted vertical line and an open marker locate the Ring and Tree crossover near 1 MB, separating the latency-dominated and bandwidth-dominated regions."}
 
 ```{python}
 #| echo: false
@@ -2028,34 +2044,33 @@ t_ring_ms = t_ring * THOUSAND
 t_tree_ms = t_tree * THOUSAND
 t_dbt_ms = t_dbt * THOUSAND
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 6))
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.8))
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.loglog(message_sizes, t_ring_ms, label='Ring (Bandwidth Optimal)', color=COLORS['VioletLine'], linewidth=2.5)
-ax.loglog(message_sizes, t_tree_ms, label='Tree (Latency Optimal)', color=COLORS['GreenLine'], linewidth=2.5, linestyle='--')
-ax.loglog(message_sizes, t_dbt_ms, label='Double Binary Tree (Hybrid)', color=COLORS['BlueLine'], linewidth=2.5, linestyle='-.')
+ax.loglog(message_sizes, t_ring_ms, label='Ring (bandwidth-optimal)', color=COLORS['VioletLine'], linewidth=2.2, zorder=3)
+ax.loglog(message_sizes, t_tree_ms, label='Tree (latency-optimal)', color=COLORS['GreenLine'], linewidth=2.2, linestyle='--', zorder=3)
+ax.loglog(message_sizes, t_dbt_ms, label='Double binary tree', color=COLORS['BlueLine'], linewidth=2.2, linestyle='-.', zorder=3)
 
-ax.text(
-    8e3,
-    1.6e-1,
-    'Latency Dominated\n(Tree wins)',
-    fontsize=10,
-    color='#555555',
-    ha='center',
-    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'),
-)
-ax.text(
-    3e7, 2e2, 'Bandwidth Dominated\n(Ring wins)', fontsize=10, color='#555555', bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'), ha='center'
-)
+# Ring/Tree crossover, located from the modeled curves themselves.
+cross_i = int(np.argmax(t_ring_ms < t_tree_ms))
+cross_x = message_sizes[cross_i]
+ax.axvline(cross_x, color=COLORS['secondary'], linewidth=0.8, linestyle=':', zorder=2)
+ax.plot([cross_x], [t_ring_ms[cross_i]], marker='o', markersize=5, markerfacecolor='white', markeredgecolor=COLORS['primary'], zorder=4)
 
-ax.set_xlabel('Message Size (Bytes)', fontsize=12)
-ax.set_ylabel('AllReduce Time (ms)', fontsize=12)
-ax.legend(loc='upper left', fontsize=8, facecolor='white', frameon=True)
-ax.grid(True, which="both", ls="-", alpha=0.3)
+ax.text(3e3, 2.0, 'Latency-dominated\n(trees win)', fontsize=9, color=COLORS['primary'], ha='left', va='bottom')
+ax.text(5e8, 4e-2, 'Bandwidth-dominated\n(ring wins)', fontsize=9, color=COLORS['primary'], ha='left', va='bottom')
+
+ax.set_xlabel('Message size')
+ax.set_ylabel('AllReduce time (ms)')
+ax.legend(loc='upper left', fontsize=9, frameon=False, handlelength=3)
+ax.grid(which='minor', visible=False)
+for side in ('top', 'right'):
+    ax.spines[side].set_visible(False)
 
 ax.set_xticks([1e3, 1e6, 1e9])
 ax.set_xticklabels(['1 KB', '1 MB', '1 GB'])
 
+plt.tight_layout()
 plt.show()
 plt.close()
 
@@ -2331,7 +2346,7 @@ On a DGX H100 node, each GPU's local NVLink capacity is `{python} CommInfraScena
 
 A flat ring whose ordering repeatedly crosses node boundaries can leave local NVLink capacity unused while loading scarce inter-node links. Hierarchical AllReduce\index{Hierarchical AllReduce}\index{Hierarchical AllReduce!three-phase decomposition} explicitly partitions the global operation into three stages that align communication volume with the fabric tiers (@fig-hierarchical-allreduce).
 
-::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), leaving a payload of $\CollectivePayloadSize/\AcceleratorsPerNode$ on each of the $\AcceleratorsPerNode$ GPUs per node. Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The schematic shows two representative ranks per node; the same decomposition applies to $\AcceleratorsPerNode$ ranks." fig-alt="Three schematic phases with two representative ranks per node: local ReduceScatter leaves partial shards, corresponding-rank AllReduce produces global shards, and local AllGather reconstructs the full result."}
+::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), leaving a payload of $\CollectivePayloadSize/\AcceleratorsPerNode$ on each of the $\AcceleratorsPerNode$ GPUs per node. Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The schematic shows two representative ranks per node; the same decomposition applies to $\AcceleratorsPerNode$ ranks." fig-alt="Three columns for the three phases, each showing Node 0 and Node 1 with GPU 0 and GPU 1. After the NVLink ReduceScatter, GPU 0 holds a node partial sum of shard A and GPU 1 of shard B. Vertical InfiniBand arrows link corresponding GPUs across nodes, after which they hold fully reduced shards. After the NVLink AllGather, every GPU holds both fully reduced shards."}
 ![](images/svg/hierarchical-allreduce.svg)
 
 <!--
@@ -2801,7 +2816,7 @@ Hierarchy fits a fabric whose tiers differ in speed. A torus, the direct-connect
 
 @Fig-torus-reduction maps this dimension-ordered schedule onto a $4 \times 4$ 2D torus grid (16 ranks)\index{Torus Topology!dimension-ordered reduction}. In Phase 1 (orange solid paths), each row executes an independent 4-rank Ring AllReduce across the horizontal X dimension using dashed wrap-around boundary links to close the ring ($2(\TorusFirstAxisChipCount-1) = 6$ steps). Once row partial sums are established, Phase 2 (slate solid paths) executes orthogonal 4-rank vertical Ring AllReduces down the Y dimension ($2(\TorusSecondAxisChipCount-1) = 6$ steps). These phases use direct nearest-neighbor links without multi-hop routing within a logical ring edge. They reduce the startup count from $2(\DeviceCount-1) = 30$ rounds on a flat 16-rank ring to $2(\TorusFirstAxisChipCount-1) + 2(\TorusSecondAxisChipCount-1) = 12$ rounds, a $2.5\times$ reduction in the modeled startup term. In this simple form each axis still processes the full message, so the round-count saving comes at a byte cost that the partitioned form below removes.
 
-::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-ordered reduction on a torus topology**: In a 2D torus mesh ($4 \times 4$ node grid representing a simplified TPU pod slice), AllReduce proceeds sequentially along orthogonal dimensions. Phase 1 (orange) executes four parallel horizontal rings across the X dimension ($2(\TorusFirstAxisChipCount-1) = 6$ steps). Phase 2 (slate) then executes four parallel vertical rings across the Y dimension ($2(\TorusSecondAxisChipCount-1) = 6$ steps) on the row-aggregated partial sums. Dashed links indicate torus wrap-around boundary connections. This dimension-ordered decomposition needs 12 startup rounds against 30 for a 16-rank 1D global ring, a $2.5\times$ reduction, but each axis processes the full message, so its bandwidth time is $3\CollectivePayloadSize/\LinkBandwidth$ for this grid." fig-alt="2D grid diagram of 16 nodes in a 4x4 torus topology. Orange arrows show Phase 1 horizontal row rings, slate arrows show Phase 2 vertical column rings, and dashed lines trace wrap-around boundary links. A legend below the grid names the three line styles."}
+::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-ordered reduction on a torus topology**: In a 2D torus mesh ($4 \times 4$ node grid representing a simplified TPU pod slice), AllReduce proceeds sequentially along orthogonal dimensions. Phase 1 (orange) executes four parallel horizontal rings across the X dimension ($2(\TorusFirstAxisChipCount-1) = 6$ steps). Phase 2 (slate) then executes four parallel vertical rings across the Y dimension ($2(\TorusSecondAxisChipCount-1) = 6$ steps) on the row-aggregated partial sums. Dashed stubs mark the torus wrap-around links, each leaving one edge of the grid and re-entering at the opposite edge. This dimension-ordered decomposition needs 12 startup rounds against 30 for a 16-rank 1D global ring, a $2.5\times$ reduction, but each axis processes the full message, so its bandwidth time is $3\CollectivePayloadSize/\LinkBandwidth$ for this grid." fig-alt="4x4 grid of 16 nodes labeled by coordinate and rank 0 to 15. Orange arrows link each row left to right for Phase 1, slate arrows link each column top to bottom for Phase 2, and dashed stubs leave the right and bottom edges and re-enter at the left and top edges to show the wrap-around links. A legend below the grid names the three line styles."}
 ![](images/svg/torus-reduction.svg){width=85%}
 
 <!--

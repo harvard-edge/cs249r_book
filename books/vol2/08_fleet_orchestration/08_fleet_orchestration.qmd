@@ -449,7 +449,7 @@ Periodic **defragmentation**\index{Defragmentation!definition} migrates or preem
 
 A third strategy, **over-subscription**\index{Over-subscription!definition}, admits more demand than a capacity dimension can sustain simultaneously, but only where the resource is divisible and the scheduler can bound interference. Average activity of a GPU's streaming multiprocessors (SMs), its compute units, does not create fractional whole GPUs. A job that reserves device memory, requires an exclusive CUDA context, or belongs to a rigid gang still occupies its assigned device while kernels are idle. Statistical multiplexing can be safe for explicitly shareable CPU, network, storage, or partitioned GPU capacity when tenants have measured, weakly correlated peaks and enforceable limits. It is unsafe to convert 70 percent average GPU utilization into a 1.4$\times$ device overcommit ratio. Whole-device capacity should instead be recovered through preemption, elastic resizing, or an isolation mechanism such as Multi-Instance GPU (MIG) hardware partitioning or NVIDIA's Multi-Process Service (MPS), which lets several processes' kernels share one device, provided the scheduler models each mechanism's memory, compute, and fault-sharing contract explicitly. Both reappear with the serving workloads they suit best in @sec-fleet-orchestration-resource-isolation.
 
-::: {#fig-fragmentation-problem fig-env="figure" fig-pos="htb" fig-cap="**The fragmentation problem**: A snapshot of an 8-node cluster (rows) with 8 GPUs each (columns). Blue tones mark slots held by active jobs (labeled J1 to J15); dashed white cells are free. Although 19 GPUs, roughly 30 percent of capacity, are free, every node still holds at least one busy slot, so a job that needs a full node cannot be placed. Fragmentation, not total capacity, sets what the scheduler can admit." fig-alt="Eight-by-eight grid of GPU slots, rows labeled node 0 to node 7 and columns labeled slot 0 to 7. Occupied slots are shaded in blue tones and labeled with job numbers J1 to J15; free slots are white with dashed outlines, scattered across every row. A status box reads 64 total GPUs, 45 allocated, 19 free, and a red note reads that a pending 8-GPU job is blocked because no node has 8 free slots."}
+::: {#fig-fragmentation-problem fig-env="figure" fig-pos="htb" fig-cap="**The fragmentation problem**: A snapshot of an 8-node cluster (rows) with 8 GPUs each (columns). Blue blocks mark the slots each active job holds (J1 to J15); dashed white cells are free, and the count at the right of each row gives that node's free slots. Although 19 GPUs, roughly 30 percent of capacity, are free, every node still holds at least one busy slot, so the pending job above the grid, which needs a full node, cannot be placed. Fragmentation, not total capacity, sets what the scheduler can admit." fig-alt="Eight-by-eight grid of GPU slots, rows labeled node 0 to node 7 and columns labeled slot 0 to 7. Each active job, J1 to J15, is a light blue block spanning its slots; free slots are white with dashed outlines, scattered across every row. A column at the right lists free slots per node, between 1 and 3, totaling 19 free, 30 percent. Above the grid, a queue row holds a red dashed bar spanning all eight columns labeled pending job, 8 GPUs on one node, with the note blocked, no node fits."}
 
 ```{python}
 #| echo: false
@@ -460,7 +460,7 @@ A third strategy, **over-subscription**\index{Over-subscription!definition}, adm
 # │
 # │ Goal: Heatmap of 8×8 cluster; show fragmented free slots; illustrate why
 # │       8-contiguous-GPU job cannot be placed despite 30% free.
-# │ Show: per-slot grid; muted blue job tones; dashed white = free; red blocked note.
+# │ Show: one blue block per job; dashed white = free; per-node free count; red pending job.
 # │ How: row_patterns grid; Rectangle patches; book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -491,62 +491,83 @@ free_gpus = total_gpus - allocated_gpus
 allocated_pct = allocated_gpus / total_gpus * 100
 free_pct = free_gpus / total_gpus * 100
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5.4))
 
-# Occupied slots: one muted blue tone per job, alternating so adjacent jobs
-# stay distinguishable without borrowing semantic colors. Free slots: white.
-job_tones = ['#5E93BA', '#9CC3DE', '#7AA9CC']
-FREE_FACE, FREE_EDGE = '#FFFFFF', '#94A3B8'
+# Each job is drawn as one block over its contiguous slots, in one blue
+# family; free slots are dashed outlines. A per-node free count on the right
+# shows that no row reaches the 8 slots the pending job needs.
+JOB_FACE, JOB_EDGE = COLORS['BlueL'], COLORS['BlueLine']
+FREE_EDGE = COLORS['secondary']
+PAD = 0.06
+
+def job_blocks(row):
+    blocks, start = [], 0
+    for c in range(1, len(row) + 1):
+        if c == len(row) or row[c] != row[start]:
+            if row[start] != 0:
+                blocks.append((row[start], start, c - start))
+            start = c
+    return blocks
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for r in range(n_nodes):
     for c in range(gpus_per_node):
-        job = grid[r, c]
-        if job == 0:
+        if grid[r, c] == 0:
             ax.add_patch(
-                mpatches.Rectangle((c + 0.06, r + 0.06), 0.88, 0.88, facecolor=FREE_FACE, edgecolor=FREE_EDGE, linewidth=1.0, linestyle=(0, (3, 2)))
+                mpatches.Rectangle(
+                    (c + PAD, r + PAD), 1 - 2 * PAD, 1 - 2 * PAD, facecolor='white', edgecolor=FREE_EDGE, linewidth=0.9, linestyle=(0, (3, 2))
+                )
             )
-        else:
-            ax.add_patch(mpatches.Rectangle((c, r), 1, 1, facecolor=job_tones[job % 3], edgecolor='white', linewidth=1.5))
-            ax.text(c + 0.5, r + 0.5, f'J{job}', ha='center', va='center', fontsize=7.5, color='#10324A')
+    for job, c0, w in job_blocks(grid[r]):
+        ax.add_patch(mpatches.Rectangle((c0 + PAD, r + PAD), w - 2 * PAD, 1 - 2 * PAD, facecolor=JOB_FACE, edgecolor=JOB_EDGE, linewidth=1.0))
+        ax.text(c0 + w / 2, r + 0.5, f'J{job}', ha='center', va='center', fontsize=9, color=JOB_EDGE)
+    n_free = int(np.count_nonzero(grid[r] == 0))
+    ax.text(gpus_per_node + 0.35, r + 0.5, f'{n_free} free', ha='left', va='center', fontsize=9.5, color=COLORS['primary'])
 
-ax.set_xlim(0, gpus_per_node)
-ax.set_ylim(n_nodes, 0)
+# Pending job: one row of 8 slots above the grid, red because it cannot be placed.
+py = -1.55
+ax.add_patch(
+    mpatches.Rectangle(
+        (PAD, py + PAD),
+        gpus_per_node - 2 * PAD,
+        1 - 2 * PAD,
+        facecolor=COLORS['RedL'],
+        edgecolor=COLORS['RedLine'],
+        linewidth=1.0,
+        linestyle=(0, (4, 2)),
+    )
+)
+ax.text(
+    gpus_per_node / 2, py + 0.5, f'pending job: {gpus_per_node} GPUs on one node', ha='center', va='center', fontsize=9.5, color=COLORS['RedLine']
+)
+ax.text(gpus_per_node + 0.35, py + 0.5, 'blocked:\nno node fits', ha='left', va='center', fontsize=9.5, color=COLORS['RedLine'], linespacing=1.3)
+
+# Totals under the free-count column.
+ax.plot([gpus_per_node + 0.35, gpus_per_node + 1.75], [n_nodes + 0.15] * 2, color=COLORS['grid'], linewidth=0.8, clip_on=False)
+ax.text(
+    gpus_per_node + 0.35,
+    n_nodes + 0.55,
+    f'{free_gpus} free ({free_pct:.0f}%)',
+    ha='left',
+    va='center',
+    fontsize=9.5,
+    color=COLORS['primary'],
+    fontweight='bold',
+)
+
+ax.set_xlim(-0.05, gpus_per_node + 1.9)
+ax.set_ylim(n_nodes + 0.05, py - 0.05)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_xlabel('GPU Slot (Local Rank)')
-ax.set_ylabel('Node')
 ax.set_xticks(np.arange(gpus_per_node) + 0.5)
 ax.set_xticklabels(np.arange(gpus_per_node))
-ax.set_yticks(np.arange(n_nodes) + 0.5)
-ax.set_yticklabels([f'Node {i}' for i in range(n_nodes)])
+ax.set_xlabel('GPU slot (local rank)', x=gpus_per_node / 2 / (gpus_per_node + 1.95))
+ax.set_yticks([py + 0.5] + list(np.arange(n_nodes) + 0.5))
+ax.set_yticklabels(['Queue'] + [f'Node {i}' for i in range(n_nodes)])
 ax.tick_params(length=0)
 ax.grid(False)
 for spine in ax.spines.values():
     spine.set_visible(False)
-
-props = dict(boxstyle='round,pad=0.6', facecolor='white', edgecolor=COLORS['grid'])
-status_text = f"Total GPUs: {total_gpus}\n" f"Allocated: {allocated_gpus} ({allocated_pct:.0f}%)\n" f"Free: {free_gpus} ({free_pct:.0f}%)"
-ax.text(gpus_per_node + 0.35, 0.1, status_text, fontsize=10, va='top', bbox=props, color=COLORS['primary'])
-
-pending = f"Pending job: {gpus_per_node} GPUs on one node\n" "Blocked: no node has 8 free slots"
-ax.text(
-    gpus_per_node + 0.35,
-    2.9,
-    pending,
-    fontsize=10,
-    va='top',
-    color=COLORS['RedLine'],
-    bbox=dict(boxstyle='round,pad=0.6', facecolor=COLORS['RedFill'], edgecolor=COLORS['RedLine']),
-)
-
-legend_patches = [
-    mpatches.Patch(facecolor=FREE_FACE, edgecolor=FREE_EDGE, linestyle='--', label='Free slot'),
-    mpatches.Patch(facecolor=job_tones[0], edgecolor='white', label='Occupied (one job per tone)'),
-]
-ax.legend(handles=legend_patches, loc='lower left', bbox_to_anchor=(1.03, 0), frameon=False)
-
-plt.subplots_adjust(right=0.66)
 
 plt.show()
 plt.close()
@@ -1104,7 +1125,7 @@ class TopologyPlacement:
 
 Applied to a whole job, the same reasoning ranks placement strategies. The latencies in this comparison are illustrative, not derived. They are constructed to stay above the ring-AllReduce bandwidth bound for the payload, and they show the order in which placement removes delay rather than values a reader could recompute from topology names. For a 0.5 GB gradient synchronization on `{python} TopologyPlacement.n_gpus_str` GPUs, random placement spans multiple racks and spine switches and takes an assumed `{python} TopologyPlacement.random_placement_latency_ms_str`. Each successive strategy removes a source of delay that the previous one leaves. Confining the group to a single rack removes spine hops and reduces latency to `{python} TopologyPlacement.rack_aware_latency_ms_str`. Rail-optimized alignment maps ranks so that every member of each collective group sits at the same local GPU index and therefore on the same network rail (developed in @sec-fleet-orchestration-rail-optimized). Traffic that previously hopped between rails through the spine now stays within one rail's switches, which cuts latency to `{python} TopologyPlacement.rail_optimized_latency_ms_str`. Topology-optimal placement additionally avoids leaf ports that other jobs are using and reaches `{python} TopologyPlacement.optimal_latency_ms_str`, a `{python} TopologyPlacement.speedup_mult_str` reduction (@fig-topology-placement, where each bar also carries its algorithm throughput). This ratio compares whole collectives under four assumed placements, so it need not match the link-bandwidth ratio of the two-rack paths above.
 
-::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology placement impact**: Assumed AllReduce latency across four placement strategies (Random, Rack-Aware, Rail-Optimized, and Topology-Optimal) for a 0.5 GB gradient sync on 64 GPUs. The assumed latency falls from 120 ms to 25 ms, a 4.8$\times$ ratio. Labels report payload divided by completion time (algorithm throughput), not physical link bandwidth." fig-alt="Bar chart of AllReduce latency for four placement strategies: random at 120 ms in red, rack-aware at 85 ms and rail-optimized at 40 ms in gray, and topology-optimal at 25 ms in green. Each bar is labeled with its latency and algorithm throughput, and an arrow marks a 4.8 times lower latency for topology-optimal placement."}
+::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology placement impact**: Assumed AllReduce latency across four placement strategies (Random, Rack-Aware, Rail-Optimized, and Topology-Optimal) for a 0.5 GB gradient sync on 64 GPUs. The assumed latency falls from 120 ms to 25 ms, a 4.8$\times$ ratio. Labels report payload divided by completion time (algorithm throughput), not physical link bandwidth." fig-alt="Bar chart of AllReduce latency for four placement strategies: random at 120 ms, rack-aware at 85 ms, and rail-optimized at 40 ms in gray, and topology-optimal at 25 ms in light green. Each bar is labeled with its latency and algorithm throughput. A dashed line carries the 120 ms level across the chart, and a green double arrow between it and the top of the topology-optimal bar is labeled 4.8 times lower."}
 
 ```{python}
 #| echo: false
@@ -1132,17 +1153,24 @@ gradient_payload = 0.5 * GB  # constructed placement scenario, not a measured be
 bandwidths = [(gradient_payload / t).to(GB / second).magnitude for t in lat]
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.6))
-# Red marks the penalty case, green the target; intermediate strategies stay neutral.
-colors = [COLORS['RedLine'], COLORS['secondary'], COLORS['secondary'], COLORS['GreenLine']]
+# Neutral bars for the strategies that leave delay on the table; green marks the target.
+face = [COLORS['grid'], COLORS['grid'], COLORS['grid'], COLORS['GreenL']]
+edge = [COLORS['secondary'], COLORS['secondary'], COLORS['secondary'], COLORS['GreenLine']]
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-bars = ax.bar(strategies, times, color=colors, alpha=0.85, width=0.6)
+x = np.arange(len(strategies))
+bars = ax.bar(x, times, color=face, edgecolor=edge, linewidth=1.0, width=0.56)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_ylabel('AllReduce Latency (ms)')
-ax.set_xlabel('Placement Strategy')
-ax.set_ylim(0, max(times) * 1.3)
+ax.set_xticks(x)
+ax.set_xticklabels(strategies)
+ax.set_ylabel('AllReduce latency (ms)')
+ax.set_xlabel('Placement strategy')
+ax.set_xlim(-0.55, len(strategies) - 0.1)
+ax.set_ylim(0, max(times) * 1.22)
 ax.grid(False)
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
 
 for bar, time, bw in zip(bars, times, bandwidths):
     ax.text(
@@ -1155,15 +1183,23 @@ for bar, time, bw in zip(bars, times, bandwidths):
         color=COLORS['primary'],
     )
 
+# Ratio bracket: dashed reference at the random-placement latency, carried to
+# the right of the topology-optimal bar, with a double arrow down to its top.
+x_br = x[-1] + 0.38
+ax.plot([x[0] + 0.28, x_br + 0.06], [times[0], times[0]], color=COLORS['secondary'], lw=0.8, ls=(0, (4, 3)))
 ax.annotate(
-    f'{TopologyPlacement.speedup:.1f}$\\times$ lower latency',
-    xy=(3, times[-1] + max(times) * 0.2),
-    xytext=(2.35, times[0] * 1.05),
-    textcoords='data',
-    ha='left',
-    arrowprops=dict(arrowstyle='->', color=COLORS['GreenLine'], lw=1.0, connectionstyle='arc3,rad=-0.2'),
+    '', xy=(x_br, times[-1]), xytext=(x_br, times[0]), arrowprops=dict(arrowstyle='<->', color=COLORS['GreenLine'], lw=1.2, shrinkA=0, shrinkB=0)
+)
+ax.plot([x[-1] + 0.28, x_br + 0.06], [times[-1], times[-1]], color=COLORS['GreenLine'], lw=0.8)
+ax.text(
+    x_br - 0.06,
+    (times[0] + times[-1]) / 2,
+    f'{TopologyPlacement.speedup:.1f}$\\times$\nlower',
+    ha='right',
+    va='center',
     fontsize=10,
     color=COLORS['GreenLine'],
+    fontweight='bold',
 )
 
 plt.tight_layout()
@@ -1558,36 +1594,36 @@ ax.axvspan(_esc.win_min, _esc.win_max, color=COLORS["grid"], alpha=0.45, lw=0)
 ax.axhline(1.0, color=COLORS["secondary"], ls="--", lw=1)
 ax.plot(n, eff, color=COLORS["BlueLine"], lw=2, marker="o", ms=5, zorder=3)
 for x, y in zip(n, eff):
-    ax.annotate(f"{y * 100:.0f}%", (x, y), textcoords="offset points", xytext=(0, -14), ha="center", fontsize=8, color=COLORS["primary"])
+    ax.annotate(f"{y * 100:.0f}%", (x, y), textcoords="offset points", xytext=(0, -15), ha="center", fontsize=9, color=COLORS["primary"])
 
-# (b) Share of each step lost, by source. Series differ by hatch as well as color.
+# (b) Share of each step lost, by source. The pipeline bubble is the term that
+# grows, so it carries the strong (dark neutral) fill; the two communication
+# terms stay muted in the network hue (violet), separated by tint vs. dots.
 loss_series = [
-    ("tp", "Tensor-parallel comm.", COLORS["OrangeLine"], None),
-    ("bub", "Pipeline bubble", COLORS["VioletLine"], "//"),
-    ("dp", "Exposed gradient sync", COLORS["OrangeL"], ".."),
+    ("tp", "Tensor-parallel comm.", COLORS["VioletL"], None, COLORS["VioletLine"]),
+    ("bub", "Pipeline bubble", COLORS["secondary"], None, "white"),
+    ("dp", "Exposed gradient sync", "white", "....", COLORS["VioletLine"]),
 ]
 x = np.arange(len(n))
 bottom = np.zeros(len(n))
-for key, label, color, hatch in loss_series:
+for key, label, color, hatch, edge in loss_series:
     v = np.array([r[key] for r in _esc.rows])
-    ax2.bar(
-        x, v, bottom=bottom, color=color, label=label, width=0.7, hatch=hatch, edgecolor="white" if hatch != ".." else COLORS["OrangeLine"], lw=0.5
-    )
+    ax2.bar(x, v, bottom=bottom, color=color, label=label, width=0.7, hatch=hatch, edgecolor=edge, lw=0.5)
     bottom += v
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(n[-1] * 1.2, 1.008, "Ideal linear scaling", ha="right", va="bottom", fontsize=8, color=COLORS["secondary"])
+ax.text(n[-1] * 1.2, 1.008, "Ideal linear scaling", ha="right", va="bottom", fontsize=9, color=COLORS["secondary"])
 ax.text(
     (_esc.win_min * _esc.win_max) ** 0.5,
     0.53,
     f"Assumed policy window\n[{_esc.win_min:,}, {_esc.win_max:,}] GPUs",
     ha="center",
-    fontsize=8,
+    fontsize=9,
     color=COLORS["primary"],
 )
 ax.set_xscale("log", base=2)
 ax.set_xticks(n)
-ax.set_xticklabels(tick_labels, fontsize=8)
+ax.set_xticklabels(tick_labels, fontsize=9)
 ax.minorticks_off()
 ax.set_xlim(n[0] / 1.3, n[-1] * 1.3)
 ax.set_ylim(0.5, 1.05)
@@ -1599,7 +1635,7 @@ ax.set_title("(a)", loc="left", fontsize=10)
 
 top = bottom.max() * 1.15
 ax2.set_xticks(x)
-ax2.set_xticklabels(tick_labels, fontsize=8)
+ax2.set_xticklabels(tick_labels, fontsize=9)
 ax2.set_ylim(0, top)
 _yt = np.arange(0, top, 0.1)
 ax2.set_yticks(_yt)
@@ -1607,7 +1643,9 @@ ax2.set_yticklabels([f"{t:.0%}" for t in _yt])
 ax2.set_xlabel("GPUs")
 ax2.set_ylabel("Share of step time lost")
 _h, _l = ax2.get_legend_handles_labels()  # list top of stack first
-ax2.legend(_h[::-1], _l[::-1], loc="upper left", fontsize=8, frameon=True, framealpha=0.95)
+# Opaque, edgeless legend box so no gridline runs through a swatch or label.
+_leg = ax2.legend(_h[::-1], _l[::-1], loc="upper left", fontsize=9, frameon=True, facecolor="white", edgecolor="none", framealpha=1)
+_leg.set_zorder(5)
 ax2.grid(axis="x", visible=False)
 ax2.set_title("(b)", loc="left", fontsize=10)
 
@@ -1774,7 +1812,7 @@ IdleCostAnchors.philly_util_pct_label = IdleCostAnchors.philly_util_pct_str
 
 At a fixed utilization, idle capacity grows linearly with fleet size, so the dollar cost of a scheduling inefficiency grows with every procurement (@fig-cost-idle-gpus). At `{python} IdleCostAnchors.n_gpus_str` GPUs operating at `{python} IdleCostAnchors.util_low_str` utilization, annual waste reaches `{python} IdleCostAnchors.waste_low_str` under the chapter's `{python} IdleCostAnchors.gpu_hour_str`/GPU-hour accounting scenario. Published measurements show that such underutilization occurs in production. Microsoft's Philly cluster study [@jeon2019analysis] measured mean GPU utilization of approximately `{python} IdleCostAnchors.philly_util_str`. The 30 to 70 percent shaded band in the figure is an illustrative operating range for the cost model, not a universal empirical claim about all production clusters. Moving from `{python} IdleCostAnchors.util_low_str` to `{python} IdleCostAnchors.util_mid_str` utilization on a `{python} IdleCostAnchors.n_gpus_str`-GPU cluster recovers over `{python} IdleCostAnchors.recovered_str` annually in equivalent capacity value under this pricing scenario. That value equals the opening's annual waste at `{python} ClusterEconomicsContext.idle_pct_str` idle for a simple reason. Both scenarios concern `{python} ClusterEconomicsContext.idle_pct_str` of the same `{python} IdleCostAnchors.n_gpus_str` GPUs at the same rate, so both price `{python} ClusterEconomicsContext.productive_gpu_gain_str` GPU-equivalents of capacity, once as waste and once as recovery. Cash savings require avoiding billed usage or a planned purchase.
 
-::: {#fig-cost-idle-gpus fig-env="figure" fig-pos="htb" fig-cap="**The cost of idle GPUs**: Annual wasted cost as a function of cluster size for different GPU utilization levels, assuming `{python} IdleCostAnchors.gpu_hour_str`/GPU-hour (cloud equivalent). The shaded region between 30 percent and 70 percent is an illustrative operating range for the scenario analysis. At `{python} IdleCostAnchors.n_gpus_str` GPUs with `{python} IdleCostAnchors.util_low_str` utilization, the model yields `{python} IdleCostAnchors.waste_low_str` in annual wasted capacity. The Microsoft Philly data point marks the published mean GPU utilization of `{python} IdleCostAnchors.philly_util_str`. Data source: @jeon2019analysis." fig-alt="Line chart of annual wasted cost in millions vs. cluster size with four utilization curves at 30, 50, 70, and 90 percent and shaded illustrative range."}
+::: {#fig-cost-idle-gpus fig-env="figure" fig-pos="htb" fig-cap="**The cost of idle GPUs**: Annual wasted cost as a function of cluster size for different GPU utilization levels, assuming `{python} IdleCostAnchors.gpu_hour_str`/GPU-hour (cloud equivalent). The shaded region between 30 percent and 70 percent is an illustrative operating range for the scenario analysis. At `{python} IdleCostAnchors.n_gpus_str` GPUs with `{python} IdleCostAnchors.util_low_str` utilization, the model yields `{python} IdleCostAnchors.waste_low_str` in annual wasted capacity. The Microsoft Philly data point marks the published mean GPU utilization of `{python} IdleCostAnchors.philly_util_str`. Data source: @jeon2019analysis." fig-alt="Line chart of annual wasted cost in millions of dollars against cluster size from 0 to 100 thousand GPUs. Four straight lines rise from the origin, labeled at their right ends 30, 50, 70, and 90 percent utilization, steepest for 30 percent. A light gray band fills the region between the 30 and 70 percent lines. A dark diamond near 4 thousand GPUs marks Microsoft Philly at 52 percent mean utilization, and a crimson dot on the 50 percent line at 10 thousand GPUs is labeled 87.6 million dollars wasted per year."}
 
 ```{python}
 #| echo: false
@@ -1804,69 +1842,68 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
 gpu_cost_per_hour = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
 cluster_sizes = np.linspace(1000, 100000, 200)
 
-# Utilization levels use line style and neutral tones; red is reserved for the
-# highest-waste condition.
+# Utilization levels differ by line style and gray value (darker = more waste);
+# each line is labeled at its right end. The crimson dot is the selection mark
+# for the worked example, not a data series.
 util_configs = [
-    (0.30, COLORS['RedLine'], '-', '30% utilization'),
-    (0.50, '#444444', '--', '50% utilization'),
-    (0.70, '#777777', '-.', '70% utilization'),
-    (0.90, '#aaaaaa', ':', '90% utilization'),
+    (0.30, COLORS['primary'], '-', '30%'),
+    (0.50, COLORS['primary'], '--', '50%'),
+    (0.70, COLORS['secondary'], '-.', '70%'),
+    (0.90, COLORS['secondary'], ':', '90%'),
 ]
 
-# Plot lines
-
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-for util, color, linestyle, label in util_configs:
-    annual_waste = cluster_sizes * (1 - util) * gpu_cost_per_hour * HOURS_PER_YEAR / MILLION
-    ax.plot(cluster_sizes / THOUSAND, annual_waste, color=color, linestyle=linestyle, linewidth=2, label=label)
-
-# Shade typical range (30% to 70%)
+# Shade the illustrative range (30% to 70%) first so lines draw over it.
 waste_30 = cluster_sizes * (1 - 0.30) * gpu_cost_per_hour * HOURS_PER_YEAR / MILLION
 waste_70 = cluster_sizes * (1 - 0.70) * gpu_cost_per_hour * HOURS_PER_YEAR / MILLION
-ax.fill_between(cluster_sizes / THOUSAND, waste_70, waste_30, alpha=0.10, color='#777777', label='Illustrative range')
+ax.fill_between(cluster_sizes / THOUSAND, waste_70, waste_30, color=COLORS['grid'], alpha=0.35, lw=0)
+
+for util, color, linestyle, label in util_configs:
+    annual_waste = cluster_sizes * (1 - util) * gpu_cost_per_hour * HOURS_PER_YEAR / MILLION
+    ax.plot(cluster_sizes / THOUSAND, annual_waste, color=color, linestyle=linestyle, linewidth=1.6)
+    ax.text(101.5, annual_waste[-1], label, ha='left', va='center', fontsize=9.5, color=color)
+ax.text(101.5, max(waste_30) * 1.08, 'utilization', ha='left', va='center', fontsize=9, color=COLORS['secondary'])
 
 # Microsoft Philly data point: published mean utilization from Literature.
-# Place on appropriate line (interpolate between 50% and 70%)
 philly_cluster = 4  # scenario assumption: plotting position only; the paper reports "thousands of GPUs"
 philly_waste = philly_cluster * THOUSAND * (1 - IdleCostAnchors.philly_util) * gpu_cost_per_hour * HOURS_PER_YEAR / MILLION
-ax.scatter([philly_cluster], [philly_waste], color='#222222', s=100, zorder=5, marker='D', edgecolors='white', linewidth=1.0)
+ax.scatter([philly_cluster], [philly_waste], color=COLORS['primary'], s=55, zorder=5, marker='D', edgecolors='white', linewidth=1.0)
+
+waste_10k_50 = Systems.Clusters.Training_10K.total_accelerators * (1 - 0.50) * gpu_cost_per_hour * HOURS_PER_YEAR / MILLION
+ax.scatter([10], [waste_10k_50], color=COLORS['crimson'], s=55, zorder=6, edgecolors='white', linewidth=1.0)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate(
     f'Microsoft Philly\n({IdleCostAnchors.philly_util_pct_label} mean util.)',
-    xy=(philly_cluster - 0.5, philly_waste),
-    xytext=(9, philly_waste + 350),
-    fontsize=8,
-    ha='center',
-    fontweight='normal',
-    color='#222222',
-    arrowprops=dict(arrowstyle='->', shrinkB=7, color='#222222', lw=0.75),
+    xy=(philly_cluster, philly_waste),
+    xytext=(2, 520),
+    fontsize=9,
+    ha='left',
+    va='bottom',
+    color=COLORS['primary'],
+    arrowprops=dict(arrowstyle='-', shrinkA=2, shrinkB=6, color=COLORS['primary'], lw=0.7),
 )
-
-waste_10k_50 = Systems.Clusters.Training_10K.total_accelerators * (1 - 0.50) * gpu_cost_per_hour * HOURS_PER_YEAR / MILLION
-
-ax.scatter([10], [waste_10k_50], color='crimson', s=45, zorder=6, edgecolors='white', linewidth=0.8)
-
-# Key annotation: waste at 10K GPUs, 50% utilization
-
 ax.annotate(
-    f'At 10K GPUs, 50% util.\n= ${waste_10k_50:.1f}M wasted/year',
+    f'10K GPUs at 50% util.:\n${waste_10k_50:.1f}M wasted per year',
     xy=(10, waste_10k_50),
-    xytext=(15, waste_10k_50 + 500),
-    fontsize=8,
-    fontweight='normal',
-    color='crimson',
-    bbox=dict(facecolor="#f1e3e5", edgecolor='none', alpha=0.8, pad=3),
-    arrowprops=dict(arrowstyle='->', shrinkB=3, color='crimson', lw=0.75),
+    xytext=(12, 720),
+    fontsize=9,
+    ha='left',
+    va='bottom',
+    color=COLORS['crimson'],
+    arrowprops=dict(arrowstyle='-', shrinkA=2, shrinkB=5, color=COLORS['crimson'], lw=0.7),
 )
+ax.text(84, 580, 'illustrative range\n(30% to 70%)', ha='center', va='center', fontsize=9, color=COLORS['secondary'])
 
-ax.set_xlabel('Cluster Size (thousands of GPUs)')
-ax.set_ylabel('Annual Wasted Cost ($M)')
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+ax.set_xlabel('Cluster size (thousands of GPUs)')
+ax.set_ylabel('Annual wasted cost ($M)')
 ax.set_xlim(0, 100)
-ax.set_ylim(0, max(waste_30) * 1.05)
+ax.set_ylim(0, max(waste_30) * 1.12)
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
 
 plt.tight_layout()
+fig.subplots_adjust(right=fig.subplotpars.right - 0.02)  # keep the end-label column off the canvas edge
 plt.show()
 plt.close()
 ```
@@ -2499,7 +2536,7 @@ Dynamic sharing recovers `{python} DiurnalGpuShift.ds_reclaimed_str` of effectiv
 
 :::
 
-::: {#fig-fleet-orchestration-training-serving-diurnal fig-env="figure" fig-pos="htb" fig-cap="**Training vs. serving diurnal GPU capacity shift**: One day on the `{python} DiurnalGpuShift.ds_fleet_gpus_str` fleet of the diurnal GPU shift notebook, drawn from the same numbers. Serving demand (green) averages `{python} DiurnalGpuShift.ds_serving_avg_str` and peaks at `{python} DiurnalGpuShift.ds_peak_demand_str`; the orchestrator keeps a `{python} DiurnalGpuShift.ds_safety_buffer_str`-GPU surge buffer above the forecast, so the serving side never exceeds the `{python} DiurnalGpuShift.ds_serving_peak_str` a static partition would reserve (dashed line). Everything between the buffer and that line returns to training, averaging `{python} DiurnalGpuShift.ds_reclaimed_str` over the day, on top of the `{python} DiurnalGpuShift.ds_training_fixed_str` training base. The shape of the daily curve is illustrative; its average and peak are the notebook's." fig-alt="Stacked area chart of GPU count over 24 hours. From the bottom: green serving demand low overnight and peaking mid-afternoon, a hatched pale green surge buffer above it, a light blue band of training reclaimed from the serving reservation that is widest at night and vanishes at the afternoon peak, and a dark blue training base filling the rest of the fleet. A dashed line marks the static serving reservation at 400 GPUs."}
+::: {#fig-fleet-orchestration-training-serving-diurnal fig-env="figure" fig-pos="htb" fig-cap="**Training vs. serving diurnal GPU capacity shift**: One day on the `{python} DiurnalGpuShift.ds_fleet_gpus_str` fleet of the diurnal GPU shift notebook, drawn from the same numbers. Serving demand (green) averages `{python} DiurnalGpuShift.ds_serving_avg_str` and peaks at `{python} DiurnalGpuShift.ds_peak_demand_str`; the orchestrator keeps a `{python} DiurnalGpuShift.ds_safety_buffer_str`-GPU surge buffer above the forecast, so the serving side never exceeds the `{python} DiurnalGpuShift.ds_serving_peak_str` a static partition would reserve (dashed line). Everything between the buffer and that line returns to training, averaging `{python} DiurnalGpuShift.ds_reclaimed_str` over the day, on top of the `{python} DiurnalGpuShift.ds_training_fixed_str` training base. The shape of the daily curve is illustrative; its average and peak are the notebook's." fig-alt="Stacked area chart of GPU count over 24 hours. From the bottom: green serving demand low overnight and peaking mid-afternoon, a hatched pale green surge buffer above it, a light blue band of training reclaimed from the serving reservation that is widest at night and vanishes at the afternoon peak, a medium blue training base, and a thin gray strip of maintenance headroom at the top of the fleet, labeled at the right edge as 6 GPUs. A dashed line marks the static serving reservation at 400 GPUs."}
 
 ```{python}
 #| echo: false
@@ -2544,12 +2581,17 @@ check(abs(np.trapezoid(reclaimed, t) / 24 - D.reclaimed) < 1.0, "figure's daily-
 
 # ┌── 2. RENDER ─────────────────────────────────────────────────────────────────
 top_train = D.serving_peak + D.training_fixed
-ax.fill_between(t, 0, demand, color=COLORS['GreenLine'], alpha=0.85, lw=0, label='Serving demand')
+# Serving demand: mid green tint (same alpha as the training base) so dark
+# label text clears 4.5:1; the demand curve itself is drawn as a solid line.
+ax.fill_between(t, 0, demand, color=COLORS['GreenLine'], alpha=0.55, lw=0, label='Serving demand')
+ax.plot(t, demand, color=COLORS['GreenLine'], lw=1.2)
 ax.fill_between(t, demand, serving_alloc, facecolor=COLORS['GreenL'], edgecolor=COLORS['GreenLine'], hatch='///', lw=0, label='Surge buffer')
 ax.fill_between(t, serving_alloc, D.serving_peak, color=COLORS['BlueL'], lw=0, label='Training on reclaimed GPUs')
-ax.fill_between(t, D.serving_peak, top_train, color=COLORS['BlueLine'], alpha=0.85, lw=0, label='Training base')
+ax.fill_between(t, D.serving_peak, top_train, color=COLORS['BlueLine'], alpha=0.55, lw=0, label='Training base')
 ax.axhline(D.serving_peak, color=COLORS['primary'], ls='--', lw=1.1)
-ax.axhline(D.fleet, color=COLORS['grid'], lw=0.8)
+# Maintenance headroom (fleet minus reservation minus training base): a thin
+# neutral strip that runs up to the axis limit so the stack meets the frame.
+ax.fill_between(t, top_train, D.fleet, color=COLORS['grid'], lw=0)
 
 ax.text(
     23.6,
@@ -2559,7 +2601,6 @@ ax.text(
     va='bottom',
     fontsize=9,
     color=COLORS['primary'],
-    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='none', alpha=0.85),
 )
 ax.text(
     12,
@@ -2568,11 +2609,13 @@ ax.text(
     ha='center',
     va='center',
     fontsize=10,
-    color='white',
+    color=COLORS['primary'],
     fontweight='bold',
 )
 ax.annotate(f'reclaimed for training\n(average {D.reclaimed:,})', xy=(3, 330), ha='center', va='center', fontsize=9, color=COLORS['primary'])
-ax.annotate(f'serving demand\n(average {D.serving_avg:,}, peak {D.peak_demand:,})', xy=(14, 70), ha='center', va='center', fontsize=9, color='white')
+ax.annotate(
+    f'serving demand\n(average {D.serving_avg:,}, peak {D.peak_demand:,})', xy=(14, 80), ha='center', va='center', fontsize=9, color=COLORS['primary']
+)
 ax.annotate(
     f'surge buffer ({D.safety_buffer:,})',
     xy=(20.5, float(np.interp(20.5, t, demand + D.safety_buffer / 2))),
@@ -2584,6 +2627,19 @@ ax.annotate(
     arrowprops=dict(arrowstyle='-', color=COLORS['primary'], lw=0.6),
 )
 
+headroom = D.fleet - top_train
+ax.annotate(
+    f'headroom ({headroom:,})',
+    xy=(23.7, D.fleet - headroom / 2),
+    xytext=(24.5, D.fleet - headroom / 2),
+    ha='left',
+    va='center',
+    fontsize=9,
+    color=COLORS['secondary'],
+    annotation_clip=False,
+    arrowprops=dict(arrowstyle='-', color=COLORS['secondary'], lw=0.6, shrinkA=1, shrinkB=0),
+)
+
 ax.set_xlim(0, 24)
 ax.set_ylim(0, D.fleet)
 ax.set_xticks(range(0, 25, 3))
@@ -2592,6 +2648,7 @@ ax.set_yticks([0, 200, D.serving_peak, 600, 800, D.fleet])
 ax.set_xlabel('Time of day')
 ax.set_ylabel('GPUs')
 ax.grid(False)
+ax.tick_params(axis='y', length=3)
 
 plt.tight_layout()
 plt.show()
@@ -2803,7 +2860,7 @@ Even with isolation, quotas, and dynamic sharing in place, the cluster can still
 
 A cluster dashboard shows average GPU utilization stuck at 60 percent, yet developers complain about three-day queue times for small debugging jobs. Hundreds of GPUs sit idle, but no jobs are starting. Bridging this gap between theoretical capacity and production reality requires methodical forensic analysis to untangle the interactions between hardware topology, scheduler policies, and user behavior. Part of the paradox is the queueing arithmetic of notebook \ref{nbk-fleet-orchestration-queuing-theory-gpu-clusters}. The $\ServingUtilization/(1-\ServingUtilization)$ factor grows without bound as offered load approaches service capacity, so mean wait rises gently through moderate load and then steeply above 80 percent for small, mixed, and large workloads alike (@fig-utilization-paradox, plotted on a logarithmic scale). The curves use the notebook's exponential reference case ($\ServiceTimeVariationCoefficient= 1$), so they are the gentlest version of the effect. A mixed ML queue with the notebook's representative $\ServiceTimeVariationCoefficient= 3$ multiplies every curve by the larger variability factor, shifting each one upward without changing where it bends. The curves also describe offered service load rather than allocated or kernel-active GPU percentages, and their 75 percent headroom marker is an illustrative choice rather than a universal cluster threshold. Queueing explains why a busy fleet waits. A fleet whose queue is full while devices sit idle is waiting for a different reason, and finding it requires looking past the dashboard.
 
-::: {#fig-utilization-paradox fig-env="figure" fig-pos="htb" fig-cap="**The utilization paradox**: As cluster utilization approaches saturation (100 percent), job wait times increase hyperbolically and diverge near saturation, not linearly. The shaded region above 80 percent and the dashed 75 percent target illustrate headroom choices in this toy queue model, not measured GPU-utilization thresholds. Real queue delay also depends on job sizes, gang constraints, and arrival variability." fig-alt="Semi-log plot of toy-queue wait time vs. offered service load relative to capacity. Three curves for small, mixed, and large jobs. Wait times explode near 100 percent. An illustrative high-load region is shaded above 80 percent. A dashed line shows an assumed headroom target at 75 percent."}
+::: {#fig-utilization-paradox fig-env="figure" fig-pos="htb" fig-cap="**The utilization paradox**: As cluster utilization approaches saturation (100 percent), job wait times increase hyperbolically and diverge near saturation, not linearly. The shaded region above 80 percent and the dashed 75 percent target illustrate headroom choices in this toy queue model, not measured GPU-utilization thresholds. Real queue delay also depends on job sizes, gang constraints, and arrival variability." fig-alt="Semi-log plot of toy-queue wait time vs. offered service load relative to capacity. Three directly labeled curves for small, mixed, and large jobs. Wait times explode near 100 percent. An illustrative high-load region is shaded above 80 percent. A dashed line shows an assumed headroom target at 75 percent."}
 
 ```{python}
 #| echo: false
@@ -2834,28 +2891,62 @@ wait_large = (rho / (1 - rho)) * 12.0
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(utilization * 100, wait_small, label='Small jobs (average 1 h)', linewidth=2, color='#777777', linestyle=':')
-ax.plot(utilization * 100, wait_mixed, label='Mixed workload (average 4 h)', linewidth=2, color='#444444', linestyle='--')
-ax.plot(utilization * 100, wait_large, label='Large jobs (average 12 h)', linewidth=2, color='#111111', linestyle='-')
+# Curves are labeled directly; line style and gray value separate them in print.
+# Each label sits just above its own curve (3 pt perpendicular offset), staggered
+# along x so the three never share a column.
+curves = [
+    (wait_large, 'large jobs (average 12 h)', COLORS['primary'], '-', 31),
+    (wait_mixed, 'mixed workload (average 4 h)', COLORS['primary'], '--', 46),
+    (wait_small, 'small jobs (average 1 h)', COLORS['secondary'], ':', 59),
+]
+lines = []
+for w, label, color, ls, _ in curves:
+    keep = (w >= 0.1) if ls == ':' else (w > 0)  # dotted: visible part only, so its dash phase is measured from the frame
+    (ln,) = ax.plot(utilization[keep] * 100, w[keep], linewidth=1.8, color=color, linestyle=ls, dash_capstyle='butt', solid_capstyle='butt')
+    lines.append(ln)
 
 target_util = 75
-ax.axvline(x=target_util, color='gray', linestyle='--', alpha=0.7, label='Illustrative headroom (75%)')
-
-ax.axvspan(80, 100, alpha=0.6, color=COLORS['RedFill'], label='Illustrative high-load region')
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(81.5, 0.14, 'Illustrative\nhigh-load\nregion', color=COLORS['RedLine'], fontweight='bold', va='bottom')
-
-ax.text(73, 0.25, 'Headroom', color='gray', ha='right', va='bottom', rotation=90)
-
 ax.set_yscale('log')
 ax.set_xlim(0, 100)
 ax.set_ylim(0.1, 1000)
-ax.set_xlabel('Offered Service Load / Capacity (%)')
-ax.set_ylabel('Average Job Wait Time (Hours, Log Scale)')
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-ax.grid(True, which="both", ls="-", alpha=0.2)
-ax.minorticks_on()
+fig.canvas.draw()  # fix the transform so label angles and dash phase follow the drawn curves
+# Phase the dotted curve so its path ends in a gap rather than a clipped sliver of a dot.
+_dot_on, _dot_off, _lw = 1.0, 1.65, 1.8
+_xy = ax.transData.transform(lines[2].get_xydata())
+_len_pt = float(np.sum(np.hypot(*np.diff(_xy, axis=0).T))) * 72 / fig.dpi / _lw
+lines[2].set_linestyle(((_dot_on + 0.3 - _len_pt) % (_dot_on + _dot_off), (_dot_on, _dot_off)))
+for w, label, color, ls, x_lab in curves:
+    y0, y1 = (float(np.interp(v / 100, rho, w)) for v in (x_lab - 4, x_lab + 4))
+    p0, p1 = ax.transData.transform([(x_lab - 4, y0), (x_lab + 4, y1)])
+    theta = float(np.arctan2(p1[1] - p0[1], p1[0] - p0[0]))
+    y_mid = float(np.interp(x_lab / 100, rho, w))
+    off = (-3 * np.sin(theta), 3 * np.cos(theta))  # 3 pt above the curve, perpendicular to it
+    ax.annotate(
+        label,
+        (x_lab, y_mid),
+        xytext=off,
+        textcoords='offset points',
+        ha='center',
+        va='bottom',
+        fontsize=9.5,
+        color=color,
+        rotation=float(np.degrees(theta)),
+        rotation_mode='anchor',
+    )
+
+ax.axvspan(80, 100, color=COLORS['RedL'], alpha=0.55, lw=0)
+ax.axvline(x=target_util, color=COLORS['secondary'], linestyle=(0, (4, 3)), lw=1.0)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(90, 0.13, 'high-load\nregion\n(illustrative)', color=COLORS['RedLine'], ha='center', va='bottom', fontsize=9.5)
+ax.text(target_util - 1.2, 600, 'headroom\ntarget (75%)', color=COLORS['secondary'], ha='right', va='top', fontsize=9)
+
+ax.set_xlabel('Offered service load / capacity (%)')
+ax.set_ylabel('Average job wait time (hours, log scale)')
+ax.grid(True, which='major', ls='--', alpha=0.4)
+ax.grid(False, which='minor')
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
 
 plt.show()
 plt.close()

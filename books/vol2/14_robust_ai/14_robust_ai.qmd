@@ -312,7 +312,7 @@ class SilentErrorProbability:
 ```
 @Sec-ft-sdc-verification establishes that per-device silent corruption compounds across a fleet of $\DeviceCount$ devices\index{Silent Data Corruption!cluster-scale probability} as $\Pr(\geq 1) = 1 - (1 - \DeviceSilentCorruptionProbability)^\DeviceCount$ when each device has independent residual-error probability $\DeviceSilentCorruptionProbability$ over the same observation interval. A high fleet-level probability follows only for a specified device count, interval, and residual-error model; raw bit flips corrected by hardware are not silent errors. @Fig-silent-error-probability charts how this compounding risk scales across fleet sizes up to $10^5$ accelerators under three illustrative per-device error probabilities for the same observation interval. The plotted reference bands distinguish moderate from high fleet-level probability; they do not establish a measured device failure rate. With an illustrative residual-error probability of `{python} SilentErrorProbability.p_per_hr_prose_str` per device over one hour, a `{python} SilentErrorProbability.n_gpus_large_str`-device cluster incurs an hourly corruption probability of `{python} SilentErrorProbability.p_total_large_str` (marked at 10K GPUs), with failure becoming nearly certain at roughly `{python} SilentErrorProbability.n_gpus_certain_str` devices. Meta's SDC report confirms corruption at observable fleet scale [@dixit2021silent].
 
-::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three illustrative per-device error rates. The curves are analytical, $\Pr(\geq 1) = 1 - (1-\DeviceSilentCorruptionProbability)^\DeviceCount$, and show how quickly cluster-scale probabilities compound as per-device rates increase; fleet observations of silent corruption [@dixit2021silent] motivate stress-testing at rates above soft-error predictions." fig-alt="Semilog plot showing three S-curves for per-device SDC rates of 1e-3, 1e-4, and 1e-5. The 1e-3 and 1e-4 curves approach probability 1.0 by 100000 devices; the 1e-5 curve rises to about 0.63."}
+::: {#fig-silent-error-probability fig-env="figure" fig-pos="htb" fig-cap="**Silent Error Probability at Scale**: Probability of at least one silent data corruption event per hour as a function of cluster size, for three illustrative per-device error rates. The curves are analytical, $\Pr(\geq 1) = 1 - (1-\DeviceSilentCorruptionProbability)^\DeviceCount$, and show how quickly cluster-scale probabilities compound as per-device rates increase; fleet observations of silent corruption [@dixit2021silent] motivate stress-testing at rates above soft-error predictions." fig-alt="Semilog plot showing three S-curves, solid, dashed, and dotted, labeled with per-device SDC rates of 1e-3, 1e-4, and 1e-5. A red band above probability 0.95 is labeled effectively certain, and a dashed line at 0.5 is labeled more likely than not. The 1e-3 and 1e-4 curves enter the red band and approach probability 1.0 by 100000 devices, with a dot marking 0.63 at 10K on the 1e-4 curve; the 1e-5 curve rises to about 0.63."}
 
 ```{python}
 #| echo: false
@@ -333,45 +333,51 @@ import numpy as np
 import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.2))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 N = np.logspace(0, 5, 500)  # 1 to 100,000 devices
 
-# Three per-device SDC probabilities per hour
+# Three per-device SDC probabilities per hour. The rates are an ordered
+# severity sweep, not resources: one neutral ink, distinguished by line style
+# and labeled directly on each curve. Red is kept for the danger band only.
 rates = [
-    (1e-3, COLORS['RedLine'], '$p = 10^{-3}$ per device per hour'),
-    (1e-4, COLORS['OrangeLine'], '$p = 10^{-4}$ per device per hour'),
-    (1e-5, COLORS['BlueLine'], '$p = 10^{-5}$ per device per hour'),
+    (1e-3, '-', '$p = 10^{-3}$'),
+    (1e-4, '--', '$p = 10^{-4}$'),
+    (1e-5, ':', '$p = 10^{-5}$'),
 ]
+label_prob = 0.30  # height at which each curve carries its direct label
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-for p, color, label in rates:
-    P_at_least_one = 1 - (1 - p) ** N
-    ax.plot(N, P_at_least_one, color=color, linewidth=2, label=label, zorder=3)
+# Danger band: fleet-level corruption is effectively certain (Pr >= 0.95).
+ax.axhspan(0.95, 1.02, color=COLORS['RedL'], alpha=0.6, lw=0, zorder=0)
+ax.axhline(y=0.95, color=COLORS['RedLine'], linewidth=0.8, alpha=0.8, zorder=1)
 
-# Shade "Effectively Certain" region
-ax.axhspan(0.95, 1.02, alpha=0.12, color=COLORS['RedFill'], zorder=0)
+for p, style, label in rates:
+    P_at_least_one = 1 - (1 - p) ** N
+    ax.plot(N, P_at_least_one, color=COLORS['primary'], linestyle=style, linewidth=1.8, zorder=3)
+    n_label = np.log(1 - label_prob) / np.log(1 - p)  # where the curve crosses label_prob
+    ax.text(n_label / 1.15, label_prob, label, fontsize=9, ha='right', va='center', color=COLORS['primary'])
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(1.5, 0.97, 'Effectively certain', fontsize=8.5, color=COLORS['RedLine'], va='bottom', fontweight='bold')
+ax.text(1.4, 0.985, 'effectively certain', fontsize=9, color=COLORS['RedLine'], va='center')
 
 # "More likely than not" reference line
-ax.axhline(y=0.5, color='#64748B', linestyle='--', linewidth=1, alpha=0.6)
-ax.text(1.5, 0.51, 'More likely than not', fontsize=8, color='#64748B', va='bottom')
+ax.axhline(y=0.5, color=COLORS['secondary'], linestyle=(0, (4, 3)), linewidth=0.8, zorder=1)
+ax.text(1.4, 0.515, 'more likely than not', fontsize=9, color=COLORS['secondary'], va='bottom')
 
 annot_p = SilentErrorProbability.p_per_hr_illustrative
 annot_n = SilentErrorProbability.n_gpus_large
 annot_prob = 1 - (1 - annot_p) ** annot_n
-ax.plot([annot_n], [annot_prob], marker='o', markersize=5, color=COLORS['OrangeLine'], zorder=4)
+ax.plot([annot_n], [annot_prob], marker='o', markersize=5, color=COLORS['primary'], zorder=4)
 ax.text(
     annot_n / 1.25,
     annot_prob,
     f'{annot_prob:.2f} at {annot_n // 1000:.0f}K',
-    fontsize=8,
+    fontsize=9,
     ha='right',
     va='center',
-    color=COLORS['OrangeLine'],
+    color=COLORS['primary'],
 )
 
 ax.set_xscale('log')
@@ -379,17 +385,8 @@ ax.set_xlabel('Cluster size (number of GPUs)')
 ax.set_ylabel('$\\Pr$(at least one SDC per hour)')
 ax.set_xlim(1, 1e5)
 ax.set_ylim(0, 1.02)
-plt.legend(
-    loc='center left',
-    bbox_to_anchor=(0, 0.80),
-    fontsize=8,
-    frameon=True,
-    facecolor='white',
-    framealpha=0.95,
-    edgecolor='#CBD5E1',
-    labelspacing=0.1,
-    borderpad=0.6,
-)
+ax.grid(True, which='major', alpha=0.4)
+ax.grid(False, which='minor')
 plt.show()
 plt.close()
 ```
@@ -402,7 +399,7 @@ At cluster scale a per-device reliability number therefore becomes a coordinatio
 
 The unified framework helps engineers decide which failure signal they are seeing before they choose a defense. What this section adds to the three pillars named at the start of the chapter is their decomposition into concrete failure subtypes, each paired with the defense that targets it (@fig-robustness-taxonomy).
 
-::: {#fig-robustness-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The Robustness Taxonomy**: Environmental shifts, input-level attacks, and system-level faults decomposed into concrete failure subtypes, each paired with its principal defense (green). Software and pipeline defects originate in the system layer, but they are drawn as a cross-cutting layer beneath all three pillars because their symptoms can amplify or imitate any of them." fig-alt="Three columns of four cards. Environmental shifts: covariate shift, concept drift, label shift, domain shift. Input-level attacks: evasion (FGSM, PGD), C and W and boundary attacks, data and backdoor poisoning, physical perturbations. System-level faults: silent data corruption, memory and weight bit flips, underflow overflow and NaN, distributed training desync. Each card names a defense in green. A dashed bar beneath all three columns reads software and pipeline defects cut across all three pillars."}
+::: {#fig-robustness-taxonomy fig-env="figure" fig-pos="htb" fig-cap="**The Robustness Taxonomy**: Environmental shifts, input-level attacks, and system-level faults decomposed into concrete failure subtypes, each paired with its principal defense (green). Software and pipeline defects originate in the system layer, but they are drawn as a cross-cutting layer beneath all three pillars because their symptoms can amplify or imitate any of them." fig-alt="Three columns of four cards. Environmental shifts: covariate shift, concept drift, label shift, domain shift. Input-level attacks: evasion (FGSM, PGD), C and W and boundary attacks, data and backdoor poisoning, physical perturbations. System-level faults: silent data corruption, memory and weight bit flips, underflow overflow and NaN, distributed training desync. Each card names a defense in green. A dashed bar beneath all three columns reads software and pipeline defects, cross-cutting."}
 ![](images/svg/robustness-taxonomy.svg)
 :::
 
@@ -540,7 +537,7 @@ Several implementation choices determine whether PSI is sensitive enough to be u
 
 When a bin has zero observations in either distribution, adding a smoothing constant\index{Population Stability Index!smoothing constant} $\PopulationStabilitySmoothingConstant$ and renormalizing the bin probabilities prevents undefined logarithms. The choice can materially change PSI when bins are empty or sparsely populated, so the monitoring configuration must record the smoothing convention and check sensitivity to it. Monitoring population stability index over time as plotted in @fig-distribution-shift-detector reveals when a model drifts from the stable band into the warning band and then the major-shift band, triggering an escalation path that may lead to retraining after performance correlation.
 
-::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**A Calibrated Distribution-Shift Workflow**: In this synthetic service, PSI enters the warning zone as user behavior shifts and crosses the service's escalation threshold at week 32. Root-cause analysis, offline validation, and a model release precede the restored baseline at week 41." fig-alt="Line plot of weekly PSI over 52 weeks with service-calibrated green, orange, and red alert zones. Drift crosses the escalation threshold at week 32, and a validated model update restores the baseline at week 41."}
+::: {#fig-distribution-shift-detector fig-env="figure" fig-pos="htb" fig-cap="**A Calibrated Distribution-Shift Workflow**: In this synthetic service, PSI enters the warning zone as user behavior shifts and crosses the service's escalation threshold at week 32. Root-cause analysis, offline validation, and a model release precede the restored baseline at week 41." fig-alt="Line plot of weekly PSI over 52 weeks with service-calibrated green, orange, and red alert zones labeled stable, warning, and major shift. Drift crosses the escalation threshold at week 32. A gray band from week 32 to week 41 is labeled root cause, validation, release, and a validated model update restores the baseline at week 41."}
 
 ```{python}
 #| echo: false
@@ -561,57 +558,78 @@ psi_values.extend(np.random.normal(0.32, 0.02, 5))
 psi_values.extend(np.random.normal(0.04, 0.01, 12))
 psi_values = np.array(psi_values)
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9.2, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9.2, 4.2))
 
 thresh_warning = Ops.Monitoring.PsiWarnThreshold
 thresh_critical = Ops.Monitoring.PsiCriticalThreshold
+y_top = 0.45
 
-ax.axhspan(0, thresh_warning, color=COLORS['GreenFill'], alpha=0.35, label=f'Stable (PSI < {thresh_warning:.1f})')
-ax.axhspan(
-    thresh_warning, thresh_critical, color=COLORS['OrangeL'], alpha=0.35, label=f'Warning zone ({thresh_warning:.1f} ≤ PSI < {thresh_critical:.2f})'
+# Alert zones, labeled in place rather than in a legend.
+ax.axhspan(0, thresh_warning, color=COLORS['GreenFill'], alpha=0.45, lw=0, zorder=0)
+ax.axhspan(thresh_warning, thresh_critical, color=COLORS['OrangeL'], alpha=0.45, lw=0, zorder=0)
+ax.axhspan(thresh_critical, y_top, color=COLORS['RedL'], alpha=0.45, lw=0, zorder=0)
+ax.axhline(thresh_warning, color=COLORS['OrangeLine'], linestyle='--', linewidth=1.0, zorder=1)
+ax.axhline(thresh_critical, color=COLORS['RedLine'], linestyle='--', linewidth=1.0, zorder=1)
+
+zone_kw = dict(fontsize=9, va='center')
+ax.text(51.5, 0.08, f'stable (PSI$<${thresh_warning:.1f})', ha='right', color=COLORS['GreenLine'], **zone_kw)
+ax.text(
+    2,
+    (thresh_warning + thresh_critical) / 2,
+    f'warning ({thresh_warning:.1f}$\\leq$PSI$<${thresh_critical:.2f})',
+    ha='left',
+    color=COLORS['OrangeLine'],
+    **zone_kw,
 )
-ax.axhspan(thresh_critical, 0.45, color=COLORS['RedFill'], alpha=0.35, label=f'Major shift (PSI ≥ {thresh_critical:.2f})')
-
-ax.axhline(thresh_warning, color=COLORS['OrangeLine'], linestyle='--', linewidth=1.2, alpha=0.85)
-ax.axhline(thresh_critical, color=COLORS['RedLine'], linestyle='--', linewidth=1.2, alpha=0.85)
-
-ax.plot(weeks, psi_values, color=COLORS['primary'], linewidth=2.0, marker='o', markersize=5, label='Weekly PSI', zorder=3)
+ax.text(2, (thresh_critical + y_top) / 2, f'major shift (PSI$\\geq${thresh_critical:.2f})', ha='left', color=COLORS['RedLine'], **zone_kw)
 
 shift_idx = np.where(psi_values >= thresh_critical)[0][0]
-ax.annotate(
-    f'Major Shift Detected\n(PSI ≥ {thresh_critical:.2f})',
-    xy=(weeks[shift_idx], psi_values[shift_idx]),
-    xytext=(weeks[shift_idx] - 2, psi_values[shift_idx] + 0.08),
-    fontsize=8.5,
-    fontweight='bold',
-    ha='center',
-    va='bottom',
-    color=COLORS['RedLine'],
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=COLORS['RedLine'], lw=0.8),
-    arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=1.0),
-    zorder=4,
-)
-
 retrain_idx = np.where((weeks > weeks[shift_idx]) & (psi_values < thresh_warning))[0][0]
-ax.annotate(
-    'Validated Update Deployed\n(Baseline Restored)',
-    xy=(weeks[retrain_idx], psi_values[retrain_idx]),
-    xytext=(weeks[retrain_idx] + 4, psi_values[retrain_idx] + 0.08),
-    fontsize=8.5,
-    fontweight='bold',
+w_shift, w_restore = weeks[shift_idx], weeks[retrain_idx]
+
+# Response window between escalation and the restored baseline.
+ax.axvspan(w_shift, w_restore, color=COLORS['primary'], alpha=0.06, lw=0, zorder=1)
+ax.text(
+    (w_shift + w_restore) / 2,
+    y_top - 0.015,
+    'root cause,\nvalidation, release',
+    fontsize=9,
+    linespacing=1.2,
     ha='center',
-    va='bottom',
+    va='top',
+    color=COLORS['primary'],
+)
+
+ax.plot(weeks, psi_values, color=COLORS['primary'], linewidth=1.6, marker='o', markersize=3.5, zorder=3)
+
+ax.annotate(
+    f'escalation, week {w_shift}',
+    xy=(w_shift, psi_values[shift_idx]),
+    xytext=(w_shift - 1.5, psi_values[shift_idx] + 0.07),
+    fontsize=9,
+    ha='right',
+    va='center',
+    color=COLORS['RedLine'],
+    arrowprops=dict(arrowstyle='-', color=COLORS['RedLine'], lw=0.8, shrinkA=2, shrinkB=4),
+    zorder=4,
+)
+ax.annotate(
+    f'validated update\ndeployed, week {w_restore}',
+    xy=(w_restore, psi_values[retrain_idx]),
+    xytext=(w_restore + 1.5, 0.165),
+    fontsize=9,
+    ha='left',
+    va='center',
     color=COLORS['GreenLine'],
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=COLORS['GreenLine'], lw=0.8),
-    arrowprops=dict(arrowstyle='->', color=COLORS['GreenLine'], lw=1.0),
+    arrowprops=dict(arrowstyle='-', color=COLORS['GreenLine'], lw=0.8, shrinkA=2, shrinkB=4),
     zorder=4,
 )
 
+ax.grid(False, axis='x')
 ax.set_xlabel('Week')
-ax.set_ylabel('Population Stability Index (PSI)')
-ax.set_xlim(1, 52)
-ax.set_ylim(0, 0.45)
-ax.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1', fontsize=8)
+ax.set_ylabel('Population stability index (PSI)')
+ax.set_xlim(0.5, 52.5)
+ax.set_ylim(0, y_top)
 
 plt.tight_layout()
 plt.show()
@@ -1205,7 +1223,7 @@ In this formulation, $\ModelInput$ denotes the original input, $\AdversarialExam
 
 @Fig-gradient-attack geometricizes this single-step perturbation within the $\ell_\infty$ budget $\AdversarialPerturbationBudget$: moving along the sign vector of $\nabla_\ModelInput\LossFunction(\ModelParameters, \ModelInput, \ExampleLabel)$ propels input $\ModelInput$ to a corner of the bounding cube, producing $\AdversarialExample$ and crossing the decision boundary into the adjacent class region in this illustration. A different boundary or gradient need not produce a successful attack within the same budget.
 
-::: {#fig-gradient-attack fig-env="figure" fig-pos="htb" fig-cap="**Gradient-Based Attack Geometry**: Around a correctly classified input $\ModelInput$, the dashed square marks every perturbation allowed by the $\ell_\infty$ budget $\AdversarialPerturbationBudget$. FGSM moves each coordinate by the full budget in the sign direction of the loss gradient $\nabla_\ModelInput \LossFunction(\ModelParameters, \ModelInput, \ExampleLabel)$, which lands $\AdversarialExample$ on a corner of that square, the allowed point that maximizes the first-order increase in loss. A step no larger than $\AdversarialPerturbationBudget$ in any coordinate therefore carries the input across the decision boundary. The class labels are illustrative." fig-alt="Two-dimensional input space divided by a dashed diagonal decision boundary into a true-class region and an other-class region. A clean input x sits inside a dashed square labeled allowed set. A short blue arrow labeled gradient of L points up and to the left from x; a longer red arrow runs from x to the square's upper-left corner, marked x adv equals x plus epsilon times sign of the gradient, which lies across the boundary. A bracket under the square marks its half-width epsilon adv."}
+::: {#fig-gradient-attack fig-env="figure" fig-pos="htb" fig-cap="**Gradient-Based Attack Geometry**: Around a correctly classified input $\ModelInput$, the dashed square marks every perturbation allowed by the $\ell_\infty$ budget $\AdversarialPerturbationBudget$. FGSM moves each coordinate by the full budget in the sign direction of the loss gradient $\nabla_\ModelInput \LossFunction(\ModelParameters, \ModelInput, \ExampleLabel)$, which lands $\AdversarialExample$ on a corner of that square, the allowed point that maximizes the first-order increase in loss. A step no larger than $\AdversarialPerturbationBudget$ in any coordinate therefore carries the input across the decision boundary. The class labels are illustrative." fig-alt="Two-dimensional input space divided by a solid diagonal decision boundary into a true-class region and an other-class region. A clean input x sits inside a dashed square labeled allowed set. A short blue arrow labeled gradient of L points up and to the left from x; a longer red arrow runs from x to the square's upper-left corner, marked x adv equals x plus epsilon times sign of the gradient, which lies across the boundary. A bracket under the square marks its half-width epsilon adv."}
 ![](images/svg/gradient-attack.svg)
 :::
 
@@ -1333,7 +1351,7 @@ After label modification, the attacker can keep the label intact and corrupt the
 
 Whether those examples become poisoning depends on the data boundary. Web scraping, social media feeds, crowdsourced annotation, and untrusted user submissions all allow poisoned records to enter upstream and pass through weak cleaning checks in a "trusted" form. Physical systems add a second path: a sticker on a road sign is an inference-time adversarial attack when the car sees it, but harvesting that image into a training corpus creates a potential poisoning path only if the contribution serves an attack on the learner. Correctly labeled examples of such inputs can instead help train resistance to them. Online learning systems tighten the feedback loop further, allowing an attacker to introduce small increments of malicious data until model behavior drifts without a single obvious anomaly. As diagrammed in @fig-poisoning-attack-example, collaborative settings widen the boundary again: when many clients each contribute model updates to a central aggregator, a single malicious participant can poison the shared global model that aggregation produces.
 
-::: {#fig-poisoning-attack-example fig-env="figure" fig-pos="htb" fig-cap="**Collaborative Poisoning via Aggregation**: In a collaborative learning setting, multiple clients each train on local data and contribute model updates to a central server that aggregates them into a shared global model. A single malicious participant can inject poisoned updates that the server folds into the aggregated model, so the corruption spreads to every client without any one obvious anomaly. This attack surface differs from adversarial examples because it targets the model during *training* rather than at *inference*." fig-alt="An aggregation server at the top computes the weighted mean w t plus 1 equals w t plus the sum over k of n k over n times delta w k. A benign client on the left sends an amber update delta w 1 and a malicious client on the right sends a red poisoned update delta w 2. Dashed red arrows carry the poisoned w t plus 1 back down to the benign client, the malicious client, and a box for clients 3 through N."}
+::: {#fig-poisoning-attack-example fig-env="figure" fig-pos="htb" fig-cap="**Collaborative Poisoning via Aggregation**: In a collaborative learning setting, multiple clients each train on local data and contribute model updates to a central server that aggregates them into a shared global model. A single malicious participant can inject poisoned updates that the server folds into the aggregated model, so the corruption spreads to every client without any one obvious anomaly. This attack surface differs from adversarial examples because it targets the model during *training* rather than at *inference*." fig-alt="An aggregation server at the top computes the weighted mean w t plus 1 equals w t plus the sum over k of n k over n times delta w k. A row of clients sits below it: client 1, a red malicious client 2, client 3, an ellipsis, and client N. Each benign client sends an amber update arrow, delta w 1, delta w 3, and delta w N, up to the server, while client 2 sends a red update delta w 2 marked poisoned. A dashed red arrow labeled w t plus 1 runs from the server back down to every client."}
 ![](images/svg/poisoning-attack.svg)
 :::
 
@@ -1648,7 +1666,7 @@ Each layer covers a distinct point along the data path, and no single detector c
 
 For the recommendation system, the interception layer in @fig-adversarial-attack-injection examines contributed ratings before they reach training. Its decisions must preserve provenance so later model failures can be traced back to the accepted records.
 
-::: {#fig-adversarial-attack-injection fig-env="figure" fig-pos="htb" fig-cap="**Data Poisoning and Interception Workflow**: Adversaries inject malicious rows into a user-item rating matrix to manipulate model behavior. A defense layer analyzes contributed data and removes suspected malicious records before training. This can reduce poisoning risk but does not guarantee an uncorrupted model." fig-alt="A rating matrix with four user rows and two red sybil rows that rate item 3 as 1 and item 4 as 5. A dashed red arrow labeled no filter runs from the matrix to a red compromised model box in which item 3 is buried and item 4 boosted. A second arrow runs from the matrix into a green interception box listing spectral scores, influence audit, and quarantine suspects, and a green arrow labeled filtered continues to a candidate model box marked validate before release."}
+::: {#fig-adversarial-attack-injection fig-env="figure" fig-pos="htb" fig-cap="**Data Poisoning and Interception Workflow**: Adversaries inject malicious rows into a user-item rating matrix to manipulate model behavior. A defense layer analyzes contributed data and removes suspected malicious records before training. This can reduce poisoning risk but does not guarantee an uncorrupted model." fig-alt="A rating matrix with four user rows and two red sybil rows that rate item 3 as 1 and item 4 as 5. A gray bracket spans every row of the matrix, and a single line leaves its midpoint and forks. The upper branch, a dashed red arrow labeled no filter, reaches a red compromised model box in which item 3 is buried and item 4 boosted. The lower branch, a gray arrow, enters a green interception box listing spectral scores, influence audit, and quarantine suspects, and a green arrow labeled filtered continues to a candidate model box marked validate before release."}
 ![](images/svg/poisoning-interception.svg)
 :::
 

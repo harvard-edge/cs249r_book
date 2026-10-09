@@ -194,7 +194,7 @@ As a fleet accumulates shared dependencies, system-level coordination can become
 
 @Fig-n-models-complexity sketches operational load across production model counts on a logarithmic scale, with one assumed growth shape per source of work. Alerts grow linearly because each model brings its own fixed set of monitored metrics. Deployment coordination grows as $\ProductionModelCount\log \ProductionModelCount$, the cost of ordering $\ProductionModelCount$ releases against one another much as a sort orders a list. Dependency conflicts grow quadratically because any pair of models sharing a feature or data source can collide, and $\ProductionModelCount$ models form roughly $\ProductionModelCount^2/2$ pairs. Under these shapes the total crosses the team-capacity ceiling near 50 models. The shapes are a sketch, not measurements, so the crossing marks where repeated work outgrows a team rather than a threshold a real organization can read off the plot; measured dependency density, engineering effort, and remediation cost decide when platform engineering pays.
 
-::: {#fig-n-models-complexity fig-env="figure" fig-pos="htb" fig-cap="**The N-models complexity explosion**: The curves show monitoring alerts growing linearly with model count, deployment coordination growing as $\mathcal{O}(\ProductionModelCount \log \ProductionModelCount)$, and dependency conflicts growing quadratically as models share features and data sources. Under these assumed shapes, the total operational load crosses team capacity around 50 models, sketching the transition from artisanal model management to platform-required operations." fig-alt="Log-scale plot showing linear, model-count-log-model-count, and quadratic curves with total operational load crossing team capacity at 50 models, with Artisanal, Growing Pains, and Platform Required zones."}
+::: {#fig-n-models-complexity fig-env="figure" fig-pos="htb" fig-cap="**The N-models complexity explosion**: The curves show monitoring alerts growing linearly with model count, deployment coordination growing as $\mathcal{O}(\ProductionModelCount \log \ProductionModelCount)$, and dependency conflicts growing quadratically as models share features and data sources. Under these assumed shapes, the total operational load crosses team capacity around 50 models, sketching the transition from artisanal model management to platform-required operations." fig-alt="Log-log plot of operational load against models in production. A dotted linear monitoring line, a dashed model-count-log-model-count deployment line, and a dash-dot quadratic dependency line sum to a solid total curve that crosses a red dashed team-capacity line at about 50 models, marked with a red dot. Zones labeled Artisanal, Growing pains, and Platform required divide the axis at 10 and 50 models; the last zone is lightly shaded red."}
 
 ```{python}
 #| echo: false
@@ -205,7 +205,7 @@ As a fleet accumulates shared dependencies, system-level coordination can become
 # │
 # │ Goal: Plot linear, model-count-log-model-count, and quadratic curves; show total crossing capacity
 # │       at ~50 models; Artisanal/Growing Pains/Platform Required zones.
-# │ Show: Log-scale y; capacity threshold line; shaded regions.
+# │ Show: Log-log axes; capacity line; knee dot; zones; direct curve labels.
 # │ How: monitoring_alerts, deployment_coordination, dependency_conflicts;
 # │      matplotlib.
 # │
@@ -227,54 +227,63 @@ dependency_conflicts = 0.5 * n_models_axis**2
 total_operational_load = monitoring_alerts + deployment_coordination + dependency_conflicts
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(n_models_axis, monitoring_alerts, label='Monitoring Alerts (Linear)', color=COLORS['BlueLine'], linestyle=':', linewidth=2.0)
-ax.plot(
-    n_models_axis,
-    deployment_coordination,
-    label=r'Deployment Coordination ($\mathcal{O}(N_{\text{models}} \log N_{\text{models}})$)',
-    color=COLORS['OrangeLine'],
-    linestyle='--',
-    linewidth=2.0,
-)
-ax.plot(n_models_axis, dependency_conflicts, label='Dependency Conflicts (Quadratic)', color=COLORS['VioletLine'], linestyle='-.', linewidth=2.0)
-ax.plot(n_models_axis, total_operational_load, label='Total Operational Load', color=COLORS['primary'], linewidth=2.5)
-
 capacity_threshold = 2500
-ax.axhline(y=capacity_threshold, color=COLORS['RedLine'], linestyle='--', linewidth=1.5, label='Team Capacity Without Platform')
+crossing_idx = int(np.argmax(total_operational_load >= capacity_threshold))
+crossing_n = n_models_axis[crossing_idx]
+
+# Zone shading: neutral before the crossing, a light red wash once load exceeds capacity.
+ax.axvspan(crossing_n, 500, color=COLORS['RedL'], alpha=0.35, ec='none', zorder=0)
+for boundary in (10, crossing_n):
+    ax.axvline(boundary, color=COLORS['grid'], linewidth=0.8, zorder=1)
+
+ax.plot(n_models_axis, monitoring_alerts, color=COLORS['BlueLine'], linestyle=':', linewidth=1.8, zorder=3)
+ax.plot(n_models_axis, deployment_coordination, color=COLORS['OrangeLine'], linestyle='--', linewidth=1.8, zorder=3)
+ax.plot(n_models_axis, dependency_conflicts, color=COLORS['VioletLine'], linestyle='-.', linewidth=1.8, zorder=3)
+ax.plot(n_models_axis, total_operational_load, color=COLORS['primary'], linewidth=2.4, zorder=4)
+ax.axhline(y=capacity_threshold, color=COLORS['RedLine'], linestyle='--', linewidth=1.3, zorder=2)
+
+# Knee: total load meets team capacity.
+ax.plot([crossing_n], [capacity_threshold], 'o', color=COLORS['RedLine'], markersize=6, zorder=5)
+ax.text(
+    crossing_n * 0.9,
+    capacity_threshold * 1.6,
+    f'~{int(round(crossing_n, -1))} models',
+    color=COLORS['RedLine'],
+    fontsize=9,
+    fontweight='bold',
+    ha='right',
+    va='center',
+)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(
-    380,
-    capacity_threshold + 600,
-    'Capacity Limit',
-    color=COLORS['RedLine'],
-    fontsize=8.5,
-    fontweight='bold',
-    va='center',
-    ha='left',
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor=COLORS['RedLine'], lw=0.8),
-)
-
+ax.set_xscale('log')
 ax.set_yscale('log')
-
-ymin, ymax = ax.get_ylim()
-text_y_pos = ymax * 0.25
-
-ax.axvspan(1, 10, alpha=0.10, color=COLORS['BlueLine'], ec='none')
-ax.text(6.5, 60000, 'Artisanal', ha='center', rotation=90, fontsize=8.5, style='italic', color=COLORS['primary'])
-
-ax.axvspan(10, 50, alpha=0.10, color=COLORS['OrangeLine'], ec='none')
-ax.text(30, text_y_pos, 'Growing\nPains', ha='center', fontsize=8.5, style='italic', color=COLORS['primary'])
-
-ax.axvspan(50, 500, alpha=0.10, color=COLORS['RedLine'], ec='none')
-ax.text(170, text_y_pos, 'Platform Required', ha='center', fontsize=8.5, style='italic', color=COLORS['primary'])
-
-ax.set_xlabel("Number of Models in Production")
-ax.set_ylabel("Operational Complexity (Log Scale)")
 ax.set_xlim(1, 500)
-ax.set_ylim(bottom=10)
+ax.set_ylim(10, 4e5)
+ax.set_xticks([1, 10, 50, 100, 500])
+ax.set_xticklabels(['1', '10', '50', '100', '500'])
+ax.grid(True, which='major', axis='y')
+ax.grid(False, which='minor')
+ax.grid(False, axis='x')
 
-ax.legend(loc='lower right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1')
+# Direct labels at the right end of each curve (no legend).
+end_x = 520
+ax.text(end_x, total_operational_load[-1] * 1.45, 'Total load', color=COLORS['primary'], fontsize=9, fontweight='bold', va='center', ha='left')
+ax.text(end_x, dependency_conflicts[-1] * 0.5, 'Dependency\nconflicts ($N^2$)', color=COLORS['VioletLine'], fontsize=9, va='center', ha='left')
+ax.text(end_x, monitoring_alerts[-1], 'Monitoring\nalerts ($N$)', color=COLORS['BlueLine'], fontsize=9, va='center', ha='left')
+ax.text(end_x, deployment_coordination[-1], 'Deployment\ncoordination\n($N \\log N$)', color=COLORS['OrangeLine'], fontsize=9, va='center', ha='left')
+ax.text(1.15, capacity_threshold * 1.15, 'Team capacity', color=COLORS['RedLine'], fontsize=9, va='bottom', ha='left')
+
+# Zone names along the top edge.
+zone_y = 2.6e5
+ax.text(np.sqrt(1 * 10), zone_y, 'Artisanal', ha='center', va='center', fontsize=9, style='italic', color=COLORS['secondary'])
+ax.text(np.sqrt(10 * crossing_n), zone_y, 'Growing pains', ha='center', va='center', fontsize=9, style='italic', color=COLORS['secondary'])
+ax.text(np.sqrt(crossing_n * 500), zone_y, 'Platform required', ha='center', va='center', fontsize=9, style='italic', color=COLORS['RedLine'])
+
+ax.set_xlabel("Models in production (log scale)")
+ax.set_ylabel("Operational load (log scale)")
+for side in ('top', 'right'):
+    ax.spines[side].set_visible(False)
 
 plt.tight_layout()
 plt.show()
@@ -553,7 +562,7 @@ The economic gap explains why large technology companies have invested heavily i
 
 The figure's budgets are annual running costs, so its \$2M/year platform differs from the worked example's one-time \$2M build, which charges only a third of that amount to each year of its three-year life. The break-even count is therefore not a universal constant; it moves with the two inputs a platform team controls. Raising savings per model steepens the line and moves the crossing left, raising platform cost flattens it and moves the crossing right, and the benefit-cost ratio stays linear in model count.
 
-::: {#fig-platform-roi-threshold fig-env="figure" fig-pos="htb" fig-cap="**The platform benefit-cost threshold**: Assumed annual benefit divided by annual cost for two platform budgets. Break-even occurs at a ratio of one. With fixed per-model benefit, the ratio grows linearly; a ratio of five corresponds to a net ROI of 400 percent, not 500 percent." fig-alt="Benefit-cost ratio versus model count, with break-even at ratio one for each budget."}
+::: {#fig-platform-roi-threshold fig-env="figure" fig-pos="htb" fig-cap="**The platform benefit-cost threshold**: Assumed annual benefit divided by annual cost for two platform budgets. Break-even occurs at a ratio of one. With fixed per-model benefit, the ratio grows linearly; a ratio of five corresponds to a net ROI of 400 percent, not 500 percent." fig-alt="Line plot of platform benefit-cost ratio against production models from 0 to 150. A solid blue line for a 2M dollar per year platform crosses the dashed break-even line at ratio one at 20 models and reaches 5 at 100 models. A dashed orange line for a 5M dollar per year enterprise platform crosses break-even at 50 models. The band below ratio one is shaded light red as the investment phase."}
 
 ```{python}
 #| echo: false
@@ -564,7 +573,7 @@ The figure's budgets are annual running costs, so its \$2M/year platform differs
 # │
 # │ Goal: Plot ROI = (model_count * savings) / platform_cost vs model_count; show break-even at
 # │       ~20 models ($2M) and ~50 models ($5M).
-# │ Show: Two ROI curves; break-even line; shaded investment/returns phases.
+# │ Show: Two ROI curves; break-even line; shaded investment band; direct labels.
 # │ How: Compute platform ROI across model counts; book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -572,7 +581,7 @@ The figure's budgets are annual running costs, so its \$2M/year platform differs
 # │ Plot ROI = (model_count * savings) / platform_cost vs model_count; show break-even at
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.4))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 n_models = np.arange(1, 501)
@@ -593,70 +602,44 @@ breakeven_b = platform_cost_b / savings_per_model  # 50 models
 # Plot ROI curves
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.plot(n_models, roi_a, color=COLORS["BlueLine"], linewidth=2.5, label="$2M/year platform")
-ax.plot(n_models, roi_b, color=COLORS["OrangeLine"], linewidth=2.5, label="$5M/year enterprise platform")
+x_max, y_max = 150, 8
 
-# Break-even line at ROI = 1
-ax.axhline(y=1.0, color=COLORS["primary"], linestyle="--", linewidth=1.5, alpha=0.6)
+# Investment phase (ratio below one) as a light red band; returns phase above it unshaded.
+ax.axhspan(0, 1.0, color=COLORS["RedL"], alpha=0.45, ec="none", zorder=0)
+ax.axhline(y=1.0, color=COLORS["secondary"], linestyle="--", linewidth=1.0, zorder=1)
+
+ax.plot(n_models, roi_a, color=COLORS["BlueLine"], linewidth=2.2, zorder=3)
+ax.plot(n_models, roi_b, color=COLORS["OrangeLine"], linewidth=2.2, linestyle="--", zorder=3)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.text(480, 1.15, "Break-even (benefit/cost = 1)", fontsize=8, color=COLORS["primary"], ha="right", va="bottom")
+# Direct line labels at the right edge.
+ax.text(125, roi_a[124] + 0.35, "$2M/year platform", color=COLORS["BlueLine"], fontsize=9, fontweight="bold", ha="right", va="bottom")
+ax.text(140, roi_b[139] + 0.35, "$5M/year enterprise platform", color=COLORS["OrangeLine"], fontsize=9, fontweight="bold", ha="right", va="bottom")
 
-# Shade investment phase (below ROI=1) and returns phase (above)
-ax.fill_between(n_models, 0, np.minimum(roi_a, 1.0), alpha=0.08, color=COLORS["RedLine"])
-ax.fill_between(n_models, 1.0, np.maximum(roi_a, 1.0), alpha=0.08, color=COLORS["GreenLine"])
+# Break-even crossings: dot plus dropline to the model-count axis (ticks name the counts).
+for be, col in ((breakeven_a, COLORS["BlueLine"]), (breakeven_b, COLORS["OrangeLine"])):
+    ax.plot([be, be], [0, 1.0], color=col, linewidth=0.9, linestyle=":", zorder=2)
+    ax.plot(be, 1.0, "o", color=col, markersize=7, zorder=5)
 
-# Mark break-even points
-ax.plot(breakeven_a, 1.0, "o", color=COLORS["BlueLine"], markersize=10, zorder=5)
-ax.annotate(
-    f"Break-even at\n~{int(breakeven_a)} models",
-    xy=(breakeven_a, 1.0),
-    fontsize=8,
-    color=COLORS["BlueLine"],
-    fontweight="bold",
-    ha="left",
-    va="bottom",
-    xytext=(breakeven_a - 11, 3.8),
-    arrowprops=dict(arrowstyle="->", color=COLORS["BlueLine"], lw=0.75, shrinkB=5),
-)
-
-ax.plot(breakeven_b, 1.0, "o", color=COLORS["OrangeLine"], markersize=10, zorder=5)
-ax.annotate(
-    f"Break-even at\n~{int(breakeven_b)} models",
-    xy=(breakeven_b, 1.10),
-    fontsize=8,
-    color=COLORS["OrangeLine"],
-    fontweight="bold",
-    ha="left",
-    va="bottom",
-    xytext=(breakeven_b + 38, 3.0),
-    arrowprops=dict(arrowstyle="->", color=COLORS["OrangeLine"], shrinkB=5, lw=0.75),
-)
-
-# Annotate the ROI at 100 models for platform A
+# Ratio at 100 models for the $2M platform.
 roi_at_100 = (100 * savings_per_model) / platform_cost_a
-ax.annotate(
-    f"100 models: {roi_at_100:.0f}× benefit/cost",
-    xy=(100, roi_at_100),
-    fontsize=8,
-    color=COLORS["BlueLine"],
-    fontweight="bold",
-    ha="left",
-    va="bottom",
-    xytext=(30, roi_at_100 + 3.5),
-    arrowprops=dict(arrowstyle="->", color=COLORS["BlueLine"], lw=1.0),
-)
+ax.plot([100, 100], [0, roi_at_100], color=COLORS["BlueLine"], linewidth=0.9, linestyle=":", zorder=2)
+ax.plot(100, roi_at_100, "o", color=COLORS["BlueLine"], markersize=7, zorder=5)
+ax.text(98, roi_at_100 + 0.25, f"{roi_at_100:.0f}× benefit/cost", color=COLORS["BlueLine"], fontsize=9, ha="right", va="bottom")
 
-# Region labels
-ax.text(310, 0.45, "Investment phase", fontsize=9, color=COLORS["RedLine"], fontweight="bold", ha="center", va="center", alpha=0.8)
+# Region labels.
+ax.text(x_max - 2, 0.5, "Investment phase", fontsize=9, color=COLORS["RedLine"], ha="right", va="center")
+ax.text(4, y_max - 0.4, "Returns phase (benefit/cost > 1)", fontsize=9, color=COLORS["GreenLine"], ha="left", va="top")
+ax.text(4, 1.1, "Break-even", fontsize=8.5, color=COLORS["secondary"], ha="left", va="bottom")
 
-ax.text(310, 12, "Returns phase", fontsize=9, color=COLORS["GreenLine"], fontweight="bold", ha="center", va="center", alpha=0.8)
-
-ax.set_xlabel("Number of Production Models")
-ax.set_ylabel("Platform benefit/cost")
-ax.set_xlim(0, 500)
-ax.set_ylim(0, 25)
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='#CBD5E1')
+ax.set_xlabel("Production models")
+ax.set_ylabel("Platform benefit / cost")
+ax.set_xlim(0, x_max)
+ax.set_ylim(0, y_max)
+ax.set_xticks([0, 20, 50, 100, 150])
+ax.grid(False, axis="x")
+for side in ("top", "right"):
+    ax.spines[side].set_visible(False)
 
 plt.tight_layout()
 plt.show()
@@ -1640,7 +1623,7 @@ CI/CD for machine learning begins by making each training run an accountable pro
 
 @Fig-ml-cicd stages the delivery lifecycle across continuous integration, training, and deployment, with an evaluation gate that blocks or registers a candidate. Monitoring returns drift signals to data validation. A confirmed population change may justify retraining, while a corrupted feature pipeline requires repair before it supplies another training run. The sequence matters because each stage establishes evidence for the next rather than treating every alert as permission to train and deploy.
 
-::: {#fig-ml-cicd fig-env="figure" fig-pos="htb" fig-cap="**ML CI/CD pipeline**: Read the top row left to right and the bottom row right to left. Continuous integration checks each commit; continuous training validates data, trains, and evaluates against a metrics gate that either blocks the candidate and raises an alert or registers it. Continuous deployment then moves the registered version through staging, a canary slice of traffic, and full production. Monitoring closes the loop: detected drift returns to data validation and investigation before a decision to retrain." fig-alt="Two rows of stage boxes. Top row, left to right, under brackets labeled continuous integration and continuous training: commit, unit tests, data validation, training, and evaluate with a metrics gate. A red arrow from evaluate points up to a red pill reading fail, block, alert; a green arrow labeled pass points down to a green registry box. Bottom row, right to left, under a bracket labeled continuous deployment: registry, staging, canary at 5 percent of traffic, and production at 100 percent, ending at a violet monitoring box. A dashed violet arrow labeled drift prompts validation runs from monitoring back up to data validation."}
+::: {#fig-ml-cicd fig-env="figure" fig-pos="htb" fig-cap="**ML CI/CD pipeline**: Read the top row left to right and the bottom row right to left. Continuous integration checks each commit; continuous training validates data, trains, and evaluates against a metrics gate that either blocks the candidate and raises an alert or registers it. Continuous deployment then moves the registered version through staging, a canary slice of traffic, and full production. Monitoring closes the loop: detected drift returns to data validation and investigation before a decision to retrain." fig-alt="Two rows of stage boxes. Top row, left to right, under brackets labeled continuous integration and continuous training: commit, unit tests, data validation, training, and evaluate with a metrics gate. A red arrow from the bottom of evaluate turns left to a red box reading fail, block, alert; a green arrow labeled pass points down to a green registry box. Bottom row, right to left, under a bracket labeled continuous deployment: registry, staging, canary at 5 percent of traffic, and production at 100 percent, ending at a violet monitoring box. A dashed violet arrow labeled drift prompts validation runs from monitoring back up to data validation."}
 ![](images/svg/ml-cicd.svg)
 
 :::
@@ -2190,7 +2173,7 @@ The key insight is statistical efficiency. An interleaving experiment can requir
 
 In an interleaving workflow, the variants produce ranked lists that a method such as team draft or probabilistic interleaving combines into one presentation. The mixing and credit-assignment rules must control position effects and identify which ranker contributed each item. Engagement with those items supplies a relative preference signal. @Fig-interleaving-vs-ab contrasts the between-cohort comparison of A/B testing (Panel A) with this within-user comparison (Panel B). The latter can screen candidates efficiently, but preference within a blended list does not directly measure the effect of deploying either complete ranking policy on long-term outcomes such as retention. Those outcomes still require an experiment designed to measure them.
 
-::: {#fig-interleaving-vs-ab fig-env="figure" fig-pos="htb" fig-cap="**Interleaving vs. A/B testing**: (A) A/B testing splits users into cohorts, and each cohort sees only one ranker's list, so the comparison is between cohort means and must overcome the variation between users. (B) Interleaving has both rankers rank the same query for each user and merges the results into one list (here by team draft); each click is credited to the ranker that contributed the item, so every user supplies a paired, within-user comparison. That pairing can make ranker-preference screening more sample-efficient; it does not measure the full deployment outcome assessed by an A/B test [@netflix2017interleaving]." fig-alt="Two panels. Panel A, A/B testing: all users split into cohort 1 and cohort 2 at 50 percent each; cohort 1 sees a list of blue items A1 to A3 labeled ranker A only, and cohort 2 sees gray items B1 to B3 labeled ranker B only; below, compare the two cohorts' means. Panel B, interleaving: each user leads to a box reading A and B rank the same query, above one merged list alternating blue A1, gray B1, blue A2, gray B2; below, credit each click to its source ranker."}
+::: {#fig-interleaving-vs-ab fig-env="figure" fig-pos="htb" fig-cap="**Interleaving vs. A/B testing**: (A) A/B testing splits users into cohorts, and each cohort sees only one ranker's list, so the comparison is between cohort means and must overcome the variation between users. (B) Interleaving has both rankers rank the same query for each user and merges the results into one list (here by team draft); each click is credited to the ranker that contributed the item, so every user supplies a paired, within-user comparison. That pairing can make ranker-preference screening more sample-efficient; it does not measure the full deployment outcome assessed by an A/B test [@netflix2017interleaving]." fig-alt="Two panels. Panel A, A/B testing: all users split into cohort 1 and cohort 2 at 50 percent each; a short connector joins each cohort to its list, and cohort 1 sees a list of blue items A1 to A3 labeled ranker A only, and cohort 2 sees gray items B1 to B3 labeled ranker B only; below, compare the two cohorts' means. Panel B, interleaving: each user leads to a box reading A and B rank the same query, above one merged list alternating blue A1, gray B1, blue A2, gray B2; below, credit each click to its source ranker."}
 ![](images/svg/interleaving-vs-ab.svg)
 :::
 
@@ -3601,14 +3584,14 @@ class BuildVsBuyFigureScenario:
     cloud_gpu_hour_str = fmt_usd(cloud_gpu_hour_usd, precision=0, commas=False, per="GPU-hour")
 ```
 
-::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**Build vs. buy TCO**: The curves compare cumulative cost over a `{python} BuildVsBuyFigureScenario.horizon_months_num_str`-month horizon for a high-utilization H100 reference cluster. On-premises deployment begins with a CapEx step plus monthly OpEx, whereas cloud rental cost rises linearly with utilization. Over a `{python} BuildVsBuyFigureScenario.lifecycle_years_str`-year service life, owning pays off only above `{python} BuildVsBuyFigureScenario.lifecycle_breakeven_util_str` sustained utilization; below that, renting stays cheaper." fig-alt="Cumulative cost vs. months plot for an H100 reference cluster. The cloud line rises linearly with no upfront cost. The on-premises line starts with a large CapEx jump and has a shallow OpEx slope. The lines cross late in the 30-month horizon."}
+::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**Build vs. buy TCO**: The curves compare cumulative cost over a `{python} BuildVsBuyFigureScenario.horizon_months_num_str`-month horizon for a high-utilization H100 reference cluster. On-premises deployment begins with a CapEx step plus monthly OpEx, whereas cloud rental cost rises linearly with utilization. Over a `{python} BuildVsBuyFigureScenario.lifecycle_years_str`-year service life, owning pays off only above `{python} BuildVsBuyFigureScenario.lifecycle_breakeven_util_str` sustained utilization; below that, renting stays cheaper." fig-alt="Cumulative cost vs. months plot for an H100 reference cluster. The dashed orange cloud line rises linearly from zero with no upfront cost. The solid blue on-premises line starts with a large vertical CapEx step and then climbs a shallow OpEx slope. A dark dot with a dotted dropline marks where the lines cross, late in the 30-month horizon."}
 ```{python}
 #| echo: false
 
 from binder.tools.figures import style as book_style
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.4))
 
 months = np.linspace(0, BuildVsBuyFigureScenario.horizon_months, 200)
 
@@ -3621,85 +3604,79 @@ cost_cross = cloud_monthly * m_cross
 on_prem_cost = capex + monthly_opex * months
 cloud_cost = cloud_monthly * months
 
-# Background fill under cloud cost
-ax.fill_between(months, 0, cloud_cost, color=COLORS['OrangeL'], alpha=0.20, zorder=1)
+# Cost curves: the on-premises line opens with a vertical CapEx step at month 0.
+ax.plot(months, cloud_cost, color=COLORS['OrangeLine'], linewidth=2.2, linestyle='--', zorder=3)
+ax.plot(months, on_prem_cost, color=COLORS['BlueLine'], linewidth=2.2, zorder=3)
+ax.vlines(0, 0, capex, color=COLORS['BlueLine'], linewidth=2.2, zorder=3)
 
-# Plot curves
-(line_cloud,) = ax.plot(months, cloud_cost, color=COLORS['OrangeLine'], linewidth=2.2, label='Cloud (On-Demand)', zorder=3)
-(line_onprem,) = ax.plot(months, on_prem_cost, color=COLORS['BlueLine'], linewidth=2.2, label='On-Premises (CapEx + OpEx)', zorder=3)
-
-# Initial CapEx step at month 0
-ax.vlines(0, 0, capex, color=COLORS['BlueLine'], linewidth=2.4, zorder=3)
-
-# Crossover marker and dashed drop line
-ax.vlines(m_cross, 0, cost_cross, color=COLORS['RedLine'], linestyle='--', linewidth=1.3, zorder=2)
-ax.plot(m_cross, cost_cross, marker='o', markersize=6.5, color=COLORS['RedLine'], zorder=4)
-
-# Break-even badge
-ax.annotate(
-    f'TCO Crossover\nMonth ~{m_cross:.0f} (~${cost_cross:.1f}M)',
-    xy=(m_cross, cost_cross),
-    xytext=(m_cross - 6.0, 75),
-    fontsize=8.0,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    ha='center',
+# Crossover: dot and dropline to the month axis.
+ax.vlines(m_cross, 0, cost_cross, color=COLORS['secondary'], linestyle=':', linewidth=1.0, zorder=2)
+ax.plot(m_cross, cost_cross, marker='o', markersize=6.5, color=COLORS['primary'], zorder=4)
+ax.text(
+    m_cross - 0.4,
+    cost_cross + 4.5,
+    f'Crossover\nmonth ~{m_cross:.0f}, ~${cost_cross:.1f}M',
+    fontsize=8.5,
+    color=COLORS['primary'],
+    ha='right',
     va='bottom',
-    bbox=dict(boxstyle='round,pad=0.3', fc='white', ec=COLORS['RedLine'], lw=0.9),
-    arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=1.1, connectionstyle='arc3,rad=-0.12'),
 )
 
-# Upfront CapEx Callout
-ax.annotate(
-    f'Upfront CapEx: ~${capex:.1f}M\n({BuildVsBuyFigureScenario.gpus:,} H100s + fabric + facility)',
-    xy=(0, capex),
-    xytext=(1.5, 48),
-    fontsize=7.8,
-    fontweight='bold',
+# Direct annotations (no boxes).
+ax.text(
+    0.8,
+    capex + 3.0,
+    f'Upfront CapEx ~${capex:.1f}M ({BuildVsBuyFigureScenario.gpus:,} H100s + fabric + facility)',
+    fontsize=8.5,
     color=COLORS['BlueLine'],
     ha='left',
-    va='center',
-    bbox=dict(boxstyle='round,pad=0.3', fc='white', ec=COLORS['BlueLine'], lw=0.9),
-    arrowprops=dict(arrowstyle='->', color=COLORS['BlueLine'], lw=1.1, connectionstyle='arc3,rad=0.12'),
+    va='bottom',
 )
-
-# Cloud OpEx Callout
-ax.annotate(
-    f'Cloud OpEx: ~${cloud_monthly:.2f}M / mo\n(${BuildVsBuyFigureScenario.cloud_gpu_hour_usd:.2f}/GPU-hr at {BuildVsBuyFigureScenario.utilization:.0%} util)',
-    xy=(16, cloud_monthly * 16),
-    xytext=(18, 18),
-    fontsize=7.8,
-    fontweight='bold',
+ax.text(
+    15.5,
+    cloud_monthly * 15.5 - 4.0,
+    f'Cloud ~${cloud_monthly:.2f}M/month\n(${BuildVsBuyFigureScenario.cloud_gpu_hour_usd:.2f}/GPU-hr at {BuildVsBuyFigureScenario.utilization:.0%} utilization)',
+    fontsize=8.5,
     color=COLORS['OrangeLine'],
     ha='left',
-    va='center',
-    bbox=dict(boxstyle='round,pad=0.3', fc='white', ec=COLORS['OrangeLine'], lw=0.9),
-    arrowprops=dict(arrowstyle='->', color=COLORS['OrangeLine'], lw=1.1, connectionstyle='arc3,rad=-0.15'),
+    va='top',
 )
 
-# Endpoint labels
-ax.text(30.4, cloud_cost[-1], f'Cloud: ${cloud_cost[-1]:.1f}M', fontsize=8.0, fontweight='bold', color=COLORS['OrangeLine'], va='center')
-ax.text(30.4, on_prem_cost[-1], f'On-Prem: ${on_prem_cost[-1]:.1f}M', fontsize=8.0, fontweight='bold', color=COLORS['BlueLine'], va='center')
+# Endpoint labels name each line (no legend).
+# Placed just outside the axes (clip_on=False) so no gridline runs through them.
+ax.text(
+    30.6,
+    cloud_cost[-1],
+    f'Cloud (on-demand)\n${cloud_cost[-1]:.1f}M',
+    fontsize=8.5,
+    fontweight='bold',
+    color=COLORS['OrangeLine'],
+    va='center',
+    clip_on=False,
+)
+ax.text(
+    30.6,
+    on_prem_cost[-1],
+    f'On-premises\n${on_prem_cost[-1]:.1f}M',
+    fontsize=8.5,
+    fontweight='bold',
+    color=COLORS['BlueLine'],
+    va='center',
+    clip_on=False,
+)
 
 # Axis limits & labels
-ax.set_xlim(-0.5, 35.5)
-ax.set_ylim(0, 94)
-ax.set_xlabel('Cluster Operating Lifetime (Months)')
-ax.set_ylabel('Cumulative Cost ($M)')
+ax.set_xlim(-0.5, BuildVsBuyFigureScenario.horizon_months)
+ax.set_ylim(0, 80)
+ax.set_xlabel('Cluster operating lifetime (months)')
+ax.set_ylabel('Cumulative cost')
 
-ax.set_xticks(sorted({0, 6, 12, 18, 24, round(m_cross), BuildVsBuyFigureScenario.horizon_months}))
+ax.set_xticks(sorted({0, 6, 12, 18, 24, BuildVsBuyFigureScenario.horizon_months}))
 ax.set_yticks([0, 20, 40, 60, 80])
 ax.set_yticklabels(['$0M', '$20M', '$40M', '$60M', '$80M'])
-
-ax.legend(
-    handles=[line_onprem, line_cloud],
-    loc='upper right',
-    frameon=True,
-    facecolor='white',
-    edgecolor='#CBD5E1',
-    framealpha=0.95,
-    fontsize=8.0,
-)
+ax.grid(False, axis='x')
+for side in ('top', 'right'):
+    ax.spines[side].set_visible(False)
 
 plt.tight_layout()
 plt.show()
@@ -4598,7 +4575,7 @@ Here, $\TrainingCost$ is the initial training and evaluation cost, $\InferenceCo
 
 Budget projections that count GPU compute and storage can omit substantial operational work. In the illustrative budget of @fig-tco-iceberg, engineering labor (20 percent), pipeline maintenance (10 percent), continuous retraining, monitoring, incident response, and governance together equal the visible infrastructure spend. The example shows what an incomplete ledger can miss; its proportions are not universal cost shares. Each organization must measure these obligations within the same accounting horizon as its infrastructure costs.
 
-::: {#fig-tco-iceberg fig-env="figure" fig-pos="htb" fig-cap="**The TCO iceberg**: The analysis separates visible infrastructure costs from operational costs that are easier to omit. In this illustrative budget, the hidden operational costs (engineering labor, pipeline maintenance, retraining, monitoring, incident response, and compliance) together constitute half of total cost." fig-alt="Horizontal bar chart showing cost categories from GPU compute to compliance, with waterline separating visible infrastructure from hidden operational costs."}
+::: {#fig-tco-iceberg fig-env="figure" fig-pos="htb" fig-cap="**The TCO iceberg**: The analysis separates visible infrastructure costs from operational costs that are easier to omit. In this illustrative budget, the hidden operational costs (engineering labor, pipeline maintenance, retraining, monitoring, incident response, and compliance) together constitute half of total cost." fig-alt="Horizontal bar chart of eight cost categories as percentages of total cost of ownership. Two light gray bars above a dashed waterline, GPU cloud compute at 40 percent and object storage at 10 percent, sum to 50 percent visible infrastructure. Six dark gray bars below it, engineering labor 20, data pipeline maintenance 10, and retraining, monitoring, incident response, and compliance at 5 each, sum to 50 percent hidden operational costs."}
 
 ```{python}
 #| echo: false
@@ -4609,89 +4586,70 @@ Budget projections that count GPU compute and storage can omit substantial opera
 # │
 # │ Goal: Horizontal bar chart of cost categories; show visible (GPU, storage)
 # │       vs hidden (labor, maintenance, compliance) costs.
-# │ Show: Barh; waterline annotation; percentage labels.
+# │ Show: Barh; neutral waterline; visible/hidden totals; percentage labels.
 # │ How: categories/values; barh; matplotlib.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Horizontal bar chart of cost categories; show visible (GPU, storage)
 from binder.tools.figures import style as book_style
-from matplotlib.patches import Patch
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.8))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 4.2))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 categories = [
-    'GPU Cloud Compute',
-    'Object Storage',
-    'Engineering Labor',
-    'Data Pipeline Maint.',
-    'Retraining Compute',
-    'Monitoring & Obs.',
-    'Incident Response',
-    'Compliance & Gov.',
+    'GPU cloud compute',
+    'Object storage',
+    'Engineering labor',
+    'Data pipeline maintenance',
+    'Retraining compute',
+    'Monitoring and observability',
+    'Incident response',
+    'Compliance and governance',
 ]
 values = [40, 10, 20, 10, 5, 5, 5, 5]
-# Color encodes the one distinction the legend names: visible vs. hidden cost.
-colors = [COLORS['BlueLine']] * 2 + [COLORS['OrangeLine']] * 6
+n_visible = 2
+# Neutral two-tone encoding: light bars above the waterline (visible), dark bars below it (hidden).
+colors = [COLORS['grid']] * n_visible + [COLORS['secondary']] * (len(values) - n_visible)
 
 y_pos = np.arange(len(categories))
 
-bars = ax.barh(y_pos, values, color=colors, edgecolor='white', height=0.65)
+bars = ax.barh(y_pos, values, color=colors, edgecolor='none', height=0.62, zorder=3)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for bar in bars:
     width = bar.get_width()
-    ax.text(
-        width + 1, bar.get_y() + bar.get_height() / 2, f'{width}%', ha='left', va='center', fontsize=8.5, fontweight='bold', color=COLORS['primary']
-    )
+    ax.text(width + 0.8, bar.get_y() + bar.get_height() / 2, f'{width}%', ha='left', va='center', fontsize=9, color=COLORS['primary'])
 
-ax.axhline(y=1.5, color=COLORS['RedLine'], linestyle='--', linewidth=1.5)
+waterline_y = n_visible - 0.5
+ax.axhline(y=waterline_y, color=COLORS['primary'], linestyle='--', linewidth=1.0, zorder=4)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+visible_total = sum(values[:n_visible])
+hidden_total = sum(values[n_visible:])
+ax.text(59, waterline_y + 0.12, 'waterline', ha='right', va='top', fontsize=8.5, style='italic', color=COLORS['secondary'])
+ax.text(59, (n_visible - 1) / 2, f'Visible infrastructure\n{visible_total}% of TCO', ha='right', va='center', fontsize=9, color=COLORS['primary'])
 ax.text(
-    48,
-    1.25,
-    'Waterline: Visible Budget',
-    color=COLORS['RedLine'],
-    fontsize=8.5,
+    59,
+    (n_visible + len(values) - 1) / 2,
+    f'Hidden operational costs\n{hidden_total}% of TCO',
+    ha='right',
+    va='center',
+    fontsize=9,
     fontweight='bold',
-    ha='center',
-    va='bottom',
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor=COLORS['RedLine'], lw=0.8),
-)
-ax.text(
-    48,
-    1.75,
-    'Hidden Operational Debt',
     color=COLORS['primary'],
-    fontsize=8.5,
-    fontweight='bold',
-    ha='center',
-    va='top',
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.8),
 )
 
 ax.set_yticks(y_pos)
 ax.set_yticklabels(categories, fontsize=9.0)
+ax.tick_params(axis='y', length=0)
 ax.invert_yaxis()
-ax.set_xlabel('Percentage of Total Cost of Ownership (TCO)')
+ax.set_xlabel('Share of total cost of ownership (%)')
 ax.set_xlim(0, 60)
-
-legend_elements = [
-    Patch(facecolor=COLORS['BlueLine'], edgecolor='#CBD5E1', label='Visible Infrastructure Costs'),
-    Patch(facecolor=COLORS['OrangeLine'], edgecolor='#CBD5E1', label='Hidden Operational Costs'),
-]
-ax.legend(
-    handles=legend_elements,
-    loc='lower right',
-    fontsize=8.0,
-    frameon=True,
-    facecolor='white',
-    framealpha=0.95,
-    edgecolor='#CBD5E1',
-)
+ax.grid(False, axis='y')
+for side in ('top', 'right', 'left'):
+    ax.spines[side].set_visible(False)
 
 plt.tight_layout()
 plt.show()

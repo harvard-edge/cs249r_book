@@ -208,8 +208,7 @@ df = pd.read_csv("vol2/07_fault_tolerance/data/cluster_size_trend.csv")
 df_sorted = df.sort_values('year')
 
 # Plot Accelerator count
-ax1.plot(df_sorted['year'], df_sorted['accelerators'], color=color_accel, alpha=0.5, linestyle='--', zorder=2)
-ax1.scatter(df['year'], df['accelerators'], s=80, color=color_accel, zorder=3)
+ax1.scatter(df['year'], df['accelerators'], s=60, color=color_accel, edgecolor='white', linewidth=0.8, zorder=3)
 
 # Annotate models
 for idx, row in df.iterrows():
@@ -237,31 +236,28 @@ def format_accel(x, pos):
 
 ax1.yaxis.set_major_formatter(FuncFormatter(format_accel))
 
-# MTBF axis
-ax2 = ax1.twinx()
-y1_min, y1_max = ax1.get_ylim()
-# System MTBF = per-GPU MTTF / N, with the MTTF read from the registry.
+# MTBF axis: a secondary axis locked to the accelerator axis through
+# System MTBF = per-GPU MTTF / N, so every tick reads exactly off its point.
+ax1.margins(x=0.14, y=0.14)
 from mlsysim import Systems
 
 gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
-y2_min = gpu_mttf_h / y1_max
-y2_max = gpu_mttf_h / y1_min
+import numpy as np
 
-ax2.set_yscale('log')
-ax2.set_ylim(y2_max, y2_min)
-ax2.set_ylabel(f'System MTBF (Hours, assuming {gpu_mttf_h / 1000:.0f}k hr/device)', color=color_mtbf)
+_inv = lambda v: gpu_mttf_h / np.clip(v, 1e-9, None)  # self-inverse; clip avoids 1/0 at the axis limit
+ax2 = ax1.secondary_yaxis('right', functions=(_inv, _inv))
+ax2.set_ylabel(f'System MTBF (hours, {gpu_mttf_h / 1000:.0f}k h per device)', color=color_mtbf)
 ax2.tick_params(axis='y', labelcolor=color_mtbf)
 
 def format_mtbf(x, pos):
     if x >= 1000:
-        return f'{int(x/1000)}k'
+        return f'{int(round(x/1000))}k'
     if x >= 1:
-        return f'{int(x)}'
+        return f'{int(round(x))}'
     return f'{x:.1f}'
 
 ax2.yaxis.set_major_formatter(FuncFormatter(format_mtbf))
 
-ax1.margins(x=0.14, y=0.14)
 fig.tight_layout()
 
 plt.show()
@@ -639,7 +635,7 @@ class PublishedFailureRates:
 
 Production measurements confirm the $1/\AcceleratorCount$ trend of @tbl-cluster-mtbf-scaling and show that the GPU-only line is optimistic. Plotted on log-log axes, measured MTTF values and fitted projections from Meta's clusters follow the slope of the $50{,}000\,\text{h}/\AcceleratorCount$ line across more than three orders of magnitude in job size but sit below it, because a job can be interrupted by far more than its GPUs (@fig-published-failure-rates). The @kokolis2025 study of Meta's Research SuperCluster reported measured MTTF values for observed RSC job sizes and projected a `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` MTTF for `{python} PublishedFailureRates.llama_gpus_str`-GPU jobs. That projection lands next to the Llama 3\index{Llama-3!failure report} run of war story \ref{ws-vol2-introduction-llama3-failure-cadence}, whose `{python} PublishedFailureRates.llama_interruptions_str` unexpected interruptions across a `{python} PublishedFailureRates.llama_days_str`-day snapshot on `{python} PublishedFailureRates.llama_gpus_str` H100 GPUs give an observed MTTF of about `{python} PublishedFailureRates.llama_mttf_str`. Together, the measured Llama run and Kokolis projection put `{python} PublishedFailureRates.llama_gpus_str`-GPU training on a failure cadence of roughly two to three hours, bracketed by the `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` projection and the `{python} PublishedFailureRates.llama_mttf_attr_str` measurement. This evidence turns the idealized $1/\AcceleratorCount$ relation into an engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
 
-::: {#fig-published-failure-rates fig-env="figure" fig-pos="htb" fig-cap="**Published failure rates from production clusters**: Measured MTTF values and fitted projections from Meta's RSC clusters [@kokolis2025] plotted with Llama 3 training measurements [@dubey2024llama] against the theoretical 1/N curve. At 16,384 GPUs, the Kokolis projection and the Llama 3 empirical measurement bracket a failure cadence of roughly two to three hours (the `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` projection and the `{python} PublishedFailureRates.llama_mttf_attr_str` measurement), confirming that fault tolerance is a mathematical necessity, not an edge case. Data sources: Kokolis et al., arXiv:2410.21680; Meta, arXiv:2407.21783." fig-alt="Log-log scatter plot of MTTF in hours vs. GPU count with theoretical 1 over N curve and labeled measured and projected data points from Meta RSC and Llama 3 training."}
+::: {#fig-published-failure-rates fig-env="figure" fig-pos="htb" fig-cap="**Published failure rates from production clusters**: Measured MTTF values and fitted projections from Meta's RSC clusters [@kokolis2025] plotted with Llama 3 training measurements [@dubey2024llama] against the theoretical 1/N curve. At 16,384 GPUs, the Kokolis projection and the Llama 3 empirical measurement bracket a failure cadence of roughly two to three hours (the `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` projection and the `{python} PublishedFailureRates.llama_mttf_attr_str` measurement), confirming that fault tolerance is a mathematical necessity, not an edge case. Data sources: Kokolis et al., arXiv:2410.21680; Meta, arXiv:2407.21783." fig-alt="Log-log scatter plot of mean time to failure in hours versus GPU count with a dashed theoretical 50,000 hours over N line. Filled blue dots mark measured Meta RSC values at 8 and 1,024 GPUs, hollow blue dots mark projections at 16,384 and 131K GPUs, and a dark diamond marks the Llama 3 measurement of 3.1 hours. A short light red band at 16,384 GPUs spans 1.8 to 3.1 hours, labeled failure every 2 to 3 h. Dotted gray reference lines mark 1 day, 1 week, and 3 months."}
 
 ```{python}
 #| echo: false
@@ -690,39 +686,41 @@ kokolis_mttf = [
     float(_fo.Kokolis131KGpuProjectedMttfHours),
 ]  # hours
 kokolis_labels = [
-    f'{kokolis_gpus[0]:,.0f} GPUs\n({kokolis_mttf[0] / 24:.1f} days)',
-    f'{kokolis_gpus[1]:,.0f} GPUs\n({kokolis_mttf[1]:.1f} hrs)',
-    f'{kokolis_gpus[2]:,.0f} GPUs\n(projected, {kokolis_mttf[2]:.1f} hrs)',
-    f'{kokolis_gpus[3] / 1000:.0f}K GPUs\n(projected, {kokolis_mttf[3] * 60:.0f} min)',
+    f'{kokolis_gpus[0]:,.0f} GPUs, {kokolis_mttf[0] / 24:.1f} days',
+    f'{kokolis_gpus[1]:,.0f} GPUs, {kokolis_mttf[1]:.1f} h',
+    f'{kokolis_gpus[2]:,.0f} GPUs, {kokolis_mttf[2]:.1f} h',
+    f'{kokolis_gpus[3] / 1000:.0f}K GPUs, {kokolis_mttf[3] * 60:.0f} min',
 ]
 
+# Measured RSC points are filled; fitted projections are hollow.
 ax.scatter(
-    kokolis_gpus,
-    kokolis_mttf,
+    kokolis_gpus[:2],
+    kokolis_mttf[:2],
     color=COLORS['BlueLine'],
-    s=80,
+    s=60,
     zorder=3,
     marker='o',
     edgecolors='white',
     linewidth=0.8,
-    label='Meta RSC (Kokolis et al. 2025)',
+    label='Meta RSC, measured (Kokolis et al. 2025)',
 )
-# Label Kokolis points
-label_pos = {0: (40, -42, 'center'), 1: (-60, 10, 'center'), 2: (-65, 5, 'center'), 3: (-65, 10, 'center')}
+ax.scatter(
+    kokolis_gpus[2:],
+    kokolis_mttf[2:],
+    facecolors='white',
+    s=60,
+    zorder=3,
+    marker='o',
+    edgecolors=COLORS['BlueLine'],
+    linewidth=1.5,
+    label='Meta RSC, projected (Kokolis et al. 2025)',
+)
+# Label Kokolis points (offsets in points; text sits beside, not on, the 1/N line)
+label_pos = {0: (0, -16, 'center'), 1: (-10, -4, 'right'), 2: (-10, -16, 'right'), 3: (-10, -4, 'right')}
 
 for i, (x, y, lbl) in enumerate(zip(kokolis_gpus, kokolis_mttf, kokolis_labels)):
     dx, dy, ha = label_pos[i]
-
-    ax.annotate(
-        lbl,
-        xy=(x, y),
-        xytext=(dx, dy),
-        textcoords='offset points',
-        fontsize=7,
-        ha=ha,
-        color=COLORS['BlueLine'],
-        arrowprops=dict(arrowstyle='->', color=COLORS['BlueLine'], shrinkA=0, shrinkB=5, lw=0.8),
-    )
+    ax.annotate(lbl, xy=(x, y), xytext=(dx, dy), textcoords='offset points', fontsize=8, ha=ha, color=COLORS['BlueLine'])
 
 # VERIFIED DATA: Meta Llama 3 (arXiv:2407.21783), via PublishedFailureRates
 # (unexpected interruptions over the snapshot window -> observed MTTF)
@@ -730,48 +728,56 @@ llama_gpus = [PublishedFailureRates.llama_gpus]
 llama_mttf = [PublishedFailureRates.llama_mttf_h]
 
 ax.scatter(
-    llama_gpus, llama_mttf, color=COLORS['RedLine'], s=120, zorder=4, marker='*', edgecolors='white', linewidth=0.8, label='Llama 3 (Meta 2024)'
+    llama_gpus,
+    llama_mttf,
+    color=COLORS['primary'],
+    s=110,
+    zorder=4,
+    marker='D',
+    edgecolors='white',
+    linewidth=0.8,
+    label='Llama 3, measured (Meta 2024)',
 )
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate(
-    f'Llama 3 ({PublishedFailureRates.llama_gpus / 1024:.0f}K H100s,\n'
-    f'{PublishedFailureRates.llama_interruptions_str} interruptions in {PublishedFailureRates.llama_days_str} days)',
-    xy=(PublishedFailureRates.llama_gpus, PublishedFailureRates.llama_mttf_h * 1.03),
-    xytext=(40000, 8),
-    fontsize=7,
-    ha='center',
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=0.75),
+    f'Llama 3, {PublishedFailureRates.llama_interruptions_str} interruptions\n'
+    f'in {PublishedFailureRates.llama_days_str} days, {PublishedFailureRates.llama_mttf_h:.1f} h',
+    xy=(PublishedFailureRates.llama_gpus, PublishedFailureRates.llama_mttf_h),
+    xytext=(10, 6),
+    textcoords='offset points',
+    fontsize=8,
+    ha='left',
+    va='bottom',
+    color=COLORS['primary'],
 )
 
-# Training duration reference lines
+# Training duration reference lines (neutral: a time scale, not a resource)
 durations = [(24, '1 day'), (168, '1 week'), (2160, '3 months')]
 for hrs, lbl in durations:
-    ax.axhline(y=hrs, color=COLORS['GreenLine'], linestyle=':', linewidth=0.8, alpha=0.5)
-    ax.text(4, hrs * 1.15, lbl, fontsize=7, color=COLORS['GreenLine'], alpha=0.7)
+    ax.axhline(y=hrs, color=COLORS['secondary'], linestyle=':', linewidth=0.8, alpha=0.6, zorder=0)
+    ax.text(200000, hrs * 1.12, lbl, fontsize=8, color=COLORS['secondary'], ha='right')
 
-# Key annotation
-ax.annotate(
-    'At 16K GPUs: one failure\n every ~2–3 hours',
-    xy=(PublishedFailureRates.llama_gpus, np.sqrt(kokolis_mttf[2] * PublishedFailureRates.llama_mttf_h)),
-    xytext=(1200, 0.4),
-    fontsize=7,
-    ha='center',
-    fontweight='bold',
-    color='crimson',
-    bbox=dict(facecolor="#f2c9d0", edgecolor='none', alpha=0.15, pad=3),
-    arrowprops=dict(arrowstyle='->', color='crimson', lw=0.75),
+# The 16K-GPU failure cadence bracketed by the projection and the measurement
+# Confined to the 16K-GPU column so the bracket reads as a claim about that scale only.
+ax.fill_between([1.15e4, 2.35e4], kokolis_mttf[2], PublishedFailureRates.llama_mttf_h, color=COLORS['RedL'], alpha=0.8, zorder=0, lw=0)
+ax.text(
+    1.05e4,
+    np.sqrt(kokolis_mttf[2] * PublishedFailureRates.llama_mttf_h),
+    'failure every 2 to 3 h',
+    fontsize=8,
+    color=COLORS['RedLine'],
+    va='center',
+    ha='right',
 )
 
 ax.set_xscale('log')
 ax.set_yscale('log')
-ax.set_xlabel('GPU Count (N)')
-ax.set_ylabel('Mean Time to Failure (hours)')
+ax.set_xlabel('GPU count (N)')
+ax.set_ylabel('Mean time to failure (hours)')
 ax.set_xlim(3, 300000)
 ax.set_ylim(0.1, 5000)
-ax.legend(loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
+ax.legend(loc='lower left', fontsize=8, frameon=True, facecolor='white', framealpha=1.0, edgecolor=COLORS['grid'], fancybox=False, borderpad=0.6)
 
 plt.tight_layout()
 plt.show()
@@ -924,19 +930,19 @@ As components age, they enter the wear-out\index{Bathtub curve!wear-out} phase, 
 
 The practical implication for ML systems is that fleet-wide failure rates can depend on age distribution. Under the bathtub model, a new cohort passes through elevated early-life risk, a relatively stable period, and eventual wear-out. Screening, operating conditions, and replacement policy determine how much of that pattern appears in field data. Mixed-age fleets combine cohorts at different stages, so their aggregate hazard need not follow the curve of a single cohort.
 
-::: {#fig-bathtub-curve fig-env="figure" fig-pos="htb" fig-cap="**The bathtub curve**: Hardware failure rates $\ComponentHazardRate(\TimeInstant)$ vary over time. (1) Infant mortality: high failure rate initially due to manufacturing defects. (2) Useful life: constant, low failure rate where random failures dominate. (3) Wear-out: increasing failure rate as components age. Burn-in testing aims to filter out infant mortality failures before deployment." fig-alt="Line graph of failure rate vs. component age showing bathtub shape. Three phases: infant mortality with high decreasing rate, useful life with constant low rate, and wear-out with increasing rate. Vertical dashed line marks burn-in period."}
+::: {#fig-bathtub-curve fig-env="figure" fig-pos="htb" fig-cap="**The bathtub curve**: Hardware failure rates $\ComponentHazardRate(\TimeInstant)$ vary over time. (1) Infant mortality: high failure rate initially due to manufacturing defects. (2) Useful life: constant, low failure rate where random failures dominate. (3) Wear-out: increasing failure rate as components age. Burn-in testing aims to filter out infant mortality failures before deployment." fig-alt="Line graph of failure rate versus component age from days to end of life, showing a bathtub shape across three shaded regions separated by dashed lines: (1) infant mortality in red with a falling rate from manufacturing defects screened by burn-in, (2) useful life in green with a constant rate and a dot marking an MTTF of about 50,000 hours, and (3) wear-out in red with a rising rate from electromigration and thermal fatigue."}
 
 ```{python}
 #| echo: false
 from binder.tools.figures import style as book_style
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.0, 4.6))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.0, 4.0))
 
 # Zones: x in [0, 12]
-ax.axvspan(0, 3.5, color=COLORS['RedL'], alpha=0.5, zorder=1)
-ax.axvspan(3.5, 8.5, color=COLORS['GreenL'], alpha=0.5, zorder=1)
-ax.axvspan(8.5, 12.0, color=COLORS['OrangeL'], alpha=0.5, zorder=1)
+ax.axvspan(0, 3.5, color=COLORS['RedL'], alpha=0.35, zorder=1, lw=0)
+ax.axvspan(3.5, 8.5, color=COLORS['GreenL'], alpha=0.45, zorder=1, lw=0)
+ax.axvspan(8.5, 12.0, color=COLORS['RedL'], alpha=0.35, zorder=1, lw=0)
 
 # Dividers
 ax.axvline(3.5, color=COLORS['grid'], linestyle='--', linewidth=1.1, zorder=2)
@@ -950,133 +956,47 @@ x2 = np.linspace(3.5, 8.5, 60)
 y2 = np.full_like(x2, y1[-1])
 
 x3 = np.linspace(8.5, 11.9, 80)
-y3 = y2[-1] + 0.03 * np.exp(1.4 * (x3 - 8.5))
+y3 = y2[-1] + 0.03 * (np.exp(1.4 * (x3 - 8.5)) - 1)  # starts exactly on the floor: no step at the join
 
 x = np.concatenate([x1, x2, x3])
 y = np.concatenate([y1, y2, y3])
 
-ax.plot(x, y, color=COLORS['RedLine'], linewidth=2.6, zorder=4, label=r'Hazard Function $h(t)$')
+ax.plot(x, y, color=COLORS['primary'], linewidth=2.2, zorder=4)
 
-# Top Phase Banners
-ax.text(
-    1.75,
-    4.8,
-    'Infant Mortality',
-    ha='center',
-    va='center',
-    fontsize=8.8,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    bbox=dict(boxstyle='round,pad=0.35', fc=COLORS['RedL'], ec=COLORS['RedLine'], lw=0.9),
-)
+# Regime names (numbered to match the caption)
+for xc, name in [(1.75, '(1) Infant mortality'), (6.0, '(2) Useful life'), (10.25, '(3) Wear-out')]:
+    ax.text(xc, 4.85, name, ha='center', va='center', fontsize=9, fontweight='bold', color=COLORS['primary'])
 
-ax.text(
-    6.0,
-    4.8,
-    'Useful Life',
-    ha='center',
-    va='center',
-    fontsize=8.8,
-    fontweight='bold',
-    color=COLORS['GreenLine'],
-    bbox=dict(boxstyle='round,pad=0.35', fc=COLORS['GreenL'], ec=COLORS['GreenLine'], lw=0.9),
-)
+# Short regime annotations, set beside the curve
+ax.text(0.95, 2.55, 'manufacturing\ndefects', ha='left', va='center', fontsize=8, color=COLORS['primary'], linespacing=1.3)
+ax.text(0.95, 1.95, 'screened by burn-in', ha='left', va='center', fontsize=8, style='italic', color=COLORS['secondary'])
+ax.text(6.0, 0.95, 'constant rate, random failures', ha='center', va='center', fontsize=8, color=COLORS['primary'])
+ax.text(10.1, 1.15, 'electromigration,\nthermal fatigue', ha='right', va='center', fontsize=8, color=COLORS['primary'], linespacing=1.3)
 
-ax.text(
-    10.25,
-    4.8,
-    'Wear-out',
-    ha='center',
-    va='center',
-    fontsize=8.8,
-    fontweight='bold',
-    color=COLORS['OrangeLine'],
-    bbox=dict(boxstyle='round,pad=0.35', fc=COLORS['OrangeL'], ec=COLORS['OrangeLine'], lw=0.9),
-)
-
-# Trend arrows
-ax.annotate(
-    'Decreasing',
-    xy=(1.5, 1.8),
-    xytext=(1.0, 2.7),
-    arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=1.2),
-    fontsize=7.5,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-)
-
-ax.annotate(
-    'Rising',
-    xy=(11.3, 3.8),
-    xytext=(10.4, 2.7),
-    arrowprops=dict(arrowstyle='->', color=COLORS['OrangeLine'], lw=1.2),
-    fontsize=7.5,
-    fontweight='bold',
-    color=COLORS['OrangeLine'],
-)
-
-# Zone descriptive text
-ax.text(
-    2.1,
-    3.6,
-    'Burn-in period\nManufacturing defects,\nearly-life failures',
-    ha='center',
-    va='center',
-    fontsize=7.4,
-    color=COLORS['primary'],
-    bbox=dict(boxstyle='round,pad=0.3', fc='white', ec='#CBD5E1', lw=0.8, alpha=0.95),
-)
-
-ax.text(
-    6.0,
-    3.0,
-    'Constant Failure Rate (CFR)\nRandom Poisson failures dominate',
-    ha='center',
-    va='center',
-    fontsize=7.4,
-    color=COLORS['primary'],
-    bbox=dict(boxstyle='round,pad=0.3', fc='white', ec='#CBD5E1', lw=0.8, alpha=0.95),
-)
-
-ax.text(
-    10.0,
-    1.4,
-    'End-of-life\nElectromigration &\nthermal fatigue',
-    ha='center',
-    va='center',
-    fontsize=7.4,
-    color=COLORS['primary'],
-    bbox=dict(boxstyle='round,pad=0.3', fc='white', ec='#CBD5E1', lw=0.8, alpha=0.95),
-)
-
-# Peak MTBF card in useful life
+# Useful-life MTTF: the flat floor is the constant rate 1/MTTF
 peak_y = y2[0]
-ax.plot([6.0, 6.0], [peak_y, 0.55], color=COLORS['primary'], linestyle=':', lw=0.9, zorder=3)
-ax.scatter([6.0], [peak_y], color=COLORS['GreenLine'], edgecolor='white', linewidth=1.2, s=40, zorder=5)
+ax.scatter([6.0], [peak_y], color=COLORS['GreenLine'], edgecolor='white', linewidth=1.0, s=36, zorder=5)
 ax.text(
     6.0,
-    0.55,
-    f'GPU MTTF at peak\n~{float(Systems.Reliability.Gpu.mttf_hours):,.0f} hours',
+    0.45,
+    f'MTTF ≈ {float(Systems.Reliability.Gpu.mttf_hours):,.0f} h',
     ha='center',
     va='center',
-    fontsize=7.2,
-    fontweight='bold',
+    fontsize=8,
     color=COLORS['GreenLine'],
-    bbox=dict(boxstyle='round,pad=0.3', fc='white', ec=COLORS['GreenLine'], lw=0.8),
 )
 
 ax.set_xlim(0, 12.0)
 ax.set_ylim(-0.1, 5.2)
 
 ax.set_xticks([0.8, 2.2, 4.8, 7.2, 10.5])
-ax.set_xticklabels(['Days', 'Weeks', 'Months', 'Years', 'End of Life'], fontsize=8.2, fontweight='bold', color=COLORS['primary'])
-ax.set_xlabel(r'Time (Product Lifecycle) — Hazard function $h(t)$ over component lifetime', fontsize=8.5, fontweight='bold', color=COLORS['primary'])
+ax.set_xticklabels(['Days', 'Weeks', 'Months', 'Years', 'End of life'], color=COLORS['primary'])
+ax.set_xlabel('Component age')
 
-ax.set_yticks([0.1, 1.0, 2.0, 3.0, 4.0, 5.0])
-ax.set_yticklabels([])
-ax.set_ylabel(r'Failure Rate $h(t)$ (illustrative)', fontsize=8.5, fontweight='bold', color=COLORS['primary'])
+ax.set_yticks([])
+ax.set_ylabel(r'Failure rate $h(t)$ (illustrative)')
 
-ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.6, alpha=0.7)
+ax.grid(False)
 
 plt.tight_layout()
 plt.show()
@@ -1243,7 +1163,7 @@ Fleet scale turns these rare device events into routine operating conditions. Sm
 
 Each persistence class from the taxonomy maps to a different fleet action, from retry for a fault that leaves nothing to repair, through quarantine for one that returns under load, to replacement for one that repeats on every attempt (@fig-fault-tolerance-failure-spectrum). A transient fault\index{Transient fault!fleet response}, as @sec-fault-tolerance-reliability-reliability-transient-failures-57b4 established, leaves no lasting defect from that event, so the fleet's question is only whether its effect escaped. A single-event upset, a voltage droop on an unstable power path [@reddi2013], a timing violation, or a soft error in combinational logic [@mukherjee2005] can corrupt a tensor, packet, or instruction. Detection and correction can prevent propagation; affected state may otherwise require rollback. During training, an undetected error in weights or gradients can compromise convergence and contaminate subsequent checkpoints [@he2023]. During stateless inference, an activation error can remain confined to one request [@mahmoud2020]. If that activation enters retained state such as a KV cache, later outputs can also depend on it.
 
-::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Hardware faults ordered by how long they persist. A transient fault leaves nothing to repair, an intermittent fault returns under the load that exposed it, and a permanent fault repeats on every retry. Persistence decides the fleet response, from retry through quarantine to replacement, and fault tolerance engineering must handle all three to keep a fleet making progress." fig-alt="An arrow labeled fault persistence runs from clears on its own to lasts until repaired above three cards: transient, intermittent, and permanent. Each card gives how the fault behaves, a typical cause, and the fleet response, from correct or retry, through drain and stress-test, to replace and restore a checkpoint from before the fault."}
+::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Hardware faults ordered by how long they persist. A transient fault leaves nothing to repair, an intermittent fault returns under the load that exposed it, and a permanent fault repeats on every retry. Persistence decides the fleet response, from retry through quarantine to replacement, and fault tolerance engineering must handle all three to keep a fleet making progress." fig-alt="An arrow labeled fault persistence runs from clears on its own to lasts until repaired above three cards: transient, intermittent, and permanent. Each card gives how the fault behaves, a typical cause, and the fleet response, from retry or roll back, through drain and stress-test, to replace and restore."}
 ![](images/svg/failure-spectrum.svg)
 
 :::
@@ -1487,80 +1407,9 @@ The injection level determines which propagation paths the experiment includes. 
 
 This divergence comes from the multi-tier filtering formalized as error masking [@mohanram2003]. A physical soft error becomes an observable failure only if it passes two screens in turn (@fig-error-masking-ft). The corrupted data must first be read, and the value read must then produce incorrect output or a crash. A hardware disturbance that hits an unused functional unit, is overwritten prior to use, or lands in dynamically dead instructions is silently absorbed within the microarchitecture or runtime [@ko2021]. Because tensor-level mutations inject perturbations downstream of these architectural filters, their empirical error rates must be evaluated at that higher abstraction level.
 
-::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. A shaded panel lists microarchitecture-level and software-level masking causes."}
+::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. Beside each masked outcome, three masking causes are listed: unused component, overwritten value, and squashed speculation for the microarchitecture; dead instruction, logical or compare op, and uninfluential branch for software. A dashed arrow labeled software fault injection enters the flow after the first diamond."}
 
-```{.tikz}
-\scalebox{0.77}{
-\begin{tikzpicture}[font=\small\sffamily]
-\tikzset{%
-Line/.style={line width=1.0pt,black!50,text=black},
-Box/.style={inner xsep=2pt,
-    node distance=0.6,
-    draw=RedLine,
-    line width=0.75pt,
-    fill=RedL!60,
-    align=flush center,
-    minimum width=25mm, minimum height=9mm
-  },
-Box2/.style={inner xsep=2pt,
-    node distance=1.4,
-    draw=GreenLine,
-    line width=0.75pt,
-    fill=GreenL0,
-    align=flush center,
-    minimum width=29mm, minimum height=9mm
-  },
-Box3/.style={inner xsep=2pt,
-    node distance=1.1,
-    draw=GrayLine,
-    line width=0.75pt,
-    fill=white,
-    align=flush left,
-    minimum width=55mm, minimum height=9mm
-  },
-   decision/.style={diamond, minimum width=50mm,node distance=0.6,inner sep=-1ex,
-     minimum height=25mm, align=flush center, draw=GrayLine, fill=GrayL!50}
-}
-\node[Box](B1){Soft error};
-\node[Box,decision,below=of B1](B2){Corrupted  data \\are read?};
-\node[Box,decision,below=of B2](B3){Incorrect  output \\ or  system crash?};
-\node[Box2,right=of B2](B4){\textbf{Masked} \\ (microarchitecture)};
-\node[Box2,right=of B3](B5){\textbf{Masked} \\ (software)};
-\node[Box,below=of B3](B6){Failure};
-%%
-\node[Box3,right=of B4](MLA){\textbf{Microarchitecture-level analysis}
-\\[0.5ex]
-$\bullet$ Errors on unused components
-\\[0.5ex]
-$\bullet$ Overwritten by write operations
-\\[0.5ex]
-$\bullet$ Errors on speculative instructions};
-\node[Box3,right=of B5](SLA){\textbf{Software-level analysis}
-\\[0.5ex]
-$\bullet$ Dynamically dead instructions
-\\[0.5ex]
-$\bullet$ Logical, compare instructions
-\\[0.5ex]
-$\bullet$ Uninfluential branch instructions};
-%%
-\draw[Line,-latex](B1)--(B2);
-\draw[Line,-latex](B2)--
-node[right,font=\footnotesize\sffamily]{Yes}(B3);
-\draw[Line,-latex](B3)--
-node[right,font=\footnotesize\sffamily]{Yes}(B6);
-\draw[Line,-latex](B2)--
-node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B4);
-\draw[Line,-latex](B3)--
-node[above,pos=0.3,font=\footnotesize\sffamily]{No}(B5);
-%fitting
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,inner ysep=5mm,
-yshift=2.5mm,fill=BackColor!50,fit=(B4)(SLA)(MLA),line width=0.75pt](BB2){};
-\node[below=4pt of  BB2.north,inner sep=0pt,
-anchor=north]{\textbf{System-level masking effect analysis}};
-\end{tikzpicture}
-}
-```
+![](images/svg/error-masking.svg){width="88%"}
 
 :::
 
@@ -1848,14 +1697,18 @@ ax.plot(
 )
 ax.plot(tau * 60, total_waste * 100, label='Total wasted time', color=COLORS['primary'], linewidth=2.5)
 
-ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['primary'], s=40, zorder=5)
+# Young-Daly optimum: green dot with a dropline to the interval axis
+ax.plot([tau_opt * 60, tau_opt * 60], [0, waste_opt * 100], color=COLORS['GreenLine'], linestyle=':', linewidth=1.0, zorder=3)
+ax.scatter([tau_opt * 60], [waste_opt * 100], color=COLORS['GreenLine'], edgecolor='white', linewidth=1.0, s=50, zorder=5)
 ax.annotate(
-    f'$T^*_{{\\mathrm{{ckpt}}}} \\approx {tau_opt * 60:.0f}$ min, {waste_opt * 100:.1f}% wasted',
+    f'$T^*_{{\\mathrm{{ckpt}}}} \\approx {tau_opt * 60:.0f}$ min\n{waste_opt * 100:.1f}% wasted',
     xy=(tau_opt * 60, waste_opt * 100),
-    xytext=(tau_opt * 60 + 12, waste_opt * 100 + 7),
-    ha='left',
-    arrowprops=dict(arrowstyle='->', color=COLORS['primary'], shrinkB=4, lw=0.75),
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#CBD5E1', lw=0.6, alpha=0.95),
+    xytext=(0, 12),
+    textcoords='offset points',
+    ha='center',
+    va='bottom',
+    fontsize=9,
+    color=COLORS['GreenLine'],
 )
 
 ax.set_xlabel('Checkpoint interval $T_{\\mathrm{ckpt}}$ (minutes)')
@@ -1864,7 +1717,7 @@ ax.set_xlim(0, tau_opt * 4 * 60)
 ax.set_yticks([0, 5, 10, 15, 20])
 ax.set_ylim(0, 20)
 
-ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor='#CBD5E1', framealpha=0.95)
+ax.legend(loc='upper right', frameon=True, facecolor='white', edgecolor=COLORS['grid'], framealpha=1.0, fancybox=False)
 
 plt.tight_layout()
 plt.show()
@@ -2754,7 +2607,7 @@ Suppose a `{python} ElasticNodeLoss.job_gpus_str`-GPU training job loses an `{py
 
 A small example shows the lifecycle in three phases (@fig-elastic-flow). Execution begins with a balanced four-node AllReduce ring at full throughput. When Node 3 drops out, the survivors pause at a rendezvous barrier and reload the last consistent checkpoint. The group then contracts into a three-node ring in which each worker takes a one-third larger data shard, resuming productive training at 75 percent throughput.
 
-::: {#fig-elastic-flow fig-env="figure" fig-pos="htb" fig-cap="**Elastic training recovery**: Read the three phases top to bottom. Rather than restoring the original worker count before resuming, elastic training pauses when a node fails, reloads the last consistent checkpoint, re-forms the ring over the $\DeviceCount-1$ survivors, and redistributes the failed node's data shards among them. The job resumes at reduced throughput (75 percent here, assuming an unchanged per-worker rate), turning a hard failure into a temporary slowdown." fig-alt="Three stacked phases along a downward time arrow. Phase 1: four nodes in a ring, all healthy, at 100 percent throughput. Phase 2: node 3 is outlined in red and labeled failed, its ring link is broken, a checkpoint is loaded, and the remaining ranks wait at a rendezvous barrier. Phase 3: three renumbered nodes form a new ring, each with a one-third larger data shard, at 75 percent throughput."}
+::: {#fig-elastic-flow fig-env="figure" fig-pos="htb" fig-cap="**Elastic training recovery**: Read the three phases top to bottom. Rather than restoring the original worker count before resuming, elastic training pauses when a node fails, reloads the last consistent checkpoint, re-forms the ring over the $\DeviceCount-1$ survivors, and redistributes the failed node's data shards among them. The job resumes at reduced throughput (75 percent here, assuming an unchanged per-worker rate), turning a hard failure into a temporary slowdown." fig-alt="Three stacked phase panels joined by downward arrows. Phase 1: four nodes in a ring at 100 percent throughput. Phase 2: node 3 is red and labeled failed, its ring link is dashed, training is paused, and a bar under nodes 0 to 2 reads rendezvous barrier: reload last checkpoint. Phase 3: nodes 0 to 2 form a new three-node ring, each labeled shard +33%, beside an empty dashed slot labeled removed, at 75 percent throughput."}
 ![](images/svg/elastic-flow.svg)
 
 <!--
@@ -3502,7 +3355,7 @@ Combining these observability streams helps detect recurring optimization pathol
 
 A training-loss signature is useful because it narrows the hypotheses that recovery must test. The trajectories in @fig-training-failure-signatures illustrate symptoms, including nonfinite values that need not crash the process. @Tbl-training-failure-response-map pairs spike, plateau, and divergence patterns, plus the silent hang a loss curve cannot show, with a candidate cause and a first response. That pairing guides investigation without treating the curve as a unique diagnosis.
 
-::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Plot showing four loss curves: (A) Normal Training with smooth descent, (B) Gradient Explosion with a sudden spike, (C) Loss Plateau where learning stalls, and (D) NaN Divergence with erratic oscillation collapsing to NaN."}
+::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Four side-by-side loss-versus-steps panels on a shared loss axis. (A) Normal training: a green curve descending smoothly. (B) Gradient explosion: a descending curve with a red spike segment midway. (C) Loss plateau: a curve that flattens early, with the flat region shaded red. (D) NaN divergence: an oscillating curve that ends at a red X labeled NaN check halts run."}
 ```{python}
 #| echo: false
 from binder.tools.figures import style as book_style
@@ -3511,183 +3364,66 @@ import numpy as np
 book_style.set_book_style()
 COLORS = book_style.COLORS
 
-fig, axes = plt.subplots(2, 2, figsize=(8.6, 6.4))
+# Four small multiples on one shared loss axis; the healthy curve is green, the
+# pathological curves are neutral with only the failure itself marked in red.
+fig, axes = plt.subplots(1, 4, figsize=(10, 2.9), sharey=True)
 
 steps = np.linspace(0, 100, 200)
 np.random.seed(42)
 
 # PANEL A: Normal Training
-ax = axes[0, 0]
 noise = np.random.normal(0, 0.02, len(steps))
 loss_a = 2.4 * np.exp(-0.035 * steps) + 0.35 + noise
-ax.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=2.0)
-ax.set_title('(A) NORMAL TRAINING\nSmooth monotonic descent with batch variance', fontsize=8.0, fontweight='bold', color=COLORS['GreenLine'], pad=6)
-
-ax.annotate(
-    'Start',
-    xy=(steps[0], loss_a[0]),
-    xytext=(16, 2.7),
-    arrowprops=dict(arrowstyle="->", color=COLORS['GreenLine'], lw=1.1),
-    fontsize=7.2,
-    fontweight='bold',
-    color=COLORS['GreenLine'],
-)
-ax.annotate(
-    'Converged',
-    xy=(steps[-1], loss_a[-1]),
-    xytext=(68, 0.9),
-    arrowprops=dict(arrowstyle="->", color=COLORS['GreenLine'], lw=1.1),
-    fontsize=7.2,
-    fontweight='bold',
-    color=COLORS['GreenLine'],
-)
-
-ax.text(
-    50,
-    0.15,
-    'Signature: stable descent, bounded gradient variance',
-    ha='center',
-    va='center',
-    fontsize=7.0,
-    fontweight='bold',
-    color=COLORS['GreenLine'],
-    bbox=dict(boxstyle='round,pad=0.3', fc=COLORS['GreenL'], ec=COLORS['GreenLine'], lw=0.8),
-)
-
-ax.set_xlim(-2, 102)
-ax.set_ylim(-0.05, 3.1)
-ax.set_ylabel('Loss', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.set_xlabel('Steps', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
 
 # PANEL B: Gradient Explosion
-ax = axes[0, 1]
 loss_b = 2.4 * np.exp(-0.035 * steps) + 0.35 + np.random.normal(0, 0.02, len(steps))
 spike_idx = 90
 loss_b[spike_idx : spike_idx + 15] += np.linspace(0, 1.7, 15)
 loss_b[spike_idx + 15 : spike_idx + 35] = np.linspace(loss_b[spike_idx + 14], 1.1, 20)
-ax.plot(steps, loss_b, color=COLORS['RedLine'], linewidth=2.0)
-ax.set_title(
-    '(B) GRADIENT EXPLOSION\nSudden catastrophic spike exceeding loss bounds', fontsize=8.0, fontweight='bold', color=COLORS['RedLine'], pad=6
-)
-
-spike_step = steps[spike_idx + 14]
-spike_val = loss_b[spike_idx + 14]
-ax.annotate(
-    'Spike',
-    xy=(spike_step, spike_val),
-    xytext=(spike_step - 18, 2.7),
-    arrowprops=dict(arrowstyle="->", color=COLORS['RedLine'], lw=1.1),
-    fontsize=7.2,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-)
-
-ax.text(
-    50,
-    0.15,
-    r'Signature: loss spike, gradient norm $\geq 100\times$ baseline',
-    ha='center',
-    va='center',
-    fontsize=7.0,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    bbox=dict(boxstyle='round,pad=0.3', fc=COLORS['RedL'], ec=COLORS['RedLine'], lw=0.8),
-)
-
-ax.set_xlim(-2, 102)
-ax.set_ylim(-0.05, 3.1)
-ax.set_ylabel('Loss', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.set_xlabel('Steps', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
 
 # PANEL C: Loss Plateau
-ax = axes[1, 0]
 loss_c = np.copy(loss_a)
 plateau_idx = 40
 loss_c[plateau_idx:] = loss_c[plateau_idx] + np.random.normal(0, 0.015, len(steps) - plateau_idx)
-ax.plot(steps, loss_c, color=COLORS['OrangeLine'], linewidth=2.0)
-ax.set_title(
-    '(C) LOSS PLATEAU\nLearning stalls prematurely; zero meaningful descent', fontsize=8.0, fontweight='bold', color=COLORS['OrangeLine'], pad=6
-)
-
-ax.annotate(
-    'Plateau Region',
-    xy=(70, loss_c[plateau_idx]),
-    xytext=(70, 2.2),
-    ha='center',
-    arrowprops=dict(arrowstyle="->", color=COLORS['OrangeLine'], lw=1.1),
-    fontsize=7.2,
-    fontweight='bold',
-    color=COLORS['OrangeLine'],
-    bbox=dict(boxstyle='round,pad=0.25', fc=COLORS['OrangeL'], ec=COLORS['OrangeLine'], lw=0.8),
-)
-
-ax.text(
-    50,
-    0.15,
-    'Signature: vanishing gradient norm, optimizer stagnation',
-    ha='center',
-    va='center',
-    fontsize=7.0,
-    fontweight='bold',
-    color=COLORS['OrangeLine'],
-    bbox=dict(boxstyle='round,pad=0.3', fc=COLORS['OrangeL'], ec=COLORS['OrangeLine'], lw=0.8),
-)
-
-ax.set_xlim(-2, 102)
-ax.set_ylim(-0.05, 3.1)
-ax.set_ylabel('Loss', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.set_xlabel('Steps', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
 
 # PANEL D: NaN Divergence
-ax = axes[1, 1]
 nan_steps = steps[:140]
 osc = np.sin(nan_steps * 0.4) * np.exp(0.022 * nan_steps) * 0.22
 loss_d = 1.9 * np.exp(-0.02 * nan_steps) + 0.65 + osc
 loss_d = np.clip(loss_d, 0.50, 2.95)
 loss_d[-1] = 2.85
-ax.plot(nan_steps, loss_d, color=COLORS['RedLine'], linewidth=2.0)
-ax.set_title(
-    '(D) NAN DIVERGENCE\nErratic numerical oscillation collapsing to Inf / NaN', fontsize=8.0, fontweight='bold', color=COLORS['RedLine'], pad=6
-)
 
-# NaN Halt box at crash point
-ax.scatter([nan_steps[-1]], [loss_d[-1]], color=COLORS['RedLine'], edgecolor='white', linewidth=1.5, s=60, zorder=6)
-ax.text(
-    82,
-    2.1,
-    'NaN Halt\n(check fires)',
-    ha='center',
-    va='center',
-    fontsize=7.5,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    bbox=dict(boxstyle='round,pad=0.35', fc=COLORS['RedL'], ec=COLORS['RedLine'], lw=1.0),
-)
-ax.annotate('', xy=(nan_steps[-1], loss_d[-1]), xytext=(82, 2.3), arrowprops=dict(arrowstyle="->", color=COLORS['RedLine'], lw=1.1))
+ax_a, ax_b, ax_c, ax_d = axes
+lw = 1.8
 
-ax.text(
-    50,
-    0.15,
-    'Signature: overflow or invalid op, nonfinite loss',
-    ha='center',
-    va='center',
-    fontsize=7.0,
-    fontweight='bold',
-    color=COLORS['RedLine'],
-    bbox=dict(boxstyle='round,pad=0.3', fc=COLORS['RedL'], ec=COLORS['RedLine'], lw=0.8),
-)
+ax_a.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=lw)
 
-ax.set_xlim(-2, 102)
-ax.set_ylim(-0.05, 3.1)
-ax.set_ylabel('Loss', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.set_xlabel('Steps', fontsize=8.0, fontweight='bold', color=COLORS['primary'])
-ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
+ax_b.plot(steps, loss_b, color=COLORS['primary'], linewidth=lw)
+seg = slice(spike_idx - 1, spike_idx + 35)
+ax_b.plot(steps[seg], loss_b[seg], color=COLORS['RedLine'], linewidth=lw + 0.4)
+peak = spike_idx + 14
+ax_b.text(steps[peak] + 4, loss_b[peak] + 0.05, 'spike', fontsize=9, color=COLORS['RedLine'], ha='left', va='bottom')
+
+ax_c.axvspan(steps[plateau_idx], 100, color=COLORS['RedL'], alpha=0.6, lw=0, zorder=0)
+ax_c.plot(steps, loss_c, color=COLORS['primary'], linewidth=lw)
+ax_c.text(70, loss_c[plateau_idx] + 0.35, 'plateau', fontsize=9, color=COLORS['RedLine'], ha='center', va='bottom')
+
+ax_d.plot(nan_steps, loss_d, color=COLORS['primary'], linewidth=lw)
+ax_d.scatter([nan_steps[-1]], [loss_d[-1]], marker='X', color=COLORS['RedLine'], edgecolor='white', linewidth=0.8, s=70, zorder=6)
+ax_d.text(nan_steps[-1] - 5, loss_d[-1], 'NaN check halts run', fontsize=9, color=COLORS['RedLine'], ha='right', va='center')
+
+titles = ['(A) Normal training', '(B) Gradient explosion', '(C) Loss plateau', '(D) NaN divergence']
+for ax, title in zip(axes, titles):
+    ax.set_title(title, fontsize=10, fontweight='bold', color=COLORS['primary'], loc='left', pad=6)
+    ax.set_xlim(-2, 102)
+    ax.set_ylim(0, 3.1)
+    ax.set_xticks([0, 50, 100])
+    ax.set_xlabel('Steps')
+    ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
+ax_a.set_ylabel('Loss')
 
 plt.tight_layout()
-fig.subplots_adjust(hspace=0.36, wspace=0.28)
+fig.subplots_adjust(wspace=0.12)
 plt.show()
 plt.close()
 ```

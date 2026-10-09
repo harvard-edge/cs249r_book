@@ -688,9 +688,22 @@ ax.plot(
 )
 for e in _entries:
     if e["model"] in _labelled:
-        ax.annotate(e["model"], (e["year"], e["flops"]), textcoords='offset points', xytext=(5, -10), fontsize=7.5, color=COLORS['primary'])
+        # Place each label on the side of the point away from the fit line.
+        _fit = 2 ** (ComputeGrowthTrend.slope_doublings_per_year * e["year"] + ComputeGrowthTrend.intercept)
+        _above = e["flops"] >= _fit
+        ax.annotate(
+            e["model"],
+            (e["year"], e["flops"]),
+            textcoords='offset points',
+            xytext=(-6, 5) if _above else (6, -6),
+            ha='right' if _above else 'left',
+            va='bottom' if _above else 'top',
+            fontsize=7.5,
+            color=COLORS['primary'],
+        )
 ax.set_yscale('log')
 ax.set_xlim(2011.3, 2026.3)
+ax.set_ylim(3e17, 3e27)  # headroom so end labels clear the frame
 ax.set_xlabel('Publication year')
 ax.set_ylabel('Training compute (FLOPs)')
 ax.legend(loc='upper left', fontsize=8)
@@ -888,7 +901,7 @@ These directions expand the design space without making one architecture univers
 
 Whichever architecture runs the work, each lever acts at one accounting tier (@fig-energy-intervention). Work reduction and execution efficiency change IT energy; facility overhead scales that energy to the facility total; a regional grid factor converts facility kilowatt-hours into operational carbon; and hardware amortization adds embodied emissions at its own boundary. Because these terms carry different units and compound at different layers, isolated efficiency percentages cannot be multiplied into a single composite reduction factor.
 
-::: {#fig-energy-intervention fig-env="figure" fig-pos="htb" fig-cap="**Interventions and Their Accounting Boundaries**: Work and execution changes affect IT energy; facility overhead converts that energy to a facility total. A chosen grid factor converts electricity to emissions, while hardware lifecycle emissions enter separately. Evaluate the complete configuration at fixed useful work rather than multiplying unrelated improvement factors." fig-alt="Work reduction and execution efficiency lead to IT energy, then facility energy and electricity carbon. Grid factor and hardware lifecycle enter at their respective boundaries."}
+::: {#fig-energy-intervention fig-env="figure" fig-pos="htb" fig-cap="**Interventions and Their Accounting Boundaries**: Work and execution changes affect IT energy; facility overhead converts that energy to a facility total. A chosen grid factor converts electricity to emissions, while hardware lifecycle emissions enter separately. Evaluate the complete configuration at fixed useful work rather than multiplying unrelated improvement factors." fig-alt="A vertical chain of four accounting tiers, IT energy, facility energy, electricity carbon, and lifecycle account, with units of kWh or kg CO2e. Levers in a left column feed one tier each: work reduction and execution efficiency feed IT energy, facility overhead feeds facility energy, grid factor feeds electricity carbon, and hardware lifecycle feeds the lifecycle account."}
 
 ![](images/svg/intervention-cascade.svg)
 
@@ -1350,20 +1363,12 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.0, 4.2))
 _items = sorted(RegionalGridCarbon.tonnes.items(), key=lambda kv: kv[1])
 _labels = [k for k, _ in _items]
 _vals = [v for _, v in _items]
-_colors = [
-    (
-        COLORS['GreenLine']
-        if RegionalGridCarbon.factors[k] < 100
-        else (COLORS['secondary'] if RegionalGridCarbon.factors[k] < 500 else COLORS['RedLine'])
-    )
-    for k in _labels
-]
-_bars = ax.barh(_labels, _vals, color=_colors, height=0.6, zorder=3)
+_bars = ax.barh(_labels, _vals, color=COLORS['secondary'], height=0.6, zorder=3)
 for _b, _k, _v in zip(_bars, _labels, _vals):
     ax.text(
         _v + max(_vals) * 0.01,
         _b.get_y() + _b.get_height() / 2,
-        f"{_v:,.0f} t  ({RegionalGridCarbon.factors[_k]:.0f} g/kWh)",
+        f"{_v:,.0f} t ({RegionalGridCarbon.factors[_k]:.0f} g/kWh)",
         va='center',
         fontsize=7.8,
         color=COLORS['primary'],
@@ -1371,6 +1376,9 @@ for _b, _k, _v in zip(_bars, _labels, _vals):
 ax.set_xlim(0, max(_vals) * 1.32)
 ax.set_xlabel(f"Operational emissions for {RegionalGridCarbon.energy.to('MWh').magnitude:,.0f} MWh (t CO$_2$)")
 ax.grid(True, linestyle='--', alpha=0.4, axis='x')
+from matplotlib.ticker import FuncFormatter
+
+ax.xaxis.set_major_formatter(FuncFormatter(lambda _x, _p: f"{_x:,.0f}"))
 fig.tight_layout()
 plt.show()
 plt.close()
@@ -1801,7 +1809,7 @@ The GHG Protocol[^fn-ghg-protocol-scope] arranges these scopes as concentric rep
 
 [^fn-ghg-protocol-scope]: **Greenhouse Gas (GHG) Protocol**\index{Greenhouse Gas Protocol!three-scope accounting}\index{GHG Protocol|see{Greenhouse Gas Protocol}}: The framework distinguishes direct emissions, purchased energy, and other value-chain emissions [@ghgprotocol2023]. Their relative shares depend on the reporting organization and workload boundary. Explicit classification prevents purchased cloud services or manufacturing from disappearing from an account limited to an operator's own electricity.
 
-::: {#fig-ghg-protocol fig-env="figure" fig-pos="htb" fig-cap="**GHG Emission Scopes**: Concentric rings place the reporting organization's data center at the center, with Scope 1 (direct emissions) innermost, Scope 2 (purchased energy) around it, and Scope 3 (value chain) outermost. Each callout lists representative sources for its ring. The rings show reporting distance from the operator's direct control, not relative size. Scope definitions follow the GHG Protocol [@ghgprotocol2023]." fig-alt="Three concentric circles around a data center icon: an inner gray circle labeled Scope 1, a middle amber ring labeled Scope 2, and an outer blue ring labeled Scope 3. Dashed leaders run from each ring to a callout box on the right. The boxes list on-site diesel generators for Scope 1, purchased grid electricity and cooling power for Scope 2, and supply chain manufacturing, embodied hardware carbon, employee travel, and end-of-life recycling for Scope 3."}
+::: {#fig-ghg-protocol fig-env="figure" fig-pos="htb" fig-cap="**GHG Emission Scopes**: Concentric rings place the reporting organization's data center at the center, with Scope 1 (direct emissions) innermost, Scope 2 (purchased energy) around it, and Scope 3 (value chain) outermost. Each callout lists representative sources for its ring. The rings show reporting distance from the operator's direct control, not relative size. Scope definitions follow the GHG Protocol [@ghgprotocol2023]." fig-alt="Three concentric circles around a data center icon, shaded from darker gray at the center to lighter gray outside: an inner circle labeled Scope 1, a middle ring labeled Scope 2, and an outer ring labeled Scope 3. Dashed leaders run from each ring to a callout box on the right. The boxes list on-site diesel generators for Scope 1, purchased grid electricity and cooling power for Scope 2, and supply chain manufacturing, embodied hardware carbon, employee travel, and end-of-life recycling for Scope 3."}
 ![](images/svg/ghg-protocol.svg)
 
 :::
@@ -2443,7 +2451,7 @@ class UsDatacenterElectricity:
 
 The United States alone illustrates how cloud and AI infrastructure can reshape national energy planning. US data center electricity consumption roughly tripled from `{python} UsDatacenterElectricity.us_2014_twh_str` in 2014 to `{python} UsDatacenterElectricity.us_2023_twh_str` in 2023, reaching `{python} UsDatacenterElectricity.us_2023_share_str` of national supply, according to measurements and projections from Lawrence Berkeley National Laboratory (LBNL) (@fig-energy-gap). For 2028, LBNL's scenarios range from `{python} UsDatacenterElectricity.us_2028_low_value_str` to `{python} UsDatacenterElectricity.us_2028_high_twh_str`; the high end would consume roughly `{python} UsDatacenterElectricity.us_2028_high_share_str` of all US electrical generation. These scenarios describe possible demand, not a measured capacity ceiling. They motivate evaluating efficiency gains alongside the generation, transmission, and connection capacity needed to serve that demand.
 
-::: {#fig-energy-gap fig-env="figure" fig-pos="htb" fig-cap="**The Energy Gap**: US data center electricity consumption tripled from `{python} UsDatacenterElectricity.us_2014_twh_str` (2014) to `{python} UsDatacenterElectricity.us_2023_twh_str` (2023). LBNL projects consumption of `{python} UsDatacenterElectricity.us_2028_low_value_str` to `{python} UsDatacenterElectricity.us_2028_high_twh_str` by 2028, with AI workloads treated as an important driver of growth. At the high end, data centers would consume approximately `{python} UsDatacenterElectricity.us_2028_high_share_str` of US electricity, motivating evaluation of the generation, transmission, and connection capacity needed to serve that projected demand." fig-alt="Bar chart showing US data center electricity: 58 TWh in 2014, 176 TWh in 2023, projected 325 to 580 TWh by 2028. Bars colored blue for historical and red for projections."}
+::: {#fig-energy-gap fig-env="figure" fig-pos="htb" fig-cap="**The Energy Gap**: US data center electricity consumption tripled from `{python} UsDatacenterElectricity.us_2014_twh_str` (2014) to `{python} UsDatacenterElectricity.us_2023_twh_str` (2023). LBNL projects consumption of `{python} UsDatacenterElectricity.us_2028_low_value_str` to `{python} UsDatacenterElectricity.us_2028_high_twh_str` by 2028, with AI workloads treated as an important driver of growth. At the high end, data centers would consume approximately `{python} UsDatacenterElectricity.us_2028_high_share_str` of US electricity, motivating evaluation of the generation, transmission, and connection capacity needed to serve that projected demand." fig-alt="Bar chart of US data center electricity: gray bars at 58 TWh in 2014 and 176 TWh in 2023, and a 2028 projection drawn as a hatched bar up to the 325 TWh low scenario topped by a dashed outline band that extends to the 580 TWh high scenario, marking the projected range."}
 
 ```{python}
 #| echo: false
@@ -2452,82 +2460,70 @@ import numpy as np
 import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.5, 5.0))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.5, 4.4))
 
-labels = ['2014\n(Historical)', '2023\n(Recent)', '2028\n(Low Proj.)', '2028\n(High Proj.)']
 # Source of truth: Literature.DatacenterElectricity (LBNL 2024).
-values = [UsDatacenterElectricity.us_2014, UsDatacenterElectricity.us_2023, UsDatacenterElectricity.us_2028_low, UsDatacenterElectricity.us_2028_high]
-colors = [COLORS['BlueLine'], COLORS['BlueLine'], COLORS['RedLine'], COLORS['RedLine']]
-alphas = [1.0, 1.0, 0.75, 0.95]
+_u = UsDatacenterElectricity
+_x = [0, 1, 2]
+_w = 0.5
+# Measured years: solid neutral bars.
+ax.bar(_x[:2], [_u.us_2014, _u.us_2023], width=_w, color=COLORS['secondary'], edgecolor='white', linewidth=0.8, zorder=3)
+# 2028 projection: hatched bar to the low scenario, then an outline-only band for the scenario range.
+ax.bar(_x[2], _u.us_2028_low, width=_w, color='white', edgecolor=COLORS['secondary'], hatch='///', linewidth=0.9, zorder=3)
+ax.bar(
+    _x[2],
+    _u.us_2028_high - _u.us_2028_low,
+    bottom=_u.us_2028_low,
+    width=_w,
+    color='#F2F2F2',
+    edgecolor=COLORS['secondary'],
+    linestyle=(0, (3, 2)),
+    linewidth=0.9,
+    zorder=3,
+)
+for _y in (_u.us_2028_low, _u.us_2028_high):
+    ax.plot([_x[2] - _w / 2 - 0.05, _x[2] + _w / 2 + 0.05], [_y] * 2, color=COLORS['primary'], lw=1.6, zorder=4, solid_capstyle='butt')
+ax.text(_x[2], (_u.us_2028_low + _u.us_2028_high) / 2, 'scenario\nrange', ha='center', va='center', fontsize=8, color=COLORS['secondary'], zorder=5)
 
-bars = ax.bar(labels, values, color=colors, width=0.48, edgecolor='white', linewidth=1.2, zorder=3)
-for bar, alpha in zip(bars, alphas):
-    bar.set_alpha(alpha)
+def _label(x, y, top, sub=None):
+    # One order everywhere: bold value first, gray share line beneath.
+    if sub:
+        ax.text(x, y + 10, sub, ha='center', va='bottom', fontsize=8, color=COLORS['secondary'])
+        y += 30
+    ax.text(x, y + 10, top, ha='center', va='bottom', fontsize=9, fontweight='bold', color=COLORS['primary'])
 
-for bar, val in zip(bars, values):
-    ax.text(
-        bar.get_x() + bar.get_width() / 2,
-        bar.get_height() + 14,
-        f'{val:.0f} TWh',
-        ha='center',
-        va='bottom',
-        fontsize=9.0,
-        fontweight='bold',
-        color=COLORS['primary'],
-    )
+_label(0, _u.us_2014, f'{_u.us_2014:.0f} TWh')
+_label(1, _u.us_2023, f'{_u.us_2023:.0f} TWh', f'{_u.us_2023_share * 100:.1f}% of US')
+# Both scenario values share one style, set beside their ticks: bold value, gray line beneath.
+for _y, _name, _sub in [(_u.us_2028_high, 'high scenario', f'~{_u.us_2028_high_share * 100:.0f}% of US'), (_u.us_2028_low, 'low scenario', None)]:
+    ax.text(_x[2] + _w / 2 + 0.1, _y, f'{_y:.0f} TWh', ha='left', va='bottom', fontsize=9, fontweight='bold', color=COLORS['primary'])
+    ax.text(_x[2] + _w / 2 + 0.1, _y - 4, _name + (f', {_sub}' if _sub else ''), ha='left', va='top', fontsize=8, color=COLORS['secondary'])
 
-ax.text(
-    bars[1].get_x() + bars[1].get_width() / 2,
-    bars[1].get_height() / 2,
-    f'~{UsDatacenterElectricity.us_2023_share * 100:.1f}%\nof US\nelectricity',
-    ha='center',
-    va='center',
-    fontsize=8.0,
-    color='white',
-    fontweight='bold',
+# Measured growth, 2014 to 2023: corner of the 2014 bar to the top-left corner of the 2023 bar.
+ax.annotate(
+    '',
+    xy=(1 - _w / 2, _u.us_2023),
+    xytext=(0 + _w / 2, _u.us_2014),
+    arrowprops=dict(arrowstyle='->', color=COLORS['primary'], lw=1.0, shrinkA=0, shrinkB=0),
 )
 ax.text(
-    bars[3].get_x() + bars[3].get_width() / 2,
-    bars[3].get_height() / 2,
-    f'~{UsDatacenterElectricity.us_2028_high_share * 100:.0f}%\nof US\nelectricity',
-    ha='center',
-    va='center',
-    fontsize=8.0,
-    color='white',
-    fontweight='bold',
-)
-
-ax.axhline(y=values[0], color=COLORS['BlueLine'], linestyle=':', linewidth=1.4, alpha=0.7, label=f'2014 Baseline ({values[0]:.0f} TWh)')
-ax.legend(loc='upper right', bbox_to_anchor=(0.72, 0.96), fontsize=8.0, frameon=True, facecolor='white', framealpha=0.95, edgecolor=COLORS['grid'])
-
-ax.annotate('', xy=(1, values[1]), xytext=(0, values[0]), arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5))
-ax.text(
-    0.5,
-    130,
-    f'{UsDatacenterElectricity.growth_2014_2023:.0f}× growth\n' f'in {2023 - 2014} years',
-    fontsize=8.0,
-    fontweight='bold',
+    0.47,
+    (_u.us_2014 + _u.us_2023) / 2 + 22,
+    f'{_u.growth_2014_2023:.0f}× in {2023 - 2014} years',
+    ha='right',
+    va='bottom',
+    fontsize=8,
     color=COLORS['primary'],
-    ha='center',
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor=COLORS['secondary'], lw=0.8),
+    rotation=0,
 )
 
-ax.text(
-    0.03,
-    0.95,
-    'Source: LBNL 2024 US Data Center\nEnergy Usage Report',
-    transform=ax.transAxes,
-    fontsize=7.5,
-    va='top',
-    ha='left',
-    color=COLORS['secondary'],
-    style='italic',
-)
-
-ax.set_ylabel('Electricity Consumption (TWh)', fontsize=9.5, fontweight='bold', color=COLORS['primary'])
-ax.set_ylim(0, 680)
-ax.tick_params(colors=COLORS['primary'], labelsize=8.5)
-ax.grid(True, linestyle='--', alpha=0.4, axis='y')
+ax.set_xticks(_x)
+ax.set_xticklabels(['2014', '2023', '2028\n(projected)'])
+ax.set_xlim(-0.5, 3.15)
+ax.set_ylim(0, 660)
+ax.set_ylabel('US data center electricity (TWh/year)')
+ax.grid(True, axis='y')
+ax.grid(False, axis='x')
 
 plt.tight_layout()
 plt.show()
@@ -2545,7 +2541,7 @@ The GPT-3 calculation in notebook \ref{nbk-sustainable-ai-carbon-cost-training} 
 
 The operational lesson is that carbon accounting must distinguish training from recurring inference over a declared observation period. In @fig-meta-analysis, the Meta recommendation workloads (RM-1 through RM-5) split operational emissions roughly evenly between training and inference, while inference dominates the language-model example. RM-1 totals approximately 0.85 million kg $\text{CO}_2\text{e}$ in the plotted account. The public baselines, including GPT-3 and BERT-NAS, report training only; their bars do not establish a lifetime training-to-inference ratio. For high-traffic Archetype B deployments (@sec-introduction-archetype-b-dlrm-scale-fa6d), both recurring serving and model updates belong in the account before deciding which phase offers the larger reduction.
 
-::: {#fig-meta-analysis fig-env="figure" fig-pos="htb" fig-cap="**Operational Carbon Footprint of Large-Scale ML Tasks**: Stacked bars show operational CO~2~e over the reported accounting periods for Meta's recommendation models (RM-1 through RM-5), a language model (LM), and several open-source large models (BERT-NAS, Evolved Transformer, T5, Meena, GShard-600B, Switch Transformer, GPT-3). The recommendation-model bars divide roughly evenly between training and inference (solid dark blue), while the public open-source baselines report training-only footprints (hatched), underscoring that inference serving at scale can rival or exceed training emissions for deployed systems. Source: [@wu2022sustainable]." fig-alt="Stacked bar chart of CO2e in kilograms for 13 ML models. Facebook RM-1 is tallest near 0.85 million kg with large inference portion; GPT-3 shows a training-only footprint near 0.55 million kg."}
+::: {#fig-meta-analysis fig-env="figure" fig-pos="htb" fig-cap="**Operational Carbon Footprint of Large-Scale ML Tasks**: Stacked bars show operational CO~2~e over the reported accounting periods for Meta's recommendation models (RM-1 through RM-5), a language model (LM), and several open-source large models (BERT-NAS, Evolved Transformer, T5, Meena, GShard-600B, Switch Transformer, GPT-3). The recommendation-model bars divide roughly evenly between training (light and mid orange) and inference (dark brown), while the public open-source baselines report training-only footprints (hatched gray outline), underscoring that inference serving at scale can rival or exceed training emissions for deployed systems. Source: [@wu2022sustainable]." fig-alt="Stacked bar chart of CO2e in kilograms for 13 ML models. Meta models stack a light orange offline training segment and a mid orange online training segment under a dark brown inference segment; public models are white bars with gray hatching for training only. Meta RM-1 is tallest near 0.85 million kg with a large inference portion; GPT-3 shows a training-only footprint near 0.55 million kg."}
 ```{python}
 #| echo: false
 #| warning: false
@@ -2574,50 +2570,49 @@ x_meta = np.arange(len(meta_names))
 x_pub = np.arange(len(pub_names)) + len(meta_names) + 0.8
 width = 0.52
 
-ax.bar(x_meta, meta_offline, width, label='Offline Training', color=COLORS['BlueFill'], edgecolor=c_blue, hatch='///', linewidth=1.1)
-ax.bar(x_meta, meta_online, width, bottom=meta_offline, label='Online Training', color=COLORS['OrangeL'], edgecolor=c_orange, linewidth=1.1)
-ax.bar(x_meta, meta_infer, width, bottom=meta_offline + meta_online, label='Inference', color=c_blue, edgecolor=c_dark, linewidth=1.1)
+# Three Meta lifecycle segments use clearly separated lightness steps in one warm family
+# (light, mid, dark) so they stay distinct in print and grayscale; thin dark edges separate
+# stacked segments. Public training-only baselines are neutral: white fill, gray hatch.
+c_train_off = COLORS['OrangeL']  # light
+c_train_on = COLORS['OrangeLine']  # mid
+c_infer = COLORS['BrownLine']  # dark
+c_edge = COLORS['BrownLine']
+ax.bar(x_meta, meta_offline, width, label='Offline training', color=c_train_off, edgecolor=c_edge, linewidth=0.7, zorder=3)
+ax.bar(x_meta, meta_online, width, bottom=meta_offline, label='Online training', color=c_train_on, edgecolor=c_edge, linewidth=0.7, zorder=3)
+ax.bar(x_meta, meta_infer, width, bottom=meta_offline + meta_online, label='Inference', color=c_infer, edgecolor=c_edge, linewidth=0.7, zorder=3)
 
-ax.bar(x_pub, pub_vals, width, label='Public Baseline (Training-Only)', color=COLORS['GreenFill'], edgecolor=c_green, hatch='\\\\\\', linewidth=1.1)
+import matplotlib as _mpl
+
+with _mpl.rc_context({'hatch.color': COLORS['secondary'], 'hatch.linewidth': 0.8}):
+    ax.bar(x_pub, pub_vals, width, label='Training only (public)', color='white', edgecolor=COLORS['secondary'], hatch='///', linewidth=0.8, zorder=3)
 
 split_x = (x_meta[-1] + x_pub[0]) / 2
-ax.axvline(split_x, color=COLORS['secondary'], linestyle='--', linewidth=1.2)
+ax.axvline(split_x, color=COLORS['grid'], linestyle='--', linewidth=0.9)
 
-ax.text(
-    (x_meta[0] + x_meta[-1]) / 2,
-    0.98,
-    'Meta Production Models (Lifecycle Breakdown)',
-    ha='center',
-    va='top',
-    fontsize=8.2,
-    fontweight='bold',
-    color=c_blue,
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='#FFFFFF', edgecolor=c_blue, lw=0.9),
+for _xs, _txt in [(x_meta, 'Meta production models'), (x_pub, 'Public benchmark models')]:
+    ax.text((_xs[0] + _xs[-1]) / 2, 1.04, _txt, ha='center', va='top', fontsize=8.5, color=COLORS['primary'])
+
+ax.legend(
+    loc='upper right',
+    bbox_to_anchor=(0.995, 0.92),
+    frameon=False,
+    fontsize=9,
+    handlelength=2.6,
+    handleheight=1.6,
+    handletextpad=0.6,
+    labelspacing=0.55,
 )
-
-ax.text(
-    (x_pub[0] + x_pub[-1]) / 2,
-    0.98,
-    'Public Benchmark Models (Training-Only)',
-    ha='center',
-    va='top',
-    fontsize=8.2,
-    fontweight='bold',
-    color=c_green,
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='#FFFFFF', edgecolor=c_green, lw=0.9),
-)
-
-ax.legend(loc='upper right', bbox_to_anchor=(0.88, 0.88), frameon=True, facecolor='#FFFFFF', edgecolor=c_border, fontsize=7.8)
 
 all_x = np.concatenate([x_meta, x_pub])
 all_labels = meta_names + pub_names
 ax.set_xticks(all_x)
-ax.set_xticklabels(all_labels, fontsize=7.8, fontweight='bold', color=c_dark, rotation=30, ha='right')
+ax.set_xticklabels(all_labels, fontsize=8, color=c_dark, rotation=30, ha='right', rotation_mode='anchor')
+ax.set_xlim(x_meta[0] - 0.6, x_pub[-1] + 0.6)
 
 ax.set_ylim(0, 1.08)
-ax.set_ylabel(r'$\mathrm{CO}_2\mathrm{e}$ (Million kg)', fontsize=9.2, fontweight='bold', color=c_dark)
-ax.tick_params(colors=c_dark, labelsize=8.0)
-ax.grid(True, linestyle='--', alpha=0.5, axis='y')
+ax.set_ylabel(r'$\mathrm{CO}_2\mathrm{e}$ (million kg)')
+ax.grid(True, axis='y')
+ax.grid(False, axis='x')
 
 plt.tight_layout()
 plt.show()
@@ -3519,7 +3514,7 @@ Consider a `{python} H100TdpCoolingRecap.n_gpus_str`-GPU cluster of H100s at `{p
 
 :::
 
-::: {#fig-cooling-comparison fig-env="figure" fig-pos="htb" fig-cap="**Air and Liquid Heat Paths**: Air transfers chip heat through a heat sink and moving air; direct-to-chip liquid cooling transfers it through a cold plate and coolant. Both require heat rejection. Capacity, parasitic energy, and water use depend on the engineered system rather than the cooling medium alone." fig-alt="Two parallel paths show chip heat flowing through a heat sink and air or a cold plate and coolant to heat rejection."}
+::: {#fig-cooling-comparison fig-env="figure" fig-pos="htb" fig-cap="**Air and Liquid Heat Paths**: Air transfers chip heat through a heat sink and moving air; direct-to-chip liquid cooling transfers it through a cold plate and coolant. Both require heat rejection. Capacity, parasitic energy, and water use depend on the engineered system rather than the cooling medium alone." fig-alt="Two left-to-right rows. In the air row, chip heat passes through a heat sink and then moving air; in the liquid row, it passes through a cold plate and then a coolant loop. Both rows cross a dashed boundary from the server and rack into one shared facility heat rejection box."}
 
 ![](images/svg/cooling-comparison.svg)
 
@@ -3857,7 +3852,7 @@ Prefill and decode stress distinct memory and arithmetic pathways, meaning meani
 ↩ Why small-batch decode is bound by memory bandwidth, and how batching reuses each weight load, is established in @sec-inference-scale-batching-differs-across-model-types-2026.
 :::
 
-::: {#fig-prefill-decode-energy fig-env="figure" fig-pos="htb" fig-cap="**Reuse in Prefill and Decode**: Prefill reuses weights across prompt positions; a decode iteration can reuse weights across active sequences. At small batches, weight and KV-cache traffic can leave arithmetic units underused. These paths show mechanisms, not measured utilization or a universal energy-per-token ratio." fig-alt="Two panels connect weights and token work to compute, distinguishing prompt positions from one new token per active sequence."}
+::: {#fig-prefill-decode-energy fig-env="figure" fig-pos="htb" fig-cap="**Reuse in Prefill and Decode**: Prefill reuses weights across prompt positions; a decode iteration can reuse weights across active sequences. At small batches, weight and KV-cache traffic can leave arithmetic units underused. These paths show mechanisms, not measured utilization or a universal energy-per-token ratio." fig-alt="Two panels each show weights feeding compute from above and token work feeding compute from below. In the prefill panel the token work is one row of prompt positions, all new. In the decode panel it is a grid of several sequences, each a row of cached KV entries ending in one new token."}
 
 ![](images/svg/prefill-decode-energy.svg)
 
@@ -4434,7 +4429,7 @@ Life Cycle Assessments can show that discarding functional hardware purely for m
 
 Each of the four lifecycle stages\index{Life Cycle Assessment!AI system lifecycle} adds its burden through a distinct physical mechanism (@fig-ai-lca). System design fixes much of the lifetime load, manufacturing embeds carbon, water, and chemical burdens during fabrication, operation draws grid electricity for training and serving, and decommissioning produces electronic waste unless hardware is refurbished or its components recovered.
 
-::: {#fig-ai-lca fig-env="figure" fig-pos="htb" fig-cap="**AI System Lifecycle**: Four stages, each listing its main activities and ending with the burden it adds. Design decisions fix much of the load the later stages carry; manufacturing adds embodied carbon, water, and chemicals; use adds operational energy at the grid's carbon intensity; decommissioning adds e-waste unless hardware is refurbished or its components recovered." fig-alt="Four side-by-side cards joined by arrows: system design, manufacture, use and operate, and decommission. Each card lists four activities and ends with a boxed burden: fixes the lifetime load, embodied carbon, operational energy, and e-waste unless reused. The manufacture card is amber and the use card is blue."}
+::: {#fig-ai-lca fig-env="figure" fig-pos="htb" fig-cap="**AI System Lifecycle**: Four stages, each listing its main activities and ending with the burden it adds. Design decisions fix much of the load the later stages carry; manufacturing adds embodied carbon, water, and chemicals; use adds operational energy at the grid's carbon intensity; decommissioning adds e-waste unless hardware is refurbished or its components recovered." fig-alt="Four side-by-side cards joined by arrows: system design, manufacture, use and operate, and decommission. Each card lists four activities and ends with a boxed burden: fixes the lifetime load, embodied carbon, operational energy, and e-waste unless reused. The manufacture card is brown and the use card is orange."}
 ![](images/svg/ai-lca.svg)
 
 :::
@@ -4544,7 +4539,7 @@ Semiconductor fabrication uses ultrapure water for chemical-mechanical planariza
 
 [^fn-fab-water-consumption]: **Semiconductor Water Scale**\index{Semiconductor Water Scale!definition}\index{Semiconductor Fabrication!water consumption}: A fab water inventory must separate intake, internal reuse, discharge, and consumption. Water per usable die depends on process flow, yield, allocation, and site conditions; a smaller process-node label does not establish a universal per-die multiplier.
 
-::: {#fig-water-cycle fig-env="figure" fig-pos="htb" fig-cap="**Semiconductor Water Cycle**: Intake supplies process water; treatment returns part of the flow for reuse. Recycling can reduce freshwater withdrawal, while evaporation and other unreturned flows determine consumption. State the denominator of any reuse fraction." fig-alt="Water flows from raw intake through ultra-pure water treatment to fab processing. A dashed red arrow leaves fab processing to a consumed box for evaporation. A green path runs from fab processing to wastewater treatment and loops a treated, reused flow back to intake."}
+::: {#fig-water-cycle fig-env="figure" fig-pos="htb" fig-cap="**Semiconductor Water Cycle**: Intake supplies process water; treatment returns part of the flow for reuse. Recycling can reduce freshwater withdrawal, while evaporation and other unreturned flows determine consumption. State the denominator of any reuse fraction." fig-alt="Water flows from raw intake through ultra-pure water treatment to fab processing. An arrow leaves fab processing to a consumed box for evaporation. A green path runs from fab processing to wastewater treatment, which sends one flow out to a discharged box that leaves the facility and loops a treated, reused flow back to intake."}
 ![](images/svg/water-cycle.svg)
 
 :::
@@ -4602,7 +4597,7 @@ Memory capacity, bandwidth, and interconnect compatibility can motivate replacem
 
 The deployment of **embedded AI**\index{Embedded AI!definition} integrates inference into edge appliances and consumer electronics. @Fig-iot-number charts the broader connected-device fleet\index{IoT!device growth}, with historical estimates rising from 8.6 billion in 2019 to 15.1 billion in 2023 and a projection of 29.4 billion by 2030 [@Statista_2022]. These counts indicate the scale of the device ecosystem, not the number of AI systems or the amount of e-waste. Waste generation also depends on service life, repair, and reuse. Adhesive enclosures, nonreplaceable batteries, and proprietary components can make repair difficult, increasing the risk that a limited failure leads to whole-device disposal [@Balde_2017].
 
-::: {#fig-iot-number fig-env="figure" fig-pos="htb" fig-cap="**IoT Device Growth**: Connected devices worldwide, with historical counts through 2023 (unhatched) and projections from 2024 onward (hatched) [@Statista_2022]. The counts describe the connected-device ecosystem, not the number of AI systems or the amount of e-waste. Waste generation also depends on service lifetimes, repair, reuse, and disposal." fig-alt="Bar chart showing IoT device growth from 8.6 billion in 2019 to projected 29.42 billion in 2030. Steady annual increases of approximately 2 billion devices per year. Asterisks mark projected values from 2024 onward."}
+::: {#fig-iot-number fig-env="figure" fig-pos="htb" fig-cap="**IoT Device Growth**: Connected devices worldwide, with historical counts through 2023 (unhatched) and projections from 2024 onward (hatched) [@Statista_2022]. The counts describe the connected-device ecosystem, not the number of AI systems or the amount of e-waste. Waste generation also depends on service lifetimes, repair, reuse, and disposal." fig-alt="Bar chart showing IoT device growth from 8.6 billion in 2019 to projected 29.42 billion in 2030. Steady annual increases of approximately 2 billion devices per year. Hatched bars mark projected values from 2024 onward."}
 
 ```{python}
 #| echo: false
@@ -4623,45 +4618,32 @@ c_border = COLORS['grid']
 hist_yrs = ['2019', '2020', '2021', '2022', '2023']
 hist_vals = [8.6, 9.8, 11.3, 13.1, 15.1]
 
-proj_yrs = ['2024*', '2025*', '2026*', '2027*', '2028*', '2029*', '2030*']
+proj_yrs = ['2024', '2025', '2026', '2027', '2028', '2029', '2030']
 proj_vals = [17.8, 19.1, 21.1, 23.1, 25.2, 27.3, 29.4]
 
 x_hist = np.arange(len(hist_yrs))
 x_proj = np.arange(len(proj_yrs)) + len(hist_yrs)
 width = 0.58
 
-b_hist = ax.bar(x_hist, hist_vals, width, label='Historical Data', color=COLORS['BlueFill'], edgecolor=c_blue, linewidth=1.2)
-b_proj = ax.bar(x_proj, proj_vals, width, label='Statista Projections (*)', color=COLORS['VioletL'], edgecolor=c_proj, hatch='///', linewidth=1.2)
+b_hist = ax.bar(x_hist, hist_vals, width, color=c_gray, edgecolor=c_gray, linewidth=0.9, zorder=3)
+b_proj = ax.bar(x_proj, proj_vals, width, color='white', edgecolor=c_gray, hatch='///', linewidth=0.9, zorder=3)
 
-for x_val, y_val in zip(x_hist, hist_vals):
-    ax.text(x_val, y_val + 0.5, f'{y_val}', ha='center', va='bottom', fontsize=7.8, fontweight='bold', color=c_blue)
-
-for x_val, y_val in zip(x_proj, proj_vals):
-    ax.text(x_val, y_val + 0.5, f'{y_val}', ha='center', va='bottom', fontsize=7.8, fontweight='bold', color=c_proj)
+for x_val, y_val in zip(np.concatenate([x_hist, x_proj]), hist_vals + proj_vals):
+    ax.text(x_val, y_val + 0.5, f'{y_val}', ha='center', va='bottom', fontsize=8, color=c_dark)
 
 split_x = len(hist_yrs) - 0.5
-ax.axvline(split_x, color=c_gray, linestyle='--', linewidth=1.2)
-ax.text(
-    split_x,
-    34.0,
-    'Historical / Projection Split',
-    ha='center',
-    va='bottom',
-    fontsize=7.8,
-    fontweight='bold',
-    color=c_gray,
-    bbox=dict(boxstyle='round,pad=0.25', facecolor='#FFFFFF', edgecolor=c_gray, lw=0.8),
-)
+ax.axvline(split_x, color=c_border, linestyle='--', linewidth=0.9)
+ax.text(split_x - 0.2, 34.0, 'Historical', ha='right', va='center', fontsize=8.5, color=c_dark)
+ax.text(split_x + 0.2, 34.0, 'Projected (Statista)', ha='left', va='center', fontsize=8.5, color=c_dark)
 
 all_x = np.concatenate([x_hist, x_proj])
 all_yrs = hist_yrs + proj_yrs
 ax.set_xticks(all_x)
-ax.set_xticklabels(all_yrs, fontsize=8.0, fontweight='bold', color=c_dark)
+ax.set_xticklabels(all_yrs)
 ax.set_ylim(0, 37.0)
-ax.set_ylabel('Active Connected Devices (Billions)', fontsize=9.2, fontweight='bold', color=c_dark)
-ax.legend(loc='upper left', frameon=True, facecolor='#FFFFFF', edgecolor=c_border, fontsize=8.2)
-ax.tick_params(colors=c_dark, labelsize=8.0)
-ax.grid(True, linestyle='--', alpha=0.5, axis='y')
+ax.set_ylabel('Connected devices (billions)')
+ax.grid(True, axis='y')
+ax.grid(False, axis='x')
 
 plt.tight_layout()
 plt.show()
