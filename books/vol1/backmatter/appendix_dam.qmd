@@ -47,7 +47,7 @@ The opening chapter uses @fig-ai-triad to establish the conceptual landscape. He
 ::: {#fig-dam-axis-triad fig-env="figure" fig-pos="htb" fig-cap="**The D·A·M Axis Triad**: A compact diagnostic view of Data, Algorithm, and Machine as three interdependent axes. The bidirectional links emphasize that an intervention on one axis changes the constraints on the other two." fig-alt="Triangle with circles at vertices labeled Algorithm at the top, Data at lower left, and Machine at lower right. Double-headed purple arrows connect all three, showing bidirectional dependencies. Icons depict a neural network, database cylinders, and a cloud server."}
 
 ```{.tikz}
-\scalebox{0.85}{
+\scalebox{0.9}{
 \begin{tikzpicture}[line join=round,font=\sffamily\small]
 \tikzset{
  Line/.style={line width=0.35pt,black!50,text=black},
@@ -232,7 +232,12 @@ This equation transforms performance debugging from a qualitative guessing game 
 The additive iron law represents sequential execution\index{Iron law of ML systems!sequential execution}. Let $T_{\text{sequential}}$ denote time without overlap and $T_{\text{pipelined}}$ denote measured time with overlap. Overlap can move the sum toward a max, but dependencies, contention, and incomplete overlap keep the measured time above this ideal lower bound:
 $$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} \geq \max\left(\frac{D_{\text{vol}}}{\text{BW}}, \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}} $$
 
-The systems engineer's job is to make these components run in parallel, not in series. @Tbl-dam-overlap summarizes key D·A·M coordination techniques that overlap work across axes:
+The systems engineer's job is to make these components run in parallel, not in series. @Tbl-dam-overlap summarizes key D·A·M coordination techniques that overlap work across axes.
+
+Overlaps provide the greatest relative speedup when the D·A·M time terms are reasonably balanced. If one term dominates (for example, severely memory bound), overlapping the smaller term with the larger yields negligible gain—the max is still dominated by the same bottleneck. This balance occurs near $D_{\text{vol}}/\text{BW} \approx O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$. The latency term requires separate treatment.
+
+While the iron law quantifies the execution time consumed by each stage, determining whether data movement or arithmetic throughput sets the active performance ceiling depends on their ratio—the domain of arithmetic intensity.
+
 
 | **Technique**           | **D·A·M Axes Overlapped**    | **Implementation**                                             |
 |:------------------------|:-----------------------------|:---------------------------------------------------------------|
@@ -243,15 +248,11 @@ The systems engineer's job is to make these components run in parallel, not in s
 
 : **D·A·M Overlap Techniques**: Each technique overlaps work across axes, moving sequentially added Data/Machine and Algorithm/Machine time toward their ideal lower bound: the larger of the two terms. Dependencies and contention limit realized overlap. {#tbl-dam-overlap tbl-colwidths="[19,27,54]"}
 
-Overlaps provide the greatest relative speedup when the D·A·M time terms are reasonably balanced. If one term dominates (for example, severely memory bound), overlapping the smaller term with the larger yields negligible gain—the max is still dominated by the same bottleneck. This balance occurs near $D_{\text{vol}}/\text{BW} \approx O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$. The latency term requires separate treatment.
-
 ::: {#psp-appendix-dam-overhead-cannot-hide .callout-perspective title="The overhead that cannot hide"}
 
 The unhidden latency term $L_{\text{lat}}$ (kernel launch, synchronization barriers, Python dispatch) contains serialization points that cannot be fully overlapped. Kernel fusion can reduce this term by combining operations, but it does not eliminate all launch, scheduling, or synchronization overhead.
 
 :::
-
-While the iron law quantifies the execution time consumed by each stage, determining whether data movement or arithmetic throughput sets the active performance ceiling depends on their ratio—the domain of arithmetic intensity.
 
 ## Arithmetic Intensity Boundary {#sec-appdx-dam-taxonomy-arithmetic-intensity-boundary-7f5e}
 
@@ -275,7 +276,8 @@ Common industry labels cross the axes. Memory-bound execution sits on the Data/M
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9}
 
-Once profiling identifies the dominant term in the iron law, optimizations must target that specific axis. @Tbl-bottleneck-actions contrasts the interventions that yield end-to-end speedups against nonbinding optimizations that waste engineering effort:
+Once profiling identifies the dominant term in the iron law, optimizations must target that specific axis. @Tbl-bottleneck-actions contrasts the interventions that yield end-to-end speedups against nonbinding optimizations that waste engineering effort.
+
 
 | **If the workload is...** |              **Dominant Term**               | **Optimization That Works**                                                                           | **Optimization That is Wasted**                             |
 |:--------------------------|:--------------------------------------------:|:------------------------------------------------------------------------------------------------------|:------------------------------------------------------------|
@@ -286,6 +288,7 @@ Once profiling identifies the dominant term in the iron law, optimizations must 
 : **What Works vs. What Is Wasted**: Optimizing a nonbinding term yields little or no end-to-end improvement. A memory-bound large language model will not benefit from additional peak FLOP/s alone, though an accelerator with more memory bandwidth may help. {#tbl-bottleneck-actions tbl-colwidths="[19,17,32,32]"}
 
 Knowing what works also means recognizing what does not. In practice, teams under deadline pressure repeatedly fall into the same traps—optimizing the wrong axis with confidence. These failure modes are common enough to deserve their own names.
+
 
 ## Anti-Patterns {#sec-appdx-dam-taxonomy-antipatterns-72e1}
 
@@ -341,6 +344,9 @@ Identifying the root cause of performance bottlenecks requires systematic elimin
 
 A diagnostic hypothesis requires concrete hardware and runtime counters before taking corrective action. @Tbl-dam-tooling connects theoretical D·A·M components to the specific Linux and Python profiling utilities that expose them.
 
+Profiling tools generate raw metrics—utilization percentages, FLOP counts, and bandwidth measurements—that become actionable only when evaluated against workload constraints. The D·A·M Scorecard\index{DAM taxonomy@D·A·M taxonomy!scorecard} establishes screening signals rather than universal grades, isolating which measurements warrant immediate intervention.
+
+
 | **Axis**      | **Key Metric**                        | **Primary Tool**         | **Secondary Tool**            |
 |:--------------|:--------------------------------------|:-------------------------|:------------------------------|
 | **Data**      | Batch Load and Wait Time              | Framework profiler trace | `iostat`, `pidstat` (I/O/CPU) |
@@ -348,8 +354,6 @@ A diagnostic hypothesis requires concrete hardware and runtime counters before t
 | **Machine**   | Accelerator Utilization, SM Occupancy | Nsight Compute           | `nvidia-smi`, Nsight Systems  |
 
 : **D·A·M Tooling Map**: Profiling utilities for diagnosing bottlenecks along each D·A·M axis. Start with the primary tool for quick triage; use secondary tools for deep-dive analysis when the primary tool's output is inconclusive. {#tbl-dam-tooling tbl-colwidths="[12,37,20,31]"}
-
-Profiling tools generate raw metrics—utilization percentages, FLOP counts, and bandwidth measurements—that become actionable only when evaluated against workload constraints. The D·A·M Scorecard\index{DAM taxonomy@D·A·M taxonomy!scorecard} establishes screening signals rather than universal grades, isolating which measurements warrant immediate intervention.
 
 ## D·A·M Scorecard {#sec-appdx-dam-taxonomy-dam-scorecard-94e9}
 
