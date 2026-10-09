@@ -151,7 +151,7 @@ The transition from small-scale experimentation to large-scale production change
 ```
 ![](images/svg/fault_tolerance_mtbf_ladder.svg){width="100%" fig-alt="Time ladder showing system mean time between failures collapsing as fleet size grows: 1 GPU at 50,000 hours, 1,000 GPUs at 50 hours, 10,000 GPUs at 5 hours."}
 
-*System mean time between failures (MTBF) collapses as the fleet grows: `{python} FleetReliabilityRates.gpu_mttf_sym_str` to `{python} FleetReliabilityRates.hours_between_sym_str`.*
+*Fleet mean time between failures (MTBF) collapses from `{python} FleetReliabilityRates.gpu_mttf_sym_str` to `{python} FleetReliabilityRates.hours_between_sym_str` as GPUs multiply.*
 :::
 
 Because failures cannot be eliminated at this scale, fault-tolerant systems verify completion rather than assume it, treat failure as a normal code path, exercise recovery continuously, and account for partial failures that naive error handling may not anticipate. These techniques draw on decades of distributed systems research, but ML workloads change the economics. Training checkpoints are large but can be sized from the model and optimizer state, while some optimization algorithms tolerate bounded numerical perturbations without requiring bitwise replay. That tolerance must be established for the training method; stochasticity does not make arbitrary corruption or inconsistent recovery safe. A recovery design can exploit approximate execution only while preserving its declared convergence and quality requirements.
@@ -1286,7 +1286,7 @@ In the Google training telemetry presented by @dean2024mlsys, @fig-sdc-training-
 ::: {.column-margin}
 ![](images/svg/vol2_fault_tolerance_margin_001.svg){width="100%" fig-alt="One red curve over training steps that rises and flattens toward a dashed certainty line, with a dot marking 63 percent: cumulative silent-corruption probability approaches certainty over a long run."}
 
-*Silent data corruption accumulates until it becomes routine.*
+*Cumulative SDC probability nears certainty over a long run.*
 :::
 
 ```{python}
@@ -1330,7 +1330,7 @@ class SdcChapterCluster:
     run_events_str = fmt_int(round(run_events))
 ```
 
-Even a small per-GPU SDC rate accumulates across repeated collective operations, and the accumulation grows with fleet size. Any single collective is unlikely to contain an SDC event. Under the illustrative rate used in the analysis that follows, the per-step probability remains small while the cumulative probability grows over a long training run, reaching $1 - e^{-1} \approx 63$ percent once the expected number of events reaches one (the dot in the margin curve). On the chapter's `{python} SdcChapterCluster.n_gpus_str`-GPU cluster, that rate gives one expected event roughly every `{python} SdcChapterCluster.hours_between_str`, or about `{python} SdcChapterCluster.run_events_str` over the three-month run of the chapter opening. The notebook below scales the same estimate to a fleet ten times larger to show where the trend leads, since the expected interval shrinks in proportion to fleet size. Standard AllReduce reduces the supplied contributions; it does not establish that an *alive* worker computed a *correct* gradient. The fleet therefore needs validation appropriate to its fault model in addition to liveness checks.
+Even a small per-GPU SDC rate accumulates across repeated collective operations, and the accumulation grows with fleet size. Any single collective is unlikely to contain an SDC event. Under the illustrative rate used in the analysis that follows, the per-step probability remains small while the cumulative probability grows over a long training run, reaching $1 - e^{-1} \approx 63$ percent once the expected number of events reaches one. On the chapter's `{python} SdcChapterCluster.n_gpus_str`-GPU cluster, that rate gives one expected event roughly every `{python} SdcChapterCluster.hours_between_str`, or about `{python} SdcChapterCluster.run_events_str` over the three-month run of the chapter opening. The notebook below scales the same estimate to a fleet ten times larger to show where the trend leads, since the expected interval shrinks in proportion to fleet size. Standard AllReduce reduces the supplied contributions; it does not establish that an *alive* worker computed a *correct* gradient. The fleet therefore needs validation appropriate to its fault model in addition to liveness checks.
 
 Check-and-verify methods\index{Silent data corruption!detection methods} test data-path invariants, subject to the boundary drawn for transient failures in @sec-fault-tolerance-reliability-reliability-transient-failures-57b4. Digests test byte integrity and agreement within their error-detection limits; they cannot establish that the original computation was correct. Independent computation, an algorithmic invariant, or replay tests that additional claim under a declared fault model. A quick estimate shows how much exposure those checks must cover.
 
@@ -2353,7 +2353,7 @@ where $\FailureDetectionTime$ is the time between the physical hardware fault an
 ```{=latex}
 \vspace*{-5mm}
 ```
-![](images/svg/fault_tolerance_detection_ladder.svg){width="100%" fig-alt="A staircase ladder of detection latency on a log scale, ordered by how hard a failure is to see: a process crash at about 30 seconds, a GPU hang at 120 seconds, a network partition at 180 seconds, and silent data corruption at roughly two hours. The span climbs across two to three orders of magnitude."}
+![](images/svg/fault_tolerance_detection_ladder.svg){width="100%" fig-alt="A ladder of bars for detection latency on a log scale, ordered by how hard a failure is to see: a process crash within 30 seconds, a GPU hang within 120 seconds, a network partition within 180 seconds, and silent data corruption as the longest bar, labeled hours, whose end continues as a dotted open extension."}
 
 *Detection latency climbs from seconds (crash) to hours (silent corruption).*
 :::
@@ -2604,9 +2604,9 @@ class StragglerTax:
 ```
 
 ::: {.column-margin}
-![](images/svg/vol2_fault_tolerance_margin_003.svg){width="100%" fig-alt="A red square source node with five arrows fanning out to five identical blue nodes."}
+![](images/svg/vol2_fault_tolerance_margin_003.svg){width="100%" fig-alt="A red square source node with five arrows fanning out to five hollow gray nodes."}
 
-*A single straggler idles every healthy accelerator.*
+*One straggler stalls every healthy peer at the barrier.*
 :::
 
 :::: {#nbk-fault-tolerance-straggler-tax .callout-notebook title="The straggler tax"}
@@ -3154,9 +3154,9 @@ The KV cache[^fn-kv-cache-resilience] can be substantial (gigabytes for long con
 [^fn-kv-cache-resilience]: [offset=-34mm] **KV Cache**\index{KV Cache!serving fault tolerance}: Stores key and value projections for all previous tokens across all attention layers, scaling as $2 \times \LayerCount \times \KvHeadCount \times \SequenceLength\times \AttentionHeadDimension \times \ElementStorageSize$. For a Llama-family 70B model with `{python} KvCacheLiveState.layers_str` layers, `{python} KvCacheLiveState.kv_heads_str` key-value heads, `{python} KvCacheLiveState.context_k_str` context, `{python} KvCacheLiveState.head_dim_str`-dimension heads, and BF16 storage, the KV cache is about `{python} KvCacheLiveState.kv_gqa_str` per conversation; using `{python} KvCacheLiveState.heads_str` independent key-value heads would be about `{python} KvCacheLiveState.kv_mha_str`. Losing this derived state requires replaying retained tokens to rebuild their attention state, rather than generating the conversation again. Reconstruction can exceed serving latency service level agreements (SLAs) even when a replacement replica is already available.
 
 ::: {.column-margin}
-![](images/svg/fault_tolerance_kv_live_state_ladder.svg){width="100%" fig-alt="Memory ladder comparing a 64-head KV cache at 344 GB with a grouped-query KV cache at 43 GB, with the 8x gap marked as a ratio annotation."}
+![](images/svg/fault_tolerance_kv_live_state_ladder.svg){width="100%" fig-alt="Two rows. An image retry shows only a thin baseline mark labeled no state lost. An LLM conversation shows a full-width blue bar labeled 43 GB."}
 
-*Even with grouped-query attention, one long conversation holds tens of GB of live state.*
+*A retried image loses nothing; a lost conversation loses `{python} KvCacheLiveState.kv_gqa_str` of KV cache.*
 :::
 
 LLM serving choices trade KV-cache recovery latency against memory and storage overhead. The simplest strategy is to accept regeneration cost by rebuilding KV cache from conversation history after failure, but this can turn a long conversation into a multi-second or multi-minute restart. KV-cache checkpointing saves live state periodically and bounds the amount of regeneration, while KV-cache replication keeps a standby copy for fast failover at the cost of extra memory. Prefix caching\index{KV Cache!prefix caching}, also offered as prompt caching\index{KV Cache!prompt caching}, reuses state for common system prompts and shared context. A compatible cached prefix can reduce reconstruction work if it survives the failure and remains accessible to the replacement worker. Cache reuse alone does not establish a failover guarantee or preserve the session-specific history.

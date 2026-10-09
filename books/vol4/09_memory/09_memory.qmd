@@ -1562,9 +1562,8 @@ class RaymarchBandwidth:
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(bw.magnitude - 7.3728) < 1e-6, f"Ray-march traffic should be 7.37 GB/s, got {bw}.")
     check(share < 0.05, "One naive depth stream should take under 5 percent of peak.")
-    # margin_volumetric_raycasting_bandwidth_ladder.svg draws 204 GB/s, 7.37 GB/s, and 3.6%
-    check(abs(soc_bw.to(ureg.gigabyte / ureg.second).magnitude - 204.0) < 1e-9, "Margin figure peak label (204 GB/s) is stale.")
-    check(abs(share - 0.036) < 5e-4, "Margin figure share label (3.6%) is stale.")
+    # margin_volumetric_raycasting_bandwidth_ladder.svg draws 1 depth sample, 100 voxel steps, x 307,200 rays x 30 Hz x 8 B, and 7.37 GB/s
+    check(abs(n_steps - 100) < 1e-9, f"Margin figure step label (100 voxel steps) is stale, got {n_steps}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     n_rays_str = fmt_int(n_rays)
@@ -1584,8 +1583,9 @@ where $\VoxelUpdateTraffic$ is the read-modify-write memory traffic per traverse
 For an illustrative VGA depth stream of `{python} RaymarchBandwidth.n_rays_str` rays at `{python} RaymarchBandwidth.f_cam_str`, marched over `{python} RaymarchBandwidth.d_ray_str` at a `{python} RaymarchBandwidth.pitch_str` pitch (`{python} RaymarchBandwidth.n_steps_str` steps per ray) with 8 bytes per step, @eq-mem-dram-bandwidth gives `{python} RaymarchBandwidth.bw_str`, `{python} RaymarchBandwidth.share_pct_str` of the peak `{python} RaymarchBandwidth.soc_bw_str` of the host system-on-chip (SoC). This share of peak understates the actual performance impact, because these volumetric map updates share the memory interconnect with vision foundation models and motion controllers, and their throughput penalty stems from non-sequential access locality and memory bus contention rather than aggregate bandwidth alone. This update bandwidth represents a substantial baseline load that system architects must incorporate into hardware contention profiling, as memory bus saturation and cache thrashing degrade perception pipelines long before theoretical DRAM bandwidth is exhausted. Block hashing reduces this traffic by keeping active blocks in on-chip memory, and projective TSDF updates project voxels inside the viewing frustum onto the depth image instead of marching every ray. These methods reduce repeated memory traffic, but the reduction depends on scene coverage and update strategy. Sparse allocation still grows as the machine explores new regions; a bounded host store needs an explicit retention policy.
 
 ::: {.column-margin}
-![](images/svg/margin_volumetric_raycasting_bandwidth_ladder.svg){width="100%" fig-alt="Two horizontal bars on a linear scale. An outlined bar reaching a red limit line is labeled SoC peak 204 GB/s. A short blue bar beneath it is labeled ray-march updates, 7.37 GB/s, 3.6 percent."}
-*One naive depth stream's ray-march updates take a small share of peak DRAM bandwidth; the share is a load to include in the contention test, not an interference bound.*
+![](images/svg/margin_volumetric_raycasting_bandwidth_ladder.svg){width="100%" fig-alt="Two horizontal strips drawn to one scale. The top strip, labeled 1 depth sample, is a single thin blue cell. The bottom strip, labeled 100 voxel steps, is a row of 100 such cells spanning the full width. Two lines below multiply by 307,200 rays, 30 hertz, and 8 bytes, and a bold result reads equals 7.37 gigabytes per second."}
+
+*Marching turns each depth sample into `{python} RaymarchBandwidth.n_steps_str` read-modify-writes, the per-ray factor that block hashing and projective updates reduce.*
 :::
 
 What a map can certify comes from how a range return updates it. Traversing the ray[^fn-voxel-ray-traversal] from the sensor to the return [@amanatides1987fast], the map records **negative evidence**\index{Negative evidence} along the traversed ray and positive evidence at its return. Treating an entire crossed voxel as free requires qualified beam coverage, resolution, and geometric error allowances; the ray alone does not observe every point in that voxel.[^fn-logodds-unknown-prior] A valid empty ray can retire a phantom obstacle, but it says nothing about the volume behind a return, the hatched cells in @fig-09-ray-update-epochs that keep their earlier epoch. A new scan down the aisle therefore cannot renew cells hidden behind the rack. Sparse allocation saves capacity without eliminating ray traversal, and any resulting processing delay adds to evidence age.

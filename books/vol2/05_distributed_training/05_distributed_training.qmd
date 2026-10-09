@@ -225,12 +225,6 @@ The **communication-computation ratio**\index{Communication-computation ratio!de
 ↪ The communication-computation ratio, evaluated for representative data-parallel and point-to-point transfers and related to communication intensity, is developed in @sec-appdx-fleet-foundations-comm-compute-ratio.
 :::
 
-::: {.column-margin}
-![](images/svg/vol2_distributed_training_margin_001.svg){width="100%" fig-alt="Two equal-width zones labeled compute and communication with a dashed rho equals one threshold between ideal scaling and waiting."}
-
-*Past a communication-to-compute threshold, scaling stops being ideal.*
-:::
-
 Two regimes follow from this ratio. When $\IronLawComputeTime/\DeviceCount\gg \CommunicationTime(\DeviceCount)$, the cluster is compute-bound, and communication is small relative to useful computation, provided coordination and input delivery do not introduce another limit. Large-batch training of a dense convolutional model such as ResNet commonly sits here. When $\CommunicationComputeRatio\gtrsim 1$, $\CommunicationTime(\DeviceCount)$ matches or exceeds $\IronLawComputeTime/\DeviceCount$, the cluster is communication-bound, and insufficient overlap leaves substantial time waiting for gradients or activations. Large language models (LLMs) with billions of parameters to synchronize, and Deep Learning Recommendation Model (DLRM)-style workloads whose embedding exchanges saturate the network, frequently land in this regime. These are typical operating points rather than fixed labels: batch size, partitioning, and placement can move the same workload across the boundary, so the ratio must be measured for the configuration at hand.
 
 ::: {.column-margin .margin-pointer}
@@ -1478,7 +1472,7 @@ An optimizer update that consumes an AllReduce result must wait for every requir
 A worker failure can leave peers waiting for a contribution that will never arrive. The runtime may report a communication error, or the operation may remain blocked until a timeout detects the failure. Watchdogs bound that wait so the job can enter recovery rather than retain an unusable allocation indefinitely.
 
 ::: {.column-margin}
-![](images/svg/vol2_distributed_training_margin_002.svg){width="100%" fig-alt="Five worker dots approach a vertical barrier; one red missing worker causes the peer lanes to stop before the barrier."}
+![](images/svg/vol2_distributed_training_margin_002.svg){width="100%" fig-alt="Five worker dots in a column. Four blue workers have gray lanes that stop just short of a red vertical barrier, each ending in a pause mark; the middle worker is a dashed red hollow circle labeled missing with no lane, so the barrier never releases."}
 
 *One missing worker stalls the entire AllReduce barrier.*
 :::
@@ -2621,7 +2615,7 @@ This is the scaling efficiency bound (principle \ref{pri-scaling-efficiency}): p
 The equation reveals the **scaling wall**\index{Scaling wall!definition}: as $\DeviceCount$ increases, the compute term $(\IronLawComputeTime/\DeviceCount)$ shrinks, but the communication and synchronization terms can remain constant or grow. Eventually, the denominator is dominated by overhead, driving efficiency toward zero. Beyond wall-clock time, this communication overhead imposes an energy tax\index{Energy tax!communication overhead} that scales with physical distance between devices.
 
 ::: {.column-margin}
-![](images/svg/vol2_distributed_training_margin_003.svg){width="100%" fig-alt="Orange energy-per-bit ladder with representative midpoints: InfiniBand 35 pJ, NVLink 7.5 pJ, and HBM 1.5 pJ."}
+![](images/svg/vol2_distributed_training_margin_003.svg){width="100%" fig-alt="Orange energy-per-bit ladder with representative midpoints: InfiniBand 35 pJ/bit, NVLink 7.5 pJ/bit, and HBM 3.5 pJ/bit."}
 
 *Communication energy climbs from HBM out to the network.*
 :::
@@ -2680,6 +2674,12 @@ At the scale of `{python} DistTrainCommEnergyEnvelope.cluster_gpus_str`, the mul
 :::
 
 As the device count grows for a fixed workload, the balance can move from a linear scaling regime\index{Linear scaling regime!efficiency} toward a communication-bound regime\index{Communication-bound regime!efficiency drop}. The transition has no universal GPU count: it depends on compute per device, message sizes, topology, and overlap. Coordination overhead\index{Coordination overhead!collective latency} becomes consequential when its exposed time is no longer small relative to useful computation. Measurements at the intended workload and placement must establish the efficiency curve.
+
+::: {.column-margin}
+![](images/svg/vol2_distributed_training_margin_001.svg){width="100%" fig-alt="Two schematic step-time bars. Top, labeled Few GPUs: a long orange compute segment and a short violet comm segment. Bottom, labeled Many GPUs: the orange segment is a quarter as long while the violet segment keeps the same length, now longer than compute."}
+
+*More GPUs shrink each step's compute, not its communication.*
+:::
 
 ```{python}
 #| echo: false
@@ -3340,9 +3340,9 @@ class Zero3GatherCost:
 ```
 
 ::: {.column-margin}
-![](images/svg/distributed_training_memory_budget.svg){width="100%" fig-alt="Ladder of three memory rungs for a 175B-parameter mixed-precision Adam training state: optimizer state 2,100 GB (longest), gradients 350 GB, and weights 350 GB. The optimizer rung is about six times the others."}
+![](images/svg/distributed_training_memory_budget.svg){width="100%" fig-alt="Ladder of three blue memory rungs for a 175B-parameter mixed-precision Adam training state: optimizer 2,100 GB (longest), gradients 350 GB, and weights 350 GB."}
 
-*Optimizer state, not weights, dominates the per-replica training budget.*
+*Weights are only a small slice of the full Adam training state.*
 :::
 
 Memory fit alone does not settle whether a model needs this kind of partition. For a `{python} FrontierTrainingContext.frontier_params_b_str`-parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across a `{python} ModelParallelMemoryFacts.n_gpus_str`-GPU group, one-sixteenth of the `{python} DenseLLMReferenceFacts.cluster_gpus_str`-GPU reference cluster. Full mixed-precision Adam training state is much larger, `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, yet ZeRO-3 across the same `{python} ModelParallelMemoryFacts.n_gpus_str` GPUs reduces it to roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations, which fits an `{python} DenseLLMReferenceFacts.h100_mem_gb_str` accelerator. ZeRO-3 can therefore make the static state fit, as the notebook below confirms. It pays for that fit in traffic, because every step regathers every layer's parameters across the data-parallel fabric, roughly three times the model's parameter bytes per worker (@sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69). It also cannot split an individual layer's computation or activations across devices. Tensor parallelism addresses both limits by partitioning individual weight matrices across devices, using the column-then-row pairing diagrammed in @fig-tensor-parallel-split and detailed in @sec-distributed-training-systems-systems-tensor-parallelism-d76e, which confines collective communication to block boundaries. Pipeline parallelism instead stages sequential layers across devices (@sec-distributed-training-systems-systems-pipeline-parallelism-8748).
@@ -4155,9 +4155,9 @@ class FourStagePipelineWalkthrough:
 Tracing the schedule grid in @fig-pipeline-parallelism column by column reveals how the fill and drain bubbles arise. In the first slot only stage 0 has work, the forward pass of microbatch 1. In the second, stage 0 starts microbatch 2 while stage 1 receives microbatch 1's activations, and by the fourth slot every stage holds a different microbatch. The last stage then turns microbatch 4 around into its backward pass, and gradients travel upstream in reverse microbatch order, so stage 0 waits until the eleventh slot for its first gradient. Each stage therefore idles `{python} FourStagePipelineWalkthrough.fill_slots_str` slots in the forward phase and `{python} FourStagePipelineWalkthrough.fill_slots_str` more in the backward phase, `{python} FourStagePipelineWalkthrough.idle_slots_str` of the `{python} FourStagePipelineWalkthrough.slots_str` slots in the step, whether those slots fall at the start of its row, the middle, or the end. That share, about `{python} FourStagePipelineWalkthrough.bubble_pct_str`, is the bubble fraction $(\PipelineParallelDegree-1)/(\MicrobatchCount+\PipelineParallelDegree-1)$ at $\PipelineParallelDegree=\MicrobatchCount=$ `{python} FourStagePipelineWalkthrough.stages_str`. Adding microbatches lengthens the busy diagonal without lengthening fill and drain in this balanced schedule. Increasing $\MicrobatchCount$ is therefore one way to reduce the idle fraction; later schedules also change which work can occupy the gaps.
 
 ::: {.column-margin}
-![](images/svg/distributed_training_pipeline_bubble_tax.svg){width="100%" fig-alt="Two proportional stacked bars comparing pipeline bubble tax: p8 m32 has about 18 percent idle time, while p16 m16 has about 48 percent idle time."}
+![](images/svg/distributed_training_pipeline_bubble_tax.svg){width="100%" fig-alt="Two proportional bars, each split into orange busy time and red idle time: p = 4, m = 4 is 43 percent idle; p = 8, m = 32 is 18 percent idle."}
 
-*More stages require enough microbatches or the bubble dominates utilization.*
+*Enough microbatches shrink the bubble even as stages double.*
 :::
 
 The same bubble term becomes concrete in the following worked example, where an 8-stage pipeline and 32 microbatches still leave a measurable idle-time tax.
@@ -4283,9 +4283,9 @@ Frequent intra-layer exchanges favor placing tensor-parallel groups within the f
 ```{=latex}
 \vspace*{-4mm}
 ```
-![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Violet bandwidth ladder comparing per-direction NVLink bandwidth with NDR InfiniBand, illustrating the order-of-magnitude bandwidth drop from intra-node to inter-node links."}
+![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Two violet bars: NVLink at 450 GB/s per direction and InfiniBand NDR at 50 GB/s, with a 9× arrow between their ends."}
 
-*Frequent tensor-parallel exchanges favor fast links; pipeline transfers must fit their stage budget.*
+*Tensor-parallel exchanges belong on the fast tier, about 9$\times$ an NDR port.*
 :::
 
 ```{python}

@@ -136,16 +136,16 @@ $$
 
 Here, $\DataVolume$ is the data volume crossing the chosen memory boundary, $\Bandwidth$ is its bandwidth, $\Operations$ is the operation count, and $\PeakRate \cdot \EfficiencyHw$ is the realized compute rate after accounting for hardware execution efficiency. The overhead term $\Latency$ collects the exposed latency outside those compute and memory terms, and it has two parts. Host dispatch, meaning kernel launches and other software costs, belongs to each device's own execution. Exposed communication and synchronization arise only because the replica spans several devices. Local execution on each device and exposed inter-device delays together supply the service time of a replica; request queueing and routing add time outside that boundary. The roofline approximation asks which exposed term dominates at a given operating point. Increasing compute throughput for a memory-bound workload does not materially improve performance until the memory term is reduced. Eager framework execution can expose a large slice of the overhead term when the host submits many short kernels one at a time, a cost that @sec-performance-engineering-kernel-launch quantifies and that graph compilation and replay later attack.
 
+::: {.column-margin}
+![](images/svg/performance_engineering_iron_law_bars.svg){width="100%" fig-alt="Iron-law bar split into three segments for data, compute, and latency. The D segment fills most of the bar in dark blue; the C and L segments are thin light-gray slivers at the right end, labeled just above the bar."}
+
+*In batch-one decode, the data-movement term dominates the iron law.*
+:::
+
 In the Fleet Law's terms, the data and compute terms together with the dispatch part of $\Latency$ contribute to distributed local execution, whose unsharded reference time is $\UnshardedLocalExecutionTime$, while the communication and synchronization part of $\Latency$ becomes the Fleet Law's separate $\CommunicationTime(\DeviceCount)$ and $\SynchronizationTime(\DeviceCount)$ terms. For a measured device shard, partitioning has already reduced the local workload; its execution time must not be divided by the device count again. Independent serving replicas process different requests, so adding replicas raises aggregate capacity without dividing the latency of one request. In the rest of the chapter, overhead means host dispatch unless communication is named. A local optimization therefore reaches the fleet through whichever of those terms it shortens.
 
 ::: {.column-margin .margin-pointer}
 ↩ The Fleet Law, which extends this single-machine iron law across $\DeviceCount$ devices, is established in @sec-vol2-introduction-fleet-law.
-:::
-
-::: {.column-margin}
-![](images/svg/performance_engineering_iron_law_bars.svg){width="100%" fig-alt="Iron-law bar split into three segments, Data, Compute, and Latency. The Data segment is the widest and shaded; Compute and Latency are narrow and gray."}
-
-*Autoregressive transformer decode is often memory-bound, so the data-movement term dominates the iron law.*
 :::
 
 Model compression\index{Model Compression!vs. performance engineering} changes either the work a model performs or the representation of its values, and this chapter takes up only the representation side. Pruning and distillation change the model itself and are model-design decisions. Quantization reduces the bytes per value without necessarily reducing the operation count, which makes it a performance-engineering lever; the chapter treats it as precision engineering. Either kind of compression saves time only when the implementation can exploit the smaller model or representation.
@@ -943,7 +943,7 @@ $$ {#eq-perf-decode-intensity-batch}
 Here, $\Parameters$ is parameter count, $\BatchSize$ is batch size, $\HiddenDimension$ is hidden width, and $\ElementStorageSize$ is bytes per element, assuming weights and activations share one precision. The numerator counts the whole model's arithmetic, while the activation term counts only one matrix's input vectors; even summed over every weight matrix, the activations stay far smaller than the $\Parameters\ElementStorageSize$ weight bytes at the batch sizes considered here, so the shortcut does not change the estimate. This simplified weight-reuse estimate excludes KV-cache traffic and inter-device communication; it describes why batching helps before those other costs become binding. At batch size 1, the denominator is dominated by the weight term $(\Parameters\ElementStorageSize)$, and $\DecodeArithmeticIntensity\approx 2/\ElementStorageSize \approx 1$ FLOP/byte for FP16. At batch size 256, the weight term still dominates, but the same weight bytes are amortized across more requests, so $\DecodeArithmeticIntensity\approx 2 \times 256/\ElementStorageSize \approx 256$ FLOP/byte, approaching the compute-bound regime.
 
 ::: {.column-margin}
-![](images/svg/vol2_performance_engineering_margin_002.svg){width="100%" fig-alt="Roofline thumbnail with a B equals 1 point on the memory-bound slope and a B equals 256 point near the compute plateau."}
+![](images/svg/vol2_performance_engineering_margin_002.svg){width="100%" fig-alt="Roofline thumbnail: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A dark dot labeled B equals 1 sits low on the slope, and a dark dot labeled B equals 256 sits high on the slope just left of the ridge, with a gray arrow parallel to the slope pointing from the first toward the second."}
 
 *Larger batches raise arithmetic intensity toward the ridge.*
 :::
@@ -1668,9 +1668,9 @@ class FleetEfficiencyCalc:
 ```{=latex}
 \vspace*{4mm}
 ```
-![](images/svg/vol2_performance_engineering_margin_004.svg){width="100%" fig-alt="Two-point trend showing high kernel efficiency falling to lower fleet efficiency because of synchronization tax."}
+![](images/svg/vol2_performance_engineering_margin_004.svg){width="100%" fig-alt="Two orange bars, each inside a gray outlined track spanning 0 to 100 percent of peak. The bar labeled 8-GPU node fills 65 percent of its track; the bar labeled 128-GPU fleet fills 48 percent."}
 
-*Fleet-scale overheads can erode local MFU.*
+*Fleet MFU falls below the single-node baseline.*
 :::
 
 With MFU defined as useful work rather than raw busyness, the loss between a single node and the fleet becomes a number, here for the recurring 70B model in training.
@@ -1919,9 +1919,9 @@ class FlashAttentionSavings:
 FlashAttention\index{FlashAttention}\index{FlashAttention!I/O-aware design} [@dao2022] reformulates attention using tiling\index{Tiling}. Instead of materializing the full $\SequenceLength{\times}\SequenceLength$ attention matrix\index{Attention!quadratic I/O complexity}, it processes $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ in small blocks that fit in on-chip SRAM\index{FlashAttention!SRAM tiling}. The algorithm loads tiles of $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$, computes partial attention scores, and maintains running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
 
 ::: {.column-margin}
-![](images/svg/performance_engineering_flash_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in blue. Under the chapter's simplified traffic assumptions, the naive attention rung is about 35 GB and the FlashAttention rung is about 537 MB. The ratio is roughly 65."}
+![](images/svg/performance_engineering_flash_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in blue. Under the chapter's simplified traffic assumptions, the naive attention rung is 34.9 GB and the FlashAttention rung is 536.9 MB. A dimension line between the two bar ends is labeled approximately 65 times."}
 
-*An illustrative HBM-traffic accounting gives a ratio of about 65.*
+*In this scenario, tiling cuts HBM traffic about 65$\times$.*
 :::
 
 The reduction in HBM traffic can be dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the simplified naive estimate writes and reads the score and probability matrices and moves $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, $\AttentionValuesMatrix$, and output once, totaling approximately `{python} FlashAttentionSavings.naive_gb_str` for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. The idealized FlashAttention lower bound counts one read of $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ and one output write, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. The resulting `{python} FlashAttentionSavings.savings_mult_str` ratio is a scenario comparison, not a claim about allocated memory or realized kernel traffic; actual traffic depends on tile reloads and the implementation schedule.

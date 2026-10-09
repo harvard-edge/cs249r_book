@@ -1103,9 +1103,9 @@ class Gpt3CommunicationScenario:
 ```
 
 ::: {.column-margin}
-![](images/svg/vol2_introduction_margin_001.svg){width="100%" fig-alt="Two horizontal blue bars: a 700 GB GPT-3 FP32 gradient and about 1.4 TB of ring AllReduce traffic, twice as long."}
+![](images/svg/vol2_introduction_margin_001.svg){width="100%" fig-alt="Three horizontal bars on one linear scale: a blue bar for the 700 GB FP32 gradient, a violet ring-traffic bar for FP32 twice as long and marked about 2×, with a white dashed tick at one gradient length, and a violet ring-traffic bar for FP16 the same length as the gradient, marked about 1×."}
 
-*Ring AllReduce moves about twice the gradient per worker each step.*
+*Ring AllReduce moves about twice the gradient per step; 16-bit gradients halve it.*
 :::
 
 At large scale, communication can dominate communication-intensive partitions. Distributed data-parallel training synchronizes gradients across workers after each batch. For a model with `{python} Gpt3CommunicationScenario.gpt3_params_b_str` parameters, FP32 gradients occupy about `{python} Gpt3CommunicationScenario.gpt3_gradient_gb_str` before any collective algorithm is applied. Ring AllReduce arranges the AllReduce exchange among neighbors in a logical ring; with $\DeviceCount$ workers, each worker sends roughly $2(\DeviceCount-1)/\DeviceCount$ times the gradient tensor size and receives the same amount across the reduction and distribution phases (@sec-communication-collective-operations-collective-operations-ring-allreduce-ffce derives this factor). For large $\DeviceCount$ the factor approaches two, so each worker moves about twice the FP32 gradient per step, and half that when mixed-precision training exchanges 16-bit gradients. Network traffic therefore depends on precision, worker count, collective implementation, and partitioning. On slower interconnects or partitions with little computation per communicated byte, it can consume a large fraction of each iteration rather than a negligible one; notebook \ref{nbk-introduction-coordination-energy-tax} later converts the 16-bit volume into seconds of exposed transfer per step.
@@ -1957,9 +1957,9 @@ $$\CommunicationIntensity = \frac{\NetworkTrafficVolume}{\Operations}$$ {#eq-ci-
 where $\NetworkTrafficVolume$ is the number of bytes the worker moves across the network and $\Operations$ is the number of operations it performs locally in the same interval.
 
 ::: {.column-margin}
-![](images/svg/vol2_introduction_ci_knee.svg){width="100%" fig-alt="A curve that stays flat at low communication intensity then bends sharply upward past a dashed red threshold line labeled CI, marking the bandwidth-saturation point where adding accelerators stops helping."}
+![](images/svg/vol2_introduction_ci_knee.svg){width="100%" fig-alt="Step time on the vertical axis against communication intensity in bytes per operation on the horizontal axis. The line stays flat, meets a red dot on a dashed red vertical line labeled fabric balance, then rises in a straight line."}
 
-*Past the communication-intensity cliff, adding GPUs stops helping.*
+*Past the fabric balance point, step time grows with communication intensity.*
 :::
 
 Low communication intensity describes compute-heavy workloads whose accelerators spend most of their time doing math, so scaling is comparatively easy. High communication intensity describes workloads whose network demand approaches the available fabric balance; in that regime, bisection bandwidth can bind and adding more accelerators can slow training rather than speed it up. The boundary is configuration-specific because it depends on both local compute throughput and effective network bandwidth.
@@ -2001,12 +2001,6 @@ The coordination challenges discussed so far assume data-center distribution, wh
 Billions of smartphones and IoT devices operate in uncontrolled environments with unreliable connectivity and limited power. Privacy, consent, or policy constraints may prevent raw data from leaving the device, making federated learning a natural architecture [@mcmahan2017communication]. Intermittent connectivity requires a participation policy, which may select currently available devices for a round or admit delayed updates under stated rules. Keeping raw data local does not by itself protect information exposed through model updates. Device budgets and the threat model determine whether additional compression, privacy mechanisms, or local execution are appropriate.
 
 ### Governance and systemic risk at scale {#sec-vol2-introduction-why-governance-matters}
-
-::: {.column-margin}
-![](images/svg/vol2_introduction_margin_003.svg){width="100%" fig-alt="One technical bug fanning out to user or system nodes."}
-
-*At fleet scale, a technical bug becomes societal risk.*
-:::
 
 Scale and distribution amplify impact beyond engineering. When a system serves billions of users, a technical bug becomes a societal risk. This amplification increases the reach of governance failures; smaller deployments still require controls appropriate to their uses and potential harms. Governance functions as the **control plane**\index{Control Plane!definition} of the machine learning fleet, not as a set of external rules.
 
@@ -2071,6 +2065,12 @@ This traffic includes gradients, activations, and dataset shards. Finite bisecti
 Coordination ($\OperationalTaxonomyDimension_3$, the logic)\index{C³ taxonomy!coordination} captures the orchestration software (schedulers, synchronization protocols, and state-management mechanisms) that binds thousands of separate, failing machines into a coherent distributed computer.
 
 Thread synchronization and kernel launches already impose local coordination costs; distribution adds network and failure boundaries. Schedulers, barriers, and checkpointing must manage reliability collapse\index{Reliability collapse!in coordination axis} (@eq-reliability-gap) and **straggler amplification**\index{Straggler amplification!definition}, where a synchronous job waits for its slowest required participant. The objective is **goodput**\index{Goodput!definition}, the rate of useful training progress after wasted and repeated work are accounted for. Overlap where dependencies permit and bounded recovery rollback improve that rate.
+
+::: {.column-margin}
+![](images/svg/vol2_introduction_margin_003.svg){width="100%" fig-alt="A red square labeled straggler on the left with five red arrows fanning out to five dark blue dots labeled peers wait."}
+
+*One straggler holds every synchronous peer.*
+:::
 
 ### Projection from D·A·M to C$^3$ {#sec-vol2-introduction-projection}
 
@@ -2154,9 +2154,9 @@ where $\UsefulModelFlops$ is useful work in FLOPs. The three energy terms cover 
 An illustrative, communication-heavy GPT-3-class synchronization scenario connects the time and energy accounts: exposed Ring AllReduce traffic delays computation and consumes network energy.
 
 ::: {.column-margin}
-![](images/svg/vol2_introduction_coordination_tax.svg){width="100%" fig-alt="A single horizontal bar of one training step, 96 percent filled by an amber communication segment, with a thin gray compute sliver of 4 percent at the left."}
+![](images/svg/vol2_introduction_coordination_tax.svg){width="100%" fig-alt="A single horizontal bar of one training step over InfiniBand, 96 percent filled by an amber communication segment, with a thin blue compute sliver of 4 percent at the left, labeled below the bar."}
 
-*Communication dominates this illustrative step with fixed local compute time and no overlap.*
+*Over InfiniBand, exposed communication fills 96% of this illustrative step.*
 :::
 
 ```{python}

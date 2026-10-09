@@ -1012,12 +1012,6 @@ Production deployments typically withhold an additional headroom fraction $\KvPo
 
 $$\left\lceil \frac{\SharedPrefixLength}{\KvBlockSize} \right\rceil + \BatchSize \left\lceil \frac{\SequenceLength + \OutputLimit - \SharedPrefixLength}{\KvBlockSize} \right\rceil \le \left\lfloor \frac{(1-\KvPoolHeadroomFraction)\, \KvPoolMemory}{\KvBlockSize \, \KvCacheBytesPerToken} \right\rfloor$$ {#eq-kv-demand-shared}
 
-::: {.column-margin}
-![](images/svg/kv_sharing_gain_margin.svg){width="100%" fig-alt="A green curve rising from 1 times at zero shared fraction and steepening toward 10 times, with a blue dot at a shared fraction of 70.6 percent labeled 3.4 times."}
-
-*The sharing gain $1/(1-\SharedPrefixFraction)$ steepens as the shared fraction of each request grows.*
-:::
-
 The resident-fit bound of @sec-vol3-kvcache-geometry, refined for blocks, headroom, and sharing, is the maximum integer $\BatchSize$ that satisfies @eq-kv-demand-shared. Setting $\SharedPrefixLength = 0$ yields the unshared baseline. Because the common prefix is allocated only once, sharing delivers its largest gains when common instructions represent a dominant fraction of the total prompt, and when private working memory—the unique turn history and generation allowance—remains small.
 
 Notebook \ref{nbk-05-sizing-hbm-for-multi-turn-agent} grounds these formulations on the same eight-accelerator DGX H100 node serving Llama 3 70B. Rather than optimistically assuming an average generation length, the sizing calculation reserves the full $\OutputLimit$ token allowance to guarantee that resident requests cannot trigger out-of-memory aborts during decoding, treating the headroom fraction as a deliberate provisioning reserve.
@@ -1130,6 +1124,12 @@ class AgentCapacity:
 
 **Systems insight**: The common prefix covers `{python} AgentCapacity.f_shared_str` of each request's blocks, and sharing it raises the fit `{python} AgentCapacity.share_gain_mult_str`, close to the large-pool limit $1/(1-\SharedPrefixFraction) \approx$ `{python} AgentCapacity.share_bound_mult_str` for a shared fraction $\SharedPrefixFraction$. In that limit, the gain depends on $\SharedPrefixFraction$ alone, making prompt layout and the scope of sharing the primary architectural levers. A prefix shared only across one deployment's instructions covers far less of each request than one that also spans a common workspace, as the archetype comparison below shows. Within a given scope, keeping invariant tokens at the very front of the serialized input, strictly ahead of any volatile turn history, maximizes $\SharedPrefixFraction$. Although sharing does not reduce the decoding work per token or change any request's logical context, it multiplies concurrent capacity. These values are physical fit bounds for the designated memory partition, not runtime admission limits.
 
+:::
+
+::: {.column-margin}
+![](images/svg/kv_sharing_gain_margin.svg){width="100%" fig-alt="A green curve rising from 1 times at zero shared fraction and steepening to 10 times at a shared fraction of 90 percent, with a blue dot at a shared fraction of 70.6 percent labeled 3.4 times."}
+
+*The sharing gain $1/(1-\SharedPrefixFraction)$ steepens as the shared fraction of each request grows.*
 :::
 
 In production environments, requests arrive with heterogeneous lengths and variable prefix overlap. An admission controller must therefore balance committed blocks, anticipated generation growth, and temporary staging buffers required during KV transfers or eviction copies. Furthermore, an aggregate node-wide memory bound is necessary but not sufficient: multi-GPU deployments distribute KV cache blocks across tensor-parallel shards, meaning a free physical block on one accelerator cannot alleviate memory exhaustion on another. Admission decisions must satisfy physical capacity constraints across every individual device.

@@ -142,6 +142,12 @@ This chapter varies the volume's reference configuration in two stated ways. Its
 
 At large scale (hundreds of billions of parameters across thousands of GPUs), gradient synchronization can dominate training step time unless aggressive optimization techniques are applied. The next step is to model that data movement as physics rather than as an API\index{API}\index{Application Programming Interface|see{API}} call.
 
+::: {.column-margin}
+![](images/svg/collective_communication_comm_dominance.svg){width="100%" fig-alt="Two horizontal bars on a common scale under the header thousands of GPUs, illustrative, showing one large-scale training step. A short blue bar labeled compute is less than a third the length of a long amber bar labeled communication, so communication takes about three times as long as compute."}
+
+*Exposed gradient synchronization can dominate step time at scale.*
+:::
+
 ### The physics of data movement {#sec-communication-collective-operations-physics-data-movement}
 
 Physical constraints govern data movement before algorithms are designed. The speed of light sets a latency floor[^fn-speed-of-light] (roughly 5 $\MicroUnitPrefix\text{s}$ per kilometer in fiber), the bandwidth-distance product\index{Bandwidth-distance product!optical reach} limits how far a fast link can reach before it needs optics (signal loss grows with both lane rate and cable length, so copper reach shrinks as lane rates rise; @sec-network-fabrics-copper-optics), and kernel-bypass transports such as remote direct memory access (RDMA)\index{RDMA!kernel bypass} and GPUDirect RDMA\index{GPUDirect RDMA!latency reduction} strip the per-message software tax down to a few microseconds. Collective communication adds the energy cost of moving a bit, which the algorithms must respect as firmly as latency and bandwidth.
@@ -454,15 +460,6 @@ class AllReduceCost:
     campaign_steps_str = fmt(campaign_steps, precision=0, commas=True)
     halved_saving_gpu_hours_str = fmt_int(round(halved_saving_gpu_hours, -2), commas=True)
 ```
-
-::: {.column-margin}
-```{=latex}
-\vspace*{5mm}
-```
-![](images/svg/collective_communication_comm_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing the step's Fleet Law terms at large scale. The communication bar is wide and amber, dominating; the compute bar is a short blue bar."}
-
-*Exposed gradient synchronization can dominate step time at scale.*
-:::
 
 The initial ring budget reveals why data movement can become the governing constraint at scale. A single AllReduce on a 70B model's gradients consumes seconds of wall-clock time, which becomes exposed delay when no independent computation overlaps it. This asymmetry between local computation and global coordination motivates every collective algorithm that follows, and it is why a seemingly modest improvement to the collective repays itself across a training campaign that repeats it at every step.
 
@@ -953,9 +950,9 @@ class ChunkRegime:
 :::
 
 ::: {.column-margin}
-![](images/svg/collective_communication_alpha_beta_dominance.svg){width="100%" fig-alt="Two horizontal bars. Top (large message): a wide amber bandwidth segment labeled n over beta, plus a thin light-gray latency sliver. Bottom (small message): a wide dark-gray latency segment labeled alpha, plus a thin light-gray sliver. The dominant term flips."}
+![](images/svg/collective_communication_alpha_beta_dominance.svg){width="100%" fig-alt="Two normalized horizontal bars showing each term's share of one transfer's time, with the bandwidth term n over beta always amber and the latency term alpha always dark slate. Top bar, large message: amber n over beta fills about nine tenths of the bar and a thin slate alpha sliver fills the rest. Bottom bar, small message: slate alpha fills about nine tenths and a thin amber n over beta sliver fills the rest. The dominant term flips."}
 
-*Small messages are latency-bound, large ones bandwidth-bound; the cost reverses.*
+*Below $\LatencyBandwidthCrossoverSize$ the latency term $\MessageStartupLatency$ dominates; above it, the byte term $\PointToPointMessageSize/\LinkBandwidth$ does.*
 :::
 
 For collectives, the two regimes map onto different levers. In the latency-bound\index{Latency!operating regime} regime $(\PointToPointMessageSize< \LatencyBandwidthCrossoverSize)$, where MoE routing tokens, scalar reductions, and the small chunks of a large-group schedule sit, the levers are fusion, fewer schedule rounds, fewer hops, and a leaner software stack. In the bandwidth-bound\index{Bandwidth!operating regime} regime $(\PointToPointMessageSize\gg \LatencyBandwidthCrossoverSize)$, where LLM gradients and optimizer states sit, they are compression\index{Gradient Compression}, a byte-efficient algorithm, and link aggregation\index{Link Aggregation} across multiple network interface cards (NICs). Classifying each exchange, and each chunk within it, into one regime is the diagnostic skill the rest of the chapter applies.
@@ -1376,9 +1373,9 @@ An AllToAll over $\DeviceCount$ ranks creates $\DeviceCount(\DeviceCount-1)$ log
 ```{=latex}
 \vspace*{-14mm}
 ```
-![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="All-to-All quadratic logical source-destination pairs compared with the linear number of ranks; physical cost depends on how those flows share the fabric."}
+![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="Schematic against rank count N: a curve labeled N(N−1) pairs starts near zero and rises quadratically, crossing a flat line labeled per-rank payload that stays at a fixed nonzero level."}
 
-*Logical peer pairs grow quadratically; physical cost depends on the fabric.*
+*Logical pairs grow quadratically while per-rank payload can stay flat.*
 :::
 
 Expert parallelism and large-scale recommendation systems\index{Recommendation System} can reach a communication wall earlier than standard data parallelism when their traffic exhausts injection, reception, or bisection capacity, or when routing and destination skew create hotspots. The primitive determines the traffic matrix\index{Traffic matrix!collective communication}; the physical fabric and routing distribution determine the scaling ceiling.
@@ -1883,12 +1880,6 @@ Every cell in every row is filled, so every GPU receives (and, symmetrically, se
 
 :::
 
-::: {.column-margin}
-![](images/svg/collective_communication_ring_tree_divergence.svg){width="100%" fig-alt="Latency rounds against rank count N on linear axes. An amber straight line labeled ring, 2 times N minus 1, climbs steadily; a blue curve labeled tree, 2 log base 2 of N, bends over and stays near the bottom."}
-
-*Ring latency grows with N; tree stays logarithmic.*
-:::
-
 ::: {#chk-collective-communication-ring-allreduce-mechanics .callout-checkpoint title="Ring AllReduce mechanics"}
 
 Verify your understanding of bandwidth-optimal reduction:
@@ -1934,6 +1925,12 @@ Total: $\RingAllReduceCompletionTime \approx$ `{python} AllReduceCost.ring_bw_ti
 ### Tree AllReduce {#sec-communication-collective-operations-tree-allreduce}
 
 Ring AllReduce's byte efficiency comes with many startup rounds. As the group grows, the $2(\DeviceCount-1)\MessageStartupLatency$ term can exceed the byte-transfer term for a fixed payload; the crossover depends on the measured path parameters. Tree AllReduce\index{Tree AllReduce} reduces the number of dependent rounds. In the simple reduce phase\index{Tree AllReduce!reduce phase}, pairs combine contributions and forward partial sums toward a root, taking $\log_2 \DeviceCount$ steps for a balanced power-of-two group. The broadcast phase\index{Tree AllReduce!broadcast phase} distributes the result in another $\log_2 \DeviceCount$ steps. This shorter dependency chain motivates the comparison before bandwidth costs are counted.
+
+::: {.column-margin}
+![](images/svg/collective_communication_ring_tree_divergence.svg){width="100%" fig-alt="Latency rounds against rank count N on linear axes. An amber straight line labeled ring, 2 times N minus 1, climbs steadily; a blue curve labeled tree, 2 log base 2 of N, bends over and stays near the bottom."}
+
+*Ring latency grows with N; tree stays logarithmic.*
+:::
 
 The simple full-message tree loses parallel activity as contributions converge. A ring activates all $\DeviceCount$ logical edges in each round. In a pairwise tree reduction, the first round has $\DeviceCount/2$ senders and $\DeviceCount/2$ receivers; receiving is useful work, not idleness. The next round has $\DeviceCount/4$ senders and $\DeviceCount/4$ receivers, and the final reduction exchange involves two ranks while the remaining $(\DeviceCount-2)$ have completed their upstream contribution. Sending the full message through successive levels adds byte-transfer time along the dependency path. This is a limitation of the illustrated schedule, not every tree-based implementation or every physical link mapping.
 

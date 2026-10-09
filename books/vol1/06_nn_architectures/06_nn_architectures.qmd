@@ -57,12 +57,6 @@ Selecting a neural network architecture is both a modeling decision and a contra
 
 The dense multilayer perceptron (MLP) of @sec-neural-computation paid for a weight between every pixel and every hidden unit, including relationships an image rarely needs. The operations that chapter built (matrix multiplication, activation functions, and gradient computation) are the verbs every network shares. Architectures remove that waste by assembling the same verbs into computational graphs\index{Architecture!computational graph} shaped like the data. Under the silicon contract (principle \ref{pri-silicon-contract}), that shape is also an implicit agreement with hardware, trading computational patterns for efficiency on particular problem classes.
 
-::: {.column-margin}
-![](images/svg/nn_architectures_inductive_bias.svg){width="100%" fig-alt="Vertical list of three architectures with a dark-to-light dot ramp: CNN (darkest, strong spatial prior), Transformer (mid), MLP (lightest, no structural prior), ordered by inductive-bias strength."}
-
-*Inductive bias from strong (convolutional) to weak (fully connected): stronger prior, less data needed.*
-:::
-
 Every neural network architecture decides how computation should be organized to match the inherent structure in the data. Images have spatial locality, language has sequential dependencies, and tabular records often lack a fixed spatial or sequential organization. The architecture encodes assumptions about these patterns directly into the computational graph, and those assumptions influence parameter count, hardware utilization, and deployment feasibility. Architecture selection is therefore a systems engineering problem\index{Architecture!systems engineering} that directly affects the iron law terms: the number of operations $\Operations$ and the volume of data movement $\DataVolume$. The structural assumptions that each architecture encodes are known as **inductive biases**\index{Inductive bias!unifying concept},[^fn-inductive-bias-architecture] and they serve as the unifying concept for this entire chapter.
 
 [^fn-inductive-bias-architecture]: **Inductive bias**\index{Inductive bias!etymology}\index{Inductive bias!systems consequence}: From Latin *inducere*, "to lead into." Encoding a structural assumption "leads" the model toward a smaller solution space, and every architecture discussed here (multilayer perceptron (MLP), convolutional neural network (CNN), recurrent neural network (RNN), and transformer) is defined by its choice of bias. A CNN's locality bias cuts parameters by orders of magnitude vs. an equivalent MLP, directly shrinking the iron law's $\Operations$ and $\DataVolume$ terms, while global attention trades quadratic score computation for long-range connectivity.
@@ -117,9 +111,9 @@ class InductiveBiasLocalityCalc:
 :::
 
 ::: {.column-margin}
-![](images/svg/nn_architectures_algorithm_axis.svg){width="100%" fig-alt="Vertical three-box D·A·M stack: Data (gray, top), Algorithm (orange, lit, middle), Machine (gray, bottom). The lit Algorithm box marks the architecture axis."}
+![](images/svg/nn_architectures_inductive_bias.svg){width="100%" fig-alt="Vertical ordinal axis with arrowheads at both ends, labeled Strong prior, less data at the top and Weak prior, more data at the bottom. Three dots sit on the axis from dark to light: CNN near the top, Transformer in the middle, MLP near the bottom."}
 
-*Architecture is the algorithm axis of D·A·M: it sets the operation-count budget.*
+*A stronger prior substitutes engineered structure for data and compute.*
 :::
 
 A convolutional neural network (CNN) encodes an inductive bias of spatial locality: nearby pixels matter more than distant ones. A transformer lets each element attend to any other, enabling long-range relationships at quadratic score-computation cost. These biases help architectures learn efficiently by restricting the space of functions they represent. Without an appropriate bias, a model may require substantially more data and compute to learn the same structure. That exchange is the bitter lesson seen from inside a single architecture. A strong prior substitutes engineered structure for data and compute, while the transformer's weak priors bet that data and compute will keep growing, a bet that has repeatedly won at scale. The unified framework in @sec-network-architectures-architecture-selection-framework-a442 brings these architectural families together once each bias has appeared in practice.
@@ -446,15 +440,6 @@ class WorkloadSignatures:
     mobilenet_intensity_str = fmt_arithmetic_intensity(mobilenet_i * flop / byte, unit=flop / byte, commas=False)
     resnet_to_gpt2_ratio_mult_str = fmt_multiple(resnet_to_gpt2_ratio, precision=1, commas=False)
 ```
-
-::: {.column-margin}
-```{=latex}
-\vspace*{-47mm}
-```
-![](images/svg/nn_architectures_arithmetic_intensity.svg){width="100%" fig-alt="Three stacked horizontal bars on a log scale labeled ResNet 80, MobileNet 43, and GPT-2 0.5 FLOP per byte, the topmost bar far longer than the bottom one."}
-
-*A weight-only proxy gives ResNet ~160$\times$ GPT-2's batch-one intensity.*
-:::
 
 These bottlenecks reflect the underlying math, but the calculation here is a weight-only proxy rather than a complete measurement of main-memory traffic. It divides floating-point work by FP32 model-weight bytes, omitting activation, intermediate, and KV-cache traffic. Batching can amortize weight traffic across examples or tokens, while additional state movement can lower realized intensity. @Sec-appdx-algorithm-foundations-computational-complexity-cheat-sheet-0c6c gives the per-operation FLOP and parameter formulas used in the proxy. @Tbl-workload-signatures compares the three lighthouse scenarios and exposes a roughly `{python} WorkloadSignatures.resnet_to_gpt2_ratio_mult_str` gap under these assumptions.
 
@@ -1198,9 +1183,9 @@ On accelerators with ridge points in the hundreds of FLOP/byte, this batch-one F
 ```{=latex}
 \vspace*{-30mm}
 ```
-![](images/svg/vol1_nn_architectures_margin_001.svg){width="100%" fig-alt="Two horizontal log-scale parameter-count bars labeled FC 205M and Conv 37K, with the fully connected bar much longer."}
+![](images/svg/nn_architectures_arithmetic_intensity.svg){width="100%" fig-alt="Two orange lollipops on a log FLOP-per-byte axis: ResNet 80 reaches far to the right, Dense 0.5 sits near the left edge."}
 
-*Weight sharing spares convolution the fully-connected parameter explosion.*
+*A batch-one dense layer sits far below convolution's weight reuse.*
 :::
 
 *Dense connectivity offers little weight reuse within a single-example layer evaluation.* For data with inherent structure (such as spatial locality in images or temporal order in sequences), specialized architectures can exploit that structure for both better accuracy and better efficiency. The most established such architecture is the convolutional neural network.
@@ -1210,6 +1195,12 @@ On accelerators with ridge points in the hundreds of FLOP/byte, this batch-one F
 The MLP's assumption that every input may interact directly with every output proves particularly costly for spatially structured data like images. Connecting every pixel of a high-resolution input to every hidden unit creates an unmanageable parameter footprint that exhausts accelerator memory and collapses arithmetic intensity into a memory-bandwidth-bound crawl. The earlier MNIST comparison showed the remedy at small scale: a shared filter needs `{python} MLPvsCNN.param_ratio_mult_str` fewer weights per feature detector than a dense unit that treats every pixel independently.
 
 CNNs\index{CNN!definition}[^fn-convolution-etymology-locality] structure this computational trade-off directly in silicon [@lecun1998; @krizhevsky2012imagenet]. Rather than materializing an all-to-all connectivity matrix, a CNN restricts each output activation to a local spatial patch and slides identical filter weights across the entire input aperture.
+
+::: {.column-margin}
+![](images/svg/vol1_nn_architectures_margin_001.svg){width="100%" fig-alt="Two horizontal log-scale parameter-count bars labeled Dense 205M and Conv 37K, with the dense bar much longer."}
+
+*Weight sharing spares convolution the fully-connected parameter explosion.*
+:::
 
 [^fn-convolution-etymology-locality]: **Convolution**\index{Convolution!etymology}: From Latin *convolvere* ("to roll together"), describing a filter that slides across an input, combining local elements at each position. This "rolling together" enforces a locality constraint that is the source of the operation's efficiency: a single $5{\times}5$ kernel reuses its 25 weights at every spatial position instead of learning a separate weight for every pixel. \index{Convolution!data reuse}
 
@@ -2146,7 +2137,7 @@ Convolutional networks exploit *spatial* structure, where physical proximity gov
 %\vspace*{-30mm}
 ```
 
-![](images/svg/vol1_nn_architectures_margin_002.svg){width="100%" fig-alt="Flat state memory versus rising serial latency as sequence length grows."}
+![](images/svg/vol1_nn_architectures_margin_002.svg){width="100%" fig-alt="Flat blue line labeled state memory and rising slate line labeled latency, both starting from one origin, over a sequence length axis."}
 
 *RNNs hold state memory fixed, but latency grows with sequence length.*
 :::
@@ -2923,7 +2914,7 @@ Attention mechanisms exhibit distinctive system-level patterns that differ from 
 Attention mechanisms require storage for query-key-value projections and intermediate feature representations. A naive implementation also materializes an $\SequenceLength{\times}\SequenceLength$ attention-weight matrix for every sequence and head, creating a quadratic memory bottleneck alongside the $\SequenceLength{\times}\HiddenDimension$ inputs and outputs. For long sequences, these transient scores can dominate accelerator memory even though the learned projection matrices remain fixed in size. Tiled exact-attention kernels such as FlashAttention stream score blocks through faster memory and avoid retaining the complete matrix in HBM, while still computing $\SequenceLength^2$ dense interactions (@sec-appdx-algorithm-flash-attention derives the online softmax recurrence and its I/O reduction). This distinction separates an unavoidable quadratic compute cost for dense attention from optional quadratic score storage. Without kernel tiling, materializing intermediate score matrices quickly exhausts accelerator high-bandwidth memory at production sequence lengths.
 
 ::: {.column-margin}
-![](images/svg/nn_architectures_attention_memory_wall.svg){width="100%" fig-alt="A flat curve that hockey-sticks sharply upward; a dot marks the knee, and the region to the right of the knee is shaded red as a danger zone."}
+![](images/svg/nn_architectures_attention_memory_wall.svg){width="100%" fig-alt="A rising parabola labeled S squared; a green dot at sequence length S marks 1×, and a red dot at 2S marks 4×, with dashed drop lines to the axis."}
 
 *Doubling context quadruples score interactions and naive score storage.*
 :::
@@ -3737,12 +3728,6 @@ class DLRMLighthouseProfile:
 
 Once embedding tables exceed one device, capacity, not arithmetic, becomes the primary systems constraint. While a ResNet-50 (`{python} DLRMLighthouseProfile.resnet_fp32_mb_str`) fits on a single accelerator and a dense language model like GPT-3 (`{python} DLRMLighthouseProfile.gpt3_fp16_gb_str`) fits within a single multi-GPU node, production recommendation models reach terabytes of embedding parameters. In iron law terms, capacity acts as a feasibility constraint that comes before either execution term. It decides where the tables live, and therefore which bandwidth the data term $\DataVolume/\Bandwidth$ must use: HBM when the tables fit, host DRAM over PCIe or a peer accelerator over NVLink when they do not.
 
-::: {.column-margin}
-![](images/svg/vol1_nn_architectures_margin_003.svg){width="100%" fig-alt="Four embedding partitions connected by all-to-all exchange links, showing that sparse feature lookups may depend on data stored outside the local partition."}
-
-*DLRM embedding lookups can depend on vectors stored outside the local memory partition.*
-:::
-
 The architecture therefore breaks the single-device assumption that holds for smaller dense models. Systems designers resolve this capacity wall through three distinct architectural strategies:
 
 *   **Shrink the tables**: Compression, hashing, or pruning reduces capacity pressure, though these techniques risk information loss on long-tail users and items.
@@ -3803,7 +3788,7 @@ class CapacityWall:
 ```
 
 ::: {.column-margin}
-![](images/svg/nn_architectures_capacity_wall.svg){width="100%" fig-alt="Three stacked memory bars: a single item embedding table at 51 GB fits below an 80 GB A100 capacity bar, but an item-plus-user pair at 102 GB overshoots it, no longer fitting on one device."}
+![](images/svg/nn_architectures_capacity_wall.svg){width="100%" fig-alt="Two memory bars against a red 80 GB A100 capacity line: the 51.2 GB item table fits, the 102.4 GB item-plus-user pair crosses it."}
 
 *One embedding table fits an 80 GB A100; a second breaches the capacity wall.*
 :::
@@ -3826,6 +3811,12 @@ class CapacityWall:
 :::
 
 Once the tables no longer fit on one device, sparse lookups cross memory and interconnect boundaries. A request may need rows owned by several accelerators, forcing the device executing the downstream MLP to wait while the system gathers them across PCIe or NVLink. Within a multi-accelerator server, gathering rows distributed across multiple GPUs turns memory routing into an interconnect bandwidth bottleneck. The architectural consequence is that a recommendation model's memory layout directly determines its cross-accelerator data-transfer traffic, creating a coordination tax for both training and serving.
+
+::: {.column-margin}
+![](images/svg/vol1_nn_architectures_margin_003.svg){width="100%" fig-alt="Four accelerators connected by all-to-all exchange links, showing that sparse feature lookups may depend on data stored on other accelerators."}
+
+*Sharded tables can turn lookups into all-to-all accelerator traffic.*
+:::
 
 ::: {.column-margin .margin-pointer}
 ↪ Partitioning a model that exceeds one device's memory across accelerators, and the communication that partition boundaries add, is developed in @sec-model-training-model-parallelism-c97e.
@@ -4303,6 +4294,12 @@ This portability separates optimizations that transfer from those that do not. G
 ### Decision framework {#sec-network-architectures-decision-framework-a889}
 
 A wildlife monitoring sensor must classify camera-trap images within a watt-scale solar power budget, while an industrial recommendation service must retrieve terabyte-scale embeddings within a tail-latency budget of tens of milliseconds. Each constraint eliminates architectures that look competitive on unconstrained benchmarks, and a structural mismatch at this stage cannot be rescued later by compiler optimization or kernel tuning. Engineering teams nonetheless often default to architectures by popularity, deploying over-parameterized transformers where a lightweight CNN would suffice or selecting models that violate the inference latency budget. In D·A·M terms, architecture selection chooses the algorithm ($\text{A}$) that bridges the structure of the data ($\text{D}$) to the budgets of the machine ($\text{M}$): memory capacity, memory bandwidth, compute throughput, and thermal envelope.
+
+::: {.column-margin}
+![](images/svg/nn_architectures_algorithm_axis.svg){width="100%" fig-alt="D·A·M locator triangle with three nodes connected by violet edges: D (Data) at top and M (Machine) at lower right shown gray, A (Algorithm) at lower left filled solid orange. The Algorithm node is highlighted."}
+
+*Architecture selection turns on the algorithm axis, bridging data to machine.*
+:::
 
 Selection begins with data-to-architecture mapping\index{Architecture!data-to-architecture mapping}, matching the symmetries of the input to an operator family. The useful strength of an inductive bias\index{Inductive bias!hierarchy} depends on the task (@sec-network-architectures-architectural-principles-engineering-tradeoffs-362e). CNNs impose local connectivity, weight sharing, and translation equivariance, reducing parameter volume and exposing reuse for grid-like data. RNNs impose temporal recurrence, bounding inference state across sequence lengths at the price of serialization. Transformers use content-based attention, gaining flexible interactions while paying for dense quadratic score computation. MLPs impose no specific spatial or temporal connectivity pattern, leaving those relationships to be learned. A matching prior can reduce the samples and computation needed for a target accuracy; a mismatched prior can exclude useful solutions. Model selection must test both predictive fit and the resulting machine costs, and the history of the Netflix Prize shows what happens when only the first test is run.
 
