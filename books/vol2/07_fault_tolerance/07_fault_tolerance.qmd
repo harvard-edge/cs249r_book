@@ -156,7 +156,7 @@ The transition from small-scale experimentation to large-scale production change
 
 Because failures cannot be eliminated at this scale, fault-tolerant systems verify completion rather than assume it, treat failure as a normal code path, exercise recovery continuously, and account for partial failures that naive error handling may not anticipate. These techniques draw on decades of distributed systems research, but ML workloads change the economics. Training checkpoints are large but can be sized from the model and optimizer state, while some optimization algorithms tolerate bounded numerical perturbations without requiring bitwise replay. That tolerance must be established for the training method; stochasticity does not make arbitrary corruption or inconsistent recovery safe. A recovery design can exploit approximate execution only while preserving its declared convergence and quality requirements.
 
-### The mathematics of inevitable failure {#sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef}
+## The Mathematics of Inevitable Failure {#sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef}
 
 System reliability engineering provides the foundational framework for understanding failure at scale [@birolini2017]. Individual components exhibit failure rates characterized by the failure rate parameter $\ComponentFailureRate$,[^fn-fits-failure-rate] measured in failures per unit time. For a single component with constant failure rate $\ComponentFailureRate$, the probability of surviving without failure until time $\TimeInstant$ follows an exponential distribution,[^fn-poisson-failure-rate] as in @eq-single-component-reliability:
 
@@ -290,7 +290,7 @@ plt.close()
 
 :::
 
-### Quantitative reliability analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
+## Quantitative Reliability Analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
 
 The GPU-only calculation of @eq-system-mtbf supplies the scale intuition; a real training system then composes GPUs, HBM, links, power supplies, storage paths, and redundancy into one failure budget. Component rates are usually quoted in the FIT units introduced with the failure rate, so the `{python} FleetReliabilityRates.gpu_mttf_attr_str` GPU contributes `{python} FleetReliabilityRates.gpu_fit_str` FIT to whatever system contains it. The new question is how different component rates compose, and the composition rule depends on the redundancy structure and the independence assumptions. For series systems\index{Reliability!series system}\index{Series system!reliability calculation} (for example, a node where all `{python} FleetReliabilityRates.node_gpus_str` GPUs must work), failure of any component fails the whole. With independent constant-rate failures, the reliabilities multiply as in @eq-system-reliability-product, so the rates add even when the components differ:
 $$\SystemMtbf = \frac{1}{\sum \ComponentFailureRate_i}$$
@@ -399,7 +399,7 @@ Composition makes the distinction between raw faults and job interruptions essen
 
 These raw bit-error rates justify ECC, but they are not the interruption rates that set checkpoint cadence; the worked cascade that follows uses device MTTF values that already include the effect of that protection. The cascade also treats its GPU, PCIe, power, and network contributions as separate categories, so a measured whole-node rate that already includes those paths cannot be added to them again.
 
-### Cluster MTBF calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
+## Cluster MTBF Calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
 
 ```{python}
 #| echo: false
@@ -510,7 +510,7 @@ Consider a training cluster designed for large language model development, rough
 
 Together, these components define the failure domain used in the rate calculations in this worked example.
 
-#### Failure rate calculation per GPU subsystem {.unnumbered}
+### Failure rate calculation per GPU subsystem {.unnumbered}
 
 Each GPU operates within a failure domain that includes the GPU itself, its PCIe connection, and a proportional share of the node's network infrastructure. Power enters the sum only through supplies whose single failure stops the node, counted as $\SeriesPsuCount$ in the power equation. With the node's supplies in redundant sets, no single unit qualifies, so the power term below is zero in this first-order calculation. The approximation omits the residual risk that additional independent failures exhaust redundancy before repair. A fault upstream of the chassis, such as the loss of the circuits feeding it, can also take down the whole node; that risk belongs to the correlated failures treated later in this chapter.
 
@@ -522,11 +522,11 @@ Each GPU operates within a failure domain that includes the GPU itself, its PCIe
 
 `{python} FailureCascadeExample.lambda_net_eq_math`
 
-#### Total per-GPU failure rate calculation {.unnumbered}
+### Total per-GPU failure rate calculation {.unnumbered}
 
 `{python} FailureCascadeExample.lambda_total_eq_math`
 
-#### System failure rate and MTBF calculation {.unnumbered}
+### System failure rate and MTBF calculation {.unnumbered}
 
 `{python} FailureCascadeExample.lambda_system_eq_math`
 
@@ -832,13 +832,13 @@ plt.close()
 
 :::
 
-### Failure taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
+## Failure Taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
 
 The MTBF calculations in the reliability analysis quantify how often failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. Designing effective fault tolerance also requires understanding what kind of failures occur, which depends on precise vocabulary. A fault is the underlying defect or event, an error is the corrupted state it produces, and a failure is the externally visible behavior the training system must handle [@avizienis2004basic]. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely.
 
 No single label captures all of these differences. Reliability decisions require three orthogonal axes: persistence (transient, intermittent, or permanent), manifestation (fail-stop, degraded, or value-corrupting), and failure scope (one device, one node, a rack or power domain, or the whole job). A transient fault can therefore manifest as either a detected crash or silent corruption, while a permanent switch failure can remain confined to one rack or partition an entire job. The four subsections that follow are therefore not four parallel classes or mutually exclusive buckets [@constantinescu2008; @lamport1982byzantine]. Each takes the value of one axis that most changes recovery. Transient failures come from the persistence axis, because they show why a fault that clears can still leave state to repair. Fail-stop and Byzantine (value-corrupting) failures come from the manifestation axis, and correlated failures come from the scope axis. Two parts of the space are developed where they drive decisions. The intermittent and permanent persistence classes return with hardware faults (@sec-ft-fault-persistence-response), where persistence selects retry, quarantine, or replacement. The degraded manifestation, a gray failure that slows a worker without stopping it, returns with stragglers (@sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d).
 
-#### Transient failures {#sec-fault-tolerance-reliability-reliability-transient-failures-57b4}
+### Transient failures {#sec-fault-tolerance-reliability-reliability-transient-failures-57b4}
 
 A transient fault clears without physical repair, but the state it corrupts can persist after the disturbance ends. Recovery must therefore retry or validate affected work before relying on that state. Large-scale training systems encounter several forms of temporary disruption. Network packet loss\index{Transient fault!network packet loss} momentarily drops data while transport retransmission succeeds. Memory bit flips\index{Memory!bit flip} can result from cosmic-ray-induced single-event upsets.[^fn-seu-soft-error] Under temperature spikes, thermal throttling\index{Thermal throttling!performance degradation} temporarily reduces compute throughput without halting execution, while software timeouts\index{Software timeout!resource contention} emerge when transient contention delays communication beyond its allotted time.
 
@@ -848,7 +848,7 @@ Transient faults are particularly difficult to diagnose in ML training when they
 
 The appropriate response to transient failures depends on detection capability. Errors that trigger explicit exceptions can be handled through bounded retry logic. Silent corruption requires end-to-end validation. Checksums detect changed bytes in storage or transport, cross-rank digests reveal disagreement about a supposedly identical reduced buffer, and statistical or replay checks test whether the computation itself remains plausible. A rank that computes the wrong local gradient and then correctly checksums those wrong bytes passes an ordinary checksum; only independent recomputation, invariants, or model-level evidence can expose that error.
 
-#### Fail-stop failures {#sec-fault-tolerance-reliability-reliability-failstop-failures-5cdd}
+### Fail-stop failures {#sec-fault-tolerance-reliability-reliability-failstop-failures-5cdd}
 
 Fail-stop failures\index{Fail-stop failure!characteristics}\index{Fail-stop failure!detection and recovery} cause components to cease operation entirely and detectably. The failed component stops responding to requests and is suspected through timeout mechanisms, though a timeout alone cannot distinguish an outright crash from an isolated or delayed host. A GPU hardware failure\index{GPU!hardware failure} renders an individual accelerator unresponsive, while a broader node crash\index{Node!crash} abruptly terminates all training processes on the host. Similarly, a network partition\index{Network partition!fault tolerance} severs communication between a healthy node and the remaining cluster, and a storage failure\index{Storage!failure} prevents workers from writing or reading checkpoint shards.
 
@@ -858,7 +858,7 @@ A stopped component usually gives a clearer symptom than a component returning p
 
 A stopped rank announces itself only through silence, so detection rests on timeouts, and every timeout must separate a dead rank from one that is merely slow, such as a GPU still writing a large checkpoint while the collective waits. @Sec-fault-tolerance-reliability-reliability-failure-detection-mechanisms-efed sets that threshold once the full recovery-time budget is in view.
 
-#### Byzantine failures {#sec-fault-tolerance-reliability-reliability-byzantine-failures-8a24}
+### Byzantine failures {#sec-fault-tolerance-reliability-reliability-byzantine-failures-8a24}
 
 Where a fail-stop component ceases to participate, a value-corrupting component can keep running while returning incorrect results, as when a GPU returns wrong gradients without raising an error, a link delivers a corrupted packet whose error pattern the CRC happens not to cover, or a worker computes different results for identical inputs and state. Byzantine failures\index{Byzantine failure!classification} allow arbitrary behavior, including inconsistent messages to different participants [@lamport1982byzantine]. ML systems can encounter this broader failure model through silent data corruption\index{Silent data corruption!mechanism} or adversarial corruption. Numerical instability\index{Numerical instability!Byzantine failure} and determinism violations\index{Determinism!violation} also require validation when they break the execution contract, but ordinary rounding differences or intentionally stochastic outputs are not themselves evidence of a faulty worker. The recovery concern is a participant whose accepted contribution can corrupt shared state without a visible crash.
 
@@ -879,7 +879,7 @@ Byzantine-resilient distributed training algorithms exist but impose significant
 
 [^fn-byzantine-consensus-overhead]: **Byzantine-resilient ML**\index{Byzantine-resilient ML!algorithmic overhead}\index{Byzantine fault tolerance!ML overhead}: Named after Lamport's 1982 "Byzantine Generals Problem," these algorithms (Krum\index{Byzantine fault tolerance!Krum algorithm}, trimmed mean\index{Byzantine fault tolerance!trimmed mean}, and signSGD, which aggregates only the signs of gradient coordinates by majority vote) tolerate a bounded fraction of corrupted workers, with the exact bound depending on the algorithm and assumptions. For $\AcceleratorCount$ workers, Krum requires pairwise distance computations over worker gradients, so overhead grows quadratically with worker count and directly competes with the throughput gains of data parallelism [@blanchard2017machine].
 
-#### Correlated failures {#sec-fault-tolerance-reliability-reliability-correlated-failures-95e8}
+### Correlated failures {#sec-fault-tolerance-reliability-reliability-correlated-failures-95e8}
 
 The reliability calculations in @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef assume independent failures. Real systems depart sharply from this assumption by exhibiting correlated failures, where common physical or operational dependencies take down multiple components simultaneously. At the node level, a power fault that exhausts the chassis's redundant supplies\index{Correlated failure!power supply}, such as the loss of the circuits feeding it, takes down every GPU in the chassis. At the cluster level, a top-of-rack network switch failure\index{Correlated failure!network switch} isolates all attached nodes, while a cooling system failure\index{Correlated failure!cooling system} can trigger thermal shutdowns across a row of racks. Beyond physical infrastructure, shared software dependencies create broad blast radii. A software bug\index{Correlated failure!software bug} in an updated CUDA driver can crash processes across nodes when they exercise the affected path, and operator error\index{Correlated failure!operator error} during cluster reconfiguration can render an entire fleet unreachable.
 
@@ -960,7 +960,7 @@ class TpuV4WarStoryScale:
 
 :::
 
-### The bathtub curve and hardware lifecycle {#sec-fault-tolerance-reliability-reliability-bathtub-curve-hardware-lifecycle-7d8a}
+## The Bathtub Curve and Hardware Lifecycle {#sec-fault-tolerance-reliability-reliability-bathtub-curve-hardware-lifecycle-7d8a}
 
 The failure taxonomy classifies failure types and domains, answering what kind of failures occur. Equally critical for fault tolerance design is determining *when* over an accelerator's operating lifespan those failures strike. @Fig-bathtub-curve plots the hazard function $\ComponentHazardRate(\TimeInstant)$ across component lifecycles, partitioning operational longevity into three distinct reliability regimes.
 
@@ -1054,7 +1054,7 @@ plt.close()
 
 These three hazard regimes in @fig-bathtub-curve translate directly into admission control and maintenance policies. Before assigning new or repaired nodes to a long training run, operators use matrix-multiply, memory, and communication stress tests to expose marginal components. During service, temperature trends, error counts, and performance degradation help identify devices for scheduled replacement. Screening moves failures out of expensive production runs. An infant-mortality failure caught during a few hours of stress testing costs only idle time, while the same failure weeks into a pretraining run forces a checkpoint rollback, which is why operators often route fresh or repaired nodes to short jobs first. Monitoring then checks whether the constant-rate model remains appropriate as the fleet ages.
 
-### Model-type diversity in failure impact {#sec-fault-tolerance-reliability-reliability-modeltype-diversity-failure-impact-8ec0}
+## Model-Type Diversity in Failure Impact {#sec-fault-tolerance-reliability-reliability-modeltype-diversity-failure-impact-8ec0}
 
 ```{python}
 #| echo: false
@@ -1113,7 +1113,7 @@ Vision models illustrate how a smaller state budget can permit more frequent sav
 
 Scientific workflows can require state beyond the model and optimizer. An iterative molecular-search pipeline, for example, must retain which configurations have been evaluated if those results determine its next candidates. A training pipeline that samples scientific datasets must preserve the sampling state needed by its own recovery contract. The governing question is which prior decisions affect future work; the checkpoint boundary must include that state wherever it resides.
 
-### Economic framework for fault tolerance investment {#sec-fault-tolerance-reliability-reliability-economic-framework-fault-tolerance-investment-e032}
+## Economic Framework for Fault Tolerance Investment {#sec-fault-tolerance-reliability-reliability-economic-framework-fault-tolerance-investment-e032}
 
 Fault tolerance mechanisms consume resources: storage for checkpoints, bandwidth for checkpoint writes, compute cycles for redundant calculations, and engineering time for implementation and maintenance. Rational investment in fault tolerance requires quantifying both the cost of failures and the cost of prevention.
 
