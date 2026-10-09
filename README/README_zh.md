@@ -166,7 +166,7 @@
 
 | Part | Focus | Chapters |
 |------|-------|----------|
-| **I. Foundations** | 基础概念 | Introduction, ML Systems, DL Primer, Architectures |
+| **I. Foundations** | 基础概念 | Introduction, System Paradigms, DL Primer, Architectures |
 | **II. Design** | 构建模块 | Workflow, Data Engineering, Frameworks, Training |
 | **III. Performance** | 加速性能 | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
 | **IV. Deployment** | 实际部署 | MLOps, On‑device Learning, Privacy, Robustness |

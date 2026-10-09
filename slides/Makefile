@@ -129,7 +129,7 @@ build-%: svgs
 
 # Convenience aliases: ch01, ch02, ..., ch16
 ch01: build-01_introduction
-ch02: build-02_ml_systems
+ch02: build-02_system_paradigms
 ch03: build-03_ml_workflow
 ch04: build-04_data_engineering
 ch05: build-05_nn_computation
@@ -221,7 +221,7 @@ pptx-vol2: vol2
 
 # Per-chapter PPTX: pptx-ch01, pptx-ch02, ..., pptx-v2ch01, ...
 pptx-ch01: ch01 ; @$(PDF2PPTX) $(VOL1_OUT)/01_introduction.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
-pptx-ch02: ch02 ; @$(PDF2PPTX) $(VOL1_OUT)/02_ml_systems.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
+pptx-ch02: ch02 ; @$(PDF2PPTX) $(VOL1_OUT)/02_system_paradigms.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch03: ch03 ; @$(PDF2PPTX) $(VOL1_OUT)/03_ml_workflow.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch04: ch04 ; @$(PDF2PPTX) $(VOL1_OUT)/04_data_engineering.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch05: ch05 ; @$(PDF2PPTX) $(VOL1_OUT)/05_nn_computation.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)

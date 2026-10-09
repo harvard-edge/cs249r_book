@@ -321,7 +321,7 @@ def test_source_line_match_strips_rendered_sidenote_number(tmp_path):
     qmd = tmp_path / "chapter.qmd"
     qmd.write_text(
         "\n".join([
-            "# ML Systems",
+            "# System Paradigms",
             "",
             "HIPAA (Health Insurance Portability and Accountability Act) appears "
             "in prose before the rendered sidenote.",
@@ -342,7 +342,7 @@ def test_source_line_match_prefers_footnote_title_over_nearby_mentions(tmp_path)
     qmd = tmp_path / "chapter.qmd"
     qmd.write_text(
         "\n".join([
-            "# ML Systems",
+            "# System Paradigms",
             "",
             "[^fn-inference]: **Inference**: Mentions 2 W edge accelerators.",
             "",

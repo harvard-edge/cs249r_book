@@ -62,7 +62,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
     <tr>
       <td>02</td>
-      <td><code>lab_02_ml_systems</code></td>
+      <td><code>lab_02_system_paradigms</code></td>
       <td>The Iron Law</td>
     </tr>
     <tr>

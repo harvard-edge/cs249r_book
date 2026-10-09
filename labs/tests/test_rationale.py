@@ -22,7 +22,7 @@ def test_rationale_evaluation_verified():
         correct_option="4x",
         correct_mechanism="compute",
         concept_title="The Iron Law & Ridge Point",
-        chapter_reference="Chapter 2: Machine Learning Systems",
+        chapter_reference="Chapter 2: System Paradigms",
         literature_source="Williams et al. (2009)",
         fallacy_explanation="Small batch sizes underutilize tensor cores due to memory bandwidth limits.",
     )

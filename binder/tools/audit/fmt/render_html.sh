@@ -23,7 +23,7 @@ case "$VOL" in
     BUILD_DIR="books/_build/html-vol1/vol1"
     CHAPTERS=(
       introduction/introduction
-      ml_systems/ml_systems
+      02_system_paradigms/02_system_paradigms
       ml_workflow/ml_workflow
       data_engineering/data_engineering
       nn_computation/nn_computation
