@@ -1202,9 +1202,9 @@ The `optimizer.zero_grad()` call marks the boundary between one update and the n
 The `optimizer.step()` method is the other boundary: it consumes the current gradients and mutates persistent optimizer state. For Adam optimization, this call implements momentum estimation, squared gradient tracking, bias correction, and the parameter update. @Algo-adam-update makes the hidden state explicit so the memory cost remains visible rather than disappearing behind an API call.
 
 ::: {.column-margin}
-![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A simplified stacked memory bar split into parameters, gradients, and Adam moment state in a 1 to 1 to 2 ratio. Activations, workspace, and any master-weight copy are excluded."}
+![](images/svg/training_optimizer_memory.svg){width="100%" fig-alt="A simplified stacked memory bar split into four equal segments: parameters P, gradients G, and Adam's two moment buffers m and v, a 1 to 1 to 2 ratio. Activations, workspace, and any master-weight copy are excluded."}
 
-*In this simplified static-state view, Adam's two moment buffers occupy twice the parameter storage.*
+*Parameters (P) and gradients (G) take one share each, and Adam's moment buffers m and v add two more in this simplified static-state view.*
 :::
 
 ```pseudocode
@@ -5429,16 +5429,18 @@ class GPT2SummaryScalingRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     b_total_mem_gb_str = fmt_memory(b_total_mem, unit=GB, precision=1, commas=False)
     o_total_mem_gb_str = fmt_memory(o_total_mem, unit=GB, precision=1, commas=False)
-    o_total_mem_b4_gb_str = fmt_memory(o_total_mem_b4, unit=GB, commas=False)
-    v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
+    o_total_mem_b4_gb_str = fmt_memory(o_total_mem_b4, unit=GB, precision=1, commas=False)
+    # Decimal GB so the capacity compares directly with the decimal-GB totals above.
+    v100_mem_decimal_gb_str = fmt_memory(v100_mem, unit=GB, precision=1, commas=False)
+    v100_mem_gib_str = fmt_memory(v100_mem, unit=GiB, precision=0, commas=False)
 ```
 
-The GPT-2 walkthrough models how mixed precision and checkpointing reduce a batch-4 tensor budget to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str`, near a V100's `{python} GPT2SummaryScalingRecap.v100_mem_capacity_gb_str` capacity before workspaces and allocator overhead. At batch 32, the modeled total falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str` but still exceeds that V100. Larger-memory accelerators may move the boundary. A 70-billion-parameter model, however, requires about 140 GB for FP16 weights alone and substantially more for full-parameter training state, motivating sharding, offload, or multiple devices.
+The GPT-2 walkthrough models how mixed precision and checkpointing reduce a batch-4 tensor budget to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str`, just under a V100's `{python} GPT2SummaryScalingRecap.v100_mem_gib_str` (`{python} GPT2SummaryScalingRecap.v100_mem_decimal_gb_str`) capacity before workspaces and allocator overhead. At batch 32, the modeled total falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str` but still exceeds that V100. Larger-memory accelerators may move the boundary. A 70-billion-parameter model, however, requires about 140 GB for FP16 weights alone and substantially more for full-parameter training state, motivating sharding, offload, or multiple devices.
 
 ::: {.column-margin}
-![](images/svg/vol1_training_margin_004.svg){width="100%" fig-alt="Growth curve that crosses a red capacity point into a shaded over-capacity region."}
+![](images/svg/vol1_training_margin_004.svg){width="100%" fig-alt="Memory bars on a decimal-gigabyte scale: GPT-2 at batch 4 (33.0 GB), GPT-2 at batch 32 (95.7 GB), and 70B FP16 weights (140 GB) against a red V100 capacity line at 34.4 GB; only batch 4 stays under it."}
 
-*Some models exceed single-GPU memory before anything else matters.*
+*GPT-2 at batch 4 fits just under one V100; batch 32 and a 70B model cross the wall.*
 :::
 
 When a chosen workload still exceeds one device's memory or schedule, spreading it across devices provides aggregate memory and compute. Other responses include reducing the model, batch, sequence length, or training scope; offloading state; and parameter-efficient adaptation, which trains only a small set of added parameters on top of a frozen model. Scaling beyond one device\index{Training!scaling strategies} begins with multi-GPU configurations inside one machine and may extend across nodes. The major parallelism strategies make different communication trade-offs; a full treatment of distributed-training implementation lies beyond this chapter.
