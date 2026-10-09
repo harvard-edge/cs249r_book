@@ -613,7 +613,7 @@ def ch04_phase_budget_envelope():
 
 
 @margin("04_nervous", "margin_lease_rule_envelope", "budget-envelope",
-        sources=("PartOneCoupledBudget.t_renewal_need", ".t_lease", ".t_lease_upper_age"))
+        sources=("PartOneCoupledBudget.t_renewal_need", ".t_lease", ".t_lease_upper_admit"))
 def ch04_lease_rule_envelope():
     # The lease rule on one time axis: the renewal floor below, the chosen
     # lease, and the ceiling left after tick, bus, onset, and evidence age.
@@ -621,7 +621,7 @@ def ch04_lease_rule_envelope():
     P = lego("04_nervous", "PartOneCoupledBudget")
     floor_ = mag(P.t_renewal_need, "millisecond")
     lease = mag(P.t_lease, "millisecond")
-    ceil_ = round(mag(P.t_lease_upper_age, "millisecond"), 1)
+    ceil_ = round(mag(P.t_lease_upper_admit, "millisecond"), 1)
     fig, ax = new_fig("budget-envelope")
     budget_envelope(ax, rows=[("renewal floor", floor_, TIME), ("lease", lease, DATA)],
                     limit=ceil_, limit_label=f"{ceil_:.1f} ms ceiling", limit_label_offset=-0.03,
