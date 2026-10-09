@@ -24,8 +24,12 @@ local function ensure_html_deps()
     [[
     <script type="text/javascript">
     (function(d) {
-      function renderPseudocode() {
-        d.querySelectorAll(".pseudocode-container").forEach(function(el) {
+      async function renderPseudocode() {
+        for (const el of d.querySelectorAll(".pseudocode-container")) {
+          if (el.dataset.pseudocodeRendered === "true") continue;
+          let source = el.querySelector(".pseudocode");
+          if (!source) continue;
+          el.dataset.pseudocodeRendered = "true";
           let pseudocodeOptions = {
             indentSize: el.dataset.indentSize,
             commentDelimiter: " " + el.dataset.commentDelimiter + " ",
@@ -35,8 +39,8 @@ local function ensure_html_deps()
             scopeLines: el.dataset.indentLines.toLowerCase() === "true",
             titlePrefix: el.dataset.captionPrefix,
           };
-          pseudocode.renderElement(el.querySelector(".pseudocode"), pseudocodeOptions);
-        });
+          await pseudocode.renderElement(source, pseudocodeOptions);
+        }
         d.querySelectorAll(".pseudocode-container").forEach(function(el) {
           let captionSpan = el.querySelector(".ps-root > .ps-algorithm > .ps-line > .ps-keyword")
           if (captionSpan !== null) {
@@ -194,11 +198,25 @@ local function render_pseudocode_block_html(global_options)
         end
       end
 
-      local inner_el = pandoc.Div(source_code)
-      inner_el.attr.classes = pandoc.List()
-      inner_el.attr.classes:insert("pseudocode")
+      -- Keep the parser source inert: MathJax must not preprocess algorithm
+      -- environments or mutate their text before pseudocode.js reads them.
+      local escaped_source = source_code:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+      local inner_el = pandoc.RawBlock("html",
+        '<textarea class="pseudocode" hidden aria-hidden="true">' .. escaped_source .. '</textarea>')
 
-      local outer_el = pandoc.Div(inner_el)
+      local contents = pandoc.List({ inner_el })
+      -- An actual algorithm expression advertises the math dependency to
+      -- Pandoc, honoring Quarto's configured backend and URL even when the
+      -- document contains no prose math. It is never visible to the reader.
+      local first_math = source_code:match("%$(.-)%$") or source_code:match("\\%((.-)\\%)")
+      if first_math then
+        local dependency_math = pandoc.Span({ pandoc.Math("InlineMath", first_math) })
+        dependency_math.attr.classes:insert("hidden")
+        dependency_math.attr.attributes["aria-hidden"] = "true"
+        contents:insert(pandoc.Plain({ dependency_math }))
+      end
+
+      local outer_el = pandoc.Div(contents)
       outer_el.attr.classes = pandoc.List()
       outer_el.attr.classes:insert("pseudocode-container")
       outer_el.attr.classes:insert("quarto-float")
