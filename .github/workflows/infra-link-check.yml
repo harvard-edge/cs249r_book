@@ -19,6 +19,8 @@ name: '🔧 Infra · 🔗 Link Check'
 #                      callers don't suddenly start blocking.
 #   accept_status      Comma-separated list of HTTP statuses to accept as OK
 #                      (e.g. "200,403,429"). Default "200,403".
+#   schemes            Comma-separated URL schemes to check (e.g. "https,http").
+#                      Default "" checks every scheme, including file:// paths.
 #
 # Flow:
 #   1. CHECKOUT — Pull repository content
@@ -60,6 +62,11 @@ on:
         type: string
         default: '200,403'
         description: 'Comma-separated HTTP status codes Lychee should treat as OK.'
+      schemes:
+        required: false
+        type: string
+        default: ''
+        description: 'Comma-separated URL schemes to check (e.g. "https,http"). Empty checks all.'
 
     outputs:
       check-status:
@@ -99,6 +106,11 @@ on:
         type: string
         default: '200,403'
         description: 'Comma-separated HTTP status codes Lychee should treat as OK.'
+      schemes:
+        required: false
+        type: string
+        default: ''
+        description: 'Comma-separated URL schemes to check (e.g. "https,http"). Empty checks all.'
 
 permissions:
   contents: read
@@ -150,6 +162,25 @@ jobs:
           echo "globs=$globs" >> "$GITHUB_OUTPUT"
           echo "Lychee inputs: $globs"
 
+      # 2026-10-09: the nightly sweep reads .qmd as plain text, so every URL
+      # in a code listing is checked, and a listing that writes a path such as
+      # `file:///repo/src/buffer.c` became a "broken link". Internal links are
+      # Tier 1's job (check-internal-links.py), so the nightly passes
+      # schemes "https,http" and lychee skips file:// entirely.
+      - name: 🧭 Resolve schemes
+        id: resolve-schemes
+        env:
+          SCHEMES: ${{ inputs.schemes }}
+        run: |
+          args=""
+          IFS=',' read -ra list <<< "$SCHEMES"
+          for sc in "${list[@]}"; do
+            sc="${sc// /}"
+            [ -n "$sc" ] && args+="--scheme $sc "
+          done
+          echo "scheme_args=$args" >> "$GITHUB_OUTPUT"
+          echo "Scheme filter: ${args:-<all schemes>}"
+
       - name: 🔗 Check Links
         id: lychee
         uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
@@ -157,7 +188,7 @@ jobs:
           # NB: --exclude-mail was removed in lychee v0.21; mailto: links are
           # now skipped by default and you must opt in with --include-mail.
           # Default (skip) is what we want for link rot.
-          args: --verbose --no-progress --max-concurrency ${{ inputs.max_concurrency }} --accept ${{ inputs.accept_status }} ${{ steps.resolve-ignore.outputs.ignore_arg }} ${{ steps.resolve-patterns.outputs.globs }}
+          args: --verbose --no-progress --max-concurrency ${{ inputs.max_concurrency }} --accept ${{ inputs.accept_status }} ${{ steps.resolve-schemes.outputs.scheme_args }}${{ steps.resolve-ignore.outputs.ignore_arg }} ${{ steps.resolve-patterns.outputs.globs }}
           # Force the action's exit code to reflect link health. We then
           # absorb the failure with `continue-on-error: true` below so the
           # summary step can run and decide what to do with it.
@@ -278,6 +309,7 @@ jobs:
             echo "- **Pattern**: \`${{ inputs.path_pattern }}\`"
             echo "- **Concurrency**: ${{ inputs.max_concurrency }}"
             echo "- **Accept statuses**: ${{ inputs.accept_status }}"
+            echo "- **Schemes**: ${{ inputs.schemes || 'all' }}"
             echo "- **Status**: $STATUS"
             echo "- **Broken**: $BROKEN_COUNT"
             if [ -n "$BROKEN_SAMPLE" ]; then
