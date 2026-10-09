@@ -2,7 +2,7 @@
 quiz: ml_workflow_quizzes.json
 concepts: ml_workflow_concepts.yml
 engine: jupyter
-notation-local: [\EngineeringTeamSize, \LifecycleStageIndex, \ReadByteAddress]
+notation-local: [\EngineeringTeamSize, \ReadByteAddress]
 ---
 
 # ML Workflow {#sec-ml-workflow}
@@ -472,17 +472,11 @@ ML systems are not traditional software with a model attached. Check the differe
 
 ### Constraint propagation principle {#sec-ml-workflow-decisions-cascade-system-98f4}
 
-::: {.column-margin}
-![](images/svg/ml_workflow_constraint_cost_escalation.svg){width="100%" fig-alt="Rising correction-cost curve across six lifecycle stages, from define at 1x to monitor at 32x. The curve steepens as constraints are discovered later in the lifecycle."}
-
-*An illustrative doubling scenario visualizes late-discovery sensitivity.*
-:::
-
 In the DR scenario, the intermittent 2 Mbps clinic uplink rules out cloud inference and requires edge deployment. The edge target's memory and power budgets then constrain model architecture, favoring compact MobileNet-class models over large ensembles and requiring automated image-quality checks at capture time. Each downstream constraint narrows the design space for upstream stages, coupling hardware limits directly to data collection and model design. Stating that coupling precisely uses the stage numbers given alongside @fig-ml-lifecycle, from (1) problem definition to (6) monitoring and maintenance.
 
 ::: {#dfn-ml-workflow-constraint-propagation-principle .callout-definition title="The constraint propagation principle"}
 
-***The constraint propagation principle***\index{Constraint propagation principle!definition} states that a constraint discovered late in the ML lifecycle can force rework across affected upstream stages. Datasets, trained weights, validation evidence, and deployment packages record decisions that later work depends on. Correcting a missing constraint requires tracing those dependencies to determine which artifacts must change and which remain valid. The margin figure assigns a constraint discovered at stage $\LifecycleStageIndex$ (1 = problem definition) a cost of $2^{\LifecycleStageIndex-1}$ times the stage-1 cost solely to illustrate sensitivity to discovery timing. Artifact dependencies do not imply this doubling rule. Estimating actual rework requires the effort to revise each affected artifact, repeat its dependent work, and validate the resulting system.
+***The constraint propagation principle***\index{Constraint propagation principle!definition} states that a constraint discovered late in the ML lifecycle can force rework across affected upstream stages. Datasets, trained weights, validation evidence, and deployment packages record decisions that later work depends on. Correcting a missing constraint requires tracing those dependencies to determine which artifacts must change and which remain valid. Estimating actual rework requires the effort to revise each affected artifact, repeat its dependent work, and validate the resulting system.
 
 1.  **Significance**: A 100 ms latency target discovered at deployment (stage 5) may propagate backward to constrain model size (stage 3: operation count $\Operations$), dataset requirements (stage 2: dataset size $\DatasetSize$, the number of training examples), and problem definition (stage 1: what accuracy is achievable). Rework depends on which earlier decisions relied on the missing constraint. Within the iron law, a latency budget bounds total time $\Time$, and therefore every term that sums to it, so it redefines the feasible region for $\Operations$, for the bytes moved $\DataVolume$ (distinct from the example count $\DatasetSize$), and for the hardware efficiency $\EfficiencyHw$ the model must achieve.
 2.  **Distinction**: Unlike modular decomposition (which encourages independent optimization of each component), this principle mandates end-to-end reasoning: optimizing accuracy in isolation may produce a model that is infeasible to deploy, so an accuracy optimum reached in isolation can be an infeasible system.
@@ -915,83 +909,53 @@ The interface contracts make the recursive feedback loop in @fig-lifecycle-overv
 #| echo: false
 #| label: constraint-propagation
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ CONSTRAINT PROPAGATION PRINCIPLE
+# │ ARTIFACT REWORK SCHEDULE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Used in "Auditing Stage Transitions" callout, Fallacies section,
-# │          and Summary section for an illustrative late-discovery sensitivity model
+# │ Context: @exmp-ml-workflow-auditing-stage-transitions
 # │
-# │ Goal: Illustrate one assumed doubling rule for late constraint discovery.
-# │ Show: How the assigned multiplier changes across lifecycle stages.
-# │ How: Model a simple doubling rule across the six stages of the ML lifecycle.
+# │ Goal: Estimate delay from an explicit chain of affected artifacts.
+# │ Show: The elapsed duration of a hypothetical sequential repair schedule.
+# │ How: Sum supplied task durations, assuming resources are available.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.physics import calc_constraint_propagation_factor
-from mlsysim.fmt import check, fmt_count_range, fmt_multiple, fmt_percent, fmt_time, fmt_time_range, fmt_memory
+from mlsysim.core.units import MB, day
+from mlsysim.fmt import check, fmt_memory, fmt_time
 
 class ConstraintPropagation:
-    """Illustrative doubling model for late constraint discovery across lifecycle stages."""
+    """Hypothetical rework schedule; durations are assumptions, not measurements."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ML_WORKFLOW_STAGE_PROBLEM_DEFINITION = 1  # ML workflow lifecycle stage index
-    ML_WORKFLOW_STAGE_DEPLOYMENT = 5
-    ML_WORKFLOW_STAGE_MONITORING = 6
-    ML_WORKFLOW_CONSTRAINT_COST_BASE = 2
-    stage_deployment = ML_WORKFLOW_STAGE_DEPLOYMENT
-    stage_monitoring = ML_WORKFLOW_STAGE_MONITORING
-    stage_definition = ML_WORKFLOW_STAGE_PROBLEM_DEFINITION
-    avoided_cycles_min = 2
-    avoided_cycles_max = 4
-    weeks_per_cycle = 4
-    sensitivity_target_pct = 90
-    specificity_target_pct = 80
-    stage5_latency_q = 100 * millisecond  # scenario assumption
-    stage5_memory_q = 500 * MB  # scenario assumption
-    jetson_latency_q = 50 * millisecond  # scenario assumption
-    jetson_model_q = 200 * MB  # scenario assumption
-    resnet_variant_q = 200 * MB  # scenario assumption
+    stage5_memory_q = 500 * MB
+    preparation_q = 1 * day
+    training_q = 2 * day
+    validation_q = 2 * day
+    packaging_q = 1 * day
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cost_factor = calc_constraint_propagation_factor(stage_definition, stage_deployment, ML_WORKFLOW_CONSTRAINT_COST_BASE)
-    monitoring_cost_factor = calc_constraint_propagation_factor(stage_definition, stage_monitoring, ML_WORKFLOW_CONSTRAINT_COST_BASE)
-    rework_weeks_min = avoided_cycles_min * weeks_per_cycle
-    rework_weeks_max = avoided_cycles_max * weeks_per_cycle
+    elapsed_q = preparation_q + training_q + validation_q + packaging_q
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(cost_factor == 16, f"Stage 5 scenario should assign 16x, got {cost_factor}x.")
-    check(monitoring_cost_factor == 32, f"Stage 6 scenario should assign 32x, got {monitoring_cost_factor}x.")
-    check(rework_weeks_min == 8 and rework_weeks_max == 16, "Scenario should assign an 8--16 week rework range.")
+    check(elapsed_q == 6 * day, "Sequential repair should occupy six days.")
+    check(all(duration > 0 * day for duration in
+              (preparation_q, training_q, validation_q, packaging_q)),
+          "Each affected task must have a positive duration.")
 
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cost_factor_mult_str = fmt_multiple(cost_factor, precision=0, commas=False)
-    rework_cycles_str = fmt_count_range(
-        avoided_cycles_min,
-        avoided_cycles_max,
-        precision=0,
-        commas=False,
-    )
-    rework_weeks_str = fmt_time_range(
-        rework_weeks_min,
-        rework_weeks_max,
-        "week",
-        precision=0,
-        commas=False,
-        style="word",
-    )
-    sensitivity_target_pct_str = fmt_percent(sensitivity_target_pct / 100, precision=0, commas=False, style='prose')
-    specificity_target_pct_str = fmt_percent(specificity_target_pct / 100, precision=0, commas=False, style='prose')
-    stage5_latency_ms_str = fmt_time(stage5_latency_q, millisecond, precision=0, commas=False)
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     stage5_memory_mb_str = fmt_memory(stage5_memory_q, unit=MB, precision=0, commas=False)
-    jetson_latency_ms_str = fmt_time(jetson_latency_q, millisecond, precision=0, commas=False)
-    jetson_model_mb_str = fmt_memory(jetson_model_q, unit=MB, precision=0, commas=False)
-    resnet_variant_mb_str = fmt_memory(resnet_variant_q, unit=MB, precision=0, commas=False)
+    preparation_str = fmt_time(preparation_q, day, precision=0, commas=False, style="word")
+    training_str = fmt_time(training_q, day, precision=0, commas=False, style="word")
+    validation_str = fmt_time(validation_q, day, precision=0, commas=False, style="word")
+    packaging_str = fmt_time(packaging_q, day, precision=0, commas=False, style="word")
+    elapsed_str = fmt_time(elapsed_q, day, precision=0, commas=False, style="word")
 ```
 
 ::: {#exmp-ml-workflow-auditing-stage-transitions .callout-example title="Auditing stage transitions"}
 
 **Scenario**: An engineering team claims to have completed Problem Definition for a medical imaging classifier, attempting to transition to Data Collection without establishing deployment target constraints.
 
-**Diagnosis**: The output contract lacks deployment paradigm selection and resource constraints (latency and memory targets). If the violation surfaces only at deployment as a trained model larger than the edge device's `{python} ConstraintPropagation.stage5_memory_mb_str` model budget, the audit must trace what relied on the missing limit. A smaller candidate may require revised input-resolution or preprocessing choices, new weights, repeated sensitivity and on-device memory tests, and a replacement deployment package. Existing raw images may remain usable; changing the candidate does not imply recollecting every image. The assigned doubling scenario gives this stage-5 discovery a `{python} ConstraintPropagation.cost_factor_mult_str` multiplier, but an engineering estimate requires the effort and dependencies of those specific revisions.
+**Diagnosis**: The output contract lacks deployment paradigm selection and resource constraints (latency and memory targets). If the violation surfaces only at deployment as a trained model larger than the edge device's `{python} ConstraintPropagation.stage5_memory_mb_str` model budget, the audit must trace what relied on the missing limit. A smaller candidate may require revised input-resolution or preprocessing choices, new weights, repeated sensitivity and on-device memory tests, and a replacement deployment package. Existing raw images may remain usable; changing the candidate does not imply recollecting every image.
+
+**Repair schedule**: Suppose the repair plan preserves the raw images and labels but changes input preparation and the candidate architecture. Assume `{python} ConstraintPropagation.preparation_str` to revise preparation, `{python} ConstraintPropagation.training_str` to train new weights, `{python} ConstraintPropagation.validation_str` to repeat validation, and `{python} ConstraintPropagation.packaging_str` to package the approved result. If each task waits for the preceding artifact and the required staff and compute are available, the repair takes `{python} ConstraintPropagation.elapsed_str`. This is a supplied schedule for this dependency chain, not a multiplier determined by the discovery stage. Queueing, failed validation, or parallel independent tests would change the elapsed time.
 
 **Systems lesson**: Stage transitions act as quality gates in the ML lifecycle. Enforcing strict output contract validation before proceeding downstream prevents expensive upstream rework and ensures data collection aligns with target deployment hardware.
 
@@ -1229,7 +1193,7 @@ Storage placement is another data-collection decision that either preserves or e
 
 [^fn-tiered-storage-ml]: **Tiered storage**\index{Tiered storage!ML I/O bottleneck}: Places data on different storage media based on access frequency and performance requirements. The storage price gap is roughly `{python} StorageCosts.cost_ratio_mult_str` in this example: Non-Volatile Memory Express (NVMe) SSDs deliver 500,000+ input/output operations per second (IOPS) for random reads at `{python} StorageCosts.cost_nvme_str`, while object storage costs `{python} StorageCosts.cost_s3_str` but incurs 100--200 ms request latency. For ML training loops requiring sustained sequential streaming at 1--10 GB/s, fetching thousands of individual image files introduces random seeking and protocol overhead that collapses throughput, converting a compute-bound training loop into an I/O-bound stall that starves accelerator execution units.
 
-The training set belongs on hot storage (fast local SSDs), because every epoch rereads it and a slow read stalls the accelerator. Recent datasets and validation sets sit on warm object storage, which costs several times less per gigabyte but answers each request far more slowly. The audit archive sits on cold archival storage, the cheapest per gigabyte and the slowest to retrieve. The workflow decision is which tier a training run reads from. A run that streams the training set from warm storage pays request latency on every epoch, eroding the iteration velocity the iteration tax showed to be valuable, while keeping the archive on hot storage pays a premium for data no one reads. The boundary between tiers moves over time. A dataset migrates from warm to hot when selected for the next training run, and from hot to cold when the model it trained is superseded, under automated policies keyed to training schedules and access recency.
+The training set benefits from hot storage (fast local SSDs) when its repeated reads would otherwise arrive more slowly than the accelerator consumes them. Packing images into large files and fetching them ahead of use can also make an object-storage stream sufficient if its measured delivery rate meets that demand. Recent datasets and validation sets sit on warm object storage, which costs several times less per gigabyte but answers each request far more slowly. The audit archive sits on cold archival storage, the cheapest per gigabyte and the slowest to retrieve. The workflow decision is which tier a training run reads from. A run whose warm-storage requests leave the accelerator waiting loses the iteration velocity the iteration tax showed to be valuable, while keeping the archive on hot storage pays a premium for data no one reads. The boundary between tiers moves over time. A dataset can migrate from warm to hot when a training run needs faster delivery, and from hot to cold when its access rate falls, under automated policies keyed to training schedules and access recency.
 
 ::: {.column-margin .margin-pointer}
 ↪ The cost and throughput of each storage tier, and why ML systems combine them, are measured in @sec-data-engineering-ml-storage-requirements-performance-1b0d.
@@ -1571,7 +1535,7 @@ These feedback pathways settle what data the training set contains. A curated, v
 
 ### Sample order and read locality {#sec-ml-workflow-erosion-determinism}
 
-The DR training set, on the order of $10^5$ fundus photographs, must be read in full on every epoch (one complete pass over the training set), and in a fresh random order each time. Whether the accelerator stays busy during those passes comes down to one comparison: the rate at which the data loader delivers images against the rate at which training consumes them. If delivery is slower, the accelerator idles however fast it is. The workflow must therefore record both the sample order training requires and the delivery rate the loader actually achieves, and test one against the other before treating the data handoff as complete.
+The DR training procedure considered here reads the training set, on the order of $10^5$ fundus photographs, in full on every epoch (one complete pass over the training set), using a fresh random order each time. Whether the accelerator stays busy during those passes comes down to one comparison: the rate at which the data loader delivers images against the rate at which training consumes them. If delivery is slower, the accelerator idles however fast it is. The workflow must therefore record both the sample order training requires and the delivery rate the loader actually achieves, and test one against the other before treating the data handoff as complete.
 
 This is a different locality question from the data locality invariant (\ref{dfn-ml-systems-data-locality-invariant}) applied earlier to the clinic uplink, which decides *where* computation runs relative to the data. Here the data is already placed, and the question is the *order* in which training reads it. Training shuffles examples across epochs to reduce dependence on their stored order; shuffling alone does not guarantee independent and identically distributed (i.i.d.) samples. Randomized order works against the locality that operating systems exploit,[^fn-locality-violation-cost] the tendency for a program that reads byte $\ReadByteAddress$ to read nearby bytes soon and to reuse recently accessed memory.
 
@@ -1709,105 +1673,9 @@ At every development milestone, teams validate models against the deployment con
 
 ### Prototype to production {#sec-ml-workflow-prototype-productionscale-development-168a}
 
-A team of three data scientists may manage experiments with spreadsheets and shared notebooks, while a team of 30 is more likely to need shared workflow infrastructure. As projects evolve from prototype to production, complexity grows across multiple dimensions simultaneously: larger datasets, more sophisticated models, concurrent experiments, and distributed training infrastructure. Informal coordination can become a bottleneck at production scale as teams share data splits, resolve experiment conflicts, and reconcile notebook versions. @Fig-mlops-returns plots conceptual experimentation velocity as team size expands from 1 to 40 engineers, contrasting the saturating "Coordination Tax" of ad hoc scripts against the super-linear "Flywheel Effect" enabled by a shared workflow platform.
+A small team of data scientists can often coordinate exploratory experiments using ad hoc scripts, spreadsheets, and shared notebooks. As projects evolve from prototype to production, however, complexity expands across multiple dimensions simultaneously: datasets grow, models require distributed training across accelerator clusters, and multiple engineers launch concurrent runs. Under these conditions, informal coordination rapidly becomes a development bottleneck. Without shared infrastructure, team members inadvertently train on conflicting data splits, duplicate expensive preprocessing passes across separate machines, overwrite shared model checkpoints, and struggle to reconcile divergent notebook versions. The time required to untangle conflicting artifacts and unrecorded configurations begins to dominate development.
 
-::: {#fig-mlops-returns fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Workflow Automation Dynamics**: Conceptual scaling curves contrast the experimentation velocity of manual workflows against shared workflow platforms as team size grows. Unstructured ad hoc scripts eventually hit a \"coordination tax\" from merge conflicts and unversioned artifacts, whereas shared platforms can reduce duplicated work through reusable components and automated lineage. The curves illustrate assumptions rather than empirical scaling laws." fig-alt="Illustrative line chart comparing assumed experimentation velocity with team size. The manual-workflow curve eventually declines, while the shared-platform curve continues rising."}
-
-```{python}
-#| echo: false
-#| label: mlops-returns-plot
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MLOPS RETURNS FIGURE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Figure showing scaling dynamics of manual vs automated workflows
-# │
-# │ Goal: Demonstrate why infrastructure investment yields outsized returns.
-# │ Show: How shared workflow platforms enable super-linear scaling vs. manual coordination.
-# │ How: Plot throughput curves for automated vs. manual ML workflows.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-
-# ┌── 1. LOAD (Inputs and Imports) ─────────────────────────────────────────────
-import sys
-import numpy as np
-import matplotlib.pyplot as plt
-
-# Ensure mlsys/viz is available in Quarto execution
-sys.path.insert(0, ".")
-from binder.tools.figures import style as book_style
-
-team_size_value = np.linspace(1, 40, 100)  # team size range
-
-# ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────────────
-velocity_manual_value = 5 * team_size_value * np.exp(-0.05 * team_size_value)  # saturating
-velocity_platform_value = 5 * team_size_value**1.1  # super-linear
-
-# ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────────
-check(len(team_size_value) == 100, "Team-size grid should contain 100 samples.")
-check(velocity_platform_value[-1] > velocity_manual_value[-1], "Platform curve should exceed manual curve at scale.")
-
-# ┌── 4. OUTPUT (Figure) ──────────────────────────────────────────────────────
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.75))
-ax.plot(
-    team_size_value,
-    velocity_manual_value,
-    "--",
-    color=COLORS["RedLine"],
-    label="Ad hoc Scripts",
-    linewidth=2,
-)
-ax.plot(
-    team_size_value,
-    velocity_platform_value,
-    "-",
-    color=COLORS["BlueLine"],
-    label="Shared Platform",
-    linewidth=2.5,
-)
-
-ax.fill_between(
-    team_size_value,
-    velocity_manual_value,
-    velocity_platform_value,
-    color=COLORS["BlueL"],
-    alpha=0.2,
-)
-
-ax.text(
-    16.0,
-    117,
-    "The Flywheel\nEffect",
-    ha="center",
-    color=COLORS["BlueLine"],
-    fontweight="normal",
-    fontsize=8,
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.2),
-)
-ax.annotate("", xy=(18, 110), xytext=(18, 40), arrowprops=dict(arrowstyle="->", color=COLORS["BlueLine"]))
-
-ax.text(
-    15,
-    29,
-    "Coordination Tax",
-    ha="center",
-    color=COLORS["RedLine"],
-    fontweight="normal",
-    fontsize=8,
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3),
-)
-
-ax.set_xlabel("Team Size (Engineers)")
-ax.set_ylabel("Experimentation Velocity (relative units)")
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-The scaling trajectories charted in @fig-mlops-returns encode assumed analytical functions ($5\EngineeringTeamSize\cdot e^{-0.05\EngineeringTeamSize}$ for manual workflows and $5\EngineeringTeamSize^{1.1}$ for shared platforms, where $\EngineeringTeamSize$ is team size) rather than empirical fleet-wide measurements. The manual-workflow curve models coordination overhead from sharing data splits, resolving experiment conflicts, and reconciling notebook versions. Conversely, the platform curve reflects compounding gains from reusable preprocessing components, versioned experiment tracking, and automated scheduling. Actual throughput need not saturate or grow super-linearly; it depends on workload parallelism, platform overhead, team structure, and experiment quality. The comparison therefore demonstrates why shared infrastructure can reduce duplicated work and manual handoffs without predicting an identical quantitative return for every engineering organization.
+Shared workflow platforms resolve this coordination friction by standardizing stage interfaces and centralizing resource management. Rather than relying on manual handoffs and uncoordinated scripts, a shared platform provides standardized data partitioning, cached preprocessing pipelines that compute intermediate representations once for the entire team, and automated job schedulers that allocate cluster accelerators efficiently. Furthermore, shared platforms track experiment metadata systematically, linking code revisions to exact training configurations, hyperparameters, and resulting evaluation metrics. Operating at scale therefore requires teams to systematically preserve each experiment's inputs, software dependencies, and execution configuration, establishing the baseline needed to verify genuine improvements.
 
 ### Reproducibility and technical debt {#sec-ml-workflow-reproducibility-technical-debt-4c78}
 
@@ -1821,14 +1689,14 @@ The cost of neglecting **reproducibility**\index{Reproducibility!experiment line
 
 ### Reproducible system artifacts {#sec-ml-workflow-systems-artifacts-beyond-model-weights-b895}
 
-Experiment tracking needs a well-defined unit to version, and that unit is the stage's actual deliverable. A common failure mode is treating the trained model weights as the sole output of model development. In a mature ML workflow, the deliverable is a **reproducible system artifact**\index{Reproducible system artifact!definition} with four components:
+Experiment tracking needs a well-defined unit to version, and that unit is the stage's actual deliverable. A common failure mode is treating the trained model weights as the sole output of model development. In a mature ML workflow, the deliverable is a **reproducible system artifact**\index{Reproducible system artifact!definition} whose inference package has four components:
 
 - **Model weights**: The learned parameters.
 - **Inference code**: The exact code used to run the model, including preprocessing logic.
 - **Environment specification**: The complete dependency graph (for example, Docker container, `requirements.txt`, CUDA drivers) required to execute the code.
 - **Configuration**: Hyperparameters and runtime settings.
 
-The artifact must also record the dataset version that produced the weights. Under the data-as-code principle (\ref{pri-data-as-code}), a changed training set changes learned behavior as surely as changed inference code does, so an artifact that omits its data lineage cannot be rebuilt.
+Reproducing inference and rebuilding a trained candidate require different evidence. Alongside the inference package, the artifact must link to the dataset version, training-code version, preprocessing recipe, training configuration, and execution environment that produced the weights. Under the data-as-code principle (\ref{pri-data-as-code}), a changed training set changes learned behavior as surely as changed inference code does. This provenance makes the training procedure repeatable; the nondeterminism described in @sec-ml-workflow-reproducibility-technical-debt-4c78 still requires checking variation across runs rather than promising identical weights.
 
 Without bundling the environment with the model, dependency mismatches can create dangerous failures. Some incompatibilities, including unsupported CUDA combinations or missing libraries, fail loudly and immediately. Other differences in compatible kernels, linear algebra libraries, or image-resizing routines such as OpenCV and PIL may alter floating-point results or pixel interpolation without crashing the serving process. These changes can shift model outputs and affect accuracy. Environment reproducibility is therefore necessary not only for successful execution but also for validating equivalent inference behavior. A model that achieves 99 percent accuracy in development must be reevaluated if its production environment changes, even when inference completes without an exception.
 
@@ -1897,7 +1765,7 @@ Serving infrastructure must support this staged validation pipeline by design. R
 
 ### Production-condition validation {#sec-ml-workflow-validation-production-conditions-a351}
 
-Production-condition validation evaluates whether an ML model withstands the physical and operational environments specified during problem definition. Evaluation confined to held-out samples from the training distribution does not test every deployment condition; production validation deliberately stress-tests this assumption across three dimensions: site heterogeneity, input-level perturbations, and temporal drift.
+A model evaluated on one clinic’s images still needs evidence for the other cameras, capture conditions, and patient populations specified during problem definition. Production-condition validation tests these requirements across site heterogeneity, input-level perturbations, and temporal drift. These dimensions apply within the offline and controlled-production gates in @sec-ml-workflow-offline-online-evaluation-3a6b; they are not stages that begin after live A/B testing. Held-out samples from the training distribution alone cannot supply all of this evidence.
 
 External and multisite validation address site-level distribution shifts: determining whether the model has learned generalizable representations or overfit to the sensor hardware of the development environment. In retinal screening, camera sensor sensitivities, optical lens coatings, and illumination spectra differ across equipment vendors. A DR model trained exclusively on images from high-end fundus cameras in research hospitals can fail when deployed to community clinics using older hardware. Multisite validation requires benchmarking candidate models on data collected across independent clinic sites with varying hardware configurations, ambient lighting environments, and operator skill tiers.
 
@@ -2179,7 +2047,7 @@ Proactive maintenance closes the lifecycle loop. Operational signals identify po
 
 ## Systems Thinking {#sec-ml-workflow-integrating-systems-thinking-principles-24c0}
 
-The camera-upgrade case that opened the monitoring stage touched every stage at once. A change in capture hardware at one clinic shifted the input distribution, degraded a model that had passed validation, and required routing evidence back through the lifecycle to identify and validate a remedy. Three structural mechanisms explain coupled behavior of this kind. The first, backward constraint propagation (@sec-ml-workflow-decisions-cascade-system-98f4), has recurred at every stage handoff since it was defined. The other two, multi-scale feedback and emergent system trade-offs, appear only once the full loop is running. Managing all three distinguishes proactive, constraint-driven system design from reactive post-deployment debugging.
+The camera-upgrade case that opened the monitoring stage touched every stage at once. A change in capture hardware at one clinic shifted the input distribution, degraded a model that had passed validation, and required routing evidence back through the lifecycle to identify and validate a remedy. Three structural mechanisms explain coupled behavior of this kind. The first, backward constraint propagation (@sec-ml-workflow-decisions-cascade-system-98f4), has recurred at every stage handoff since it was defined. Multi-scale feedback organizes the different response times within that loop, while emergent system trade-offs connect the resource and quality decisions encountered across its stages. Managing all three distinguishes proactive, constraint-driven system design from reactive post-deployment debugging.
 
 ::: {#chk-ml-workflow-cost-late-discovery .callout-checkpoint title="Closing the feedback loop"}
 
@@ -2233,43 +2101,7 @@ Teams often treat data cleaning and feature engineering as a static milestone to
 
 :::
 
-```{python}
-#| echo: false
-#| label: fallacies-constraint-propagation-anchor
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FALLACIES CONSTRAINT PROPAGATION ANCHOR
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Fallacies and Summary sections below.
-# │
-# │ Goal: Keep the stage-5 scenario multiplier local to repeated fallacy prose.
-# │ Show: The illustrative model assigns 2^(5-1) = 16x at stage 5.
-# │ How: Recompute the chapter's illustrative constraint-propagation rule.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_math, check
-from mlsysim.physics import calc_constraint_propagation_factor
 
-# ┌── LEGO ───────────────────────────────────────────────
-class FallaciesConstraintPropagation:
-    """Local constraint-propagation anchor for late-stage fallacies."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    ML_WORKFLOW_STAGE_PROBLEM_DEFINITION = 1  # ML workflow lifecycle stage index
-    ML_WORKFLOW_STAGE_DEPLOYMENT = 5
-    ML_WORKFLOW_CONSTRAINT_COST_BASE = 2
-    stage_deployment = ML_WORKFLOW_STAGE_DEPLOYMENT
-    stage_definition = ML_WORKFLOW_STAGE_PROBLEM_DEFINITION
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    cost_factor = calc_constraint_propagation_factor(stage_definition, stage_deployment, ML_WORKFLOW_CONSTRAINT_COST_BASE)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(cost_factor == 16, f"Stage 5 scenario should assign 16x, got {cost_factor}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cost_factor_mult_str = fmt_multiple(cost_factor, precision=0, commas=False)
-    constraint_math = fmt_math(f"2^{{{stage_deployment}-{stage_definition}}} = {cost_factor}\\times")
-```
 
 ::: {.fallacy-pitfall}
 
@@ -2299,7 +2131,7 @@ Compressing or bypassing justified validation stages transfers unresolved risk t
 
 **Pitfall**: *Deferring deployment paradigm selection until after model development.*
 
-Teams often assume deployment targets can be selected after optimizing model accuracy. In practice, the deployment paradigm (Cloud, Edge, Mobile, or TinyML) is a primary constraint that shapes every preceding lifecycle stage (@tbl-stage-interface). Suppose a team develops a 2 GB ensemble model and learns only at deployment (stage 5) that its TinyML target has 256 KB of memory. The resulting mismatch cascades backward, forcing teams to redesign data preprocessing, model architecture, and evaluation benchmarks. The assigned doubling scenario gives that stage-5 discovery `{python} FallaciesConstraintPropagation.constraint_math` the stage-1 cost, but the actual rework follows the affected artifact dependencies. Deferring platform selection invites expensive iteration cycles, because deployment hardware dictates which models are physically realizable, not merely where they execute.
+Teams often assume deployment targets can be selected after optimizing model accuracy. In practice, the deployment paradigm (Cloud, Edge, Mobile, or TinyML) is a primary constraint that shapes every preceding lifecycle stage (@tbl-stage-interface). Suppose a team develops a 2 GB ensemble model and learns only at deployment (stage 5) that its TinyML target has 256 KB of memory. The resulting mismatch cascades backward, forcing teams to redesign data preprocessing, model architecture, and evaluation benchmarks. Deferring platform selection invites expensive iteration cycles, because deployment hardware dictates which models are physically realizable, not merely where they execute.
 
 :::
 
@@ -2309,12 +2141,12 @@ The day-153 failure that opened this chapter was a workflow failure, and the six
 
 Understanding this framework explains why machine learning systems require specialized additions to established software-engineering practices. ML workflows add probabilistic optimization, learned statistical behavior, and data-dependent feedback loops. The iron law supplies one quantitative lens: decisions across the lifecycle jointly change data movement, operation count, hardware efficiency, and fixed latency in $(\Time = \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency)$, while production evidence feeds constraint violations back into review. This perspective recognizes that success emerges not from perfecting individual stages in isolation, but from understanding how data quality affects model performance, how deployment constraints shape training strategies, and how production insights inform each subsequent development iteration.
 
-Three patterns define the engineering discipline of the ML lifecycle. Many practitioners report data collection, cleaning, labeling, validation, or preparation as major time sinks, while model development is only one part of the lifecycle. Production-ready systems also require repeated iteration cycles across data, model, and infrastructure stages, so investment in data engineering can have high leverage when data quality is a major source of rework. Finally, late constraints can expand rework because data, weights, validation evidence, and deployment packages depend on earlier decisions. The assigned doubling scenario illustrates sensitivity to discovery timing; estimating a project's correction cost requires tracing which artifacts need revision and which dependent work must be repeated. Early constraint discovery does not require freezing the workflow. It establishes an operating envelope through latency, memory, power, safety, and validation obligations while data and model choices continue to iterate within those bounds.
+Three patterns define the engineering discipline of the ML lifecycle. Many practitioners report data collection, cleaning, labeling, validation, or preparation as major time sinks, while model development is only one part of the lifecycle. Production-ready systems also require repeated iteration cycles across data, model, and infrastructure stages, so investment in data engineering can have high leverage when data quality is a major source of rework. Finally, late constraints can expand rework because data, weights, validation evidence, and deployment packages depend on earlier decisions. Estimating a project's correction cost requires tracing which artifacts need revision and which dependent work must be repeated. Early constraint discovery does not require freezing the workflow. It establishes an operating envelope through latency, memory, power, safety, and validation obligations while data and model choices continue to iterate within those bounds.
 
 ::: {.callout-takeaways title="See the whole map first"}
 
 * **The lifecycle is a loop, not a checklist**: Data and model pipelines advance in parallel, but production feedback is what makes them a system. Monitoring, validation, and retraining send lessons from deployment back into collection, labeling, architecture, and infrastructure decisions.
-* **Late constraints can increase rework**: A deployment limit discovered late may invalidate preprocessing, weights, validation evidence, and integration work. Trace those dependencies to bound the correction effort; the illustrative doubling scenario supplies no project-specific estimate.
+* **Late constraints can increase rework**: A deployment limit discovered late may invalidate preprocessing, weights, validation evidence, and integration work. Trace those dependencies and estimate the required tasks to bound the correction effort and delay.
 * **Iteration velocity expands search opportunity**: Under the worked assumptions, a lightweight model starting 5 percentage points behind ends near the same ceiling as the large model while testing about four times as many ideas. Workflow speed buys search breadth rather than guaranteed model quality.
 * **Interfaces make feedback actionable**: Stage contracts define inputs, outputs, and quality invariants so that data, model, and deployment teams can detect violations before integration. Without explicit contracts, each stage can optimize locally while the system fails globally.
 * **Production speaks on different clocks**: Real-time inference monitoring, batch update reviews, and quarterly architectural reviews answer different failure modes. Treating all feedback as one loop either reacts too slowly to drift or churns expensive workflows without signal.

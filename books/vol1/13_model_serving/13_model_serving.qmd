@@ -2807,7 +2807,7 @@ Once a model is loaded, warmed up, and producing predictions consistent with tra
 
 ## Throughput Optimization {#sec-model-serving-throughput-optimization-18d1}
 
-Consider a representative ResNet-50 classifier on a V100\index{V100!batching throughput} GPU\index{GPU!batching utilization} operating at batch size one. Each forward pass streams the model's weights from HBM to serve a single image and issues dozens of small kernels whose fixed launch cost is paid once per image, so neither the weight traffic nor the launch overhead is shared; how much each contributes is something a measured execution trace must establish. The GPU achieves only 15 percent hardware utilization and 200 images per second. Processing 32 images at once reaches 95 percent utilization and 1,280 images per second, a 6.4$\times$ throughput improvement on identical hardware, because the loaded weights are reused across inputs in on-chip memory, amortizing both memory bandwidth demands and kernel launch overheads. **Batching**\index{Batching!training vs. serving}[^fn-batch-serving-tradeoff] is the primary lever for improving serving economics, but its operational constraints differ sharply between training and serving [@crankshaw2017clipper]. *Training* batches maximize throughput by grouping hundreds or thousands of samples together with no constraint on individual sample latency. *Serving* batches must balance accelerator saturation against individual request deadlines, ensuring that no early-arriving input waits excessively for a batch to form. An inference server resolves this tension through **dynamic batching**\index{Dynamic batching!definition}, adjusting batch size at runtime to match incoming request arrivals.
+Consider a representative ResNet-50 classifier on a V100\index{V100!batching throughput} GPU\index{GPU!batching utilization} operating at batch size one. Each forward pass streams the model's weights from high-bandwidth memory to serve a single image and issues dozens of small kernels whose fixed launch cost is paid once per image, leaving neither weight traffic nor launch overhead shared across inputs. During each batch-1 forward pass, the GPU achieves only 15 percent compute execution efficiency (the fraction of streaming multiprocessor execution pipelines active during kernel execution), despite processing requests continuously at 200 images per second. Processing 32 images at once reaches 95 percent active compute efficiency and 1,280 images per second, a 6.4$\times$ throughput improvement on identical hardware, because the loaded weights are reused across inputs in on-chip memory, amortizing both memory bandwidth demands and kernel launch overheads. This in-kernel execution efficiency must not be confused with serving utilization: a single worker processing batch 1 at 200 requests per second is 100 percent busy in queueing terms ($\ServingUtilization = 1.0$) with zero spare serving capacity, yet uses its internal arithmetic pipelines at only 15 percent efficiency. **Batching**\index{Batching!training vs. serving}[^fn-batch-serving-tradeoff] is the primary lever for improving serving economics, but its operational constraints differ sharply between training and serving [@crankshaw2017clipper]. *Training* batches maximize throughput by grouping hundreds or thousands of samples together with no constraint on individual sample latency. *Serving* batches must balance accelerator saturation against individual request deadlines, ensuring that no early-arriving input waits excessively for a batch to form. An inference server resolves this tension through **dynamic batching**\index{Dynamic batching!definition}, adjusting batch size at runtime to match incoming request arrivals.
 
 [^fn-batch-serving-tradeoff]: **Batch**\index{Batching!etymology}: From Old French *bache* (a quantity baked at one time), entering computing in the 1950s for jobs processed together without human interaction. The ML serving usage preserves the original trade-off: grouping requests amortizes fixed costs (kernel launch, weight movement) across multiple inputs, but an online request may wait for a batch to form. Training can use batches of hundreds or thousands when memory permits; serving batch sizes range from one to much larger values depending on the model, arrival rate, and latency SLO.
 
@@ -2889,9 +2889,9 @@ Two fixed costs dominate at small batch sizes. Kernel launch overhead\index{Kern
 
 [^fn-kernel-launch-serving]: **Kernel (GPU)**\index{Operator kernel!GPU definition}: CUDA borrowed this term from operating systems circa 2007 because GPU functions represent the computational "core" of parallel algorithms. Unlike OS kernels that run continuously, GPU kernels are discrete units of parallel work launched\index{Kernel launch!serving overhead} by the CPU, so each one carries a host-side launch cost that serving pays per request unless batching or graph capture amortizes it.
 
-Larger batches improve hardware efficiency but increase per-request latency. In practice, the optimal batch size depends on both the latency SLO and the arrival rate of requests. The engineering question is quantitative: determine the largest batch size that still meets a given latency SLO. In the ResNet-50 scenario quantified in @tbl-model-serving-batching-throughput-tradeoff, batch size 8 served with a `{python} BatchThroughputCalc.batch_window_ms_str` batching window has a mean formation-plus-inference budget of about 14 ms. A request waits on average about half the window, 5 ms (@sec-model-serving-queue-waiting-time-analysis-8d5c derives why), and then pays about 9 ms of inference. Meeting a 20 ms SLO also requires room for waiting on a busy worker and the remaining request stages. That earns `{python} BatchThroughputCalc.batch8_vs_batch1_mult_str` higher service throughput than batch-1 serving on the same hardware, provided sustained load is high enough to fill the batching window. @Fig-throughput-latency-knee plots this relationship across batch sizes on dual logarithmic axes, isolating the knee where extra batching stops paying for its latency cost. It makes a stricter assumption than the table: a single worker first waits out the full window and only then serves the batch, so formation and service never overlap and each request's latency is the window plus the batch's service time. That serialization is why the figure's batch-one throughput, 64 requests per second, sits far below the table's 200 images per second, which counts inference time alone. Under this assumption, throughput climbs from 64 to 935 requests per second as batch size grows toward 32 while latency stays under 35 ms. Beyond that point the hardware is already near saturation, so each larger batch adds service time to every request it carries while adding little throughput, and latency climbs steeply to 300 ms at the largest batch plotted.
+Larger batches improve hardware efficiency but inflate per-request latency. The engineering objective is to identify the operating point that maximizes sustainable throughput while satisfying the request deadline. For the ResNet-50 benchmark quantified in @tbl-model-serving-batching-throughput-tradeoff below, serving batch size 8 with a `{python} BatchThroughputCalc.batch_window_ms_str` batching window requires a mean formation-plus-inference budget of approximately 14 ms: an arriving request waits on average half the window (5 ms, as derived in @sec-model-serving-queue-waiting-time-analysis-8d5c) and requires roughly 9 ms of inference. If the service must meet a 20 ms SLO, the remaining 6 ms provides headroom for worker backlog and auxiliary pipeline stages, while delivering `{python} BatchThroughputCalc.batch8_vs_batch1_mult_str` higher service throughput than batch 1 on identical hardware. To illustrate why batch size cannot be increased indefinitely, @fig-throughput-latency-knee models this relationship across batch sizes on a logarithmic axis. To isolate the planning knee under worst-case scheduling conditions, the figure assumes a strictly serialized single worker that waits out the full batching window before executing each batch, without pipelined overlap ($\text{Latency} = \BatchingWindow + \BatchServiceTime(\BatchSize)$). Under this unpipelined assumption, batch-1 throughput is 64 requests per second rather than the 200 images per second sustained when inference runs back-to-back. Throughput rises sharply as batch size approaches 32 while latency stays under 35 ms. Beyond that planning knee, incremental gains in arithmetic intensity diminish while batch execution time accelerates; at the largest batches, throughput actually declines while latency climbs steeply to 300 ms, demonstrating that oversized batches degrade both throughput and latency.
 
-::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: Batch size vs. throughput (blue) and latency (orange). Throughput increases with batch size as hardware utilization improves, but eventually saturates. Latency remains relatively flat until the knee, after which it rises steeply because each larger batch takes longer to serve while adding little throughput. Throughput assumes a single worker that forms and serves each batch serially; pipelined serving sustains higher throughput. Values are representative and depend on model/hardware." fig-alt="Dual-axis line chart. Blue line (throughput) rises and plateaus. Orange line (latency) stays low then spikes upward. A vertical dashed line labeled Optimal Point marks batch size 32."}
+::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: Batch size vs. throughput (blue) and latency (orange). Throughput initially increases with batch size, then peaks and declines when batch latency grows faster than batch size. Latency rises sharply beyond the marked planning knee. Each throughput value is derived from batch size divided by the plotted formation-plus-service latency. Throughput assumes a single worker that forms and serves each batch serially; pipelined serving sustains higher throughput. Values are representative and depend on model/hardware." fig-alt="Dual-axis line chart. Blue line (throughput) rises, peaks at batch size 64, and declines. Orange line (latency) rises slowly then steeply. A vertical dashed line labeled Planning Knee marks batch size 32."}
 
 ```{python}
 #| echo: false
@@ -2920,17 +2920,24 @@ fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(10, 4.8))
 # =============================================================================
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+# Scenario assumptions: one worker forms and serves each batch serially.
 BATCHING_DATA = [
-    {'BatchSize': 1, 'Throughput': 64, 'Latency': 15.6},
-    {'BatchSize': 2, 'Throughput': 120, 'Latency': 16.5},
-    {'BatchSize': 4, 'Throughput': 230, 'Latency': 17.4},
-    {'BatchSize': 8, 'Throughput': 404, 'Latency': 19.8},
-    {'BatchSize': 16, 'Throughput': 650, 'Latency': 24.6},
-    {'BatchSize': 32, 'Throughput': 935, 'Latency': 34.2},
-    {'BatchSize': 64, 'Throughput': 1100, 'Latency': 60.0},
-    {'BatchSize': 128, 'Throughput': 1143, 'Latency': 136.8},
-    {'BatchSize': 256, 'Throughput': 1150, 'Latency': 300.0},
+    {'BatchSize': 1, 'Latency': 15.6},
+    {'BatchSize': 2, 'Latency': 16.5},
+    {'BatchSize': 4, 'Latency': 17.4},
+    {'BatchSize': 8, 'Latency': 19.8},
+    {'BatchSize': 16, 'Latency': 24.6},
+    {'BatchSize': 32, 'Latency': 34.2},
+    {'BatchSize': 64, 'Latency': 60.0},
+    {'BatchSize': 128, 'Latency': 136.8},
+    {'BatchSize': 256, 'Latency': 300.0},
 ]
+for row in BATCHING_DATA:
+    row['Throughput'] = (row['BatchSize'] * count / (row['Latency'] * ms)).to(count / second).magnitude
+    check(abs(row['Throughput'] * row['Latency'] / 1000 - row['BatchSize']) < 1e-9,
+          "Serialized batch throughput must equal batch size divided by latency.")
+check(BATCHING_DATA[-1]['Throughput'] < BATCHING_DATA[-3]['Throughput'],
+      "The largest batches lose throughput under the assumed latency growth.")
 df = pd.DataFrame(BATCHING_DATA)
 
 # =============================================================================
@@ -2958,7 +2965,7 @@ ax1.axvline(df['BatchSize'].iloc[optimal_idx], color='gray', linestyle='--', alp
 ax1.text(
     df['BatchSize'].iloc[optimal_idx] - 2,
     400,
-    " Optimal\n Point",
+    " Planning\n Knee",
     ha='right',
     color='gray',
     fontsize=9,
@@ -2972,11 +2979,11 @@ plt.close()
 
 :::
 
-The vertical dashed marker at batch size 32 in @fig-throughput-latency-knee marks the point beyond which increasing batch service time buys little additional throughput. This represents an illustrative planning knee rather than a universal optimum: the selected operating point depends on the latency SLO, arrival process, and cost objective. In this illustrative curve, throughput reflects single-worker serialized execution ($\BatchSize/ (\BatchingWindow+ \BatchServiceTime(\BatchSize))$, where $\BatchServiceTime(\BatchSize)$ is the time to serve a batch of $\BatchSize$ requests); under pipelined serving with overlapped batch formation, saturated throughput is governed by service time alone ($\EffectiveServiceRate(\BatchSize) = \BatchSize/ \BatchServiceTime(\BatchSize)$), yielding higher throughput as analyzed in @tbl-model-serving-batching-throughput-tradeoff.
+The vertical dashed marker at batch size 32 in @fig-throughput-latency-knee marks the point where increasing batch execution time outpaces batch-size growth. This illustrates a universal systems trade-off rather than an immutable operating setting. Under unpipelined serial dispatch, throughput is bounded by $\BatchSize / (\BatchingWindow + \BatchServiceTime(\BatchSize))$. In contrast, when the serving runtime pipelines batch formation with accelerator execution, saturated throughput depends solely on accelerator service time ($\EffectiveServiceRate(\BatchSize) = \BatchSize / \BatchServiceTime(\BatchSize)$), achieving the higher capacities documented in @tbl-model-serving-batching-throughput-tradeoff.
 
 ::: {#nbk-model-serving-resnet-50-batching-efficiency .callout-notebook title="ResNet-50 batching efficiency"}
 
-@Tbl-model-serving-batching-throughput-tradeoff illustrates the throughput-latency trade-off for a ResNet-50/V100 scenario across batch sizes one through thirty-two. The batch sizes, measured inference times, and GPU utilization are the scenario givens; the per-image compute and throughput columns are derived from them.
+@Tbl-model-serving-batching-throughput-tradeoff illustrates the throughput-latency trade-off for a ResNet-50/V100 scenario across batch sizes one through thirty-two. The batch sizes, measured inference times, and GPU utilization are scenario inputs; the per-image compute and throughput columns are derived from them. Crucially, the utilization column reports *in-kernel compute efficiency* (the proportion of streaming multiprocessor pipelines actively executing instructions during the inference burst), not the server's queueing utilization $\ServingUtilization = \ArrivalRate/\ServiceRate$ (@sec-model-serving-utilizationlatency-relationship-a2f0) nor its wall-clock hardware duty cycle (@eq-system-efficiency). A dedicated worker executing batch size 1 continuously operates at 100 percent queueing utilization with zero spare serving capacity, even though its internal execution units achieve only `{python} BatchThroughputCalc.gpu_util_str[0]` compute efficiency.
 
 **Math**: For the batch-`{python} BatchThroughputCalc.batch_size_str[2]` row, dividing batch latency by batch size yields per-image compute: `{python} BatchThroughputCalc.inference_ms_str[2]` ÷ `{python} BatchThroughputCalc.batch_size_str[2]` images ≈ `{python} BatchThroughputCalc.per_image_ms_str[2]` per image. Dividing batch size by batch latency yields throughput: `{python} BatchThroughputCalc.batch_size_str[2]` images ÷ `{python} BatchThroughputCalc.inference_ms_str[2]` ≈ `{python} BatchThroughputCalc.throughput_img_per_s_str[2]`. The same two relations apply to every derived row.
 
@@ -2993,7 +3000,7 @@ The vertical dashed marker at batch size 32 in @fig-throughput-latency-knee mark
 | **`{python} BatchThroughputCalc.batch_size_str[3]`** | `{python} BatchThroughputCalc.inference_ms_str[3]` | `{python} BatchThroughputCalc.per_image_ms_str[3]` | `{python} BatchThroughputCalc.throughput_img_per_s_str[3]` | `{python} BatchThroughputCalc.gpu_util_str[3]` |
 | **`{python} BatchThroughputCalc.batch_size_str[4]`** | `{python} BatchThroughputCalc.inference_ms_str[4]` | `{python} BatchThroughputCalc.per_image_ms_str[4]` | `{python} BatchThroughputCalc.throughput_img_per_s_str[4]` | `{python} BatchThroughputCalc.gpu_util_str[4]` |
 
-: **ResNet-50 batching sweep**: Illustrative per-image compute, throughput, and GPU utilization across batch sizes one through thirty-two on a V100. Throughput grows `{python} BatchThroughputCalc.throughput_ratio_mult_str` from batch one to batch thirty-two as GPU utilization climbs from `{python} BatchThroughputCalc.gpu_util_prose_str[0]` to `{python} BatchThroughputCalc.gpu_util_prose_str[4]`, while pure inference time stretches from `{python} BatchThroughputCalc.batch1_inference_total_ms_str` to `{python} BatchThroughputCalc.batch32_inference_ms_str`. {#tbl-model-serving-batching-throughput-tradeoff}
+: **ResNet-50 batching sweep**: Illustrative per-image compute, throughput, and active GPU compute utilization (in-kernel SM efficiency) across batch sizes one through thirty-two on a V100. Throughput grows `{python} BatchThroughputCalc.throughput_ratio_mult_str` from batch one to batch thirty-two as compute efficiency climbs from `{python} BatchThroughputCalc.gpu_util_prose_str[0]` to `{python} BatchThroughputCalc.gpu_util_prose_str[4]`, while pure inference time stretches from `{python} BatchThroughputCalc.batch1_inference_total_ms_str` to `{python} BatchThroughputCalc.batch32_inference_ms_str`. In-kernel efficiency measures hardware resource engagement during the forward pass and is distinct from server queueing utilization or wall-clock duty cycle. {#tbl-model-serving-batching-throughput-tradeoff}
 
 ```{=latex}
 \endgroup
@@ -3031,8 +3038,8 @@ class BatchingTax:
     lambda_qps = 500.0
 
     # Inference times (ms)
-    t_inf_b1 = 2.0
-    t_inf_b32 = 15.0
+    t_inf_b1 = BatchThroughputCalc.inference_ms_value[0]
+    t_inf_b32 = BatchThroughputCalc.inference_ms_value[-1]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Batch 1
@@ -3068,7 +3075,7 @@ Batching needs a few symbols beyond those of the queueing section. $\BatchServic
 When an inference server uses request-triggered fixed-size batching, it introduces two distinct sources of latency. **Batch formation delay**\index{Batching!batch formation delay, definition} $(\BatchFormationDelay)$ is the time each request waits for the batch to fill; the first request waits longest, and the last waits zero. **Inference inflation**\index{Inference inflation!definition} is the growth in batch service time $\BatchServiceTime(\BatchSize)$ when the accelerator processes $\BatchSize$ samples instead of 1. The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} represents the operating envelope where throughput gains require paying a tax in response latency. Under stationary Poisson arrivals, @eq-batching-tax approximates the average formation-plus-service latency for batch size $\BatchSize$ and arrival rate $\ArrivalRate$, assuming a worker is available when the batch forms. Its total covers formation and service only; resource-queue waiting and other request stages require separate budget:
 $$ \BatchedRequestLatency\approx \underbrace{ \frac{\BatchSize-1}{2\ArrivalRate} }_{\text{Formation delay}} + \underbrace{ \BatchServiceTime(\BatchSize) }_{\text{Inference time}} $$ {#eq-batching-tax}
 
-@Eq-batching-tax formalizes the trade-off between accelerator throughput and individual request latency. Increasing $\BatchSize$ raises arithmetic intensity and amortizes memory bandwidth across inputs, but inflates the per-request queueing delay. Concretely, at 500 QPS, moving from batch-1 to batch-32 increases wait-time from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, contributing to a `{python} BatchingTax.penalty_ratio_mult_str` total latency penalty (`{python} BatchingTax.lat_b1_ms_str` → `{python} BatchingTax.lat_b32_ms_str`). Sizing $\BatchSize$ is therefore an economic optimization: operators select the largest batch size that maximizes query throughput and hardware efficiency without breaching the latency SLO $(\LatencySlo)$.
+@Eq-batching-tax formalizes the component trade-off between accelerator throughput and individual request latency, assuming an idle worker is immediately available upon batch assembly. Increasing $\BatchSize$ raises arithmetic intensity and amortizes memory bandwidth across inputs, but introduces formation delay for early arrivals. Evaluated as a formation-plus-service component comparison using the service times from @tbl-model-serving-batching-throughput-tradeoff at 500 QPS, moving from batch 1 to batch 32 increases formation wait from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, yielding a `{python} BatchingTax.penalty_ratio_mult_str` growth in isolated stage latency (`{python} BatchingTax.lat_b1_ms_str` to `{python} BatchingTax.lat_b32_ms_str`). However, batch-one service cannot sustain 500 QPS on a single worker whose peak service rate is only 200 requests per second; without batching, worker backlog diverges toward infinity, so `{python} BatchingTax.lat_b1_ms_str` does not represent a viable steady-state response time at this arrival rate. Batching is what makes 500 QPS feasible on that hardware in the first place, demonstrating that grouping requests can lower loaded end-to-end response time even while adding formation delay. Sizing $\BatchSize$ is therefore an operational stability screen before it is an economic optimization: operators first enforce queue stability ($\ArrivalRate < \EffectiveServiceRate(\BatchSize)$) and then select the batch size that maximizes throughput within the memory ceiling and latency SLO $(\LatencySlo)$.
 
 @Eq-batching-tax assumes the batcher waits for exactly $\BatchSize$ requests. Under fluctuating traffic that assumption is itself the problem, because a slow period can leave early arrivals waiting indefinitely, and how serving systems relax it governs the choice of batching strategy.
 
@@ -3076,7 +3083,7 @@ $$ \BatchedRequestLatency\approx \underbrace{ \frac{\BatchSize-1}{2\ArrivalRate}
 
 Static batching\index{Static batching!fixed batch size} fixes the batch dimension at compile time and holds execution until a queue accumulates exactly $\BatchSize$ requests. In offline batch processing and model training, static shapes allow compilers to allocate static memory buffers and emit optimized compute kernels that maximize weight reuse and arithmetic intensity. In interactive serving, however, client requests arrive stochastically. Under low or fluctuating arrival rates, static batching exposes requests to unbounded queuing delay while waiting for the batch to fill. Conversely, setting a small fixed batch size to curtail latency leaves accelerator compute units underutilized and fails to amortize weight transfers from high-bandwidth memory when traffic spikes.
 
-Dynamic batching\index{Dynamic batching!time window} decouples batch formation from arrival determinism by buffering incoming requests behind a dual-trigger scheduler [@olston2017tensorflow; @nvidia_triton]. Rather than waiting indefinitely for a fixed tensor shape, the serving runtime makes a batch eligible for dispatch when either of two thresholds is satisfied: the queue accumulates a maximum batch size $\MaxBatchSize$, or a timeout window $\BatchingWindow$ expires relative to the oldest buffered request. When traffic bursts, the queue fills to $\MaxBatchSize$ almost instantaneously, achieving high arithmetic intensity with minimal queuing delay. When arrival rates drop, the timeout window forces the dispatch of an undersized batch ($\BatchSize< \MaxBatchSize$), bounding formation time at the expense of per-request compute efficiency. If the accelerator is busy, the ready batch can still wait for service. The timeout window $\BatchingWindow$ and maximum batch size $\MaxBatchSize$ form the primary operational levers: shorter windows prioritize latency over accelerator efficiency, whereas larger windows maximize system throughput whenever request volume permits.
+Dynamic batching\index{Dynamic batching!time window} decouples batch formation from arrival determinism by buffering incoming requests behind a dual-trigger scheduler [@olston2017tensorflow; @nvidia_triton]. Rather than waiting indefinitely for a fixed tensor shape, the serving runtime makes a batch eligible for dispatch when either of two thresholds is satisfied: the queue accumulates a maximum batch size $\MaxBatchSize$, or a timeout window $\BatchingWindow$ expires relative to the oldest buffered request. When traffic bursts, the queue fills to $\MaxBatchSize$ almost instantaneously, achieving high arithmetic intensity with minimal queuing delay. When arrival rates drop, the timeout window forces the dispatch of an undersized batch ($\BatchSize< \MaxBatchSize$), bounding formation time at the expense of per-request compute efficiency. If the accelerator is busy, the ready batch can still wait for service. The timeout window $\BatchingWindow$ and maximum batch size $\MaxBatchSize$ form the primary operational levers: shorter windows limit formation delay, whereas longer windows allow larger batches when enough requests arrive. A longer window is useful only when the resulting throughput gain remains within the latency and memory constraints.
 
 ### Dynamic batching latency-throughput trade-offs {#sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d}
 
@@ -3094,7 +3101,9 @@ where $\BatchingQueueWait$ is the time spent waiting in the batching queue (corr
 
 #### Quantitative analysis of batching {#sec-model-serving-queue-waiting-time-analysis-8d5c}
 
-Two formation models now coexist, and the calculations that follow name the one they use. A count-triggered batcher (@eq-batching-tax) waits for $\BatchSize$ requests, so its average formation delay, $(\BatchSize-1)/(2\ArrivalRate)$, shrinks as traffic grows. A timer-triggered batcher waits for a window to close, so its formation delay is set by the window rather than by traffic. The dynamic batcher above combines both triggers, dispatching at $\MaxBatchSize$ or at the timeout, whichever comes first. The next calculations isolate the timer with the simplest version, fixed calendar windows, with no maximum-batch truncation and an available worker at window close. A calendar window differs from the oldest-request timer above. A triggered window begins with one request and then collects later arrivals, whereas a calendar window can be empty. Under stationary Poisson arrivals, request arrival times are uniform within each calendar window. A request arriving at time $\WindowArrivalOffset$ waits $\BatchingWindow- \WindowArrivalOffset$ for that window to close, so @eq-avg-wait gives an average wait of half the window:
+The configuration decision has three parts: choose a formation rule, estimate the batch service cost, and reserve time for work already ahead of the request. The count-triggered calculation establishes why waiting for a full batch is costly. The dual-trigger scheduler bounds that formation wait. Calendar windows provide a simpler analytical model for screening candidate timer values; they do not model the complete dual-trigger worker. Example \ref{exmp-model-serving-batch-dispatch-decision} returns to that worker and accounts for its backlog explicitly.
+
+A count-triggered batcher (@eq-batching-tax) waits for $\BatchSize$ requests, so its average formation delay, $(\BatchSize-1)/(2\ArrivalRate)$, shrinks as traffic grows. A timer-triggered batcher waits for a window to close, so its formation delay is set by the window rather than by traffic. The dynamic batcher above combines both triggers, dispatching at $\MaxBatchSize$ or at the timeout, whichever comes first. The next calculations isolate the timer with the simplest version, fixed calendar windows, with no maximum-batch truncation and an available worker at window close. A calendar window differs from the oldest-request timer above. A triggered window begins with one request and then collects later arrivals, whereas a calendar window can be empty. Under stationary Poisson arrivals, request arrival times are uniform within each calendar window. A request arriving at time $\WindowArrivalOffset$ waits $\BatchingWindow- \WindowArrivalOffset$ for that window to close, so @eq-avg-wait gives an average wait of half the window:
 $$\mathbb{E}[\BatchingQueueWait] = \frac{\BatchingWindow}{2}$$ {#eq-avg-wait}
 
 ```{python}
@@ -3219,7 +3228,7 @@ $$\EffectiveServiceRate(\BatchSize) \approx \frac{\BatchSize}{\BatchServiceTime(
 
 In @eq-batch-throughput, $\ArrivalRate$ is the offered arrival rate and $\EffectiveServiceRate(\BatchSize)$ is the saturated service capacity for batch size $\BatchSize$. The numerator increases linearly with batch size while service time often increases sublinearly over a useful range because larger batches amortize fixed kernel-launch overheads and DRAM weight transfers, shifting execution from memory-bandwidth-bound matrix-vector operations toward compute-bound matrix-matrix multiplication. The batching window still appears in request latency and in low-traffic regimes, where the expected batch size is limited by arrivals during the window, roughly $\ArrivalRate \BatchingWindow$.
 
-For ResNet-50 on a V100 GPU, service time approximately scales as $\BatchServiceTime(\BatchSize) = 5 \text{ ms} + (0.6 \text{ ms})\,\BatchSize$ (5 ms fixed overhead plus 0.6 ms per image in the batch). This linear approximation captures the dominant trend; actual service times may deviate slightly due to memory hierarchy effects. With a $\BatchingWindow= 10 \text{ ms}$ batching window, @tbl-batching-throughput extends the pure-inference sweep of @tbl-model-serving-batching-throughput-tradeoff: the latency column includes the full formation window plus service, but excludes resource backlog and other request stages; saturated throughput uses service time alone:
+To analytically evaluate batching strategies across arbitrary batch sizes without interpolating discrete benchmark tables, ResNet-50 execution time on a V100 GPU can be modeled via the affine approximation $\BatchServiceTime(\BatchSize) = 5 \text{ ms} + (0.6 \text{ ms})\,\BatchSize$ (5 ms fixed kernel launch and parameter-staging overhead plus 0.6 ms per image). This analytical service model unifies the queueing, window screening, and dispatch calculations throughout the remainder of this section. With a $\BatchingWindow= 10 \text{ ms}$ batching window, @tbl-batching-throughput uses this explicit service function to evaluate the trade-off between formation-plus-service latency and saturated capacity, where latency includes the full formation window plus execution but excludes worker queueing, and throughput reflects saturated pipelined execution:
 
 ```{python}
 #| echo: false
@@ -3332,7 +3341,7 @@ $$ \Time = \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency $$ {#eq-
 *   **Case 1 (batch 1)**: Overhead (`{python} BatchingAnalysisCalc.il_overhead_ms_str`) $\gg$ Compute (`{python} BatchingAnalysisCalc.il_compute_b1_ms_str`). Efficiency ≈ `{python} BatchingAnalysisCalc.il_eff_b1_str`. The GPU is mostly waiting.
 *   **Case 2 (batch 32)**: Overhead (`{python} BatchingAnalysisCalc.il_overhead_ms_str`) $\ll$ Compute (`{python} BatchingAnalysisCalc.il_compute_b32_ms_str`). Efficiency ≈ `{python} BatchingAnalysisCalc.il_eff_b32_str`. The GPU is crunching numbers.
 
-**Systems insight**: Increase batch size until fixed overhead becomes negligible ($<$ `{python} BatchingAnalysisCalc.il_threshold_str` of total time) or the latency SLO blocks further waiting. Beyond this point, additional batching yields minimal throughput but imposes a linear queueing penalty.
+**Systems insight**: Within this two-term model, batching offers diminishing throughput gains once fixed overhead becomes negligible ($<$ `{python} BatchingAnalysisCalc.il_threshold_str` of total time). Treat that point as a candidate for measurement; stop earlier if memory capacity or the latency SLO binds, or if measured useful throughput declines. Overhead amortization alone does not identify the best serving configuration.
 
 :::
 
@@ -3340,7 +3349,7 @@ These results compose a calendar-window planning model: average formation wait i
 
 #### Latency-constrained optimization {#sec-model-serving-latencyconstrained-optimization-8f66}
 
-When latency is the binding constraint, a mean-latency approximation provides an initial screen of candidate batch sizes. For the portion of a mean latency SLO allocated to batching and service, $\BatchingLatencyBudget$, and average wait time $\BatchingWindow/2$, @eq-latency-constrained-batch defines the maximum allowable batch size $\LatencyBoundedBatchSize$ using a first-order average latency approximation. Other request stages require separate budget allocations. This screens a mean budget; it does not certify a p95 or p99 target:
+When latency is the binding constraint, a mean-latency approximation provides an initial screen of candidate batch sizes. For the portion of a mean latency SLO allocated to batching and service, $\BatchingLatencyBudget$, and average wait time $\BatchingWindow/2$, @eq-latency-constrained-batch defines the maximum allowable batch size $\LatencyBoundedBatchSize$ using a first-order average latency approximation. Other request stages require separate budget allocations. This is a feasibility bound, not a throughput optimum, and it screens a mean budget rather than certifying a p95 or p99 target:
 $$\LatencyBoundedBatchSize= \max\left\{\BatchSize : \frac{\BatchingWindow}{2} + \BatchServiceTime(\BatchSize) \leq \BatchingLatencyBudget\right\}$$ {#eq-latency-constrained-batch}
 
 <!-- Consider a 50 ms p95 latency SLO for ResNet-50 serving (using this mean-based approximation as a starting point): -->
@@ -3417,7 +3426,7 @@ class BatchingOptimization:
     latency_p99_increase_ms_str = fmt_time(round(s2_window - s1_window), 'millisecond', precision=0, commas=False)
 ```
 
-In this illustrative ResNet-50 scenario with a 50 ms p95 latency SLO, comparing a conservative batching window against an aggressive one shows how the assumed configurations trade wait time, inference budget, and saturated capacity. @Tbl-batching-windows lays the two configurations side by side.
+Applying @eq-latency-constrained-batch to the affine service model for a 50 ms target deadline illustrates how selecting candidate batching windows shapes the feasible configuration space. @Tbl-batching-windows contrasts two concrete design points: a conservative `{python} BatchingOptimization.s1_window_ms_str` window and an aggressive `{python} BatchingOptimization.s2_window_ms_str` window.
 
 | **Metric**                       | **Conservative ($\BatchingWindow$ = `{python} BatchingOptimization.s1_window_ms_str`)**                                                        | **Aggressive ($\BatchingWindow$ = `{python} BatchingOptimization.s2_window_ms_str`)** |
 |:---------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|
@@ -3428,7 +3437,7 @@ In this illustrative ResNet-50 scenario with a 50 ms p95 latency SLO, comparing 
 
 : **Illustrative batching window trade-off**: How two assumed batching configurations trade average wait, inference budget, batch-size cap, and saturated capacity. {#tbl-batching-windows tbl-colwidths="[25,49,26]"}
 
-A longer window buys capacity at a known, bounded price in waiting. The aggressive configuration assumes `{python} BatchingOptimization.throughput_gain_pct_str` higher saturated capacity, and in exchange average batching wait rises by `{python} BatchingOptimization.latency_avg_increase_ms_str` and the worst-case window wait by `{python} BatchingOptimization.latency_p99_increase_ms_str`. That worst case bounds only the window's contribution; the full request p99 also depends on how much the batch size varies and on worker backlog, and the next subsection accounts for the first of these.
+This comparison quantifies the diminishing returns of expanding the batching window. Widening the window by `{python} BatchingOptimization.latency_p99_increase_ms_str` delivers only `{python} BatchingOptimization.throughput_gain_pct_str` higher saturated capacity while increasing average formation wait by `{python} BatchingOptimization.latency_avg_increase_ms_str`. However, this initial screen relies on mean formation wait and deterministic batch sizing. In production, stochastic arrivals introduce batch-size variance that can breach tail deadlines even when the mean latency appears well within the budget, requiring the percentile envelope analysis developed next.
 
 #### SLO violation analysis {#sec-model-serving-slo-violation-analysis-6ebf}
 
@@ -3712,6 +3721,54 @@ For an illustrative ResNet-50 serving system with a 50 ms SLO and 500 QPS traffi
 ```{=latex}
 \endgroup
 ```
+
+```{python}
+#| echo: false
+# ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+# Hypothetical trace: oldest request arrives at zero; three join before timeout.
+class BatchDispatchCalc:
+    arrivals = [0 * ms, 2 * ms, 5 * ms, 9 * ms]
+    worker_ready = 18 * ms
+    outside_remaining = 4 * ms
+    deadline = PracticalConfigCalc.pc_slo_ms_value
+    window = PracticalConfigCalc.pc_config_window_ms_value
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    formation_end = arrivals[0] + window
+    dispatch = max(formation_end, worker_ready)
+    backlog_wait = dispatch - formation_end
+    service = service_time_value(len(arrivals))
+    response = dispatch + service + outside_remaining
+    oldest_latency = response - arrivals[0]
+    slack = deadline - oldest_latency
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(arrivals[-1] < formation_end, "All four requests must join before timeout.")
+    check(len(arrivals) < PracticalConfigCalc.pc_config_batch_count_value, "Timeout must trigger before the batch cap.")
+    check(backlog_wait > 0 * ms, "The trace must expose waiting beyond formation.")
+    check(slack > 0 * ms, "The oldest request must meet this trace's deadline.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    formation_ms_str = fmt_time(window, 'millisecond', precision=0, commas=False)
+    dispatch_ms_str = fmt_time(dispatch, 'millisecond', precision=0, commas=False)
+    backlog_ms_str = fmt_time(backlog_wait, 'millisecond', precision=0, commas=False)
+    service_ms_str = fmt_time(service, 'millisecond', precision=1, commas=False)
+    outside_ms_str = fmt_time(outside_remaining, 'millisecond', precision=0, commas=False)
+    response_ms_str = fmt_time(oldest_latency, 'millisecond', precision=1, commas=False)
+    slack_ms_str = fmt_time(slack, 'millisecond', precision=1, commas=False)
+```
+
+::: {#exmp-model-serving-batch-dispatch-decision .callout-example title="From a batching window to a dispatch decision"}
+
+**Problem**: In a hypothetical trace of the selected dual-trigger configuration, four requests arrive at 0, 2, 5, and 9 ms. No further requests arrive before dispatch. The worker becomes available at `{python} BatchDispatchCalc.dispatch_ms_str`, and the remaining response path takes `{python} BatchDispatchCalc.outside_ms_str`. Does the oldest request meet the 50 ms deadline under the planning service-time model?
+
+**Analysis**: The batch remains below the maximum count, so the oldest-request timer makes it eligible after `{python} BatchDispatchCalc.formation_ms_str`. The worker is still busy, adding `{python} BatchDispatchCalc.backlog_ms_str` of resource-queue wait. The four-request batch then takes `{python} BatchDispatchCalc.service_ms_str` under the same linear service model used for the window analysis. Adding the remaining response path gives `{python} BatchDispatchCalc.response_ms_str` from the oldest arrival to completion.
+
+**Result**: Dispatching the four-request batch meets the oldest request's deadline with `{python} BatchDispatchCalc.slack_ms_str` of slack; the later arrivals finish with more slack. Waiting for the maximum batch would leave these requests stalled because the trace supplies no further arrivals. The timeout therefore determines eligibility, while worker availability determines actual dispatch.
+
+**Systems insight**: The selected window passes this complete trace, including backlog and the response path. Establishing a percentile SLO requires repeating the accounting over the intended traffic, service-time variation, and input mix, with rejected requests and fallback quality reported alongside completed-request latency.
+
+:::
 
 Working backward from the budget can also conclude that the right window is zero, because batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack support for ragged (variable-length) tensors, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
 
@@ -4418,6 +4475,28 @@ The KV cache[^fn-kv-cache-serving]\index{KV cache!LLM memory}\index{KV cache!seq
 
 Many requests carry identical prefixes, and recomputing their cache entries wastes both prefill compute and memory. **Prefix caching**\index{Prefix caching!KV cache reuse} stores the KV states of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing independent requests to reuse the prefill result for an identical prefix. For $\SharedPrefixRequestCount$ requests sharing a prefix of $\SharedPrefixLength$ tokens, the avoided prefill work is roughly $(\SharedPrefixRequestCount-1)\SharedPrefixLength$ token steps, subject to cache hits, eviction, and implementation overhead. For multi-turn conversations, the same principle lets a subsequent turn process only the new suffix after reusing compatible prior state.
 
+When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV cache offloading**\index{KV cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents OOM failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly. Distributed parallelism, which splits one request across multiple devices or machines, is a further lever that belongs to large-scale systems.
+
+### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
+
+Prefix reuse and offloading both assume that the next turn of a conversation reaches the replica that holds its cache. Session affinity, routing successive requests from a client to the same physical replica, arises whenever serving state resides in local accelerator memory rather than being reconstructed on every invocation. In conversational models, this resident state is dominated by the KV cache\index{KV cache!session reuse}\index{KV cache!multi-turn conversations}. When turn $\ConversationTurnIndex$ executes on a replica, that replica's HBM retains the projected keys and values across all prior prompt and generation tokens. Routing turn $\ConversationTurnIndex+1$ to a different replica discards that local memory footprint, forcing the new node to recompute the entire prefix sequence from scratch. This redundant prefill consumes memory bandwidth and tensor-core cycles that would otherwise advance active decode iterations, directly inflating time-to-first-token.
+
+A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}: small per-user adapters, each a pair of low-rank matrices whose product is added to a frozen base weight matrix. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines, such as tokenizer vocabularies and per-session normalization state, impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
+
+::: {.column-margin .margin-pointer}
+↩ Products of two low-rank matrices, and the storage and memory traffic they save relative to a full matrix, are established in @sec-model-compression-lowrank-factorization-955e.
+:::
+
+Fleet routing is an optional extension of this local state-reuse constraint. Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($\ArithmeticIntensity\propto \BatchSize$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches, collapsing arithmetic intensity back into the memory-bandwidth-bound regime, or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
+
+::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
+
+Each LLM technique in this section answers one of two physical limits. The first is the decode bound, in which every generated token pays for a full weight stream at small batch: continuous batching keeps decode batches full so each stream serves many sequences, chunked prefill keeps prompt processing from stalling that stream, and speculative decoding extracts more than one accepted token per stream. The second is the KV cache, which grows with sequence length and batch size and often exceeds the weights themselves; PagedAttention, prefix caching, offloading, and session affinity decide where it lives and how much of it can be reused. Weight-only quantization (such as INT4 weights with FP16 activations), the precision lever of @sec-model-serving-precision-selection-serving-55ba applied to the weight stream, addresses both at once, because it shrinks the bytes streamed per token and frees capacity for cache [@lin2023awq].
+
+These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
+
+:::
+
 ```{python}
 #| echo: false
 #| label: carbon-cost-h100-tdp
@@ -4532,28 +4611,6 @@ As LLMs scale, joules per token becomes a first-class operational metric alongsi
 \vspace*{-0.7ex}
 ```
 The primary way to reduce J/token is to increase hardware utilization and eliminate redundant compute. If the GPU sits at `{python} CarbonCostCalc.cc_low_util_pct_str` utilization due to poor batching, it still draws ~`{python} CarbonCostCalc.cc_idle_power_w_str` and the host adds `{python} CarbonCostCalc.cc_host_overhead_w_str`, causing energy per token to rise to `{python} CarbonCostCalc.cc_low_util_joules_j_str` (approximately `{python} CarbonCostCalc.cc_low_util_ratio_mult_str` the baseline). Architectural optimizations like prefix caching also skip the energy-intensive prefill phase for shared context, directly reducing the energy footprint of retrieval-augmented generation (RAG) and chat applications. The serving lesson is that efficiency is not only a latency or cost metric; it also determines how much energy each useful token consumes.
-
-:::
-
-When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV cache offloading**\index{KV cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents OOM failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly. Distributed parallelism, which splits one request across multiple devices or machines, is a further lever that belongs to large-scale systems.
-
-### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
-
-Prefix reuse and offloading both assume that the next turn of a conversation reaches the replica that holds its cache. Session affinity, routing successive requests from a client to the same physical replica, arises whenever serving state resides in local accelerator memory rather than being reconstructed on every invocation. In conversational models, this resident state is dominated by the KV cache\index{KV cache!session reuse}\index{KV cache!multi-turn conversations}. When turn $\ConversationTurnIndex$ executes on a replica, that replica's HBM retains the projected keys and values across all prior prompt and generation tokens. Routing turn $\ConversationTurnIndex+1$ to a different replica discards that local memory footprint, forcing the new node to recompute the entire prefix sequence from scratch. This redundant prefill consumes memory bandwidth and tensor-core cycles that would otherwise advance active decode iterations, directly inflating time-to-first-token.
-
-A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}: small per-user adapters, each a pair of low-rank matrices whose product is added to a frozen base weight matrix. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines, such as tokenizer vocabularies and per-session normalization state, impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
-
-::: {.column-margin .margin-pointer}
-↩ Products of two low-rank matrices, and the storage and memory traffic they save relative to a full matrix, are established in @sec-model-compression-lowrank-factorization-955e.
-:::
-
-Fleet routing is an optional extension of this local state-reuse constraint. Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($\ArithmeticIntensity\propto \BatchSize$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches, collapsing arithmetic intensity back into the memory-bandwidth-bound regime, or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
-
-::: {#psp-model-serving-llm-serving-beyond-fundamentals .callout-perspective title="LLM serving: Beyond the fundamentals"}
-
-Each LLM technique in this section answers one of two physical limits. The first is the decode bound, in which every generated token pays for a full weight stream at small batch: continuous batching keeps decode batches full so each stream serves many sequences, chunked prefill keeps prompt processing from stalling that stream, and speculative decoding extracts more than one accepted token per stream. The second is the KV cache, which grows with sequence length and batch size and often exceeds the weights themselves; PagedAttention, prefix caching, offloading, and session affinity decide where it lives and how much of it can be reused. Weight-only quantization (such as INT4 weights with FP16 activations), the precision lever of @sec-model-serving-precision-selection-serving-55ba applied to the weight stream, addresses both at once, because it shrinks the bytes streamed per token and frees capacity for cache [@lin2023awq].
-
-These LLM-specific optimizations build directly on core serving mechanics: queueing models govern scheduling timeouts, batching dynamics determine throughput-latency curves, and reduced precision bounds memory traffic. Advanced treatments extend these mechanics to multi-tenant prefix sharing across fleets and multi-node tensor-parallel execution.
 
 :::
 
@@ -4735,7 +4792,7 @@ This arithmetic compares assumed capacities under different service models; it d
 
 ### Production case study: Serving 8-billion-parameter Llama 3 {#sec-model-serving-production-case-study-serving-llama38b-0499}
 
-Beyond resident weights, KV-cache memory represents the primary physical capacity bottleneck in large-language-model serving\index{LLM serving!production case study}. @Fig-kv-cache-growth charts this memory consumption at 70-billion-parameter scale with grouped-query attention, tracking how cache footprints expand linearly with context length across batch sizes 1 through 32. On the modeled 80 GB A100, 4-bit weights leave roughly 51 decimal GB for cache before runtime overhead; the capacity-label convention is reconciled below. With that budget, batch size 32 breaches the capacity ceiling at roughly 4,800 tokens, crossing directly into the shaded out-of-memory danger zone. The 8-billion-parameter Llama 3\index{Llama 3!8-billion-parameter serving case study}\index{LLM serving!8-billion-parameter case study} profile analyzed in the rest of this section obeys the same physics with more headroom, making it a workload an engineer can fit on one GPU and reason about end to end.
+In large-language-model serving, resident model weights establish only the static memory baseline; dynamic key-value (KV) cache memory dictates the physical serving envelope and maximum concurrency\index{LLM serving!production case study}. To ground the memory and compute trade-offs of generative inference end to end, this case study analyzes an 8-billion-parameter Llama 3 deployment on a single accelerator\index{Llama 3!8-billion-parameter serving case study}\index{LLM serving!8-billion-parameter case study}. Before evaluating the 8-billion-parameter workload contract, @fig-kv-cache-growth illustrates why KV-cache growth dominates capacity planning across the transformer architecture. At frontier 70-billion-parameter scale with grouped-query attention on an 80 GB A100 GPU, 4-bit weights consume roughly 35 GB, leaving 51 decimal GB for dynamic cache before runtime workspace. As context length grows, batch size 32 breaches that physical capacity ceiling at approximately 4,800 tokens, precipitating out-of-memory failure. The 8-billion-parameter model analyzed below obeys these identical physical laws but operates with substantial memory headroom on modern hardware, allowing an engineer to balance batching, prompt prefill, and autoregressive decoding on a single device without multi-node sharding.
 
 ```{python}
 #| echo: false
@@ -4839,7 +4896,7 @@ The following fixed workload assumptions define the reference case used througho
 *   **Request characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
 
-The device capacity labels use binary-sized units. For the A100 comparison, `{python} LlmCaseStudyHwSpecs.a100_mem_decimal_gb_str` is the same capacity expressed in decimal GB, making the plotted weight and cache footprints directly comparable. Runtime workspace still needs a separate reserve.
+Hardware datasheets report accelerator memory in binary units (GiB), whereas tensor footprint calculations use decimal gigabytes (GB). For the A100 memory baseline in @fig-kv-cache-growth, `{python} LlmCaseStudyHwSpecs.a100_mem_decimal_gb_str` expresses device capacity in decimal units, making weight and cache footprints directly comparable before reserving space for runtime workspace.
 
 ::: {#fig-kv-cache-growth fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled A100, 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled A100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
 
@@ -4941,7 +4998,7 @@ plt.close()
 
 :::
 
-Longer contexts therefore require smaller concurrent batches or more memory, reducing throughput efficiency. These assumptions make the case study narrow enough to calculate while preserving the two serving constraints that matter most: the prefill budget for time to first token and the decode budget for each generated token.
+As demonstrated by @fig-kv-cache-growth, longer context lengths force serving engines to restrict concurrent batch sizes to avoid out-of-memory crashes, trading throughput efficiency for sequence length. In contrast, the case study's 8-billion-parameter workload (1,000-token prompt, 256-token decode) fits comfortably within the H100 memory budget, allowing analysis to isolate the two foundational serving bounds: the compute-bound prefill phase governing time to first token and the memory-bandwidth-bound decode phase governing time per output token.
 
 #### Latency deconstruction {#sec-model-serving-latency-deconstruction-217e}
 
@@ -5082,6 +5139,16 @@ With 4-bit weights occupying `{python} LlmServingCalc.model_weight_gb_str`, the 
 Consider a representative H100 SXM5 rental cost of approximately `{python} LlmServingCalc.hourly_cost_str` and an assumed isolated prefill rate of 10,000 prompt tokens/s. Dividing that rate by the 1,000-token prompt gives the prefill request capacity. For this calculation, each completed request counts both prompt and generated output tokens, totaling `{python} LlmServingCalc.tokens_per_req_str`. Multiplying the limiting request rate by this token count and the seconds in an hour gives `{python} LlmServingCalc.m_tokens_per_hour_str`; dividing the hourly rental cost by that throughput gives `{python} LlmServingCalc.cost_per_million_tokens_usd_str`.
 
 The comparison also converts KV residency into a request rate by dividing the resident request count by the modeled time to complete prefill and decode. It assumes that all those resident requests can advance at the modeled per-request pace, which is an optimistic concurrency assumption rather than a measured decode capacity. Under these assumptions, isolated prefill supplies the smaller rate and sets the displayed cost floor. Shared prefill/decode contention, batched decode timing, runtime workspace, and SLO-qualified throughput determine whether the service realizes that rate; memory fit alone does not establish it.
+
+The resulting cost floor is a bound for this workload. A load experiment must supply the missing service capacity before the same arithmetic can price an accepted deployment configuration.
+
+::: {#chk-model-serving-llm-capacity-acceptance .callout-checkpoint title="Complete the LLM capacity decision"}
+
+- [ ] **Define acceptance**: For the case study's 200 ms TTFT and 20 ms TPOT targets, state the required completion quantiles, availability requirement, and memory reserve before evaluating a configuration. Why do latency thresholds alone leave the SLO incomplete?
+- [ ] **Measure the missing capacity**: Hold runtime, precision, hardware, and prompt/output lengths fixed. Increase offered request rate across several concurrency limits below the residency ceiling. For each warmed configuration, record TTFT and TPOT distributions, completed request rate, rejection rate, and peak allocated memory. Identify the configurations that satisfy all acceptance conditions.
+- [ ] **Close the economic decision**: Recompute cost using each qualifying configuration's completed request rate and the case study's prompt-plus-output token convention. Select the lowest-cost qualifying setting for the required load. If none qualifies, identify whether lower offered load, a different batching/runtime policy, or different hardware is the next experiment. Explain why the KV-residency ceiling cannot supply the missing throughput observation.
+
+:::
 
 For large language models, memory capacity\index{Memory!capacity, LLM throughput}\index{KV cache!memory capacity} (the size of the unallocated VRAM dedicated to the KV cache) determines maximum concurrent residency, while prefill compute and decode bandwidth determine realized token throughput and cost under a specific traffic mix. Memory bandwidth\index{Memory bandwidth!LLM latency}\index{HBM!memory bandwidth} bounds low-batch decode latency; larger batches amortize parameter movement and shift the limit toward compute or KV-cache traffic.
 
@@ -5480,7 +5547,7 @@ Effective serving optimization measures the complete request path rather than mo
 
 The chosen deployment paradigm changes the feasible request path. A cloud API may use dynamic batching under a measured arrival process, synchronized sensors impose a frame deadline, and a single-stream mobile workload may choose batch one to protect responsiveness and energy. The MLPerf scenarios provide standardized approximations of these shapes; production design still begins with the service's own traffic, hardware, and objective.
 
-Node-level optimization connects the model's operations to the machine that executes them. Profiling reveals whether compilation, kernel fusion, precision, locality, serialization, or loading actually binds the request path. Gains matter only when they survive production input shapes, accuracy checks, and latency variation. Token-streaming language models stretch the whole toolkit at once. Latency splits into time to first token and time per output token, batching must reschedule at every generated token, and the KV cache, not arithmetic, bounds how many requests can share an accelerator. Capacity planning converts that valid throughput into replica count and unit cost, as the Llama 3 case study in @sec-model-serving-production-case-study-serving-llama38b-0499 demonstrates. A faster kernel that neither reduces provisioned capacity nor improves the SLO has not produced an economic gain.
+Node-level optimization connects the model's operations to the machine that executes them. Profiling reveals whether compilation, kernel fusion, precision, locality, serialization, or loading actually binds the request path. Gains matter only when they survive production input shapes, accuracy checks, and latency variation. Token-streaming language models stretch the whole toolkit at once. Latency splits into time to first token and time per output token, batching must reschedule at every generated token, and the KV cache, not arithmetic, bounds how many requests can share an accelerator. Capacity planning converts that valid throughput into replica count and unit cost, while the Llama 3 case study in @sec-model-serving-production-case-study-serving-llama38b-0499 separates calculable capacity bounds from the load experiment needed to establish valid throughput. A faster kernel that neither reduces provisioned capacity nor improves the SLO has not produced an economic gain.
 
 ::: {.callout-takeaways title="Inverting every training priority"}
 

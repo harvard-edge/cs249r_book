@@ -1150,7 +1150,7 @@ For GPT-2's `{python} GPT2Optimizer.model_params_b_str` parameters in FP32 (`{py
 - Adam State ($\AdamFirstMoment_t$, $\AdamSecondMoment_t$): `{python} GPT2Optimizer.model_params_b_str` $\times$ `{python} GPT2Optimizer.adam_bytes_value_str` bytes = `{python} GPT2Optimizer.adam_state_gb_str`
 - Total static memory: `{python} GPT2Optimizer.total_static_fp32_gb_str`
 
-This static training state alone, `{python} GPT2Optimizer.total_static_fp32_gb_str` for GPT-2, takes most of a V100's `{python} GPT2Optimizer.v100_mem_capacity_gb_str` before any activation is stored, and how much room the activations need depends on batch size and sequence length. This chapter builds the GPT-2 memory ledger in stages. The activation notebook below adds activations at batch 4, and the optimization walkthrough (@sec-model-training-putting-together-gpt2-optimization-walkthrough-def7) delivers the final verdict for that configuration.
+This static training state alone, `{python} GPT2Optimizer.total_static_fp32_gb_str` for GPT-2, takes most of a V100's `{python} GPT2Optimizer.v100_mem_capacity_gb_str` before any activation is stored, and how much room the activations need depends on batch size and sequence length. This chapter builds the GPT-2 memory ledger in stages. The activation notebook below starts at batch 4; the mixed-precision ledger tests an explicit checkpoint schedule for that micro-batch, which the optimization walkthrough (@sec-model-training-putting-together-gpt2-optimization-walkthrough-def7) carries into profiling.
 
 **System Decisions Driven by Optimizer**
 
@@ -1232,6 +1232,70 @@ Steps 1 and 2 keep two persistent moment buffers per parameter, so parameters pl
 The framework's learning rate scheduling\index{Learning rate scheduling!definition}\index{Learning rate!scheduling}\index{Learning rate!warmup}\index{Learning rate!cosine decay} hook changes the optimizer's trajectory without adding per-parameter state. It adjusts the learning rate $\LearningRate$ during training, letting the system shape convergence behavior while leaving the underlying optimizer equations intact.
 
 Schedules such as cosine annealing\index{Cosine annealing!learning rate schedule}, exponential decay, or step-wise reductions implement that trajectory by changing the step size over time. A scheduler tracks lightweight scalar state (current step, epoch, warmup phase) that must be serialized into checkpoints alongside optimizer states to resume the schedule. Reproducing the training trajectory also requires the relevant random-number and data-position state and compatible execution settings. This separation lets the systems engineer combine base optimization algorithms (SGD, Adam) with scheduling strategies (cosine annealing, linear warmup) without modifying the underlying tensor update rules.
+
+#### Time to target quality {#sec-model-training-time-to-quality}
+
+A faster update is valuable only if the recipe reaches the required validation quality sooner. Optimizer state and numerical precision affect the price of each update, while the optimizer and schedule affect how many updates the run needs. Both quantities enter a time-to-target decision.
+
+```{python}
+#| echo: false
+#| label: training-time-to-quality-calc
+from mlsysim.core.units import second, minute
+from mlsysim.fmt import fmt, fmt_count, fmt_time, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Goal: Compare complete training recipes at the same validation target.
+# │ Show: A faster step can lose once steps to target and evaluation are counted.
+class TrainingQualityComparison:
+    # ┌── 1. LOAD (Explicit hypothetical scenario inputs) ───────────────────
+    steps_a = 6000
+    steps_b = 10000
+    step_a = 2 * second
+    step_b = 1.5 * second
+    evaluation_a = 600 * second
+    evaluation_b = 600 * second
+
+    # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    training_a = steps_a * step_a
+    training_b = steps_b * step_b
+    target_a = training_a + evaluation_a
+    target_b = training_b + evaluation_b
+    break_even_steps_b = ((target_a - evaluation_b) / step_b).to("").magnitude
+
+    # ┌── 3. GUARD ──────────────────────────────────────────────────────────
+    check(step_b < step_a, "Recipe B must have the faster step.")
+    check(target_b > target_a, "Extra steps must reverse the step-time ranking.")
+    check(break_even_steps_b * step_b + evaluation_b == target_a, "Break-even budget must match total time.")
+
+    # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────
+    steps_a_str = fmt_count(steps_a, commas=True)
+    steps_b_str = fmt_count(steps_b, commas=True)
+    step_a_str = fmt_time(step_a, second, precision=0, commas=False)
+    step_b_str = fmt_time(step_b, second, precision=1, commas=False)
+    training_a_str = fmt_time(training_a, minute, precision=0, commas=False)
+    training_b_str = fmt_time(training_b, minute, precision=0, commas=False)
+    evaluation_a_str = fmt_time(evaluation_a, minute, precision=0, commas=False)
+    evaluation_b_str = fmt_time(evaluation_b, minute, precision=0, commas=False)
+    target_a_str = fmt_time(target_a, minute, precision=0, commas=False)
+    target_b_str = fmt_time(target_b, minute, precision=0, commas=False)
+    break_even_steps_str = fmt_count(break_even_steps_b, commas=True)
+```
+
+Consider two precision-and-optimizer recipes for the same model, dataset, effective batch, machine, and validation target. Both fit in memory. @Tbl-training-time-to-quality supplies hypothetical observations for their first accepted checkpoint and calculates the total elapsed time from them.
+
+| **Quantity** | **Recipe A** | **Recipe B** |
+|:-------------|:------------:|:------------:|
+| End-to-end update time | `{python} TrainingQualityComparison.step_a_str` | `{python} TrainingQualityComparison.step_b_str` |
+| Updates to the same validation target | `{python} TrainingQualityComparison.steps_a_str` | `{python} TrainingQualityComparison.steps_b_str` |
+| Update time × update count | `{python} TrainingQualityComparison.training_a_str` | `{python} TrainingQualityComparison.training_b_str` |
+| Separate evaluation and checkpoint time | `{python} TrainingQualityComparison.evaluation_a_str` | `{python} TrainingQualityComparison.evaluation_b_str` |
+| Total time to accepted checkpoint | `{python} TrainingQualityComparison.target_a_str` | `{python} TrainingQualityComparison.target_b_str` |
+
+: **Illustrative Time-to-Quality Comparison**: Step durations, target-reaching update counts, and evaluation/checkpoint overhead are supplied observations for a hypothetical workload, not benchmark results. Totals multiply updates by end-to-end step time and add overhead excluded from that step time. {#tbl-training-time-to-quality tbl-colwidths="[54,23,23]"}
+
+Recipe A reaches the target sooner. At its shorter step duration, Recipe B would tie A's total time if it reached the target at `{python} TrainingQualityComparison.break_even_steps_str` updates under the stated overhead. Its assumed `{python} TrainingQualityComparison.steps_b_str` updates exceed that budget. On the same allocated machine, shorter total time also means fewer billed accelerator-hours.
+
+A profile measures the price of an update; validation measures how many updates buy the required quality. Comparing optimizers, precision, or batch schedules requires both measurements under a common acceptance criterion. A real experiment must also account for run-to-run variation and any change in evaluation frequency; an apparent crossing of the target is not evidence that a recipe reliably meets it.
 
 Parameter update rules define trajectories given gradient vectors, but assume those gradients are already materialized. For billion-parameter networks, gradient evaluation constitutes the dominant computational and memory burden of the training loop. The mechanics of gradient generation—rather than the optimizer step itself—dictate training memory budgets and runtime.
 
@@ -1449,7 +1513,7 @@ This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_capacity_gb
 3. Mixed precision: FP16 activations (already applied) vs. FP32 (would be `{python} GPT2ActivationMemory.act_fp32_gb_str`)
 4. Reduced micro-batch size and gradient accumulation: Build a larger effective batch from multiple memory-feasible forward/backward passes
 
-**Systems insight**: Even after selective recomputation, the modeled activations plus static state total about `{python} GPT2ActivationMemory.ckpt_peak_gb_str`, slightly above the raw `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` V100 capacity before workspace and allocator overhead. Selective recomputation removes `{python} GPT2ActivationMemory.ckpt_reduction_str` of the activations; the separately assumed fourfold peak activation budget in notebook \ref{nbk-training-gpt-2-mixed-precision-memory} brings this same batch-4 tensor estimate just under capacity, conditional on the runtime meeting that budget, and the optimization walkthrough assembles that final ledger.
+**Systems insight**: Even after selective recomputation, the modeled activations plus static state total about `{python} GPT2ActivationMemory.ckpt_peak_gb_str`, slightly above the raw `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` V100 capacity before workspace and allocator overhead. Selective recomputation removes `{python} GPT2ActivationMemory.ckpt_reduction_str` of the activations; the explicit segment-checkpoint ledger in notebook \ref{nbk-training-gpt-2-mixed-precision-memory} retains only segment inputs between passes and budgets the live recomputed segment. That schedule admits batch 4 in the tensor budget, which the optimization walkthrough carries into profiling.
 
 :::
 
@@ -2305,13 +2369,15 @@ Storage throughput is bounded by the slower of two hardware constraints, $\Stora
 
 #### Preprocessing {#sec-model-training-preprocessing-523c}
 
-Once retrieved from storage, raw bytes require CPU transformation into model-ready tensors. While static feature extraction can run offline, dynamic transformations such as on-the-fly tokenization and image augmentation execute during training. Under ideal independent-worker scaling, preprocessing throughput grows with worker count as expressed in @eq-preprocess-throughput:
+Once retrieved from storage, raw bytes require CPU transformation into model-ready tensors. While static feature extraction can run offline, dynamic transformations such as on-the-fly tokenization and image augmentation execute during training. Under ideal independent-worker scaling, the CPU worker pool delivers transformation capacity according to @eq-preprocess-throughput:
 $$\PreprocessingThroughput= \frac{\WorkerCount}{\WorkerTransformTime}$$ {#eq-preprocess-throughput}
-where $\WorkerCount$ parallel processing threads each perform transformations requiring $\WorkerTransformTime$ seconds. Training architectures employ multiple workers to ensure preprocessing keeps pace with accelerator consumption rates---a single thread performing image augmentation at 30 ms per batch cannot feed an accelerator that computes a forward pass in 10 ms.
+where $\WorkerCount$ parallel processing threads each perform transformations requiring $\WorkerTransformTime$ seconds per batch. Training architectures employ multiple workers to ensure transformation keeps pace with accelerator consumption rates---a single thread performing image augmentation at 30 ms per batch cannot feed an accelerator that computes a forward pass in 10 ms.
 
-Preprocessed data must then transfer to the accelerator before computation can begin. The overall training throughput is therefore constrained by the slowest of three stages, as @eq-training-bottleneck makes explicit. This single minimum is the chapter's pipeline model; every later bound on the input path is an instance of it:
+However, transforming records assumes that storage delivers raw bytes fast enough to keep worker queues filled. Under overlapped host staging, the achieved host preparation rate cannot exceed the slower of storage retrieval and CPU transformation. Dividing effective storage throughput $\EffectiveStorageThroughput$ by the raw bytes retrieved per batch yields the storage delivery rate in batches per second. When storage delivery lags behind worker demand, additional CPU threads sit idle waiting on disk I/O, capping host throughput regardless of $\WorkerCount$. The complete host preparation rate is therefore bounded by the lesser of the storage delivery rate and the worker transformation capacity $\WorkerCount / \WorkerTransformTime$.
+
+Preprocessed data must then transfer across the host-accelerator interconnect before computation can begin. End-to-end training throughput is consequently constrained by the slowest of three sequential stages, as @eq-training-bottleneck makes explicit. In this three-stage pipeline model, the first term $\PreprocessingThroughput$ denotes the achieved complete host preparation rate—bounded by both storage delivery and CPU worker capacity—while the remaining terms capture host-to-device bus transfer and device execution:
 $$\TrainingThroughput=\min\left(\PreprocessingThroughput, \frac{\HostTransferBandwidth}{\BatchDataVolume}, \frac{\SustainedComputeRate}{\BatchOperations}\right)$$ {#eq-training-bottleneck}
-where $\HostTransferBandwidth$ is the host-to-accelerator transfer bandwidth, $\BatchDataVolume$ is the input bytes per batch, and $\BatchOperations$ is the forward-backward work per batch in FLOPs. Every term is therefore expressed in batches per second before the minimum is taken.
+where $\HostTransferBandwidth$ is the host-to-accelerator transfer bandwidth, $\BatchDataVolume$ is the input bytes per batch transferred to the device, and $\BatchOperations$ is the forward-backward work per batch in FLOPs. Every term is therefore expressed in batches per second before the minimum is taken.
 
 ```{python}
 #| echo: false
@@ -2433,7 +2499,7 @@ class GPT2DataPipeline:
     f_access_str = fmt(f_access, precision=1, commas=False)
     throughput_samples_str = fmt_int(throughput_samples, commas=False)
     n_v100_gpus_str = fmt(n_v100_gpus, precision=0, commas=False)
-    accelerator_step_ms_str = fmt_time(effective_step_time, millisecond, precision=1, commas=False)
+    accelerator_step_ms_str = fmt_time(effective_step_time, millisecond, precision=0, commas=False)
     prep_ms_str = fmt_time(prep_ms, 'millisecond', precision=1, commas=False)
     serial_service_fraction_pct_str = fmt_percent(serial_service_fraction, precision=0, commas=False, style='prose')
 
@@ -2674,11 +2740,11 @@ class TrainingDimensions:
 
 ### Forward pass {#sec-model-training-forward-pass-9695}
 
-Prepared batches enter the training loop through the forward pass\index{Forward pass!compute operations}\index{Forward pass!memory management}, where input data propagates through the model to generate predictions. The conceptual flow follows the layer-by-layer transformation $\ActivationMatrix^{(\ell)} = \ActivationFunction\left(\ActivationMatrix^{(\ell-1)}\WeightMatrix^{(\ell)} + \BiasVector^{(\ell)}\right)$, but the physical implementation must schedule compute kernels, stream activations through the memory hierarchy, and retain intermediate tensors for backpropagation.
+Prepared batches enter the forward pass\index{Forward pass!compute operations}\index{Forward pass!memory management} after the data pipeline supplies their tensors. The operation counts in @sec-model-training-matrix-operations-1f21 now become a scheduling problem: the runtime must launch kernels with enough parallel work, stage their operands, and keep the values required by backward execution.
 
 #### Compute operations {#sec-model-training-compute-operations-83ee}
 
-The forward pass maps neural network layers to the matrix multiplication kernels analyzed in @sec-model-training-matrix-operations-1f21. For each dense layer with input width $\LayerInputWidth$ and output width $\LayerOutputWidth$, the accelerator executes $\LayerInputWidth \times \LayerOutputWidth \times \BatchSize$ multiply-accumulate operations\index{Matrix multiplication!dense operations}. For example, a layer with dimensions of `{python} TrainingDimensions.layer_dims_math` processing a batch of `{python} TrainingDimensions.layer_batch_str` samples executes about `{python} TrainingDimensions.layer_macs_str`, or about `{python} TrainingDimensions.layer_mflop_str` under the two-FLOPs-per-MAC convention.
+A dense layer's FLOP count\index{Matrix multiplication!dense operations} is already fixed by its input width, output width, and batch size. Its execution time also depends on how that work fills the accelerator. A layer with dimensions of `{python} TrainingDimensions.layer_dims_math` at batch `{python} TrainingDimensions.layer_batch_str` supplies `{python} TrainingDimensions.layer_macs_str`, or `{python} TrainingDimensions.layer_mflop_str`; the kernel must divide this work among execution units without leaving a long, mostly empty final wave.
 
 Accelerators execute these parallel workloads by grouping execution threads into fixed-size units: warps\index{Warp!GPU execution unit}[^fn-warp-execution-model] of 32 threads on NVIDIA architectures, or wavefronts of 64 threads on AMD architectures. Hardware execution efficiency depends on aligning tensor dimensions and tile shapes with the thread-block geometry and the operand matrix dimensions required by specialized units like Tensor Cores.
 
@@ -2718,9 +2784,7 @@ On a large GPU such as the NVIDIA H100 with 132 Streaming Multiprocessors (SMs),
 
 Beyond dense matrix multiplication, distinct neural architectures introduce specialized computational patterns. Convolutional networks\index{Convolution!computational cost}, for instance, slide spatial filters across multichannel input tensors. Consider an input tensor of dimensions `{python} TrainingDimensions.conv_input_dims_math` (batch size $\times$ height $\times$ width $\times$ channels) processed by `{python} TrainingDimensions.conv_kernel_dims_math` kernels. Each position requires `{python} TrainingDimensions.conv_ops_per_pos_str`, and with `{python} TrainingDimensions.conv_filters_str` filters operating across `{python} TrainingDimensions.conv_spatial_dims_math` spatial dimensions, the arithmetic work scales into millions of multiply-accumulate operations per image. Accelerators execute these spatial convolutions by either lowering them into dense GEMMs through column unfolding (`im2col`) or applying Winograd minimal filtering, which reduces multiplications at the cost of extra additions and transform workspace.
 
-Transformer architectures introduce attention mechanisms\index{Attention mechanism!similarity computation}, which compute similarity scores across sequences. Attention pairs batch matrix multiplications ($\AttentionQueryMatrix\AttentionKeyMatrix^T$ and $\text{softmax}(\cdot)\AttentionValuesMatrix$) with row-wise reductions. Because intermediate attention score matrices scale quadratically with sequence length, materializing these activations in global memory creates a memory bandwidth bottleneck unless kernels fuse matrix multiplications and normalization within on-chip SRAM.
-
-Throughout these networks, elementwise operations exhibit low arithmetic intensity. Standalone implementations of activation functions such as ReLU and sigmoid transform tensor elements independently, leaving them bound by memory bandwidth rather than compute throughput (@sec-model-training-arithmetic-intensity-training-bottlenecks-4446). Batch normalization compounds this memory traffic by computing statistics across batch and spatial dimensions, requiring global synchronization barriers and multiple read/write sweeps over activation memory.
+The other operator families impose different scheduling constraints. Attention\index{Attention mechanism!similarity computation} alternates batched matrix products with row-wise reductions, while normalization requires statistics before normalized outputs can be produced. The arithmetic-intensity analysis in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446 explains their traffic cost; the runtime must additionally respect these reduction dependencies and choose which intermediates can remain inside a fused kernel.
 
 Optimized operator libraries such as cuDNN\index{cuDNN!optimized implementations} [@chetlur2014cudnn] implement multiple computational algorithms for each layer type, dynamically selecting among them based on tensor dimensions, scratchpad memory limits, and hardware capabilities. For example, cuDNN chooses between direct convolution, GEMM-based lowering, fast Fourier transform (FFT) convolution, and Winograd transforms by evaluating the trade-off between workspace memory overhead and arithmetic operations [@nvidia2023cudnn896]. These hardware utilization patterns reinforce the coupling between batch size and hardware efficiency established in @sec-model-training-gradientbased-optimization-methods-9798: larger batch sizes saturate accelerator compute units and amortize memory transfers, but increase intermediate activation storage.
 
@@ -2922,7 +2986,6 @@ class ResNetMemoryScaling:
     resnet_conv1_width_str = fmt(first_conv_w, precision=0, commas=False)
     resnet_conv1_c_str = fmt(first_conv_c, precision=0, commas=False)
     resnet_conv1_mb_str = fmt_memory(first_conv, unit=MB, precision=1, commas=False)
-    resnet_layers_str = fmt_count(resnet_layers, commas=False, label="layer")
     act_gb_b32_str = fmt_memory(act_b32, unit=GB, precision=0, commas=False)
     grad_gb_b32_str = fmt_memory(grad_b32, unit=GB, precision=0, commas=False)
     param_mb_str = fmt_memory(param_mem, unit=MB, precision=1, commas=False)
@@ -2951,7 +3014,7 @@ During backpropagation (@sec-model-training-backpropagation-mechanics-0b64), the
 \noindent
 \begin{minipage}{1\linewidth}
 ```
-Once the backward pass populates gradient buffers, the system executes the optimizer step\index{Parameter update!optimizer step}\index{Training!weight update} to update model parameters. The choice of optimizer determines both the mathematical trajectory toward the loss minimum and the hardware resources demanded by each iteration. In standard deep learning frameworks, this phase couples gradient evaluation with the parameter update (@lst-param_update): `loss.backward()` traverses the computational graph in reverse to populate gradient tensors, and `optimizer.step()` applies the update rule across all registered parameters.
+Once backward execution populates the gradient buffers, the optimizer\index{Parameter update!optimizer step}\index{Training!weight update} consumes them and updates the persistent state defined in @algo-adam-update. The important pipeline boundary is the weight mutation: the next forward pass must observe the completed update. @Lst-param_update shows that boundary at the framework interface.
 
 ::: {#lst-param_update lst-cap="**Parameter Update**: Computes gradients and applies an optimizer step to model parameters. Repeating this cycle seeks to minimize the training objective, although improvement is not guaranteed on every step or epoch."}
 
@@ -2967,11 +3030,11 @@ optimizer.step()  # Update parameters
 
 ```
 
-Although `optimizer.step()` appears as a single framework call, it is the memory-bound phase analyzed alongside @algo-adam-update. Unlike the forward and backward passes, where GEMMs reuse tiled operands in registers and shared memory, the update streams every parameter, its gradient, and its optimizer state from HBM, applies a few elementwise operations, and writes the results back, about 28 bytes per parameter in FP32 Adam for roughly a dozen operations. Its duration is therefore set by memory bandwidth, not by Tensor Core throughput. In the training loop that duration is also exposed: the next forward pass reads the updated weights, so it cannot begin until the update finishes, which is why fused optimizer kernels that cut the number of passes over HBM shorten every step.
+The optimizer's memory traffic is exposed on this dependency path. The FP32 Adam update already priced at 28 bytes per parameter in @sec-model-training-framework-optimizer-interface-82ff must finish before the next forward pass reads those weights. Fusing moment updates and weight writes can shorten this interval by reducing passes over HBM, even when the forward and backward matrix products already use the arithmetic units efficiently.
 
 #### Optimizer memory in the training loop {#sec-model-training-optimizer-memory-training-loop-4383}
 
-The bandwidth cost of the update grows with the auxiliary state quantified in @tbl-optimizer-properties. SGD streams only weights and gradients, while Adam adds two FP32 moment tensors per parameter that must be read and written on every step. The same tensors occupy capacity that could otherwise hold larger batches or longer sequences, so an adaptive optimizer pays twice, once in traffic and once in residency.
+The same optimizer tensors occupy capacity between updates. Reducing their footprint can therefore make a larger micro-batch feasible even if the optimizer is not the longest phase of the step.
 
 ```{python}
 #| echo: false
@@ -3705,9 +3768,7 @@ class PreprocessingScenarios:
     buffer_total_mem_gb_str = fmt_memory(buffer_total_mem, unit=GB, precision=1, commas=True)
 ```
 
-Prefetching only pays off when the profile shows data movement on the critical path. Training data still passes through retrieval, transformation, and model execution; the optimization changes when those stages run. An unoptimized pipeline serializes them, leaving the GPU idle during data fetching and preprocessing. Data loaders avoid that stall by preparing the next batch in separate threads or processes while the current batch trains.
-
-Overlapping extends the same idea across the full pipeline. As the GPU processes one batch, preprocessing begins on the next batch, while data fetching starts for the subsequent batch. After the pipeline fills, overlap can reduce the service interval from the sum of stage times to their maximum. The slowest stage still limits throughput; faster stages may wait between batches even when the schedule achieves this bound.
+The overlapped schedule requires enough host workers and buffering to make the next batch ready before the device requests it. Worker count controls preparation capacity; queue depth absorbs variation in preparation time. Neither changes the slowest-stage bound established by @eq-training-bottleneck.
 
 Machine learning frameworks expose the control variables for this trade-off. @Lst-dataloader_usage demonstrates PyTorch's DataLoader configuration\index{DataLoader!configuration parameters}, where `{python} PreprocessingScenarios.num_workers_str` sets preprocessing parallelism and `{python} PreprocessingScenarios.prefetch_factor_str` maintains a buffer of `{python} PreprocessingScenarios.prefetch_buffer_batches_str` batches ready for accelerator consumption.
 
@@ -3899,7 +3960,7 @@ class MixedPrecisionBenefits:
     model_1b_fp16_gb_str = fmt_memory(model_1b_fp16, unit=GB, precision=0, commas=False)
 ```
 
-Mixed-precision training delivers gains across three interacting system dimensions: memory footprint, arithmetic throughput, and communication volume. Halving operand width cuts the storage of every 16-bit tensor by `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str`, so a one-billion-parameter model's working weights drop from `{python} MixedPrecisionBenefits.model_1b_fp32_gb_str` to `{python} MixedPrecisionBenefits.model_1b_fp16_gb_str`. As the 16-bytes-per-parameter accounting above showed, FP32 master weights and moments give that saving back in the static state, so the footprint that actually shrinks is the activations. Computationally, reduced precision routes dense matrix multiplication kernels to high-throughput Tensor Core pipelines (@sec-model-training-mixedprecision-hardware-support-d7c1). In distributed topologies, transferring 16-bit rather than 32-bit gradients halves collective AllReduce traffic across the interconnect. These effects compound: reclaimed activation memory permits larger micro-batches, Tensor Cores accelerate kernel execution, and narrower tensors reduce gradient exchange latency. The following case study evaluates these memory effects on GPT-2 XL at batch 4, the configuration the activation notebook left over a V100's capacity even after selective recomputation, and asks whether mixed precision and a specified recomputation budget can bring its modeled tensors within that capacity.
+Mixed-precision training delivers gains across three interacting system dimensions: memory footprint, arithmetic throughput, and communication volume. Halving operand width cuts the storage of every 16-bit tensor by `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str`, so a one-billion-parameter model's working weights drop from `{python} MixedPrecisionBenefits.model_1b_fp32_gb_str` to `{python} MixedPrecisionBenefits.model_1b_fp16_gb_str`. As the 16-bytes-per-parameter accounting above showed, FP32 master weights and moments give that saving back in the static state, so the footprint that actually shrinks is the activations. Computationally, reduced precision routes dense matrix multiplication kernels to high-throughput Tensor Core pipelines (@sec-model-training-mixedprecision-hardware-support-d7c1). In distributed topologies, transferring 16-bit rather than 32-bit gradients halves collective AllReduce traffic across the interconnect. These effects compound: reclaimed activation memory permits larger micro-batches, Tensor Cores accelerate kernel execution, and narrower tensors reduce gradient exchange latency. The following case study evaluates these memory effects on GPT-2 XL at batch 4, the configuration the activation notebook left over a V100's capacity even after selective recomputation, and derives a checkpoint schedule before selecting a micro-batch that fits the tensor budget.
 
 ```{python}
 #| echo: false
@@ -3911,11 +3972,12 @@ from mlsysim.fmt import fmt, check, fmt_memory, fmt_memory_capacity, fmt_params
 from mlsysim.physics import calc_activation_memory
 
 class MixedPrecisionMemory:
-    batch_size = 4  # walkthrough tensor budget, conditional on activation policy
+    batch_size = 4  # candidate admitted by the explicit segment ledger
     contrast_batch_size = 32  # the scale-out contrast exceeds the comparison V100
     seq_len = 1024
     bytes_per_val = BYTES_FP16.to(byte).magnitude
-    checkpoint_factor = 4  # supplied peak saved-plus-rematerialized activation budget
+    checkpoint_segments = 8
+    checkpoint_segment_layers = Models.Language.GPT2.layers // checkpoint_segments
 
     act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
@@ -3947,7 +4009,13 @@ class MixedPrecisionMemory:
     master_fp32 = p_fp32
     total_mp = p_fp16 + g_fp16 + act_fp16 + master_fp32 + opt_fp32
 
-    act_ckpt = act_fp16 / checkpoint_factor
+    # Keep all segment inputs while reconstructing one full segment. The
+    # live-state estimate includes that segment's input again: conservative
+    # double counting, rather than omitting a simultaneously resident tensor.
+    boundary_memory = checkpoint_segments * batch_size * seq_len * Models.Language.GPT2.hidden_dim * BYTES_FP16
+    live_segment_memory = (act_fp16 / Models.Language.GPT2.layers) * checkpoint_segment_layers
+    act_ckpt = boundary_memory + live_segment_memory
+    checkpoint_factor = (act_fp16 / act_ckpt).to("").magnitude
     total_ckpt = p_fp16 + g_fp16 + act_ckpt + master_fp32 + opt_fp32
     total_ckpt_b32 = p_fp16 + g_fp16 + (act_fp16_b32 / checkpoint_factor) + master_fp32 + opt_fp32
     v100_capacity = Hardware.Cloud.V100.memory.capacity
@@ -3961,7 +4029,9 @@ class MixedPrecisionMemory:
         "FP32 total must equal sum of parameters, activations, gradients, and optimizer states.",
     )
     # The callout's two pedagogical claims, pinned as invariants:
-    check(total_ckpt < v100_capacity, "Batch-4 AMP+checkpointing total must fit a 32 GB V100 (the callout's 'fits' claim).")
+    check(Models.Language.GPT2.layers % checkpoint_segments == 0, "Checkpoint segments must cover equal numbers of layers.")
+    check(total_ckpt < v100_capacity, "The segment-checkpoint candidate must satisfy the tensor budget.")
+    check(abs((boundary_memory + live_segment_memory - act_ckpt).to(GB).magnitude) < 1e-9, "Checkpoint ledger must add up.")
     check(total_ckpt_b32 > v100_capacity, "Batch-32 total must exceed a single V100 (the callout's scale-out contrast).")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -3979,12 +4049,22 @@ class MixedPrecisionMemory:
     master_gb_str = fmt_memory(master_fp32, unit=GB, precision=0, commas=False)
     mp_opt_gb_str = fmt_memory(opt_fp32, unit=GB, precision=0, commas=False)
     fp16_t_gb_str = fmt_memory(total_mp, unit=GB, precision=1, commas=False)
-    ckpt_act_gb_str = fmt_memory(act_ckpt, unit=GB, commas=False)
-    ckpt_total_gb_str = fmt_memory(total_ckpt, unit=GB, commas=False)
+    ckpt_act_gb_str = fmt_memory(act_ckpt, unit=GB, precision=3, commas=False)
+    ckpt_total_gb_str = fmt_memory(total_ckpt, unit=GB, precision=3, commas=False)
     ckpt_total_b32_gb_str = fmt_memory(total_ckpt_b32, unit=GB, precision=1, commas=False)
     contrast_batch_size_str = fmt(contrast_batch_size, precision=0, commas=False)
-    v100_capacity_gb_str = fmt_memory_capacity(v100_capacity, unit=GiB, precision=0, commas=False)
-    v100_capacity_decimal_gb_str = fmt_memory(v100_capacity, unit=GB, precision=1, commas=False)
+    v100_capacity_decimal_gb_str = fmt_memory(v100_capacity, unit=GB, precision=3, commas=False)
+    checkpoint_segments_str = fmt(checkpoint_segments, precision=0, commas=False)
+    segment_layers_str = fmt(checkpoint_segment_layers, precision=0, commas=False)
+    model_layers_str = fmt(Models.Language.GPT2.layers, precision=0, commas=False)
+    boundary_gb_str = fmt_memory(boundary_memory, unit=GB, precision=3, commas=False)
+    live_segment_gb_str = fmt_memory(live_segment_memory, unit=GB, precision=3, commas=False)
+    fit_headroom_gb_str = fmt_memory(v100_capacity - total_ckpt, unit=GB, precision=3, commas=False)
+
+    sequence_length_str = fmt(seq_len, precision=0, commas=False)
+    hidden_dimension_str = fmt(Models.Language.GPT2.hidden_dim, precision=0, commas=False)
+    activation_bytes_str = fmt(BYTES_FP16.to(byte).magnitude, precision=0, commas=False)
+
 ```
 
 ::: {#nbk-training-gpt-2-mixed-precision-memory .callout-notebook title="GPT-2 mixed precision memory savings"}
@@ -4007,16 +4087,20 @@ class MixedPrecisionMemory:
 - Optimizer states (Adam first and second moments in FP32): `{python} MixedPrecisionMemory.mp_opt_gb_str`
 - Total: ~`{python} MixedPrecisionMemory.fp16_t_gb_str` (still exceeds the comparison device's capacity before checkpointing)
 
-**Mixed precision + illustrative fourfold activation reduction**:
+**Mixed precision + a segment-checkpoint ledger**:
 
-For this scenario, retain block inputs and recompute discarded attention and feed-forward intermediates during backward. Assume a peak activation budget of one quarter of the unrecomputed FP16 estimate, counting both retained boundaries and the live rematerialized segment. This is an implementation budget to verify, not a saving derived from checkpointing every fourth layer or from the equal-layer schedule developed later.
+Partition the `{python} MixedPrecisionMemory.model_layers_str` transformer layers into `{python} MixedPrecisionMemory.checkpoint_segments_str` contiguous segments of `{python} MixedPrecisionMemory.segment_layers_str` layers. During forward execution, retain each segment's input and discard its internal backward state. During backward execution, reconstruct one segment, retain its internal state while differentiating that segment, then free it before reconstructing the preceding segment. Each layer therefore executes one additional forward pass; against a forward-plus-backward step costing about three forward passes, the extra arithmetic is about one-third. This is work accounting, not a wall-clock penalty.
 
-- Activations reduced to ~`{python} MixedPrecisionMemory.ckpt_act_gb_str` under this saved-plus-rematerialized activation budget
-- Estimated tensor total: ~`{python} MixedPrecisionMemory.ckpt_total_gb_str`, compared with `{python} MixedPrecisionMemory.v100_capacity_gb_str` of V100 capacity, before temporary workspaces and allocator overhead
+Each retained segment input has shape batch × sequence length × hidden width. Its storage is therefore `{python} MixedPrecisionMemory.mp_batch_size_str` × `{python} MixedPrecisionMemory.sequence_length_str` × `{python} MixedPrecisionMemory.hidden_dimension_str` × `{python} MixedPrecisionMemory.activation_bytes_str` bytes. Keep all `{python} MixedPrecisionMemory.checkpoint_segments_str` inputs resident while adding the complete saved-state estimate for the `{python} MixedPrecisionMemory.segment_layers_str` layers in one reconstructed segment. This deliberately counts the active segment's input in both terms, making the retained-state estimate conservative rather than omitting a live boundary.
 
-The device capacity label uses a binary-sized memory quantity, while the tensor footprints above use decimal GB. On the same decimal basis, device capacity is `{python} MixedPrecisionMemory.v100_capacity_decimal_gb_str`; the tensor estimate leaves only limited headroom for runtime overhead.
+- Retained segment inputs: `{python} MixedPrecisionMemory.boundary_gb_str`
+- Live reconstructed segment: `{python} MixedPrecisionMemory.live_segment_gb_str`
+- Combined activation allowance: `{python} MixedPrecisionMemory.ckpt_act_gb_str`
+- Static state plus activations at batch `{python} MixedPrecisionMemory.mp_batch_size_str`: `{python} MixedPrecisionMemory.ckpt_total_gb_str`
 
-**Systems insight**: Compare the two lists line by line. Mixed precision halves the parameter and gradient tensors, the FP32 master weights add those bytes straight back, and the optimizer state is untouched, so the static state is identical in both recipes. The entire saving is the activation term, which checkpointing then cuts further by trading recomputation for storage. At batch size `{python} MixedPrecisionMemory.mp_batch_size_str`, the simplified tensor estimate approaches V100 capacity, so an actual run may still require additional memory reduction after accounting for workspaces and allocator behavior. At batch `{python} MixedPrecisionMemory.contrast_batch_size_str`, the same estimate requires ~`{python} MixedPrecisionMemory.ckpt_total_b32_gb_str`, motivating multi-device scaling techniques.
+The V100 capacity label is binary-sized; on the decimal basis used by these tensor estimates it is `{python} MixedPrecisionMemory.v100_capacity_decimal_gb_str`. The calculated candidate leaves `{python} MixedPrecisionMemory.fit_headroom_gb_str` for output/loss buffers, temporary backward workspaces, communication buffers, and allocator overhead. A runtime peak-memory measurement decides whether those excluded allocations fit in the remainder. The general checkpoint-count trade-off in @sec-model-training-optimal-checkpoint-placement-strategy-4a0d explains why both boundaries and the live segment must be counted; transformer segment inputs are much smaller than their internal saved state, so they receive separate byte counts here.
+
+**Systems insight**: Mixed precision leaves the static state unchanged in this recipe. Checkpointing admits the candidate by replacing retained layer interiors with small boundary tensors and one live reconstructed segment. Gradient accumulation can then raise the effective batch without raising the simultaneous activation footprint. At batch `{python} MixedPrecisionMemory.contrast_batch_size_str`, this same checkpoint ledger would require `{python} MixedPrecisionMemory.ckpt_total_b32_gb_str`, still beyond one V100.
 
 :::
 
@@ -4287,7 +4371,7 @@ Because hardware support for low-precision formats evolved across accelerator ge
 
 : **Precision Strategy by GPU Architecture**: V100 supports FP16 Tensor Core training, A100 adds native BF16, and H100 adds FP8 paths whose use requires recipe-specific validation. {#tbl-hw-precision-strategy tbl-colwidths="[13,28,59]"}
 
-An illustrative single-GPU GPT-2 scenario (`{python} CrossGenPrecisionCalc.gpt2_params_b_str`) demonstrates how architectural execution units and numerical formats compound: `{python} CrossGenPrecisionCalc.v100_fp32_sps_str` for V100 FP32, `{python} CrossGenPrecisionCalc.v100_fp16_sps_str` for V100 FP16, `{python} CrossGenPrecisionCalc.a100_bf16_sps_str` for A100 BF16, and `{python} CrossGenPrecisionCalc.h100_fp8_sps_str` for H100 FP8. These figures represent scenario projections rather than isolated benchmarks, as software stacks, kernel implementations, and batch dimensions also evolved across generations. The systems principle is clear: maximizing training throughput requires co-designing the numerical precision format with the accelerator's native matrix execution pipelines.
+An illustrative single-GPU GPT-2 scenario (`{python} CrossGenPrecisionCalc.gpt2_params_b_str`) demonstrates how architectural execution units and numerical formats compound: `{python} CrossGenPrecisionCalc.v100_fp32_sps_str` for V100 FP32, `{python} CrossGenPrecisionCalc.v100_fp16_sps_str` for V100 FP16, `{python} CrossGenPrecisionCalc.a100_bf16_sps_str` for A100 BF16, and `{python} CrossGenPrecisionCalc.h100_fp8_sps_str` for H100 FP8. These figures represent scenario projections rather than isolated benchmarks, as software stacks, kernel implementations, and batch dimensions also evolved across generations. Maximizing training throughput therefore requires co-designing the numerical precision format with the accelerator's native matrix execution pipelines.
 
 ### FlashAttention: IO-aware attention optimization {#sec-model-training-flash-attention-ioaware-attention-optimization-3da0}
 
@@ -4777,6 +4861,8 @@ The memory column counts two things, the stored checkpoints and the one segment 
 
 Setting the derivative of total memory cost $(\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount) \times \ActivationMemory^{(\ell)})$ with respect to the checkpoint count $\ActivationCheckpointCount$ to zero yields the analytical optimum at $\ActivationCheckpointCount= \sqrt{\LayerCount}$. In the standard $\sqrt{\LayerCount}$ checkpointing scheme, this costs roughly one extra forward pass, about one-third more total step compute, in exchange for minimizing activation footprint under this analytical model. For GPT-2 with forty-eight transformer layers, the operational difference is substantial: uncheckpointed training requires $48 \times \ActivationMemory^{(\ell)}$ in full activation storage, whereas uniform checkpointing ($\sqrt{48} \approx 7$ checkpoints) requires $7 \times \ActivationMemory^{(\ell)} + (48/7) \times \ActivationMemory^{(\ell)} \approx 14 \times \ActivationMemory^{(\ell)}$, saving 71 percent activation memory for approximately 33 percent additional total step computation (by recomputing one forward pass over the uncheckpointed layers during backpropagation).
 
+The GPT-2 memory notebook uses eight equal segments of six layers. It applies the same boundary-plus-live-segment accounting with unequal storage costs: a segment input contains only the hidden tensor, whereas the reconstructed layer state also includes attention and feed-forward intermediates. The equal-state optimum above is therefore a useful baseline, not an optimality claim for that transformer schedule. Counting the two components separately produces the candidate memory budget without assuming a reduction factor.
+
 Not all operations are equally expensive to recompute, which motivates selective checkpointing. @Tbl-selective-checkpoint-placement compares where activation memory is large enough to justify recomputation.
 
 | **Layer type**          | **Memory cost**                                                         | **Recompute cost**                 | **Checkpointing strategy**                                           |
@@ -4825,7 +4911,7 @@ class GradientAccumulation:
     micro_batch = 4
     effective_batch = 512
     gpus_accum = 8
-    accum_steps = 16
+    accum_steps = effective_batch // (gpus_accum * micro_batch)
     gpu_hourly_rate = 3  # $/hour per V100, illustrative on-demand single-GPU rate
     naive_training_hours = 14 * 24  # 2 weeks
     v100_mem = Hardware.Cloud.V100.memory.capacity
@@ -4887,7 +4973,7 @@ This illustrative GPT-2-scale scenario uses assumed prices and durations to show
 
 **Memory Constraints**
 
-- A V100 with `{python} GradientAccumulation.v100_mem_capacity_gb_str` has a modeled tensor budget for a per-GPU micro-batch of $\MicrobatchSize=4$, conditional on meeting the specified peak activation budget and verifying workspace headroom, as discussed in notebook \ref{nbk-training-gpt-2-mixed-precision-memory}.
+- A V100 with `{python} GradientAccumulation.v100_mem_capacity_gb_str` has a modeled tensor budget for a per-GPU micro-batch of $\MicrobatchSize=4$, admitted by the segment-checkpoint ledger and subject to verifying workspace headroom, as discussed in notebook \ref{nbk-training-gpt-2-mixed-precision-memory}.
 - A resident effective batch of $\BatchSize=512$ would therefore require 512 ÷ 4 = `{python} GradientAccumulation.gpus_naive_str`.
 
 **Accumulation Configuration**
@@ -5028,8 +5114,8 @@ class GPT2WalkthroughCalc:
         strategy="none",
     )
     act_fp32 = act_fp16 * 2
-    checkpoint_factor = 4  # supplied peak saved-plus-rematerialized activation budget
-    recompute_overhead_pct = 33  # separate scenario assumption: extra total-step arithmetic
+    checkpoint_factor = MixedPrecisionMemory.checkpoint_factor  # same explicit segment schedule
+    recompute_overhead_pct = 100 / 3  # one extra forward pass over a three-forward-equivalent step
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: FP32 Baseline
@@ -5102,8 +5188,8 @@ class GPT2WalkthroughCalc:
     v100_mem_capacity_decimal_gb_str = fmt_memory(v100_mem, unit=GB, precision=1, commas=False)
     memory_reduction_mult_str = fmt_multiple(memory_reduction, precision=1, commas=False)
     amp_reduction_pct_str = fmt_percent(amp_reduction, precision=1, commas=False, style='prose')
-    recompute_overhead_pct_str = fmt_percent(recompute_overhead_pct / 100, precision=0, commas=False, style='prose')
-    checkpoint_factor_mult_str = fmt_multiple(checkpoint_factor, precision=0, commas=False)
+    recompute_overhead_pct_str = fmt_percent(recompute_overhead_pct / 100, precision=1, commas=False, style='prose')
+    checkpoint_factor_mult_str = fmt_multiple(checkpoint_factor, precision=1, commas=False)
     util_naive_pct_str = fmt_percent(util_naive_pct / 100, precision=0, commas=False, style='prose')
     data_naive_pct_str = fmt_percent(data_naive_pct / 100, precision=0, commas=False, style='prose')
     compute_naive_pct_str = fmt_percent(compute_naive_pct / 100, precision=0, commas=False, style='prose')
@@ -5121,7 +5207,7 @@ class GPT2WalkthroughCalc:
 
 **Step 1**: Establish the baseline memory footprint.
 
-The trace starts with GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: small enough to discuss on one V100, but large enough that the tensor-memory estimate already proves the baseline infeasible. This walkthrough uses batch size 4, the same configuration as the mixed-precision callout (napkin math \ref{nbk-training-gpt-2-mixed-precision-memory}); @tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized), which exceed the comparison V100 even after optimization. At batch size 4, the FP32 baseline needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_capacity_gb_str` V100 before throughput matters.
+The trace starts with GPT-2 XL with 1.5 billion parameters, batch size 4, sequence length 1024, FP32 tensors throughout, and a single-threaded synchronous data loader. This is a deliberately constrained configuration: small enough to discuss on one V100, but large enough that the tensor-memory estimate already proves the baseline infeasible. This walkthrough uses the batch size 4 admitted by the mixed-precision callout (napkin math \ref{nbk-training-gpt-2-mixed-precision-memory}); @tbl-gpt2-summary reports the batch-32 equivalents (`{python} GPT2WalkthroughCalc.summary_b_total_mem_gb_str` FP32 baseline, `{python} GPT2WalkthroughCalc.summary_o_total_mem_gb_str` optimized), which exceed the comparison V100 even after optimization. At batch size 4, the FP32 baseline needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, so the run fails the machine constraint on a `{python} GPT2WalkthroughCalc.v100_mem_capacity_gb_str` V100 before throughput matters.
 
 **Step 2**: Apply mixed precision.
 
@@ -5129,7 +5215,7 @@ The first intervention targets memory feasibility rather than speed. This modele
 
 **Step 3**: Add gradient checkpointing.
 
-Holding this static-state representation fixed, gradient checkpointing attacks the remaining activation footprint. Instead of retaining forward activations across every layer for backpropagation, the runtime discards intermediate states and recomputes them on demand during the backward pass. The scenario assumes a `{python} GPT2WalkthroughCalc.checkpoint_factor_mult_str` activation-memory reduction, bringing total tensor allocation to `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`. The binary-sized device capacity label corresponds to `{python} GPT2WalkthroughCalc.v100_mem_capacity_decimal_gb_str` on the decimal GB basis used for tensor footprints, so the modeled tensors fit with limited headroom. The activation budget includes retained block inputs and the live rematerialized segment, as specified in notebook \ref{nbk-training-gpt-2-mixed-precision-memory}; it is not derived from the equal-layer placement rule. Separately, the scenario assumes `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` additional total-step arithmetic from recomputation. Neither assumption establishes the other; a production run must measure the peak activation footprint and recomputation overhead and verify that temporary workspace allocations and memory allocator fragmentation remain within the available headroom.
+Holding the static-state representation fixed, the segment schedule in notebook \ref{nbk-training-gpt-2-mixed-precision-memory} retains eight segment-input tensors and budgets the saved state of at most six live reconstructed layers. Its `{python} GPT2WalkthroughCalc.checkpoint_factor_mult_str` activation-memory reduction brings the batch-4 tensor total to `{python} GPT2WalkthroughCalc.total_ckpt_gb_str`, below the V100's `{python} GPT2WalkthroughCalc.v100_mem_capacity_decimal_gb_str` on the same decimal basis. Reconstructing each segment once adds one forward pass, about `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` more arithmetic than the unrecomputed step. Runtime measurement must verify that backward workspaces, output/loss buffers, and allocator overhead fit in the remaining capacity; the arithmetic ratio alone does not predict the time penalty.
 
 **Step 4**: Examine an illustrative throughput profile.
 
@@ -5170,7 +5256,7 @@ Resolving input starvation requires overlapping host data preparation with accel
 
 :::
 
-This walkthrough demonstrates why training optimization is a sequential diagnostic discipline rather than an arbitrary collection of techniques. Each intervention addresses a constraint established by the memory calculation or assumed profile. In this recipe, mixed precision halves activation storage and the specified checkpointing budget assumes `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` additional arithmetic. Together these interventions deliver a `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` modeled memory reduction that satisfies the tensor budget. Asynchronous prefetching then addresses exposed input waits once execution begins. With a candidate single-accelerator configuration established, the next task is evaluating how these compounding optimizations scale across a multi-accelerator cluster in execution time, energy consumption, and total training cost.
+This walkthrough demonstrates why training optimization is a sequential diagnostic discipline rather than an arbitrary collection of techniques. Each intervention addresses a constraint established by the memory calculation or assumed profile. In this recipe, mixed precision halves activation storage and reconstructing each segment once adds about `{python} GPT2WalkthroughCalc.recompute_overhead_pct_str` to the step arithmetic. Together these interventions deliver a `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` modeled memory reduction that satisfies the tensor budget. Asynchronous prefetching then addresses exposed input waits once execution begins. With a candidate single-accelerator configuration established, the next task is evaluating how these compounding optimizations scale across a multi-accelerator cluster in execution time, energy consumption, and total training cost.
 
 ::: {#chk-training-optimization-evidence .callout-checkpoint title="From a feasible configuration to a validated run"}
 
@@ -5221,7 +5307,7 @@ class GPT2SummaryCalc:
     batch_size = 32
     seq_len = 1024
     bytes_per_val = BYTES_FP16.to(byte).magnitude
-    checkpoint_factor = 4  # supplied peak saved-plus-rematerialized activation budget
+    checkpoint_factor = MixedPrecisionMemory.checkpoint_factor  # same explicit segment schedule
     act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
@@ -5334,7 +5420,7 @@ class OptimizationSummaryCalc:
     batch_size = 32
     seq_len = 1024
     bytes_per_val = BYTES_FP16.to(byte).magnitude
-    checkpoint_factor = 4  # supplied peak saved-plus-rematerialized activation budget
+    checkpoint_factor = MixedPrecisionMemory.checkpoint_factor  # same explicit segment schedule
     act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
@@ -5389,7 +5475,7 @@ class GPT2SummaryScalingRecap:
     batch_size = 32  # the scale-out contrast configuration
     fit_batch_size = 4  # the walkthrough configuration that fits a V100
     seq_len = 1024
-    checkpoint_factor = 4  # supplied peak saved-plus-rematerialized activation budget
+    checkpoint_factor = MixedPrecisionMemory.checkpoint_factor  # same explicit segment schedule
     act_fp16 = calc_activation_memory(
         n_layers=Models.Language.GPT2.layers,
         seq_len=seq_len,
@@ -5433,7 +5519,7 @@ class GPT2SummaryScalingRecap:
     v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
 ```
 
-The GPT-2 walkthrough models how mixed precision and checkpointing reduce a batch-4 tensor budget to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str`, near a V100's `{python} GPT2SummaryScalingRecap.v100_mem_capacity_gb_str` capacity before workspaces and allocator overhead. At batch 32, the modeled total falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str` but still exceeds that V100. Larger-memory accelerators may move the boundary. A 70-billion-parameter model, however, requires about 140 GB for FP16 weights alone and substantially more for full-parameter training state, motivating sharding, offload, or multiple devices.
+The GPT-2 walkthrough models how mixed precision and checkpointing reduce a batch-4 tensor budget to `{python} GPT2SummaryScalingRecap.o_total_mem_b4_gb_str`, below a V100's `{python} GPT2SummaryScalingRecap.v100_mem_capacity_gb_str` capacity before workspaces and allocator overhead. At batch 32, the modeled total falls from `{python} GPT2SummaryScalingRecap.b_total_mem_gb_str` to `{python} GPT2SummaryScalingRecap.o_total_mem_gb_str` but still exceeds that V100. Larger-memory accelerators may move the boundary. A 70-billion-parameter model, however, requires about 140 GB for FP16 weights alone and substantially more for full-parameter training state, motivating sharding, offload, or multiple devices.
 
 ::: {.column-margin}
 ![](images/svg/vol1_training_margin_004.svg){width="100%" fig-alt="Growth curve that crosses a red capacity point into a shaded over-capacity region."}
@@ -6245,7 +6331,7 @@ Hybrid strategies combine tensor, pipeline, and data parallelism (3D parallelism
 
 : **Hybrid Parallelism Placement**: A common heuristic places tensor parallelism within nodes, pipeline parallelism within racks, and data parallelism across racks. Actual placement depends on the model and topology. {#tbl-hybrid-parallelism-placement tbl-colwidths="[19,25,56]"}
 
-Partitioning computation across a cluster ultimately transforms training from a purely arithmetic problem into a multi-tier data-movement hierarchy. While collective communication algorithms, parameter servers, and fault-tolerant scheduling allow models to scale across thousands of accelerators, their sustained efficiency remains bound by the ratio of compute throughput to network transfer time. Understanding how modern training platforms balance these constraints requires examining the historical convergence of high-performance scientific computing and warehouse-scale infrastructure that produced today's AI hardware fabrics.
+Partitioning computation across a cluster ultimately transforms training from a purely arithmetic problem into a multi-tier data-movement hierarchy. While collective communication algorithms, parameter servers, and fault-tolerant scheduling allow models to scale across thousands of accelerators, their sustained efficiency remains bound by the ratio of compute throughput to network transfer time. The remaining decision is whether the workload's memory or schedule requires paying that communication cost.
 
 ::: {.column-margin .margin-pointer}
 ↪ Empirical protocols for quantifying multi-accelerator scaling efficiency and communication loss are operationalized in @sec-benchmarking-scalability-parallelism-1124.
@@ -6253,80 +6339,9 @@ Partitioning computation across a cluster ultimately transforms training from a 
 
 [^fn-allreduce-ring-synchronization]: **AllReduce**\index{AllReduce!ring topology}: A collective communication primitive that sums data across all devices and distributes the result back to each device. Ring AllReduce is one common implementation: devices pass gradient shards around a logical ring so each participant sends and receives bounded chunks rather than a full copy of every gradient tensor at once. This is the communication primitive that makes large data-parallel training practical, but its detailed cost model belongs with distributed training.
 
-### The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
-
-The parallelism strategies in @sec-model-training-singlenode-multigpu-training-c87f and @sec-model-training-scaling-beyond-single-node-a671 represent the convergence of distinct architectural traditions\index{Training!infrastructure evolution}. Modern training platforms integrate paradigms developed across four computing eras, each shaped by the physical constraints and dominant workloads of its time.
-
-Neural network training combines requirements drawn simultaneously from high-performance computing (HPC) and warehouse-scale systems. From HPC, training inherits dense matrix multiplication (GEMM) kernels operating near accelerator compute limits, requiring tightly synchronized parallel execution across devices. From warehouse-scale computing\index{Warehouse-scale computing!training evolution}, multi-day training jobs inherit the necessity of cluster-wide orchestration, asynchronous data ingestion, and automated fault recovery across failure-prone nodes. @Fig-evolution-systems sequences this architectural lineage across four overlapping computing eras—from early mainframe mainstays (ENIAC, IBM System/360) and vector HPC supercomputers (CDC 6600, Cray-1) through warehouse-scale cloud clusters to modern GPU and TPU hypercomputing clusters.
-
-::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sf,node distance=0pt,xscale=2]
-\tikzset{
-  Box/.style={inner xsep=2pt, draw=black!80, line width=0.75pt,
-    fill=black!10, anchor=south, rounded corners=2pt,
-    font=\sf\footnotesize, align=center, minimum height=5mm},
-}
-\definecolor{col1}{RGB}{240,240,255}
-\definecolor{col2}{RGB}{255, 255, 205}
-\def\du{199mm}
-\def\vi{15mm}
-\node[fill=green!10,draw=none,minimum width=\du,
-name path=G4,anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
-\node[right=2mm of B1.west,anchor=west,align=left]{AI Hypercomputing\\ Era};
-\node[fill=col2,draw=none,minimum width=\du,
-name path=G3,anchor=south west, minimum height=\vi](Z)at(B1.north west){};
-\node[right=2mm of Z.west,anchor=west,align=left]{Warehouse Scale\\ Computing};
-\node[fill=red!10,draw=none,minimum width=\du,
-anchor=south west, minimum height=\vi](B2)at (Z.north west){};
-\node[right=2mm of B2.west,anchor=west,align=left]{High-Performance\\ Computing};
-\node[fill=col1,draw=none,minimum width=\du,
-name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
-\node[right=2mm of V.west,anchor=west,align=left]{Mainframe};
-\def\hi{6.75}
-\draw[thick,name path=V1](0mm,0)node[below]{1950}--++(90:\hi);
-\draw[thick,name path=V2](10mm,0)node[below]{1960}--++(90:\hi);
-\draw[thick,name path=V3](20mm,0)node[below]{1970}--++(90:\hi);
-\draw[thick,name path=V4](30mm,0)node[below]{1980}--++(90:\hi);
-\draw[thick,name path=V5](40mm,0)node[below]{1990}--++(90:\hi);
-\draw[thick,name path=V6](50mm,0)node[below]{2000}--++(90:\hi);
-\draw[thick,name path=V7](60mm,0)node[below]{2010}--++(90:\hi);
-\draw[thick,name path=V8](70mm,0)node[below]{2020}--++(90:\hi);
-\def\fa{2}
-\path [name intersections={of=V1 and G1,by={A,B}}];
-\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]B){ENIAC};
-\path [name intersections={of=V3 and G1,by={C,D}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]C){IBM\\ System/360};
-\node[Box, minimum width=40mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]D){CDC 6600};
-\path [name intersections={of=V4 and G3,by={E,F}}];
-\node[Box, minimum width=30mm, anchor=south west, xshift=-\fa*4mm]at([yshift=1pt]E){Cray-1};
-\path [name intersections={of=V6 and G3,by={G,H}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=0mm]at([yshift=-1pt]G){Google Data\\ Centers};
-\path [name intersections={of=V7 and G3,by={I,J}}];
-\node[Box, minimum width=22mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]J){AWS};
-\path [name intersections={of=V8 and G4,by={K,L}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*5mm]at([yshift=-1pt]K){NVIDIA GPU};
-\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]L){Google TPUs};
-\end{tikzpicture}
-```
-
-:::
-
-The lineage explains why a training platform must support both tightly coupled numerical execution and reliable data supply over long runs. @Tbl-computing-eras contrasts the workload and execution patterns inherited from these architectural traditions.
-
-| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         |
-|:----------------------|:----------------------------|:------------------------------|:-----------------------------|
-| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    |
-| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        |
-| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   |
-| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed |
-
-: **Computing Era Characteristics**: Each computing era optimized for different workload patterns, and modern training systems inherit requirements from multiple predecessors. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale distributed processing, while adding specialized support for the gradient-based optimization and massive parameter state management central to neural network training. {#tbl-computing-eras}
-
 ### When to scale: The physical ceiling {#sec-model-training-scale-physical-ceiling-e06c}
 
-AI hypercomputing exists because training state and schedules outgrew one device. For any single run, the engineering question is narrower, namely whether this run's state or schedule has outgrown one device. Knowing how to partition computation across devices does not answer *when* distributed execution is warranted\index{Training!scaling threshold}\index{Training!memory exhaustion threshold}. Distributing state introduces communication overhead, synchronization barriers, and operational failure modes, so the single-node optimizations come first, because they isolate whether the bottleneck is fundamentally algorithmic or capacity-driven. Profile-guided tuning should evaluate lower-precision execution paths (@sec-model-training-mixedprecision-training-9218) when numerical stability permits, gradient accumulation (@sec-model-training-gradient-accumulation-checkpointing-0c47) to synthesize target batch sizes without activation blowup, activation checkpointing (@sec-model-training-gradient-accumulation-checkpointing-mechanics-fb09) to trade redundant forward compute for memory headroom, and overlapped data prefetching (@sec-model-training-data-prefetching-pipeline-overlapping-e984) when host ingestion limits the critical path.
+A run needs more devices only when its state or schedule exceeds what the chosen local configuration can provide. Knowing how to partition computation across devices does not answer *when* distributed execution is warranted\index{Training!scaling threshold}\index{Training!memory exhaustion threshold}. Distributing state introduces communication overhead, synchronization barriers, and operational failure modes, so the single-node optimizations come first, because they isolate whether the bottleneck is fundamentally algorithmic or capacity-driven. Profile-guided tuning should evaluate lower-precision execution paths (@sec-model-training-mixedprecision-training-9218) when numerical stability permits, gradient accumulation (@sec-model-training-gradient-accumulation-checkpointing-0c47) to synthesize target batch sizes without activation blowup, activation checkpointing (@sec-model-training-gradient-accumulation-checkpointing-mechanics-fb09) to trade redundant forward compute for memory headroom, and overlapped data prefetching (@sec-model-training-data-prefetching-pipeline-overlapping-e984) when host ingestion limits the critical path.
 
 @Tbl-scaling-decision structures this progression as a resource lookup keyed to measured hardware bottlenecks rather than arbitrary parameter thresholds.
 
@@ -6461,6 +6476,77 @@ class TrainingCarbonFootprint:
 **Systems lesson**: Doubling hardware utilization $\EfficiencyHw$ at constant cluster power $\ClusterPower$ halves execution time $\TrainingTime$ and total energy $\TotalEnergy$. Under average grid carbon intensity, doubling efficiency saves ~`{python} TrainingCarbonFootprint.cf_energy_saved_kwh_str` of electricity and avoids `{python} TrainingCarbonFootprint.cf_co2_str` of emissions. Environmental audits must measure $\TotalEnergy = \int \ClusterPower(\TimeInstant)\,d\TimeInstant$ rather than relying on GPU utilization metrics alone.
 
 :::
+
+### Historical context: The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
+
+The parallelism strategies in @sec-model-training-singlenode-multigpu-training-c87f and @sec-model-training-scaling-beyond-single-node-a671 represent the convergence of distinct architectural traditions\index{Training!infrastructure evolution}. Modern training platforms integrate paradigms developed across four computing eras, each shaped by the physical constraints and dominant workloads of its time.
+
+Neural network training combines requirements drawn simultaneously from high-performance computing (HPC) and warehouse-scale systems. From HPC, training inherits dense matrix multiplication (GEMM) kernels operating near accelerator compute limits, requiring tightly synchronized parallel execution across devices. From warehouse-scale computing\index{Warehouse-scale computing!training evolution}, multi-day training jobs inherit the necessity of cluster-wide orchestration, asynchronous data ingestion, and automated fault recovery across failure-prone nodes. @Fig-evolution-systems sequences this architectural lineage across four overlapping computing eras—from early mainframe mainstays (ENIAC, IBM System/360) and vector HPC supercomputers (CDC 6600, Cray-1) through warehouse-scale cloud clusters to modern GPU and TPU hypercomputing clusters.
+
+::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sf,node distance=0pt,xscale=2]
+\tikzset{
+  Box/.style={inner xsep=2pt, draw=black!80, line width=0.75pt,
+    fill=black!10, anchor=south, rounded corners=2pt,
+    font=\sf\footnotesize, align=center, minimum height=5mm},
+}
+\definecolor{col1}{RGB}{240,240,255}
+\definecolor{col2}{RGB}{255, 255, 205}
+\def\du{199mm}
+\def\vi{15mm}
+\node[fill=green!10,draw=none,minimum width=\du,
+name path=G4,anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
+\node[right=2mm of B1.west,anchor=west,align=left]{AI Hypercomputing\\ Era};
+\node[fill=col2,draw=none,minimum width=\du,
+name path=G3,anchor=south west, minimum height=\vi](Z)at(B1.north west){};
+\node[right=2mm of Z.west,anchor=west,align=left]{Warehouse Scale\\ Computing};
+\node[fill=red!10,draw=none,minimum width=\du,
+anchor=south west, minimum height=\vi](B2)at (Z.north west){};
+\node[right=2mm of B2.west,anchor=west,align=left]{High-Performance\\ Computing};
+\node[fill=col1,draw=none,minimum width=\du,
+name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
+\node[right=2mm of V.west,anchor=west,align=left]{Mainframe};
+\def\hi{6.75}
+\draw[thick,name path=V1](0mm,0)node[below]{1950}--++(90:\hi);
+\draw[thick,name path=V2](10mm,0)node[below]{1960}--++(90:\hi);
+\draw[thick,name path=V3](20mm,0)node[below]{1970}--++(90:\hi);
+\draw[thick,name path=V4](30mm,0)node[below]{1980}--++(90:\hi);
+\draw[thick,name path=V5](40mm,0)node[below]{1990}--++(90:\hi);
+\draw[thick,name path=V6](50mm,0)node[below]{2000}--++(90:\hi);
+\draw[thick,name path=V7](60mm,0)node[below]{2010}--++(90:\hi);
+\draw[thick,name path=V8](70mm,0)node[below]{2020}--++(90:\hi);
+\def\fa{2}
+\path [name intersections={of=V1 and G1,by={A,B}}];
+\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]B){ENIAC};
+\path [name intersections={of=V3 and G1,by={C,D}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]C){IBM\\ System/360};
+\node[Box, minimum width=40mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]D){CDC 6600};
+\path [name intersections={of=V4 and G3,by={E,F}}];
+\node[Box, minimum width=30mm, anchor=south west, xshift=-\fa*4mm]at([yshift=1pt]E){Cray-1};
+\path [name intersections={of=V6 and G3,by={G,H}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=0mm]at([yshift=-1pt]G){Google Data\\ Centers};
+\path [name intersections={of=V7 and G3,by={I,J}}];
+\node[Box, minimum width=22mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]J){AWS};
+\path [name intersections={of=V8 and G4,by={K,L}}];
+\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*5mm]at([yshift=-1pt]K){NVIDIA GPU};
+\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]L){Google TPUs};
+\end{tikzpicture}
+```
+
+:::
+
+The lineage explains why a training platform must support both tightly coupled numerical execution and reliable data supply over long runs. @Tbl-computing-eras contrasts the workload and execution patterns inherited from these architectural traditions.
+
+| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         |
+|:----------------------|:----------------------------|:------------------------------|:-----------------------------|
+| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    |
+| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        |
+| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   |
+| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed |
+
+: **Computing Era Characteristics**: Each computing era optimized for different workload patterns, and modern training systems inherit requirements from multiple predecessors. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale distributed processing, while adding specialized support for the gradient-based optimization and massive parameter state management central to neural network training. {#tbl-computing-eras}
 
 Scaling changes the binding constraint rather than removing it: data parallelism buys throughput, model parallelism buys memory capacity, pipeline parallelism buys utilization, and tensor parallelism buys layer-scale feasibility, but each adds communication and coordination cost. The implementation details of multi-node distributed training, including collective communication primitives, fault tolerance mechanisms, and elastic scheduling, build directly on the single-machine principles covered throughout this chapter and are treated in depth in advanced distributed systems texts.
 
@@ -6719,7 +6805,7 @@ from mlsysim.physics import calc_activation_memory, model_memory
 class GPT2SummaryChapterRecap:
     batch_size = 4  # the walkthrough configuration whose optimized total fits a V100
     seq_len = 1024
-    checkpoint_factor = 4  # supplied peak saved-plus-rematerialized activation budget
+    checkpoint_factor = MixedPrecisionMemory.checkpoint_factor  # same explicit segment schedule
     act_fp16_gb = (
         calc_activation_memory(
             n_layers=Models.Language.GPT2.layers,
@@ -6752,7 +6838,7 @@ class GPT2SummaryChapterRecap:
 * **Memory determines whether an optimizer fits**: Standard mixed-precision Adam uses 8$\times$ the FP16 inference-weight memory in the stated representation before activations. Optimizer state and batch-dependent activations—not weights alone—determine whether training fits.
 * **Profiles choose the remedy**: Profile, diagnose, fix, and re-profile. Compute-bound jobs need better arithmetic or algorithms; memory-bound jobs need less state or traffic; data- and communication-bound jobs need pipeline or parallelism changes.
 * **Precision and IO-aware kernels shift bottlenecks**: FP16 with FP32 accumulation can improve throughput and shrink activation memory (the static state stays at 16 bytes per parameter), while FlashAttention avoids materializing the full $\SequenceLength{\times}\SequenceLength$ matrix in HBM; realized gains depend on workload and hardware.
-* **Checkpointing buys memory with recompute**: The walkthrough supplies a fourfold peak activation budget, reducing the modeled saved-plus-rematerialized state from `{python} GPT2SummaryChapterRecap.act_fp16_gb_str` to `{python} GPT2SummaryChapterRecap.act_ckpt_gb_str` at batch 4. Use it when memory, not compute, binds.
+* **Checkpointing buys memory with recompute**: The segment schedule counts retained boundaries and one live reconstructed segment, reducing the modeled activation allowance from `{python} GPT2SummaryChapterRecap.act_fp16_gb_str` to `{python} GPT2SummaryChapterRecap.act_ckpt_gb_str` at batch 4. Use it when memory, not compute, binds.
 * **Composed optimizations can postpone scale-out**: Mixed precision and checkpointing turn `{python} GPT2SummaryChapterRecap.b_total_mem_gb_str` into a modeled `{python} GPT2SummaryChapterRecap.o_total_mem_gb_str` for batch-4 GPT-2, before temporary workspaces. Use relevant local levers before accepting distributed communication and operational overhead.
 
 :::

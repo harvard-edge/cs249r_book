@@ -446,6 +446,8 @@ The systems challenge is excising surplus capacity without compromising task-cri
 
 These techniques address the challenge through complementary mechanisms. Pruning eliminates redundant parameters from an existing network; knowledge distillation transfers learned representations into an independently designed compact topology; neural architecture search automates the structural discovery process from the ground up [@hutter2019automl]. In production pipelines, these techniques frequently compose: a NAS-discovered architecture, supervised by a distilled teacher, is pruned prior to final quantization. Pruning comes first in this analysis because it exposes the physical bottleneck most directly: reducing parameter count accelerates execution only when the resulting structure maps to supported hardware kernels.
 
+The core comparison is what artifact each method produces, what recovery or training it requires, and which execution conditions make it useful. Lottery-ticket discovery, tensor decomposition, NAS search algorithms, and routing-gradient estimators provide optional depth for designing those methods. Their deployment trade-offs remain relevant even when a practitioner uses an existing implementation. In an actual deployment, post-training quantization is often the first experiment because it can reduce storage without changing the architecture or retraining.
+
 ### Pruning {#sec-model-compression-pruning-d1cb}
 
 ```{python}
@@ -977,7 +979,7 @@ $$
 $$
 where $\PruningThreshold$ is chosen to ensure that only the largest $(1 - \SparsityRatio)$ fraction of weights remain. This method assumes that larger-magnitude weights contribute more to the network's function, making them preferable for retention.
 
-Unstructured pruning reduces the count of nonzero parameters, but translating that reduction into physical storage savings requires an indexed sparse encoding such as Compressed Sparse Row (CSR) or coordinate list (COO). Because these formats must store positional metadata (such as column indices and row pointers) alongside the nonzero values, metadata overhead offsets savings at low sparsity. For example, storing a 16-bit floating-point weight with a 16-bit column index doubles the per-element byte footprint, requiring over 50 percent sparsity just to break even on artifact size ($\DataVolume$). Storing a dense tensor with zeroed entries saves zero memory. The wearable anchor that opened this section shows the consequence. Its surviving weights total `{python} MobileNetCompressionAnchor.pruned_size_mb_str` only if they cost nothing to locate. A 16-bit index beside each value adds half again to 32-bit values and doubles 16-bit ones, so the stored artifact misses the 2 MB flash budget. Meeting that budget requires either a denser position encoding, such as a bitmap, or structured removal of whole channels, which the next sections develop.
+Unstructured pruning reduces the count of nonzero parameters, but translating that reduction into physical storage savings requires an indexed sparse encoding such as Compressed Sparse Row (CSR) or coordinate list (COO). Because these formats must store positional metadata (such as column indices and row pointers) alongside the nonzero values, metadata overhead offsets savings at low sparsity. For example, storing a 16-bit floating-point weight with a 16-bit column index doubles the per-element byte footprint, requiring over 50 percent sparsity just to break even on artifact size ($\DataVolume$). Storing a dense tensor with zeroed entries saves zero memory. The wearable anchor that opened this section shows the consequence. Its surviving weights total `{python} MobileNetCompressionAnchor.pruned_size_mb_str` only if they cost nothing to locate. A 16-bit index beside each value adds half again to 32-bit values and doubles 16-bit ones, so the stored artifact misses the 2 MB flash budget. A denser position encoding, such as a bitmap, reduces the metadata overhead but cannot fit unchanged values that already consume the entire budget. Fitting requires further pruning or lower-precision values with room reserved for metadata, or structured removal of whole channels so that the remaining tensors can be stored without per-value indices.
 
 ::: {.column-margin .margin-pointer}
 ↪ The memory footprint and index-pointer layouts for compressed sparse row (CSR) representations are developed in @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0.
@@ -1610,7 +1612,7 @@ minimum width=27mm,minimum height=29mm,
 
 The working rule follows from that mechanism. Start with one-shot pruning plus recovery, because it is cheapest, and accept it if the recovered model meets the quality target. Move to an iterative schedule when it does not, which is most likely at high sparsity, where a single large cut removes capacity the network cannot rebuild in one recovery phase. Compare the two at a matched recovery budget, and spend the extra cycles only when the target accelerator can exploit the sparsity pattern that results.
 
-#### Lottery ticket hypothesis {#sec-model-compression-lottery-ticket-hypothesis-1b3d}
+#### Lottery ticket hypothesis (optional depth) {#sec-model-compression-lottery-ticket-hypothesis-1b3d}
 
 Standard pruning workflows assume a fully trained dense model from which weights are subsequently removed. Yet the relationship between network structure and optimization dynamics runs deeper: pruning can reveal inherently efficient, highly trainable subnetworks embedded within the initial random parameterization.
 
@@ -2194,7 +2196,7 @@ LRMF applies directly to fully connected projection layers and to flattened conv
 ↪ How a matrix is tiled onto a fixed-size systolic array, and why a dimension just past the tile width drops utilization sharply, is developed in @sec-hardware-acceleration-tiling-principle.
 :::
 
-#### Tensor decomposition {#sec-model-compression-tensor-decomposition-5e9e}
+#### Tensor decomposition (optional depth) {#sec-model-compression-tensor-decomposition-5e9e}
 
 **Tensor decomposition**\index{Tensor decomposition!definition} extends low-rank approximation to multidimensional arrays, such as four-dimensional convolutional kernels ($\LayerOutputWidth \times \LayerInputWidth \times \KernelHeight \times \KernelWidth$) and multi-head attention weights. Low-rank matrix factorization could compress such a tensor only after unfolding it into a matrix, for example by merging the spatial and input-channel axes into one. Unfolding keeps every entry but discards which axis was which, so the rank limit then treats a spatial pattern and a channel pattern as interchangeable. Tensor decompositions instead keep each axis separate by representing the tensor through multilinear products of lower-dimensional factors. @Fig-tensor-decomposition decomposes a three-dimensional tensor $\DecomposedTensor\in \mathbb{R}^{\TensorRowModeSize\times \TensorColumnModeSize\times \TensorDepthModeSize}$ into three rank-$\FactorizationRank$ factor matrices ($\RowModeFactorMatrix$, $\ColumnModeFactorMatrix$, and $\DepthModeFactorMatrix$), isolating how outer products of slice vectors $\RowModeFactorSlice_i$, $\ColumnModeFactorSlice_j$, and $\DepthModeFactorSlice_t$ reconstruct entry $\DecomposedTensorEntry$.
 
@@ -2539,7 +2541,7 @@ $$
 
 DenseNet reduces parameter redundancy through feature reuse, but concatenating retained features can increase activation storage and memory traffic. The resulting working set and runtime must be measured on the target hardware.
 
-Activation checkpointing, the training-time technique that recomputes discarded activations during backpropagation, attacks the same memory term from the other side. For $\LayerCount$ comparable layers, each with activation footprint $\ActivationMemory^{(\ell)}$, evenly spaced checkpointing reduces the saved-activation term from $\mathcal{O}(\LayerCount \ActivationMemory^{(\ell)})$ to $\mathcal{O}(\sqrt{\LayerCount}\,\ActivationMemory^{(\ell)})$. Its role in compression is indirect, and it leaves the deployed artifact unchanged. It lets a dense teacher or an over-wide model be trained within a fixed memory budget, and that model then supplies the surplus capacity that pruning and distillation remove.
+Activation checkpointing attacks activation memory by trading recomputation for retained tensor states during backpropagation. Its role in compression is strictly indirect: it leaves the deployed inference artifact unchanged, but enables training an over-wide teacher or search supernet within a fixed memory budget, providing the surplus capacity that pruning and distillation later carve away.
 
 ::: {.column-margin .margin-pointer}
 ↩ Activation checkpointing, which trades recomputation for saved activations during training, is established in @sec-model-training-activation-checkpointing-2ee1.
@@ -2702,8 +2704,7 @@ filllcolor=green!10!,Linewidth=2.75pt, filllcirclecolor=cyan!20}};
 \node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,minimum height=37mm,
 yshift=5.5mm,fill=BackColor!10,fit=(C2)(C3)(B3),line width=1pt](BB1){};
 \node[below=4pt of BB1.north,inner sep=0pt,
-anchor=north,align=center]{One-shot approach:\\
-learning model architecture parameters and weights together};
+anchor=north,align=center]{Architecture search and evaluation loop};
 \draw[Arr](C1)--(C2);
 \draw[Arr](C2.15)--node[text=black,above=2pt,align=center]{Architecture  $a\in\mathcal{A}$}(C3.165);
 \draw[Arr](C3.195)--node[text=black,below,align=center]{Performance\ estimate of $a$}(C2.345);
@@ -2712,7 +2713,7 @@ learning model architecture parameters and weights together};
 
 :::
 
-#### The NAS optimization problem {#sec-model-compression-nas-optimization-problem-7f8e}
+#### The NAS optimization problem (optional depth) {#sec-model-compression-nas-optimization-problem-7f8e}
 
 The effectiveness of NAS depends on three design decisions: what architectures to search over (the search space), how to explore that space efficiently (the search strategy), and how to evaluate each candidate's fitness for deployment. The optimization problem begins with a chicken-and-egg constraint: we cannot know how good an architecture is until we train it, but training is expensive. This creates two nested decisions: choosing which operations to include (the architecture) and finding the best parameters for those operations (the weights). The architecture defines *what* to optimize; the weights define *how well* that architecture can perform.
 
@@ -2728,7 +2729,7 @@ $$
 
 The computational bottleneck lies in this inner loop. If evaluating every candidate requires independent training from scratch, a modest search space of 10 operation choices across 20 layers yields $10^{20}$ possible architectures, making exhaustive enumeration impossible. Practical NAS methods overcome this combinatorial explosion through three mechanisms: restricting the search space to reusable cells, amortizing evaluation through weight sharing, or relaxing discrete choices into continuous, differentiable formulations.
 
-#### Search space design {#sec-model-compression-search-space-design-62db}
+#### Search space design (optional depth) {#sec-model-compression-search-space-design-62db}
 
 The search space defines what architectures NAS can discover. Well-designed search spaces incorporate domain knowledge to focus search on promising regions while remaining flexible enough to discover novel patterns.
 
@@ -2736,7 +2737,7 @@ Rather than searching entire network architectures, many NAS systems search for 
 
 Search spaces also encode physical hardware constraints directly. Rather than allowing arbitrary topological graphs, hardware-aware search spaces restrict candidate operations to primitives that have efficient, vectorized kernel implementations on the target platform. For example, mobile search spaces prioritize depthwise separable convolutions with bounded kernel sizes and channel dimensions and layouts chosen for efficient kernels and memory transactions [@zhang2020fast]. MobileNetV3 paired this structured block-level search space with NetAdapt to prune layer channels against measured mobile CPU latency [@howard2019].
 
-#### Search strategies {#sec-model-compression-search-strategies-84ad}
+#### Search strategies (optional depth) {#sec-model-compression-search-strategies-84ad}
 
 Search strategies determine how to explore the architecture space efficiently without exhaustive enumeration. @Tbl-nas-strategies compares the trade-offs between search cost, architectural diversity, and optimality guarantees for each approach.
 
@@ -3186,7 +3187,7 @@ While early exit and MoE routing make discrete branch selections, adaptive infer
 
 #### Implementation challenges {#sec-model-compression-implementation-challenges-1184}
 
-Realizing the efficiency gains of adaptive computation requires overcoming critical challenges across model training, runtime orchestration, and hardware alignment. During training, discrete routing decisions (such as non-differentiable $\mathrm{argmax}$ selections) break standard backpropagation. Practitioners must employ a continuous relaxation such as the Gumbel-Softmax estimator, which replaces the hard selection with a temperature-scaled softmax over noise-perturbed scores so gradients can flow; policy gradients, which treat each routing choice as an action rewarded by the resulting loss, as in reinforcement-learning NAS; or auxiliary load-balancing losses to prevent routing collapse where the router over-allocates inputs to a single expert or exit [@shazeer2017outrageously].
+Realizing the efficiency gains of adaptive computation requires overcoming critical challenges across model training, runtime orchestration, and hardware alignment. Training the router adds an optional layer of algorithmic detail. Discrete routing decisions (such as non-differentiable $\mathrm{argmax}$ selections) break standard backpropagation. Practitioners must employ a continuous relaxation such as the Gumbel-Softmax estimator, which replaces the hard selection with a temperature-scaled softmax over noise-perturbed scores so gradients can flow; policy gradients, which treat each routing choice as an action rewarded by the resulting loss, as in reinforcement-learning NAS; or auxiliary load-balancing losses to prevent routing collapse where the router over-allocates inputs to a single expert or exit [@shazeer2017outrageously].
 
 At runtime, control-flow branching fundamentally conflicts with the bulk-synchronous parallel execution model of modern accelerators, in which threads compute in parallel phases separated by synchronization points, and the threads of a warp execute the same instruction in lockstep. When parallel threads within a GPU warp encounter divergent execution branches, the hardware may serialize branch execution and mask inactive threads, reducing the value of theoretical FLOP savings. Gating also introduces control dependencies that can limit fusion, require token-permutation buffers, or trigger host-device synchronization, depending on the runtime. If these dispatch overheads exceed the compute time saved by skipping layers, the dynamic model exhibits higher end-to-end latency than a dense baseline. Runtime strategies such as ragged batching and dynamic kernel launch queues exist to manage exactly these execution patterns, and they belong to the accelerator runtime rather than to the model.
 
@@ -3274,20 +3275,20 @@ Three system properties can change. The raw weight payload falls by 4$\times$ fr
 
 The accuracy cost varies by model, task, quantizer, calibration data, and bit width. Many convolutional neural network (CNN) inference models tolerate INT8 well; transformers, speech models, and outlier-heavy layers may need different granularity, mixed precision, or training-aware methods. The main approaches are **post-training quantization**\index{Post-training quantization!definition} (PTQ), **quantization-aware training**\index{Quantization-aware training!definition} (QAT), and mixed-precision or **extreme quantization**\index{Quantization!extreme (INT4, binary)} for lower-bit deployment. They differ in training cost and control, not in a guaranteed ordering of accuracy.
 
-The viability of each approach depends on how much precision a particular model can shed before quality deteriorates. @Fig-quantization-free-lunch charts this trade-off across precision formats from FP32 down to INT2. Both CNN and transformer curves hold accuracy across a low-loss plateau from FP32 to INT8, which the figure labels a free-lunch zone, then drop steeply off an accuracy cliff below 4 bits where representational capacity collapses. The figure's label means a loss below 1 percent. It is a looser sense than Region 1 of @tbl-optimization-tradeoffs, which reserves "free lunch" for changes with no accuracy cost or a negligible one (below 0.1 percent) and places FP16-to-INT8 in Region 2. The bit width at either boundary is not universal.
+The viability of each approach depends on how much precision a particular model can shed before quality deteriorates. @Fig-quantization-free-lunch charts an illustrative trade-off across precision formats from FP32 down to INT2. Both CNN and transformer curves hold near baseline accuracy across a low-loss plateau from FP32 to INT8, then drop steeply at lower precision. A plateau can still carry a quality cost; the application's acceptance threshold determines whether that cost is tolerable. The bit width at either boundary is model- and task-dependent.
 
 ::: {#fig-quantization-free-lunch fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Quantization Regimes**: The curves depict a qualitative plateau followed by an accuracy cliff as bit width falls. Their breakpoints are illustrative; actual boundaries depend on the model, layer distributions, quantizer, calibration or training method, and evaluation task." fig-alt="Illustrative line chart of accuracy versus precision. Two example curves remain nearly flat over part of the range and then fall at different low-bit thresholds. Shaded regions mark a low-loss plateau and a model-dependent cliff."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ THE QUANTIZATION FREE LUNCH (FIGURE)
+# │ QUANTIZATION REGIMES (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-quantization-free-lunch in Quantization and Precision section
 # │
 # │ Goal: Visualize the accuracy-vs-precision trade-off.
-# │ Show: The "Free Lunch Zone" above 4 bits and the "cliff" below it.
-# │ How: Plot model accuracy across bit-widths (FP32 to 1-bit).
+# │ Show: An illustrative low-loss plateau and accuracy cliff.
+# │ How: Plot illustrative accuracy across bit-widths (FP32 to INT2).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -3319,7 +3320,7 @@ ax.set_xticks(bits)
 ax.set_xticklabels(['FP32', 'FP16', 'INT8', 'INT4', 'INT3', 'INT2'], rotation=90)
 
 ax.axvspan(33, 7, color=COLORS['GreenL'], alpha=0.3)
-ax.text(20, 50, "Free Lunch Zone\n(<1 percent Loss)", color=COLORS['GreenLine'], fontweight='bold', ha='center', fontsize=9)
+ax.text(20, 50, "Low-Loss Plateau", color=COLORS['GreenLine'], fontweight='bold', ha='center', fontsize=9)
 ax.axvspan(3.5, 1, color=COLORS['RedL'], alpha=0.3)
 ax.text(3.0, 83, "The Cliff", color=COLORS['RedLine'], fontweight='bold', ha='center', fontsize=9)
 ax.legend(loc='lower left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
@@ -3598,11 +3599,7 @@ class EnergyDividend:
 
 #### The energy dividend: INT8 vs. FP32 {#sec-model-compression-energy-dividend}
 
-Memory reduction is often the first motivation for quantization, but lower-precision arithmetic can also provide an **energy dividend**\index{Energy dividend!quantization efficiency}. Moving from FP32 to INT8 reduces raw value payload by exactly 4$\times$; the operation-level energy ratio can be larger, while end-to-end energy remains workload- and device-dependent.
-
-The hardware energy hierarchy exposes this operational asymmetry. In the reference technology model used here, an FP32 addition costs `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition costs `{python} EnergyDividend.energy_add_int8_pj_per_op_str`, an operation-level ratio of `{python} EnergyDividend.energy_dividend_factor_mult_str`. That ratio is not a device-level battery-life prediction: memory accesses, accumulation precision, control, sensors, and idle power remain. It does explain why many accelerators add specialized low-precision units and why quantization can be necessary when arithmetic or memory energy binds.
-
-These energy savings shift fundamentally when memory capacity, rather than compute throughput, is the binding physical constraint.
+The arithmetic ratios in the energy hierarchy describe an **energy dividend**\index{Energy dividend!quantization efficiency} per operation. In the reference technology model, an FP32 addition costs `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition costs `{python} EnergyDividend.energy_add_int8_pj_per_op_str`, an operation-level ratio of `{python} EnergyDividend.energy_dividend_factor_mult_str`. Applying that ratio to battery life would also require accounting for memory accesses, accumulation precision, control, sensors, and idle power. When memory capacity binds, the more immediate benefit is placement: smaller values may let the model reside in a memory tier that the uncompressed model cannot fit.
 
 ::: {.column-margin}
 ```{=latex}
@@ -4349,11 +4346,11 @@ The energy argument of @sec-model-compression-precision-energy-cc8e carries into
 
 Reducing numerical bit width relieves memory traffic and arithmetic energy, but naive truncation introduces quantization noise that degrades model accuracy. Deploying low-precision representations requires structured strategies that control where and how bit widths change across the computational graph.
 
-Three approaches form a complexity ladder. Post-training quantization (PTQ) reduces precision after training, requiring no retraining and minimal engineering effort. Quantization-aware training (QAT) incorporates quantization effects into the training loop, enabling models to adapt to lower precision and retain higher accuracy. Mixed-precision approaches assign different bit widths to different layers, matching numerical precision to each operator's sensitivity. @Fig-quantization-roadmap stages these techniques along a three-tier complexity ladder: progressing from Foundational post-training calibration through Production quantization-aware retraining to the Research Frontier of extreme sub-4-bit formats. The displayed accuracy-loss ranges are illustrative scenario values, not expected results for each method; the task and calibration or recovery procedure determine the measured loss.
+Three approaches form an engineering decision ladder governed by training and validation cost. Post-training quantization (PTQ) reduces precision after training, requiring no retraining and minimal computational investment. Quantization-aware training (QAT) models quantization noise directly within the training loop, allowing backpropagation to adapt surviving weights and recover accuracy when calibration alone is insufficient. Specialized extreme formats push beyond standard 8-bit and 4-bit representations to binary or ternary regimes, demanding customized execution kernels and model-specific co-design. Representation choices—such as selecting INT8 versus INT4, mixing bit widths across sensitive layers, or choosing per-tensor versus per-channel calibration—are orthogonal options evaluated *within* these workflows rather than separate maturity levels. @Fig-quantization-roadmap stages this deployment sequence by the engineering effort required, moving from fast post-training calibration through quantization-aware retraining to custom low-bit pipelines.
 
-::: {#fig-quantization-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Quantization Complexity Roadmap**: The tiers order techniques by typical engineering and validation effort, not by guaranteed accuracy. PTQ provides a low-cost starting point; QAT and mixed precision add training or kernel control; INT4, binary, and ternary methods require increasingly model- and hardware-specific validation. A deployment may stop at any tier once it meets measured quality, latency, memory, and energy criteria, and a more complex tier is not automatically better." fig-alt="Tiered diagram with three levels. Foundation includes PTQ and basic INT8. Production adds QAT and mixed precision. Research frontier shows INT4, binary, and ternary quantization with increasing implementation and validation complexity."}
+::: {#fig-quantization-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Quantization Engineering Workflow**: The tiers order deployment paths by engineering and validation effort, not by format or guaranteed accuracy. PTQ serves as the initial candidate because it operates over frozen weights with zero retraining cost; QAT introduces simulated quantization into the training loop when quality recovery demands backpropagation; specialized sub-4-bit and binary formats require custom kernel execution and extensive hardware-specific validation. Representation choices such as INT8 versus INT4, per-channel scaling, and mixed precision apply across these stages rather than defining separate maturity levels." fig-alt="Tiered diagram with three levels ordered by engineering effort: post-training calibration without retraining, quantization-aware retraining for accuracy recovery, and specialized sub-4-bit formats requiring custom execution support."}
 
-```{.tikz}
+```{tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily]
 \tikzset{
 Box/.style={align=flush center,
@@ -4519,29 +4516,26 @@ pics/brick/.style = {
    (S\k)+(\i:0.7*\ra) arc[start angle=\i, end angle=\newX, radius=0.7*\ra];
 }
 \draw[LineA](S1.240)--++(200:2.15)coordinate(MA);
- \node[Box,anchor=north](FO)at(MA){\textbf{Foundational}\\ Post-Training Quantization
-FP32/FP16/INT8 Basic Calibration};
+ \node[Box,anchor=north](FO)at(MA){\textbf{Post-Training (PTQ)}\\ Calibration Without Retraining\\ Fast Validation Path};
  \draw[LineA](S2.240)--++(200:2.15)coordinate(ST);
- \node[Box,anchor=north](PR)at(ST){\textbf{Production}\\ Quantization-Aware Training
-Mixed-Precision Per-Channel Quantization};
+ \node[Box,anchor=north](PR)at(ST){\textbf{Quantization-Aware (QAT)}\\ Retraining With Simulated Noise\\ Recovers Discretization Loss};
  \draw[LineA](S3.240)--++(200:2.15)coordinate(ST1);
- \node[Box,anchor=north](RE)at(ST1){\textbf{Research Frontier}\\ INT4/INT2
-Binary/Ternary Networks Extreme Quantization};
+ \node[Box,anchor=north](RE)at(ST1){\textbf{Specialized \& Extreme}\\ Custom Kernels \& Hardware Co-design\\ Sub-4-Bit \& Non-Standard Formats};
 %
-\node[TxtC,below=5pt of FO]{Quick deployment\\ Minimal training cost\\ 0.5-2\% accuracy loss};
-\node[TxtC,below=5pt of PR]{Production systems\\ Requires retraining\\ 0.2-1\% accuracy loss};
-\node[TxtC,below=5pt of RE]{Extreme constraints\\ Architectural changes \\ 2-10\% accuracy loss};
+\node[TxtC,below=5pt of FO]{Primary deployment candidate\\ Zero retraining cost\\ Evaluates INT8/INT4 PTQ};
+\node[TxtC,below=5pt of PR]{Applies gradient updates\\ Fine-tunes model weights\\ Used when PTQ falls short};
+\node[TxtC,below=5pt of RE]{Extreme hardware limits\\ Non-standard datapath logic\\ Requires specialized kernels};
 %
 \draw[-{Triangle[width=18pt,length=8pt]}, line width=10pt,cyan!40,shorten >=5pt, shorten <=5pt]
 (S1)--node[above,text=black]{Increasing}(S2);
 \draw[-{Triangle[width=18pt,length=8pt]}, line width=10pt,cyan!40,shorten >=5pt, shorten <=5pt]
-(S2)--node[above,text=black]{Complexity}(S3);
+(S2)--node[above,text=black]{Engineering Effort}(S3);
  \end{tikzpicture}
 ```
 
 :::
 
-The roadmap is a deployment-ordering device rather than a taxonomy of numerical formats. PTQ belongs first because it changes representation with minimal training cost; QAT and mixed precision move into the production tier because they require training-loop or kernel support; INT4, binary, and ternary methods sit at the frontier because the accuracy and hardware assumptions become architecture-specific.
+This workflow emphasizes engineering economics rather than a taxonomy of numerical formats. An engineer should evaluate post-training quantization first because it modifies representations with minimal compute and pipeline overhead. When PTQ satisfies the application latency, energy, and quality thresholds, the optimization process halts. When post-training calibration introduces unacceptable accuracy degradation, quantization-aware training provides the recovery mechanism by allowing model weights to adapt to discretization noise during backpropagation. Format selections such as INT8 or INT4 weight-only packing, per-channel scaling, and mixed layer precisions operate within both workflows, whereas extreme sub-4-bit or ternary representations demand dedicated kernel implementations and rigorous hardware validation.
 
 #### Post-training quantization {#sec-model-compression-posttraining-quantization-bb5b}
 
@@ -5814,37 +5808,27 @@ Fusion removes traffic between dense operations that must all execute. It does n
 
 ### Sparsity exploitation {#sec-model-compression-sparsity-exploitation-48a6}
 
-Recall that pruning (from @sec-model-compression-pruning-d1cb) introduces zeros into weight matrices. Sparsity exploitation asks how to accelerate computation when those zeros are present. Pruning creates zeros or removes structure; sparse formats can reduce storage, and matching kernels can reduce computation. **Sparsity**\index{Sparsity!definition}[^fn-sparsity-hardware-gap] in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero.
+Pruning introduces zeros into weight matrices, but dense kernels cannot infer skipped operations from a zero operand in memory. Sparsity exploitation addresses the execution half of this trade-off: designing representations and kernels that translate zeros into reduced memory traffic and execution time. **Sparsity**\index{Sparsity!definition}[^fn-sparsity-hardware-gap] in machine learning denotes tensors where a substantial fraction of entries are zero.
 
 [^fn-sparsity-hardware-gap]: **Sparsity**\index{Sparsity!hardware gap}: From Latin *sparsus* (scattered), past participle of *spargere* (to scatter); in ML, $\ell_1$ regularization such as the lasso can induce exact zeros rather than merely small values [@tibshirani1996regression]. Software can represent arbitrary sparsity patterns, while efficient hardware execution generally requires a supported format or structured pattern (for example, NVIDIA's 2:4 sparsity). The gap between representable and executable sparsity separates theoretical compression from realized speedup.
 
-More formally, for a sparse weight matrix $\SparseWeightMatrix\in \mathbb{R}^{\WeightMatrixRowCount\times \WeightMatrixColumnCount}$, the sparsity ratio $\SparsityRatio$ can be expressed as:
+Formally, for a sparse weight matrix $\SparseWeightMatrix\in \mathbb{R}^{\WeightMatrixRowCount\times \WeightMatrixColumnCount}$, the nominal sparsity ratio $\SparsityRatio$ is:
 $$
 \SparsityRatio= \frac{\Vert \ZeroEntryIndicator\Vert_0}{\WeightMatrixRowCount\times \WeightMatrixColumnCount}
 $$
-where $\ZeroEntryIndicator$ is an indicator function that yields one if entry $(\MatrixRowIndex,\MatrixColumnIndex)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ represents the $\ell_0$ norm, which counts the number of nonzero elements. Exact zero is representable in floating point, but thresholded definitions also group small-magnitude values when the pruning method treats them as removable. The thresholded sparsity ratio becomes:
+where $\ZeroEntryIndicator$ is an indicator function that yields 1 if entry $(\MatrixRowIndex,\MatrixColumnIndex)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ counts nonzero entries. When magnitude pruning treats entries below $\PruningThreshold$ as removable, the thresholded sparsity ratio becomes:
 $$
 \ThresholdedSparsityRatio= \frac{\Vert \BelowThresholdIndicator \Vert_0}{\WeightMatrixRowCount\times \WeightMatrixColumnCount}
 $$
-where $\PruningThreshold$ is the same small magnitude threshold that defines the pruning mask.
-
-Exact sparsity can emerge during training through regularization or be introduced deliberately through pruning, which forces selected elements to zero. It yields memory, compute, or energy savings only when the storage format and execution path skip those zeros with less overhead than dense execution. That qualification is especially important on resource-constrained devices, where index metadata and irregular accesses consume the same scarce bandwidth and power.
+where $\PruningThreshold$ defines the pruning boundary. Zeros yield wall-clock acceleration only when the execution pipeline skips both the arithmetic and the associated memory traffic.
 
 #### Sparsity types {#sec-model-compression-sparsity-types-793d}
 
-The hardware decision begins with the pattern of zeros. Sparsity in neural networks falls into two broad categories: unstructured sparsity and structured sparsity.
-
-Unstructured sparsity occurs when individual weights are set to zero without any specific pattern, typically through magnitude-based pruning. While highly flexible, unstructured sparsity is less efficient on hardware because it lacks a predictable structure.[^fn-sparsity-vectorization-penalty] Exploiting it requires specialized hardware or software optimizations.
-
-[^fn-sparsity-vectorization-penalty]: **Unstructured sparsity and SIMD waste**\index{Sparsity!SIMD vectorization}: Modern CPUs and GPUs process data in vector or tensorized groups; a dense masked tensor still loads and processes zeros. A compact sparse format instead stores nonzero values and metadata, avoiding those zero loads but introducing index traffic, irregular activation accesses, and possible lane imbalance. This is why structured sparsity can deliver speedups at lower sparsity levels than arbitrary unstructured sparsity, while unstructured sparsity often needs very high zero fractions and specialized kernels before arithmetic savings overcome indexing and lane-utilization overheads [@hoefler2021sparsity].
-
-Structured sparsity removes regular groups such as filters, neurons, channels, blocks, or fixed within-group patterns. Regularity makes storage and execution more predictable, but acceleration still depends on whether the target supports that structure and whether the resulting shapes use its compute units efficiently. It is therefore a candidate, not an automatic preference, when deployment requires predictable resource use.
+From an execution standpoint, the spatial pattern of zeros determines memory transaction efficiency. As established in @sec-model-compression-unstructured-pruning-1c47, unstructured sparsity zeroes arbitrary scalar connections, requiring pointer arrays and non-unit-stride gathers that degrade bandwidth on SIMD and systolic units. Conversely, structured patterns—such as channel pruning or $N$:$M$ constraints—preserve predictable memory layouts, aligning with standard dense kernels or dedicated hardware datapaths.
 
 #### Sparsity utilization methods {#sec-model-compression-sparsity-utilization-methods-04c3}
 
-A sparse model with 90 percent of weights zeroed may still run at nearly full computational cost on hardware not designed for irregular memory access. The critical question is how to translate theoretical zeros into actual speedup. A dense kernel *cannot* infer skipped work from a pruning mask it does not use. A sparse kernel can locate nonzeros from metadata without loading every zero, but decoding that metadata and gathering operands adds overhead. Bridging this gap requires specialized utilization methods and hardware support that can efficiently skip zero-valued computations [@hoefler2021sparsity]. Han et al.'s pruning work [-@han2015deep] is a canonical example of turning dense networks into sparse ones by removing unimportant connections, but accelerator speedups depend on whether the resulting sparsity pattern matches hardware-supported formats.
-
-The simplest utilization method is a sparse matrix operation, which stores nonzero values and uses their indices to skip arithmetic on zeros. Consider the difference: multiplying a dense $4{\times}4$ matrix with a vector typically requires 16 multiplications, while a sparse-aware implementation computes the six nonzero products in addition to processing the sparse metadata:
+Translating zeros into runtime speedup requires a representation that encodes nonzero positions and a kernel that decodes those coordinates to bypass unneeded computation [@hoefler2021sparsity]. Consider the arithmetic difference during a matrix-vector product: a dense $4{\times}4$ operator executes 16 multiply-accumulate operations, whereas a sparse execution path computes only the six nonzero products alongside the necessary metadata lookups:
 $$
 \begin{bmatrix}
 2 & 0 & 0 & 1 \\
@@ -5857,7 +5841,7 @@ $$
 \begin{bmatrix} 2\LayerInputComponent_1 + \LayerInputComponent_4 \\ 3\LayerInputComponent_2 \\ 4\LayerInputComponent_1 + 5\LayerInputComponent_3 \\ 6\LayerInputComponent_4 \end{bmatrix}
 $$
 
-The deployment choice is therefore not a generic desire for fewer parameters; it is a choice between representations the runtime can execute efficiently. Low-rank approximation, covered earlier in @sec-model-compression-lowrank-factorization-955e, replaces a dense matrix with smaller dense factors, while sparsity exploitation skips literal zero-valued weights. Sparsity-aware training and sparse gradient descent can help models learn or maintain zero patterns, but runtime speedup appears only when the deployed representation uses formats and kernels that skip zeros. That is why the next design question is not merely how sparse the matrix is, but what structure the zeros have.
+The runtime benefit depends entirely on whether the latency eliminated by skipping 10 multiply-accumulate operations exceeds the latency added by coordinate decoding and non-contiguous activation loads. Structured patterns resolve this trade-off by constraining where zeros occur.
 
 #### Structured patterns {#sec-model-compression-structured-patterns-c3f4}
 
@@ -6953,7 +6937,7 @@ Across all platforms, sparse operations can reduce memory bandwidth requirements
 
 #### Challenges and limitations {#sec-model-compression-challenges-limitations-975f}
 
-The same format-hardware contract explains why sparsity often disappoints in practice.
+The format-hardware contract explains why nominal sparsity often fails to deliver speedups in practice.
 
 ::: {.column-margin}
 ![](images/svg/vol1_model_compression_margin_003.svg){width="100%" fig-alt="A speedup curve stays nearly flat before climbing through a shaded range labeled kernel-dependent break-even; no universal sparsity percentage is marked."}
@@ -6961,25 +6945,11 @@ The same format-hardware contract explains why sparsity often disappoints in pra
 *Unstructured sparsity pays off only after crossing a hardware- and kernel-specific break-even point.*
 :::
 
-The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that common dense accelerator paths cannot exploit; skipping those zeros requires a sparse representation and a compatible kernel. Pruning itself adds training or analysis cost because identifying removable weights can require sophisticated importance estimation on large models. Even after sparsity is achieved, storage formats add indices whose overhead can offset saved values and arithmetic. The performance break-even point varies with tensor shape, sparse format, kernel, batch size, and hardware; there is no universal sparsity threshold.
-
-The accuracy-efficiency trade-off requires measurement across candidate sparsity levels. A model may tolerate one level with little measured impact and then degrade sharply after a comparatively small additional pruning step. The operating point is the highest useful sparsity whose task quality and deployed performance both satisfy their thresholds.
-
-Energy efficiency is not guaranteed. While sparse operations reduce arithmetic operations, the overhead of sparse indexing and irregular memory access can increase power consumption on hardware not optimized for sparse patterns. On edge devices with tight power budgets, these overheads may outweigh the benefits.
-
-Finally, sparsity benefits vary by layer, model, and execution target. A workload whose useful tensors remain dense, or a target without a matching sparse path, may see no improvement and can regress after metadata and irregular-access costs are included.
+First, the performance break-even point varies with tensor dimensions, sparse format, kernel implementation, and hardware architecture. When coordinate metadata and irregular activation gathers saturate cache lines, an unstructured sparse kernel can run slower than an optimized dense baseline until sparsity exceeds 80 to 90 percent. Second, the accuracy-efficiency trade-off is non-linear: models often tolerate moderate pruning before task quality degrades abruptly past a critical density threshold. Finally, energy savings do not scale linearly with skipped operations; irregular memory access and index decoding can consume more power on edge devices than the arithmetic they eliminate.
 
 #### Combined optimizations {#sec-model-compression-combined-optimizations-99fd}
 
-Pruning, quantization, kernel fusion, dynamic computation, and sparse execution share weights, representations, and physical resources. A deployment may combine them when one technique cannot satisfy every constraint, but the combined result is not guaranteed to exceed the best individual technique. Each transformation can alter the accuracy, shapes, distributions, and bottlenecks assumed by the next, so combinations require joint quality and performance measurement rather than a promised compression ratio [@hoefler2021sparsity].
-
-The interaction between sparsity and pruning is the most direct: pruning creates sparsity, but the pattern determines hardware efficiency. Removing entire filters or layers can produce smaller dense shapes, while fixed within-group patterns can map to supported sparse kernels. Unstructured pruning creates irregular patterns that require specialized formats and kernels to realize speedups [@elsen2020; @gale2019state].
-
-Combining sparsity with quantization can multiply raw value-payload reductions, but the deployed representation carries both sparse and quantization metadata. GPUs with dedicated sparse tensor cores can accelerate supported structured patterns, while CPU outcomes depend on the chosen format, low-precision sparse kernel, tensor shape, and indexing overhead [@NVIDIA2020; @hoefler2021sparsity; @gale2020].
-
-The recurring theme across all combinations is hardware alignment. Efficient model designs such as depthwise separable convolutions [@howard2017mobilenets], dynamic computation, and sparsity help only when the target hardware supports the resulting operation patterns [@hoefler2021sparsity].
-
-The coordination challenges inherent in combining sparsity with other techniques point to a broader principle: optimization techniques rarely succeed in isolation, and their effectiveness depends on sequencing decisions and hardware alignment.
+Pruning, quantization, kernel fusion, and dynamic computation share weights, representations, and physical memory. Composing these techniques can compound footprint reductions—such as pairing structured 2:4 sparsity with INT8 quantization—but the resulting executable must manage both structural metadata and quantization scales simultaneously. If transformations interact destructively, such as pruning disrupting the memory alignment required by a quantized SIMD kernel, wall-clock performance collapses. Because each optimization alters the arithmetic intensity and memory traffic seen by downstream operators, multi-technique pipelines require joint profiling rather than accumulating theoretical ratios [@hoefler2021sparsity].
 
 ::: {#psp-model-compression-optimization-composition-problem .callout-perspective title="The optimization composition problem"}
 
@@ -7889,9 +7859,9 @@ Quantization error histograms show whether error is broadly distributed or conce
 
 :::
 
-Sparsity diagnostics resolve an essential deployment question by identifying which layers become sparse enough for the runtime to exploit. Across twelve layer types and eight architectural blocks, @fig-sparse-heat-map maps non-uniform weight sparsity: early convolutional layers (Conv1–Conv5) remain lightly shaded to preserve low-level features, whereas fully connected layers (FC1–FC3) darken toward near-total parameter pruning. Profiling must still confirm whether the target runtime's sparse kernels accelerate these specific block patterns. TensorBoard, Netron, and SparseML provide these tools.
+Sparsity diagnostics identify candidate layers for sparse execution. @Fig-sparse-heat-map is a schematic spanning convolutional, fully connected, and transformer layer types, not measurements from one model or pruning run. Its rows illustrate how a pruning policy might distribute zeros unevenly across architectural blocks. A real diagnostic would pair each layer's density with its storage format and target-kernel profile to determine whether those zeros reduce memory traffic or execution time. Graph viewers and sparsity inspection tools help locate the affected tensors; profiling establishes the deployment benefit.
 
-::: {#fig-sparse-heat-map fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Sparsity Distribution**: Block-level heat map visualizing non-uniform parameter removal. Darker tiles indicate higher sparsity density, revealing which network layers retain dense features versus which layers concentrate zero-valued weights for memory saving or sparse kernel scheduling." fig-alt="Heatmap visualization of a pruned neural network with weight matrix blocks. Darker regions indicate higher sparsity where more weights have been removed. Lighter regions show retained weights."}
+::: {#fig-sparse-heat-map fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Layer-Wise Sparsity Distribution**: This schematic combines several layer types to illustrate non-uniform parameter removal. Darker tiles indicate more zero-valued weights; their shade establishes neither task redundancy nor a runtime benefit." fig-alt="Schematic heatmap of convolutional, fully connected, attention, and MLP layer types with weight matrix blocks. Darker regions indicate higher sparsity where more weights have been removed. Lighter regions show retained weights."}
 
 ```{.tikz}
 \begin{tikzpicture}[x=13mm,y=13mm,line join=round,font=\sffamily\footnotesize]
@@ -8087,7 +8057,7 @@ Sparsity diagnostics resolve an essential deployment question by identifying whi
   font=\sffamily\itshape\small,
   text=black!55
 ] at (\CenterX,-9.51)
-{Sparsity varies by layer type: early conv layers retain features; FC layers tolerate aggressive pruning};
+{Illustrated policy prunes FC blocks more heavily; layer tolerance and redundancy require empirical validation};
 
 %====================================================
 % COLUMN TITLE
@@ -8168,7 +8138,7 @@ node[align=left,anchor=west]{\textit{\color{black!50}Transformer layers:}\\
 
 :::
 
-The diagnostic value is the nonuniformity, not the exact shade of any one cell. If later layers are much sparser than early feature extractors, the pruning policy is concentrating compression where representations are more redundant; if early layers darken first, the policy may be destroying low-level features before the model has enough depth to compensate.
+The diagnostic value is the nonuniformity, not the exact shade of any one cell. Greater sparsity in later layers shows where the policy removed weights; it does not establish that those representations were redundant. Compare task quality after removing weights from a candidate layer and after recovery training, including performance on important input slices. Early-layer sparsity warrants the same checks because damaging feature extraction can propagate through subsequent layers. Only those comparisons can establish whether the observed removal pattern preserves required behavior.
 
 Implementation tools make compression repeatable, but they do not make the trade-offs disappear. Quantization can follow pruning or distillation in a layered pipeline: pruning alters model structure or parameter count, quantization changes numerical representation, and distillation trains the smaller artifact against a teacher's output distribution. While composing these transformations can compound nominal footprint reductions, unmeasured composition frequently produces catastrophic latency regressions or silent accuracy collapse on target hardware. Understanding where intuitive compression assumptions fail requires analyzing the concrete engineering fallacies that plague real-world deployments.
 
@@ -8242,9 +8212,9 @@ Engineers assume optimization strategies compose additively: 50 percent pruning 
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Optimizing for theoretical metrics rather than actual deployment performance.*
+**Pitfall**: *Assuming theoretical metrics or compression ratios translate directly into proportional deployment speedup.*
 
-Teams can reduce FLOPs substantially without realizing proportional latency gains. In one hypothetical trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only 12 percent latency reduction because irregular sparsity prevents efficient execution. A second scenario reduces a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str`, yet conversion overhead on hardware without a fast low-precision path erodes the latency benefit. These values illustrate failure modes rather than report ARM or GPU measurements. Memory bandwidth, cache behavior, kernels, and instruction-level parallelism determine actual performance, so production deployments require wall-clock measurements on target hardware.
+Teams frequently reduce FLOPs or parameter counts substantially without realizing proportional latency gains on physical hardware. In one representative trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only a 12 percent latency reduction because irregular sparsity prevents efficient execution. Similarly, reducing a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str` through INT8 quantization yields a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction, yet format conversion and scalar fallback on hardware without a native low-precision datapath erode the latency dividend. In a composed pipeline combining 50 percent structured pruning and INT8 quantization, the realized speedup reaches only `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target—capturing just `{python} FallaciesAnalysis.actual_speedup_str` of the theoretical projection. Scales, index metadata, unsupported operators, and memory bottlenecks dictate runtime throughput. Production workflows must evaluate wall-clock latency on target execution units rather than extrapolate from nominal compression ratios.
 
 :::
 
@@ -8274,27 +8244,11 @@ Teams often begin with post-training quantization (PTQ) because it avoids retrai
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Assuming compression ratios translate directly into proportional deployment gains.*
+**Fallacy**: *Sparse matrix representations always save memory and accelerate inference.*
 
-Teams may obtain a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction through INT8 quantization and expect the same deployment gain. In practice, scales, metadata, unsupported operators, conversions, and sparse indexing erode the benefit. The chapter's hypothetical trace realizes `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target, only `{python} FallaciesAnalysis.actual_speedup_str` of the projection; it illustrates the failure mode rather than reporting a BERT benchmark. Production workflows must profile deployed latency on target hardware rather than extrapolate from compression ratios.
+Sparse formats introduce coordinate metadata that erodes storage savings at moderate densities. To represent $\NonzeroCount$ nonzero values across $\SparseMatrixRowCount$ rows, a coordinate list (COO) stores explicit coordinate tuples `(row_idx, col_idx, value)`. For 32-bit floats and 32-bit integer indices, each nonzero element consumes 12 bytes ($3\times$ a dense 4-byte FP32 entry), requiring greater than 66.7 percent sparsity just to break even on memory footprint. Compressed sparse row (CSR) eliminates redundant row coordinates by storing three arrays: `values` ($\NonzeroCount \times 4\text{ B}$), `col_indices` ($\NonzeroCount \times 4\text{ B}$), and `row_pointers` ($(\SparseMatrixRowCount+1) \times 4\text{ B}$). Each nonzero entry costs 8 bytes ($2\times$ a dense FP32 entry), requiring over 50 percent sparsity before the sparse structure consumes less memory than the original dense tensor; below 50 percent sparsity, CSR metadata expands the model's memory footprint.
 
-:::
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Sparse matrices always save memory.*
-
-Sparse formats add index-array metadata that erodes storage savings at moderate densities. To represent $\NonzeroCount$ nonzero values across $\SparseMatrixRowCount$ rows, a coordinate list (COO) stores explicit coordinate tuples `(row_idx, col_idx, value)`. For 32-bit floats and 32-bit integer indices, each nonzero element consumes 12 bytes ($3\times$ a dense 4-byte FP32 entry), requiring greater than 66.7 percent sparsity just to break even on memory footprint. Compressed sparse row (CSR) eliminates redundant row coordinates by storing three arrays: `values` ($\NonzeroCount \times 4\text{ B}$), `col_indices` ($\NonzeroCount \times 4\text{ B}$), and `row_pointers` ($(\SparseMatrixRowCount+1) \times 4\text{ B}$). Each nonzero entry costs 8 bytes ($2\times$ a dense FP32 entry), requiring over 50 percent sparsity before the sparse structure consumes less memory than the original dense tensor; below 50 percent sparsity, CSR metadata actually expands the model's memory footprint.
-
-Performance has no universal sparsity threshold because tensor shape, format, kernel, batch, and hardware determine whether sparse execution outruns dense execution. Specialized formats such as 2:4 structured sparsity eliminate index arrays in favor of fixed 2-bit multiplexer metadata, providing a hardware-accelerated path that nearly halves weight traffic with only a small fixed metadata cost (@sec-model-compression-structured-pruning-9692 develops structured sparsity).
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Choosing sparse storage before checking the density threshold.*
-
-Teams sometimes convert tensors to sparse formats as soon as pruning creates visible zeros. That conversion can make the system slower and larger if metadata, gather/scatter overhead, and poor cache locality outweigh the saved values. A production compression pass should measure the realized density, choose a sparse format only after the break-even point is crossed, and prefer structured sparsity when the target hardware has kernels that can exploit it.
+Execution exhibits similar break-even constraints. Converting tensors to sparse storage as soon as pruning creates zeros degrades latency if metadata decoding, irregular gather operations, and poor cache locality outweigh the saved arithmetic. Furthermore, performance exhibits no universal sparsity threshold: tensor dimensions, sparse format, runtime kernel, batch size, and hardware architecture jointly govern whether sparse execution outperforms dense execution. Specialized formats such as 2:4 structured sparsity eliminate index arrays in favor of fixed 2-bit multiplexer metadata, providing an accelerator datapath that nearly halves weight traffic with minimal indexing overhead (@sec-model-compression-structured-pruning-9692). Production workflows must therefore measure realized density and commit to a sparse representation only after verifying that the operational break-even threshold has been crossed on target hardware.
 
 :::
 
