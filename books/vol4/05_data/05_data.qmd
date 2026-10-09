@@ -580,18 +580,18 @@ class TeleopLoopLatency:
     hum_share_pct_str = fmt_percent(hum_share, precision=1, style="prose")
 ```
 
+::: {.column-margin}
+![](images/svg/margin_teleop_loop_latency_strip.svg){width="100%" fig-alt="One horizontal bar divided into the four stages of a teleoperated correction, drawn to scale under a bracket labeled 340 milliseconds loop: display 50 ms, human 200 ms, command 10 ms, and mechanics 80 ms. The human segment is the longest by far."}
+
+*The operator's own reaction is `{python} TeleopLoopLatency.hum_share_pct_str` of the `{python} TeleopLoopLatency.t_loop_str` correction loop.*
+:::
+
 Each stage in this distributed loop introduces latency that shifts the phase of any corrective action. In an illustrative reference setup with a high-speed camera and a wired local network, display pipeline processing requires $\DisplayPipelineLatency =$ `{python} TeleopLoopLatency.t_disp_str` across sensor exposure, H.264 decoding, and display raster refresh. Human visual perception, cognitive motor planning, and neuromuscular transmission contribute an operator response latency of $\OperatorResponseLatency =$ `{python} TeleopLoopLatency.t_hum_str` for continuous trajectory tracking. Command quantization, packetization, and fieldbus transport to the robot controller add $\TeleoperationCommandLatency =$ `{python} TeleopLoopLatency.t_cmd_str`. Finally, actuator torque ramp-up and structural link inertia impose a mechanical response latency of $\FollowerMechanicalLatency =$ `{python} TeleopLoopLatency.t_mech_str` before the manipulator achieves the commanded acceleration. The **teleoperation round-trip latency** $\TeleoperationRoundTripLatency$, defined as the elapsed time from a physical contact disturbance to the corrective actuator response, is their sum:
 $$\TeleoperationRoundTripLatency = \DisplayPipelineLatency + \OperatorResponseLatency + \TeleoperationCommandLatency + \FollowerMechanicalLatency.$$ {#eq-data-teleop-loop-latency}
 
 Consider the causal sequence when a contact misalignment occurs at time $\TimeInstant$. The operator sees the error on the display `{python} TeleopLoopLatency.t_disp_str` later, dispatches a physical correction `{python} TeleopLoopLatency.t_commanded_str` after the event, and the follower arm finally pushes back at $\TimeInstant +{}$ `{python} TeleopLoopLatency.t_loop_str`. During this `{python} TeleopLoopLatency.t_loop_str` interval, the arm continues to drift under momentum and contact compliance. If the logger naively pairs observation $\MultimodalObservation_{t}$ with the command issued at that same instant, it pairs the current physical state with an action selected for a state that is `{python} TeleopLoopLatency.t_commanded_str` stale. A policy trained by behavioral cloning learns this delay as intentional strategy. When subsequently evaluated autonomously at high control frequencies, the policy over-corrects and enters destructive oscillations. Round-trip latency is therefore a property of the resulting dataset rather than just an artifact of the rig: it injects a systematic phase lag into every recorded demonstration, dominated by the operator's own reaction time (`{python} TeleopLoopLatency.hum_share_pct_str` of the loop in this setup).
 
 This delay differs in kind from the sensor-pipeline delay of @sec-data-multimodal-time-sync. That one was a pairing artifact of the logger, and exposure-midpoint stamping lets the alignment pipeline account for it. The operator's delay is a real property of the demonstrator, so no timestamp correction can remove it, and silently erasing it would misstate what the demonstration contains. The logger therefore keeps both times of every pair (the observation's exposure midpoint and the command's issue time) and records the session's measured loop latency. Training can then treat the observation-to-action interval as a declared part of the demonstration, either by conditioning the policy on enough observation history to span it or by pairing each command with the earlier frame the operator was answering, and deployment can match the interval it was trained with, as UMI's latency matching does (@sec-data-alignment-pipeline). Because the operator's reaction varies from command to command, no single fixed shift recovers the exact frame each command answered, which is why the latch campaign records the interval instead of baking one correction into the archive.
-
-::: {.column-margin}
-![](images/svg/margin_teleop_loop_latency_strip.svg){width="100%" fig-alt="One horizontal bar divided into the four stages of a teleoperated correction, drawn to scale under a bracket labeled 340 milliseconds loop: display 50 ms, human 200 ms, command 10 ms, and mechanics 80 ms. The human segment is the longest by far."}
-
-*The operator's own reaction is `{python} TeleopLoopLatency.hum_share_pct_str` of the `{python} TeleopLoopLatency.t_loop_str` correction loop.*
-:::
 
 Force reflection introduces a deeper stability challenge into the collection interface. In **bilateral teleoperation**, the operator manipulates the leader device while measured contact forces from the follower arm reflect back across a delayed communication channel. Over a closed motion cycle of period $\MotionCyclePeriod$, the net mechanical energy delivered at that port is:
 $$\PortCycleNetEnergy = \int_0^{\MotionCyclePeriod} \ReflectedContactForce(\TimeInstant - \PureTransportDelay) \PortVelocity(\TimeInstant)\,d\TimeInstant.$$
@@ -789,7 +789,7 @@ class MultiCameraIngestionBudget:
 :::
 
 ::: {.column-margin}
-![](images/svg/margin_sensory_ingestion_bandwidth_ladder.svg){width="100%" fig-alt="Horizontal bar ladder of write bandwidth in megabytes per second: an NVMe Gen4 drive at 7,000, all camera and kinematic streams together at 3,122, the navigation camera alone at 2,219, and the session compressed eightfold at 390. A red dashed line marks the SATA solid-state drive write ceiling at 550; every raw bar crosses it and only the compressed bar stays below."}
+![](images/svg/margin_sensory_ingestion_bandwidth_ladder.svg){width="100%" fig-alt="Horizontal bar ladder of write bandwidth in megabytes per second: three bars for all camera and kinematic streams together at 3,122, the navigation camera alone at 2,219, and the session compressed eightfold at 390, between a red dashed SATA solid-state drive write ceiling at 550 and a gray dashed NVMe Gen4 ceiling at 7,000. Both raw bars cross the SATA ceiling and only the compressed bar stays below it."}
 
 *The navigation camera alone writes `{python} MultiCameraIngestionBudget.nav_over_sata_mult_str` what a SATA SSD sustains; only the compressed session fits under it.*
 :::
@@ -797,6 +797,12 @@ class MultiCameraIngestionBudget:
 While ingestion throughput dictates edge storage hardware requirements, archival fidelity dictates downstream dataset utility. Regardless of whether an engineering team stores trajectories in custom HDF5 containers, ROS 2 MCAP bags (a container file format for multimodal robotics data), or standardized dataset formats such as LeRobot [@cadene2024lerobot], the preservation invariant remains identical. The logging daemon must capture all four control taps, hardware timestamps, master clock domain identifiers, missing-sample flags, and spatial calibration parameters across every conversion stage. Furthermore, the storage subsystem must flush complete chunks to durable non-volatile storage before sudden power disruptions or process halts can corrupt write buffers. Video compression is a fundamental engineering compromise rather than a benign storage optimization: lossy encoders discard high-frequency spatial detail and inject blocking artifacts directly into the visual features that train the policy. Finally, successful deserialization of a dataset file proves only syntactic integrity; it does not guarantee that sensory and motor streams remain physically synchronized.
 
 ### Operational yield and mechanical fatigue budgeting {#sec-data-yield-fatigue-budgeting}
+
+::: {.column-margin}
+![](images/svg/margin_facility_yield_burndown_envelope.svg){width="100%" fig-alt="Three bars on a shared minute scale: scheduled session 60, active motion window 35, retained demonstration time 14.73."}
+
+*In this illustrative session, setup, rest, resets, and rejected attempts leave under a quarter of the scheduled hour as retained demonstrations.*
+:::
 
 Sustained storage bandwidth bounds the volume of telemetry an edge rig can physically capture; operational yield and mechanical durability bound the volume of validated training data a physical campaign can produce. In embodied AI, scheduled facility hours rarely translate into equivalent robot demonstration time. Cell setup routines, multi-sensor extrinsic recalibrations, operator ergonomics, automated scene resets, and post-hoc quality assurance filtering consume the vast majority of active floor time. Moreover, because physical demonstration collection subjects robotic drivetrains and internal cable harnesses to cyclic mechanical strain, collection campaigns must be sized against mechanical fatigue limits rather than wall-clock facility reservations.
 
@@ -995,12 +1001,6 @@ Mechanical fatigue accumulates per physical motion cycle rather than per facilit
 :::
 
 Operator rest requirements and fatigue rates depend heavily on interface ergonomics and cognitive task difficulty; teams must empirically calibrate sustained operator throughput and retention on their specific hardware. A robust collection campaign must be budgeted simultaneously in validated trajectory time and consumable hardware fatigue life, rather than superficial facility clock hours. @Tbl-05-collection-budget breaks down the time and mechanical wear budgets of the illustrative session stage by stage.
-
-::: {.column-margin}
-![](images/svg/margin_facility_yield_burndown_envelope.svg){width="100%" fig-alt="Three bars on a shared minute axis for the scheduled session, its active motion window, and the retained demonstration time, with a gray dashed line marking the end of the scheduled session."}
-
-*In this illustrative session, resets and retention losses leave about a quarter of scheduled time as usable demonstrations.*
-:::
 
 [^fn-l10-rated-campaign]: **$\RatedFatigueLife$ Rated Life**\index{L10 rated life!collection campaign}: The convention comes from rolling-bearing fatigue theory, where @lundberg1949dynamic modeled the scatter of bearing life as a probability of survival and rated a bearing by the life that 90 percent of a population reaches. A rating chosen that way is a population statistic, not a guarantee for one part. A fleet of ten collection arms, each run to its cable's rated life, should therefore expect about one cable to fail before the budget says it will.
 
