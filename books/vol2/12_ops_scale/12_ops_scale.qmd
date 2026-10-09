@@ -1590,20 +1590,17 @@ class DataQualityIncident:
 
 A recommendation model's click-through rate (CTR) drops `{python} DataQualityIncident.ctr_drop_pct_str` over `{python} DataQualityIncident.incident_days_str`. The initial hypothesis focuses on model drift, but the constructed investigation reveals a feature computation defect.
 
-::: {.column-margin}
-```{=latex}
-\vspace*{-54mm}
-```
-![](images/svg/vol2_ops_scale_margin_004.svg){width="100%" fig-alt="Time ladder comparing a late five-day detection window with a four-hour automated alert window, marked as a 30x gap."}
-
-*Automated alerts cut detection from five days to four hours.*
-:::
-
 The investigation starts with the model symptom and then works backward through the data path. Model metrics\index{Lineage!model metrics} confirm that CTR declined from `{python} DataQualityIncident.ctr_before_pct_str` to `{python} DataQualityIncident.ctr_after_pct_str`, but freshness checks\index{Data!data freshness} show that features still arrive within the `{python} DataQualityIncident.freshness_slo_hr_str` SLO. That weakens the stale-pipeline hypothesis only if source progress, event-time coverage, and the affected entities are also verified; refresh age alone cannot exclude stale inputs. The investigation therefore tests semantic change as well. Distribution analysis then shows the mean of `user_engagement_score`, the shared feature whose redefinition @sec-ml-operations-scale-feature-versioning-lineage-624c used to motivate versioning, shifting from `{python} DataQualityIncident.engagement_before_str` to `{python} DataQualityIncident.engagement_after_str`, a `{python} DataQualityIncident.engagement_decline_pct_str` decline, and lineage tracking\index{Lineage!pipeline tracking}\index{Lineage tracking!provenance} ties the shift to an upstream pipeline version deployed `{python} DataQualityIncident.incident_days_str` earlier.
 
 The shift and deployment history make the new pipeline a candidate cause; a changed population could also move the mean. Replaying the same source records through both pipeline versions with identical event cutoffs isolates the computation. In this scenario, the new version uses a different aggregation window even though its declared feature definition is unchanged, while the previous version matches that definition. This same-record comparison establishes a feature computation defect. The defect is the same class of silent semantic change that feature versioning is meant to name before release; the marginal distribution alone would not establish it.
 
 Assuming revenue falls in proportion to CTR and traffic is uniform over the interval, the modeled impact is `{python} DataQualityIncident.ctr_drop_pct_str` of `{python} DataQualityIncident.weekly_revenue_usd_str`/week over `{python} DataQualityIncident.incident_days_str`, producing `{python} DataQualityIncident.revenue_impact_usd_str` in lost revenue. If automated alerts and effective containment shorten exposure to `{python} DataQualityIncident.alert_detection_hr_str`, the modeled impact falls by `{python} DataQualityIncident.impact_reduction_pct_str`. The resolution restores the previous pipeline and compatible model-feature state. A distribution validation gate then blocks unexplained feature shifts exceeding the scenario's `{python} DataQualityIncident.feature_shift_threshold_pct_str` threshold; semantic tests remain necessary for bugs that do not cross that band.
+
+::: {.column-margin}
+![](images/svg/vol2_ops_scale_margin_004.svg){width="100%" fig-alt="Two gray horizontal bars on a linear time scale: a long bar labeled No alert 5 d above a thin bar labeled Alert 4 h, with a double-headed arrow between their ends labeled 30×."}
+
+*Four-hour alerts shrink a five-day exposure window 30$\times$.*
+:::
 
 #### Operational integration {#sec-ml-operations-scale-operational-integration-a2de}
 
@@ -1875,12 +1872,6 @@ Assume the same request rate, per-request harm, and time to effective rollback i
 
 :::
 
-::: {.column-margin}
-![](images/svg/ops_scale_canary_exposure_ladder.svg){width="100%" fig-alt="Exposure ladder comparing blue-green deployment at 100 percent of users with a canary rollout at 5 percent of users, with the 20x risk-exposure reduction marked as a ratio annotation."}
-
-*Canary rollout cuts initial exposure by 20$\times$.*
-:::
-
 #### Blue-green deployment {#sec-ml-operations-scale-bluegreen-deployment-894e}
 
 Blue-green deployment prepares the new version (green) in a parallel environment while the current version (blue) serves production traffic. The environments provide comparable serving capabilities but hold different release versions. After readiness checks pass, the routing layer transfers traffic according to the release policy; switching time depends on routing propagation and treatment of in-flight requests.
@@ -1894,6 +1885,12 @@ The environment layout and the traffic policy are separate decisions. A blue-gre
 Canary deployment[^fn-canary-traffic-deployment] routes a small percentage of traffic to the new version while monitoring for regressions. If metrics remain acceptable, traffic percentage increases until the new version serves all traffic.
 
 [^fn-canary-traffic-deployment]: **Canary Deployment**\index{Canary Deployment!gradual rollout}: Named after the coal-mining practice of using canaries to detect toxic gases. In an ML release, a limited traffic cohort supplies early evidence while bounding initial exposure. Quality regressions can leave health checks green, so the canary needs model and product metrics as well as service-health signals; delayed outcomes can still postpone detection.
+
+::: {.column-margin}
+![](images/svg/ops_scale_canary_exposure_ladder.svg){width="100%" fig-alt="Five gray vertical bars rising left to right on a linear scale, labeled 1%, 5%, 25%, 50%, and 100%; the first bar is a thin sliver and the last is full height."}
+
+*Each canary stage earns a larger share of live traffic.*
+:::
 
 A typical progression moves from 1 percent to 5 percent to 25 percent to 50 percent to 100 percent as evidence accumulates. The 5 percent canary in notebook \ref{nbk-ops-scale-safety-staged-rollouts} is the second of these stages; opening at 1 percent bounds initial exposure further. Determining the duration of each stage is critical. @Eq-canary-duration relates stage duration to sample requirements, request rate, and traffic percentage, giving a lower bound on the time needed to collect the planned sample:
 
@@ -2220,7 +2217,7 @@ For an equally allocated comparison of two proportions, a normal-approximation s
 ```{=latex}
 \vspace*{8mm}
 ```
-![](images/svg/vol2_ops_scale_margin_002.svg){width="100%" fig-alt="Inverse-square curve labeled n sample proportional to 1 over delta squared, with a red dot at the small-effect end high on the curve and a green dot at the large-effect end near the bottom."}
+![](images/svg/vol2_ops_scale_margin_002.svg){width="100%" fig-alt="Black inverse-square curve labeled n proportional to 1 over delta MDE squared, with a red dot labeled small effect high on the steep part and a gray dot labeled large effect at the flat end."}
 
 *Detecting smaller effects explodes the required sample size.*
 :::
@@ -2590,7 +2587,7 @@ Telemetry capacity follows the series count, sample rate, bytes per observation,
 Before allocating a long training job, a scheduler can use automated preflight checks\index{Pre-flight check!node health}\index{Cluster management!pre-flight checks} to screen its nodes. General matrix multiply (GEMM) benchmarks exercise arithmetic throughput, NCCL AllReduce tests exercise collective paths, and memory stress tests look for errors under load. Results must be compared with baselines for the same hardware and configuration before a node is quarantined. Preflight consumes startup time and cannot reveal every fault; its value depends on the failed work it avoids and the cost of unnecessary exclusions.
 
 ::: {.column-margin}
-![](images/svg/vol2_ops_scale_margin_005.svg){width="100%" fig-alt="Two-level fan: one red square links to three violet nodes, and each violet node links to two blue nodes."}
+![](images/svg/vol2_ops_scale_margin_005.svg){width="100%" fig-alt="One red square labeled slow with gray arrows fanning out to six identical blue peer nodes, which sit before a dashed vertical line labeled barrier."}
 
 *One slow accelerator stalls every peer at the barrier.*
 :::
@@ -2678,12 +2675,6 @@ class FalseAlarmTax:
     fpr_eqn_str = fmt_math(f"1 - {specificity_val_str} = {fpr_str}")
 ```
 
-::: {.column-margin}
-![](images/svg/vol2_ops_scale_margin_003.svg){width="100%" fig-alt="Red saturating curve labeled 1 minus (1 minus alpha fp) to the N tests, rising with the number of tests N tests toward a gray line at 1, annotated near 1."}
-
-*Across independent null checks, the probability of at least one false alert approaches certainty as tests multiply.*
-:::
-
 ::: {#nbk-ops-scale-false-alarm-tax .callout-notebook title="The false alarm tax"}
 
 **Problem**: Consider a system monitoring `{python} FalseAlarmTax.n_models_str` models. Each model has `{python} FalseAlarmTax.n_metrics_str` metrics (latency, accuracy, drift, and others). Alert thresholds are set at `{python} FalseAlarmTax.sigma_label_str` (99.7 percent specificity), and a control script re-evaluates every metric on a fixed interval. Assume calibrated stable Gaussian null behavior and count raw threshold crossings before grouping or suppression; those crossings are not necessarily distinct incidents.
@@ -2697,6 +2688,12 @@ class FalseAlarmTax:
 
 **Systems insight**: Even with high-specificity (3-sigma) alerts, scale becomes problematic. Aggregation, deduplication, persistence windows, and calibrated thresholds reduce repeated notifications. Specific safety or hardware-failure alerts must still trigger independently when their contracts require immediate action.
 
+:::
+
+::: {.column-margin}
+![](images/svg/vol2_ops_scale_margin_003.svg){width="100%" fig-alt="Red saturating curve rising from a gray baseline toward a gray horizontal line at 1, labeled near 1, with the horizontal axis labeled N tests."}
+
+*False alerts become near-certain as checks multiply.*
 :::
 
 The multiple-testing problem from concurrent experiments (@sec-ml-operations-scale-multiple-testing-correction-023f) also appears in monitoring. For independent checks under the null, each with false positive rate $\AlertFalsePositiveRate$, @eq-false-alert-rate shows that the probability of at least one false alert approaches certainty as the number of tests $\AlertCheckCount$ grows, because the probability of no false alert decays exponentially:
@@ -4940,9 +4937,9 @@ If this model requires quarterly retraining, annual training cost reaches approx
 #### Inference cost model {#sec-ml-operations-scale-inference-cost-model-63ed}
 
 ::: {.column-margin}
-![](images/svg/ops_scale_tco_dominance.svg){width="100%" fig-alt="Stacked bar of the four TCO terms labeled T for training, Inf for inference, Da for data, and It for iteration. Inference is the widest segment and is shaded orange; the others are gray."}
+![](images/svg/ops_scale_tco_dominance.svg){width="100%" fig-alt="Horizontal bar split into four segments with illustrative widths, labeled Train, Infer, Data, and Iter. Infer is the widest segment and is orange; the others are gray, and Train is the narrowest."}
 
-*Serving can dominate lifecycle cost when cumulative demand outweighs training and iteration costs.*
+*Serving can outgrow the training bill.*
 :::
 
 Inference costs can dominate when cumulative serving demand outweighs training and iteration costs. @Eq-ops-scale-inference-cost estimates continuously provisioned capacity from average daily demand and sustained per-GPU throughput measured under representative batching, the target latency SLO, and operating headroom. Daily volume alone does not size traffic peaks; the estimate requires a separate check against the arrival pattern, workload mix, and scaling response:

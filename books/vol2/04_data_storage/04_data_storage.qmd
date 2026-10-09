@@ -187,7 +187,7 @@ The problem is deceptive because storage technology has improved substantially. 
 The storage problem joins physics with economics. Physics favors the memory closest to the accelerator, which offers the highest bandwidth in the smallest capacity; economics favors shared storage, which pools far more capacity at lower cost per byte behind additional interfaces and service queues. Device technology, interconnects, and contention then determine the rate a particular consumer actually receives. The engineering task is to place and move data so that the accelerator receives each batch before it is needed. The resulting design problem is quantitative. It asks how fast each tier must be, how deep the pipeline must run, and which bytes are worth keeping close to the accelerator. Improving arithmetic throughput alone does not improve input delivery or checkpoint persistence. Those paths require their own bandwidth and latency budgets.
 
 ::: {.column-margin}
-![](images/svg/data_storage_checkpoint_dominance.svg){width="100%" fig-alt="A two-rung ladder on a log scale: a tall blue rung for checkpoint writes towering over a tiny rung for per-epoch training data, showing checkpoints move over a thousand times more bytes than the dataset."}
+![](images/svg/data_storage_checkpoint_dominance.svg){width="100%" fig-alt="Two horizontal bars on a log scale: a long blue bar for 10.6 PB of checkpoint writes over the run above a short bar for one 6 TB epoch of training data, showing checkpoints move over a thousand times more bytes."}
 
 *Over the run, checkpoint writes exceed one epoch of training-data reads by more than 1,000 times.*
 :::
@@ -365,12 +365,6 @@ The practical consequence for the running example is stark. The `{python} Storag
 ## The ML Storage Hierarchy {#sec-storage-hierarchy}
 
 A system architect must organize storage to serve workloads that simultaneously demand terabytes-per-second bandwidth for computation, petabyte-scale capacity for datasets, and durable checkpoints. No single technology satisfies all three requirements. HBM supplies high local bandwidth at limited capacity; object storage pools durable capacity, but delivery depends on its service and client paths. A multi-tier hierarchy\index{Tiered storage!hierarchy} combines these resources rather than requiring one technology to meet every demand. Each tier offers a different balance of bandwidth\index{Bandwidth!storage hierarchy}, latency\index{Latency!storage hierarchy}, capacity, and cost. The hierarchy extends the familiar processor memory hierarchy\index{Storage hierarchy!extended memory hierarchy} across nodes. The new fleet-level decision is how local staging reduces demand on shared storage while preserving a durable, consistently versioned source. @Tbl-storage-hierarchy-merged compares the resources at their stated device, node, and service scopes.
-
-::: {.column-margin}
-![](images/svg/data_storage_bandwidth_cliff.svg){width="100%" fig-alt="Three stacked horizontal bars on a log scale, longest at top: HBM at 3.35 TB/s, host DRAM at 200 GB/s, and NVMe at 7 GB/s, showing bandwidth dropping sharply across the top three storage tiers."}
-
-*Bandwidth drops roughly 479$\times$ across the top three tiers, from HBM to local NVMe.*
-:::
 
 ```{python}
 #| echo: false
@@ -713,6 +707,12 @@ The engineering challenge is to deliver each batch to HBM before the accelerator
 ### Bandwidth cliffs between tiers {#sec-storage-bandwidth-cliffs}
 
 The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy only when the scope of each rate is explicit, because a per-accelerator, per-node, or shared-service figure describes a different resource, as bracketed in @fig-storage-pyramid. For one accelerator's HBM compared with the whole host's DRAM, the illustrative ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tb_per_s_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str`). A node-level comparison must account for all eight accelerators sharing that host-memory bandwidth. Between host DRAM and NVMe, the ratio is roughly `{python} StoragePyramidContext.dram_nvme_ratio_mult_str` (`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str` vs. ~`{python} StoragePyramidContext.raid0_bw_gb_per_s_str` from a `{python} StoragePyramidContext.raid0_drive_count_str`-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a `{python} StoragePyramidContext.pfs_bw_tb_per_s_str` aggregate parallel file system (PFS) serves `{python} StoragePyramidContext.pfs_nodes_str` nodes, each node receives roughly `{python} StoragePyramidContext.pfs_per_node_bw_gb_per_s_str`, a `{python} StoragePyramidContext.raid0_pfs_ratio_mult_str` reduction from the local RAID-0 stripe. Object-storage throughput likewise depends on the client path and allocation; there is no fixed ratio to a parallel file system.
+
+::: {.column-margin}
+![](images/svg/data_storage_bandwidth_cliff.svg){width="100%" fig-alt="Four horizontal violet bars on a log scale, longest at top: HBM 3.35 TB/s, host DRAM 200 GB/s, four-drive NVMe 28 GB/s, and a per-node parallel-file-system share of about 4 GB/s."}
+
+*Per-client bandwidth falls roughly 7 to 17$\times$ at each step from HBM to a node's share of the parallel file system.*
+:::
 
 As @sec-storage-fuel-line established, a cliff is not a feed requirement; the feed rate remains input-batch bytes divided by iteration time, summed over distinct consumers. What the cliffs decide is where buffering must sit. Along the chosen path, host DRAM can buffer prepared batches and NVMe can cache shards from shared storage. Each buffer must cover the delay of the tier below it while that tier sustains the consumption rate; durable repositories need not act as intermediate buffers.
 
@@ -2466,7 +2466,7 @@ If object-storage reads take 500 ms at the 99th percentile and compute takes `{p
 ::: {.column-margin}
 ![](images/svg/vol2_data_storage_margin_002.svg){width="100%" fig-alt="Sequence strip showing a 500 ms p99 I/O delay spanning two and a half 200 ms compute windows, which rounds up to a prefetch depth of three batches."}
 
-*p99 I/O latency defines a buffer-sizing window; ready batches must cover it.*
+*A 500 ms p99 read spans 2.5 steps of 200 ms, so three ready batches must cover it.*
 :::
 
 ```{python}
@@ -3209,9 +3209,9 @@ After the `{python} StorageFuelLineContext.run_accels_str` accelerators of the r
 A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with mixed-precision Adam\index{Adam optimizer!checkpoint state size} generates a resumable checkpoint of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The byte contract comprises `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.master_weights_fp32_gb_str` of FP32 master weights, and `{python} CheckpointModelIntro.adam_moments_gb_str` for the two FP32 Adam moments. Learning-rate-scheduler state, random-number-generator state, and the data-loader cursor add little capacity but remain required for deterministic continuation. Gradients are omitted because the restored job recomputes them. Each participating worker process, called a rank, saves its assigned shard simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads. How large each rank's shard is depends on the rule that a coordinated save writes each unique byte once, whatever the parallel layout. In the running layout of @tbl-hbm-memory-budget, the Adam moments and master weights already exist as distinct per-node slices, while the FP16 weights repeat once per node, so the save writes one copy of the weights and each optimizer slice once. Spreading those unique bytes evenly gives each of the `{python} StorageFuelLineContext.run_nodes_str` nodes about 1/`{python} StorageFuelLineContext.run_nodes_str` of the checkpoint. The third ZeRO stage (ZeRO-3), which partitions the weights as well, makes that even split the natural one, because every rank already owns a distinct slice. Breaking that rule is a real risk even in the running layout, where a save in which every node writes the FP16 weight copy it holds would multiply the weight bytes by the node count. Its cost is clearest in a deliberately extreme thought experiment, a smaller model whose complete resumable state is written once per GPU of the book's reference cluster.
 
 ::: {.column-margin}
-![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Two-bar log-scale ladder: a long gray bar for a naive replicated checkpoint write at 167.3 minutes above a short bar for a ZeRO-3 sharded write at 9.8 seconds, with a double arrow labeled 1,024 times between them."}
+![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Two-bar log-scale ladder: a long slate bar for every replica writing its full state, 167.3 minutes, above a short bar for one coordinated copy, 9.8 seconds, with a double arrow labeled 1,024 times."}
 
-*Replicated checkpoint writes take about 1,000 times longer than sharded ones.*
+*Writing one copy per replica takes 1,024 times longer than writing each unique byte once.*
 :::
 
 ```{python}

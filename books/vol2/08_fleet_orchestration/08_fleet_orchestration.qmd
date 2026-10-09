@@ -277,9 +277,9 @@ class FleetFailureRates:
 At scale, failure is normal operation, not exceptional. Fault tolerance turned that principle into checkpoints, detection, and elastic recovery for a running job; for the scheduler, it means planning for failure in every allocation decision rather than merely tolerating it. Holding per-component reliability constant, adding components increases the expected fleet event count. For an operating population maintained at $\FleetAcceleratorCount$ GPUs with independent, constant failure hazards, each with mean time to failure $\GpuMttf$ in hours:
 
 ::: {.column-margin}
-![](images/svg/vol2_fleet_orchestration_margin_001.svg){width="100%" fig-alt="Fleet failure rate rises from single GPU to 10,000 GPUs."}
+![](images/svg/vol2_fleet_orchestration_margin_001.svg){width="100%" fig-alt="Two 48-hour timelines with red marks for GPU failures. The 1,024-GPU cluster shows a single mark, and the 10,000-GPU fleet shows a mark about every 5 hours."}
 
-*Normal component failure rates make fleet failures routine.*
+*Failures become a cadence, one every `{python} FleetFailureRates.reference_mtbf_h_str` hours at `{python} FleetFailureRates.reference_gpus_str` GPUs but `{python} FleetFailureRates.large_per_day_str` a day at `{python} FleetFailureRates.large_gpus_str`.*
 :::
 
 $$ \text{Expected GPU failures per day} = \FleetAcceleratorCount\times \frac{24}{\GpuMttf} $$
@@ -602,17 +602,17 @@ The accuracy of runtime estimates determines backfill effectiveness, and this cr
 
 Gang scheduling removes the hold-and-wait deadlock, but another waiting pattern remains. Priority inversion can still strand reserved GPUs behind jobs that cannot finish their own exit path.
 
-::: {.column-margin}
-![](images/svg/fleet_orchestration_dependency_cascade.svg){width="100%" fig-alt="Priority inversion wait-for sketch: a high-priority job waits on a low-priority job holding GPUs, while medium-priority jobs starve the low-priority job's checkpoint exit path."}
-
-*Priority inversion is a wait-for chain, not a root-failure tree.*
-:::
-
 #### Deadlock prevention and detection {#sec-fleet-orchestration-deadlock}
 
 Gang scheduling eliminates the hold-and-wait condition for the atomically allocated bundle, but it does not immunize the cluster against all forms of resource contention. Later requests for auxiliary resources can still create a cycle of dependencies. Priority rules can also prevent a resource holder from making progress without creating a cycle. Distinguishing these cases matters because breaking a deadlock and providing a starved job with enough resources to exit require different interventions.
 
 Priority inversion occurs when a high-priority job waits on a low-priority resource holder whose progress other work delays. Consider the 64-GPU fine-tuning run of the 175B-parameter model, submitted at high priority. The scheduler has reserved 60 available GPUs, but the remaining 4 are held by a low-priority data processing job. Normally, the scheduler would preempt the low-priority job to satisfy the high-priority request. However, if a stream of medium-priority development jobs saturates the cluster's CPU or network bandwidth, starving the low-priority job of the resources it needs to checkpoint and exit, the low-priority job stalls. Its graceful release path cannot complete. The high-priority job waits for the low-priority job, which is effectively blocked by the medium-priority jobs. The 60-GPU idle block persists until the exit path receives resources or an enforced termination policy reclaims the remaining GPUs, potentially losing uncheckpointed work.
+
+::: {.column-margin}
+![](images/svg/fleet_orchestration_dependency_cascade.svg){width="100%" fig-alt="Wait-for chain of three job nodes. An arrow labeled waits on runs from the high-priority job to the low-priority job holding GPUs, and an arrow labeled starved by runs from the low-priority job to the medium-priority jobs that consume its checkpoint exit path."}
+
+*Priority inversion: the high-priority job waits on a low-priority holder that medium-priority work starves.*
+:::
 
 ::: {#dfn-fleet-orchestration-priority-inversion .callout-definition title="Priority inversion"}
 
@@ -1587,9 +1587,9 @@ Each action must respect the framework contract. The most consequential of the t
 Adding resources to a running job does not always accelerate time-to-convergence. Communication and synchronization overhead limit throughput gains, requiring the scheduler to enforce elastic scaling policies based on empirical efficiency curves rather than resource availability alone. A job's scaling efficiency\index{Scaling Efficiency!operating regimes} $\ScalingEfficiency(\ScalingCurveWorkerCount)$ compares observed throughput at $\ScalingCurveWorkerCount$ workers with the throughput predicted by ideal linear scaling from a reference allocation. With fixed global work per step, it typically passes through three regimes: a near-linear regime where per-worker computation dwarfs every fixed per-step cost, a sublinear regime where pipeline fill and drain and the unhidden part of gradient synchronization become a visible share of each step, and a saturation regime where those fixed costs rival the shrinking computation itself. Assigning available GPUs to a saturated job can yield less useful progress than serving queued work. The lower allocation bound answers a different question. Below its **minimum viable scale**\index{Minimum Viable Scale!definition}, a job may lack the memory or complete parallel groups needed to execute at all. A policy can impose a higher minimum to meet a deadline, even when a smaller allocation remains computationally efficient.
 
 ::: {.column-margin}
-![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Concave elastic-scaling curve that rises steeply and then flattens toward saturation."}
+![](images/svg/vol2_fleet_orchestration_margin_002.svg){width="100%" fig-alt="Schematic throughput curve against worker count beside a dashed ideal linear diagonal from the origin. The curve follows the diagonal at first, falls away from it, and flattens, with the regions labeled linear, sublinear, and saturated along the horizontal axis."}
 
-*Elastic scaling's benefit flattens into saturation.*
+*Throughput falls away from ideal linear scaling and saturates.*
 :::
 
 The 175B reference job shows these regimes with the chapter's own numbers. Modeled at a fixed global batch with the step-time decomposition of the Fleet Law (@eq-fleet-law), its scaling efficiency falls from `{python} ElasticScalingCurve.eff_min_str` at `{python} ElasticNodeRange.min_gpus_str` GPUs to `{python} ElasticScalingCurve.eff_max_str` at `{python} ElasticNodeRange.max_gpus_str` GPUs and `{python} ElasticScalingCurve.eff_top_str` at `{python} ElasticScalingCurve.top_gpus_str` (@fig-fleet-orchestration-scaling-efficiency-curve, panel a). Efficiency falls, yet quadrupling from `{python} ElasticNodeRange.max_gpus_str` to `{python} ElasticScalingCurve.top_gpus_str` still raises throughput `{python} ElasticScalingCurve.thr_gain_mult_str`, so a lower efficiency is a declining marginal return rather than a slowdown. Panel (b) locates the loss. Tensor-parallel communication shrinks along with each worker's computation, so its share of the step never rises above `{python} ElasticScalingCurve.tp_share_str`. The decline comes instead from pipeline fill and drain and unhidden gradient synchronization, which take roughly fixed time per step while each worker's share of the batch shrinks. The pipeline bubble grows fastest of the three, for a reason the bubble fraction $(\PipelineParallelDegree-1)/(\MicrobatchCount+\PipelineParallelDegree-1)$ of @sec-distributed-training-systems-systems-pipeline-parallelism-8748 makes explicit. With the global batch fixed, each added replica takes a share of the sequences, so the microbatch count $\MicrobatchCount$ per replica falls while the stage count stays at `{python} ElasticScalingCurve.pp_str`, and the idle fraction rises. The shaded window from `{python} ElasticNodeRange.min_gpus_str` to `{python} ElasticNodeRange.max_gpus_str` GPUs is therefore a policy choice, not an interval derived from these efficiencies alone. A minimum allocation could follow from a completion deadline or the job's declared resource contract. It does not follow from insufficient per-worker computation at smaller scale, since with fixed global work fewer workers generally perform more work each. The upper limit likewise requires comparing additional useful progress with resize cost and the value of serving queued jobs. A real scheduler must obtain those inputs from profiling and the workload's quality target.
@@ -2798,9 +2798,9 @@ As the over-subscription discussion in @sec-fleet-orchestration-bin-packing show
 ### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
 
 ::: {.column-margin}
-![](images/svg/fleet_orchestration_preempt_cascade.svg){width="100%" fig-alt="One red source node on the left with arrows fanning out to five separate downstream nodes on the right, showing one event displacing many."}
+![](images/svg/fleet_orchestration_preempt_cascade.svg){width="100%" fig-alt="Two-level tree. A red square for the admitted job evicts two jobs, labeled k, and each of those evicts two more, labeled k squared. A dashed line labeled requeue cap crosses the tree between the two levels."}
 
-*One eviction ripples to many: the preemption cascade.*
+*Each eviction can evict again, so one admission reaches $\PreemptionFanoutCount + \PreemptionFanoutCount^2$ jobs.*
 :::
 
 When a high-priority job enters a saturated cluster, the scheduler must decide which running workloads to terminate to free up resources. This decision is rarely isolated. In tightly packed clusters, evicting a medium-priority job to accommodate a high-priority request often triggers a **preemption cascade**\index{Preemption Cascade!definition}, where the evicted job immediately attempts to reschedule itself by displacing lower-priority workloads. The disruption multiplies with each level. If the urgent job displaces $\PreemptionFanoutCount$ medium-priority jobs and each of those, on rescheduling, displaces $\PreemptionFanoutCount$ lower-priority jobs, one admission interrupts $\PreemptionFanoutCount+ \PreemptionFanoutCount^2$ jobs after two levels, every one of which pays the preemption tax quantified below and adds a checkpoint reload to the storage system at the same moment. Two dampening controls cap that growth. A rule that evicted jobs requeue without preempting anyone themselves stops the chain at the first level, so one admission costs at most $\PreemptionFanoutCount$ interruptions. A **preemption budget**\index{Preemption Budgets!definition} limits how often any single job, or what fraction of capacity, may be displaced in a time window, which protects the jobs at the bottom of the priority order that every chain would otherwise reach.
@@ -2869,9 +2869,9 @@ The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a 
 Three tiers of measurement expose this gap between requested hardware and actual progress. Allocated capacity counts resources reserved for a job. Compute utilization measures hardware activity under a stated counter definition, which can include communication kernels or work later replayed. Productive utilization requires a workload-level measure of retained training progress or serving work that meets its objective, normalized to a declared reference rate. For example, a team allocated 500 GPUs might average 350 active-device equivalents (70 percent activity) while delivering 280 device-equivalents of useful work at the reference rate (56 percent of its allocation). These are time-averaged equivalents, not necessarily distinct sets of active and productive devices. The gap motivates profiling; it does not identify its cause or imply that necessary communication and recovery can all be eliminated.
 
 ::: {.column-margin}
-![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Three horizontal orange utilization bars labeled allocated 500, active 350, and productive 280, decreasing from top to bottom."}
+![](images/svg/vol2_fleet_orchestration_margin_004.svg){width="100%" fig-alt="Three horizontal orange bars of GPU-equivalent counts, labeled allocated 500, active 350, and productive 280, decreasing from top to bottom."}
 
-*Allocated, active, and productive utilization drift far apart.*
+*Allocated, active, and productive capacity in GPU equivalents, each tier counting less than the one above.*
 :::
 
 Attribution in a shared fleet presents a control problem. Every admitted job needs an owner, project, workload class, and preemption contract so the scheduler can apply quota and recovery policy consistently. Kubernetes labels and Slurm accounts carry this scheduling identity.

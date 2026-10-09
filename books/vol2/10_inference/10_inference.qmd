@@ -459,9 +459,9 @@ An illustrative budget shows why the decomposition matters. If an interactive re
 ### Serving cost dominance in production {#sec-inference-scale-serving-cost-dominates-training-cost-576a}
 
 ::: {.column-margin}
-![](images/svg/inference_serving_cost_dominance.svg){width="100%" fig-alt="Two horizontal bars comparing lifetime cost terms. The recurring serving-cost bar is wide and shaded orange; the per-version training-cost bar is a narrow gray sliver."}
+![](images/svg/inference_serving_cost_dominance.svg){width="100%" fig-alt="Two horizontal bars on a linear scale. A short gray bar shows a training cost of 2 million dollars; a long orange bar shows first-year serving cost of 18.25 million dollars. A bracket between their ends marks the 9.1 times ratio."}
 
-*Lifetime serving cost dwarfs one-time training.*
+*At this traffic, one year of serving costs about nine times the training run.*
 :::
 
 The serving tax quantified in @eq-serving-tax consumes a fraction of the latency budget per request. The true economic impact of inference emerges when evaluating cost over a model's entire operational lifetime. The serving cost dominance principle\index{Serving Cost Dominance} (\ref{pri-serving-cost-dominance}) states that serving cost\index{Serving cost!upfront vs. recurring expense} can dominate training cost by orders of magnitude because a model version incurs training expense before deployment while serving expense recurs with traffic. Both activities can consume purchased or rented infrastructure; the distinction here is expense timing, not financial capitalization. A quick cost calculation makes the multiplier concrete.
@@ -1378,9 +1378,9 @@ The resulting batching efficiency curve\index{Batching!efficiency curve} shows d
 ```{=latex}
 \vspace*{-1mm}
 ```
-![](images/svg/inference_batching_knee.svg){width="100%" fig-alt="A curve that stays nearly flat and then climbs steeply, with a red dot at the knee and a red wash shading the region past it."}
+![](images/svg/inference_batching_knee.svg){width="100%" fig-alt="Throughput on the vertical axis against batch size on the horizontal axis. The curve rises steeply and then keeps climbing ever more slowly toward a dashed asymptote labeled 1 over t sub req. A ring marks the knee, where throughput reaches half the asymptote."}
 
-*Past the knee, larger batches buy diminishing throughput gains at increasing execution latency.*
+*Throughput saturates toward $1/\MarginalRequestServiceTime$; past the knee, each larger batch buys less.*
 :::
 
 The execution-only feasibility condition is $\BatchServiceTime(\BatchSize) \le \text{SLO}$\index{SLO!batch size trade-off}. In a live service, execution receives only the budget remaining after routing, queueing, batch formation, and response delivery. The batch-size decision must therefore use that remaining budget rather than consume the full SLO. The following example contrasts a vision workload with a relatively high $\MarginalRequestServiceTime$ and an LLM decode workload with a high $\BatchFixedOverheadTime$ from weight loading, showing how those measured costs change the tuning decision.
@@ -2470,6 +2470,12 @@ Under this weight-traffic-only approximation, increasing $\PromptLength$ beyond 
 
 In contrast, the subsequent decode phase generates a single token per sequence sequentially. At the decode batch sizes this chapter considers, from tens of sequences up to the knee near `{python} BatchingEfficiency.bec_llm_knee_str` in notebook \ref{nbk-inference-batching-efficiency-curve}, the arithmetic intensity $\DecodeArithmeticIntensity\approx \DecodeBatchSize$ stays below the ridge point, placing the weight projections in a memory-bandwidth-bound regime under this approximation. Each decode iteration streams the active weights from HBM and reuses them across the batch. Larger batches and growing KV-cache traffic change that balance.
 
+::: {.column-margin}
+![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bandwidth-bound slope rising to a dashed ridge, then an orange compute-bound ceiling. A blue dot labeled decode sits low on the slope, well left of the ridge; an orange dot labeled prefill sits on the compute ceiling past the ridge."}
+
+*Long-prompt prefill reaches the compute ceiling; decode stays on the bandwidth slope.*
+:::
+
 ::: {#dfn-inference-chunked-prefill .callout-definition title="Chunked prefill"}
 
 ***Chunked prefill***\index{Chunked prefill!definition} is an LLM serving mechanism that divides long prompt evaluations into discrete token chunks of size at most $\PrefillChunkSize$, interleaving prefill computation with ongoing decode iterations within a shared token budget.
@@ -2901,9 +2907,9 @@ The batching strategies to this point focus on scheduling work under a chosen re
 ### The logic wall and test-time compute scaling {#sec-inference-logic-wall}
 
 ::: {.column-margin}
-![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale. The reasoning response rung is about 12.8 seconds; the fast pattern-match rung is about 0.1 seconds. The gap is roughly 128 times."}
+![](images/svg/inference_logic_wall_ladder.svg){width="100%" fig-alt="A two-rung latency ladder on a log scale in slate gray. The reasoning response rung is 12.8 seconds; the standard response rung is 100 milliseconds. A bracket between their ends marks the 128 times gap."}
 
-*The illustrated serial reasoning budget expands latency about 128 times over the fast response.*
+*Reasoning through 128 serial tokens turns a 100 ms answer into 12.8 s.*
 :::
 
 Test-time scaling turns reasoning into a serving resource. The scaling laws that motivate the fleet were first measured for pretraining, where quality improves as a power law in parameters, data, and training compute. The same pattern has a third regime in which quality rises with the compute spent on each query at inference time. For a serving fleet that regime moves the scaling curve out of the training cluster and into the request path. Every increment of quality bought this way is paid on every request for the lifetime of the deployment, the recurring cost that the serving cost dominance law (principle \ref{pri-serving-cost-dominance}) already prices. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Whether that extra work buys quality is an empirical question. Capability studies describe abilities that appear abruptly with scale [@wei2022emergent], while later analysis cautions that some apparent jumps are artifacts of the metric chosen [@schaeffer2023mirage], so a serving budget should rest on measured quality gains for the workload rather than on the expectation of a jump.
@@ -3259,6 +3265,12 @@ class KVCacheCapacityEstimator:
     )
 ```
 
+::: {.column-margin}
+![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="A column of 12 equal blue blocks, each one 128K-token request of 42.9 GB, stacked on a linear scale inside a 526 GB KV budget whose top is a red ceiling line. A thin gap below the ceiling is too small for a thirteenth request."}
+
+*A dozen 128K-token requests exhaust the whole KV budget.*
+:::
+
 ::: {#nbk-inference-kv-cache-capacity-estimator .callout-notebook title="KV-cache capacity estimator"}
 
 Unlike the conservative decimal budgets used in the illustrative comparisons, this estimator retains the registered byte capacity when summing the node's HBM. Converting its display units does not change that byte count.
@@ -3287,12 +3299,6 @@ Available Memory for KV = `{python} KVCacheCapacityEstimator.total_hbm_decimal_g
 
 **Systems insight**: Even with grouped query attention (GQA), whose shared key-value heads the 8-head count in this calculation already reflects, each 128K-context request consumes tens of gigabytes of KV state. This configuration therefore admits only a limited number of concurrent long-context requests. PagedAttention can recover allocation waste, but cannot shrink the attention tensors counted here. Increasing concurrency beyond that limit requires changing the memory budget, cache representation, or placement of state.
 
-:::
-
-::: {.column-margin}
-![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="A three-rung log-scale memory ladder under a red ceiling line: KV budget 526 GB at top, one 128K-token request at 43 GB, and a single token at 0.33 MB."}
-
-*A dozen 128K-token requests exhaust the whole KV budget.*
 :::
 
 ### The fragmentation problem {#sec-inference-scale-fragmentation-problem-28be}
@@ -3918,12 +3924,6 @@ Speculative decoding pairs a small draft model\index{Speculative Decoding!draft 
 ↩ The draft-and-verify mechanics of speculative decoding are established in @sec-performance-engineering-speculative.
 :::
 
-::: {.column-margin}
-![](images/svg/inference_decode_roofline.svg){width="100%" fig-alt="A roofline silhouette: a blue memory-bound slope rising to a dashed ridge line, then an orange compute-bound ceiling. A workload dot sits deep on the memory-bound slope, the regime batch-1 decode occupies before parallel verification raises its arithmetic intensity toward the ridge."}
-
-*Small-batch decode is memory-bound; parallel verification raises arithmetic intensity.*
-:::
-
 The latency benefit depends on accepted progress relative to drafting and verification time. When the draft model proposes $\SpeculativeDraftLength$ tokens, high acceptance rates allow the target model to verify and emit multiple tokens in a single forward pass. When acceptance drops, rejected tokens are discarded while drafting and verification still cost time; generation can become slower than ordinary decoding. With the simplified constant, independent acceptance probability at each draft position used in that analysis, the expected number of tokens emitted per round, including the correction token, is $\frac{1 - \DraftTokenAcceptanceProbability^{\SpeculativeDraftLength+1}}{1 - \DraftTokenAcceptanceProbability}$, which collapses toward 1 as acceptance falls. The following calculation assumes $\SpeculativeDraftLength= 5$ draft tokens, a draft step 20$\times$ faster than a target decode step, and a verification pass costing the same as one target decode step. Holding those costs fixed isolates sensitivity to acceptance:
 
 ```{python}
@@ -3993,7 +3993,7 @@ class SpeculativeSpeedup:
 Evaluating this model across representative acceptance regimes illustrates how sharply returns depend on draft accuracy: high acceptance ($\DraftTokenAcceptanceProbability= 0.9$) yields an expected `{python} SpeculativeSpeedup.et_high_str` per verification round for a `{python} SpeculativeSpeedup.sp_high_mult_str` speedup, medium acceptance ($\DraftTokenAcceptanceProbability= 0.7$) delivers `{python} SpeculativeSpeedup.et_med_str` per round for a `{python} SpeculativeSpeedup.sp_med_mult_str` speedup, and low acceptance ($\DraftTokenAcceptanceProbability= 0.5$) drops progress to `{python} SpeculativeSpeedup.et_low_str` per round, yielding a modest speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
 
 ::: {.column-margin}
-![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Three horizontal bars on a linear scale: 90 percent acceptance gives 3.7 times faster decoding, 70 percent gives 2.4 times, and 50 percent gives 1.6 times."}
+![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Three slate-gray horizontal bars on a linear scale: 90 percent acceptance gives 3.7 times faster decoding, 70 percent gives 2.4 times, and 50 percent gives 1.6 times. A dashed vertical line at 1 times marks no gain."}
 
 *Speedup shrinks quickly as draft acceptance falls.*
 :::
@@ -4435,7 +4435,7 @@ KV pages and adapter deltas share HBM with the base weights. Even when long cont
 ## Weight Quantization for Serving {#sec-inference-scale-weight-quantization-serving-097b}
 
 ::: {.column-margin}
-![](images/svg/inference_quantization_capacity_ladder.svg){width="100%" fig-alt="Memory ladder comparing a 140 GB FP16 70B model with a 35 GB INT4 70B model, with the 4x capacity reduction marked as a ratio annotation."}
+![](images/svg/inference_quantization_capacity_ladder.svg){width="100%" fig-alt="Linear memory ladder comparing a 140 GB FP16 70B model with a 35 GB INT4 70B model. A dashed red vertical line marks one GPU's 80 GB capacity: the FP16 bar crosses it and the INT4 bar ends well inside it. A bracket marks the 4 times reduction."}
 
 *INT4 turns a two-GPU model into a one-GPU candidate.*
 :::
@@ -5279,7 +5279,7 @@ class MoEEconomics:
 The following comparison isolates weight-related costs at batch size 1. Streaming all weights of a dense 400B FP16 model moves `{python} MoEEconomics.dense_mem_gb_str` per step. Counting only DeepSeek-V3's `{python} MoEEconomics.moe_active_params_str` active parameters gives approximately `{python} MoEEconomics.moe_decode_gb_str` in FP16, a `{python} MoEEconomics.bw_ratio_mult_str` reduction in weight bytes per token. The proportional estimate of weight-related arithmetic is `{python} MoEEconomics.compute_ratio_mult_str` lower. These are payload and arithmetic comparisons, not equivalent-quality model comparisons or measured speedups; cache traffic, expert placement, routing, and communication affect realized latency.
 
 ::: {.column-margin}
-![](images/svg/vol2_inference_margin_002.svg){width="100%" fig-alt="Memory ladder comparing MoE resident weights at 1342 GB, dense resident weights at 800 GB, and MoE active read at 74 GB."}
+![](images/svg/vol2_inference_margin_002.svg){width="100%" fig-alt="Linear memory ladder comparing MoE resident weights at 1342 GB, dense weights at 800 GB (all resident and all read per step), and MoE active weights read per token at 74 GB. A bracket between the dense and MoE active bars marks the 10.8 times reduction."}
 
 *MoE keeps every expert resident but activates few per token.*
 :::
@@ -5819,12 +5819,6 @@ Archetype B (DLRM at Scale) uses `{python} ArchetypeBTailAtScale.p99_slo_math` a
 
 ### Load balancing principles {#sec-inference-scale-load-balancing-principles-63ec}
 
-::: {.column-margin}
-![](images/svg/vol2_inference_margin_003.svg){width="100%" fig-alt="Two slowly rising curves of maximum load as the fleet grows: a red random-assignment curve grows slowly but stays above a still flatter blue two-choice curve."}
-
-*Two-choice routing flattens the tail imbalance of random placement.*
-:::
-
 Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
 
 Evaluation therefore requires complementary signals for latency and fleet balance. Queue lengths reveal accumulated requests, but service times and scheduling order determine how long those requests wait. Estimated work per replica and its variance are more informative when request costs differ. Utilization spread reveals idle and saturated replicas, while decision overhead measures the cost of computing the routing choice. These signals must be evaluated alongside completed-request tail latency and admission outcomes; balanced counts alone do not establish a healthy service.
@@ -5834,6 +5828,12 @@ Evaluation therefore requires complementary signals for latency and fleet balanc
 The simplest load-balancing strategies assign requests without considering server state. Round-robin\index{Round-robin load balancing} sends request 1 to server 1, request 2 to server 2, and so on, which gives perfect distribution only when servers are homogeneous and request processing times are identical. Random assignment\index{Random assignment!load balancing} selects a server uniformly at random for each request; with many requests it converges to an even mean distribution, but its variance is higher than round-robin. Both strategies are reasonable baselines for identical servers, yet production serving rarely satisfies that assumption. Heterogeneous GPU generations, different memory configurations, variable request sizes, warmup behavior, and replicas nearing memory limits all make the state of the server fleet matter.
 
 A static placement model isolates the imbalance caused by random choice: place $\ReplicaCount$ equal-size jobs sequentially into $\ReplicaCount$ initially empty bins, without departures. With uniform independent choices, the expected maximum bin occupancy follows the classical balls-into-bins\index{Balls-into-bins!queue length bound} result [@mitzenmacher2001] in @eq-random-max-queue:
+
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_003.svg){width="100%" fig-alt="Two slowly rising curves of maximum load as the fleet grows: a gray random-assignment curve keeps climbing, while a blue two-choice curve stays lower and flattens."}
+
+*Two-choice routing flattens the tail imbalance of random placement.*
+:::
 
 $$\mathbb{E}[\text{max bin occupancy}] =\AsymptoticTightBound\left(\frac{\log \ReplicaCount}{\log \log \ReplicaCount}\right)$$ {#eq-random-max-queue}
 
