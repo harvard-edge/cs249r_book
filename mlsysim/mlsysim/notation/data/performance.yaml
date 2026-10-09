@@ -1,0 +1,3587 @@
+# Notation registry: performance
+# Iron law, roofline, memory, serving and energy: the quantities every volume measures performance in.
+# How to add or change an entry: README.md in this directory.
+
+symbols:
+- macro: \AcceleratedFractionSpeedup
+  latex: G
+  definition: speedup factor applied to the accelerated fraction of a workload in Amdahl's law, whether
+    it comes from faster hardware or from more workers
+  kind: scalar
+  unit: dimensionless
+  notes: General form of the Amdahl gain; specializes to \AcceleratorGain ($G_{\text{accel}}$) for an
+    accelerator or to \WorkerCount for linear scaling over workers. Not the LogGP per-byte gap \LongMessageGapPerByte,
+    the agentic \GroupSize, or \TaskContractGoal, which share the glyph.
+- macro: \AcceleratorBatchTime
+  latex: T_{\text{GPU}}
+  definition: time the accelerator takes to run one training step on one batch
+  kind: scalar
+  unit: s
+  notes: Denominator of $\InputPipelineRatio$.
+- macro: \AcceleratorConsumptionRate
+  latex: R_{\text{accel}}
+  definition: batches per second the accelerator can consume, its compute rate divided by the operations
+    per batch
+  kind: scalar
+  unit: batches/s
+- macro: \AcceleratorCount
+  latex: N_{\text{GPU}}
+  definition: number of accelerators one job runs on
+  kind: count
+  notes: Counts accelerators, not host nodes. Training time divides across it in the iron law's compute
+    term, and ring AllReduce traffic per rank scales as $2(\AcceleratorCount-1)/\AcceleratorCount$.
+  aliases:
+  - \AcceleratorCountGpu
+- macro: \AcceleratorDataConsumptionRate
+  latex: R_{\text{consumption}}
+  definition: rate at which one accelerator consumes training input data while computing at full speed
+  kind: scalar
+  unit: bytes/s
+  notes: Times \AcceleratorCount gives the aggregate input demand that \StorageBandwidth must meet. Distinct
+    from \AcceleratorConsumptionRate, which counts batches per second.
+- macro: \AcceleratorGain
+  latex: G_{\text{accel}}
+  definition: speedup an optimization or accelerator gives the fraction of execution it applies to, in
+    Amdahl's law
+  kind: scalar
+  unit: dimensionless
+  notes: Pairs with $\ParallelFraction$; overall speedup is $1/((1-\ParallelFraction) + \ParallelFraction/G_{\text{accel}})$.
+- macro: \AcceleratorMemoryBandwidth
+  latex: \text{BW}_{\text{accelerator}}
+  definition: sustained rate at which bytes move between an accelerator's own memory, such as HBM, and
+    its compute units
+  kind: scalar
+  unit: bytes/s
+- macro: \AcceleratorRailVoltage
+  latex: V_{\text{rail}}
+  definition: voltage of a chip's supply rail at the load end of its power delivery network
+  kind: scalar
+  unit: V
+- macro: \AcceleratorSecondsPerQuery
+  latex: S_{\text{GPU/query}}
+  definition: allocated accelerator-seconds divided by completed queries over an accounting period
+  kind: scalar
+  unit: s/query
+  notes: Includes idle headroom; busy kernel time alone gives service demand instead.
+- macro: \AcceleratorSupplyCurrent
+  latex: i
+  definition: electrical current an accelerator draws from its power supply
+  kind: scalar
+  unit: A
+  notes: Appears as its time derivative di/dt, the current slew that average-power meters miss. Not the
+    motor phase current i_{phase} of the physical domain.
+- macro: \AcceleratorTargetQueryRate
+  latex: R_{\text{GPU,target}}
+  definition: queries per second one accelerator sustains at the target latency objective, including batching
+    and operating headroom
+  kind: scalar
+  unit: queries/s
+- macro: \AccountQueryDistribution
+  latex: p_{\text{user}}
+  definition: empirical distribution of the queries one API account sends, over a chosen representation
+    of inputs
+  kind: distribution
+  notes: Compared with $\ExpectedQueryDistribution$ by KL divergence to flag extraction.
+- macro: \AccumulatedSyncTime
+  latex: T_{\text{sync}}
+  definition: gradient synchronization time paid once for an accumulated update
+  kind: scalar
+  unit: s
+- macro: \AccumulatedUpdateTime
+  latex: T_{\text{effective}}
+  definition: 'time of one optimizer update under gradient accumulation: all micro-batch passes, one synchronization
+    and the step'
+  kind: scalar
+  unit: s
+- macro: \AchievedKernelBandwidth
+  latex: \text{BW}_{\text{effective}}
+  definition: memory bandwidth a kernel actually achieves, the bytes it moves divided by its measured
+    execution time
+  kind: scalar
+  unit: bytes/s
+  notes: Measured from a profiler trace and compared against the peak memory bandwidth to diagnose a memory-bound
+    kernel. Decorated form of \Bandwidth.
+- macro: \ActivationCheckpointCount
+  latex: n_{\text{ckpt}}
+  definition: number of layers whose activations gradient checkpointing keeps
+  kind: count
+  notes: Uniform spacing puts the optimum at $\sqrt{\LayerCount}$.
+- macro: \ActivationMemory
+  latex: M_{\text{activations}}
+  definition: memory holding the intermediate activations a model keeps for the backward pass or between
+    serving stages
+  kind: scalar
+  unit: bytes
+  notes: One term of $\TotalMemoryFootprint$. Grows with batch size and sequence length while weight,
+    gradient and optimizer-state memory stay fixed; activation checkpointing trades it for recomputation.
+  aliases:
+  - \ActivationMemoryActivations
+- macro: \ActiveInferencePower
+  latex: P_{\text{active}}
+  definition: average power an accelerator draws while actively running inference
+  kind: scalar
+  unit: W
+  notes: Times the inference duration gives the energy of one inference.
+- macro: \ActivePrefillRequestSet
+  latex: \mathcal{P}_{\text{active}}
+  definition: set of waiting prefill requests that receive a prompt chunk in the current iteration
+  kind: set
+- macro: \AdaptationEnergyAllowance
+  latex: E_{\text{slack}}
+  definition: energy a device's admission policy lets background adaptation spend before the next charging
+    opportunity
+  kind: scalar
+  unit: J
+  notes: Admission requires \AdaptationWindowEnergy not to exceed it.
+- macro: \AdaptationLatencyIncrease
+  latex: \Delta L_{\text{lat,fg}}^{\text{wc}}
+  definition: worst-case increase in foreground latency when an adaptation update runs concurrently
+  kind: scalar
+  unit: s
+  notes: One symbol including the Delta and the wc superscript; a text superscript cannot sit on \ForegroundLatency.
+- macro: \AdaptationPeakMemory
+  latex: M_{\text{peak}}
+  definition: 'peak working memory an on-device adaptation update needs: resident weights, trainable state,
+    and the largest sum of saved activations and operator workspace over its execution'
+  kind: scalar
+  unit: bytes
+  notes: Defined by @eq-edge-adaptation-peak-memory; admission requires it plus \ReservedDeviceMemory
+    to fit under \DeviceMemoryCapacity.
+- macro: \AdaptationPowerIncrement
+  latex: P_{\text{update}}
+  definition: additional sustained power a running adaptation update adds to the device's draw
+  kind: scalar
+  unit: W
+  notes: Added to \DevicePower in the thermal term of @eq-edge-background-admission.
+- macro: \AdaptationWindowEnergy
+  latex: E_{\text{update}}
+  definition: predicted energy one on-device adaptation window consumes
+  kind: scalar
+  unit: J
+  notes: First term of @eq-edge-background-admission.
+- macro: \AdmissibleBacklogCount
+  latex: n
+  definition: number of transaction backlogs that can queue ahead of a safety read before the read exceeds
+    its time ceiling
+  kind: count
+  notes: Found as the floor of the read ceiling, less the snapshot\'s own read time, over the per-backlog
+    queueing delay.
+- macro: \AggregateServerPower
+  latex: P_{\text{servers}}
+  definition: electrical power all servers of a facility draw together
+  kind: scalar
+  unit: W
+  notes: One component of \InformationTechnologyPower; not \ServerPower, the draw of one server.
+- macro: \AlgorithmTaxonomyAxis
+  latex: \mathsf{Algorithm}
+  definition: Algorithm axis of the D·A·M taxonomy, viewed as the set of techniques and concepts it covers
+    so that axis intersections name zones of the taxonomy
+  kind: set
+  notes: The chapter states the D·A·M axes are taxonomy labels, not mathematical variables; $\mathsf{Algorithm}$
+    appears only inside set intersections such as $\mathsf{Data} \cap \mathsf{Algorithm}$. Never \DatasetSize
+    or \DataVolume.
+  render_exception: Sans-serif upright-ish name marks a D·A·M taxonomy axis treated as a set of techniques
+    in an intersection, not a calligraphic or blackboard set symbol.
+- macro: \AllowableRailExcursion
+  latex: \Delta V_{\max}
+  definition: largest rail-voltage excursion a chip tolerates, the nominal voltage times the tolerance
+    fraction
+  kind: scalar
+  unit: V
+- macro: \ApiAccount
+  latex: u
+  definition: user account of a model API whose query stream an extraction detector scores and whose quota
+    it adjusts
+  kind: record
+  notes: Argument of per-account features such as query rate and KL divergence.
+- macro: \ArithmeticIntensity
+  latex: I
+  definition: operations a workload performs per byte it moves through memory
+  kind: scalar
+  unit: FLOP/byte
+  notes: $\ArithmeticIntensity = \Operations/\DataVolume$. The roofline model plots attainable rate against
+    it; above $\RooflineRidgePoint$ a kernel is compute-bound, below it memory-bound.
+- macro: \ArrivalRate
+  latex: \lambda_{\text{arr}}
+  definition: average number of requests or jobs arriving per second
+  kind: scalar
+  unit: arrivals/s
+  notes: Enters Little's law, $\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$, and serving utilization
+    $\ServingUtilization = \ArrivalRate/\mu$. The subscript keeps bare $\lambda$ free for other rates.
+- macro: \AsymptoticTightBound
+  latex: \Theta
+  definition: 'asymptotic tight bound: grows at the same rate as its argument, up to constant factors'
+  kind: operator
+  notes: Companion to big-O, which is exempt.
+- macro: \AttainableComputeRate
+  latex: R_{\text{attain}}
+  definition: highest operation rate a workload can sustain on given hardware, capped by peak compute
+    or by memory bandwidth times arithmetic intensity
+  kind: scalar
+  unit: FLOP/s
+  notes: 'Roofline bound: $\AttainableComputeRate \leq \min(\PeakRate, \ArithmeticIntensity \times \Bandwidth)$.
+    Uses $R$, not $T$, because this quantity is a rate.'
+- macro: \AveragePower
+  latex: P_{\text{avg}}
+  definition: power drawn averaged over a stated period
+  kind: scalar
+  unit: W
+  notes: Power always carries a subscript; bare $P$ is parameter count $\Parameters$.
+- macro: \AxiBurstLength
+  latex: A_{\text{len}}
+  definition: number of data beats in one burst of an AXI interconnect transaction
+  kind: count
+- macro: \BackwardPassTime
+  latex: T_{\text{backward}}
+  definition: time of the full backward pass over all layers in one training step
+  kind: scalar
+  unit: s
+- macro: \Bandwidth
+  latex: \text{BW}
+  definition: sustained rate at which bytes move across a memory or data path
+  kind: scalar
+  unit: bytes/s
+  notes: The denominator of the iron law's data-movement term $\DataVolume/\Bandwidth$. Never bare $B$,
+    which is batch size $\BatchSize$.
+- macro: \BankConflictPenalty
+  latex: \Delta t_{\text{conflict}}
+  definition: time one memory bank or row conflict adds to a queued transfer, about a precharge plus an
+    activation
+  kind: scalar
+  unit: s
+- macro: \BatchArrivalRate
+  latex: \lambda_{\text{batch}}
+  definition: rate at which batches arrive at a server when each batch is treated as one super-request,
+    the request arrival rate divided by the batch size
+  kind: scalar
+  unit: batches/s
+  notes: 'Used in the M/G/1 batch surrogate: $\ServingUtilization = \lambda_{\text{batch}} \mathbb{E}[\BatchServiceTime]$.
+    Distinct from \ArrivalRate, the request arrival rate.'
+- macro: \BatchBufferMemory
+  latex: M_{\text{batch}}
+  definition: host memory one batch occupies while it sits in a pipeline buffer
+  kind: scalar
+  unit: bytes
+- macro: \BatchDataVolume
+  latex: D_{\text{vol}}^{(\text{batch})}
+  definition: bytes of input data one batch carries to the accelerator
+  kind: scalar
+  unit: bytes
+- macro: \BatchFetchTime
+  latex: T_{\text{fetch}}
+  definition: time to fetch one batch from storage
+  kind: scalar
+  unit: s
+- macro: \BatchFillArrivalCount
+  latex: k
+  definition: number of arrivals after a batch's triggering request needed to fill the batch, one less
+    than the maximum batch size
+  kind: count
+  notes: Equals $\MaxBatchSize - 1$ for a request-triggered window. Not \WindowArrivalCount, which counts
+    the arrivals that actually occur.
+- macro: \BatchFixedOverheadTime
+  latex: T_{\text{fixed}}
+  definition: part of a batch's service time paid once per batch whatever its size, such as weight loading
+    and kernel launch
+  kind: scalar
+  unit: s
+  notes: Intercept of the linear batch service-time model $\BatchServiceTime(\BatchSize) = T_{\text{fixed}}
+    + \BatchSize\, t_{\text{req}}$.
+- macro: \BatchFormationDelay
+  latex: L_{\text{lat,form}}
+  definition: time a request waits for its batch to fill before the batch is dispatched
+  kind: scalar
+  unit: s
+  notes: Averages $(\BatchSize-1)/(2\ArrivalRate)$ for a count-triggered batcher under Poisson arrivals;
+    bounded by \BatchingWindow for a timed one.
+- macro: \BatchLatencyEnvelope
+  latex: L_{\text{lat,envelope}}
+  definition: conservative bound on a request's batching latency, the full batching window plus the service
+    time of its 99th-percentile batch
+  kind: scalar
+  unit: s
+  notes: Assumes an available worker at dispatch; excludes other request stages.
+- macro: \BatchMaxOutputLength
+  latex: S_{\text{max}}
+  definition: largest number of output tokens any request in a batch generates
+  kind: count
+  notes: Not $\ContextWindow$ ($S_{\max}$), the per-call token limit.
+- macro: \BatchMaximumDeviationMultiple
+  latex: k
+  definition: number of standard deviations by which the longest output in a batch is assumed to exceed
+    the mean output length
+  kind: scalar
+  unit: dimensionless
+  notes: A scenario assumption, not a workload property; it grows with batch size.
+- macro: \BatchMeanOutputLength
+  latex: \bar{S}
+  definition: mean number of output tokens per request over the requests of a batch
+  kind: scalar
+  unit: tokens
+- macro: \BatchOperations
+  latex: O_{\text{batch}}
+  definition: floating-point operations of the forward and backward pass for one batch
+  kind: scalar
+  unit: FLOP
+- macro: \BatchProcessingTime
+  latex: T_{\text{process}}
+  definition: time the preprocessing stage spends on one batch
+  kind: scalar
+  unit: s
+- macro: \BatchServiceTime
+  latex: T_{\text{svc}}
+  definition: time an accelerator takes to process one batch once execution begins, as a function of batch
+    size
+  kind: scalar
+  unit: s
+  notes: Often modeled as a fixed overhead plus a per-request cost times batch size. Sets the batched
+    service rate $\EffectiveServiceRate = \BatchSize/\BatchServiceTime$.
+  aliases:
+  - \BatchServiceTimeSvc
+- macro: \BatchTransferTime
+  latex: T_{\text{transfer}}
+  definition: time to copy one batch of input data from host memory to the device that consumes it
+  kind: scalar
+  unit: s
+  notes: Overlap with compute bounds the batch interval by $\max(\IronLawComputeTime, T_{\text{transfer}})$.
+- macro: \BatchedDecodeStepTime
+  latex: t_{\text{step}}
+  definition: time of one decode step that serves a batch of streams with one weight read, the larger
+    of the weight-transfer and arithmetic times
+  kind: scalar
+  unit: s
+  notes: 'Written with the batch size as argument, $t_{\text{step}}(\BatchSize)$. Weight-only: ignores
+    attention-state traffic.'
+- macro: \BatchedRequestLatency
+  latex: L_{\text{lat,batch}}
+  definition: latency a request accrues in a batching server, its batching wait plus the service time
+    of its batch
+  kind: scalar
+  unit: s
+  notes: Covers batching and service only, not network, preprocessing or other stages; distinct from \EndToEndRequestLatency
+    despite the shared subscript.
+- macro: \BatchingLatencyBudget
+  latex: L_{\text{lat,budget}}
+  definition: share of a mean latency objective allotted to batching wait and batch service
+  kind: scalar
+  unit: s
+  notes: Bounds $T_{\text{window}}/2 + \BatchServiceTime$ when screening batch sizes. A part of \LatencySlo,
+    not all of it; the two share a glyph today.
+- macro: \BatchingQueueWait
+  latex: L_{\text{lat,wait}}
+  definition: time a request waits in a batching server's queue before its batch begins service, formation
+    included
+  kind: scalar
+  unit: s
+  notes: The text says it corresponds to the queue-only wait \QueueWaitTime and to the latency budget's
+    \QueueingLatency.
+- macro: \BatchingWindow
+  latex: T_{\text{window}}
+  definition: length of the batching window, the longest a dynamic batcher holds requests before dispatching
+    a batch
+  kind: scalar
+  unit: s
+  notes: Measured from the oldest buffered request for a triggered window, or as a fixed calendar interval.
+    Poisson arrivals give a mean of $\ArrivalRate T_{\text{window}}$ requests per window.
+- macro: \BitFlippedFloatNumber
+  latex: x_{\text{corrupt}}
+  definition: number a floating-point bit pattern represents after one exponent bit flips
+  kind: scalar
+  unit: dimensionless
+  notes: A flip of the FP16 top exponent bit scales a normal value by $2^{\pm 16}$.
+- macro: \BreakEvenUtilization
+  latex: u^*
+  definition: fraction of reference capacity above which a dedicated deployment costs less per hour than
+    a per-token API at the same delivered output
+  kind: scalar
+  unit: dimensionless
+  notes: Equals \DedicatedHourlyFixedCost over 3600 times the feasible output rate times the per-token
+    price gap.
+- macro: \BroadcastColumnElement
+  latex: A
+  definition: one element of the broadcast column tensor
+  kind: scalar
+  unit: dimensionless
+- macro: \BroadcastColumnTensor
+  latex: \mathbf{A}
+  definition: column tensor of shape (3, 1) that broadcasting stretches across columns
+  kind: matrix
+- macro: \BroadcastRowElement
+  latex: b
+  definition: one element of the broadcast row tensor
+  kind: scalar
+  unit: dimensionless
+  notes: Not batch size.
+- macro: \BroadcastRowTensor
+  latex: \mathbf{B}
+  definition: row tensor of shape (1, 4) that broadcasting stretches across rows
+  kind: matrix
+- macro: \BroadcastTableSize
+  latex: s_{\text{table}}
+  definition: size in bytes of the small table a broadcast join sends to every worker
+  kind: scalar
+  unit: bytes
+  notes: Broadcast traffic is this size times one less than the worker count.
+- macro: \BufferIndex
+  latex: i
+  definition: position of one staging buffer in a double-buffered or multi-buffered pipeline, where one
+    buffer fills while the next is consumed
+  kind: index
+  notes: Buffer $i+1$ is filled while computation reads buffer $i$. Not $\BatchIndex$, which counts batches
+    delivered, not buffer slots.
+- macro: \BulkDecouplingCapacitance
+  latex: C_{\text{bulk}}
+  definition: bulk electrolytic or polymer decoupling capacitance that holds a rail until the regulator
+    loop responds
+  kind: scalar
+  unit: F
+- macro: \CacheMissStallFraction
+  latex: f
+  definition: fraction of the unloaded permission tick spent stalled on shared-cache misses
+  kind: scalar
+  unit: dimensionless
+  notes: Only this share is slowed by cross-workload interference; the rest of the tick runs unchanged.
+- macro: \CallTailProbability
+  latex: p_{\text{tail}}
+  definition: probability that one call exceeds its per-call tail-latency percentile, such as the 99th
+  kind: scalar
+  unit: dimensionless
+- macro: \CascadeEscalationProbability
+  latex: p_{\text{escalate}}
+  definition: probability that an edge-cloud cascade escalates an input to cloud inference, measured on
+    the deployment input distribution
+  kind: scalar
+  unit: dimensionless
+- macro: \CascadeInferenceEnergy
+  latex: E_{\text{cascade}}
+  definition: average energy an edge-cloud cascade spends per input, local inference plus escalated transmission
+    and cloud inference
+  kind: scalar
+  unit: J
+- macro: \CausalTokenPosition
+  latex: s
+  definition: position of one token within a causal prefill, equal to the number of earlier tokens whose
+    keys and values it attends to
+  kind: index
+  notes: Summed from one to $\SequenceLength$ to give the quadratic attention term $2\LayerCount\HiddenDimension\SequenceLength^2$.
+- macro: \CentralizedTrainingEnergy
+  latex: E_{\text{centralized}}
+  definition: total energy of training centrally, every client uploading raw data plus one cloud training
+    run
+  kind: scalar
+  unit: J
+- macro: \ChainedOperationCount
+  latex: n_{\text{ops}}
+  definition: number of consecutive operations in a chain that each read and write the same intermediate
+    tensor, the chain kernel fusion merges
+  kind: count
+- macro: \ChassisThermalResistance
+  latex: R_{\text{th,chassis}}
+  definition: thermal resistance of conduction through a metal enclosure to the ambient air
+  kind: scalar
+  unit: K/W
+- macro: \ClientLocalTrainingEnergy
+  latex: E_{\text{client}}
+  definition: energy one federated client spends on local training in one round
+  kind: scalar
+  unit: J
+  notes: Not \LocalInferenceEnergy, the energy of one on-device inference.
+- macro: \ClientUpdateUploadEnergy
+  latex: E_{\text{upload}}
+  definition: energy one federated client spends uploading its model update for one round
+  kind: scalar
+  unit: J
+- macro: \ClockFrequency
+  latex: f
+  definition: rate at which a processor's clock ticks, setting how many switching cycles occur per second
+  kind: scalar
+  unit: Hz
+  notes: With voltage rising in proportion to frequency, dynamic power scales roughly as $f^3$.
+- macro: \ClockPeriod
+  latex: T_{\text{clk}}
+  definition: period of the clock of a synchronous digital pipeline, the time one stage has to settle
+  kind: scalar
+  unit: s
+- macro: \CloudInferenceEnergy
+  latex: E_{\text{cloud}}
+  definition: energy a cloud-hosted model spends serving one inference
+  kind: scalar
+  unit: J
+  notes: Not \CloudOffloadEnergy, the device energy to transmit the input.
+- macro: \CloudOffloadEnergy
+  latex: E_{\text{transmit}}
+  definition: energy a device spends transmitting an input to the cloud for remote inference
+  kind: scalar
+  unit: J
+  notes: Approximately data volume times $\TransmissionEnergyPerByte$; excludes the server's own energy.
+- macro: \CloudTrainingRunEnergy
+  latex: E_{\text{cloud,train}}
+  definition: energy of one centralized training run in the cloud
+  kind: scalar
+  unit: J
+- macro: \ClusterPower
+  latex: P_{\text{cluster}}
+  definition: electrical power a training cluster draws, accelerators plus hosts
+  kind: scalar
+  unit: W
+  notes: Times training time gives training energy.
+- macro: \ColumnAccessLatency
+  latex: t_{\text{CL}}
+  definition: latency from a DRAM column read command to its data on the bus, the only step a row hit
+    pays
+  kind: scalar
+  unit: s
+- macro: \CompilationBreakevenCount
+  latex: N_{\text{breakeven}}
+  definition: number of executions whose per-execution savings repay one compilation
+  kind: count
+  notes: Compilation time over the per-execution saving of compiled over eager mode. Not the agentic $\BreakEvenTaskCount$.
+- macro: \CompilationTime
+  latex: T_{\text{compile}}
+  definition: time one compilation or recompilation of a model takes
+  kind: scalar
+  unit: s
+- macro: \CompiledExecutionTime
+  latex: T_{\text{compiled}}
+  definition: time for one execution of a model after compilation
+  kind: scalar
+  unit: s
+- macro: \CompilerBackendCount
+  latex: N_{\text{backend}}
+  definition: number of hardware backends a compiler stack generates code for
+  kind: count
+- macro: \CompilerFrontendCount
+  latex: M
+  definition: number of source frontends, such as capture mechanisms or languages, a compiler stack supports
+  kind: count
+- macro: \CompletedRequestCount
+  latex: N
+  definition: number of requests a system has completed by a given time
+  kind: count
+  notes: Written N(T) in the Little's law proof. Not \DeviceCount.
+- macro: \CompressionRatio
+  latex: r_{\text{comp}}
+  definition: uncompressed size of a payload divided by its compressed size
+  kind: scalar
+  unit: dimensionless
+  notes: A compressed payload has $1/\CompressionRatio$ of the uncompressed size. The subscript avoids
+    bare $C$ collisions.
+- macro: \ComputationalDimensionCount
+  latex: N_{\text{comp}}
+  definition: number of computational dimensions of an operation whose memory placement a mapping chooses
+  kind: count
+- macro: \ComputeDemandVolume
+  latex: Q
+  definition: quantity of AI compute demanded at a given unit cost, the volume axis of a demand curve
+  kind: scalar
+  unit: FLOP
+  notes: Indexed $Q_0$, $Q_1$ before and after an efficiency gain.
+- macro: \ComputeLimitedSampleRate
+  latex: R_{\text{compute}}
+  definition: samples per second the accelerators could process if input data were always ready
+  kind: scalar
+  unit: samples/s
+  notes: Compute-capacity side of the training-throughput bound; not $\AttainableComputeRate$, which is
+    in FLOP/s.
+- macro: \ComputeUnitCost
+  latex: P
+  definition: monetary cost of one unit of AI compute, the price axis of a demand curve in a rebound analysis
+  kind: scalar
+  unit: USD/FLOP
+  notes: Indexed $P_0$, $P_1$ before and after an efficiency gain. Not \Parameters, the bare-P parameter
+    count; not \FlopPrice, whose subscripted glyph cannot take the 0/1 index.
+- macro: \ConductorCurrent
+  latex: I
+  definition: electrical current flowing through a power-distribution conductor
+  kind: scalar
+  unit: A
+  notes: Resistive loss is $\ConductorCurrent^2 \ElectricalResistance$. Not \ArithmeticIntensity, which
+    shares the glyph.
+- macro: \ConversationTurnIndex
+  latex: i
+  definition: position of one turn within a multi-turn conversation
+  kind: index
+  notes: Turn k+1 reuses turn k's KV cache only if routed to the same replica.
+- macro: \ConvolutionTimeInstant
+  latex: t'
+  definition: earlier time instant between zero and t, the variable a convolution integral over past noise
+    runs over
+  kind: scalar
+  unit: s
+- macro: \CoolantHeatLoad
+  latex: P_{\text{thermal}}
+  definition: heat per unit time that a liquid cooling loop must carry away from a rack, the load that
+    sets its coolant mass flow
+  kind: scalar
+  unit: W
+  notes: Required mass flow is $\CoolantHeatLoad/(\SpecificHeatCapacity\,\FiniteChange\CoolantTemperature)$.
+    Not the edge device's thermally sustainable power limit, which shares the glyph.
+- macro: \CoolantMassFlowRate
+  latex: \dot{m}
+  definition: mass of coolant, liquid or air, passing through a cooling loop per second
+  kind: scalar
+  unit: kg/s
+  notes: Heat removed is $\CoolantMassFlowRate\,\SpecificHeatCapacity\,\FiniteChange\CoolantTemperature$.
+- macro: \CoolantTemperature
+  latex: T
+  definition: temperature of the liquid or air coolant in a cooling loop, whose finite change is its rise
+    from inlet to outlet
+  kind: scalar
+  unit: K
+  notes: Appears as $\FiniteChange\CoolantTemperature$. Not \Time, the iron-law execution time, which
+    shares the glyph.
+- macro: \CoolingEnergy
+  latex: E_{\text{cooling}}
+  definition: cooling energy attributable to a fleet's equipment over a stated interval
+  kind: scalar
+  unit: J
+  notes: One of the three disjoint terms in the denominator of $\FleetEnergyProductivity$, with $\DeviceEnergy$
+    and $\NetworkEnergy$.
+- macro: \CoordinationLatency
+  latex: L_{\text{lat,coordination}}
+  definition: exposed time a request spends fanning out to services and waiting to join their results
+    on its critical path
+  kind: scalar
+  unit: s
+  notes: One stage of $\EndToEndRequestLatency$. Not $\SynchronizationTime$, the per-step coordination
+    cost of distributed training.
+- macro: \CoreRailVoltageDroop
+  latex: \Delta V_{\text{droop}}
+  definition: transient drop in a processor core supply rail when the load current steps, from package
+    inductance and resistance
+  kind: scalar
+  unit: V
+  notes: Inductive term \PackageInductance times current slew plus resistive term current step times \PackageResistance;
+    ignores on-die decoupling. Not \DcBusDynamicRailDroop, the inverter DC bus droop under motor current.
+- macro: \CpuEnergy
+  latex: E_{\text{CPU}}
+  definition: energy the host CPUs consume over a stated interval
+  kind: scalar
+  unit: J
+  notes: One disjoint component term of \FacilityEnergy before PUE scaling.
+- macro: \CumulativeArrivals
+  latex: A
+  definition: cumulative number of requests that have arrived at a system by a given time
+  kind: function
+  unit: requests
+  notes: Written A(t). Not the advantage A of reinforcement learning.
+- macro: \CumulativeCompletions
+  latex: C
+  definition: cumulative number of requests a system has completed by a given time
+  kind: function
+  unit: requests
+  notes: Written C(t).
+- macro: \CurrentWallClockTime
+  latex: t_{\text{current}}
+  definition: current wall-clock time at which a monitor evaluates staleness
+  kind: scalar
+  unit: s
+  notes: A point in time, like \TimeInstant, fixed at the moment of the check.
+- macro: \DailyAccountQueryCount
+  latex: q_{\text{daily}}
+  definition: number of queries one API account issues in a day, compared against a static extraction-alert
+    threshold
+  kind: count
+  notes: Per account, unlike $\DailyQueryVolume$, which counts a whole service's queries.
+- macro: \DataLoaderWorkerCount
+  latex: W
+  definition: number of data-loader worker processes on one host that each read, decode, augment and enqueue
+    batches
+  kind: count
+  notes: PyTorch's num_workers. Not the agentic pool size $\WorkerCount$ or forward work.
+- macro: \DataMovementEnergyFraction
+  latex: q
+  definition: share of a workload's total energy that data movement contributes
+  kind: scalar
+  unit: dimensionless
+- macro: \DataSupplyRate
+  latex: R_{\text{data}}
+  definition: samples per second the storage and input pipeline can deliver to training
+  kind: scalar
+  unit: samples/s
+  notes: Storage bandwidth after overhead divided by bytes per sample, $\Bandwidth_{\text{storage}}(1-f)/\SampleStorageSize$.
+- macro: \DataTaxonomyAxis
+  latex: \mathsf{Data}
+  definition: Data axis of the D·A·M taxonomy, viewed as the set of techniques and concepts it covers
+    so that axis intersections name zones of the taxonomy
+  kind: set
+  notes: The chapter states the D·A·M axes are taxonomy labels, not mathematical variables; $\mathsf{Data}$
+    appears only inside set intersections such as $\mathsf{Data} \cap \mathsf{Algorithm}$. Never \DatasetSize
+    or \DataVolume.
+  render_exception: Sans-serif upright-ish name marks a D·A·M taxonomy axis treated as a set of techniques
+    in an intersection, not a calligraphic or blackboard set symbol.
+- macro: \DataVolume
+  latex: D_{\text{vol}}
+  definition: total bytes a workload moves through memory or across a data path
+  kind: scalar
+  unit: bytes
+  notes: The numerator of the iron law's data-movement term $\DataVolume/\Bandwidth$. Distinct from bare
+    $D$, which is dataset size in tokens in scaling laws.
+- macro: \DatasetShardCount
+  latex: K_{\text{shards}}
+  definition: number of shards a training dataset is split into on shared storage
+  kind: count
+  notes: Not a class count or top-K; the subscript names the shards.
+- macro: \DatasetTransferTime
+  latex: T
+  definition: ideal line-rate time to move a dataset of a given size across a network or storage path,
+    data volume divided by bandwidth
+  kind: scalar
+  unit: s
+  notes: Lower bound that ignores latency and protocol overhead; the data-gravity calculation.
+- macro: \DecodeArithmeticIntensity
+  latex: I_{\text{decode}}
+  definition: arithmetic intensity of the weight-dominated part of an LLM decode step, operations per
+    byte of weights and activations moved, as a function of batch size
+  kind: scalar
+  unit: FLOP/byte
+  notes: Written with its batch argument, $I_{\text{decode}}(\BatchSize) = 2\Parameters\BatchSize/(\Parameters\ElementStorageSize
+    + \BatchSize\HiddenDimension\ElementStorageSize)$; grows roughly linearly with $\BatchSize$ while
+    weight bytes dominate. Excludes KV-cache traffic.
+- macro: \DecodeBatchSize
+  latex: B_{\text{dec}}
+  definition: number of sequences decoding in one iteration, each contributing one token
+  kind: count
+- macro: \DecodeRequestSet
+  latex: \mathcal{D}
+  definition: set of requests decoding in one serving iteration, each contributing one token position
+    to the iteration
+  kind: set
+  notes: Its size $\lvert\DecodeRequestSet\rvert$ is the decode share of $\IterationTokenBudget$. Not
+    $\ClientLocalDataset$ or $\DivergenceMeasure$, which share the glyph; counterpart of $\ActivePrefillRequestSet$.
+- macro: \DecodeTokenTimeFloor
+  latex: T_{\text{token}}
+  definition: lower bound on the time to generate one token at batch one, bytes streamed per step divided
+    by memory bandwidth
+  kind: scalar
+  unit: s
+  notes: Realized time per output token (\PerTokenDecodeTime) adds dispatch and launch overhead on top
+    of it.
+- macro: \DecouplingCapacitance
+  latex: C
+  definition: capacitance of one decoupling capacitor or parallel capacitor branch of a power delivery
+    network
+  kind: scalar
+  unit: F
+- macro: \DeliveredCapacityFraction
+  latex: u
+  definition: fraction of a dedicated deployment's latency-feasible reference output rate that the workload
+    actually delivers
+  kind: scalar
+  unit: dimensionless
+  notes: Measured against a rate already chosen to meet the latency target, unlike \ServingUtilization;
+    $u=1$ still meets the target.
+- macro: \DemandPriceElasticity
+  latex: \epsilon_{\text{elast}}
+  definition: magnitude of the price elasticity of demand, the percentage change in quantity demanded
+    per percentage change in unit cost
+  kind: scalar
+  unit: dimensionless
+  notes: Above one, demand is elastic and efficiency gains can raise total consumption (rebound, Jevons
+    paradox).
+- macro: \DenseEvaluationEnergy
+  latex: E_{\text{eval}}
+  definition: energy one evaluation of a periodically evaluated dense model consumes
+  kind: scalar
+  unit: J
+- macro: \DenseEvaluationRate
+  latex: f_{\text{eval}}
+  definition: number of times per second a periodically evaluated dense model runs
+  kind: scalar
+  unit: 1/s
+  notes: Draws $\DenseEvaluationRate\,\DenseEvaluationEnergy$ whether or not its input changed.
+- macro: \DevelopmentIterationCount
+  latex: N_{\text{dev}}
+  definition: number of development iterations that each force a recompilation
+  kind: count
+- macro: \DeviceEnergy
+  latex: E_{\text{device}}
+  definition: energy the compute devices of a fleet consume over a stated interval
+  kind: scalar
+  unit: J
+  notes: One of the three disjoint terms in the denominator of $\FleetEnergyProductivity$, with $\CoolingEnergy$
+    and $\NetworkEnergy$.
+- macro: \DeviceHardwareTime
+  latex: T_{\text{hw}}
+  definition: time the device spends executing a step's kernels, compute plus memory time when they do
+    not overlap
+  kind: scalar
+  unit: s
+  notes: Approximately $\IronLawComputeTime + \IronLawMemoryTime$ without overlap; replace with measured
+    device time when they overlap.
+- macro: \DeviceMemoryCapacity
+  latex: M_{\text{device}}
+  definition: total memory a device provides for a model's weights and activations
+  kind: scalar
+  unit: bytes
+  notes: 'A fit precondition: $\WeightMemory + \ActivationMemory$ must not exceed it.'
+- macro: \DevicePower
+  latex: P_{\text{device}}
+  definition: electrical power one device draws
+  kind: scalar
+  unit: W
+  notes: Integrated over time it gives the device's energy.
+- macro: \DeviceRequestCapacity
+  latex: Q_{\text{req,max}}
+  definition: largest number of requests a device can hold in service at once, its concurrent request
+    slots
+  kind: count
+  notes: Upper bound on \RequestConcurrency set by device state; divided by \RequestTimeInSystem it gives
+    a throughput proxy.
+- macro: \DiskBandwidth
+  latex: \text{BW}_{\text{disk}}
+  definition: sustained rate at which a storage disk delivers bytes
+  kind: scalar
+  unit: bytes/s
+  notes: One of three bandwidths on the data path with $\NetworkBandwidth$ and $\AcceleratorMemoryBandwidth$;
+    they differ by orders of magnitude.
+- macro: \DispatchedOperationCount
+  latex: N_{\text{ops}}
+  definition: number of operations a framework dispatches, each paying its own launch overhead
+  kind: count
+  notes: A count of dispatches, not of arithmetic operations ($\Operations$).
+- macro: \DominantComponentEnergy
+  latex: E_{\text{dominant}}
+  definition: larger of the compute and data-movement energy contributions of a workload, the energy-roofline
+    term
+  kind: scalar
+  unit: J
+  notes: $\max(\Operations\,\EnergyPerOperation, \DataVolume\,\EnergyPerByteMoved)$; understates \TotalEnergy
+    near balance.
+- macro: \DraftAcceptanceRate
+  latex: \alpha
+  definition: fraction of draft-model tokens the target model accepts in speculative decoding
+  kind: scalar
+  unit: dimensionless
+  notes: Sets the expected accepted tokens per verification step.
+- macro: \DraftCandidateToken
+  latex: \tilde{x}
+  definition: one token a draft proposes in a speculative-sampling iteration, written with its draft position
+  kind: record
+  notes: Written $\DraftCandidateToken_j$ for position $j$ from one to $\SpeculativeDraftTokenCount$.
+- macro: \DraftModelDistribution
+  latex: q_{\phi}
+  definition: next-token probability distribution of the draft model in speculative decoding
+  kind: distribution
+  notes: Not \CvaeRecognitionEncoder, which shares the glyph.
+- macro: \DraftPositionAcceptanceProbability
+  latex: \alpha_{\text{spec}, j}
+  definition: probability that exact speculative sampling accepts the draft candidate at one position,
+    the target-to-draft probability ratio capped at one
+  kind: scalar
+  unit: dimensionless
+  notes: $\min(1, \TargetSamplingDistribution/\DraftSamplingDistribution)$ at the candidate. The position
+    index $j$ is part of the rendered label.
+- macro: \DraftPositionIndex
+  latex: i
+  definition: position of one drafted token within a speculative-decoding round, counted from zero
+  kind: index
+  notes: In the expected-tokens series $\sum_{i=0}^{K}\alpha_{\text{acc}}^{i}$ it counts the leading draft
+    positions that must all be accepted.
+- macro: \DraftSamplingDistribution
+  latex: q
+  definition: normalized next-token distribution the draft sampler draws from at a prefix in speculative
+    sampling, after temperature, masks and other sampling transformations
+  kind: distribution
+  notes: Evaluated at a token, $q(\DraftCandidateToken_j \mid \cdot)$. Not $\DraftModelDistribution$,
+    the untransformed draft model distribution.
+- macro: \DraftTokenAcceptanceProbability
+  latex: \alpha_{\text{acc}}
+  definition: probability that the target model accepts one drafted token in speculative decoding, taken
+    as independent across draft positions
+  kind: scalar
+  unit: dimensionless
+  notes: Sets the expected tokens per round, $(1-\alpha_{\text{acc}}^{K+1})/(1-\alpha_{\text{acc}})$.
+    The per-position form of \DraftAcceptanceRate ($\alpha$).
+- macro: \DraftTokenCostRatio
+  latex: \beta
+  definition: time cost of generating one draft token as a fraction of one target-model decoding step
+    in speculative decoding
+  kind: scalar
+  unit: dimensionless
+- macro: \DraftTokenCount
+  latex: \gamma
+  definition: number of tokens a draft model proposes for the target model to verify in one speculative-decoding
+    step
+  kind: count
+  notes: The target model verifies the k-token block in one forward pass.
+- macro: \DraftedToken
+  latex: T
+  definition: one token the draft model proposes in a speculative-decoding round, numbered by its position
+  kind: record
+  notes: Written with its position, $T_1$ to $T_K$. Not \Time, which shares the glyph.
+- macro: \DroopedSupplyVoltage
+  latex: V_{\text{droop}}
+  definition: supply voltage a core sees at the bottom of a droop event
+  kind: scalar
+  unit: V
+- macro: \DurableStoreWriteBandwidth
+  latex: \text{BW}_{\text{store}}
+  definition: sustained rate at which the collector writes records to durable storage
+  kind: scalar
+  unit: bytes/s
+  notes: Caps the attempt rate at $\DurableStoreWriteBandwidth/\RecordSizeCeiling$.
+- macro: \DutyCyclePeriod
+  latex: T_{\text{period}}
+  definition: length of one wake-and-sleep cycle of a duty-cycled device
+  kind: scalar
+  unit: s
+- macro: \DynamicPower
+  latex: P_{\text{dynamic}}
+  definition: power a chip draws switching its transistors, proportional to switched capacitance, supply
+    voltage squared and clock frequency
+  kind: scalar
+  unit: W
+  notes: $P_{\text{dynamic}} \propto \SupplyVoltage^2 \ClockFrequency$; leakage power is separate.
+- macro: \EagerExecutionTime
+  latex: T_{\text{eager}}
+  definition: time for one execution of a model in eager mode
+  kind: scalar
+  unit: s
+- macro: \EchoFactor
+  latex: e
+  definition: number of times data echoing reuses each sample the input pipeline produces
+  kind: scalar
+  unit: dimensionless
+  notes: Raising it beyond $\InputPipelineRatio$ adds no throughput.
+- macro: \EffectiveServiceRate
+  latex: \mu_{\text{eff}}
+  definition: requests a batched server completes per second at a given batch size
+  kind: scalar
+  unit: requests/s
+  notes: $\EffectiveServiceRate = \BatchSize/\BatchServiceTime$. The unbatched service rate is $\mu =
+    \mu_{\text{eff}}(1)$; a stable server needs $\EffectiveServiceRate > \ArrivalRate$.
+- macro: \EffectiveStorageThroughput
+  latex: R_{\text{storage,eff}}
+  definition: storage throughput a training job actually achieves, after record size, layout, caching
+    and shuffling losses
+  kind: scalar
+  unit: bytes/s
+- macro: \EffectiveWasteFraction
+  latex: W_{\text{effective}}
+  definition: padding-waste fraction that would produce a given realized continuous-batching speedup
+  kind: scalar
+  unit: dimensionless
+- macro: \EfficiencyHw
+  latex: \eta_{\text{hw}}
+  definition: fraction of peak compute rate the hardware actually sustains on a workload
+  kind: scalar
+  unit: dimensionless
+  notes: Lies between 0 and 1; the iron law's compute term is $\Operations/(\PeakRate \cdot \EfficiencyHw)$.
+    The subscript keeps bare $\eta$ for the learning rate $\LearningRate$.
+- macro: \ElementStorageSize
+  latex: s_{\text{elem}}
+  definition: bytes needed to store one tensor element at its numerical precision
+  kind: scalar
+  unit: bytes/element
+  notes: Two bytes for FP16 or BF16, one for INT8. Multiplies element counts into bytes moved or held,
+    as in weight bytes $\Parameters \ElementStorageSize$.
+- macro: \EndToEndRequestLatency
+  latex: L_{\text{lat,total}}
+  definition: time from a request leaving the client to its response returning, summed over every stage
+    on the request path
+  kind: scalar
+  unit: s
+  notes: Sums network, preprocessing, inference, postprocessing and queueing delay, $L_{\text{lat,network}}
+    + L_{\text{lat,pre}} + L_{\text{lat,infer}} + L_{\text{lat,post}} + L_{\text{lat,queue}}$. $\RequestTimeInSystem$
+    covers only the time inside the serving system, and the iron law's $\Latency$ only fixed overhead.
+- macro: \EnergyCrossoverIntensity
+  latex: I_{\text{crossover}}
+  definition: arithmetic intensity at which compute energy and data-movement energy are equal
+  kind: scalar
+  unit: FLOP/byte
+  notes: Equals $\EnergyPerByteMoved/\EnergyPerOperation$. The energy analogue of \RooflineRidgePoint,
+    which balances time, not energy.
+- macro: \EnergyPerByteMoved
+  latex: E_{\text{move}}
+  definition: energy spent moving one byte between memory and the compute units
+  kind: scalar
+  unit: J/byte
+  notes: The movement term of total energy is $\DataVolume \times \EnergyPerByteMoved$. Moving a byte
+    from DRAM costs far more than one arithmetic operation, $\EnergyPerByteMoved \gg \EnergyPerOperation$.
+- macro: \EnergyPerOperation
+  latex: E_{\text{compute}}
+  definition: energy spent executing one arithmetic operation
+  kind: scalar
+  unit: J/operation
+  notes: The compute term of total energy is $\Operations \times \EnergyPerOperation$. Depends on precision
+    and process node.
+  aliases:
+  - \EnergyPerOperationCompute
+- macro: \EntityCount
+  latex: N_{\text{entities}}
+  definition: number of entities, such as users or items, a recommendation table or feature store holds
+    rows for
+  kind: count
+- macro: \ErrorBudgetConsumption
+  latex: B
+  definition: 'share of one reliability target''s error budget a service has used: the fraction of eligible
+    observations that violate the target divided by the violating fraction the target allows'
+  kind: scalar
+  unit: dimensionless
+  notes: Indexed by reliability target (availability, latency, freshness, quality). A value of 1 exhausts
+    that target's budget; the service is inside its reliability envelope only when the maximum over targets
+    is at most 1.
+- macro: \EventDetectionPower
+  latex: P_{\text{detect}}
+  definition: constant power drawn by the circuitry that watches for input events in an event-driven design
+  kind: scalar
+  unit: W
+- macro: \EventProcessingEnergy
+  latex: E_{\text{event}}
+  definition: energy an event-driven design spends processing one event
+  kind: scalar
+  unit: J
+- macro: \ExpectedQueryDistribution
+  latex: p_{\text{expected}}
+  definition: reference distribution of queries expected from legitimate use of an API, against which
+    an account's query distribution is compared
+  kind: distribution
+- macro: \ExponentBitIndex
+  latex: k
+  definition: position of one bit in the exponent field of a floating-point number, counted from zero
+    so that the bit has place value two to this power
+  kind: index
+  notes: Flipping that bit scales the stored value by $2^{\pm 2^k}$. Not the bit width $\NumericBitWidth$.
+- macro: \ExtractionQueryCount
+  latex: n_{\text{queries}}
+  definition: number of API queries an attacker needs to extract a substitute model
+  kind: count
+  notes: Times $\QueryPrice$, compared with the training cost $\TrainingCost$.
+- macro: \FacilityEnergy
+  latex: E_{\text{facility}}
+  definition: energy a data center facility draws over a stated period, its IT energy scaled by power
+    usage effectiveness
+  kind: scalar
+  unit: J
+  notes: Operational carbon is facility energy times grid carbon intensity; PUE enters once, through this
+    term.
+- macro: \FacilityHeatRemovalCapacity
+  latex: \dot{Q}_{\text{remove,max}}
+  definition: largest rate at which an installed facility and cooling configuration can remove heat
+  kind: scalar
+  unit: W
+  notes: Written with its arguments (facility, cooling configuration) in text; the thermodynamic limit
+    requires \InformationTechnologyHeatLoad to stay at or below it.
+- macro: \FacilityPower
+  latex: P_{\text{facility}}
+  definition: total electrical power a data center facility draws from the grid, its IT load plus cooling,
+    power conversion, lighting and other overhead
+  kind: scalar
+  unit: W
+  notes: Power usage effectiveness is $\text{PUE} = \FacilityPower/\InformationTechnologyPower$.
+- macro: \FacilityWaterConsumption
+  latex: W_{\text{water}}
+  definition: volume of water a facility consumes over a period, mostly through evaporative cooling
+  kind: scalar
+  unit: m^3
+  notes: Numerator of water usage effectiveness, $\text{WUE} = \FacilityWaterConsumption/\InformationTechnologyEnergy$;
+    the chapter reports it in liters.
+- macro: \FanoutBackendCount
+  latex: m
+  definition: number of parallel backend sub-requests one user request fans out to and must wait for
+  kind: count
+  notes: With independent backends each meeting a threshold with probability 0.99, all meet it with probability
+    $0.99^m$.
+- macro: \FeasibleOutputTokenRate
+  latex: \mu_{\text{out}}
+  definition: output tokens per second a dedicated deployment can generate while meeting its latency objective
+  kind: scalar
+  unit: tokens/s
+  notes: A token rate, distinct from the per-worker call rate \ServiceRate.
+- macro: \FederatedTrainingEnergy
+  latex: E_{\text{federated}}
+  definition: total energy of training a model by federated learning, summed over all rounds, clients
+    and server aggregation
+  kind: scalar
+  unit: J
+- macro: \FeedForwardOperations
+  latex: O_{\text{FFN}}
+  definition: floating-point operations of the two linear transformations of one transformer feed-forward
+    block
+  kind: scalar
+  unit: FLOP
+- macro: \FirstAtomicGradientUpdate
+  latex: A
+  definition: first of three gradient updates that accelerator threads accumulate atomically into a shared
+    tensor, whose accumulation order varies between runs
+  kind: scalar
+  unit: dimensionless
+  notes: Concrete instance of the floating-point associativity example; the run-dependent grouping of
+    these updates is the source of bitwise nondeterminism. Not the generic addends a, b, c and not matrix
+    operands.
+- macro: \FirstFloatingPointAddend
+  latex: a
+  definition: first of three floating-point numbers added in either grouping to show that floating-point
+    addition is not associative
+  kind: scalar
+  unit: dimensionless
+  notes: The three addends a, b, c appear together only in the associativity identity (a+b)+c vs a+(b+c);
+    they are generic numbers, not any modeled quantity. Distinct from the bold GEMM matrix operands A,
+    B, C.
+- macro: \FlippedFloatExponentField
+  latex: e'
+  definition: unsigned integer stored in the exponent bits of a floating-point number after one exponent
+    bit flips
+  kind: scalar
+  unit: dimensionless
+  notes: Flipping FP16 exponent bit 14 gives $\FloatExponentField \pm 16$; the represented number becomes
+    $\BitFlippedFloatNumber$.
+- macro: \FloatEncodedNumber
+  latex: x
+  definition: real number that a finite normal binary floating-point bit pattern represents
+  kind: scalar
+  unit: dimensionless
+  notes: $(-1)^s \, 2^{e-15} (1 + m/1024)$ in FP16.
+- macro: \FloatExponentField
+  latex: e
+  definition: unsigned integer stored in the exponent bits of a binary floating-point number, before the
+    bias is subtracted
+  kind: scalar
+  unit: dimensionless
+  notes: FP16 normal values have $1 \le e \le 30$ and bias 15. Written as a variable, never as the base
+    of the natural exponential.
+- macro: \FloatMantissaField
+  latex: m
+  definition: unsigned integer stored in the mantissa (fraction) bits of a binary floating-point number
+  kind: scalar
+  unit: dimensionless
+  notes: FP16 has ten mantissa bits, so the significand is $1 + m/1024$ for normal values.
+- macro: \FloatSignBit
+  latex: s
+  definition: sign bit of a binary floating-point number, zero for positive and one for negative
+  kind: scalar
+  unit: dimensionless
+  notes: Contributes the factor $(-1)^s$.
+- macro: \FlopPrice
+  latex: c_{\text{FLOP}}
+  definition: price of executing one floating-point operation on rented or owned accelerators
+  kind: scalar
+  unit: USD/FLOP
+  notes: Turns training operations into processing cost.
+- macro: \ForegroundLatency
+  latex: L_{\text{lat,fg}}
+  definition: measured latency of the foreground application's interactive work on a device
+  kind: scalar
+  unit: s
+  notes: Compared against \CompletionDeadline (alias \Deadline) in @eq-edge-background-admission.
+- macro: \FormatEfficiency
+  latex: \eta_{\text{format}}
+  definition: fraction of the bytes a storage format reads that carry the features a job selects
+  kind: scalar
+  unit: dimensionless
+  notes: Multiplies physical bandwidth into effective bandwidth. Not the learning rate $\LearningRate$
+    or hardware efficiency $\EfficiencyHw$.
+- macro: \ForwardPassTokenCount
+  latex: n
+  definition: number of token positions, decode and prefill together, that one forward pass of the serving
+    engine processes
+  kind: count
+  notes: The argument of the weight-only step-time estimate $\WeightOnlyStepTime(\ForwardPassTokenCount)$;
+    at most $\IterationTokenBudget$ in one engine iteration.
+- macro: \FusedDataVolume
+  latex: D_{\text{vol,fused}}
+  definition: bytes an operation sequence moves after fusion keeps its intermediates on chip
+  kind: scalar
+  unit: bytes
+  notes: Specialization of \DataVolume; about $2\,\IntermediateTensorSize$.
+- macro: \FusionInputTensor
+  latex: \mathbf{X}
+  definition: input tensor of a chain of elementwise operators that kernel fusion combines
+  kind: matrix
+  notes: Its intermediate results are $\mathbf{X}'$ after ReLU and $\mathbf{X}''$ after batch normalization.
+- macro: \FusionIntermediateTensor
+  latex: \mathbf{Z}
+  definition: intermediate tensor one operator of an unfused chain writes to global memory and the next
+    operator reads back, the traffic kernel fusion removes
+  kind: matrix
+  notes: Numbered by position in the chain, $\mathbf{Z}_1$, $\mathbf{Z}_2$. Its partners are \FusionInputTensor
+    and \FusionOutputTensor. Not \PreactivationMatrix or \MultimodalFusedTokenStream, which share the
+    glyph.
+- macro: \FusionOutputTensor
+  latex: \mathbf{Y}
+  definition: output tensor of a chain of elementwise operators that kernel fusion combines
+  kind: matrix
+- macro: \GatePropagationDelay
+  latex: t_{\text{prop}}
+  definition: propagation delay of a logic gate, written as a function of its supply voltage
+  kind: scalar
+  unit: s
+  notes: The alpha-power law makes it grow as the supply approaches \TransistorThresholdVoltage.
+- macro: \GemmAccumulatorScale
+  latex: \beta
+  definition: scalar multiplier applied to the existing output matrix before the product is added in a
+    general matrix multiply
+  kind: scalar
+  unit: dimensionless
+  notes: BLAS convention; not the link bandwidth $\LinkBandwidth$.
+- macro: \GemmColumnDimension
+  latex: N
+  definition: number of columns of the right operand and of the output in a matrix multiply
+  kind: count
+  notes: Not $\DeviceCount$; a GEMM dimension, so it appears only beside $M$ and $K$.
+- macro: \GemmInnerDimension
+  latex: K
+  definition: shared inner dimension of a general matrix multiply, the number of products summed per output
+    element
+  kind: count
+- macro: \GemmLeftOperand
+  latex: \mathbf{A}
+  definition: left input matrix of a general matrix multiply, of size M by K
+  kind: matrix
+  notes: In $\GemmOutputMatrix = \GemmProductScale \GemmLeftOperand\GemmRightOperand + \GemmAccumulatorScale
+    \GemmOutputMatrix$.
+- macro: \GemmLeftOperandElement
+  latex: A
+  definition: one entry of the left operand of a matrix multiply, indexed by row and reduction position
+  kind: scalar
+  unit: dimensionless
+  notes: Entry $(i,k)$ of $\GemmLeftOperand$, written $\GemmLeftOperandElement_{ik}$.
+- macro: \GemmLeftOperandEntry
+  latex: A_{ik}
+  definition: entry in row i and column k of the left input matrix of a matrix multiply
+  kind: scalar
+  unit: dimensionless
+  notes: k is the summed inner index; the matrix is $\GemmLeftOperand$.
+- macro: \GemmOutputElement
+  latex: C
+  definition: one entry of the output of a matrix multiply, indexed by row and column
+  kind: scalar
+  unit: dimensionless
+  notes: Entry $(i,j)$ of $\GemmOutputMatrix$, written $\GemmOutputElement_{ij}$.
+- macro: \GemmOutputEntry
+  latex: C_{ij}
+  definition: entry in row i and column j of the output matrix of a matrix multiply
+  kind: scalar
+  unit: dimensionless
+  notes: Italic because it is a scalar; the matrix is $\GemmOutputMatrix$.
+- macro: \GemmOutputMatrix
+  latex: \mathbf{C}
+  definition: output matrix of a general matrix multiply, of size M by N, which the operation updates
+    in place
+  kind: matrix
+  notes: Appears on both sides of $\mathbf{C}=\alpha \mathbf{A}\mathbf{B}+\beta \mathbf{C}$.
+- macro: \GemmProductScale
+  latex: \alpha
+  definition: scalar multiplier applied to the matrix product in a general matrix multiply
+  kind: scalar
+  unit: dimensionless
+  notes: BLAS convention; not the significance level $\SignificanceLevel$.
+- macro: \GemmReductionIndex
+  latex: k
+  definition: index of the reduction position a matrix-multiply loop is summing over
+  kind: index
+  notes: Ranges over $\GemmInnerDimension$. As a subscript, $k$ is exempt.
+- macro: \GemmRightOperand
+  latex: \mathbf{B}
+  definition: right input matrix of a general matrix multiply, of size K by N
+  kind: matrix
+  notes: Bold; never batch size $\BatchSize$.
+- macro: \GemmRightOperandElement
+  latex: B
+  definition: one entry of the right operand of a matrix multiply, indexed by reduction position and column
+  kind: scalar
+  unit: dimensionless
+  notes: Entry $(k,j)$ of $\GemmRightOperand$, written $\GemmRightOperandElement_{kj}$. Not $\BatchSize$.
+- macro: \GemmRightOperandEntry
+  latex: B_{kj}
+  definition: entry in row k and column j of the right input matrix of a matrix multiply
+  kind: scalar
+  unit: dimensionless
+  notes: Italic scalar entry; not batch size.
+- macro: \GemmRowDimension
+  latex: M
+  definition: number of rows of the left operand and of the output in a matrix multiply
+  kind: count
+  notes: An $M{\times}K$ by $K{\times}N$ product costs $2MNK$ operations. Not $\CollectivePayloadSize$
+    and not a memory size.
+- macro: \GemmTileColumnDimension
+  latex: N_{\text{tile}}
+  definition: number of output columns in one tile of a tiled matrix multiply
+  kind: count
+  notes: The tile counterpart of $\GemmColumnDimension$.
+- macro: \GemmTileInnerDimension
+  latex: K_{\text{tile}}
+  definition: length of the reduction dimension covered by one tile of a tiled matrix multiply
+  kind: count
+  notes: The tile counterpart of $\GemmInnerDimension$.
+- macro: \GemmTileRowDimension
+  latex: M_{\text{tile}}
+  definition: number of output rows in one tile of a tiled matrix multiply
+  kind: count
+  notes: The tile counterpart of $\GemmRowDimension$.
+- macro: \GemvArithmeticIntensity
+  latex: I_{\text{GEMV}}
+  definition: arithmetic intensity of a matrix-vector multiply that reads each weight once, counting weight
+    traffic only
+  kind: scalar
+  unit: FLOP/byte
+  notes: About 1 FLOP/byte at FP16 and 0.5 at FP32; the batch-one decode regime. General intensity is
+    $\ArithmeticIntensity$.
+- macro: \GeneralPurposeEnergyProductivity
+  latex: \rho_{\text{energy,general}}
+  definition: useful floating-point operations general-purpose silicon delivers per joule on a given workload
+  kind: scalar
+  unit: FLOP/J
+  notes: General-purpose counterpart of \SpecializedEnergyProductivity in the generality-tax comparison.
+- macro: \GpuEnergy
+  latex: E_{\text{GPU}}
+  definition: energy the GPU boards consume over a stated interval, as board telemetry reports it
+  kind: scalar
+  unit: J
+  notes: One disjoint component term of \FacilityEnergy before PUE scaling; must not double-count device
+    memory with \MemorySubsystemEnergy.
+- macro: \GradientMemory
+  latex: M_{\text{gradients}}
+  definition: memory holding the gradient of every trainable parameter during training
+  kind: scalar
+  unit: bytes
+  notes: One term of $\TotalMemoryFootprint$; zero at inference. ZeRO-2 shards it across data-parallel
+    workers.
+  aliases:
+  - \GradientMemoryGradients
+- macro: \GridFeedCapacity
+  latex: P_{\text{grid}}
+  definition: largest electrical power the utility grid connection can deliver to a facility
+  kind: scalar
+  unit: W
+  notes: 'An instantaneous limit: $\FacilityPower \le \GridFeedCapacity$ at every moment, unlike a cumulative
+    energy account.'
+- macro: \HalfPrecisionGemvIntensity
+  latex: I_{\text{GEMV, 16-bit}}
+  definition: arithmetic intensity of a batch-one matrix-vector multiply whose 16-bit weights stream from
+    memory
+  kind: scalar
+  unit: FLOP/byte
+  notes: A specific case of \ArithmeticIntensity; 16-bit covers FP16 and BF16.
+- macro: \HammingDataBitCount
+  latex: n
+  definition: number of data bits one Hamming codeword protects
+  kind: count
+  notes: A single-error-correcting Hamming code needs $\mathcal{O}(\log \HammingDataBitCount)$ check bits.
+- macro: \HardwareServiceLife
+  latex: T_{\text{lifetime}}
+  definition: length of time a piece of hardware stays in service, over which its embodied carbon is amortized
+  kind: scalar
+  unit: s
+  notes: The chapter states it in years and multiplies by 365 (days) or 365 x 24 (hours).
+- macro: \HomomorphicCiphertext
+  latex: c
+  definition: ciphertext, the encrypted form of a plaintext under a public key
+  kind: record
+- macro: \HomomorphicFunction
+  latex: f
+  definition: function a homomorphic encryption scheme evaluates over ciphertexts, whose decrypted result
+    equals the function applied to the plaintext
+  kind: function
+- macro: \HomomorphicPublicKey
+  latex: pk
+  definition: public key of a homomorphic encryption scheme, used to encrypt plaintexts and to evaluate
+    functions over ciphertexts
+  kind: record
+- macro: \HomomorphicSecretKey
+  latex: sk
+  definition: secret key of a homomorphic encryption scheme, needed to decrypt ciphertexts
+  kind: record
+- macro: \HostLinkBandwidth
+  latex: \text{BW}_{\text{link}}
+  definition: aggregate bandwidth, in one direction, of the host links that move KV state between a serving
+    node's accelerator memory and host memory
+  kind: scalar
+  unit: bytes/s
+  notes: Sum over the node's accelerator-to-host (PCIe) links operating concurrently. Shares its glyph
+    with $\SingleLinkBandwidth$, which is one network link.
+- macro: \HostPower
+  latex: P_{\text{host}}
+  definition: electrical power one host server draws for its CPUs and other non-accelerator components
+  kind: scalar
+  unit: W
+  notes: Multiplied by the node count for the host share of cluster power $P_{\text{cluster}}$; excludes
+    the accelerators, counted in $P_{\text{GPU}}$.
+- macro: \HostPreparationTime
+  latex: T_{\text{prep}}
+  definition: time the host takes to prepare one batch for the accelerator, from read through batching
+  kind: scalar
+  unit: s
+- macro: \HostSoftwareTime
+  latex: T_{\text{sw}}
+  definition: host-side software time a step spends in the interpreter, dispatch and kernel launch
+  kind: scalar
+  unit: s
+  notes: In the additive model $T_{\text{sw}} = N_{\text{ops}} \cdot t_{\text{dispatch}}$; the dispatch
+    tax is $T_{\text{sw}}/(T_{\text{sw}}+T_{\text{hw}})$.
+- macro: \HostTransferBandwidth
+  latex: \text{BW}_{\text{host}}
+  definition: sustained bandwidth of the host-to-accelerator transfer path
+  kind: scalar
+  unit: bytes/s
+- macro: \HotTierHitProbability
+  latex: h
+  definition: probability that a request to a tiered storage hierarchy is served by the hot (fastest)
+    tier, its cache hit rate
+  kind: scalar
+  unit: dimensionless
+  notes: The miss probability is $1-h$. Not a classifier $h(x)$ or a coordination overhead.
+- macro: \HotTierServiceTime
+  latex: T_{\text{hot}}
+  definition: time to serve one request that hits the hot tier of a storage hierarchy
+  kind: scalar
+  unit: s
+  notes: Pairs with $T_{\text{cold}}$ in the mean service time of a tiered hierarchy.
+- macro: \HourlyAccountQueryCount
+  latex: q_{\text{hourly}}
+  definition: number of queries one API account issues in an hour, compared against a static extraction-alert
+    threshold
+  kind: count
+  notes: Hourly companion of $\DailyAccountQueryCount$.
+- macro: \HybridIterationTime
+  latex: T_{\text{step}}
+  definition: time of one serving iteration that runs decode tokens and prefill chunks together
+  kind: scalar
+  unit: s
+  notes: Not the training step times $\TrainingStepTime$, $\AcceleratorStepTime$ or $\DistributedStepTime$
+    that share the glyph.
+- macro: \IdealMemoryQueueDelay
+  latex: t_{\text{queue,ideal}}
+  definition: time a safety read waits behind the transactions queued ahead of it counting only their
+    transfer time, before bank conflicts, refresh and turnaround
+  kind: scalar
+  unit: s
+  notes: The transfer-only part of \MemoryBusQueueDelay.
+- macro: \InferenceActiveTime
+  latex: t_{\text{inference}}
+  definition: time a duty-cycled device spends actively running inference in each period
+  kind: scalar
+  unit: s
+  notes: \InferenceDutyCycle is this divided by \DutyCyclePeriod.
+- macro: \InferenceDutyCycle
+  latex: \alpha_{\text{duty}}
+  definition: fraction of time an accelerator actively runs inference rather than waiting in standby
+  kind: scalar
+  unit: dimensionless
+  notes: Weights active and standby power in the average-power model. Not the actuator duty cycle of the
+    physical domain.
+- macro: \InferenceEnergy
+  latex: E_{\text{inf}}
+  definition: energy consumed to complete one inference request
+  kind: scalar
+  unit: J
+  notes: Equals active power times inference duration for an isolated request.
+- macro: \InferenceLatency
+  latex: L_{\text{lat,infer}}
+  definition: time the model takes to compute a request's output
+  kind: scalar
+  unit: s
+  notes: One stage of $\EndToEndRequestLatency$.
+- macro: \InferenceLoadSocPower
+  latex: P_{\text{load}}
+  definition: power an application SoC dissipates with continuous proposal inference running
+  kind: scalar
+  unit: W
+- macro: \InformationTechnologyEnergy
+  latex: E_{\text{IT}}
+  definition: energy delivered to a data center's IT equipment over a stated period
+  kind: scalar
+  unit: J
+  notes: Time integral of $\InformationTechnologyPower$; denominator of WUE.
+- macro: \InformationTechnologyHeatLoad
+  latex: \dot{Q}_{\text{IT}}
+  definition: rate at which a facility's information technology equipment (servers, accelerators, network
+    gear) produces heat
+  kind: scalar
+  unit: W
+  notes: Heat-flow form of IT power; must stay within \FacilityHeatRemovalCapacity. IT is spelled out
+    in the name because the book does not define the acronym.
+- macro: \InformationTechnologyPower
+  latex: P_{\text{IT}}
+  definition: 'electrical power delivered to a data center''s IT equipment: servers, accelerators, storage
+    and networking'
+  kind: scalar
+  unit: W
+  notes: Denominator of PUE, $\FacilityPower/\InformationTechnologyPower$. Not the IT heat load $\dot{Q}_{\text{IT}}$,
+    a heat rate.
+- macro: \IngestionPricePerSample
+  latex: C_{\text{ingest/sample}}
+  definition: provider price charged to ingest one telemetry sample
+  kind: scalar
+  unit: USD/sample
+- macro: \InputCaptureTime
+  latex: T_{\text{capture}}
+  definition: time to capture one unit of streaming input, such as an audio or video frame
+  kind: scalar
+  unit: s
+- macro: \InputConsumerAcceleratorCount
+  latex: N_{\text{GPU}}
+  definition: number of accelerators that each consume a distinct local input batch, so devices cooperating
+    on one batch count once
+  kind: count
+  notes: Equals $\AcceleratorCount$ only under pure data parallelism; it is the count that multiplies
+    per-batch input demand in the pipeline throughput equation.
+- macro: \InputEventRate
+  latex: r_{\text{event}}
+  definition: number of relevant input changes per second that make an event-driven design fire
+  kind: scalar
+  unit: 1/s
+- macro: \InputPipelineRate
+  latex: R_{\text{pipeline}}
+  definition: batches per second the host-side input pipeline supplies
+  kind: scalar
+  unit: batches/s
+- macro: \InputPipelineRatio
+  latex: r_{\text{pipe}}
+  definition: time the input pipeline takes to produce a batch divided by the time the accelerator takes
+    to train on it
+  kind: scalar
+  unit: dimensionless
+  notes: Above one, the pipeline bottlenecks training; data echoing helps up to an echo factor equal to
+    it.
+- macro: \InputPipelineServiceRate
+  latex: r_{\text{pipeline}}
+  definition: end-to-end rate at which the input pipeline delivers data, set by its slowest stage under
+    bounded buffering
+  kind: scalar
+  unit: bytes/s
+  notes: The minimum over stages of the stage service rate.
+- macro: \InputPipelineStageIndex
+  latex: j
+  definition: position of one stage in the input pipeline service chain from storage read to host-to-device
+    transfer
+  kind: index
+  notes: Outside a subscript, so not covered by the index-letter exemption. Not the ML lifecycle stage
+    index or the pipeline-parallel stage count.
+- macro: \InputStageServiceRate
+  latex: r
+  definition: measured rate at which one stage of the input pipeline service chain delivers data, in output-equivalent
+    bytes per second
+  kind: scalar
+  unit: bytes/s
+  notes: Indexed by stage ($r_k$). Rates are converted through each stage's expansion or compression ratio
+    before comparison.
+- macro: \InstantaneousRequestOccupancy
+  latex: Q
+  definition: number of requests inside a system at one instant, arrivals so far minus completions so
+    far
+  kind: function
+  unit: requests
+  notes: Written Q(t). Its long-run time average is \RequestConcurrency.
+- macro: \IntegrationDummyTime
+  latex: t'
+  definition: dummy time variable of integration inside a time integral, distinct from its limits
+  kind: scalar
+  unit: s
+  notes: A prime on \TimeInstant would be a decorated quantity; this entry names the bound variable.
+- macro: \InterGroupColumnDelay
+  latex: t_{\text{CCD\_S}}
+  definition: minimum spacing between consecutive column commands to different DRAM bank groups
+  kind: scalar
+  unit: s
+- macro: \InterKernelGapTime
+  latex: T_{\text{gap}}
+  definition: time the device sits idle between consecutive kernels on a profiler timeline
+  kind: scalar
+  unit: s
+  notes: Exposed dispatch, dependency or transfer waiting; its share of kernel-plus-gap time is the overhead
+    ratio.
+- macro: \InterQueryIntervalDeviation
+  latex: \sigma_{\text{inter-query}}
+  definition: standard deviation of the time between one account's successive API queries, a timing-regularity
+    feature for extraction detection
+  kind: function
+  notes: Applied to an account; low values suggest automated querying. Returns seconds.
+- macro: \InterarrivalVariationCoefficient
+  latex: c_{a}
+  definition: coefficient of variation of the interarrival times of a renewal arrival stream, their standard
+    deviation divided by their mean
+  kind: scalar
+  unit: dimensionless
+  notes: Squared in the Kingman approximation, $c_a^2$.
+- macro: \InterfaceMaterialThermalResistance
+  latex: R_{\text{th,TIM}}
+  definition: thermal resistance through the thermal interface material between a package and its heat
+    path
+  kind: scalar
+  unit: K/W
+  notes: Grows as shock and thermal cycling degrade the material.
+- macro: \InterferenceSlowdownFactor
+  latex: r_{\text{slow}}
+  definition: factor by which cross-workload interference lengthens the memory-stall share of a victim
+    task
+  kind: scalar
+  unit: dimensionless
+  notes: Unbounded under unregulated contention; memory-bandwidth regulation turns it into a bounded quantity.
+- macro: \IntermediateTensorSize
+  latex: M_{\text{tensor}}
+  definition: bytes in the intermediate tensor that a sequence of operations passes between its steps
+  kind: scalar
+  unit: bytes
+- macro: \IntervalMean
+  latex: \bar{T}
+  definition: mean of an interarrival or service time in a queueing model
+  kind: scalar
+  unit: s
+  notes: Not the service rate.
+- macro: \IntervalMeanOccupancy
+  latex: \bar{Q}
+  definition: average number of requests inside a system over a finite observation interval
+  kind: scalar
+  unit: requests
+  notes: Tends to \RequestConcurrency as the interval grows for a stable system.
+- macro: \IntervalStandardDeviation
+  latex: \sigma
+  definition: standard deviation of an interarrival or service time in a queueing model
+  kind: scalar
+  unit: s
+- macro: \IntervalVariationCoefficient
+  latex: c
+  definition: coefficient of variation of an interarrival or service time, its standard deviation divided
+    by its mean
+  kind: scalar
+  unit: dimensionless
+  notes: Generic form; the interarrival and service cases are $c_a$ and $c_s$.
+- macro: \IntraGroupColumnDelay
+  latex: t_{\text{CCD\_L}}
+  definition: minimum spacing between consecutive column commands to the same DRAM bank group
+  kind: scalar
+  unit: s
+- macro: \IoTransferTime
+  latex: T_{\text{IO}}
+  definition: time to move a workload's data over a storage or network link, the input/output stage of
+    a pipelined step
+  kind: scalar
+  unit: s
+  notes: Overlaps with compute in the pipelined iron law; the step is I/O bound when it is the largest
+    stage.
+- macro: \IronLawComputeTime
+  latex: T_{\text{compute}}
+  definition: time spent computing in the iron law, operations divided by the sustained compute rate
+  kind: scalar
+  unit: s
+  notes: Equals $\Operations/(\PeakRate \cdot \EfficiencyHw)$. Its partner is $\IronLawMemoryTime$; in
+    the Fleet Law the single-device term is divided across devices, $\IronLawComputeTime/N$.
+  aliases:
+  - \IronlawTermTimesCompute
+  - \SingleDeviceComputeTime
+- macro: \IronLawMemoryTime
+  latex: T_{\text{memory}}
+  definition: time spent moving data in the iron law, bytes moved divided by bandwidth
+  kind: scalar
+  unit: s
+  notes: Equals $\DataVolume/\Bandwidth$. When $\IronLawMemoryTime > \IronLawComputeTime$ without overlap,
+    execution is memory-bound.
+  aliases:
+  - \IronlawTermTimesMemory
+- macro: \IterationTokenBudget
+  latex: N_{\text{budget}}
+  definition: largest number of tokens, decode and prefill together, a hybrid scheduler admits into one
+    iteration
+  kind: count
+- macro: \JunctionAmbientThermalResistance
+  latex: R_{\text{th,JA}}
+  definition: lumped thermal resistance from a silicon junction to the ambient air, the sum of the junction-to-case,
+    interface-material and chassis paths
+  kind: scalar
+  unit: K/W
+  notes: Not \ThermalResistance, the motor stator-to-ambient path.
+- macro: \JunctionCaseThermalResistance
+  latex: R_{\text{th,JC}}
+  definition: thermal resistance from a silicon junction to the case of its package
+  kind: scalar
+  unit: K/W
+- macro: \JunctionTemperature
+  latex: T_{\text{j}}
+  definition: temperature of a silicon die at its transistor junctions
+  kind: scalar
+  unit: degC
+  notes: Written as a function of time when it relaxes after a power step. A temperature always carries
+    a subscript; bare T is time.
+- macro: \KendallMarkovianCode
+  latex: M
+  definition: Kendall-notation code marking a Markovian, memoryless arrival or service process in a queue
+    model name such as M/M/1
+  kind: record
+  notes: A label, not a quantity. Upright $\text{M/M/1}$ (as line 2323 already writes in prose) would
+    remove the need for this entry; see the chapter questions.
+- macro: \KernelActiveTime
+  latex: T_{\text{compute}}
+  definition: time a resource spends executing useful kernels, the union of its kernel-active intervals
+  kind: scalar
+  unit: s
+  notes: Measured accelerator busy time, the numerator of duty-cycle system efficiency. Counts memory-bound
+    kernels too, so it is not the iron law's \IronLawComputeTime, though the two share the glyph.
+- macro: \KernelExecutionTime
+  latex: T_{\text{kernel}}
+  definition: time a kernel spends executing on the device, as measured on a profiler timeline
+  kind: scalar
+  unit: s
+  notes: The denominator of achieved bandwidth and achieved compute throughput in trace-based diagnosis.
+- macro: \KvCacheFootprint
+  latex: M_{\text{KV}}
+  definition: memory a transformer key-value cache occupies during autoregressive decoding
+  kind: scalar
+  unit: bytes
+  notes: $2 \times N_L \times d \times S \times s_{\text{elem}}$ bytes.
+  aliases:
+  - \TransformerKvcacheFootprint
+- macro: \KvCacheHandoffTime
+  latex: T_{\text{handoff}}
+  definition: time to transfer one request's KV cache from a prefill worker to a decode worker in a disaggregated
+    deployment
+  kind: scalar
+  unit: s
+- macro: \KvElementStorageSize
+  latex: s_{\text{elem,KV}}
+  definition: bytes needed to store one key or value element of the KV cache at its storage precision
+  kind: scalar
+  unit: bytes/element
+  notes: The key-value precision case of $\ElementStorageSize$; $\KvCacheBytesPerToken = 2\LayerCount\KvHeadCount\AttentionHeadDimension\KvElementStorageSize$.
+- macro: \KvPoolHeadroomFraction
+  latex: f_{\text{head}}
+  definition: fraction of the KV pool a capacity plan withholds from allocation to absorb bursty activations
+    and fragmentation
+  kind: scalar
+  unit: dimensionless
+  notes: Usable KV memory is $(1-\KvPoolHeadroomFraction)\,\KvPoolMemory$.
+- macro: \KvPoolMemory
+  latex: M_{\text{pool}}
+  definition: accelerator memory of a serving node left for KV cache after model weights and the runtime
+    reserve are allocated
+  kind: scalar
+  unit: bytes
+  notes: $\KvPoolMemory = \NodeHbmCapacity - \WeightMemory - \RuntimeReserveMemory$. Not the sandbox memory
+    pool of the sandboxes chapter.
+- macro: \KvRecomputeTime
+  latex: T_{\text{recompute}}
+  definition: time to rebuild a paused sequence's KV state by running prefill over its retained tokens
+    again
+  kind: scalar
+  unit: s
+  notes: Two weight operations per parameter per token at the sustained prefill rate in the weight-only
+    estimate; the attention term lengthens it. Not $\LostWorkReplayTime$, which recomputes training steps.
+- macro: \KvReloadTime
+  latex: T_{\text{reload}}
+  definition: time to move a paused sequence's KV state back from host memory to accelerator memory over
+    the host links
+  kind: scalar
+  unit: s
+  notes: Retained tokens times $\KvCacheBytesPerToken$ divided by $\HostLinkBandwidth$ in the linear estimate.
+    Compared with $\KvRecomputeTime$ to choose between reload and recomputation.
+- macro: \KvTileCount
+  latex: T_c
+  definition: number of key-value tiles the sequence is split into in tiled attention
+  kind: count
+  notes: 'Not a time: equals the ceiling of sequence length over the key-value block size.'
+- macro: \KvTileIndex
+  latex: j
+  definition: index of one key-value tile in tiled attention
+  kind: index
+  notes: Runs from 1 to the key-value block count.
+- macro: \KvTileSize
+  latex: B_c
+  definition: number of key and value rows in one tile of tiled attention
+  kind: count
+  notes: 'Not batch size: the subscript c marks the column (key-value) blocking of FlashAttention.'
+- macro: \Latency
+  latex: L_{\text{lat}}
+  definition: fixed overhead time a step pays regardless of bytes moved or operations executed, such as
+    kernel launch, dispatch or network round trip
+  kind: scalar
+  unit: s
+  notes: The additive third term of the iron law. Distinct from loss $\mathcal{L}$, from request time
+    in system $\RequestTimeInSystem$, and from end-to-end request latency $\EndToEndRequestLatency$.
+- macro: \LatencyBoundedBatchSize
+  latex: B_{\text{SLO}}
+  definition: largest batch size whose half-window wait plus batch service time fits the batching share
+    of the latency objective
+  kind: count
+  notes: A first-order screen on the mean; it does not certify a percentile target.
+- macro: \LatencySlo
+  latex: L_{\text{lat,SLO}}
+  definition: latency target a serving system's service-level objective sets for a request
+  kind: scalar
+  unit: s
+  notes: May bound a mean or a stated percentile. The portion of it allotted to batching and service is
+    \BatchingLatencyBudget.
+- macro: \LayerActivationMemory
+  latex: M_{\text{activations}}^{(\ell)}
+  definition: memory holding the activations of layer l
+  kind: scalar
+  unit: bytes
+  notes: Per-layer term of \ActivationMemory.
+- macro: \LayerBackwardTime
+  latex: T_{\text{layer backward}}
+  definition: backward compute time of one layer, the window in which the previous layer's gradient AllReduce
+    can hide
+  kind: scalar
+  unit: s
+  notes: Per-layer counterpart of \BackwardPassTime. LaTeX as the chapter writes it today; see questions.
+- macro: \LayerIntermediateStateMemory
+  latex: s_{\ell}
+  definition: bytes of saved intermediate state, other than activation outputs, one example leaves at
+    one layer for the backward pass
+  kind: scalar
+  unit: bytes
+- macro: \LayerSavedTensorCount
+  latex: n_{\text{saved}}
+  definition: number of activation tensors one layer retains for its backward pass
+  kind: count
+- macro: \LcResonantFrequency
+  latex: f_0
+  definition: resonant frequency of a branch of inductance and capacitance, one over two pi root LC
+  kind: scalar
+  unit: Hz
+- macro: \LeakageCurrent
+  latex: I_{\text{leak}}
+  definition: current that leaks through a chip's transistors when they are not switching
+  kind: scalar
+  unit: A
+  notes: Rises with temperature; times supply voltage it gives leakage power.
+- macro: \LeakagePower
+  latex: P_{\text{leakage}}
+  definition: static power a chip dissipates through leakage current regardless of switching
+  kind: scalar
+  unit: W
+  notes: Equals leakage current times supply voltage; grows with temperature.
+- macro: \LinkEnergyPerBit
+  latex: E_{\text{link}}
+  definition: physical-layer energy spent sending one bit across a host bus, accelerator interconnect
+    or network link
+  kind: scalar
+  unit: J/bit
+  notes: Quoted in pJ/bit on spec sheets. Not \EnergyPerByteMoved, which is the per-byte cost of memory-to-compute
+    movement.
+- macro: \LoadedJunctionTemperature
+  latex: T_{\text{load}}
+  definition: steady-state junction temperature under continuous proposal-inference power
+  kind: scalar
+  unit: degC
+  notes: Ambient plus loaded power times junction-to-ambient thermal resistance; above the trip temperature
+    in the rejected placement.
+- macro: \LocalInferenceEnergy
+  latex: E_{\text{local}}
+  definition: energy a device spends running one inference on its own hardware
+  kind: scalar
+  unit: J
+  notes: Compared against $\CloudOffloadEnergy$ to decide whether to transmit or process locally.
+- macro: \LocalPathTime
+  latex: T_{\text{local}}
+  definition: complete time to serve one request on the local device, with no network transit
+  kind: scalar
+  unit: s
+  notes: Compared with $\RemotePathTime$; must itself be validated against the deadline.
+- macro: \LogitStorageSize
+  latex: s_{\text{logit}}
+  definition: bytes stored per logit in the vector a model emits at each decode step
+  kind: scalar
+  unit: bytes/element
+  notes: One logit vector occupies $|\TokenVocabulary|\,\LogitStorageSize$ bytes.
+- macro: \LoopNestDepth
+  latex: n_{\text{loops}}
+  definition: number of nested loops in a computation's loop nest
+  kind: count
+  notes: Gives at most $n_{\text{loops}}!$ execution orders.
+- macro: \LoopOrderCount
+  latex: N_{\text{order}}
+  definition: number of ways to order the loops of a loop nest, ignoring dependences and equivalent orderings
+  kind: count
+  notes: $N_{\text{order}} = \LoopNestDepth!$.
+- macro: \LoopParallelizationChoiceCount
+  latex: \mathcal{P}_{\text{parallel}}
+  definition: number of ordered ways to choose the loops of a loop nest that run in parallel, before legality
+    constraints
+  kind: count
+  notes: $\LoopNestDepth!/(\LoopNestDepth - \ParallelLoopCount)!$.
+- macro: \LossScaleFactor
+  latex: s_{\text{loss}}
+  definition: multiplier applied to the loss in reduced-precision training so small gradients stay representable
+  kind: scalar
+  unit: dimensionless
+  notes: Gradients are divided by it before the optimizer step; dynamic scaling halves it on overflow
+    and doubles it after a run of clean steps.
+  aliases:
+  - \LossscaleFactor
+- macro: \MacAccumulator
+  latex: \text{acc}
+  definition: running sum that a multiply-accumulate operation adds each product into
+  kind: scalar
+  unit: dimensionless
+  notes: 'Not \NeuronActivation: here a is the accumulator register of a MAC.'
+- macro: \MachineTaxonomyAxis
+  latex: \mathsf{Machine}
+  definition: Machine axis of the D·A·M taxonomy, viewed as the set of techniques and concepts it covers
+    so that axis intersections name zones of the taxonomy
+  kind: set
+  notes: The chapter states the D·A·M axes are taxonomy labels, not mathematical variables; $\mathsf{Machine}$
+    appears only inside set intersections such as $\mathsf{Data} \cap \mathsf{Algorithm}$. Never \DatasetSize
+    or \DataVolume.
+  render_exception: Sans-serif upright-ish name marks a D·A·M taxonomy axis treated as a set of techniques
+    in an intersection, not a calligraphic or blackboard set symbol.
+- macro: \MappingSearchSpaceSize
+  latex: \mathcal{S}_{\text{mapping}}
+  definition: number of candidate mappings of an operation, the product of placement, ordering and parallelization
+    choices across memory levels
+  kind: count
+  notes: An illustration, not an exact count of legal schedules.
+- macro: \MarginalRequestServiceTime
+  latex: t_{\text{req}}
+  definition: additional batch service time that one more request in the batch adds
+  kind: scalar
+  unit: s
+  notes: Slope of the linear batch service-time model; $1/t_{\text{req}}$ is the asymptotic batched service
+    rate.
+- macro: \MatrixMultiplyDestination
+  latex: \mathbf{D}
+  definition: destination matrix of a matrix multiply-accumulate instruction, which receives the product
+    plus the accumulator input
+  kind: matrix
+  notes: Tensor Core instructions compute $\mathbf{D} = \mathbf{A}\mathbf{B} + \mathbf{C}$; $\mathbf{D}$
+    may alias $\mathbf{C}$.
+- macro: \MaxBatchSize
+  latex: B_{\text{max}}
+  definition: largest batch a dynamic batcher forms, the size at which it dispatches without waiting for
+    the window to close
+  kind: count
+  notes: The size trigger of the dual-trigger batcher; the time trigger is \BatchingWindow.
+- macro: \MaxBatchingWindow
+  latex: T_{\text{max}}
+  definition: longest batching window a traffic-adaptive batcher may choose, the cap on its window when
+    arrivals are slow
+  kind: scalar
+  unit: s
+  notes: Caps $\BatchingWindow$ in traffic-adaptive batching.
+- macro: \MaxResidentContextCount
+  latex: B_{\max}
+  definition: largest number of contexts of mean length whose KV cache fits in a node's KV pool at once,
+    the memory bound on decode batch size
+  kind: count
+  notes: $\lfloor \KvPoolMemory/(\MeanContextLength\,\KvCacheBytesPerToken) \rfloor$; a payload bound,
+    not an admission guarantee.
+- macro: \MaximumLoadCurrentStep
+  latex: \Delta I_{\max}
+  definition: largest step in load current a chip's rail must absorb
+  kind: scalar
+  unit: A
+- macro: \MeanAcceptedDraftLength
+  latex: \bar{m}
+  definition: mean number of draft tokens the target model accepts per speculative-decoding round
+  kind: scalar
+  unit: tokens
+  notes: Each round yields $\bar m+1$ verified tokens.
+- macro: \MeanContextLength
+  latex: \bar{S}
+  definition: mean number of tokens in the contexts a serving node keeps resident
+  kind: scalar
+  unit: tokens
+  notes: Divides the KV pool in the mean-footprint estimate of resident contexts.
+- macro: \MeanHoldTime
+  latex: \bar{T}_{\text{hold}}
+  definition: mean time one item holds a resource, such as a turn holding its KV cache slot, the residence
+    term of Little's law
+  kind: scalar
+  unit: s
+  notes: As in $\bar{N}_{\text{slot}} = \ArrivalRate\,\bar{\Time}_{\text{hold}}$. The sandbox-lease form
+    is $\LeaseHoldTime$.
+- macro: \MeanSlotOccupancy
+  latex: \bar{N}_{\text{slot}}
+  definition: long-run average number of KV cache slots held resident in accelerator memory, the occupancy
+    term of Little's law
+  kind: scalar
+  unit: items
+  notes: $\MeanSlotOccupancy = \ArrivalRate\,\MeanHoldTime$. Each item is one turn's generation-and-tool-wait
+    cycle, not a trajectory ($\ConcurrentTrajectories$) or a request in a queue ($\RequestConcurrency$).
+- macro: \MeasurementWindowEnd
+  latex: t_{\text{end}}
+  definition: instant at which an energy measurement window closes
+  kind: scalar
+  unit: s
+  notes: Upper limit of the energy integral; its lower limit t_{\text{start}} opens the window.
+- macro: \MemoryHierarchyLevelCount
+  latex: N_{\text{mem}}
+  definition: number of levels in a memory hierarchy, such as registers, shared memory and DRAM
+  kind: count
+- macro: \MemoryPlacementCount
+  latex: \mathcal{M}_{\text{placement}}
+  definition: number of ways to place every computational dimension at every memory level, before legality
+    constraints
+  kind: count
+  notes: $\PlacementChoiceCount^{\ComputationalDimensionCount \times \MemoryHierarchyLevelCount}$.
+- macro: \MemorySubsystemEnergy
+  latex: E_{\text{memory}}
+  definition: energy the memory subsystem consumes over a stated interval, outside any other measured
+    component
+  kind: scalar
+  unit: J
+- macro: \MemoryTierBandwidth
+  latex: \text{BW}_{\text{memory}}
+  definition: sustained rate at which bytes move between a device memory and its compute units, the memory
+    tier of the distributed bandwidth hierarchy
+  kind: scalar
+  unit: bytes/s
+  notes: Memory tier beside $\InterconnectBandwidth$ and $\NetworkBandwidth$. Close to $\AcceleratorMemoryBandwidth$
+    ($\text{BW}_{\text{accelerator}}$); see the glossary question before registering.
+- macro: \MicroUnitPrefix
+  latex: \text{µ}
+  definition: SI unit prefix micro, one millionth, written before a unit such as seconds
+  kind: operator
+  notes: 'Not a quantity: it only scales the unit after it ($\mu$s). Never the unbatched service rate
+    or a mean.'
+- macro: \MicrobatchPassTime
+  latex: T_{\text{micro},j}
+  definition: measured forward and backward time of one micro-batch, indexed by micro-batch
+  kind: scalar
+  unit: s
+- macro: \MinimumPrefetchBufferCount
+  latex: Q_{\text{prefetch,min}}
+  definition: smallest number of batches the prefetch queue must hold so a tail-latency I/O delay does
+    not stall the accelerator
+  kind: count
+  notes: Tail I/O time over per-batch compute time, rounded up. A lower bound on $\PrefetchBufferCount$.
+- macro: \MinimumRoundTripLatency
+  latex: L_{\text{lat,min}}
+  definition: smallest possible round-trip time over a network path, set by the propagation speed of the
+    medium
+  kind: scalar
+  unit: s
+  notes: Twice the one-way distance divided by $\FiberPropagationSpeed$; a physical floor no optimization
+    removes.
+- macro: \MinimumStableBatchSize
+  latex: B_{\text{min}}
+  definition: batch size at which a batched server's effective service rate equals the arrival rate, the
+    boundary that stable batch sizes must exceed
+  kind: count
+  notes: $T_{\text{fixed}} \ArrivalRate / (1 - t_{\text{req}} \ArrivalRate)$ under the linear batch service
+    model; a real-valued boundary, so the smallest stable integer batch lies strictly above it.
+- macro: \MissPathServiceTime
+  latex: T_{\text{cold}}
+  definition: total time to serve one request that misses the hot tier of a storage hierarchy, including
+    the failed hot-tier lookup and the colder-tier access
+  kind: scalar
+  unit: s
+  notes: Includes the failed hot-tier lookup, so it is not the colder tier's own access time.
+- macro: \MlpWeightArithmeticIntensity
+  latex: I_{\text{MLP}}
+  definition: arithmetic intensity of a dense layer evaluated on one input vector, counting only weight
+    bytes read from the memory level analyzed
+  kind: scalar
+  unit: FLOP/byte
+  notes: Two operations per weight divided by \WeightElementStorageSize; a special case of \ArithmeticIntensity.
+- macro: \ModelDownloadEnergy
+  latex: E_{\text{download}}
+  definition: energy one federated client spends downloading the global model in one round
+  kind: scalar
+  unit: J
+- macro: \ModelFlopsUtilization
+  latex: \text{MFU}
+  definition: useful model operations per second divided by the hardware's peak operation rate
+  kind: scalar
+  unit: dimensionless
+  notes: Counts only operations the model needs, excluding recomputation and padding. Written as a text
+    acronym to avoid overloading $\eta$.
+- macro: \ModelStepOperations
+  latex: O_{\text{model}}
+  definition: useful model floating-point operations of one training step, forward plus backward, excluding
+    recomputation
+  kind: scalar
+  unit: FLOP
+  notes: Numerator of $\ModelFlopsUtilization$.
+- macro: \MonitoringAlertCost
+  latex: C_{\text{alert}}
+  definition: monitoring cost of evaluating alert rules over an accounting window
+  kind: scalar
+  unit: USD
+  notes: One of the four terms of the monitoring cost.
+- macro: \MonitoringComputeCost
+  latex: C_{\text{compute}}
+  definition: monitoring cost of query and dashboard compute over an accounting window
+  kind: scalar
+  unit: USD
+  notes: One of the four terms of the monitoring cost. Same glyph as the retraining compute cost, different
+    meaning.
+- macro: \MonitoringCostComponent
+  latex: C_*
+  definition: any one of the four monitoring cost components (ingestion, storage, compute, alert) over
+    an accounting window
+  kind: scalar
+  unit: USD
+  notes: Wildcard name for the family of monitoring cost terms.
+- macro: \MonitoringIngestionCost
+  latex: C_{\text{ingest}}
+  definition: monitoring cost of ingesting telemetry over an accounting window
+  kind: scalar
+  unit: USD
+  notes: One of the four terms of the monitoring cost.
+- macro: \MonitoringStorageCost
+  latex: C_{\text{storage}}
+  definition: monitoring cost of storing retained telemetry over an accounting window
+  kind: scalar
+  unit: USD
+  notes: One of the four terms of the monitoring cost.
+- macro: \NetworkBandwidth
+  latex: \text{BW}_{\text{network}}
+  definition: sustained rate at which a network path delivers bytes between machines
+  kind: scalar
+  unit: bytes/s
+  notes: Not $\LinkBandwidth$ ($\beta$), which is one link in the alpha-beta model.
+- macro: \NetworkEnergy
+  latex: E_{\text{network}}
+  definition: energy the network fabric, its switches, links and adapters, consumes over a stated interval
+  kind: scalar
+  unit: J
+  notes: A term of $\FleetEnergyProductivity$'s denominator and of facility energy accounting; not $\LinkEnergyPerBit$,
+    a per-bit cost.
+- macro: \NetworkEquipmentPower
+  latex: P_{\text{network}}
+  definition: electrical power a facility's network switches, links and adapters draw
+  kind: scalar
+  unit: W
+  notes: One component of \InformationTechnologyPower.
+- macro: \NetworkLatency
+  latex: L_{\text{lat,network}}
+  definition: time a request and its response spend crossing the network, including propagation, routing
+    and protocol handling
+  kind: scalar
+  unit: s
+  notes: One stage of $\EndToEndRequestLatency$. Not the LogP wire latency $\LogpNetworkLatency$.
+- macro: \NextLayerActivationMemory
+  latex: M_{\text{activations}}^{(\ell+1)}
+  definition: memory holding the activations of the layer after layer l
+  kind: scalar
+  unit: bytes
+  notes: Exists only because the checker treats (\LayerIndex+1) as a new decoration; see question.
+- macro: \NodeAcceleratorCount
+  latex: n_{\text{acc}}
+  definition: number of accelerators in one serving node
+  kind: count
+  notes: Multiplies per-accelerator memory into $\NodeHbmCapacity$. Same quantity as $\AcceleratorsPerNode$.
+- macro: \NodeHbmCapacity
+  latex: M_{\text{HBM}}
+  definition: total high-bandwidth memory across all accelerators of one serving node
+  kind: scalar
+  unit: bytes
+  notes: Aggregate over the node, unlike $\DeviceMemoryCapacity$, which is one device.
+- macro: \NominalClockFrequency
+  latex: f_{\text{nom}}
+  definition: nominal clock frequency of a processor cluster before any thermal throttling
+  kind: scalar
+  unit: Hz
+  notes: A qualified \ClockFrequency.
+- macro: \NominalSupplyVoltage
+  latex: V_{\text{nom}}
+  definition: nominal regulated supply voltage of a core rail
+  kind: scalar
+  unit: V
+- macro: \NonzeroCount
+  latex: n_{\text{nz}}
+  definition: number of nonzero values a sparse matrix format stores
+  kind: count
+- macro: \NumericBitWidth
+  latex: b
+  definition: number of bits used to represent one numeric value, such as an arithmetic operand or a quantized
+    weight or activation
+  kind: count
+  notes: 'Bit width, not bytes: bytes per element is \ElementStorageSize. Multiplier energy and area grow
+    roughly as b^2, adder cost as b.'
+- macro: \ObservationIntervalLength
+  latex: T_{\text{obs}}
+  definition: length of the observation interval over which arrivals, completions and in-system requests
+    are counted, starting at time zero
+  kind: scalar
+  unit: s
+  notes: Used in the operational proof of Little's law; the law follows as T goes to infinity. Distinct
+    from \Time, the time to complete a unit of work.
+- macro: \OhmUnit
+  latex: \Omega
+  definition: SI unit of electrical resistance, the ohm, written after a prefix as in milliohms
+  kind: operator
+  notes: A unit symbol, upright in print by convention; companion of \MicroUnitPrefix.
+- macro: \OnDieDecouplingCapacitance
+  latex: C_{\text{die}}
+  definition: decoupling capacitance fabricated on the silicon die, the fastest tier of a decoupling hierarchy
+  kind: scalar
+  unit: F
+- macro: \OperationDispatchOverhead
+  latex: t_{\text{dispatch}}
+  definition: host time to dispatch one operation, including framework dispatch and kernel launch
+  kind: scalar
+  unit: s
+  notes: Per operation; the per-step fixed overhead is $\Latency$.
+- macro: \Operations
+  latex: O
+  definition: total arithmetic operations a workload executes
+  kind: scalar
+  unit: FLOP
+  notes: The numerator of the iron law's compute term $\Operations/(\PeakRate \cdot \EfficiencyHw)$. Dense
+    training costs about $6 \Parameters$ operations per token.
+- macro: \OperationsPerSample
+  latex: O_{\text{sample}}
+  definition: arithmetic operations spent training on one sample in one pass
+  kind: scalar
+  unit: FLOP
+  notes: Total operations are $\Operations = \OperationsPerSample \cdot \DatasetSize$ per pass.
+- macro: \OperatorWorkspaceMemory
+  latex: M_{\text{workspace}}
+  definition: temporary operator workspace and staging buffers live at a given point of an update's execution
+  kind: scalar
+  unit: bytes
+  notes: Written as a function of \TimeInstant; its peak need not coincide with the activation peak.
+- macro: \OptimizerStateMemory
+  latex: M_{\text{optimizer}}
+  definition: memory holding the optimizer's per-parameter state, such as momentum, variance and master
+    weights
+  kind: scalar
+  unit: bytes
+  notes: One term of $\TotalMemoryFootprint$; zero at inference. ZeRO-1 shards it across data-parallel
+    workers.
+  aliases:
+  - \OptimizerstateMemory
+- macro: \OptimizerStepTime
+  latex: T_{\text{update}}
+  definition: time the optimizer takes to apply one parameter update
+  kind: scalar
+  unit: s
+- macro: \OutputLengthStandardDeviation
+  latex: \sigma
+  definition: standard deviation of the number of output tokens per request across a workload
+  kind: scalar
+  unit: tokens
+- macro: \OutputProjectionOperations
+  latex: O_{\text{out}}
+  definition: floating-point operations of the output projection that maps attention output back to the
+    hidden width, for one layer
+  kind: scalar
+  unit: FLOP
+- macro: \PackageDecouplingCapacitance
+  latex: C_{\text{pkg}}
+  definition: decoupling capacitance mounted on the chip package
+  kind: scalar
+  unit: F
+- macro: \PackageInductance
+  latex: L_{\text{pkg}}
+  definition: lumped inductance of the package power-delivery path to a processor die
+  kind: scalar
+  unit: H
+  notes: Part of the loop \ParasiticLoopInductance describes; the package term this chapter prices.
+- macro: \PackageResistance
+  latex: R_{\text{pkg}}
+  definition: lumped resistance of the package power-delivery path to a processor die
+  kind: scalar
+  unit: Ohm
+- macro: \PackageThermalCapacitance
+  latex: C_{\text{th}}
+  definition: lumped heat capacity of a die and package, energy per degree of temperature rise
+  kind: scalar
+  unit: J/K
+  notes: Same glyph as \StatorThermalCapacitance, the motor stator\'s.
+- macro: \PackageThermalTimeConstant
+  latex: \tau_{\text{th}}
+  definition: characteristic time for a die and package to heat or cool after a power step, junction-to-ambient
+    thermal resistance times thermal capacitance
+  kind: scalar
+  unit: s
+  notes: The fast pole of the die and package thermal network. Same glyph as \ThermalTimeConstant, the
+    motor winding\'s constant.
+- macro: \PaddingWasteFraction
+  latex: W
+  definition: fraction of the compute static batching performs that is padding for requests that already
+    finished
+  kind: scalar
+  unit: dimensionless
+  notes: Equals one minus the mean over the maximum output length of the batch.
+- macro: \PairedTimeInstant
+  latex: s
+  definition: second point in continuous time at which a random process is evaluated, paired with t in
+    a covariance kernel
+  kind: scalar
+  unit: s
+  notes: Not the IntegrationTimeInstant proposed for 02_body, a dummy integration variable.
+- macro: \ParallelLoopCount
+  latex: k_{\text{parallel}}
+  definition: number of loops of a loop nest selected to run in parallel
+  kind: count
+- macro: \ParasiticLoopInductance
+  latex: L_{\text{parasitic}}
+  definition: unintended inductance of the current loop that feeds an accelerator's core rail, which turns
+    current slew into voltage droop
+  kind: scalar
+  unit: H
+  notes: Droop is $\FiniteChange\SupplyVoltage = \ParasiticLoopInductance\,d\AcceleratorSupplyCurrent/d\TimeInstant$.
+    Not the motor-drive \PowerRailInductance of the physical domain.
+- macro: \PdnBranchCurrent
+  latex: I_{\text{branch}}
+  definition: current through one lumped source-path branch of a power delivery network, distinct from
+    the load current local decoupling supplies
+  kind: scalar
+  unit: A
+- macro: \PdnBranchResistance
+  latex: R_{\text{PDN}}
+  definition: parasitic resistance of one lumped source-path branch of a chip's power delivery network
+  kind: scalar
+  unit: Ohm
+- macro: \PdnTargetImpedance
+  latex: Z_{\text{target}}
+  definition: impedance a power delivery network must stay below across its frequency band, allowed excursion
+    over the largest current step
+  kind: scalar
+  unit: Ohm
+- macro: \PeakMemoryBandwidth
+  latex: \text{BW}_{\text{peak}}
+  definition: highest memory bandwidth the hardware specification states for a device
+  kind: scalar
+  unit: bytes/s
+  notes: The bandwidth counterpart of \PeakRate. Decorated form of \Bandwidth.
+- macro: \PeakRate
+  latex: R_{\text{peak}}
+  definition: highest operation rate the hardware can execute, as specified for a given precision
+  kind: scalar
+  unit: FLOP/s
+  notes: Roofline presentations often write $P$ for performance; the series keeps $P$ for parameter count
+    $\Parameters$.
+- macro: \PerDeviceWeightReadTime
+  latex: T_{\text{read}}
+  definition: time one device takes to read its share of the active weights from memory in one decode
+    step
+  kind: scalar
+  unit: s
+  notes: Not $\StorageReadTime$, which reads training data from storage.
+- macro: \PerExampleForwardBackwardTime
+  latex: T_{\text{forward+backward per example}}
+  definition: amortized forward and backward pass time per training example at a given micro-batch size
+  kind: scalar
+  unit: s
+- macro: \PerStreamTokenRate
+  latex: R
+  definition: number of output tokens one decode stream emits per second
+  kind: scalar
+  unit: tokens/s
+  notes: Multiplies per-token payloads into transfer rates, $\BatchSize\,\PerStreamTokenRate$ tokens per
+    second across a batch.
+- macro: \PipelineBufferMemory
+  latex: M_{\text{required}}
+  definition: total host memory the prefetch, processing and transfer buffers of an input pipeline require
+  kind: scalar
+  unit: bytes
+- macro: \PipelineClockSkew
+  latex: t_{\text{skew}}
+  definition: difference in clock arrival time between the launching and capturing registers of a pipeline
+    stage
+  kind: scalar
+  unit: s
+- macro: \PipelineIterationTime
+  latex: T_{\text{iteration}}
+  definition: steady-state interval between batches an overlapped input pipeline delivers, the largest
+    stage time
+  kind: scalar
+  unit: s
+- macro: \PipelinedExecutionTime
+  latex: T_{\text{pipelined}}
+  definition: execution time of a workload whose data movement and computation overlap, set by the slower
+    of the two plus fixed latency
+  kind: scalar
+  unit: s
+  notes: The max-form iron law, $\PipelinedExecutionTime \ge \max(\IronLawMemoryTime, \IronLawComputeTime)
+    + \Latency$. Its serialized counterpart is $\Time$, the sum of the terms.
+- macro: \PlacementChoiceCount
+  latex: n
+  definition: number of placement choices a computational dimension has at each memory level in the toy
+    mapping count
+  kind: count
+- macro: \PlaintextInput
+  latex: m
+  definition: plaintext input that is encrypted before computation over ciphertexts
+  kind: record
+  notes: Not $\ModelInput$ in general, though in encrypted inference it is one.
+- macro: \PostprocessingLatency
+  latex: L_{\text{lat,post}}
+  definition: time spent turning a model's output into the response
+  kind: scalar
+  unit: s
+  notes: One stage of $\EndToEndRequestLatency$.
+- macro: \PoweredServerCount
+  latex: N
+  definition: number of servers a facility keeps powered and active at the same time
+  kind: count
+  notes: Bounded by $\InformationTechnologyPower/\ServerPower$. Not \DeviceCount, the devices in one distributed
+    job.
+- macro: \PrefetchBufferCount
+  latex: N_{\text{prefetch}}
+  definition: number of buffers holding batches loaded ahead of use
+  kind: count
+- macro: \PrefillAllocatedTokenCount
+  latex: C
+  definition: number of prompt tokens the scheduler allocates to one waiting prefill request in one iteration
+  kind: count
+  notes: Written $\PrefillAllocatedTokenCount_k$ for waiting request $k$.
+- macro: \PrefillArithmeticIntensity
+  latex: I_{\text{prefill}}
+  definition: operations per byte of weights loaded for the linear projections of the prefill phase
+  kind: scalar
+  unit: FLOP/byte
+  notes: Grows with prompt length under the weight-traffic-only approximation.
+- macro: \PrefillChunkSize
+  latex: C_{\text{chunk}}
+  definition: largest number of prompt tokens chunked prefill processes for one request in one iteration
+  kind: count
+- macro: \PrefillOperations
+  latex: O_{\text{prefill}}
+  definition: arithmetic operations one evaluation's prefill executes over all of its input tokens
+  kind: scalar
+  unit: FLOP
+  notes: Compute-bound phase of a fresh evaluation; divided by \EfficiencyHw times \PeakRate it gives
+    the prefill time. Instance of \Operations.
+- macro: \PrefillRequestIndex
+  latex: i
+  definition: index of a waiting prefill request within the active prefill set
+  kind: index
+- macro: \PrefixHitRate
+  latex: \rho_{\text{prefix}}
+  definition: token-weighted share of prompt tokens over a workload window whose compatible key-value
+    state was attached without recomputation
+  kind: scalar
+  unit: dimensionless
+  notes: Sum of matched tokens over sum of prompt tokens across requests, after availability, permission
+    and block-alignment limits; counts only tokens actually served, not potential matches. Not \ServingUtilization.
+- macro: \PreprocessingLatency
+  latex: L_{\text{lat,pre}}
+  definition: time spent preparing a request's input before inference
+  kind: scalar
+  unit: s
+  notes: One stage of $\EndToEndRequestLatency$.
+- macro: \PreprocessingServiceTime
+  latex: T_{\text{preprocessing}}
+  definition: average time between batches the preprocessing workers deliver, across all workers
+  kind: scalar
+  unit: s
+- macro: \PreprocessingThroughput
+  latex: R_{\text{preprocessing}}
+  definition: batches per second the host workers can transform into model-ready tensors
+  kind: scalar
+  unit: batches/s
+- macro: \ProcessedKeyTileIndex
+  latex: t
+  definition: index of the key tile an online softmax is processing, counted in processing order
+  kind: index
+  notes: Same role as \KvTileIndex ($j$) in the step-by-step online-softmax description.
+- macro: \ProcessingBufferCount
+  latex: N_{\text{processing}}
+  definition: number of buffers holding batches under transformation
+  kind: count
+- macro: \ProductionExecutionCount
+  latex: N_{\text{prod}}
+  definition: number of production executions, such as inference requests or training steps, that reuse
+    one compiled program
+  kind: count
+- macro: \PromptLength
+  latex: S_{\text{prompt}}
+  definition: number of tokens in one request's prompt, all of which prefill processes
+  kind: count
+- macro: \ProposerEvaluationRate
+  latex: f
+  definition: rate of fresh proposer evaluations when every evaluation streams the weights
+  kind: scalar
+  unit: Hz
+- macro: \PufChallenge
+  latex: C
+  definition: challenge presented to a physical unclonable function, a bit string whose indexed entries
+    are the challenge bits
+  kind: record
+  notes: Paired with the device-specific response $\PufResponse$. Not the gradient clipping norm $\GradientClippingNorm$.
+- macro: \PufResponse
+  latex: R
+  definition: response a physical unclonable function returns to a challenge, which differs between devices
+    of the same design
+  kind: record
+  notes: Indexed by device, $R_1$, $R_2$.
+- macro: \PufResponseBit
+  latex: r
+  definition: single output bit of an arbiter physical unclonable function, set by which of two racing
+    signals arrives first
+  kind: record
+- macro: \QueryBlockCount
+  latex: T_r
+  definition: number of query tiles the sequence is split into in tiled attention
+  kind: count
+  notes: 'Not a time: equals the ceiling of sequence length over the query block size.'
+- macro: \QueryBlockIndex
+  latex: i
+  definition: index of one query tile in tiled attention
+  kind: index
+  notes: Runs from 1 to the query block count.
+- macro: \QueryBlockSize
+  latex: B_r
+  definition: number of query rows in one tile of tiled attention
+  kind: count
+  notes: 'Not batch size: the subscript r marks the row (query) blocking of FlashAttention.'
+- macro: \QueryPrice
+  latex: p_{\text{query}}
+  definition: price an API charges for one query
+  kind: scalar
+  unit: USD/query
+  notes: Not a probability.
+- macro: \QueueServerCount
+  latex: c
+  definition: number of identical servers in an M/M/c queue
+  kind: count
+  notes: Kendall's c, the third field of the A/S/c queue-model name, kept because the prose names the
+    M/M/c model. Distinct from \WorkerCount, the size of a general worker pool.
+- macro: \QueueServiceVariationCoefficient
+  latex: c_{s}
+  definition: coefficient of variation of a queue's service times, their standard deviation divided by
+    their mean, in the lowercase Kingman notation
+  kind: scalar
+  unit: dimensionless
+  notes: Enters Kingman's approximation squared, with $\InterarrivalVariationCoefficient$. Same quantity
+    as $\ServiceTimeVariationCoefficient$.
+- macro: \QueueSystemCapacity
+  latex: K
+  definition: largest number of requests a queueing system can hold at once, waiting plus in service,
+    beyond which arrivals are rejected
+  kind: count
+  notes: Kendall's K, the fourth field of an A/S/c/K queue-model name such as M/G/c/K. Distinct from \DeviceRequestCapacity,
+    which counts only requests in service on one device.
+- macro: \QueueWaitTime
+  latex: W_{q}
+  definition: mean time a request waits in a queue before its service begins, excluding service time
+  kind: scalar
+  unit: s
+  notes: The classical queue-only wait. Time in system \RequestTimeInSystem adds the service time to it.
+    Grows as utilization over one minus utilization in an M/M/1 queue.
+- macro: \QueuedJobCount
+  latex: N_{\text{queue}}
+  definition: number of jobs waiting in a queue, not in service, as an arrival sees it
+  kind: count
+  notes: Little's law gives $\mathbb{E}[N_{\text{queue}}]=\ArrivalRate\,\mathbb{E}[T_{\text{queue}}]$.
+    Not \RequestConcurrency, which counts requests in the whole system.
+- macro: \QueuedTransactionCount
+  latex: K
+  definition: number of interconnect transactions admitted ahead of a safety-critical request in a shared
+    queue
+  kind: count
+- macro: \QueuedTransactionSet
+  latex: \mathcal{Q}
+  definition: set of memory transactions queued ahead of a safety read at the memory controller
+  kind: set
+  notes: Summed over in the DRAM queueing delay \MemoryBusQueueDelay.
+- macro: \QueueingLatency
+  latex: L_{\text{lat,queue}}
+  definition: time a request waits in queues before it is served
+  kind: scalar
+  unit: s
+  notes: One stage of $\EndToEndRequestLatency$.
+- macro: \QuiescentJunctionTemperature
+  latex: T_{\text{j},\text{target}}
+  definition: steady-state junction temperature under baseline (quiescent) power, toward which the junction
+    relaxes once a burst ends
+  kind: scalar
+  unit: degC
+  notes: Ambient plus baseline power times junction-to-ambient thermal resistance.
+- macro: \QuiescentSocPower
+  latex: P_{\text{base}}
+  definition: power an application SoC dissipates with only the permission loop, idle and memory power
+    running
+  kind: scalar
+  unit: W
+- macro: \QuotaReductionSensitivity
+  latex: \gamma_{\text{rate}}
+  definition: coefficient that sets how steeply an account's effective query quota shrinks, exponentially,
+    with its anomaly score
+  kind: scalar
+  unit: dimensionless
+  notes: Assumes a dimensionless anomaly score. Not a decay rate over time.
+- macro: \RailVoltageTolerance
+  latex: \delta_{\text{tol}}
+  definition: allowed rail-voltage excursion as a fraction of the nominal voltage
+  kind: scalar
+  unit: dimensionless
+- macro: \RawDataUploadEnergy
+  latex: E_{\text{raw}}
+  definition: energy one client spends uploading its raw training data for centralized training
+  kind: scalar
+  unit: J
+- macro: \ReadByteAddress
+  latex: X
+  definition: memory address of a byte a program has just read, used to describe spatial locality
+  kind: index
+  notes: Names a location, not a byte count; distinct from \ScaledResource (X) and from \DataVolume.
+- macro: \ReadTimeCeiling
+  latex: R
+  definition: longest time a safety read may take, from the sensing allowance or what the declared execution
+    bound leaves for the read
+  kind: scalar
+  unit: s
+  notes: Not the electrical resistance R.
+- macro: \RealizedArrivalCount
+  latex: n
+  definition: one possible value of the number of requests that arrive after the trigger in a batching
+    window, used as a summation variable
+  kind: count
+  notes: A value taken by \TriggeredWindowArrivalCount, as in $\Pr(Q_{\text{arr}}=n)$; a timeout batch
+    holds $n+1$ requests.
+- macro: \RealizedServiceTime
+  latex: s
+  definition: length of one realized service interval, a sample of the service time
+  kind: scalar
+  unit: s
+  notes: Contributes $s^2/2$ to the residual-work area; a realization of \RequestServiceTime.
+- macro: \RecommenderItemCount
+  latex: N_{\text{items}}
+  definition: number of catalog items a static recommendation system precomputes predictions for
+  kind: count
+  notes: With \RecommenderUserCount it sets the size of the precomputed prediction table, which grows
+    as their product.
+- macro: \RecommenderUserCount
+  latex: N_{\text{users}}
+  definition: number of users whose predictions a static recommendation system precomputes
+  kind: count
+  notes: With \RecommenderItemCount it sets the size of the precomputed prediction table, which grows
+    as their product.
+- macro: \ReductionInputCount
+  latex: n
+  definition: number of values one reduction combines
+  kind: count
+  notes: A tree reduction takes $\mathcal{O}(\log n)$ stages, a serial one $\mathcal{O}(n)$.
+- macro: \RegisterSetupTime
+  latex: t_{\text{setup}}
+  definition: time a register's input must be stable before the capturing clock edge
+  kind: scalar
+  unit: s
+- macro: \ReliabilityTargetIndex
+  latex: i
+  definition: position of one reliability target, such as availability, latency, freshness, or model quality,
+    among the targets an evaluation contract budgets
+  kind: index
+  notes: Indexes the error-budget consumption vector; the reliability envelope is the maximum over this
+    index.
+- macro: \RemoteHardwareEfficiency
+  latex: \eta_{\text{hw,remote}}
+  definition: fraction of its peak compute rate the remote server sustains on an offloaded request
+  kind: scalar
+  unit: dimensionless
+  notes: The remote instance of $\EfficiencyHw$.
+- macro: \RemotePathTime
+  latex: T_{\text{remote}}
+  definition: 'complete time to serve one request remotely: transmission, network round trip and remote
+    compute'
+  kind: scalar
+  unit: s
+  notes: Remote execution is feasible only when it is within the deadline; compared with $\LocalPathTime$.
+- macro: \RemotePeakRate
+  latex: R_{\text{peak,remote}}
+  definition: peak compute rate of the remote server that would execute an offloaded request
+  kind: scalar
+  unit: FLOP/s
+  notes: The remote instance of $\PeakRate$.
+- macro: \RepeatedRunMean
+  latex: \mu_{\text{run}}
+  definition: mean of a measured benchmark metric across repeated runs of the same configuration
+  kind: scalar
+  unit: varies
+  notes: 'Not the service rate \mu of queueing. Unit: units of the measured metric.'
+- macro: \RepeatedRunStandardDeviation
+  latex: \sigma_{\text{run}}
+  definition: standard deviation of a measured benchmark metric across repeated runs of the same configuration
+  kind: scalar
+  unit: varies
+  notes: 'Divided by the run mean it gives the coefficient of variation used to flag unstable measurements.
+    Unit: units of the measured metric.'
+- macro: \RequestConcurrency
+  latex: Q_{\text{req}}
+  definition: average number of requests in flight inside a stable serving system
+  kind: scalar
+  unit: requests
+  notes: Little's law gives $\RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystem$. Avoids bare
+    $N$, which counts devices, elements or samples elsewhere.
+- macro: \RequestOutputLength
+  latex: S
+  definition: number of tokens one request generates during decode
+  kind: count
+  notes: Written $S_i$ for request $i$ of a batch. Not $\SequenceLength$, the input sequence length.
+- macro: \RequestResidenceTime
+  latex: W
+  definition: time one request spends inside a system from arrival to completion
+  kind: scalar
+  unit: s
+  notes: Indexed W_i by request; its mean over requests is \RequestTimeInSystem.
+- macro: \RequestResponseTime
+  latex: t
+  definition: time one request spends in a serving system, the random variable whose distribution gives
+    tail latency
+  kind: scalar
+  unit: s
+  notes: Its mean is \RequestTimeInSystem; its 99th percentile is \TailRequestLatency. Bare t is otherwise
+    an index letter.
+- macro: \RequestSeenBatchSize
+  latex: B_{\text{req}}
+  definition: size of the batch a given request lands in, counting itself and the other arrivals in its
+    window
+  kind: count
+  notes: One plus a Poisson count with mean $\ArrivalRate T_{\text{window}}$; larger on average than the
+    per-window batch size because requests land in busy windows more often.
+- macro: \RequestServiceTime
+  latex: T_{\text{svc}}
+  definition: time a server spends serving one request, call or job once its service begins, excluding
+    the wait in queue
+  kind: scalar
+  unit: s
+- macro: \RequestTimeInSystem
+  latex: T_{\text{lat}}
+  definition: average time a request spends inside a serving system, waiting plus being served
+  kind: scalar
+  unit: s
+  notes: The time term of Little's law. Distinct from the iron law's fixed overhead $\Latency$ and from
+    end-to-end request latency $\EndToEndRequestLatency$.
+  aliases:
+  - \RequestTimeInSystemLat
+- macro: \RequiredInputBandwidth
+  latex: \text{BW}_{\text{required}}
+  definition: input data rate the storage and data pipeline must deliver so the accelerators reach a target
+    fraction of time computing
+  kind: scalar
+  unit: bytes/s
+  notes: Consumers times target compute fraction times local batch bytes over per-batch compute time.
+    Not $\RequiredMemoryBandwidth$.
+- macro: \RequiredMemoryBandwidth
+  latex: \text{BW}_{\text{req}}
+  definition: memory bandwidth a workload needs to sustain a target operation rate at its arithmetic intensity
+  kind: scalar
+  unit: bytes/s
+  notes: $\text{BW}_{\text{req}} = \TargetComputeRate/\ArithmeticIntensity$; the workload is memory bound
+    when it exceeds $\Bandwidth$.
+- macro: \RequiredServiceRate
+  latex: \mu_{\text{required}}
+  definition: service rate a server must sustain so peak arrivals keep utilization at the safe ceiling
+  kind: scalar
+  unit: requests/s
+  notes: Peak arrival rate divided by the safe \ServingUtilization.
+- macro: \ResampledReplacementToken
+  latex: T_4'
+  definition: token the target model samples from the normalized positive residual to replace the first
+    rejected draft token, written for the fourth position of the illustrated round
+  kind: record
+  notes: The LaTeX carries the position because the chapter writes only this one instance; a general form
+    would be the drafted-token glyph with a prime.
+- macro: \ReservedDeviceMemory
+  latex: M_{\text{reserve}}
+  definition: device memory held back for the runtime, the operating system and the foreground application,
+    unavailable to background adaptation
+  kind: scalar
+  unit: bytes
+  notes: \DeviceMemoryCapacity minus this is the background allowance.
+- macro: \ResidentWeightMemory
+  latex: M_{\text{weights,resident}}
+  definition: memory the frozen backbone weights occupy once staged into working memory for an adaptation
+    update
+  kind: scalar
+  unit: bytes
+  notes: Weights kept in nonvolatile flash count toward storage, not this term, until staged.
+- macro: \ResidualSamplingDistribution
+  latex: p_{\text{res}}
+  definition: normalized positive part of the target minus draft distribution, from which speculative
+    sampling draws the replacement token at the first rejection
+  kind: distribution
+  notes: $\max(0, \TargetSamplingDistribution - \DraftSamplingDistribution)$ normalized over the vocabulary.
+- macro: \ResponseTimeDistributionFunction
+  latex: F
+  definition: cumulative distribution function of the time a request spends in a serving system
+  kind: function
+  notes: Exponential in an M/M/1 queue, $F(t) = 1 - e^{-t/\RequestTimeInSystem}$; its 0.99 quantile is
+    the p99 latency.
+- macro: \ResponseTimeStandardDeviation
+  latex: \sigma_t
+  definition: standard deviation of the time a request spends in a serving system
+  kind: scalar
+  unit: s
+  notes: One symbol including its subscript; used in the Gaussian p99 estimate $\TailRequestLatency \approx
+    \mathbb{E}[\RequestResponseTime] + 2.33 \sigma_t$. The subscript names response time (\RequestResponseTime),
+    not an index.
+- macro: \ResultActionTime
+  latex: T_{\text{action}}
+  definition: time to deliver an inference result to the application and act on it, the last stage of
+    a streaming pipeline
+  kind: scalar
+  unit: s
+- macro: \ReusedPrefixLength
+  latex: S_{\text{match}}
+  definition: number of tokens of one request's prompt whose compatible KV state is attached from a prefix
+    cache without recomputation
+  kind: count
+  notes: At most $\PromptLength$; counted after eviction, tenant isolation and block-alignment rules,
+    so it can be less than the raw matching prefix. Written $\ReusedPrefixLength^{(i)}$ for request $i$.
+- macro: \RooflineRidgePoint
+  latex: I_{\text{ridge}}
+  definition: arithmetic intensity at which a device's memory-bandwidth limit meets its compute limit
+  kind: scalar
+  unit: FLOP/byte
+  notes: $\RooflineRidgePoint = \PeakRate/\Bandwidth$, also called hardware balance. Prefer this explicit
+    form over starred shorthand so the meaning stays clear in prose.
+- macro: \RoundEmittedTokenCount
+  latex: N_{\text{emit}}
+  definition: number of tokens one speculative-decoding round emits, its accepted draft prefix plus one
+    token sampled from the target model
+  kind: count
+  notes: A random variable; its expectation is $\sum_{i=0}^{K} \alpha_{\text{acc}}^{i}$. Not \EmittedTokenCount
+    ($S_{\text{out}}$), the length of a whole output.
+- macro: \RowActivationDelay
+  latex: t_{\text{RCD}}
+  definition: minimum time from activating a DRAM row to the first column access to it, the row-to-column
+    delay
+  kind: scalar
+  unit: s
+  notes: JEDEC timing parameter tRCD.
+- macro: \RowActiveTime
+  latex: t_{\text{RAS}}
+  definition: minimum time a DRAM row must stay open after activation before it may be precharged
+  kind: scalar
+  unit: s
+- macro: \RowCycleTime
+  latex: t_{\text{RC}}
+  definition: minimum time between consecutive row activations to the same DRAM bank, the row active time
+    plus the precharge time
+  kind: scalar
+  unit: s
+- macro: \RowPrechargeTime
+  latex: t_{\text{RP}}
+  definition: minimum time a DRAM bank needs to close its open row by precharge before another row can
+    be activated
+  kind: scalar
+  unit: s
+  notes: JEDEC timing parameter tRP. A row conflict costs it plus \RowActivationDelay.
+- macro: \RuntimeReserveMemory
+  latex: M_{\text{runtime}}
+  definition: accelerator memory a serving runtime reserves for dynamic activations and scratch buffers,
+    excluded from the KV pool
+  kind: scalar
+  unit: bytes
+  notes: Not $\ReservedDeviceMemory$, which holds memory back from on-device background adaptation.
+- macro: \SampleStorageSize
+  latex: s_{\text{sample}}
+  definition: bytes needed to store one training or serving sample
+  kind: scalar
+  unit: bytes/sample
+- macro: \ScaledSerialFraction
+  latex: s
+  definition: share of a scaled parallel run's execution time that is serial, which sets the scaled speedup
+    in Gustafson's law
+  kind: scalar
+  unit: dimensionless
+  notes: Scaled speedup on $N$ processors is $N - s(N-1)$. Measured on the scaled parallel run, so it
+    is not Amdahl's $\SerialFraction$, which is a share of the fixed single-device workload.
+- macro: \SecondAtomicGradientUpdate
+  latex: B
+  definition: second of three gradient updates that accelerator threads accumulate atomically into a shared
+    tensor, whose accumulation order varies between runs
+  kind: scalar
+  unit: dimensionless
+  notes: Concrete instance of the floating-point associativity example; the run-dependent grouping of
+    these updates is the source of bitwise nondeterminism. Not the generic addends a, b, c and not matrix
+    operands.
+- macro: \SecondFloatingPointAddend
+  latex: b
+  definition: second of three floating-point numbers added in either grouping to show that floating-point
+    addition is not associative
+  kind: scalar
+  unit: dimensionless
+  notes: The three addends a, b, c appear together only in the associativity identity (a+b)+c vs a+(b+c);
+    they are generic numbers, not any modeled quantity. Distinct from the bold GEMM matrix operands A,
+    B, C.
+- macro: \SequenceIterationOperations
+  latex: c_{\text{decode}}
+  definition: operations one decode iteration spends on one sequence of a batch
+  kind: scalar
+  unit: FLOP
+- macro: \SequentialExecutionTime
+  latex: T_{\text{sequential}}
+  definition: execution time when data movement, computation and fixed overhead run one after another
+    with no overlap, the sum of the iron-law terms
+  kind: scalar
+  unit: s
+  notes: Equals the additive iron law $\DataVolume/\Bandwidth + \Operations/(\PeakRate \cdot \EfficiencyHw)
+    + \Latency$, i.e. $\Time$; written with a subscript only when contrasted with $\PipelinedExecutionTime$.
+- macro: \SerialFraction
+  latex: r
+  definition: share of a fixed workload's single-device execution time that does not shrink when the work
+    is spread across devices, the serial term of Amdahl's law
+  kind: scalar
+  unit: dimensionless
+  notes: Speedup on $\DeviceCount$ devices is $\DeviceCount/(1+(\DeviceCount-1)r)$, capped at $1/r$. Not
+    the synchronization share a profiler reports, which grows with $\DeviceCount$.
+- macro: \SerializationLatency
+  latex: L_{\text{lat,serialization}}
+  definition: exposed time a request spends converting data to a wire representation and reconstructing
+    it at the receiver
+  kind: scalar
+  unit: s
+  notes: One stage of $\EndToEndRequestLatency$.
+- macro: \ServerAggregationEnergy
+  latex: E_{\text{aggregation}}
+  definition: energy the server spends aggregating client updates in one federated round
+  kind: scalar
+  unit: J
+- macro: \ServerPower
+  latex: P_{\text{server}}
+  definition: electrical power one complete server draws, its accelerators, CPUs, memory and fans together
+  kind: scalar
+  unit: W
+  notes: Not \HostPower, which excludes the accelerators.
+- macro: \ServiceTimeStandardDeviation
+  latex: \sigma
+  definition: standard deviation of the service time of jobs or requests in a queueing model
+  kind: scalar
+  unit: s
+  notes: With the service rate it gives the service-time coefficient of variation, standard deviation
+    times service rate.
+- macro: \ServiceTimeVariationCoefficient
+  latex: c_{s}
+  definition: coefficient of variation of service time, its standard deviation divided by its mean
+  kind: scalar
+  unit: dimensionless
+  notes: One for exponential service times. Enters the Pollaczek-Khinchine mean wait through the factor
+    one plus its square, over two.
+- macro: \ServingUtilization
+  latex: \rho_{\text{serv}}
+  definition: fraction of time a server is busy, offered load divided by service capacity
+  kind: scalar
+  unit: dimensionless
+  notes: $\ServingUtilization = \ArrivalRate/\mu$ for one server. Queueing delay grows without bound as
+    it approaches 1. The subscript keeps bare $\rho$ free for other ratios.
+- macro: \SessionRequestCount
+  latex: N_{\text{session}}
+  definition: number of independent requests a single user session issues, each of which may hit the latency
+    tail
+  kind: count
+  notes: Probability that at least one request is slow grows as one minus the per-request fast probability
+    raised to this count.
+- macro: \ShardReaderCount
+  latex: n_{\text{workers}}
+  definition: number of workers that each choose one dataset shard at random to read next, in a shard-collision
+    estimate
+  kind: count
+  notes: Local to the birthday-problem shard-contention estimate. Not the agentic pool size $\WorkerCount$
+    nor the data-loader worker processes of one node.
+- macro: \SharedBusBandwidth
+  latex: \text{BW}_{\text{bus}}
+  definition: sustained transfer rate of the shared on-chip interconnect or memory bus that queued transactions
+    drain through
+  kind: scalar
+  unit: bytes/s
+- macro: \SharedPrefixFraction
+  latex: f
+  definition: share of each request's KV blocks that a prefix shared across requests covers
+  kind: scalar
+  unit: dimensionless
+  notes: Bounds the capacity gain of prefix sharing at $1/(1-\SharedPrefixFraction)$ in a large pool.
+    Not $\CommunicationTimeFraction$ or $\ClockFrequency$, which share the glyph.
+- macro: \SharedPrefixLength
+  latex: S_{\text{prefix}}
+  definition: number of tokens in a prompt prefix that several requests share
+  kind: count
+  notes: A part of \SequenceLength; prefix caching reuses its KV states.
+- macro: \SharedPrefixRequestCount
+  latex: n_{\text{req}}
+  definition: number of requests that share an identical prompt prefix
+  kind: count
+  notes: Prefix caching avoids about $(n_{\text{req}}-1)$ prefix prefills.
+- macro: \SinglePrecisionGemvIntensity
+  latex: I_{\text{GEMV, 32-bit}}
+  definition: arithmetic intensity of a batch-one matrix-vector multiply whose 32-bit weights stream from
+    memory
+  kind: scalar
+  unit: FLOP/byte
+  notes: A specific case of \ArithmeticIntensity.
+- macro: \SnapshotReadTime
+  latex: t_{\text{own}}
+  definition: time to read the safety snapshot itself once no traffic waits ahead of it
+  kind: scalar
+  unit: s
+- macro: \SparseMatrixEntryCount
+  latex: n_{\text{elem}}
+  definition: number of entries of a sparse matrix counted in dense form, zeros included, against which
+    CSR storage is compared
+  kind: count
+  notes: Sparse storage formats; sits beside $\SparseMatrixRowCount$ ($n_{\text{rows}}$) and $\NonzeroCount$
+    ($n_{\text{nz}}$). Not $\TensorElementCount$, which is the general element count of a tensor.
+- macro: \SparseMatrixRowCount
+  latex: n_{\text{rows}}
+  definition: number of rows of a sparse matrix, which sets the length of the CSR row-pointer array
+  kind: count
+  notes: Sparse storage formats; CSR keeps one more row pointer than rows.
+- macro: \SpecializedEnergyProductivity
+  latex: \rho_{\text{energy,specific}}
+  definition: useful floating-point operations specialized, domain-specific silicon delivers per joule
+    on a workload suited to its design
+  kind: scalar
+  unit: FLOP/J
+  notes: Specialized-silicon counterpart of \GeneralPurposeEnergyProductivity in the generality-tax comparison;
+    a per-architecture form of \FleetEnergyProductivity.
+- macro: \SpecificHeatCapacity
+  latex: c_p
+  definition: heat needed to raise one kilogram of a coolant by one kelvin at constant pressure
+  kind: scalar
+  unit: J/(kg*K)
+  notes: Water is about 4186 J/(kg*K), air about 1005. Sets the mass flow a cooling loop needs per watt
+    of heat.
+- macro: \SpeculativeDecodingSpeedup
+  latex: S_{\text{spec}}
+  definition: decoding speedup speculative decoding gives one isolated generation stream, verified tokens
+    per round over target-step equivalents per round
+  kind: scalar
+  unit: dimensionless
+- macro: \SpeculativeDraftLength
+  latex: K
+  definition: number of tokens a draft model proposes for the target model to verify in one speculative-decoding
+    round
+  kind: count
+  notes: Same quantity as \DraftTokenCount ($k$) under the capital glyph vol2 uses. Not \ClassCount, \OutputLength
+    or \GemmInnerDimension, which share the glyph.
+- macro: \SpeculativeDraftTokenCount
+  latex: k
+  definition: number of tokens a draft proposes autoregressively for the target to verify in one speculative-sampling
+    iteration
+  kind: count
+  notes: The vol3 glyph for the draft length; an iteration emits between one and $\SpeculativeDraftTokenCount+1$
+    tokens. Same quantity as $\SpeculativeDraftLength$ in vol2.
+- macro: \SquareGemmDimension
+  latex: N
+  definition: side length of the square matrices in a matrix multiply, the shared row, column and inner
+    dimension
+  kind: count
+- macro: \SramCapacity
+  latex: M_{\text{SRAM}}
+  definition: capacity of the fast on-chip SRAM available to one kernel
+  kind: scalar
+  unit: words
+  notes: Counted in words (tensor elements), not bytes, in the FlashAttention I/O analysis.
+- macro: \StandbyPower
+  latex: P_{\text{idle}}
+  definition: power a device draws in standby, when it is not running inference
+  kind: scalar
+  unit: W
+  notes: Dominates battery life at low duty cycle.
+- macro: \StaticBatchingOperations
+  latex: O_{\text{traditional}}
+  definition: operations static (traditional) batching performs on one batch, counting the padded iterations
+    of sequences that already finished
+  kind: scalar
+  unit: FLOP
+  notes: Equals batch size times the longest output length times the per-sequence operations of one decode
+    iteration.
+- macro: \StepIoTime
+  latex: T_{\text{IO}}
+  definition: time the input pipeline needs to read, decompress, decode and stage the data for one training
+    step
+  kind: scalar
+  unit: s
+  notes: 'Paired with $\IronLawComputeTime$ in the two-stage overlap model: step time lies between $\max(\IronLawComputeTime,
+    T_{\text{IO}})$ and their sum. Not $\IronLawMemoryTime$, which is device memory traffic inside the
+    iron law; this term includes storage reads and CPU-side decode.'
+- macro: \StorageAccessFactor
+  latex: F_{\text{access}}
+  definition: fraction of peak storage throughput a workload's access pattern achieves
+  kind: scalar
+  unit: dimensionless
+- macro: \StorageBandwidth
+  latex: \text{BW}_{\text{storage}}
+  definition: sustained rate at which the storage system delivers bytes to the input pipeline
+  kind: scalar
+  unit: bytes/s
+  notes: A specialization of $\Bandwidth$ to the storage path; the data-fetch time of one batch is $\DataVolume/\Bandwidth_{\text{storage}}$.
+- macro: \StorageCapacityPrice
+  latex: C_{\text{storage/byte-time}}
+  definition: provider price charged to retain one byte of telemetry for one unit of time
+  kind: scalar
+  unit: USD/(byte*s)
+  aliases:
+  - \StoragePricePerByteTime
+- macro: \StorageEquipmentPower
+  latex: P_{\text{storage}}
+  definition: electrical power a facility's storage systems draw
+  kind: scalar
+  unit: W
+  notes: One component of \InformationTechnologyPower.
+- macro: \StorageIngestBandwidth
+  latex: \text{BW}_{\text{ingest}}
+  definition: aggregate rate at which a storage tier absorbs writes, such as a checkpoint burst
+  kind: scalar
+  unit: bytes/s
+  notes: Write-side counterpart of $\StorageBandwidth$.
+- macro: \StoragePrice
+  latex: c_{\text{storage}}
+  definition: price of keeping one gigabyte in storage for one month
+  kind: scalar
+  unit: USD/GB/month
+  notes: Object-storage pricing in the data cost model.
+- macro: \StorageReadTime
+  latex: T_{\text{read}}
+  definition: time to read one batch's raw data from storage at the effective storage throughput
+  kind: scalar
+  unit: s
+- macro: \StorageRetentionTime
+  latex: T_{\text{months}}
+  definition: length of time a dataset is kept in storage
+  kind: scalar
+  unit: months
+  notes: Multiplies stored volume and monthly storage price.
+- macro: \StorageThroughput
+  latex: R_{\text{storage}}
+  definition: rate at which storage can deliver training data, bounded by disk and network bandwidth
+  kind: scalar
+  unit: bytes/s
+- macro: \StoredDataVolume
+  latex: D_{\text{vol,store}}
+  definition: bytes a retained dataset occupies in storage
+  kind: scalar
+  unit: bytes
+  notes: Not $\DataVolume$, the bytes a workload moves.
+- macro: \StreamingEndToEndLatency
+  latex: T_{\text{streaming}}
+  definition: time from capturing one streaming input to acting on its result, summed over capture, transfer,
+    inference and action
+  kind: scalar
+  unit: s
+- macro: \SubsequentArrivalTime
+  latex: \tau
+  definition: time from the request that opened a batching window until a later arrival, indexed by arrival
+    order
+  kind: scalar
+  unit: s
+  notes: $\tau_k$ is Erlang with shape k and rate \ArrivalRate under Poisson arrivals; a full batch closes
+    when $\tau_k \leq \BatchingWindow$. Distinct from \WindowArrivalOffset, which is conditioned on arriving
+    inside the window.
+- macro: \SupplyVoltage
+  latex: V
+  definition: supply voltage that powers a digital circuit, the quantity dynamic voltage and frequency
+    scaling lowers
+  kind: scalar
+  unit: V
+  notes: Dynamic power scales with $V^2$. Not the virtual pipeline stage count $\VirtualPipelineStagesPerDevice$.
+- macro: \SustainedComputeRate
+  latex: R_{\text{sustained}}
+  definition: operation rate an accelerator or system actually sustains on a workload
+  kind: scalar
+  unit: FLOP/s
+  notes: Divided by $\BatchOperations$ it gives batches per second.
+- macro: \SwitchedCapacitance
+  latex: C
+  definition: capacitance of the wires and gates a circuit charges when it switches
+  kind: scalar
+  unit: F
+- macro: \SwitchingActivityFactor
+  latex: \alpha
+  definition: average fraction of a chip's gate capacitance that switches each clock cycle
+  kind: scalar
+  unit: dimensionless
+  notes: Not the significance level or the alpha-beta startup latency.
+- macro: \SwitchingEnergy
+  latex: E
+  definition: dynamic energy a circuit dissipates charging and discharging its switched capacitance
+  kind: scalar
+  unit: J
+  notes: Proportional to $\SwitchedCapacitance \cdot \SupplyVoltage^2$.
+- macro: \SystemMemoryBandwidth
+  latex: \text{BW}_{\text{system}}
+  definition: sustained bandwidth of host system memory
+  kind: scalar
+  unit: bytes/s
+- macro: \TailRequestLatency
+  latex: T_{\text{lat},\text{p99}}
+  definition: 99th-percentile time a request spends in a serving system
+  kind: scalar
+  unit: s
+  notes: About 4.6 times the mean \RequestTimeInSystem in an M/M/1 queue. The same quantity as $t_{99}$
+    in the derivation.
+- macro: \TailRequestSeenBatchSize
+  latex: B_{\text{req,p99}}
+  definition: 99th percentile of the batch size a request lands in
+  kind: count
+  notes: Evaluated in \BatchServiceTimeFunction to bound tail service time.
+- macro: \TailStepIoTime
+  latex: T_{\text{IO,p99}}
+  definition: 99th-percentile time the input pipeline takes to fetch the data for one training step from
+    storage
+  kind: scalar
+  unit: s
+  notes: Tail counterpart of $\StepIoTime$; sizes the minimum prefetch depth.
+- macro: \TargetBatchSize
+  latex: B_{\text{target}}
+  definition: batch size a traffic-adaptive batcher sizes its window to fill at the current arrival rate
+  kind: count
+- macro: \TargetCompletionQuantile
+  latex: q
+  definition: required probability that a request completes within its latency deadline, the completion
+    quantile a service level states
+  kind: scalar
+  unit: dimensionless
+  notes: Written $\Pr[\EndToEndRequestLatency \le \CompletionDeadline] \ge q$; typical values 0.95, 0.99,
+    0.999.
+- macro: \TargetComputeRate
+  latex: R_{\text{ops}}
+  definition: operation rate a workload is required to sustain, from which the memory bandwidth it needs
+    follows
+  kind: scalar
+  unit: FLOP/s
+  notes: Required bandwidth is $R_{\text{ops}}/\ArithmeticIntensity$. Not $\AttainableComputeRate$, which
+    is what the hardware allows.
+- macro: \TargetComputeTimeFraction
+  latex: \eta_{\text{target}}
+  definition: target fraction of wall-clock time an accelerator spends computing rather than waiting for
+    input, used to size input delivery
+  kind: scalar
+  unit: dimensionless
+  notes: An active-time fraction, not model FLOPs utilization $\ModelFlopsUtilization$; not the learning
+    rate.
+- macro: \TargetInferenceLatency
+  latex: L_{\text{lat,target}}
+  definition: inference latency a searched architecture is required to meet
+  kind: scalar
+  unit: s
+- macro: \TargetModelDistribution
+  latex: p_{\theta}
+  definition: next-token probability distribution of the target model in speculative decoding
+  kind: distribution
+  notes: The acceptance test keeps a draft token with probability $\min(1, p_{\theta}/q_{\phi})$. Not
+    \NextTokenDistribution ($p$), the generic language-model distribution.
+- macro: \TargetSamplingDistribution
+  latex: p
+  definition: normalized next-token distribution of the target model at a prefix in speculative sampling,
+    after temperature, masks and other sampling transformations, the distribution exact speculative sampling
+    preserves
+  kind: distribution
+  notes: Not $\TargetModelDistribution$, the untransformed target model distribution.
+- macro: \TargetServingUtilization
+  latex: \rho_{\text{target}}
+  definition: serving utilization a system is sized not to exceed, chosen below one to keep latency headroom
+  kind: scalar
+  unit: dimensionless
+  notes: A ceiling on \ServingUtilization, typically 0.7 to 0.8 in production serving. \RequiredServiceRate
+    divides peak arrivals by this ceiling.
+- macro: \TargetUtilizationBatchSize
+  latex: B_{\text{util}}
+  definition: smallest batch size whose serving utilization stays at or below the target utilization,
+    under the linear batch service model
+  kind: count
+  notes: $\ArrivalRate T_{\text{fixed}} / (\rho_{\text{target}} - \ArrivalRate t_{\text{req}})$, written
+    as a function of the target utilization. Setting the target to one gives \MinimumStableBatchSize.
+- macro: \TelemetryRetentionDuration
+  latex: T_{\text{retention}}
+  definition: length of time stored telemetry samples are retained
+  kind: scalar
+  unit: s
+- macro: \TelemetrySamplingFrequency
+  latex: f_{\text{sample}}
+  definition: number of samples recorded per second for one telemetry series
+  kind: scalar
+  unit: Hz
+  notes: Not the controller sampling rate $f_s$ of the physical volumes.
+- macro: \TelemetrySeriesCount
+  latex: N_{\text{series}}
+  definition: number of distinct telemetry time series after label expansion
+  kind: count
+  notes: Grows with metric label cardinality.
+- macro: \TensorCoreAccumulatorMatrix
+  latex: \mathbf{C}_{\text{acc}}
+  definition: accumulator matrix added to the product in one Tensor Core matrix multiply-accumulate
+  kind: matrix
+- macro: \TensorCoreLeftInput
+  latex: \mathbf{A}_{\text{tc}}
+  definition: left input matrix of one Tensor Core matrix multiply-accumulate
+  kind: matrix
+- macro: \TensorCoreOutputMatrix
+  latex: \mathbf{D}_{\text{tc}}
+  definition: result matrix of one Tensor Core matrix multiply-accumulate
+  kind: matrix
+- macro: \TensorCoreRightInput
+  latex: \mathbf{B}_{\text{tc}}
+  definition: right input matrix of one Tensor Core matrix multiply-accumulate
+  kind: matrix
+- macro: \TensorElementCount
+  latex: N
+  definition: number of elements in one tensor
+  kind: count
+  notes: Times $\ElementStorageSize$ gives the tensor size in bytes. Not the device count of a collective.
+- macro: \ThermalPowerLimit
+  latex: P_{\text{thermal}}
+  definition: largest power a device can sustain without exceeding its thermal limits
+  kind: scalar
+  unit: W
+- macro: \ThirdAtomicGradientUpdate
+  latex: C
+  definition: third of three gradient updates that accelerator threads accumulate atomically into a shared
+    tensor, whose accumulation order varies between runs
+  kind: scalar
+  unit: dimensionless
+  notes: Concrete instance of the floating-point associativity example; the run-dependent grouping of
+    these updates is the source of bitwise nondeterminism. Not the generic addends a, b, c and not matrix
+    operands.
+- macro: \ThirdFloatingPointAddend
+  latex: c
+  definition: third of three floating-point numbers added in either grouping to show that floating-point
+    addition is not associative
+  kind: scalar
+  unit: dimensionless
+  notes: The three addends a, b, c appear together only in the associativity identity (a+b)+c vs a+(b+c);
+    they are generic numbers, not any modeled quantity. Distinct from the bold GEMM matrix operands A,
+    B, C.
+- macro: \ThrottleClearTemperature
+  latex: T_{\text{clear}}
+  definition: junction temperature below which a thermal governor restores the nominal clock after throttling
+  kind: scalar
+  unit: degC
+  notes: Lower than \ThrottleTripTemperature so the clock does not chatter.
+- macro: \ThrottleOnsetJunctionTemperature
+  latex: T_{\text{j},\text{start}}
+  definition: junction temperature at the moment throttling begins, the start of the cooling curve
+  kind: scalar
+  unit: degC
+- macro: \ThrottleRecoveryTime
+  latex: t_{\text{recov}}
+  definition: time a throttled die takes to cool from the trip temperature to the clear temperature, during
+    which the clock stays reduced
+  kind: scalar
+  unit: s
+- macro: \ThrottleTripTemperature
+  latex: T_{\text{trip}}
+  definition: junction temperature at or above which a hardware thermal governor reduces the processor
+    clock
+  kind: scalar
+  unit: degC
+  notes: Paired with the lower \ThrottleClearTemperature for hysteresis.
+- macro: \ThrottledClockFrequency
+  latex: f_{\text{throt}}
+  definition: reduced clock frequency a thermal governor imposes while the junction is above its trip
+    temperature
+  kind: scalar
+  unit: Hz
+  notes: A qualified \ClockFrequency.
+- macro: \TickCycleCount
+  latex: N
+  definition: number of clock cycles one permission tick needs, its execution time times the nominal clock
+    frequency
+  kind: count
+- macro: \TieredRequestServiceTime
+  latex: T
+  definition: time to serve one request through a tiered storage hierarchy, a random variable that equals
+    the hot-tier time on a hit and the miss-path time on a miss
+  kind: scalar
+  unit: s
+  notes: Its mean $\mathbb{E}[T]$ sizes effective bandwidth for fixed-size records served serially.
+- macro: \TileRowIndex
+  latex: m
+  definition: index of the tile row that an output block occupies in a tiled matrix multiply
+  kind: index
+- macro: \Time
+  latex: T
+  definition: total wall-clock time to complete a unit of work, from start to finish
+  kind: scalar
+  unit: s
+  notes: In the iron law, $\Time = \DataVolume/\Bandwidth + \Operations/(\PeakRate \cdot \EfficiencyHw)
+    + \Latency$.
+- macro: \TimeInstant
+  latex: t
+  definition: a point in continuous wall-clock time, the variable over which time-varying quantities are
+    integrated
+  kind: scalar
+  unit: s
+  notes: Argument of time-varying quantities such as power, $P(t)$, and the variable of $\int \ldots\,dt$.
+    Not the turn index $\TurnIndex$ or token index $\TokenIndex$, which share the glyph.
+- macro: \TokenIdentifierSize
+  latex: s_{\text{id}}
+  definition: bytes one sampled token identifier occupies when sampling runs on the accelerator and only
+    the identifier is transferred
+  kind: scalar
+  unit: bytes/token
+  notes: Payload ratio against full logit transfer is $|\TokenVocabulary|\,\LogitStorageSize/\TokenIdentifierSize$.
+- macro: \TokenizationTime
+  latex: T_{\text{tokenize}}
+  definition: time one CPU core takes to tokenize one batch
+  kind: scalar
+  unit: s
+- macro: \TotalChipPower
+  latex: P_{\text{total}}
+  definition: total power a chip dissipates, the sum of dynamic switching power and static leakage power
+  kind: scalar
+  unit: W
+- macro: \TotalEnergy
+  latex: E_{\text{total}}
+  definition: total energy a workload consumes
+  kind: scalar
+  unit: J
+  notes: Decomposes into movement and compute terms, $\TotalEnergy \approx \DataVolume \times \EnergyPerByteMoved
+    + \Operations \times \EnergyPerOperation$, or is measured as average power times run time.
+- macro: \TotalMemoryFootprint
+  latex: M_{\text{total}}
+  definition: total memory a workload occupies on a device
+  kind: scalar
+  unit: bytes
+  notes: For training, $\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory
+    + \ActivationMemory$; for serving, weights plus KV cache plus activations. Avoids bare $M$.
+- macro: \TrainableStateMemory
+  latex: M_{\text{train}}
+  definition: memory holding the trainable parameters of an adaptation update together with their gradients
+    and optimizer state
+  kind: scalar
+  unit: bytes
+  notes: The term bias-only, adapter and LoRA methods shrink; saved activations are counted separately
+    in \ActivationMemory.
+- macro: \TrainingSampleThroughput
+  latex: R_{\text{train}}
+  definition: samples per second a training job actually processes
+  kind: scalar
+  unit: samples/s
+  notes: Bounded by $\min(R_{\text{compute}}, R_{\text{data}})$.
+- macro: \TrainingStepEnergy
+  latex: E_{\text{step}}
+  definition: energy a fleet consumes executing one distributed training step
+  kind: scalar
+  unit: J
+  notes: Approximately $\AveragePower \times \DistributedStepTime(\DeviceCount)$.
+- macro: \TrainingStepOperations
+  latex: O_{\text{step}}
+  definition: arithmetic operations one training step executes across all devices, for every token in
+    the global batch
+  kind: scalar
+  unit: FLOP
+  notes: About $6 \Parameters$ operations per token times tokens per step. The per-step specialization
+    of \Operations.
+- macro: \TrainingStepTime
+  latex: T_{\text{step}}
+  definition: wall-clock time of one training step, bounded below by the slower of compute and input I/O
+  kind: scalar
+  unit: s
+  notes: Single-job step time without a device-count argument; $\DistributedStepTime$ is the same idea
+    written $T_{\text{step}}(N)$ as a function of device count.
+- macro: \TrainingThroughput
+  latex: R_{\text{training}}
+  definition: batches per second a training system completes, the slowest of preprocessing, transfer and
+    compute
+  kind: scalar
+  unit: batches/s
+- macro: \TrainingTime
+  latex: T_{\text{train}}
+  definition: wall-clock time to complete one training run
+  kind: scalar
+  unit: s
+  notes: In the compute-dominated case $\TrainingTime \approx \Operations/(\AcceleratorCount \cdot \PeakRate
+    \cdot \EfficiencyHw)$. Benchmarking defines it operationally as time to reach a target accuracy. One
+    step on N devices is $\DistributedStepTime$.
+- macro: \TransferBufferCount
+  latex: N_{\text{transfer}}
+  definition: number of buffers staging batches for transfer to the accelerator
+  kind: count
+- macro: \TransistorThresholdVoltage
+  latex: V_{\text{th}}
+  definition: gate-source voltage at which a transistor begins to conduct, its threshold voltage
+  kind: scalar
+  unit: V
+  notes: The headroom between supply and threshold sets gate delay in the alpha-power law.
+- macro: \TransmissionEnergyPerByte
+  latex: E_{\text{tx}}
+  definition: energy a device spends transmitting one byte of data over a wireless link
+  kind: scalar
+  unit: J/byte
+  notes: The chapter quotes it per megabyte; multiplied by data volume it gives $\CloudOffloadEnergy$.
+- macro: \TriggeredWindowArrivalCount
+  latex: Q_{\text{arr}}
+  definition: number of requests that arrive after the request that opened a batching window and before
+    the window closes
+  kind: count
+  notes: Poisson with mean $\ArrivalRate \BatchingWindow$ under Poisson arrivals; the realized batch is
+    $\min(\MaxBatchSize, 1 + Q_{\text{arr}})$. Distinct from \WindowArrivalCount, the count of a fixed
+    calendar window, which is itself the batch size.
+- macro: \UncachedPromptLength
+  latex: S_{\text{new}}
+  definition: number of tokens of a newly arriving request's prompt that have no cached KV state and must
+    be prefilled
+  kind: count
+  notes: Equals $\PromptLength$ minus $\ReusedPrefixLength$ for that request.
+- macro: \UnfusedDataVolume
+  latex: D_{\text{vol,unfused}}
+  definition: bytes an operation sequence moves when each operation reads and writes its intermediate
+    in memory
+  kind: scalar
+  unit: bytes
+  notes: Specialization of \DataVolume; $2\,\ChainedOperationCount \IntermediateTensorSize$.
+- macro: \UnitAliasMultiplier
+  latex: k
+  definition: number of base units in one unit alias, the conversion multiplier of a unit-conventions
+    table row
+  kind: scalar
+  unit: dimensionless
+  notes: For KB, k = 10^3 bytes. Not an index letter here; it stands outside any subscript.
+- macro: \VacuumLightSpeed
+  latex: c
+  definition: speed of light in vacuum, the upper limit on how fast an electrical signal crosses a chip
+    or link
+  kind: scalar
+  unit: m/s
+  notes: About $3 \times 10^8$ m/s; on-chip wires propagate signals at a fraction of it.
+- macro: \VectorElementCount
+  latex: N_{\text{vec}}
+  definition: number of elements in each operand vector of an element-wise vector operation
+  kind: count
+- macro: \VelocitySaturationExponent
+  latex: \alpha
+  definition: technology-dependent exponent of the alpha-power law, by which drain current grows with
+    gate overdrive above threshold
+  kind: scalar
+  unit: dimensionless
+  notes: Falls from 2 (long-channel square law) toward 1 as carrier velocity saturates.
+- macro: \WeightElementStorageSize
+  latex: s_{\text{elem,W}}
+  definition: bytes needed to store one model weight at the precision the weights are held in
+  kind: scalar
+  unit: bytes/element
+  notes: The weight-precision case of $\ElementStorageSize$; weight payload is $\Parameters\,\WeightElementStorageSize$.
+    Distinct from $\KvElementStorageSize$, the key-value precision.
+- macro: \WeightMemory
+  latex: M_{\text{weights}}
+  definition: memory holding a model's weights
+  kind: scalar
+  unit: bytes
+  notes: Equals parameter count times bytes per parameter, $\Parameters \ElementStorageSize$. Small-batch
+    decoding streams it once per step.
+  aliases:
+  - \WeightMemoryWeights
+- macro: \WeightOnlyStepTime
+  latex: t
+  definition: weight-only estimate of the time of one serving forward pass, the larger of the weight-read
+    time and the time to perform two weight operations per parameter per token position at the sustained
+    rate
+  kind: function
+  unit: s
+  notes: Written $\WeightOnlyStepTime(\ForwardPassTokenCount)$; omits attention traffic and per-iteration
+    overhead. Not $\HybridIterationTime$ (a measured iteration time) nor the turn index $t$.
+- macro: \WeightStreamingDecodeTime
+  latex: T_{\text{decode}}
+  definition: time to read a device's weights from memory once at peak bandwidth, the bandwidth-bound
+    floor on the time to decode one token at batch one
+  kind: scalar
+  unit: s
+  notes: Weight bytes divided by memory bandwidth. Same quantity as \DecodeTokenTimeFloor ($T_{\text{token}}$)
+    under another glyph; not \CodecDecodeTime or \DecodeInterval, which share this glyph.
+- macro: \WindowArrivalCount
+  latex: k
+  definition: number of requests that arrive during one batching window
+  kind: count
+  notes: Poisson with mean $\ArrivalRate T_{\text{window}}$ under Poisson arrivals, so it is the realized
+    batch size of a fixed calendar window.
+- macro: \WindowArrivalOffset
+  latex: t
+  definition: time at which a request arrives, measured from the start of its batching window
+  kind: scalar
+  unit: s
+  notes: Uniform over the window under Poisson arrivals, so the mean wait is half the window.
+- macro: \WorkerTransformTime
+  latex: T_{\text{transform}}
+  definition: time one preprocessing worker takes to transform one batch
+  kind: scalar
+  unit: s
+- macro: \WorkloadMeanOutputLength
+  latex: \mu
+  definition: mean number of output tokens per request across a workload's output-length distribution
+  kind: scalar
+  unit: tokens
+  notes: Population counterpart of the batch mean $\BatchMeanOutputLength$. Not $\ServiceRate$.
+- macro: \WorkloadRequestIndex
+  latex: i
+  definition: index of one request among the requests of a measurement window
+  kind: index
+  notes: Indexes the requests summed in the prefix hit rate. Not $\PrefillRequestIndex$, which indexes
+    waiting prefill requests within one scheduling iteration.

@@ -73,6 +73,19 @@ def _is_chapter_qmd(path) -> bool:
 
 
 
+# Strict notation (2026-10-08). Volumes whose conversion to registry macros is
+# finished. For them, notation rows must be used by a chapter (not only by the
+# notation chapter's own notes), and no chapter may use two different symbols
+# that render alike. Add a volume here when its conversion lands.
+STRICT_CONVERTED_VOLUMES: set = {"vol1", "vol2", "vol3", "vol4"}
+# Volumes whose chapters are held to one letter, one meaning (check notation
+# --scope collisions). Separate from conversion: resolving a collision changes
+# what readers see, so each volume joins after an editorial pass.
+COLLISION_CHECKED_VOLUMES: set = {"vol1", "vol2", "vol3", "vol4"}
+# Iron-law rows every volume's notation chapter must carry, used or not.
+CORE_REQUIRED_ROWS = {r"\Bandwidth", r"\DataVolume", r"\EfficiencyHw", r"\Latency", r"\Operations", r"\PeakRate"}
+
+
 @dataclass
 
 
@@ -820,8 +833,12 @@ class ValidateCommand:
                   note="bidirectional volume coverage: every macro used in a volume is defined in its notation.qmd, and every notation.qmd row is used in that volume"),
             Scope("forms", "_run_notation_forms",
                   note="banned notation forms inside math (\\mathrm subscripts, P(.) probability, bare O(.) big-O, per-volume transpose, raw thousands commas); default since 2026-10-01, when vol1-4 reached zero"),
-            Scope("vol1-print-pin", "_run_notation_vol1_pin",
-                  note="Volume I is in print: its assembled notation text must match the pinned hash; re-pin only as an errata decision"),
+            Scope("strict", "_run_notation_strict",
+                  note="every symbol in math is a registered macro; ratchet: no new raw symbol beyond the baseline (binder/tools/audit/data/notation_strict_baseline.json)"),
+            Scope("collisions", "_run_notation_collisions",
+                  note="no top-level section of a chapter in COLLISION_CHECKED_VOLUMES uses two different symbols that render alike"),
+            Scope("conventions", "_run_notation_conventions",
+                  note="every registry entry follows the naming and field conventions (mlsysim/mlsysim/notation/data/README.md)"),
         ],
         "spelling": [
             # Both scopes require aspell. Heavy and not part of pre-commit
@@ -12717,7 +12734,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_notation_coverage(self, root: Path) -> ValidationRunResult:
+    def _run_notation_coverage(self, root: Path) -> ValidationRunResult:  # noqa: C901
         """Enforce bidirectional notation coverage between chapters and notation.qmd.
 
         For each volume:
@@ -12739,55 +12756,19 @@ class ValidateCommand:
         project_root = books.parent
         if str(project_root / "mlsysim") not in sys.path:
             sys.path.insert(0, str(project_root / "mlsysim"))
+        # Fail loudly: an empty registry would report every table row as unused
+        # (this happened silently whenever numpy was missing; fixed 2026-10-08).
         try:
             from mlsysim.notation import Notation
-            all_macros = {s.macro for s in Notation.list()}
-        except Exception:
-            all_macros = set()
-
-        macro_aliases = {
-            r"\ActivationMemoryActivations": r"\ActivationMemory",
-            r"\WeightMemoryWeights": r"\WeightMemory",
-            r"\GradientMemoryGradients": r"\GradientMemory",
-            r"\BatchServiceTimeSvc": r"\BatchServiceTime",
-            r"\RequestTimeInSystemLat": r"\RequestTimeInSystem",
-            r"\TrainingDistributionZero": r"\TrainingDistribution",
-            r"\TsdfAccumulatedVolumeVox": r"\TsdfAccumulatedWeight",
-            r"\SamplingPeriodAndRate": r"\SamplingPeriod",
-            r"\TorqueAndBackemfConstants": r"\MotorTorqueConstant",
-            r"\WindingAndAmbientTemperature": r"\WindingTemperature",
-            r"\RotorAndLoadInertia": r"\RotorInertia",
-            r"\IronlawTermTimesCompute": r"\IronLawComputeTime",
-            r"\IronlawTermTimesMemory": r"\IronLawMemoryTime",
-            r"\AcceleratorCountGpu": r"\AcceleratorCount",
-            r"\CollectiveCompletionTimeRing": r"\RingAllReduceCompletionTime",
-            r"\CollectiveCompletionTimeTree": r"\TreeAllReduceCompletionTime",
-            r"\MeanTimeBetweenFailuresThree": r"\MeanTimeBetweenFailures",
-            r"\NumberOfKeyvalueHeadsKv": r"\NumberOfKeyValueHeads",
-            r"\ScalingExponentScale": r"\ScalingExponent",
-            r"\ContentionAndCoherencyCoefficientsTwo": r"\CoherencyContentionCoefficient",
-            r"\BarrierConstraintRowsCbf": r"\BarrierConstraintMatrix",
-            r"\BarrierConstraintRowsCbfTwo": r"\BarrierConstraintVector",
-            r"\ContinuousPeakCurrent": r"\ContinuousCurrent",
-            r"\ContinuousPeakCurrentTwo": r"\PeakCurrent",
-            r"\ContinuousPeakTorqueHold": r"\HoldingTorque",
-            r"\CoordinateReferenceFramesB": r"\BodyReferenceFrame",
-            r"\CoordinateReferenceFramesW": r"\WorldReferenceFrame",
-            r"\CredibleDecelerationBrake": r"\CredibleBrakingDeceleration",
-            r"\FundamentalAndEssentialMatrices": r"\FundamentalMatrix",
-            r"\FundamentalAndEssentialMatricesTwo": r"\EssentialMatrix",
-            r"\LinearBarrierDecayRateCbf": r"\LinearBarrierDecayRate",
-            r"\PhaseInductanceAndResistance": r"\PhaseInductance",
-            r"\PhaseInductanceAndResistanceTwo": r"\PhaseResistance",
-            r"\RotorAndLoadInertiaTwo": r"\LoadInertia",
-            r"\SprtBoundariesLo": r"\SprtLowerBoundary",
-            r"\SprtBoundariesUp": r"\SprtUpperBoundary",
-            r"\TransmissionEfficiencyGear": r"\GearboxTransmissionEfficiency",
-            r"\TruncatedSignedDistanceVox": r"\TruncatedSignedDistance",
-            r"\VirtualDampingAndStiffness": r"\VirtualDampingMatrix",
-            r"\VirtualDampingAndStiffnessTwo": r"\VirtualStiffnessMatrix",
-            r"\WindingAndAmbientTemperatureTwo": r"\AmbientTemperature",
-        }
+        except Exception as exc:
+            raise RuntimeError(
+                "notation coverage cannot import mlsysim (" + type(exc).__name__ + ": " + str(exc)
+                + "). Run binder with the project virtual environment on PATH."
+            ) from exc
+        all_macros = {s.macro for s in Notation.list()}
+        # Retired names compile to their canonical macro (registry `aliases:`).
+        macro_aliases = Notation.aliases()
+        all_macros |= set(macro_aliases)
 
         issues: List[ValidationIssue] = []
         files_checked = 0
@@ -12800,17 +12781,26 @@ class ValidateCommand:
 
             not_text = not_file.read_text(encoding="utf-8")
             table_macros: Dict[str, int] = {}
+            sym_col = 0     # the column a table's header names "Symbol" (first by default)
             for lineno, line in enumerate(not_text.splitlines(), 1):
-                if line.startswith("|") and not line.startswith("|---") and not line.startswith("| Symbol"):
-                    parts = [c.strip() for c in line.strip("|").split("|")]
-                    if parts:
-                        for m in re.finditer(r"\\([A-Za-z]+)", parts[0]):
+                if not line.startswith("|"):
+                    sym_col = 0
+                    continue
+                parts = [c.strip() for c in line.strip("|").split("|")]
+                heads = [re.sub(r"[*\s]", "", c).lower() for c in parts]
+                if "symbol" in heads and not any("$" in c for c in parts):
+                    sym_col = heads.index("symbol")
+                    continue
+                if not line.startswith("|---") and not line.startswith("|:-") and not line.startswith("| Symbol"):
+                    if len(parts) > sym_col:
+                        for m in re.finditer(r"\\([A-Za-z]+)", parts[sym_col]):
                             macro_name = "\\" + m.group(1)
                             canon = macro_aliases.get(macro_name, macro_name)
                             if canon in all_macros or not all_macros:
                                 table_macros[canon] = lineno
 
             vol_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
+            chapter_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
             for qmd in sorted(v_dir.rglob("*.qmd")):
                 files_checked += 1
                 qmd_text = qmd.read_text(encoding="utf-8")
@@ -12826,12 +12816,33 @@ class ValidateCommand:
                             clean_lines.append(ln)
                     qmd_text = "\n".join(clean_lines)
 
+                in_notation = "frontmatter/notation" in str(qmd)
+                # A chapter's own symbols (front matter `notation-local: [...]`)
+                # are declared there, not in the notation table; the declaration
+                # line itself is not a use (2026-10-08).
+                local_decl = set()
+                fm_end = 0
+                if qmd_text.startswith("---"):
+                    head = qmd_text.split("\n---", 1)[0]
+                    fm_end = head.count("\n") + 2
+                    lm = re.search(r"^notation-local:\s*\[(.*?)\]\s*$", head, re.M)
+                    if lm:
+                        local_decl = {macro_aliases.get("\\" + n, "\\" + n)
+                                      for n in re.findall(r"\\?([A-Z][A-Za-z]*)", lm.group(1))}
                 for lineno, line in enumerate(qmd_text.splitlines(), 1):
+                    if lineno <= fm_end:
+                        continue
                     for m in re.finditer(r"\\([A-Za-z]+)(?![A-Za-z])", line):
                         macro_name = "\\" + m.group(1)
                         canon = macro_aliases.get(macro_name, macro_name)
+                        if canon in local_decl:
+                            continue
                         if canon in all_macros:
                             vol_usage[canon].append((qmd_rel, lineno))
+                            # A row is alive only if a chapter uses it; the notation
+                            # chapter's own notes cannot keep a row alive (2026-10-08).
+                            if not in_notation:
+                                chapter_usage[canon].append((qmd_rel, lineno))
 
             # 1. Under-coverage: Used in volume, but missing from notation table
             missing = set(vol_usage.keys()) - set(table_macros.keys())
@@ -12848,7 +12859,12 @@ class ValidateCommand:
                 ))
 
             # 2. Over-coverage: Defined in notation table, but unused in volume
-            unused = set(table_macros.keys()) - set(vol_usage.keys())
+            # 2026-10-08: a row is alive only if a chapter (not the notation chapter's own
+            # notes) uses it. Switched on per volume once its strict-notation
+            # conversion is done; until then chapters still write raw letters for
+            # rows like \Time, so the stricter test would only report noise.
+            usage_for_dead_rows = chapter_usage if vol in STRICT_CONVERTED_VOLUMES else vol_usage
+            unused = set(table_macros.keys()) - set(usage_for_dead_rows.keys()) - CORE_REQUIRED_ROWS
             for m in sorted(unused):
                 line = table_macros[m]
                 issues.append(ValidationIssue(
@@ -13155,6 +13171,102 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _notation_strict_inputs(self, root: Path):
+        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()), root / "books")
+        repo = books.parent
+        from cli.checks import notation_strict as ns
+        files = sorted(books.glob("vol*/**/*.qmd")) + sorted(books.glob("vol*/**/*_quizzes.json"))
+        files = [f for f in files if "_build" not in f.parts]
+        return repo, ns, files
+
+    def _run_notation_strict(self, root: Path) -> ValidationRunResult:
+        """Strict notation ratchet (added 2026-10-08).
+
+        Every raw symbol in math is fingerprinted (symbol + its math span). A
+        commit may remove fingerprints but never add one beyond the stored
+        baseline, so the book can only move toward full registry notation.
+        `./binder/binder notation report <file>` explains what to do.
+        """
+        t0 = time.time()
+        repo, ns, files = self._notation_strict_inputs(root)
+        reg = ns.Registry.load(repo)
+        violations = []
+        for f in files:
+            violations += ns.scan_path(f, repo, reg)
+        current = ns.baseline_of(violations)
+        base_path = repo / "binder" / "tools" / "audit" / "data" / "notation_strict_baseline.json"
+        baseline = json.loads(base_path.read_text(encoding="utf-8")) if base_path.exists() else {}
+        worse = ns.ratchet(current, baseline)
+        issues: List[ValidationIssue] = []
+        by_fp = {}
+        for v in violations:
+            by_fp.setdefault((v.file, v.fingerprint()), v)
+        for f, fps in sorted(worse.items()):
+            for fp in fps:
+                v = by_fp[(f, fp)]
+                issues.append(ValidationIssue(
+                    file=f, line=v.line, code="notation-strict-new-raw-symbol",
+                    message=(f"{v.raw} is used here but not declared for this chapter (add a row to the volume's notation chapter, or list it in the chapter's notation-local)"
+                             if v.kind == "out-of-scope" else
+                             f"{v.raw} is a retired macro name: write the canonical one"
+                             if v.kind == "alias" else
+                             f"new raw symbol {v.raw} ({v.kind}) in math: every symbol must be a registered macro"),
+                    context=v.math[:160],
+                    suggestion=("candidates: " + ", ".join("\\" + c["macro"] + " (" + c["meaning"] + ")" for c in v.suggestions[:4]))
+                               if v.suggestions else "register a symbol; see ./binder/binder notation report " + f,
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-strict",
+            description="No new raw symbols in math (ratchet against the baseline)",
+            files_checked=len(files), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
+    def _run_notation_collisions(self, root: Path) -> ValidationRunResult:
+        """One letter, one meaning per chapter (added 2026-10-08)."""
+        t0 = time.time()
+        repo, ns, files = self._notation_strict_inputs(root)
+        reg = ns.Registry.load(repo)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for f in files:
+            rel = f.relative_to(repo)
+            if len(rel.parts) < 2 or rel.parts[1] not in COLLISION_CHECKED_VOLUMES:
+                continue
+            if rel.as_posix().endswith(("frontmatter/notation.qmd", "glossary/glossary.qmd")):
+                continue        # notation chapter and glossary: independent entries, every meaning by design
+            checked += 1
+            # an appendix of derivations: each ### derivation keeps its home chapter's notation
+            level = 3 if "/backmatter/appendix_" in rel.as_posix() else 2
+            for c in ns.glyph_collisions(f.read_text(encoding="utf-8"), reg, level):
+                issues.append(ValidationIssue(
+                    file=str(rel), line=min(c["lines"]), code="notation-glyph-collision",
+                    message=f"{', '.join(chr(92) + m for m in c['macros'])} all render ${c['latex']}$ in the section "
+                            f"'{c['section'][:60]}': a reader sees one letter mean two things",
+                    suggestion="give one of them a distinguishing subscript (a new entry), or use one meaning here",
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-collisions", description="No chapter uses two symbols that render alike",
+            files_checked=checked, issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
+    def _run_notation_conventions(self, root: Path) -> ValidationRunResult:
+        """Every registry entry follows the naming and field conventions (no exemption list)."""
+        t0 = time.time()
+        repo, _, _ = self._notation_strict_inputs(root)
+        if str(repo / "mlsysim") not in sys.path:
+            sys.path.insert(0, str(repo / "mlsysim"))
+        from mlsysim.notation import Notation
+        from mlsysim.notation.types import convention_problems
+        issues: List[ValidationIssue] = []
+        for s_ in Notation.list():
+            probs = convention_problems(s_)
+            if probs:
+                issues.append(ValidationIssue(file=f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml", line=1,
+                                              code="notation-convention",
+                                              message=f"{s_.macro}: " + "; ".join(probs),
+                                              rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        return ValidationRunResult(
+            name="notation-conventions", description="Registry entries follow the naming and field conventions",
+            files_checked=len(Notation), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
+
     def _run_notation_forms(self, root: Path) -> ValidationRunResult:
         """Flag notation forms the Notation chapter rules out, inside math spans.
 
@@ -13211,67 +13323,6 @@ class ValidateCommand:
             name="notation-forms",
             description="Banned notation forms inside math (Notation chapter rules)",
             files_checked=files, issues=issues,
-            elapsed_ms=int((time.time() - t0) * 1000),
-        )
-
-    def _run_notation_vol1_pin(self, root: Path) -> ValidationRunResult:
-        """Fail when Volume I's printed notation text changes without an errata decision.
-
-        Volume I is in print with MIT Press, and its Notation chapter is assembled
-        from the series core (shared with every volume) plus the vol1 degradation
-        extension. Any edit to those files, including one made for another volume,
-        changes the printed Volume I table. This scope resolves the vol1 wrapper's
-        includes in order, strips HTML comments, normalizes whitespace, and
-        compares a SHA-256 against binder/tools/audit/data/vol1_notation_pin.json.
-        To accept an intended change, record it as an erratum and re-pin with
-        `python3 binder/tools/audit/repin_vol1_notation.py "<reason>"`.
-        Added 2026-10-01 after the vol1 notation audit.
-        """
-        import hashlib
-
-        t0 = time.time()
-        # Callers pass the repo root, books/, or books/volN; find books/ in any case.
-        books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()),
-                     root / "books")
-        repo = books.parent
-        wrapper = books / "vol1" / "frontmatter" / "notation.qmd"
-        pin_path = repo / "binder" / "tools" / "audit" / "data" / "vol1_notation_pin.json"
-        issues: List[ValidationIssue] = []
-        files = [wrapper]
-        try:
-            text = wrapper.read_text(encoding="utf-8")
-            body = re.sub(r"^---.*?---\s*", "", text, flags=re.S)
-            body = re.sub(r"^#\s+Notation[^\n]*\n", "", body)
-            assembled = re.sub(r"```\{=latex\}\s*\\part\{key:mainmatter\}\s*```", "", body, flags=re.S)
-            assembled = re.sub(r"<!--.*?-->", "", assembled, flags=re.S)
-            # Pipe-table padding and separator widths do not print.
-            assembled = re.sub(r"-{3,}", "---", assembled)
-            assembled = re.sub(r"\s+", " ", assembled).strip()
-            digest = hashlib.sha256(assembled.encode("utf-8")).hexdigest()
-            pin = json.loads(pin_path.read_text(encoding="utf-8"))
-            if digest != pin.get("sha256"):
-                issues.append(ValidationIssue(
-                    file=str(wrapper.relative_to(repo)),
-                    line=1,
-                    code="vol1-notation-pin",
-                    message=("Volume I's printed notation text changed (pinned "
-                             f"{pin.get('pinned', '?')}: {pin.get('reason', '')}). "
-                             "Edits to the series core change the printed Volume I table."),
-                    severity="error",
-                    suggestion=("If the change is an intended erratum, record it and re-pin: "
-                                "python3 binder/tools/audit/repin_vol1_notation.py \"<reason>\". "
-                                "Otherwise put the symbol in the volume's own extension."),
-                ))
-        except (OSError, ValueError) as exc:
-            issues.append(ValidationIssue(
-                file=str(pin_path.relative_to(repo)), line=1, code="vol1-notation-pin",
-                message=f"Cannot verify the Volume I notation pin: {exc}", severity="error",
-            ))
-        return ValidationRunResult(
-            name="vol1-notation-pin",
-            description="Volume I printed notation text matches its pinned hash",
-            files_checked=len(files),
-            issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 

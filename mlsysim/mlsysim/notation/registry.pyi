@@ -10,488 +10,509 @@ class NotationRegistry:
     def for_category(self, category: str) -> List[NotationSymbol]: ...
     def for_volume(self, volume: str) -> List[NotationSymbol]: ...
 
-    ABudget: NotationSymbol  # A budget ($B$) [$B$ is batch size. The trajectory budget is bold $\mathbf{B}$, and the reasoning budget is $B_{\text{reason}}$.]
-    ACommitHash: NotationSymbol  # A commit hash ($h$)
-    AFourthTaxonomyAxis: NotationSymbol  # A fourth taxonomy axis; a grant or commit ($C$) [There is no $C$ axis; closure evidence levels are named in words. Costs carry subscripts ($C_{\text{task}}$, $C_{\text{eff}}$, $C_{\max}$), and the task contract is $\mathcal{C}$.]
-    ASequenceOfSteps: NotationSymbol  # A sequence of steps ($\mathcal{T}$) [Calligraphic $\mathcal{T}$ with a subscript is a set of trajectories. Time is $T$.]
-    AWorkerOrAgentCount: NotationSymbol  # A worker or agent count ($M$)
-    AcceleratorCount: NotationSymbol  # Accelerator Count ($N_{\text{GPU}}$) [Integer]
-    AcceleratorsPerNode: NotationSymbol  # Accelerators per Node, Node Count ($G_{\text{node}}$)
-    AcceleratorsPerNodeNodes: NotationSymbol  # Accelerators per Node, Node Count ($N_{\text{nodes}}$)
-    AcceptanceFraction: NotationSymbol  # Acceptance fraction ($\alpha$)
-    AcceptanceProbability: NotationSymbol  # Acceptance probability ($p_{\text{acc}}$)
-    AcceptedInfluences: NotationSymbol  # Accepted influences ($\text{Inf}(o)$)
-    AcceptedTasks: NotationSymbol  # Accepted tasks ($N_{\text{acc}}$)
-    AccuracyAtTime: NotationSymbol  # Accuracy at Time $t$ ($\text{Accuracy}(t)$) [Scalar]
-    ActVariationalObjective: NotationSymbol  # ACT Variational Objective ($\mathcal{L}_{\text{ACT}}(\theta, \phi)$)
-    ActionChunk: NotationSymbol  # Action chunk $\mathbf{A}_t$, $\mathbf{A}_{t:t+H}$, and its denoising iterate $\mathbf{A}_t^k$ ($\mathbf{A}$)
-    ActionChunkHorizon: NotationSymbol  # Action Chunk Horizon ($H$) [Time steps]
-    ActionChunkTrajectory: NotationSymbol  # Action Chunk Trajectory ($\mathbf{A}_{t:t+H}$) [Tensor]
-    ActionDimension: NotationSymbol  # Action Dimension ($d_a$)
-    ActionExecutionRate: NotationSymbol  # Action Execution Rate ($f_{\text{exec}}$) [$\text{Hz}$]
-    ActionProposal: NotationSymbol  # Action proposal ($a_t$) [Text or tool call]
-    ActionValueOrCosttogo: NotationSymbol  # Action value or cost-to-go ($Q_t^{\pi}(s_t, a_t)$)
-    ActivationMemory: NotationSymbol  # Activation Memory ($M_{\text{activations}}$) [bytes]
-    ActuationSelectionMatrix: NotationSymbol  # Actuation Selection Matrix ($\mathbf{S}$) [Matrix]
-    ActuatorDutyCycle: NotationSymbol  # Actuator Duty Cycle ($D_{\text{cycle}}$) [$[0, 1]$]
-    ActuatorResponseTime: NotationSymbol  # Actuator Response Time ($T_{\text{act}}$) [$\text{ms}$]
-    AdjointRepresentation: NotationSymbol  # Adjoint Representation ($\mathbf{Ad}_T$) [Matrix]
-    AdminLeaseTime: NotationSymbol  # Administrative Lease Time ($T_{\text{admin}}$) [seconds]
-    Advantage: NotationSymbol  # Advantage; action sets ($A$) [Authority is written only with a level, $A_0$ to $A_3$. Advantage is $\hat{A}$; action sets are $\mathcal{A}_{\text{prop}}$ and $\mathcal{A}_{\text{perm}}$.]
-    AdversarialPerturbationBudget: NotationSymbol  # Adversarial Perturbation Budget ($\epsilon_{\text{adv}}$)
-    AgenticSystem: NotationSymbol  # Agentic system ($\mathcal{S}$) [Tuple]
-    AllowableCollisionEnergy: NotationSymbol  # Allowable Collision Energy ($E_{k, \text{allow}}$) [$\text{Joules (J)}$]
-    AmbientTemperature: NotationSymbol  # Ambient Temperature ($T_{\text{amb}}$) [degC]
-    AngularVelocityAcceleration: NotationSymbol  # Angular Velocity & Acceleration ($\boldsymbol{\omega}$)
-    ArithmeticIntensity: NotationSymbol  # Arithmetic Intensity ($I$) [FLOP/byte]
-    ArrivalRate: NotationSymbol  # Arrival Rate ($\lambda_{\text{arr}}$) [requests/s]
-    ArticulatedInertiaMatrix: NotationSymbol  # Articulated inertia matrix $\mathbf{M}(\mathbf{q}) \in \mathbb{R}^{n \times n}$ ($\mathbf{M}$) [Mass ($m, m_{\text{eff}}$), memory footprint ($M_{\text{weights}}, M_{\text{KV}}$), or fleet size ($N_{\text{fleet}}$)]
-    AttackStepsPgd: NotationSymbol  # Attack Steps ($K_{\text{PGD}}$)
-    AttainableComputeRate: NotationSymbol  # Attainable Compute Rate ($R_{\text{attain}}$) [FLOP/s]
-    AttemptCost: NotationSymbol  # Attempt cost ($C_{\text{attempt}}$) [Dollars]
-    AttentionHeadDimension: NotationSymbol  # Attention Head Dimension ($d_{\text{head}}$) [Integer. Per-head hidden dimension in attention layers.]
-    AttentionHeads: NotationSymbol  # Attention heads; hidden size ($H$) [$H$ is the horizon in turns. Heads use $N_{\text{heads}}$ and $H_{\text{KV}}$; hidden size uses $d$.]
-    AvailableObservations: NotationSymbol  # Available observations ($\mathcal{O}_{\text{avail}}$) [Specification]
-    BackemfVoltageBemf: NotationSymbol  # Back-EMF Voltage ($e_{\text{bemf}}$) [$\text{V}$]
-    Bandwidth: NotationSymbol  # Bandwidth ($\text{BW}$) [bytes/s]
-    BarrierConstraintMatrix: NotationSymbol  # Barrier Constraint Rows ($\mathbf{A}_{\text{cbf}}$)
-    BarrierConstraintVector: NotationSymbol  # Barrier Constraint Rows ($\mathbf{b}_{\text{cbf}}$)
-    BarrierRelativeDegree: NotationSymbol  # Barrier Relative Degree ($r$) [Integer]
-    BasePromptLength: NotationSymbol  # Base prompt length ($S_{\text{base}}$)
-    BatchServiceTime: NotationSymbol  # Batch Service Time ($T_{\text{svc}}(B)$) [seconds]
-    BatchSize: NotationSymbol  # Batch Size ($B$) [Bandwidth ($\text{BW}$), Body frame ($\mathcal{F}_B$), bus burst size ($B_k$), or input matrix $\mathbf{B}$]
-    BeliefInvalidationHorizon: NotationSymbol  # Belief Invalidation Horizon ($T_{\text{inv}}$)
-    BlendingTransitionWindow: NotationSymbol  # Blending Transition Window ($\tau_{\text{blend}}$) [$\text{s}$]
-    BodyReferenceFrame: NotationSymbol  # Body Reference Frame ($\mathcal{F}_B$)
-    BumplessTransferBlend: NotationSymbol  # Bumpless Transfer Blend ($\alpha(\hat{t})$) [$[0, 1]$]
-    BumplessTransferBlendingFunctionAlphaInZero: NotationSymbol  # Bumpless transfer blending function $\alpha(\hat{t}) \in [0, 1]$ ($\alpha$)
-    CallLatency: NotationSymbol  # Call latency ($T_{\text{call}}$) [Seconds]
-    CameraIntrinsicCalibrationMatrix: NotationSymbol  # Camera intrinsic calibration matrix $\mathbf{K} \in \mathbb{R}^{3 \times 3}$ ($\mathbf{K}$) [Contact stiffness ($k_{\text{contact}}$), control gains ($K_p, K_d$), motor constants ($K_t, K_e$), ensembling window $K$, or diffusion step $k$]
-    CameraframeThreedCoordinate: NotationSymbol  # Camera-Frame 3D Coordinate ($\mathbf{p}_c$)
-    CapabilityGrant: NotationSymbol  # Capability grant ($\Gamma$)
-    CartesianThreedPosition: NotationSymbol  # Cartesian 3D Position ($\mathbf{p}$)
-    CenterOfMass: NotationSymbol  # Center of Mass (CoM) ($\mathbf{c}$) [$\text{m}$]
-    CentroidalAngularMomentum: NotationSymbol  # Centroidal Angular Momentum ($\mathbf{h}_{\text{ang}} \in \mathbb{R}^3$) [$\text{kg}\cdot\text{m}^2/\text{s}$]
-    CentroidalLinearMomentum: NotationSymbol  # Centroidal Linear Momentum ($\mathbf{h}_{\text{lin}} \in \mathbb{R}^3$) [$\text{kg}\cdot\text{m/s}$]
-    CertifiedControlAction: NotationSymbol  # Certified Control Action ($\mathbf{u}^*$) [$\text{N}\cdot\text{m}$ / $\text{rad}$]
-    CheckpointIntervalCkpt: NotationSymbol  # Checkpoint Interval ($T_{\text{ckpt}}$)
-    CheckpointWriteTime: NotationSymbol  # Checkpoint Write Time ($T_{\text{write}}$) [seconds]
-    ChunkLease: NotationSymbol  # Chunk Lease ($T_{\text{lease}}$)
-    ChunkLeaseTime: NotationSymbol  # Chunk Lease Time ($T_{\text{lease}}$) [seconds]
-    ChunkRenewalPeriod: NotationSymbol  # Chunk Renewal Period ($T_{\text{chunk}}$)
-    ClassRateFunction: NotationSymbol  # Class-$\mathcal{K}$ Rate Function ($\kappa(\cdot)$)
-    ClearDistance: NotationSymbol  # Clear Distance ($D_{\text{clear}}$) [$\text{m}$]
-    ClockOffset: NotationSymbol  # Clock Offset ($\theta_{\text{offset}}$)
-    ClockSynchronizationSkew: NotationSymbol  # Clock Synchronization Skew ($\delta_{\text{skew}}$) [$\text{ppm}, \mu\text{s/s}$]
-    ClosureOperator: NotationSymbol  # Closure operator ($\mathcal{I}$) [Function]
-    CodecDecodeTime: NotationSymbol  # Codec Decode Time ($T_{\text{decode}}$) [seconds]
-    CodecEncodeTime: NotationSymbol  # Codec Encode Time ($T_{\text{encode}}$) [seconds]
-    CoefficientOfRestitution: NotationSymbol  # Coefficient of Restitution ($e$)
-    CognitivePolicyAction: NotationSymbol  # Cognitive Policy Action ($\mathbf{a}_t$) [Normalized]
-    CohensKappa: NotationSymbol  # Cohen's kappa; a coherency coefficient ($\kappa$)
-    CoherencyContentionCoefficient: NotationSymbol  # Contention and coherency coefficients ($\kappa_{\text{coh}}$)
-    CollectivePayloadSize: NotationSymbol  # Collective Payload Size ($M$) [Bytes]
-    CommandTransportTimeBus: NotationSymbol  # Command Transport Time ($T_{\text{bus}}$) [$\text{ms}$]
-    CommitmentInstant: NotationSymbol  # Commitment Instant ($t_{\text{commit}}$)
-    CommunicationIntensity: NotationSymbol  # Communication Intensity ($\text{CI}$)
-    CommunicationTime: NotationSymbol  # Communication Time ($T_{\text{comm}}(N)$) [seconds]
-    CommunicationcomputationRatio: NotationSymbol  # Communication-Computation Ratio ($\rho$) [Dimensionless]
-    CompletionCriteria: NotationSymbol  # Completion criteria ($\mathcal{K}_{\text{comp}}$) [Set of checks]
-    CompoundingCovariateDrift: NotationSymbol  # Compounding Covariate Drift ($\mathcal{O}(T^2 \epsilon)$) [Error bound]
-    CompressedCommunicationTime: NotationSymbol  # Compressed Communication Time ($T_{\text{compressed}}$) [seconds]
-    CompressionRatio: NotationSymbol  # Compression Ratio ($r_{\text{comp}}$) [Dimensionless]
-    ConcurrentTrajectories: NotationSymbol  # Concurrent trajectories, admission rate ($N_{\text{traj}}$)
-    ConcurrentTrajectoriesTwo: NotationSymbol  # Concurrent trajectories, admission rate ($\lambda_{\text{traj}}$)
-    ConditionalDistribution: NotationSymbol  # Conditional Distribution ($p(y \mid x)$) [Conditional probability/density. Use this form for generic label relationships; reserve $P_0$ and $P_t$ for the training/current distributions of drift analysis.]
-    Confidentiality: NotationSymbol  # Confidentiality ($\kappa(x)$)
-    ContactForceVectorK: NotationSymbol  # Contact Force Vector ($\mathbf{f}_k$) [$\text{N}$]
-    ContactPointJacobianK: NotationSymbol  # Contact Point Jacobian ($\mathbf{J}_k(\mathbf{q})$) [Mixed]
-    ContactStiffness: NotationSymbol  # Contact Stiffness ($k_{\text{contact}}$)
-    ContentionAndCoherencyCoefficients: NotationSymbol  # Contention and coherency coefficients ($\sigma_{\text{cont}}$)
-    Context: NotationSymbol  # Context ($c_t$) [Tokens]
-    ContextWindow: NotationSymbol  # Context window ($S_{\max}$) [Tokens]
-    ContinuationCount: NotationSymbol  # Continuation count ($K$)
-    ContinuousCurrent: NotationSymbol  # Continuous Motor Current ($I_{\text{cont}}$) [A]
-    ContinuousPeakTorque: NotationSymbol  # Continuous / Peak Torque ($\tau_{\text{peak}}$) [$\text{N}\cdot\text{m}$]
-    ControlAffineDriftField: NotationSymbol  # Control-Affine Drift and Input Fields ($\mathbf{f}(\mathbf{x})$)
-    ControlAffineInputField: NotationSymbol  # Control-Affine Drift and Input Fields ($\mathbf{g}(\mathbf{x})$)
-    ControlBarrierFunction: NotationSymbol  # Control Barrier Function (CBF) ($h(\mathbf{x})$) [Scalar]
-    ControlSetpointJerk: NotationSymbol  # Control Setpoint Jerk ($\mathbf{j}(t)$) [$\text{m/s}^3, \text{N}\cdot\text{m/s}$]
-    CoordinateReferenceFrames: NotationSymbol  # Coordinate Reference Frames ($\mathcal{F}_E$) [Reference]
-    CoriolisCentrifugalMatrix: NotationSymbol  # Coriolis / Centrifugal Matrix ($\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})$)
-    CoriolisMatrix: NotationSymbol  # Coriolis matrix $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \in \mathbb{R}^{n \times n}$ ($\mathbf{C}$) [Safe set $\mathcal{C}$, state-space output matrix $\mathbf{C}$, capacitance ($C_{\text{th}}, C_{\text{bus}}$), CoM $\mathbf{c}$, or shield coverage $c_{\text{shield}}$]
-    Correlation: NotationSymbol  # Correlation ($\rho$)
-    CostCeiling: NotationSymbol  # Cost ceiling ($C_{\max}$) [Dollars]
-    CostPerAcceptedTaskEff: NotationSymbol  # Cost per accepted task ($C_{\text{eff}}$) [Dollars/task]
-    CoulombFrictionCoefficient: NotationSymbol  # Coulomb Friction Coefficient ($\mu$) [Dimensionless]
-    CredibleBrakingDeceleration: NotationSymbol  # Credible Deceleration ($a_{\text{brake}}$) [$\text{m/s}^2$]
-    CrossoverPoint: NotationSymbol  # Crossover Point ($n^*$) [bytes]
-    CurrentDistribution: NotationSymbol  # Current Distribution ($P_t$) [Distribution]
-    CvaeRecognitionEncoder: NotationSymbol  # CVAE Recognition Encoder ($q_\phi(\mathbf{z} \mid \mathbf{o})$)
-    DataVolume: NotationSymbol  # Data Volume ($D_{\text{vol}}$) [bytes]
-    DataparallelDegreeDp: NotationSymbol  # Data-Parallel Degree ($N_{\text{DP}}$)
-    DatasetSize: NotationSymbol  # Dataset Size ($D$) [$\text{ms}$]
-    DcBusBulkCapacitance: NotationSymbol  # DC Bus Bulk Capacitance ($C_{\text{bus}}$) [$\mu\text{F}$]
-    DcBusDynamicRailDroop: NotationSymbol  # DC Bus Dynamic Rail Droop ($\Delta V_{\text{droop}}$) [$\text{V}$]
-    Deadline: NotationSymbol  # Deadline ($T_{\text{deadline}}$)
-    DecoderEvaluationCount: NotationSymbol  # Decoder Evaluation Count ($N_{\text{eval}}$)
-    DetectionInterval: NotationSymbol  # Detection Interval ($t_{\text{detect}}$)
-    DiagnosticCoverage: NotationSymbol  # Diagnostic Coverage ($C_{\text{diag}}$)
-    DifferentialPrivacyBudget: NotationSymbol  # Differential Privacy Budget ($(\epsilon, \delta)$)
-    DiffusionGaussianNoise: NotationSymbol  # Diffusion Gaussian Noise ($\boldsymbol{\epsilon}$)
-    DiffusionMatchingLoss: NotationSymbol  # Diffusion Matching Loss ($\mathcal{L}_{\text{diff}}(\theta)$) [Scalar]
-    DiffusionScheduleParameterK: NotationSymbol  # Diffusion Schedule Parameter ($\bar{\alpha}_k$) [$[0, 1]$]
-    DirectionalCosineMatrix: NotationSymbol  # Directional Cosine Matrix ($\mathbf{R}$) [Matrix]
-    DispatchtoadmissionIntervalDa: NotationSymbol  # Dispatch-to-Admission Interval ($\Delta_{\text{da}}$)
-    DistillationTemperature: NotationSymbol  # Distillation Temperature ($T_{\text{distill}}$) [Dimensionless. Softmax temperature in knowledge distillation; the one use of the $T$ root that is not a time.]
-    DistributedStepTime: NotationSymbol  # Distributed Step Time ($T_{\text{step}}(N)$) [seconds]
-    Distribution: NotationSymbol  # Distribution ($p(x)$) [Probability mass/density for a random variable. Use lowercase $p(\cdot)$ for generic distributions to avoid collision with $P$ (parameter count).]
-    DivergenceInstant: NotationSymbol  # Divergence Instant ($t_{\text{div}}$)
-    DollarCostInfer: NotationSymbol  # Dollar Cost ($C_{\text{infer}}$)
-    DollarCostTrain: NotationSymbol  # Dollar Cost ($C_{\text{train}}$)
-    DuplicateeffectProbability: NotationSymbol  # Duplicate-effect probability ($p_{\text{dup}}$)
-    EffectiveFleetThroughput: NotationSymbol  # Effective Fleet Throughput ($R_{\text{eff}}$) [FLOP/s]
-    EffectiveImpactMass: NotationSymbol  # Effective Impact Mass ($m_{\text{eff}}$) [$\text{kg}$]
-    EffectiveJointInertia: NotationSymbol  # Effective Joint Inertia ($J_{\text{eff}}$)
-    EffectiveServiceRate: NotationSymbol  # Effective Service Rate ($\mu_{\text{eff}}(B)$) [requests/s]
-    EfficiencyHw: NotationSymbol  # Efficiency ($\eta_{\text{hw}}$) [—]
-    ElectricalTimeConstant: NotationSymbol  # Electrical Time Constant ($\tau_e$)
-    ElementStorageSize: NotationSymbol  # Element Storage Size ($s_{\text{elem}}$) [bytes/element]
-    EmittedTokenCountOut: NotationSymbol  # Emitted Token Count ($S_{\text{out}}$)
-    EndToEndRequestLatency: NotationSymbol  # End-to-End Request Latency ($L_{\text{lat, total}}$) [seconds]
-    EnergyPerByteMoved: NotationSymbol  # Energy per Byte Moved ($E_{\text{move}}$) [joules/byte]
-    EnergyPerOperationCompute: NotationSymbol  # Energy per Operation ($E_{\text{compute}}$) [joules/FLOP]
-    EnforcerComputeTime: NotationSymbol  # Enforcer Compute Time ($T_{\text{comp}}$)
-    EnsemblingWindowLength: NotationSymbol  # Ensembling Window Length ($K$) [Time steps]
-    Environment: NotationSymbol  # Environment ($\mathcal{E}_{\text{env}}$) [Specification]
-    EnvironmentState: NotationSymbol  # Environment state ($s_t$)
-    EnvironmentStateK: NotationSymbol  # Environment state ($s_k$)
-    EssentialMatrix: NotationSymbol  # Essential Matrix ($\mathbf{E}$)
-    EstimatedAdvantageK: NotationSymbol  # Estimated advantage ($\hat{A}(h_k, a_k)$)
-    EstimatedValueK: NotationSymbol  # Estimated value ($\hat{V}(h_k)$) [Scalar]
-    EstimationErrorCovariance: NotationSymbol  # Estimation Error Covariance ($\mathbf{P}$) [Matrix]
-    EventProbability: NotationSymbol  # Event Probability ($\Pr(E)$) [Probability of an event $E$. Use for event statements such as $\Pr(\text{batch}=0)$; use $p(x)$ and $p(y \mid x)$ for distributions.]
-    EvidenceHorizon: NotationSymbol  # Evidence Horizon ($\tau_{\text{ev}}$)
-    EvidenceOrEventSets: NotationSymbol  # Evidence or event sets ($\mathcal{E}$)
-    Expectation: NotationSymbol  # Expectation ($\mathbb{E}[\cdot]$)
-    ExpectedCheckingTime: NotationSymbol  # Expected checking time ($T_{\text{check}}$)
-    ExpectedIrreversibleLossA: NotationSymbol  # Expected irreversible loss ($L_A$)
-    ExposureDuration: NotationSymbol  # Exposure Duration ($t_{\text{exp}}$)
-    ExternalWait: NotationSymbol  # External wait ($T_{\text{wait}}$) [Seconds]
-    FallbackHold: NotationSymbol  # Fallback Hold ($T_{\text{hold}}$)
-    FittedSensitivity: NotationSymbol  # Fitted Sensitivity ($\lambda$) [Scalar]
-    FleetEnergyProductivity: NotationSymbol  # Fleet Energy Productivity ($\rho_{\text{energy}}$)
-    ForwardinvariantSafeSet: NotationSymbol  # Forward-Invariant Safe Set ($\mathcal{C}$) [Set]
-    FreespaceDepth: NotationSymbol  # Free-Space Depth ($d_{\text{free}}$)
-    FundamentalMatrix: NotationSymbol  # Fundamental Matrix ($\mathbf{F}$)
-    GearReductionRatio: NotationSymbol  # Gear Reduction Ratio ($N_{\text{gear}}$) [Dimensionless]
-    GearboxTransmissionEfficiency: NotationSymbol  # Transmission Efficiency ($\eta_{\text{gear}}$) [Dimensionless]
-    GemmDimension: NotationSymbol  # GEMM dimension; memory root ($M_{\text{total}}$) ($M$)
-    GeneralizedAccelerations: NotationSymbol  # Generalized Accelerations ($\ddot{\mathbf{q}}$) [$\text{rad/s}^2$ or $\text{m/s}^2$]
-    GeneralizedCoordinates: NotationSymbol  # Generalized Coordinates ($\mathbf{q}$) [$\text{rad}$ or $\text{m}$]
-    GeneralizedInertiaMatrix: NotationSymbol  # Generalized Inertia Matrix ($\mathbf{M}(\mathbf{q})$) [$\text{kg}\cdot\text{m}^2$]
-    GeneralizedVelocities: NotationSymbol  # Generalized Velocities ($\dot{\mathbf{q}}$) [$\text{rad/s}$ or $\text{m/s}$]
-    Goal: NotationSymbol  # Goal ($g$)
-    GoodputRatio: NotationSymbol  # Goodput Ratio ($\eta_{\text{goodput}}$) [Dimensionless]
-    Gradient: NotationSymbol  # Gradient $\mathbf{g}$ ($g$)
-    GradientMemory: NotationSymbol  # Gradient Memory ($M_{\text{gradients}}$) [bytes]
-    GradientStaleness: NotationSymbol  # Gradient Staleness ($\tau_{\text{stale}}$)
-    GravitationalTorqueVector: NotationSymbol  # Gravitational Torque Vector ($\mathbf{g}(\mathbf{q})$) [$\text{N}\cdot\text{m}$]
-    GroupSize: NotationSymbol  # Group size ($G$)
-    HandoverTimeout: NotationSymbol  # Handover Timeout ($T_{\text{timeout}}$)
-    HardwareAndCommoncauseRateOther: NotationSymbol  # Hardware and Common-Cause Rate ($\lambda_{\text{other}}$)
-    HardwareWatchdogTimeout: NotationSymbol  # Hardware Watchdog Timeout ($t_{\text{watchdog}}$) [$\text{ms}$]
-    HazardOnset: NotationSymbol  # Hazard Onset ($t_{\text{onset}}$)
-    HazardousProposalRate: NotationSymbol  # Hazardous Proposal Rate ($\lambda_{\text{proposal}, h}$)
-    HertzianContactStiffness: NotationSymbol  # Contact Stiffness ($k_H$) [$\text{N/m}$]
-    HiddenDimension: NotationSymbol  # Hidden Dimension ($d$) [Permit]
-    HiddenDimensionFour: NotationSymbol  # Hidden dimension; time; distribution $p(\cdot)$ ($p$) [Integer]
-    HoldingTorque: NotationSymbol  # Continuous / Peak Torque ($\tau_{\text{hold}}$)
-    HomogeneousTransform: NotationSymbol  # Homogeneous Transform ($\mathbf{T}_{AB}$) [Matrix]
-    Horizon: NotationSymbol  # Horizon ($H$) [Time steps]
-    HumanWalkingSpeedBound: NotationSymbol  # Human Walking-Speed Bound ($v_h$) [$\text{m/s}$]
-    IdempotencyKey: NotationSymbol  # Idempotency key ($k_{\text{idem}}$) [String]
-    ImagePlanePixelCoordinates: NotationSymbol  # Image Plane Pixel Coordinates ($\mathbf{u}_{\text{px}}$)
-    InitialAccuracy: NotationSymbol  # Initial Accuracy ($\text{Accuracy}_0$) [Scalar]
-    InitialAndCeilingError: NotationSymbol  # Initial and Ceiling Error ($e_{\max}$)
-    InitialTrackingError: NotationSymbol  # Initial and Ceiling Error ($e_0$)
-    IntegrityProvenance: NotationSymbol  # Integrity provenance ($\iota(x)$)
-    IntentLease: NotationSymbol  # Intent Lease ($\mathcal{I}_{\text{intent}}$)
-    IntentleaseExpiryIntentexp: NotationSymbol  # Intent-Lease Expiry ($t_{\text{intent\_exp}}$)
-    InterconnectPortConflicts: NotationSymbol  # Interconnect Port Conflicts ($N_{\text{conflict}}$) [Count]
-    InterconnectTransferTimeXfer: NotationSymbol  # Interconnect Transfer Time ($t_{\text{xfer}}$) [$\text{ms}$]
-    IronLawComputeTime: NotationSymbol  # Iron-Law Term Times ($T_{\text{compute}}$) [seconds]
-    IronLawMemoryTime: NotationSymbol  # Iron-Law Term Times ($T_{\text{memory}}$)
-    IrreducibleLoss: NotationSymbol  # Irreducible Loss ($C_{\mathcal{L}}$)
-    JerkLimit: NotationSymbol  # Jerk Limit ($j_{\max}$) [$\text{m/s}^3$]
-    JouleanTemperatureRise: NotationSymbol  # Joulean Temperature Rise ($\Delta T$) [$\text{Kelvin (K)}$]
-    KalmanGain: NotationSymbol  # Kalman Gain ($\mathbf{G}_k$)
-    KineticInsetBarrierFunction: NotationSymbol  # Kinetic Inset Barrier Function ($h_{\text{kinetic}}(\mathbf{x})$) [Scalar]
-    KvBlockSizeBlk: NotationSymbol  # KV block size ($S_{\text{blk}}$)
-    KvBytesPerToken: NotationSymbol  # KV bytes per token ($m_{\text{token}}$) [Bytes/token]
-    KvPayload: NotationSymbol  # KV payload ($M_{\text{KV}}$)
-    KvcacheBytesPerToken: NotationSymbol  # KV-Cache Bytes per Token ($m_{\text{token}}$)
-    KvcacheMemory: NotationSymbol  # KV-Cache Memory ($M_{\text{KV}}$) [bytes]
-    Latency: NotationSymbol  # Latency ($L_{\text{lat}}$) [seconds]
-    LatentStyleStateEmbedding: NotationSymbol  # Latent Style / State Embedding ($\mathbf{z}$) [Dimensionless]
-    LayerIndex: NotationSymbol  # Layer Index ($\ell$) [Integer. Index for a layer. Use instead of bare $L$ when indexing layers, since $L$ collides with loss and latency. A numeric subscript marks a norm instead ($\ell_1$, $\ell_2$).]
-    LayerInputWidth: NotationSymbol  # Layer Input Width ($d_{\text{in}}$)
-    LayerOutputWidth: NotationSymbol  # Layer Output Width ($d_{\text{out}}$) [Integer. Input and output feature counts of a single layer.]
-    LearnedModelParameters: NotationSymbol  # Learned model (policy) parameters, as in $\pi_\theta$ ($\theta$)
-    LearningRate: NotationSymbol  # Learning Rate ($\eta$)
-    LieDerivativeAlongControl: NotationSymbol  # Lie Derivative along Control ($L_{\mathbf{g}} h(\mathbf{x})$) [Vector]
-    LieDerivativeAlongDrift: NotationSymbol  # Lie Derivative along Drift ($L_{\mathbf{f}} h(\mathbf{x})$) [$\text{s}^{-1}$]
-    LinearBarrierDecayRate: NotationSymbol  # Linear Barrier Decay Rate ($\gamma_{\text{cbf}}$) [$\text{s}^{-1}$]
-    LinearStatespaceMatrices: NotationSymbol  # Linear State-Space Matrices ($\mathbf{B}$) [Matrix]
-    LinearStatespaceMatricesSys: NotationSymbol  # Linear State-Space Matrices ($\mathbf{A}_{\text{sys}}$)
-    LinkBandwidth: NotationSymbol  # Link Bandwidth ($\beta$) [bytes/s]
-    LittlesLawOccupancy: NotationSymbol  # Little's law occupancy; loss; latency ($L$)
-    LoadInertia: NotationSymbol  # Load Inertia ($J_{\text{load}}$) [kg*m^2]
-    LocalizationBound: NotationSymbol  # Localization Bound ($\delta_{\text{loc}}$) [$\text{m}$]
-    LoggpLongmessageTime: NotationSymbol  # LogGP Long-Message Time ($T_{\text{long}}(n)$) [seconds]
-    LogploggpNetworkLatency: NotationSymbol  # LogP/LogGP Network Latency ($L_{\text{LogGP}}$)
-    LongmessageGapPerByte: NotationSymbol  # Long-Message Gap per Byte ($G$) [$\mathcal{G}$ is trajectory goodput. The goal is $g$ in the loop and $G$ in the task contract.]
-    Loss: NotationSymbol  # Loss ($L$) [Latency]
-    LossFunction: NotationSymbol  # Loss Function ($\mathcal{L}$) [Scalar. The objective function minimized during training.]
-    LossMaskT: NotationSymbol  # Loss mask ($m_t$) [Binary $\{0, 1\}$]
-    LossscaleFactor: NotationSymbol  # Loss-Scale Factor ($s_{\text{loss}}$) [Dimensionless]
-    LqrControlWeightMatrix: NotationSymbol  # LQR Control Weighting Matrix ($\mathbf{R}_u$)
-    LqrGainAndWeights: NotationSymbol  # LQR Gain and Weights ($\mathbf{K}_{\text{lqr}}$)
-    LqrStateWeightMatrix: NotationSymbol  # LQR State Weighting Matrix ($\mathbf{Q}_x$)
-    ManipulatorJacobian: NotationSymbol  # Manipulator Jacobian ($\mathbf{J}(\mathbf{q})$) [Mixed]
-    MaskedFinetuningLossSft: NotationSymbol  # Masked fine-tuning loss ($\mathcal{L}_{\text{SFT}}$) [Cross-entropy]
-    MeanTimeBetweenFailures: NotationSymbol  # Mean Time Between Failures ($\text{MTBF}$) [hours]
-    MeanTimeToFailure: NotationSymbol  # Mean Time To Failure ($\text{MTTF}$) [hours]
-    MeanTimeToRepair: NotationSymbol  # Mean Time To Repair ($\text{MTTR}$) [hours]
-    MeasurementMatrix: NotationSymbol  # Transition and Measurement Maps ($\mathbf{H}$)
-    MeasurementNoiseVector: NotationSymbol  # Process and Measurement Noise ($\mathbf{v}_{\text{meas}}(t)$) [Vector]
-    MechanicalPlantState: NotationSymbol  # Mechanical Plant State ($\mathbf{x}$) [$\text{rad, rad/s}$]
-    MemoryBusQueueDelay: NotationSymbol  # Memory Bus Queue Delay ($t_{\text{queue}}$) [$\text{ms}$]
-    MemoryHeldDuringAWait: NotationSymbol  # Memory held during a wait ($O_{\text{mem}}$) [Byte-seconds]
-    MessageInjectionGap: NotationSymbol  # Message Injection Gap ($g$) [$\text{failures/hour}$]
-    MicrobatchCount: NotationSymbol  # Microbatch Count ($m$) [$\text{failures/hour}$]
-    MlProductivityGoodputFactorsProgram: NotationSymbol  # ML Productivity Goodput Factors ($\eta_{\text{program}}$)
-    MlProductivityGoodputFactorsRuntime: NotationSymbol  # ML Productivity Goodput Factors ($\eta_{\text{runtime}}$)
-    MlProductivityGoodputFactorsScheduling: NotationSymbol  # ML Productivity Goodput Factors ($\eta_{\text{scheduling}}$)
-    ModelFlopsUtilization: NotationSymbol  # Model FLOPs Utilization ($\text{MFU}$) [Dimensionless]
-    ModelParameterCount: NotationSymbol  # Model parameter count $P$ (series core) ($P$)
-    ModelParameters: NotationSymbol  # Model Parameters ($\theta$) [$\text{K/W}$]
-    ModelTime: NotationSymbol  # Model time ($T_{\text{model}}$) [Seconds]
-    MotorBackEmfConstant: NotationSymbol  # Motor Back-EMF Constant ($K_e$) [V/(rad/s)]
-    MotorPhaseRmsCurrent: NotationSymbol  # Motor Phase RMS Current ($I_{\text{phase}}$) [$\text{Amperes (A)}$]
-    MotorTorqueConstant: NotationSymbol  # Motor Torque Constant ($K_t$) [N*m/A]
-    MultimodalFusedTokenStream: NotationSymbol  # Multimodal Fused Token Stream ($\mathbf{Z}$) [Tensor]
-    MultimodalObservation: NotationSymbol  # Multimodal Observation ($\mathbf{o}_t$) [Mixed]
-    NdeviceTime: NotationSymbol  # N-Device Time ($T_N$) [seconds]
-    NetBrakingDeceleration: NotationSymbol  # Net Braking Deceleration ($a_{\text{net}}$)
-    NetPhaseMargin: NotationSymbol  # Net Phase Margin ($\text{PM}_{\text{net}}$) [$\text{deg}$]
-    NoisePredictionNetwork: NotationSymbol  # Noise Prediction Network ($\boldsymbol{\epsilon}_\theta(\mathbf{o}_t, \mathbf{A}_t^k, k)$)
-    NoisePredictionNetworkTwo: NotationSymbol  # Noise Prediction Network ($\mathbf{A}^k$)
-    NominalControlCommand: NotationSymbol  # Nominal Control Command ($\mathbf{u}_{\text{nom}}$) [$\text{N}\cdot\text{m}$ / $\text{rad}$]
-    NonmaskableInterruptTimeNmi: NotationSymbol  # Non-Maskable Interrupt Time ($t_{\text{NMI}}$) [$\mu\text{s}$]
-    NormalContactForce: NotationSymbol  # Normal Contact Force ($f_{k, \perp}$) [$\text{N}$]
-    NumberOfAttentionHeads: NotationSymbol  # Number of Attention Heads ($N_{\text{heads}}$) [Integer. Number of attention heads in a multi-head attention layer.]
-    NumberOfDevices: NotationSymbol  # Number of Devices ($N$) [Count]
-    NumberOfKeyValueHeads: NotationSymbol  # Number of Key-Value Heads ($H_{\text{KV}}$) [Integer. Number of key-value heads in grouped-query or multi-query attention.]
-    NumberOfLayers: NotationSymbol  # Number of Layers ($N_L$) [Integer. Total number of layers in a network.]
-    ObservabilityMatrices: NotationSymbol  # Observability Matrices ($\mathbf{O}_{\text{obs}}$)
-    ObservabilityMatricesNl: NotationSymbol  # Observability Matrices ($\mathbf{O}_{\text{NL}}$) [Matrix]
-    Observation: NotationSymbol  # Observation ($o_t$) [Typed result]
-    ObservationAge: NotationSymbol  # Observation Age ($t_{\text{age}}$) [$\text{ms}$]
-    OpenloopCrossoverFrequency: NotationSymbol  # Open-Loop Crossover Frequency ($\omega_c$) [$\text{rad/s}$]
-    OperationalOverheadFraction: NotationSymbol  # Operational Overhead Fraction ($f_{\text{overhead}}$) [Dimensionless]
-    Operations: NotationSymbol  # Operations ($O$) [FLOPs]
-    OptimalCheckpointInterval: NotationSymbol  # Optimal Checkpoint Interval ($T^\ast_{\text{ckpt}}$) [seconds]
-    OptimalCheckpointIntervalCkpt: NotationSymbol  # Optimal Checkpoint Interval ($T^\ast_{\text{ckpt}}$) [seconds]
-    OptimalInertiamatchingRatio: NotationSymbol  # Optimal Inertia-Matching Ratio ($N^*$) [Dimensionless]
-    OptimizerstateMemory: NotationSymbol  # Optimizer-State Memory ($M_{\text{optimizer}}$) [bytes]
-    OutputLength: NotationSymbol  # Output length ($K$) [Tokens]
-    OutputLimit: NotationSymbol  # Output limit ($K_{\max}$) [Tokens]
-    OverlappedTime: NotationSymbol  # Overlapped Time ($T_{\text{overlap}}$) [seconds]
-    ParallelFraction: NotationSymbol  # Parallel fraction ($f_{\text{parallel}}$)
-    ParameterStreamingTime: NotationSymbol  # Parameter Streaming Time ($t_{\text{stream}}$) [$\text{ms}$]
-    ParameterizedNeuralPolicy: NotationSymbol  # Parameterized Neural Policy ($\pi_\theta(\mathbf{a} \mid \mathbf{o})$) [Distribution]
-    Parameters: NotationSymbol  # Parameters ($P$) [Power ($P_{\text{elec}}, P_{\text{cont}}$), Riccati error covariance $\mathbf{P}(t)$, failure rate $p_{\text{fail}}$, or 3D point $\mathbf{p}$]
-    PeakCurrent: NotationSymbol  # Peak Motor Current ($I_{\text{peak}}$) [A]
-    PeakInternodePhaseJitter: NotationSymbol  # Peak Inter-Node Phase Jitter ($\Delta t_{\text{peak}}$) [$\mu\text{s}$]
-    PeakRate: NotationSymbol  # Peak Rate ($R_{\text{peak}}$) [FLOP/s]
-    PerceptionDepthCovariance: NotationSymbol  # Perception Depth Covariance ($\boldsymbol{\Sigma}_{\text{depth}}$) [$\text{m}^2$]
-    PercomponentFailureRate: NotationSymbol  # Per-Component Failure Rate ($\lambda$) [failures/hour]
-    PermessageLatency: NotationSymbol  # Per-Message Latency ($\alpha$) [CBF decay ($\gamma_{\text{cbf}}$), significance ($\alpha_{\text{sig}}$), angular acceleration ($\boldsymbol{\alpha}$), copper tempco ($\alpha_{\text{Cu}}$), or noise schedule ($\bar{\alpha}_k$)]
-    PermissionloopPeriodTick: NotationSymbol  # Permission-Loop Period ($T_{\text{tick}}$) [$\text{ms}$]
-    PermittedActions: NotationSymbol  # Permitted actions ($\mathcal{A}_{\text{perm}}$) [Set]
-    PertokenDecodeTime: NotationSymbol  # Per-token decode time ($t_{\text{decode}}$) [Seconds]
-    PertokenPricesCache: NotationSymbol  # Per-token prices ($c_{\text{cache}}$)
-    PertokenPricesIn: NotationSymbol  # Per-token prices ($c_{\text{in}}$)
-    PertokenPricesOut: NotationSymbol  # Per-token prices ($c_{\text{out}}$)
-    PertrialProbabilitiesFail: NotationSymbol  # Per-Trial Probabilities ($p_{\text{fail}}$)
-    PertrialProbabilitiesTarget: NotationSymbol  # Per-Trial Probabilities ($p_{\text{target}}$)
-    PerturnAppend: NotationSymbol  # Per-turn append ($\Delta S_{\text{turn}}$)
-    PhaseInductance: NotationSymbol  # Motor Phase Inductance ($L_{\text{phase}}$) [H]
-    PhaseLagDegradation: NotationSymbol  # Phase Lag Degradation ($\Delta \phi$) [$\text{rad}$ / $\text{deg}$]
-    PhaseResistance: NotationSymbol  # Motor Phase Resistance ($R_{\text{phase}}$) [Ohm]
-    PhysicalWorldState: NotationSymbol  # Physical World State ($s_t$) [Mixed]
-    PidDerivativeGain: NotationSymbol  # Derivative Gain ($K_d$)
-    PidIntegralGain: NotationSymbol  # Integral Gain ($K_i$) [Mixed]
-    PidProportionalGain: NotationSymbol  # Proportional Gain ($K_p$)
-    PinholeCameraIntrinsics: NotationSymbol  # Pinhole Camera Intrinsics ($\mathbf{K}$) [Pixels]
-    PipelineBubbleFraction: NotationSymbol  # Pipeline Bubble Fraction ($b_{\text{pipe}}$) [Dimensionless]
-    PipelineparallelDegreePp: NotationSymbol  # Pipeline-Parallel Degree ($N_{\text{PP}}$)
-    PointToPointMessageSize: NotationSymbol  # Point-to-Point Message Size ($n$) [$\text{m}$]
-    PointToPointTransferTime: NotationSymbol  # Point-to-Point Transfer Time ($T(n)$)
-    Policy: NotationSymbol  # Policy ($\pi_\theta$) [Distribution]
-    PositionalTaskTolerance: NotationSymbol  # Positional Task Tolerance ($r_{\text{tol}}$)
-    PowerRailInductance: NotationSymbol  # Power Rail Inductance / ESR ($L_{\text{bus}}$)
-    PowerRailResistance: NotationSymbol  # Power Rail Inductance / ESR ($R_{\text{bus}}$) [$\mu\text{H}, \text{m}\Omega$]
-    PrebrakeDelay: NotationSymbol  # Pre-Brake Delay ($\tau_{\text{delay}}$)
-    PredictedOutput: NotationSymbol  # Predicted Output ($\hat{\mathbf{y}}$) [Vector. A model's output for one example, such as class probabilities; $\mathbf{y}$ is the label vector.]
-    ProcessNoiseVector: NotationSymbol  # Process and Measurement Noise ($\mathbf{w}(t)$)
-    ProfileAccelerationBound: NotationSymbol  # Profile Acceleration Bound ($a_{\max}$)
-    PromptLength: NotationSymbol  # Prompt length; precision; a predicate; a count ($P$)
-    PromptTokensSent: NotationSymbol  # Prompt tokens sent ($S_{\text{sent}}$)
-    Proposed: NotationSymbol  # Proposed, permitted action ($a_{\text{prop}}$)
-    ProposedPerm: NotationSymbol  # Proposed, permitted action ($a_{\text{perm}}$) [Tool call]
-    ProposerInferenceTime: NotationSymbol  # Proposer Inference Time ($t_{\text{infer}}$) [$\text{ms}$]
-    ProtectiveClearanceMargin: NotationSymbol  # Protective Clearance ($\delta_{\text{margin}}$) [$\text{m}$]
-    PureTransportDelay: NotationSymbol  # Pure Transport Delay ($T_d$)
-    ReasoningBudget: NotationSymbol  # Reasoning budget ($B_{\text{reason}}$) [Tokens]
-    ReceiverOverheadRecv: NotationSymbol  # Receiver Overhead ($o_{\text{recv}}$) [seconds]
-    ReducedImpactMass: NotationSymbol  # Reduced Impact Mass ($m_{\text{red}}$)
-    ReflectedRotorInertia: NotationSymbol  # Reflected Rotor Inertia ($J_{\text{ref}}$) [$\text{kg}\cdot\text{m}^2$]
-    RegularizationWeight: NotationSymbol  # Regularization weight ($\lambda$)
-    ReliabilityFunctionSystem: NotationSymbol  # Reliability Function ($R_{\text{system}}(t)$) [Probability]
-    RenewaljitterAllowance: NotationSymbol  # Renewal-Jitter Allowance ($T_{\text{jitter}}$)
-    RepairCap: NotationSymbol  # Repair cap ($K_{\text{repair}}$) [Count]
-    RequestAndReplylossProbabilities: NotationSymbol  # Request- and reply-loss probabilities ($q_{\text{req}}$)
-    RequestAndReplylossProbabilitiesTwo: NotationSymbol  # Request- and reply-loss probabilities ($q_{\text{rep}}$)
-    RequestConcurrency: NotationSymbol  # Request Concurrency ($Q_{\text{req}}$) [requests]
-    RequestTimeInSystem: NotationSymbol  # Request Time in System ($T_{\text{lat}}$) [seconds]
-    ResidentStopDistanceSuffix: NotationSymbol  # Resident Stop Distance ($d_{\text{suffix}}(v)$)
-    ResponseThreshold: NotationSymbol  # Response Threshold ($\tau$) [Bare $\tau$ is a trajectory. Sampling temperature is named in words or written $\tau_{\text{temp}}$.]
-    RigidtransformTranslation: NotationSymbol  # Rigid-Transform Translation ($\mathbf{t}$)
-    RingAllReduceCompletionTime: NotationSymbol  # Collective Completion Time ($T_{\text{ring}}$)
-    RingtreeCrossoverPayload: NotationSymbol  # Ring-Tree Crossover Payload ($M_{\text{crossover}}$)
-    RollingShutterDistortion: NotationSymbol  # Rolling Shutter Distortion ($\Delta \mathbf{x}(y)$) [$\text{m}$]
-    RollingShutterRowReadout: NotationSymbol  # Rolling Shutter Row Readout ($t_{\text{row}}$) [$\mu\text{s}$]
-    RooflineRidgePoint: NotationSymbol  # Roofline Ridge Point ($I_{\text{ridge}}$) [FLOP/byte]
-    RotorInertia: NotationSymbol  # Motor Rotor Inertia ($J_{\text{rotor}}$) [kg*m^2]
-    RuntimeTime: NotationSymbol  # Runtime time ($T_{\text{runtime}}$) [Seconds]
-    SafetyBoundaryManifold: NotationSymbol  # Safety Boundary Manifold ($\partial \mathcal{C}$) [Boundary]
-    SampleStorageSize: NotationSymbol  # Sample Storage Size ($s_{\text{sample}}$) [bytes/sample]
-    SamplingPeriod: NotationSymbol  # Sampling Period ($T_s$) [s]
-    SamplingRate: NotationSymbol  # Sampling Frequency / Rate ($f_s$) [Hz]
-    ScaleCoefficient: NotationSymbol  # Scale Coefficient ($A_{\mathcal{L}}$)
-    ScaledResource: NotationSymbol  # Scaled Resource ($X$)
-    ScalingEfficiency: NotationSymbol  # Scaling Efficiency ($\eta_{\text{scaling}}$) [Dimensionless]
-    ScalingExponent: NotationSymbol  # Scaling Exponent ($\alpha_{\text{scale}}$)
-    SenderOverhead: NotationSymbol  # Sender Overhead ($o_{\text{send}}$) [seconds]
-    SensorIntegrationTimeSense: NotationSymbol  # Sensor Integration Time ($t_{\text{sense}}$) [$\text{ms}$]
-    SensorLeverarmVector: NotationSymbol  # Sensor Lever-Arm Vector ($\mathbf{r}_{P/O}$) [$\text{m}$]
-    SeqlockRetryProbability: NotationSymbol  # Seqlock Retry Probability ($p_{\text{retry}}$) [Ratio]
-    SeqlockVulnerableInterval: NotationSymbol  # Seqlock Vulnerable Interval ($t_{\text{vulnerable}}$) [$\mu\text{s}$]
-    SequenceLength: NotationSymbol  # Sequence Length ($S$)
-    SequentialLoglikelihoodRatioM: NotationSymbol  # Sequential Log-Likelihood Ratio ($\Lambda_m$)
-    ServingUtilization: NotationSymbol  # Serving Utilization ($\rho_{\text{serv}}$) [Dimensionless]
-    ShieldInterceptionCoverage: NotationSymbol  # Shield Interception Coverage ($c_h$)
-    SignificanceLevel: NotationSymbol  # Significance Level ($\alpha$)
-    SingleDeviceComputeTime: NotationSymbol  # Single-Device Compute Time ($T_{\text{compute}}$) [seconds]
-    SingledeviceTimeOne: NotationSymbol  # Single-Device Time ($T_1$) [seconds]
-    SinglestepImitationError: NotationSymbol  # Single-Step Imitation Error ($\epsilon$) [$[0, 1]$]
-    SmallConstant: NotationSymbol  # Small Constant ($\epsilon$)
-    SpecialEuclideanGroup: NotationSymbol  # Special Euclidean Group ($SE(3)$) [Lie Group]
-    SpecialOrthogonalGroup: NotationSymbol  # Special Orthogonal Group ($SO(3)$) [Lie Group]
-    SpeedAtDetection: NotationSymbol  # Speed at Detection ($v$) [$\text{m/s}$]
-    SpeedBound: NotationSymbol  # Speed Bound ($v_{\max}$)
-    SprtLowerBoundary: NotationSymbol  # SPRT Lower Decision Boundary ($\Lambda_{\text{lo}}$)
-    SprtUpperBoundary: NotationSymbol  # SPRT Upper Decision Boundary ($\Lambda_{\text{up}}$)
-    StalesupportRate: NotationSymbol  # Stale-support rate ($\epsilon_{\text{stale}}$)
-    StateAtTurn: NotationSymbol  # State at turn $t$ ($s_t$) [Record]
-    StateDistribution: NotationSymbol  # State distribution ($d_\pi$)
-    StateTransitionMatrix: NotationSymbol  # Transition and Measurement Maps ($\mathbf{F}$)
-    StatisticalDivergence: NotationSymbol  # Statistical Divergence ($\mathcal{D}(P_t \| P_0)$) [Scalar $\ge 0$]
-    StatisticalSignificanceLevel: NotationSymbol  # Statistical Significance Level ($\alpha_{\text{sig}}$) [Dimensionless]
-    StatorThermalCapacitance: NotationSymbol  # Stator Thermal Capacitance ($C_{\text{th}}$) [$\text{J/K}$]
-    StoppingDistance: NotationSymbol  # Stopping Distance ($d_{\text{stop}}$) [$\text{m}$]
-    SustainedMemoryBandwidth: NotationSymbol  # Sustained Memory Bandwidth ($\text{BW}_{\text{mem}}$) [bytes/s]
-    SynchronizationBlackout: NotationSymbol  # Synchronization Blackout ($T_{\text{blackout}}$)
-    SynchronizationTime: NotationSymbol  # Synchronization Time ($T_{\text{sync}}(N)$) [seconds]
-    SystemHazardRate: NotationSymbol  # System Hazard Rate ($\lambda_{\text{system}, h}$)
-    TakeoverResponseTime: NotationSymbol  # Takeover Response Time ($T_{\Sigma, 1}$)
-    TangentialContactShear: NotationSymbol  # Tangential Contact Shear ($\mathbf{f}_{k, \parallel}$) [$\text{N}$]
-    TargetHazardRate: NotationSymbol  # Target Hazard Rate ($\lambda_{\text{target}}$)
-    TaskContract: NotationSymbol  # Task contract ($\mathcal{C}$) [Tuple]
-    TaskCost: NotationSymbol  # Task cost ($C_{\text{task}}$)
-    TaskDeadline: NotationSymbol  # Deadline ($T_{\text{deadline}}$) [Seconds]
-    TasksPerComparisonArm: NotationSymbol  # Tasks per comparison arm ($N_{\text{arm}}$)
-    TelemetryFreshnessBound: NotationSymbol  # Telemetry Freshness Bound ($\Delta t_{\text{fresh}}$)
-    Temperature: NotationSymbol  # Temperature; a threshold; an interval ($\tau$)
-    TemperatureOrThreshold: NotationSymbol  # Temperature or threshold ($\tau$)
-    TemperaturedependentResistanceWind: NotationSymbol  # Temperature-Dependent Resistance ($R(T_{\text{wind}})$) [$\Omega$]
-    TemporalEnsemblingWeight: NotationSymbol  # Temporal Ensembling Weight ($w_i$) [Scalar]
-    TensorparallelDegreeTp: NotationSymbol  # Tensor-Parallel Degree ($N_{\text{TP}}$)
-    TestErrorRates: NotationSymbol  # Test error rates; bandwidth; regularization weights ($\alpha$)
-    TheGoal: NotationSymbol  # The goal; a graph ($\mathcal{G}$)
-    TheStateExposure: NotationSymbol  # The State exposure ($S$) [Bare $S$ is sequence length. State is written only with a level, $S_0$ to $S_3$.]
-    ThermalResistance: NotationSymbol  # Thermal Resistance ($R_{\text{th}}$)
-    ThermalTimeConstant: NotationSymbol  # Thermal Time Constant ($\tau_{\text{th}}$) [$\text{s}$]
-    Time: NotationSymbol  # Time ($T$) [s]
-    TimingJitter: NotationSymbol  # Timing Jitter ($\sigma_{\text{jitter}}$)
-    TokenIndex: NotationSymbol  # Token index ($t$)
-    ToolTime: NotationSymbol  # Tool time ($T_{\text{tool}}$) [Seconds]
-    Top: NotationSymbol  # Top-$K$, key matrix $\mathbf{K}$ ($K$)
-    TorqueproducingCurrent: NotationSymbol  # Torque-Producing Current ($i_q$)
-    TotalEnergy: NotationSymbol  # Total Energy ($E_{\text{total}}$) [joules]
-    TotalMemoryFootprint: NotationSymbol  # Total Memory Footprint ($M_{\text{total}}$) [bytes]
-    TraceDecay: NotationSymbol  # Trace decay ($\lambda$)
-    TrackingerrorBound: NotationSymbol  # Tracking-Error Bound ($\epsilon_{\text{track}}$) [$\text{m}$]
-    TrainingCompute: NotationSymbol  # Training Compute ($O_{\text{train}}$)
-    TrainingDistribution: NotationSymbol  # Training Distribution ($P_0$) [Distribution]
-    Trajectory: NotationSymbol  # Trajectory ($\tau$) [Tuple]
-    TrajectoryBudget: NotationSymbol  # Trajectory budget ($\mathbf{B}$) [Vector]
-    TrajectoryDuration: NotationSymbol  # Trajectory duration ($T_{\text{traj}}$) [Seconds]
-    TrajectoryGoodput: NotationSymbol  # Trajectory goodput ($\mathcal{G}$) [Fraction $[0, 1]$]
-    TrajectoryReward: NotationSymbol  # Trajectory reward ($R(\tau)$) [Scalar]
-    TrajectorySetsAll: NotationSymbol  # Trajectory sets ($\mathcal{T}_{\text{all}}$)
-    TrajectorySetsSuccess: NotationSymbol  # Trajectory sets ($\mathcal{T}_{\text{success}}$) [Set]
-    TransferTimeForPayload: NotationSymbol  # Transfer Time for Payload $x$ ($T_{\text{transfer}}(x)$) [seconds]
-    TransformerKvcacheFootprint: NotationSymbol  # Transformer KV-Cache Footprint ($M_{\text{KV}}$) [bytes]
-    TreeAllReduceCompletionTime: NotationSymbol  # Collective Completion Time ($T_{\text{tree}}$)
-    TrichotomyMonitorState: NotationSymbol  # Trichotomy Monitor State ($\mathcal{T}_{\text{trichotomy}}$) [Enum]
-    TruncatedSignedDistance: NotationSymbol  # Truncated Signed Distance ($\text{tsdf}(\mathbf{p}_{\text{vox}})$) [$[-1, +1]$]
-    TsdfAccumulatedDistance: NotationSymbol  # TSDF Accumulated Volume ($D_t(\mathbf{p}_{\text{vox}})$)
-    TsdfAccumulatedWeight: NotationSymbol  # TSDF Accumulated Volume ($W_t(\mathbf{p}_{\text{vox}})$) [Mixed]
-    TsdfTruncationBand: NotationSymbol  # TSDF Truncation Band ($\mu_{\text{tsdf}}$) [$\text{m}$]
-    TurnIndex: NotationSymbol  # Turn index ($t$) [Integer]
-    TypeIAndTypeIiErrorRatesSig: NotationSymbol  # Type I and Type II Error Rates ($\alpha_{\text{sig}}$)
-    TypeIAndTypeIiErrorRatesStat: NotationSymbol  # Type I and Type II Error Rates ($\beta_{\text{stat}}$)
-    TypeIiErrorAllowance: NotationSymbol  # Type II Error Allowance ($\beta$)
-    UnbrakedImpactForce: NotationSymbol  # Unbraked Impact Force ($F_{\text{unbraked}}$) [$\text{N}$]
-    UnitQuaternion: NotationSymbol  # Unit Quaternion ($\mathbf{q}_{\text{quat}}$) [Dimensionless]
-    UsefulComputetimeFraction: NotationSymbol  # Useful Compute-Time Fraction ($f_{\text{compute}}$) [Dimensionless]
-    UsefulModelFlops: NotationSymbol  # Useful Model FLOPs ($O_{\text{useful}}$)
-    Utilization: NotationSymbol  # Utilization; a recoverable fraction ($\rho$)
-    ValidityIntervalOfAMemoryEntryBirth: NotationSymbol  # Validity interval of a memory entry ($g_{\text{birth}}(c)$)
-    ValidityIntervalOfAMemoryEntryDeath: NotationSymbol  # Validity interval of a memory entry ($g_{\text{death}}(c)$)
-    ValidityIntervalOfAMemoryEntryQ: NotationSymbol  # Validity interval of a memory entry ($g_q$)
-    Var: NotationSymbol  # (none) ($N$)
-    Velocity: NotationSymbol  # Velocity ($\mathbf{v}$, end-effector velocity $\mathbf{v}_e$) ($\mathbf{v}$)
-    VerificationEvidence: NotationSymbol  # Verification evidence ($v_t$) [Pass/fail or score]
-    VerifierFalseacceptance: NotationSymbol  # Verifier false-acceptance, false-rejection rates ($\epsilon_{\text{FA}}$)
-    VerifierFalseacceptanceFr: NotationSymbol  # Verifier false-acceptance, false-rejection rates ($\epsilon_{\text{FR}}$)
-    VirtualDampingMatrix: NotationSymbol  # Virtual Damping and Stiffness ($\mathbf{D}_{\text{virt}}$)
-    VirtualPipelineStagesPerDevice: NotationSymbol  # Virtual Pipeline Stages per Device ($V$) [Integer]
-    VirtualStiffnessMatrix: NotationSymbol  # Virtual Damping and Stiffness ($\mathbf{K}_{\text{virt}}$) [Matrix]
-    VitPatchProjectionWeights: NotationSymbol  # ViT Projection & Positional Bias ($\mathbf{W}_{\text{patch}}$)
-    VitProjectionPositionalBias: NotationSymbol  # ViT Projection & Positional Bias ($\mathbf{E}_{\text{pos}}$) [Matrix]
-    Vocabulary: NotationSymbol  # Vocabulary ($\mathcal{V}$)
-    WeightMemory: NotationSymbol  # Weight Memory ($M_{\text{weights}}$) [bytes]
-    WindingTemperature: NotationSymbol  # Motor Winding Temperature ($T_{\text{winding}}$) [degC]
-    WorkerCountWorkers: NotationSymbol  # Worker count ($N_{\text{workers}}$)
-    WorldReferenceFrame: NotationSymbol  # World Reference Frame ($\mathcal{F}_W$)
-    YoshikawaManipulability: NotationSymbol  # Yoshikawa Manipulability ($w(\mathbf{q})$) [Dimensionless]
-    ZeroMomentPointZmp: NotationSymbol  # Zero Moment Point (ZMP) ($\mathbf{p}_{\text{ZMP}}$) [$\text{m}$]
-    ZerofailureTrialCount: NotationSymbol  # Zero-Failure Trial Count ($n$)
-    ZohTransportDelay: NotationSymbol  # ZOH Transport Delay ($\tau_{\text{ZOH}}$) [$\text{s}$]
+    AcceleratorCount: NotationSymbol  # number of accelerators one job runs on ($N_{\text{GPU}}$)
+    AcceleratorsPerNode: NotationSymbol  # number of accelerators in one node ($G_{\text{node}}$)
+    AcceptanceFraction: NotationSymbol  # share of a settled cohort of initiated tasks that ends accepted ($\alpha$) [dimensionless]
+    AcceptanceProbability: NotationSymbol  # probability that one attempt at a task is accepted, across a workload ($p_{\text{acc}}$) [dimensionless]
+    AcceptedInfluences: NotationSymbol  # set of sources a task policy accepts as influences on one operation ($\text{Inf}(o)$)
+    AcceptedTasks: NotationSymbol  # number of distinct tasks in a cohort accepted under the declared contract ($N_{\text{acc}}$)
+    AccuracyAtTime: NotationSymbol  # model accuracy after the model has been in service for time t since deployment or its last retraining ($\text{Accuracy}(t)$) [dimensionless]
+    ActVariationalObjective: NotationSymbol  # training objective of Action Chunking with Transformers: chunk reconstruction error plus a weighted KL penalty on the latent style variable ($\mathcal{L}_{\text{ACT}}(\theta, \phi)$)
+    ActionChunk: NotationSymbol  # sequence of future actions a policy predicts in one pass, one row per control step ($\mathbf{A}$)
+    ActionChunkHorizon: NotationSymbol  # number of future action steps a policy emits in one forward pass ($H$)
+    ActionChunkTrajectory: NotationSymbol  # action chunk written with its time window, the actions from step t up to the horizon ($\mathbf{A}_{t:t+H}$)
+    ActionDimension: NotationSymbol  # number of components in one action vector ($d_a$)
+    ActionExecutionRate: NotationSymbol  # rate at which the controller consumes the waypoints of an admitted action chunk ($f_{\text{exec}}$) [Hz]
+    ActionObservation: NotationSymbol  # result an action returned, such as an exit code, captured output, a response body, or a status ($o_t$)
+    ActionProposal: NotationSymbol  # action the model proposes on one turn, as text or a tool call ($a_t$)
+    ActivationMemory: NotationSymbol  # memory holding the intermediate activations a model keeps for the backward pass or between serving stages ($M_{\text{activations}}$) [bytes]
+    ActuationSelectionMatrix: NotationSymbol  # matrix that maps actuator torques onto the actuated joints of a floating-base robot, leaving the six base coordinates unactuated ($\mathbf{S}$) [dimensionless]
+    ActuatorDutyCycle: NotationSymbol  # fraction of each burst cycle an actuator spends at peak power, on-time divided by cycle period ($D_{\text{cycle}}$) [dimensionless]
+    ActuatorResponseTime: NotationSymbol  # time from a delivered stop command until the actuator produces retarding force, including gate drive and current rise ($T_{\text{act}}$) [s]
+    AdjointRepresentation: NotationSymbol  # six-by-six matrix that carries twists and wrenches from one coordinate frame to another under a rigid transform ($\mathbf{Ad}_T$)
+    AdminLeaseTime: NotationSymbol  # duration of the administrative lease a consensus protocol grants before it must be renewed ($T_{\text{admin}}$) [s]
+    AdmittedAction: NotationSymbol  # action the runtime permits after checking a proposal ($a_{\text{perm}}$)
+    Advantage: NotationSymbol  # estimate of how much better an action does than the policy's average from the same state ($A$) [dimensionless]
+    AdversarialPerturbationBudget: NotationSymbol  # largest norm an adversary may give the perturbation it adds to an input ($\epsilon_{\text{adv}}$) [dimensionless]
+    AgenticSystem: NotationSymbol  # policy together with its runtime harness, environment, memory, and verifiers ($\mathcal{S}$)
+    AllRunsPassProbability: NotationSymbol  # probability that all k runs of a task pass, averaged over tasks ($\text{pass}^k$) [dimensionless]
+    AllowableCollisionEnergy: NotationSymbol  # largest kinetic energy a robot may transfer to a person in transient collaborative contact, as set by the safety standard ($E_{k, \text{allow}}$) [J]
+    AmbientTemperature: NotationSymbol  # temperature of the air around a motor, the reference for its winding temperature rise ($T_{\text{amb}}$) [degC]
+    ArithmeticIntensity: NotationSymbol  # operations a workload performs per byte it moves through memory ($I$) [FLOP/byte]
+    ArrivalRate: NotationSymbol  # average number of requests or jobs arriving per second ($\lambda_{\text{arr}}$) [arrivals/s]
+    ArticulatedInertiaMatrix: NotationSymbol  # joint-space mass matrix of an articulated robot, mapping joint accelerations to the joint torques they require ($\mathbf{M}$) [kg*m^2]
+    AssuranceClaim: NotationSymbol  # top-level safety claim of an assurance argument, whose probability of holding is assessed from its premises ($C$) [dimensionless]
+    AttackStepsPgd: NotationSymbol  # number of inner gradient steps a projected gradient descent attack takes to build one adversarial example ($K_{\text{PGD}}$)
+    AttainableComputeRate: NotationSymbol  # highest operation rate a workload can sustain on given hardware, capped by peak compute or by memory bandwidth times arithmetic intensity ($R_{\text{attain}}$) [FLOP/s]
+    AttemptCost: NotationSymbol  # full monetary cost of one attempt at a task ($C_{\text{attempt}}$) [USD]
+    AttemptPassProbability: NotationSymbol  # probability that one independent attempt on a given task passes its check ($p$) [dimensionless]
+    AttentionHeadCount: NotationSymbol  # number of attention heads in one multi-head attention layer ($N_{\text{heads}}$)
+    AttentionHeadDimension: NotationSymbol  # width of the query, key and value vectors in one attention head ($d_{\text{head}}$)
+    AuthorityExposureLevel: NotationSymbol  # authority exposure level, what a task may do through its tools, from read access to irreversible external action ($A_0\text{ to }A_3$) [level]
+    AvailableObservations: NotationSymbol  # specification of what the agent may see and how much, including truncation and redaction rules ($\mathcal{O}_{\text{avail}}$)
+    BackEmfVoltage: NotationSymbol  # voltage the turning rotor induces in the stator windings, opposing the supply ($e_{\text{bemf}}$) [V]
+    Bandwidth: NotationSymbol  # sustained rate at which bytes move across a memory or data path ($\text{BW}$) [bytes/s]
+    BarrierConstraintMatrix: NotationSymbol  # matrix of stacked affine control-barrier constraints on the control input ($\mathbf{A}_{\text{cbf}}$)
+    BarrierConstraintVector: NotationSymbol  # vector of bounds on the right side of the stacked control-barrier constraints ($\mathbf{b}_{\text{cbf}}$)
+    BarrierFunction: NotationSymbol  # control-barrier certificate: a margin function of the state that is nonnegative exactly on the safe set ($h$) [m]
+    BarrierRelativeDegree: NotationSymbol  # number of times the barrier function must be differentiated along the dynamics before the control input appears ($r$)
+    BasePromptLength: NotationSymbol  # number of prompt tokens in the first call of a trajectory, before any turn appends to it ($S_{\text{base}}$)
+    BatchServiceTime: NotationSymbol  # time an accelerator takes to process one batch once execution begins, as a function of batch size ($T_{\text{svc}}(B)$) [s]
+    BatchSize: NotationSymbol  # number of examples or requests processed together in one step ($B$)
+    BehaviorCloningHorizon: NotationSymbol  # number of control steps in an episode over which imitation errors compound ($S$)
+    BeliefInvalidationHorizon: NotationSymbol  # time since the last supporting evidence after which a stored belief may no longer be used ($T_{\text{inv}}$) [s]
+    BlendingTransitionWindow: NotationSymbol  # duration of the smooth blend from one latched command to the next during a bumpless transfer ($\tau_{\text{blend}}$) [s]
+    BodyReferenceFrame: NotationSymbol  # coordinate frame attached to the mobile robot base ($\mathcal{F}_B$)
+    BreakEvenTaskCount: NotationSymbol  # number of tasks an adaptation must serve before its per-task saving recovers its one-time cost ($N^*$) [tasks]
+    BumplessTransferBlend: NotationSymbol  # blend weight that ramps from zero to one across a bumpless transfer, as a function of normalized time ($\alpha(\hat{t})$) [dimensionless]
+    CachedInputTokenPrice: NotationSymbol  # price of one cached input token ($c_{\text{cache}}$) [USD/token]
+    CallLatency: NotationSymbol  # elapsed time of one model call, from request preparation to normalized response ($T_{\text{call}}$) [s]
+    CameraFramePoint: NotationSymbol  # position of a point expressed in the camera coordinate frame ($\mathbf{p}_c$) [m]
+    CameraIntrinsicCalibrationMatrix: NotationSymbol  # three-by-three matrix of camera intrinsics, focal lengths and principal point, that maps camera-frame points to pixels ($\mathbf{K}$) [px]
+    CandidatePoolSize: NotationSymbol  # number of candidates generated for one decision in best-of-N sampling, or the breadth of concurrent candidate streams ($N$)
+    CapabilityGrant: NotationSymbol  # capability grant, the rights, objects, condition, and expiry that together describe one delegated authority ($\Gamma$)
+    CartesianPosition: NotationSymbol  # position of a point in three-dimensional space ($\mathbf{p}$) [m]
+    CentroidalAngularMomentum: NotationSymbol  # angular momentum of the whole robot about its center of mass ($\mathbf{h}_{\text{ang}} \in \mathbb{R}^3$) [kg*m^2/s]
+    CentroidalLinearMomentum: NotationSymbol  # total linear momentum of the robot, its mass times its center-of-mass velocity ($\mathbf{h}_{\text{lin}} \in \mathbb{R}^3$) [kg*m/s]
+    CertifiedControlAction: NotationSymbol  # control command after the safety filter has projected it onto the admissible set ($\mathbf{u}^*$)
+    CheckpointInterval: NotationSymbol  # useful compute time between two completed checkpoints ($T_{\text{ckpt}}$) [s]
+    CheckpointWriteTime: NotationSymbol  # time execution pauses to write one checkpoint ($T_{\text{write}}$) [s]
+    ChunkLease: NotationSymbol  # longest time an admitted action chunk may keep driving the actuators without renewal ($T_{\text{lease}}$) [s]
+    ChunkLeaseTime: NotationSymbol  # duration of the lease a distributed file system grants a chunk server to coordinate writes to one chunk ($T_{\text{lease}}$) [s]
+    ChunkRenewalPeriod: NotationSymbol  # nominal interval between successive admissions of the chunk policy's proposals ($T_{\text{chunk}}$) [s]
+    ClassKFunction: NotationSymbol  # extended class-K function that bounds how fast the barrier value may decrease ($\kappa$)
+    ClassRateFunction: NotationSymbol  # extended class-K comparison function, written as a standalone label ($\kappa(\cdot)$)
+    ClearDistance: NotationSymbol  # distance between the machine and the boundary it must stop before ($D_{\text{clear}}$) [m]
+    ClockOffset: NotationSymbol  # difference between a follower clock's reading and the leader clock's at the same instant ($\theta_{\text{offset}}$) [s]
+    ClockSynchronizationSkew: NotationSymbol  # rate at which two clocks drift apart, such as the application processor and the safety microcontroller ($\delta_{\text{skew}}$) [ppm]
+    ClosureOperator: NotationSymbol  # runtime's check that maps each proposed action and the current system state to a permitted action or a rejection ($\mathcal{I}$)
+    ClusterNodeCount: NotationSymbol  # number of nodes in a cluster or job ($N_{\text{nodes}}$)
+    CodecDecodeTime: NotationSymbol  # time to decompress a compressed payload after it arrives ($T_{\text{decode}}$) [s]
+    CodecEncodeTime: NotationSymbol  # time to compress a payload before it is sent ($T_{\text{encode}}$) [s]
+    CognitivePolicyAction: NotationSymbol  # action the learned policy emits at step t, before any safety check ($\mathbf{a}_t$)
+    CoherencyCoefficient: NotationSymbol  # universal scalability law's cost of pairwise reconciliation between workers ($\kappa_{\text{coh}}$) [dimensionless]
+    CollectivePayloadSize: NotationSymbol  # size of the message each participant contributes to a collective operation ($M$) [bytes]
+    CommandTransportTime: NotationSymbol  # time for a command to travel over the fieldbus from the permission path to the drive ($T_{\text{bus}}$) [s]
+    CommandedJointTorque: NotationSymbol  # torque commanded at a single joint in one-joint derivations ($\tau$) [N*m]
+    CommitmentInstant: NotationSymbol  # instant after which a receding-horizon plan's prefix is committed and can no longer be replaced ($t_{\text{commit}}$) [s]
+    CommunicationComputeRatio: NotationSymbol  # ratio of per-step communication time to per-device compute time ($\rho$) [dimensionless]
+    CommunicationIntensity: NotationSymbol  # network bytes a workload moves per floating-point operation it performs ($\text{CI}$) [bytes/FLOP]
+    CommunicationTime: NotationSymbol  # time per training step spent moving gradients, activations and parameter shards between devices at scale N ($T_{\text{comm}}(N)$) [s]
+    CompletionCriteria: NotationSymbol  # set of checks that decide when a task is done, at a stated closure evidence level ($\mathcal{K}_{\text{comp}}$)
+    CompletionDeadline: NotationSymbol  # time by which a call, cycle, or task must complete ($T_{\text{deadline}}$) [s]
+    ComponentAvailability: NotationSymbol  # probability that one component is up at a given instant ($A_{\text{component}}$) [dimensionless]
+    ComponentFailureRate: NotationSymbol  # rate at which one component fails ($\lambda$) [failures/hour]
+    CompressedCommunicationTime: NotationSymbol  # total time to encode, transfer and decode a compressed payload ($T_{\text{compressed}}$) [s]
+    CompressionRatio: NotationSymbol  # uncompressed size of a payload divided by its compressed size ($r_{\text{comp}}$) [dimensionless]
+    ConcurrentTrajectories: NotationSymbol  # mean number of admitted trajectories present at once ($N_{\text{traj}}$)
+    ConditionalDistribution: NotationSymbol  # probability distribution of the label given an input, the input-to-label relationship that concept drift changes ($p(y \mid x)$)
+    ConfidentialityLabel: NotationSymbol  # set of recipients permitted to receive a record ($\kappa(x)$)
+    ConformalMiscoverageRate: NotationSymbol  # allowed probability that the conformal prediction set misses the true referent ($\epsilon$) [dimensionless]
+    ConformalPredictionSet: NotationSymbol  # calibrated set of referent candidates that cannot be excluded at the miscoverage rate ($\mathcal{C}$)
+    ContactPointForce: NotationSymbol  # force the environment exerts on the robot at one contact point ($\mathbf{f}_k$) [N]
+    ContactPointJacobian: NotationSymbol  # matrix mapping joint velocities to the linear velocity of one contact point ($\mathbf{J}_k(\mathbf{q})$)
+    ContactStiffness: NotationSymbol  # stiffness of a contact treated as a spring, force per unit penetration ($k_{\text{contact}}$) [N/m]
+    ContentionCoefficient: NotationSymbol  # universal scalability law's share of work that serializes across workers ($\sigma_{\text{cont}}$) [dimensionless]
+    ContextWindow: NotationSymbol  # hard per-call limit on prompt and output tokens together ($S_{\max}$)
+    ContinuationCount: NotationSymbol  # number of independent continuations sampled from one fork condition in reinforcement learning ($K$)
+    ContinuousCurrent: NotationSymbol  # largest motor current the winding can carry indefinitely without exceeding its temperature limit ($I_{\text{cont}}$) [A]
+    ControlAffineDriftField: NotationSymbol  # unforced part of control-affine dynamics, the state rate when the control input is zero ($\mathbf{f}(\mathbf{x})$)
+    ControlAffineInputField: NotationSymbol  # input matrix field of control-affine dynamics, mapping control inputs to state rates ($\mathbf{g}(\mathbf{x})$)
+    ControlBarrierFunction: NotationSymbol  # control-barrier certificate evaluated at the state, whose superlevel set is the safe set ($h(\mathbf{x})$) [m]
+    ControlSetpointJerk: NotationSymbol  # time derivative of the commanded acceleration or torque during a mode transition ($\mathbf{j}(t)$)
+    ControllabilityMatrix: NotationSymbol  # block matrix of the input matrix and its products with powers of the system matrix, whose rank decides controllability ($\mathbf{C}_{\text{ctrb}}$)
+    CoordinationOverhead: NotationSymbol  # added elapsed time of splitting work across workers, as a fraction of serial time ($h$) [dimensionless]
+    CoriolisCentrifugalMatrix: NotationSymbol  # matrix of Coriolis and centrifugal effects in the manipulator equation, multiplying joint velocities ($\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})$)
+    CoriolisMatrix: NotationSymbol  # matrix of Coriolis and centrifugal effects in the manipulator equation, multiplying joint velocities ($\mathbf{C}$)
+    CorrelationCoefficient: NotationSymbol  # Pearson correlation coefficient between two random quantities ($\rho$) [dimensionless]
+    CostCeiling: NotationSymbol  # dollar ceiling on a trajectory that the runtime enforces before dispatching the next call ($C_{\max}$) [USD]
+    CostPerAcceptedTask: NotationSymbol  # total spend on all attempts in a cohort divided by the number of accepted tasks ($C_{\text{eff}}$) [USD/task]
+    CoulombFrictionCoefficient: NotationSymbol  # ratio of the largest tangential friction force to the normal force at a contact ($\mu$) [dimensionless]
+    CovariateDriftBound: NotationSymbol  # worst-case excess task cost of behavior cloning, growing with the square of the episode length ($\mathcal{O}(S^2 \epsilon)$)
+    CredibleBrakingDeceleration: NotationSymbol  # validated low-tail deceleration the machine achieves under its stated conditions, not the datasheet peak ($a_{\text{brake}}$) [m/s^2]
+    CrossoverFrequency: NotationSymbol  # angular frequency at which the open-loop gain of a feedback loop falls to one ($\omega_c$) [rad/s]
+    CurrentDistribution: NotationSymbol  # data distribution a deployed model sees in service at time t ($P_t$)
+    CvaeRecognitionEncoder: NotationSymbol  # approximate posterior of the latent style variable given an observation, learned by a conditional VAE encoder ($q_\phi(\mathbf{z} \mid \mathbf{o})$)
+    DataParallelDegree: NotationSymbol  # number of model replicas that each process a different slice of the batch in data parallelism ($N_{\text{DP}}$)
+    DataVolume: NotationSymbol  # total bytes a workload moves through memory or across a data path ($D_{\text{vol}}$) [bytes]
+    DatasetSize: NotationSymbol  # number of training examples or tokens in a dataset ($D$)
+    DcBusBulkCapacitance: NotationSymbol  # capacitance of the capacitor bank on the inverter DC bus that buffers transient load current ($C_{\text{bus}}$) [F]
+    DcBusDynamicRailDroop: NotationSymbol  # transient drop in DC bus voltage under a step in motor current ($\Delta V_{\text{droop}}$) [V]
+    DecodeInterval: NotationSymbol  # time a call spends generating its whole output ($T_{\text{decode}}$) [s]
+    DecoderEvaluationCount: NotationSymbol  # number of dependent forward passes a generative action head makes per chunk, such as denoising or ODE-solver steps ($N_{\text{eval}}$)
+    DelayPhaseLag: NotationSymbol  # phase lag that loop delays add at the crossover frequency, eroding the phase margin ($\Delta \phi$) [rad]
+    DelegatedTaskGoal: NotationSymbol  # delegated task and its completion rule, fixed for the trajectory ($g$)
+    DetectionInterval: NotationSymbol  # time a detector takes to recognize a hazard or an expiry, beyond what the observation age already charges ($t_{\text{detect}}$) [s]
+    DeviceCount: NotationSymbol  # number of devices (accelerators) taking part in one distributed job, also the rank count of a collective ($N$)
+    DiagnosticCoverage: NotationSymbol  # rate-weighted fraction of hardware faults whose hazardous effect a diagnostic mitigates ($C_{\text{diag}}$) [dimensionless]
+    DiffusionCumulativeSchedule: NotationSymbol  # fraction of the clean signal variance retained after k diffusion steps ($\bar{\alpha}_k$) [dimensionless]
+    DiffusionGaussianNoise: NotationSymbol  # standard Gaussian noise added to clean action chunks in the diffusion forward process ($\boldsymbol{\epsilon}$)
+    DiffusionMatchingLoss: NotationSymbol  # mean squared error between the injected noise and the noise the network predicts, averaged over diffusion steps ($\mathcal{L}_{\text{diff}}(\theta)$)
+    DirectionalCosineMatrix: NotationSymbol  # three-by-three rotation matrix giving the orientation of one frame relative to another ($\mathbf{R}$) [dimensionless]
+    DispatchAdmissionInterval: NotationSymbol  # time from dispatching a proposal to its admission by the permission path ($\Delta_{\text{da}}$) [s]
+    DispatchedTrajectorySet: NotationSymbol  # set of every trajectory dispatched ($\mathcal{T}_{\text{all}}$)
+    DistillationTemperature: NotationSymbol  # softmax temperature that softens teacher and student output probabilities in knowledge distillation ($T_{\text{distill}}$) [dimensionless]
+    DistributedStepTime: NotationSymbol  # wall-clock time of one training step on N devices ($T_{\text{step}}(N)$) [s]
+    DivergenceInstant: NotationSymbol  # time at which an autonomous policy's rollout begins to leave its supported states ($t_{\text{div}}$) [s]
+    DivergenceTolerance: NotationSymbol  # positive threshold on the trajectory-divergence residual that marks divergence ($\delta_{\text{tol}}$) [m]
+    DuplicateEffectProbability: NotationSymbol  # probability that one blind retry of a non-idempotent call applies its effect twice ($p_{\text{dup}}$) [dimensionless]
+    EffectiveFleetThroughput: NotationSymbol  # useful floating-point rate a fleet sustains after per-device, scaling and operational losses ($R_{\text{eff}}$) [FLOP/s]
+    EffectiveImpactMass: NotationSymbol  # apparent mass the robot presents along the contact normal at a given contact point and configuration ($m_{\text{eff}}$) [kg]
+    EffectiveJointInertia: NotationSymbol  # total inertia seen at one joint, link and payload plus reflected rotor inertia ($J_{\text{eff}}$) [kg*m^2]
+    EffectiveServiceRate: NotationSymbol  # requests a batched server completes per second at a given batch size ($\mu_{\text{eff}}(B)$) [requests/s]
+    EfficiencyHw: NotationSymbol  # fraction of peak compute rate the hardware actually sustains on a workload ($\eta_{\text{hw}}$) [dimensionless]
+    ElectricalResistance: NotationSymbol  # electrical resistance of a circuit or winding ($R$) [Ohm]
+    ElectricalTimeConstant: NotationSymbol  # time constant of current rise in a motor winding, inductance over resistance ($\tau_e$) [s]
+    ElementStorageSize: NotationSymbol  # bytes needed to store one tensor element at its numerical precision ($s_{\text{elem}}$) [bytes/element]
+    EmittedTokenCount: NotationSymbol  # number of tokens a decoder emits one after another for one output ($S_{\text{out}}$)
+    EndEffectorReferenceFrame: NotationSymbol  # coordinate frame attached to the robot's end effector ($\mathcal{F}_E$)
+    EndToEndRequestLatency: NotationSymbol  # time from a request leaving the client to its response returning, summed over every stage on the request path ($L_{\text{lat, total}}$) [s]
+    EnergyPerByteMoved: NotationSymbol  # energy spent moving one byte between memory and the compute units ($E_{\text{move}}$) [J/byte]
+    EnergyPerOperation: NotationSymbol  # energy spent executing one arithmetic operation ($E_{\text{compute}}$) [J/operation]
+    EnforcerComputeTime: NotationSymbol  # time the enforcer takes to evaluate its constraints within one control period ($T_{\text{comp}}$) [s]
+    EnsemblingWindowLength: NotationSymbol  # number of overlapping past chunks blended together in temporal ensembling ($K$)
+    EnvironmentState: NotationSymbol  # full environment state of the decision process at a turn, including what the model never saw ($s_t$)
+    EssentialMatrix: NotationSymbol  # three-by-three matrix relating corresponding normalized image points in two calibrated views ($\mathbf{E}$)
+    EstimatedHistoryAdvantage: NotationSymbol  # estimate of how much an action taken after a given interaction history beats the policy value at that history ($\hat{A}(h_k, a_k)$) [dimensionless]
+    EstimatedRemainingReturn: NotationSymbol  # estimated expected remaining return under a continuation policy, given the interaction history at a turn ($\hat{V}(h_k)$) [dimensionless]
+    EstimationErrorCovariance: NotationSymbol  # covariance of the error between the true state and its estimate ($\mathbf{P}$)
+    EventProbability: NotationSymbol  # probability that a stated event occurs ($\Pr(E)$) [dimensionless]
+    EvidenceHorizon: NotationSymbol  # time for which a target estimate stays within its task tolerance without fresh evidence ($\tau_{\text{ev}}$) [s]
+    ExpectedActionReturn: NotationSymbol  # expected return, or expected cost in the imitation bounds, from a step after taking an action in a state and then following the policy ($Q_t^{\pi}(s_t, a_t)$) [dimensionless]
+    ExpectedCheckingTime: NotationSymbol  # expected verifier slot time spent per attempted record under a short-circuit check cascade ($T_{\text{check}}$) [s]
+    ExpectedIrreversibleLoss: NotationSymbol  # expected consequence of the bad actions in an execution plan that cannot be recovered ($L_A$) [consequence units]
+    ExposureDuration: NotationSymbol  # integration time of one camera frame ($t_{\text{exp}}$) [s]
+    ExternalWait: NotationSymbol  # time spent waiting on a remote service or on a person's response ($T_{\text{wait}}$) [s]
+    FallbackHold: NotationSymbol  # optional hold or fault-confirmation interval before the stop command reaches the drive ($T_{\text{hold}}$) [s]
+    FittedSensitivity: NotationSymbol  # accuracy lost per unit of distribution divergence, fitted from labeled outcomes over a stated range ($\lambda$) [dimensionless]
+    FleetEnergyProductivity: NotationSymbol  # useful floating-point operations a fleet delivers per joule of device, cooling and network energy ($\rho_{\text{energy}}$) [FLOP/J]
+    ForwardInvariantSafeSet: NotationSymbol  # set of states on which the barrier certificate is nonnegative, kept invariant by the safety filter ($\mathcal{C}$)
+    FreeSpaceDepth: NotationSymbol  # distance from a hull's surface to the nearest occupied or unknown cell ($d_{\text{free}}$) [m]
+    FundamentalMatrix: NotationSymbol  # three-by-three matrix relating corresponding pixel points in two uncalibrated views ($\mathbf{F}$)
+    GearReductionRatio: NotationSymbol  # ratio of motor speed to joint output speed across a transmission ($N_{\text{gear}}$) [dimensionless]
+    GearboxTransmissionEfficiency: NotationSymbol  # fraction of input mechanical power a transmission delivers at its output ($\eta_{\text{gear}}$) [dimensionless]
+    GeneralizedAccelerations: NotationSymbol  # second time derivative of the generalized coordinates ($\ddot{\mathbf{q}}$)
+    GeneralizedCoordinates: NotationSymbol  # joint angles and prismatic extensions that fix the configuration of a mechanism ($\mathbf{q}$)
+    GeneralizedInertiaMatrix: NotationSymbol  # joint-space mass matrix of an articulated robot, mapping joint accelerations to the joint torques they require ($\mathbf{M}(\mathbf{q})$) [kg*m^2]
+    GeneralizedVelocities: NotationSymbol  # first time derivative of the generalized coordinates ($\dot{\mathbf{q}}$)
+    GoalSet: NotationSymbol  # set of terminal poses within the positional and angular tolerances of a task ($\mathcal{G}_{\text{goal}}$)
+    GoodputRatio: NotationSymbol  # fraction of allocated wall time left for productive steps after out-of-step operational losses ($\eta_{\text{goodput}}$) [dimensionless]
+    GradientMemory: NotationSymbol  # memory holding the gradient of every trainable parameter during training ($M_{\text{gradients}}$) [bytes]
+    GradientStaleness: NotationSymbol  # number of parameter updates between computing a gradient and applying it ($\tau_{\text{stale}}$)
+    GrantExpiryTime: NotationSymbol  # time after which a capability grant admits nothing ($t_{\text{exp}}$) [s]
+    GravitationalTorqueVector: NotationSymbol  # joint torques that gravity exerts on the links in a given configuration ($\mathbf{g}(\mathbf{q})$) [N*m]
+    Gravity: NotationSymbol  # gravitational acceleration at the surface of the Earth ($g$) [m/s^2]
+    GroupSize: NotationSymbol  # number of rollouts sampled per task for group-relative scoring ($G$)
+    HandoverTimeout: NotationSymbol  # countdown an arbiter sets for an unacknowledged handover before falling back to a controlled stop ($T_{\text{timeout}}$) [s]
+    HardwareCommonCauseRate: NotationSymbol  # rate of hazards from hardware faults and common causes that no shield coverage removes ($\lambda_{\text{other}}$) [1/h]
+    HardwareWatchdogTimeout: NotationSymbol  # period of the hardware watchdog timer, after which missing heartbeats trigger fail-safe braking ($t_{\text{watchdog}}$) [s]
+    HazardOnset: NotationSymbol  # interval from the last valid renewal to the physical onset of powered deceleration ($t_{\text{onset}}$) [s]
+    HazardousProposalRate: NotationSymbol  # rate at which the policy emits hazardous action proposals of class h before the permission layer ($\lambda_{\text{proposal}, h}$) [1/h]
+    HertzianContactStiffness: NotationSymbol  # effective spring constant of the body region struck in a collaborative contact ($k_H$) [N/m]
+    HiddenDimension: NotationSymbol  # width of a model's hidden representation, the transformer model width or a recurrent network's hidden-state size ($d$)
+    HoldingTorque: NotationSymbol  # joint torque a motor must sustain at standstill to hold a load ($\tau_{\text{hold}}$) [N*m]
+    HomogeneousPixelCoordinates: NotationSymbol  # image point written in homogeneous coordinates, pixel column and row with a trailing one ($\tilde{\mathbf{m}}$) [px]
+    HomogeneousTransform: NotationSymbol  # four-by-four matrix mapping coordinates from frame B into frame A ($\mathbf{T}_{AB}$)
+    HumanWalkingSpeedBound: NotationSymbol  # speed bound for a person approaching the machine, as the safety standard states it ($v_h$) [m/s]
+    HypothesisTestFalseNegativeRate: NotationSymbol  # probability that a hypothesis test misses a true effect ($\beta_{\text{stat}}$) [dimensionless]
+    HypothesisTestSignificanceLevel: NotationSymbol  # probability that a hypothesis test rejects a true null hypothesis ($\alpha_{\text{sig}}$) [dimensionless]
+    IdempotencyKey: NotationSymbol  # identifier for one intended operation, kept across retries so its effect applies once ($k_{\text{idem}}$)
+    ImagePlanePixelCoordinates: NotationSymbol  # pixel coordinates of a point in the image plane ($\mathbf{u}_{\text{px}}$) [px]
+    InertiaMatchingRatio: NotationSymbol  # gear ratio that maximizes load acceleration for a given motor torque, where reflected rotor inertia equals load inertia ($N^*$) [dimensionless]
+    InferenceCost: NotationSymbol  # recurring cost of serving a model in production ($C_{\text{infer}}$) [USD]
+    InitialAccuracy: NotationSymbol  # model accuracy at deployment, or right after the most recent retraining ($\text{Accuracy}_0$) [dimensionless]
+    InitialTrackingError: NotationSymbol  # position error of an estimate at the moment its evidence is captured ($e_0$) [m]
+    InitiatedTasks: NotationSymbol  # number of tasks in a settled cohort, whatever their outcome ($N$)
+    InputDistribution: NotationSymbol  # probability distribution of a model's inputs, whose change is data drift ($p(x)$)
+    InputTokenPrice: NotationSymbol  # price of one uncached input token ($c_{\text{in}}$) [USD/token]
+    InstantaneousPhaseCurrent: NotationSymbol  # signed instantaneous current in one motor phase, positive from the inverter node into the winding ($i_{\text{phase}}$) [A]
+    IntegrityProvenance: NotationSymbol  # set of sources whose content may have influenced a record ($\iota(x)$)
+    IntentLease: NotationSymbol  # time-bounded authorization from the permission path that binds an admitted target, its expiry, and its effort ceilings ($\mathcal{I}_{\text{intent}}$)
+    IntentLeaseExpiry: NotationSymbol  # instant at which an intent lease expires: the earliest of evidence decay, host silence, and the stopping deadline ($t_{\text{intent\_exp}}$) [s]
+    InterAnnotatorAgreement: NotationSymbol  # Cohen's kappa, agreement between two annotators corrected for the agreement expected by chance ($\kappa$) [dimensionless]
+    InterconnectPortConflicts: NotationSymbol  # number of simultaneous memory-channel access collisions among DMA, GPU and CPU masters ($N_{\text{conflict}}$)
+    InterconnectTransferTime: NotationSymbol  # time to move sensor data across on-board links such as DMA, PCIe or SerDes ($t_{\text{xfer}}$) [s]
+    IronLawComputeTime: NotationSymbol  # time spent computing in the iron law, operations divided by the sustained compute rate ($T_{\text{compute}}$) [s]
+    IronLawMemoryTime: NotationSymbol  # time spent moving data in the iron law, bytes moved divided by bandwidth ($T_{\text{memory}}$) [s]
+    IrreducibleLoss: NotationSymbol  # loss floor that adding parameters, data or compute does not remove within the fitted scaling regime ($C_{\mathcal{L}}$) [dimensionless]
+    JerkLimit: NotationSymbol  # largest rate of change of acceleration a planned or stopping profile may command ($j_{\max}$) [m/s^3]
+    JointTorque: NotationSymbol  # vector of torques the actuators apply at the joints ($\boldsymbol{\tau}$) [N*m]
+    JouleanTemperatureRise: NotationSymbol  # temperature rise of a winding above its reference caused by resistive heating ($\Delta T$) [K]
+    KalmanGain: NotationSymbol  # matrix weighting the measurement innovation in the Kalman filter state update ($\mathbf{G}_k$)
+    KineticInsetBarrierFunction: NotationSymbol  # barrier certificate shrunk by the stopping distance at the current speed, so its relative degree is one ($h_{\text{kinetic}}(\mathbf{x})$) [m]
+    KvBlockSize: NotationSymbol  # number of token positions in one fixed block of a paged KV cache ($S_{\text{blk}}$)
+    KvBytesPerToken: NotationSymbol  # bytes of KV cache one token occupies across all layers ($m_{\text{token}}$) [bytes/token]
+    KvCacheBytesPerToken: NotationSymbol  # bytes of key-value cache stored for each token held in context ($m_{\text{token}}$) [bytes/token]
+    KvCacheFootprint: NotationSymbol  # memory a transformer key-value cache occupies during autoregressive decoding ($M_{\text{KV}}$) [bytes]
+    KvCacheMemory: NotationSymbol  # memory the key-value cache occupies during autoregressive inference ($M_{\text{KV}}$) [bytes]
+    KvHeadCount: NotationSymbol  # number of key-value heads in grouped-query or multi-query attention ($H_{\text{KV}}$)
+    Latency: NotationSymbol  # fixed overhead time a step pays regardless of bytes moved or operations executed, such as kernel launch, dispatch or network round trip ($L_{\text{lat}}$) [s]
+    LatencyBandwidthCrossoverSize: NotationSymbol  # message size at which per-message startup time equals transfer time in the alpha-beta model ($n^*$) [bytes]
+    LatentStyleVariable: NotationSymbol  # latent variable of a conditional VAE policy that captures the demonstration style ($\mathbf{z}$)
+    LayerCount: NotationSymbol  # number of layers in a network ($N_L$)
+    LayerIndex: NotationSymbol  # position of one layer within a network, counted from the input ($\ell$)
+    LayerInputWidth: NotationSymbol  # number of input features, or input channels, of one layer ($d_{\text{in}}$)
+    LayerOutputWidth: NotationSymbol  # number of output features, or output channels, of one layer ($d_{\text{out}}$)
+    LearningRate: NotationSymbol  # step size the optimizer multiplies the gradient by in each parameter update ($\eta$) [dimensionless]
+    LeaseHoldTime: NotationSymbol  # mean time a trajectory holds a sandbox or other leased resource ($T_{\text{hold}}$) [s]
+    LieDerivativeAlongControl: NotationSymbol  # sensitivity of the barrier rate to the control input, the barrier gradient applied to the input field ($L_{\mathbf{g}} h(\mathbf{x})$)
+    LieDerivativeAlongDrift: NotationSymbol  # rate at which the barrier value changes under the unforced dynamics alone ($L_{\mathbf{f}} h(\mathbf{x})$) [m/s]
+    LinearBarrierDecayRate: NotationSymbol  # rate constant of the linear class-K function in the barrier condition ($\gamma_{\text{cbf}}$) [1/s]
+    LinearMomentum: NotationSymbol  # mass times speed of a moving body ($p$) [kg*m/s]
+    LinkBandwidth: NotationSymbol  # bandwidth of one network link in each direction, in the alpha-beta communication model ($\beta$) [bytes/s]
+    LoadInertia: NotationSymbol  # moment of inertia of the mechanical load a joint drives, on the output side of the transmission ($J_{\text{load}}$) [kg*m^2]
+    LocalizationBound: NotationSymbol  # bound on the error of localization and state estimation ($\delta_{\text{loc}}$) [m]
+    LoggpLongMessageTime: NotationSymbol  # time to send one long message of n bytes in the LogGP model ($T_{\text{long}}(n)$) [s]
+    LogpNetworkLatency: NotationSymbol  # time a message spends in flight across the network in the LogP and LogGP models, excluding processor overhead ($L_{\text{LogGP}}$) [s]
+    LongMessageGapPerByte: NotationSymbol  # time per byte to send a long message in the LogGP communication model ($G$) [s/byte]
+    Loss: NotationSymbol  # value of the training objective a model minimizes ($L$) [dimensionless]
+    LossFunction: NotationSymbol  # training objective that scores a model's predictions against the labels, the quantity training minimizes ($\mathcal{L}$)
+    LossGradient: NotationSymbol  # gradient of the training loss with respect to one model parameter, as an optimizer update uses it ($g$) [loss per parameter unit]
+    LossScaleFactor: NotationSymbol  # multiplier applied to the loss in reduced-precision training so small gradients stay representable ($s_{\text{loss}}$) [dimensionless]
+    LqrControlWeightMatrix: NotationSymbol  # penalty matrix on control effort in the linear-quadratic regulator cost ($\mathbf{R}_u$)
+    LqrFeedbackGain: NotationSymbol  # state-feedback gain matrix of the linear-quadratic regulator ($\mathbf{K}_{\text{lqr}}$)
+    LqrStateWeightMatrix: NotationSymbol  # penalty matrix on state deviation in the linear-quadratic regulator cost ($\mathbf{Q}_x$)
+    ManipulatorJacobian: NotationSymbol  # matrix mapping joint velocities to the spatial velocity of the end effector ($\mathbf{J}(\mathbf{q})$)
+    MaskedFinetuningLoss: NotationSymbol  # mean cross-entropy over the token positions the loss mask selects, for one example ($\mathcal{L}_{\text{SFT}}$) [nats]
+    Mass: NotationSymbol  # mass of a physical body ($m$) [kg]
+    MassCenterPosition: NotationSymbol  # position of the robot's total center of mass ($\mathbf{c}$) [m]
+    MeanTimeBetweenFailures: NotationSymbol  # average time between consecutive failures of a repairable component or system ($\text{MTBF}$) [hours]
+    MeanTimeToFailure: NotationSymbol  # average operating time of a component before it fails, derived from its FIT rate ($\text{MTTF}$) [hours]
+    MeanTimeToRepair: NotationSymbol  # average time to restore service after a failure ($\text{MTTR}$) [hours]
+    MeasurementMatrix: NotationSymbol  # output matrix of a linear state-space model, mapping the state to sensor measurements ($\mathbf{H}$)
+    MeasurementNoiseVector: NotationSymbol  # random disturbance added to the sensor output ($\mathbf{v}_{\text{meas}}(t)$)
+    MechanicalPlantState: NotationSymbol  # state of the mechanical plant: generalized positions stacked with generalized velocities ($\mathbf{x}$)
+    MemoryBusQueueDelay: NotationSymbol  # time a sensor transfer waits for contended shared memory channels on the SoC ($t_{\text{queue}}$) [s]
+    MemoryEntryBirthGeneration: NotationSymbol  # source generation from which a derived memory entry is supported ($g_{\text{birth}}(c)$)
+    MemoryEntryDeathGeneration: NotationSymbol  # source generation at which a later edit stops supporting a derived memory entry ($g_{\text{death}}(c)$)
+    MemoryHoldDuringWait: NotationSymbol  # accelerator memory a paused trajectory withholds, multiplied by how long it waits ($O_{\text{mem}}$) [byte-seconds]
+    MessageInjectionGap: NotationSymbol  # minimum interval between consecutive message injections at one node in the LogP and LogGP models ($g$) [s]
+    MessageStartupLatency: NotationSymbol  # fixed startup time paid once per message in the alpha-beta communication model, independent of message size ($\alpha$) [s]
+    MicrobatchCount: NotationSymbol  # number of microbatches one pipeline-parallel step splits its batch into ($m$)
+    ModelFlopsUtilization: NotationSymbol  # useful model operations per second divided by the hardware's peak operation rate ($\text{MFU}$) [dimensionless]
+    ModelParameters: NotationSymbol  # learned weights and biases of a model or policy ($\theta$)
+    ModelTime: NotationSymbol  # time a turn spends in model calls ($T_{\text{model}}$) [s]
+    MotorBackEmfConstant: NotationSymbol  # back-EMF voltage a motor generates per unit rotor speed ($K_e$) [V/(rad/s)]
+    MotorPhaseRmsCurrent: NotationSymbol  # root-mean-square current in one stator phase of a brushless motor ($I_{\text{phase}}$) [A]
+    MotorTorqueConstant: NotationSymbol  # torque a motor produces per ampere of torque-producing current ($K_t$) [N*m/A]
+    MpcPredictionHorizon: NotationSymbol  # number of discrete control steps over which model predictive control optimizes ($N_{\text{mpc}}$)
+    MultiDeviceRunTime: NotationSymbol  # wall-clock time for a fixed amount of productive work on N devices ($T_N$) [s]
+    MultimodalFusedTokenStream: NotationSymbol  # concatenated sequence of vision, language and state tokens fed to an embodied transformer ($\mathbf{Z}$)
+    MultimodalObservation: NotationSymbol  # robot's synchronized sensor observation at step t: images, depth, joint encoders and touch ($\mathbf{o}_t$)
+    NetBrakingDeceleration: NotationSymbol  # deceleration left after a gravity or load bias is subtracted from the available braking effort ($a_{\text{net}}$) [m/s^2]
+    NetPhaseMargin: NotationSymbol  # phase margin left after subtracting the loop's delay-induced phase lag ($\text{PM}_{\text{net}}$) [deg]
+    NmiResponseTime: NotationSymbol  # worst-case response time of the non-maskable interrupt that handles motor overcurrent or gate-drive faults ($t_{\text{NMI}}$) [s]
+    NoisePredictionNetwork: NotationSymbol  # network that predicts the noise added to an action chunk at a diffusion step, given the observation ($\boldsymbol{\epsilon}_\theta(\mathbf{o}_t, \mathbf{A}_t^k, k)$)
+    NoisedActionChunk: NotationSymbol  # action chunk after k steps of diffusion noising, the iterate a denoising pass refines ($\mathbf{A}^k$)
+    NominalControlCommand: NotationSymbol  # control command the learned policy proposes, before the safety filter checks it ($\mathbf{u}_{\text{nom}}$)
+    NonlinearObservationSpace: NotationSymbol  # space spanned by the output functions and all their repeated Lie derivatives along the dynamics ($\mathbf{O}_{\text{NL}}$)
+    NormalContactForce: NotationSymbol  # compressive component of a contact force along the contact normal ($f_{k, \perp}$) [N]
+    ObservabilityMatrix: NotationSymbol  # stack of the output matrix times powers of the system matrix, whose rank decides observability ($\mathbf{O}_{\text{obs}}$)
+    ObservationAge: NotationSymbol  # age of the state the permission path acts on, from the exposure midpoint at the sensor to the decision ($t_{\text{age}}$) [s]
+    OperationalOverheadFraction: NotationSymbol  # fraction of allocated wall time lost outside productive training steps ($f_{\text{overhead}}$) [dimensionless]
+    Operations: NotationSymbol  # total arithmetic operations a workload executes ($O$) [FLOP]
+    OptimalCheckpointInterval: NotationSymbol  # checkpoint interval that minimizes expected overhead from checkpoint writes and lost work ($T^\ast_{\text{ckpt}}$) [s]
+    OptimizerStateMemory: NotationSymbol  # memory holding the optimizer's per-parameter state, such as momentum, variance and master weights ($M_{\text{optimizer}}$) [bytes]
+    OutputLength: NotationSymbol  # number of tokens a call generates ($K$)
+    OutputLimit: NotationSymbol  # maximum number of tokens the runtime lets a call generate ($K_{\max}$)
+    OutputTokenPrice: NotationSymbol  # price of one generated output token ($c_{\text{out}}$) [USD/token]
+    OverlappedTime: NotationSymbol  # communication or coordination time per step hidden behind computation ($T_{\text{overlap}}$) [s]
+    ParallelFraction: NotationSymbol  # share of the work that divides among workers ($f_{\text{parallel}}$) [dimensionless]
+    ParameterStreamingTime: NotationSymbol  # time to stream model weights that do not stay resident into the compute units for one evaluation ($t_{\text{stream}}$) [s]
+    ParameterizedNeuralPolicy: NotationSymbol  # distribution over actions given an observation, computed by a neural network with learned weights ($\pi_\theta(\mathbf{a} \mid \mathbf{o})$)
+    Parameters: NotationSymbol  # number of trainable parameters in a model ($P$)
+    PassAtK: NotationSymbol  # probability that at least one of k runs of a task passes, averaged over tasks ($\text{pass}@k$) [dimensionless]
+    PathAccelerationTorqueCoefficient: NotationSymbol  # vector multiplying path acceleration in the path-parameterized manipulator torque equation ($\mathbf{a}_{\tau}(s)$) [N*m*s^2]
+    PathCoriolisMatrix: NotationSymbol  # Coriolis and centrifugal matrix evaluated along a geometric path for time parameterization ($\mathbf{C}(\mathbf{q}(s), \mathbf{q}'(s))$)
+    PathVelocitySquaredTorqueCoefficient: NotationSymbol  # vector multiplying squared path velocity in the path-parameterized manipulator torque equation ($\mathbf{b}_{\tau}(s)$) [N*m*s^2]
+    PeakCurrent: NotationSymbol  # largest motor current permitted during a short burst ($I_{\text{peak}}$) [A]
+    PeakInternodeTimingError: NotationSymbol  # largest timing disagreement between bus nodes during a synchronization blackout ($\Delta t_{\text{peak}}$) [s]
+    PeakRate: NotationSymbol  # highest operation rate the hardware can execute, as specified for a given precision ($R_{\text{peak}}$) [FLOP/s]
+    PeakTorque: NotationSymbol  # largest transient joint torque permitted during short bursts ($\tau_{\text{peak}}$) [N*m]
+    PerStepErrorRate: NotationSymbol  # probability that one unchecked turn of a trajectory is wrong ($\epsilon$) [dimensionless]
+    PerTokenDecodeTime: NotationSymbol  # time to generate one output token on a single stream ($t_{\text{decode}}$) [s]
+    PerceptionDepthCovariance: NotationSymbol  # covariance of the three-dimensional position error of a point lifted from stereo, lidar or depth data ($\boldsymbol{\Sigma}_{\text{depth}}$) [m^2]
+    PermissionLoopPeriod: NotationSymbol  # period of the permission loop, the longest a hazard may wait before it is checked ($T_{\text{tick}}$) [s]
+    PermittedActions: NotationSymbol  # set of tools the task may call, with the limits on each ($\mathcal{A}_{\text{perm}}$)
+    PhaseInductance: NotationSymbol  # inductance of one motor phase winding ($L_{\text{phase}}$) [H]
+    PhaseResistance: NotationSymbol  # resistance of one motor phase winding ($R_{\text{phase}}$) [Ohm]
+    PhysicalWorldState: NotationSymbol  # ground-truth state of the machine, its environment and their contacts at step t ($s_t$)
+    PidDerivativeGain: NotationSymbol  # feedback gain on the velocity error, the damping of a PD or impedance controller ($K_d$) [N*s/m]
+    PidIntegralGain: NotationSymbol  # feedback gain on the accumulated error in a PI or PID controller ($K_i$) [controller output per error-second]
+    PidProportionalGain: NotationSymbol  # feedback gain on the position error, the stiffness of a PD or impedance controller ($K_p$) [N/m]
+    PipelineBubbleFraction: NotationSymbol  # fraction of pipeline device time spent idle while the pipeline fills and drains ($b_{\text{pipe}}$) [dimensionless]
+    PipelineParallelDegree: NotationSymbol  # number of pipeline stages a model's layers are split across ($N_{\text{PP}}$)
+    PointToPointMessageSize: NotationSymbol  # size of one point-to-point message in the alpha-beta model ($n$) [bytes]
+    PointToPointTransferTime: NotationSymbol  # time to send one point-to-point message of n bytes in the alpha-beta model ($T(n)$) [s]
+    Policy: NotationSymbol  # learned model viewed as a mapping from context or observation to actions, with parameters theta ($\pi_\theta$)
+    Pose: NotationSymbol  # rigid-body pose of a named frame, its rotation and position together ($\mathbf{T}$)
+    PositionErrorCeiling: NotationSymbol  # largest position error a target's own motion may add before a measurement of it is too stale to act on ($e_{\max}$) [m]
+    PositionalTaskTolerance: NotationSymbol  # radius within which a target estimate must lie for the task to succeed ($r_{\text{tol}}$) [m]
+    PowerRailInductance: NotationSymbol  # lumped inductance of the supply loop feeding the inverter ($L_{\text{bus}}$) [H]
+    PowerRailResistance: NotationSymbol  # lumped resistance of the supply path feeding the inverter: battery cells, harness and switch ($R_{\text{bus}}$) [Ohm]
+    PreAdmissionAction: NotationSymbol  # action as proposed, before the runtime checks it ($a_{\text{prop}}$)
+    PrebrakeDelay: NotationSymbol  # time from the capture of the frame that first shows a hazard to the onset of retarding force ($\tau_{\text{delay}}$) [s]
+    PredictedOutput: NotationSymbol  # model output for one example, such as its vector of class probabilities ($\hat{\mathbf{y}}$)
+    ProcessNoiseVector: NotationSymbol  # random disturbance acting on the state in the process model ($\mathbf{w}(t)$)
+    ProfileAccelerationBound: NotationSymbol  # largest acceleration or deceleration a planned or interpolated profile may command ($a_{\max}$) [m/s^2]
+    ProgramGoodput: NotationSymbol  # ratio of ideal to actual program execution time during productive work ($\eta_{\text{program}}$) [dimensionless]
+    PromptTokensSent: NotationSymbol  # cumulative number of prompt tokens a trajectory sends across all its calls ($S_{\text{sent}}$)
+    ProposalRejection: NotationSymbol  # outcome of withholding a proposal at the admission gate, recorded with its reason ($\bot$)
+    ProposerInferenceTime: NotationSymbol  # time for one forward evaluation of the learned proposer ($t_{\text{infer}}$) [s]
+    ProtectiveClearanceMargin: NotationSymbol  # fixed nonzero clearance kept between the machine envelope and the boundary after it stops ($\delta_{\text{margin}}$) [m]
+    PureTransportDelay: NotationSymbol  # fixed delay in a feedback or communication channel ($T_d$) [s]
+    QueryWorkspaceGeneration: NotationSymbol  # workspace generation a memory query requires ($g_q$)
+    ReasoningBudget: NotationSymbol  # maximum number of reasoning tokens a call may spend before it answers ($B_{\text{reason}}$)
+    ReceiverOverhead: NotationSymbol  # processor time spent completing the receipt of one message, during which it cannot compute ($o_{\text{recv}}$) [s]
+    ReducedImpactMass: NotationSymbol  # two-body reduced mass of a collision between the robot and a body part ($m_{\text{red}}$) [kg]
+    ReferencePosition: NotationSymbol  # commanded Cartesian position the tracked point should follow ($\mathbf{r}$) [m]
+    ReflectedRotorInertia: NotationSymbol  # apparent inertia of a motor rotor seen at the joint output, scaled by the square of the gear ratio ($J_{\text{ref}}$) [kg*m^2]
+    RegularizationWeight: NotationSymbol  # weight of the regularization penalty in a training objective ($\lambda$) [dimensionless]
+    RenewalJitterAllowance: NotationSymbol  # allowance for variation in the interval between successive chunk admissions ($T_{\text{jitter}}$) [s]
+    RepairCap: NotationSymbol  # maximum number of forward repair attempts on one failed step before the harness compensates or escalates ($K_{\text{repair}}$)
+    ReplicaCount: NotationSymbol  # number of serving replicas among which a router chooses ($R$)
+    ReplyLossProbability: NotationSymbol  # probability that a call's reply is lost in transit ($q_{\text{rep}}$) [dimensionless]
+    RequestConcurrency: NotationSymbol  # average number of requests in flight inside a stable serving system ($Q_{\text{req}}$) [requests]
+    RequestLossProbability: NotationSymbol  # probability that a call's request is lost in transit ($q_{\text{req}}$) [dimensionless]
+    RequestTimeInSystem: NotationSymbol  # average time a request spends inside a serving system, waiting plus being served ($T_{\text{lat}}$) [s]
+    RequiredComponentCount: NotationSymbol  # number of components a job needs available at the same time ($N$)
+    ResidentStopDistance: NotationSymbol  # distance the resident stop travels from speed v to rest once braking begins ($d_{\text{suffix}}(v)$) [m]
+    ResidualGate: NotationSymbol  # deterministic switch that admits a learned residual correction only inside the certified contact region ($g$) [dimensionless]
+    ResponseThreshold: NotationSymbol  # score threshold at which a monitoring or selective-prediction rule acts, such as alerting, abstaining, or routing to manual review ($\tau$) [dimensionless]
+    RestitutionCoefficient: NotationSymbol  # ratio of separation speed to approach speed in an impact ($e$) [dimensionless]
+    Reward: NotationSymbol  # per-step reward an engineer writes for policy search ($r$) [dimensionless]
+    RigidTransformTranslation: NotationSymbol  # translation part of a rigid transform between two frames ($\mathbf{t}$) [m]
+    RingAllReduceCompletionTime: NotationSymbol  # time to complete an AllReduce over a ring of devices ($T_{\text{ring}}$) [s]
+    RingTreeCrossoverPayload: NotationSymbol  # collective payload size above which ring AllReduce finishes faster than tree AllReduce ($M_{\text{crossover}}$) [bytes]
+    RollingShutterDistortion: NotationSymbol  # apparent displacement of an image row caused by platform motion during rolling-shutter readout ($\Delta \mathbf{x}(y)$) [m]
+    RollingShutterRowReadout: NotationSymbol  # time between the exposure of adjacent rows of a rolling-shutter sensor ($t_{\text{row}}$) [s]
+    RolloutEnvironmentState: NotationSymbol  # full environment state at a turn of a reinforcement-learning rollout, where turns are indexed by k ($s_k$)
+    RooflineRidgePoint: NotationSymbol  # arithmetic intensity at which a device's memory-bandwidth limit meets its compute limit ($I_{\text{ridge}}$) [FLOP/byte]
+    RotorInertia: NotationSymbol  # moment of inertia of a motor rotor about its axis ($J_{\text{rotor}}$) [kg*m^2]
+    RuntimeGoodput: NotationSymbol  # fraction of allocated resource time that becomes checkpoint-preserved productive progress ($\eta_{\text{runtime}}$) [dimensionless]
+    RuntimeTime: NotationSymbol  # time a turn spends in the runtime's own work, such as assembling context, validating proposals, and running checks ($T_{\text{runtime}}$) [s]
+    SafetyBoundaryManifold: NotationSymbol  # boundary of the safe set, the states where the barrier certificate is exactly zero ($\partial \mathcal{C}$)
+    SampleStorageSize: NotationSymbol  # bytes needed to store one training or serving sample ($s_{\text{sample}}$) [bytes/sample]
+    SamplingPeriod: NotationSymbol  # time between successive executions of a discrete controller ($T_s$) [s]
+    SamplingRate: NotationSymbol  # number of controller executions or signal samples per second ($f_s$) [Hz]
+    ScaleCoefficient: NotationSymbol  # coefficient of the reducible power-law term of an empirical scaling law ($A_{\mathcal{L}}$) [dimensionless]
+    ScaledResource: NotationSymbol  # resource quantity a scaling law varies, such as parameters, training tokens or compute ($X$) [parameters, tokens or FLOP]
+    ScalingEfficiency: NotationSymbol  # measured speedup on N devices divided by the ideal linear speedup N ($\eta_{\text{scaling}}$) [dimensionless]
+    ScalingExponent: NotationSymbol  # power-law exponent at which loss falls as a training resource grows ($\alpha_{\text{scale}}$) [dimensionless]
+    SchedulingGoodput: NotationSymbol  # fraction of fleet capacity-time during which a job holds all the resources it needs for synchronous progress ($\eta_{\text{scheduling}}$) [dimensionless]
+    SearchDepth: NotationSymbol  # maximum depth a tree search expands ($d_{\max}$)
+    SenderOverhead: NotationSymbol  # processor time spent initiating one message, during which it cannot compute ($o_{\text{send}}$) [s]
+    SensorIntegrationTime: NotationSymbol  # sensor-side latency: half the exposure, analog-to-digital conversion and readout ($t_{\text{sense}}$) [s]
+    SensorLeverArm: NotationSymbol  # displacement from the body rotation origin to a sensor mounted away from it ($\mathbf{r}_{P/O}$) [m]
+    SeqlockRetryProbability: NotationSymbol  # probability that a reader of a sequence-locked buffer sees a torn update and must retry ($p_{\text{retry}}$) [dimensionless]
+    SeqlockVulnerableInterval: NotationSymbol  # window during which a concurrent write can tear a sequence-locked read ($t_{\text{vulnerable}}$) [s]
+    SequenceLength: NotationSymbol  # number of tokens in one input sequence ($S$)
+    SequentialLogLikelihoodRatio: NotationSymbol  # cumulative log-likelihood ratio of the alternative to the null hypothesis after m trials of a sequential test ($\Lambda_m$) [dimensionless]
+    ServiceRate: NotationSymbol  # rate at which one server, such as a worker, consumer, or model endpoint, completes items or calls ($\mu$) [items/s]
+    ServingUtilization: NotationSymbol  # fraction of time a server is busy, offered load divided by service capacity ($\rho_{\text{serv}}$) [dimensionless]
+    ShieldInterceptionCoverage: NotationSymbol  # verified probability that the shield intercepts a hazardous proposal of class h ($c_h$) [dimensionless]
+    SignificanceLevel: NotationSymbol  # probability that a hypothesis test rejects a true null hypothesis ($\alpha$) [dimensionless]
+    SingleDeviceRunTime: NotationSymbol  # wall-clock time for a fixed amount of productive work on one device ($T_1$) [s]
+    SingleStepImitationError: NotationSymbol  # bound on the probability that the imitation policy makes an error at a single step ($\epsilon$) [dimensionless]
+    SpecialEuclideanGroup: NotationSymbol  # group of rigid-body transformations in three dimensions, rotations combined with translations ($SE(3)$)
+    SpecialOrthogonalGroup: NotationSymbol  # group of three-by-three rotation matrices, orthogonal with determinant one ($SO(3)$)
+    SpeedAtDetection: NotationSymbol  # speed of the machine at the moment the hazard is detected ($v$) [m/s]
+    SpeedBound: NotationSymbol  # largest speed the machine, a tracked object or an approaching body is credited with in a budget ($v_{\max}$) [m/s]
+    SprtLowerBoundary: NotationSymbol  # lower stopping threshold of a sequential probability ratio test, below which the test accepts the null hypothesis ($\Lambda_{\text{lo}}$) [dimensionless]
+    SprtUpperBoundary: NotationSymbol  # upper stopping threshold of a sequential probability ratio test, above which the test accepts the alternative ($\Lambda_{\text{up}}$) [dimensionless]
+    StaleSupportRate: NotationSymbol  # share of decisions requiring current evidence that relied on superseded support ($\epsilon_{\text{stale}}$) [dimensionless]
+    StateAtTurn: NotationSymbol  # context state the model saw on one turn ($s_t$)
+    StateDistribution: NotationSymbol  # average distribution of states a policy visits over the horizon ($d_\pi$)
+    StateExposureLevel: NotationSymbol  # state exposure level, what a task carries between turns, from nothing to durable shared state ($S_0\text{ to }S_3$) [level]
+    StateSpaceInputMatrix: NotationSymbol  # input matrix of a linear state-space model, mapping control inputs to state rates ($\mathbf{B}$)
+    StateSpaceSystemMatrix: NotationSymbol  # system matrix of a linear state-space model, governing the unforced state dynamics ($\mathbf{A}_{\text{sys}}$)
+    StateTransitionMatrix: NotationSymbol  # discrete-time matrix that propagates the state one step forward in a Kalman filter ($\mathbf{F}$)
+    StatisticalDivergence: NotationSymbol  # divergence of the current data distribution from the training distribution, a nonnegative measure of drift ($\mathcal{D}(P_t \| P_0)$) [dimensionless]
+    StatisticalSignificanceLevel: NotationSymbol  # allowed probability of a type I error, rejecting a true null hypothesis ($\alpha_{\text{sig}}$) [dimensionless]
+    StatorThermalCapacitance: NotationSymbol  # heat capacity of the motor stator and winding, energy per degree of temperature rise ($C_{\text{th}}$) [J/K]
+    StoppingDistance: NotationSymbol  # distance the machine travels from hazard detection to rest, including travel during the pre-brake delay ($d_{\text{stop}}$) [m]
+    StoppingDuration: NotationSymbol  # time from braking onset to standstill ($T_{\text{stop}}$) [s]
+    SustainedMemoryBandwidth: NotationSymbol  # memory bandwidth achievable in practice under the target access pattern ($\text{BW}_{\text{mem}}$) [bytes/s]
+    SynchronizationBlackout: NotationSymbol  # interval during which a node receives no synchronization message and runs on its own clock ($T_{\text{blackout}}$) [s]
+    SynchronizationTime: NotationSymbol  # time per step lost to barriers, straggler waiting and other coordination at scale N ($T_{\text{sync}}(N)$) [s]
+    SystemHazardRate: NotationSymbol  # rate of hazardous events of class h for the whole system, after the shield ($\lambda_{\text{system}, h}$) [1/h]
+    SystemMtbf: NotationSymbol  # mean time between failures that interrupt the whole job or system ($\text{MTBF}_{\text{system}}$) [hours]
+    SystemReliability: NotationSymbol  # probability that the whole system runs without failure up to time t ($R_{\text{system}}(t)$) [dimensionless]
+    TakeoverResponseTime: NotationSymbol  # time a human operator needs to take over control after a handover request ($T_{\Sigma, 1}$) [s]
+    TangentialContactShear: NotationSymbol  # friction component of a contact force, tangential to the contact plane ($\mathbf{f}_{k, \parallel}$) [N]
+    TargetHazardRate: NotationSymbol  # tolerable dangerous failure rate assigned to a safety function by risk assessment ($\lambda_{\text{target}}$) [1/h]
+    TargetTravelDistance: NotationSymbol  # straight-line distance from the measured end-effector position to the admitted target ($d$) [m]
+    TargetTrialSuccessProbability: NotationSymbol  # per-trial success probability a test campaign must demonstrate ($p_{\text{target}}$) [dimensionless]
+    TaskContract: NotationSymbol  # five-part specification of a delegated task: goal, environment, permitted actions, available observations, and completion criteria ($\mathcal{C}$)
+    TaskContractGoal: NotationSymbol  # desired end state of a task, with explicit negative scope, as the first element of the task contract ($G$)
+    TaskCost: NotationSymbol  # total monetary cost of all attempts and branches for one initiated task ($C_{\text{task}}$) [USD]
+    TaskEnvironment: NotationSymbol  # specification of the reproducible place the work happens, such as base commit, image, configuration, and network rules ($\mathcal{E}_{\text{env}}$)
+    TasksPerComparisonArm: NotationSymbol  # number of tasks per arm needed for a two-proportion release comparison ($N_{\text{arm}}$)
+    TelemetryFreshnessBound: NotationSymbol  # largest age a measurement may reach before acting on it introduces intolerable error ($\Delta t_{\text{fresh}}$) [s]
+    TemporalEnsemblingWeight: NotationSymbol  # weight given to the prediction of a past chunk at offset i when blending overlapping chunks ($w_i$) [dimensionless]
+    TensorParallelDegree: NotationSymbol  # number of devices that shard each layer's tensors in tensor parallelism ($N_{\text{TP}}$)
+    ThermalResistance: NotationSymbol  # lumped thermal resistance from the stator windings to ambient, temperature rise per watt ($R_{\text{th}}$) [K/W]
+    ThermalTimeConstant: NotationSymbol  # characteristic time for a motor winding to heat or cool, thermal resistance times thermal capacitance ($\tau_{\text{th}}$) [s]
+    Time: NotationSymbol  # total wall-clock time to complete a unit of work, from start to finish ($T$) [s]
+    TimingJitter: NotationSymbol  # standard deviation of a nominally periodic event's timing about its schedule ($\sigma_{\text{jitter}}$) [s]
+    TokenIndex: NotationSymbol  # position of a sampled policy token within a rollout ($t$)
+    TokenLossMask: NotationSymbol  # indicator that a token position is a training target in masked fine-tuning ($m_t$) [dimensionless]
+    TokenVocabulary: NotationSymbol  # set of tokens a model call samples from ($\mathcal{V}$)
+    ToleratedFailureProbability: NotationSymbol  # largest probability with which a deployed model may miss its error tolerance, so a guarantee holds with confidence one minus it ($\epsilon$) [dimensionless]
+    ToolTime: NotationSymbol  # time a tool takes to execute, such as a build or a test run ($T_{\text{tool}}$) [s]
+    TorqueProducingCurrent: NotationSymbol  # quadrature-axis current of a field-oriented drive, the current component that produces torque ($i_q$) [A]
+    TotalEnergy: NotationSymbol  # total energy a workload consumes ($E_{\text{total}}$) [J]
+    TotalMemoryFootprint: NotationSymbol  # total memory a workload occupies on a device ($M_{\text{total}}$) [bytes]
+    TraceDecay: NotationSymbol  # generalized advantage estimator's decay factor between zero and one ($\lambda$) [dimensionless]
+    TrackingErrorBound: NotationSymbol  # bound on the distance between the commanded and the executed position of the tracked point ($\epsilon_{\text{track}}$) [m]
+    TrainingCompute: NotationSymbol  # total floating-point operations needed to train a model ($O_{\text{train}}$) [FLOP]
+    TrainingCost: NotationSymbol  # one-time cost of training and evaluating a model ($C_{\text{train}}$) [USD]
+    TrainingDistribution: NotationSymbol  # data distribution the model was trained on, the baseline that drift is measured against ($P_0$)
+    Trajectory: NotationSymbol  # ordered record of the states, actions, and observations of one delegated task ($\tau$)
+    TrajectoryAdmissionRate: NotationSymbol  # rate at which trajectories are admitted, or arrive at a stage, per second ($\lambda_{\text{traj}}$) [trajectories/s]
+    TrajectoryBudget: NotationSymbol  # ceilings on turns, tokens, wall-clock time, and dollars that the harness checks before every call ($\mathbf{B}$)
+    TrajectoryDivergenceResidual: NotationSymbol  # signed error between measured and planned kinematics used to detect a diverging rollout ($e_{\text{div}}$) [m]
+    TrajectoryDuration: NotationSymbol  # elapsed time of one trajectory between its declared endpoints ($T_{\text{traj}}$) [s]
+    TrajectoryGoodput: NotationSymbol  # distinct accepted task completions per unit of elapsed time under the declared contract ($\mathcal{G}$) [tasks/s]
+    TrajectoryReward: NotationSymbol  # reward a verifier assigns to a whole trajectory ($R(\tau)$) [dimensionless]
+    TransferTimeForPayload: NotationSymbol  # time to communicate a payload of x bytes under the relevant link or collective model ($T_{\text{transfer}}(x)$) [s]
+    TreeAllReduceCompletionTime: NotationSymbol  # time to complete an AllReduce over a binary tree of devices ($T_{\text{tree}}$) [s]
+    TrialCount: NotationSymbol  # number of physical trials in a learning or evaluation campaign ($N$)
+    TrialFailureProbability: NotationSymbol  # probability that one physical trial fails ($p_{\text{fail}}$) [dimensionless]
+    TrichotomyMonitorState: NotationSymbol  # set of three verdicts a runtime monitor can return: known true, known false, or unknown ($\mathcal{T}_{\text{trichotomy}}$)
+    TruncatedSignedDistance: NotationSymbol  # signed distance from a voxel to the nearest surface, divided by the truncation band and clamped to plus or minus one ($\text{tsdf}(\mathbf{p}_{\text{vox}})$) [dimensionless]
+    TsdfAccumulatedDistance: NotationSymbol  # running weighted average of the truncated signed distance at a voxel after t frames ($D_t(\mathbf{p}_{\text{vox}})$) [dimensionless]
+    TsdfAccumulatedWeight: NotationSymbol  # accumulated observation weight at a voxel after t frames ($W_t(\mathbf{p}_{\text{vox}})$) [dimensionless]
+    TsdfTruncationBand: NotationSymbol  # distance from a surface within which signed distances are stored rather than clamped ($\mu_{\text{tsdf}}$) [m]
+    TurnAppendLength: NotationSymbol  # number of tokens one turn adds to the next prompt ($\Delta S_{\text{turn}}$)
+    TurnContext: NotationSymbol  # tokens the runtime assembles and sends to the model on one turn ($c_t$)
+    TurnHorizon: NotationSymbol  # number of sequential turns an agent trajectory runs ($H$)
+    TurnIndex: NotationSymbol  # position of a turn within a trajectory, counted from zero ($t$)
+    UnbrakedImpactForce: NotationSymbol  # peak transient contact force when the robot strikes a body at speed without braking ($F_{\text{unbraked}}$) [N]
+    UnitQuaternion: NotationSymbol  # four-component unit-norm vector representing an orientation ($\mathbf{q}_{\text{quat}}$) [dimensionless]
+    UsefulComputeFraction: NotationSymbol  # share of the distributed step time spent on useful local arithmetic ($f_{\text{compute}}$) [dimensionless]
+    UsefulModelFlops: NotationSymbol  # floating-point operations the model's work actually requires, excluding recomputation and padding ($O_{\text{useful}}$) [FLOP]
+    ValidCandidateRate: NotationSymbol  # share of generated candidates that meet the specification, before any check ($p$) [dimensionless]
+    Velocity: NotationSymbol  # linear velocity of a point or body ($\mathbf{v}$) [m/s]
+    VerificationEvidence: NotationSymbol  # result of a check the runtime runs on the resulting state, as pass or fail or a score ($v_t$) [dimensionless]
+    VerifiedTrajectorySet: NotationSymbol  # set of dispatched trajectories whose results passed verification ($\mathcal{T}_{\text{success}}$)
+    VerifierFalseAcceptanceRate: NotationSymbol  # probability that a verifier passes a candidate that does not meet the specification ($\epsilon_{\text{FA}}$) [dimensionless]
+    VerifierFalseRejectionRate: NotationSymbol  # probability that a verifier fails a candidate that meets the specification ($\epsilon_{\text{FR}}$) [dimensionless]
+    VirtualDampingMatrix: NotationSymbol  # damping matrix an impedance controller emulates, mapping joint velocity to opposing torque ($\mathbf{D}_{\text{virt}}$)
+    VirtualPipelineStagesPerDevice: NotationSymbol  # number of interleaved virtual pipeline stages assigned to each device ($V$)
+    VirtualStiffnessMatrix: NotationSymbol  # stiffness matrix an impedance controller emulates, mapping displacement to restoring torque ($\mathbf{K}_{\text{virt}}$)
+    VitPatchProjectionWeights: NotationSymbol  # learned linear map from a flattened image patch to a token embedding in a vision transformer ($\mathbf{W}_{\text{patch}}$)
+    VitPositionEmbedding: NotationSymbol  # embedding added to each patch token that encodes its row and column in the image ($\mathbf{E}_{\text{pos}}$)
+    WeightMemory: NotationSymbol  # memory holding a model's weights ($M_{\text{weights}}$) [bytes]
+    WheelRadius: NotationSymbol  # rolling radius of a driven wheel ($r$) [m]
+    WindingResistance: NotationSymbol  # electrical resistance of the stator winding at its current temperature ($R(T_{\text{wind}})$) [Ohm]
+    WindingTemperature: NotationSymbol  # temperature of the motor winding copper ($T_{\text{winding}}$) [degC]
+    WorkerCount: NotationSymbol  # number of equally capable workers, agents, threads, or verifier slots in one pool ($N_{\text{workers}}$)
+    WorldReferenceFrame: NotationSymbol  # fixed coordinate frame attached to the world ($\mathcal{F}_W$)
+    YoshikawaManipulability: NotationSymbol  # measure of distance from kinematic singularity, the square root of the determinant of J times J transpose ($w(\mathbf{q})$) [dimensionless]
+    ZeroFailureTrialCount: NotationSymbol  # number of consecutive failure-free trials needed to demonstrate a target success probability ($n$)
+    ZeroMomentPoint: NotationSymbol  # point on the ground where the net horizontal tipping moment of the contact forces vanishes ($\mathbf{p}_{\text{ZMP}}$) [m]
+    ZohTransportDelay: NotationSymbol  # effective continuous-time delay a zero-order hold adds, half the sampling period ($\tau_{\text{ZOH}}$) [s]
 
 Notation: NotationRegistry
 Symbols: NotationRegistry

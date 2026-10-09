@@ -71,7 +71,7 @@ TinyDigits should not be used as a high-capacity production computer vision benc
 ## Distribution & Maintenance
 
 ### How will the dataset be distributed?
-Shipped directly inside the TinyTorch git repository under `tinytorch/datasets/tinydigits/` and hosted via the Harvard Edge organization on Hugging Face.
+Shipped directly inside the TinyTorch git repository under `tinytorch/datasets/tinydigits/`.
 
 ### What is the dataset license?
 BSD 3-Clause License (inherited from scikit-learn and the original Bogazici University digit distribution).

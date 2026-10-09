@@ -24,8 +24,8 @@ The **M/G/c/K notation**\index{M/G/c/K Queues} names four characteristics that a
 
 - **M (Markov arrivals)**: Requests arrive according to a Poisson process with rate $\ArrivalRate$. This models the memoryless property of user requests, where arrival of one request does not predict the timing of the next.
 - **G (General service distribution)**: Service times follow a general distribution, not restricted to exponential. GPU inference times depend on batch size and exhibit deterministic components (compute) mixed with stochastic variation (memory contention, kernel scheduling).
-- **c (Number of servers)**: The system has $c$ parallel GPU workers, each capable of serving requests independently.
-- **K (System capacity)**: At most $K$ requests may be present, including those in service. Requests arriving to a full system are rejected (load shedding).
+- **c (Number of servers)**: The system has $\QueueServerCount$ parallel GPU workers, each capable of serving requests independently.
+- **K (System capacity)**: At most $\QueueSystemCapacity$ requests may be present, including those in service. Requests arriving to a full system are rejected (load shedding).
 
 The notation comes from the same systems-performance lineage that sized telephone networks before it was applied to GPU clusters.
 
@@ -35,83 +35,83 @@ Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network a
 
 :::
 
-For a batched inference system with batch size $B$, service time becomes a function of batch size. Let $\BatchServiceTimeSvc$ denote the time to process a batch of $B$ requests. From the physics of batching (@sec-inference-scale-batching-strategies-scale-6733), @eq-service-time-batch models this as:
+For a batched inference system with batch size $\BatchSize$, service time becomes a function of batch size. Let $\BatchServiceTime(\BatchSize)$ denote the time to process a batch of $\BatchSize$ requests. From the physics of batching (@sec-inference-scale-batching-strategies-scale-6733), @eq-service-time-batch models this as:
 
-$$\BatchServiceTimeSvc = T_{\text{fixed}} + t_{\text{req}} \cdot B$$ {#eq-service-time-batch}
+$$\BatchServiceTime(\BatchSize) = \BatchFixedOverheadTime+ \MarginalRequestServiceTime\cdot \BatchSize$$ {#eq-service-time-batch}
 
-where $T_{\text{fixed}}$ represents fixed service overhead (kernel launch, weight loading from high-bandwidth memory (HBM)) and $t_{\text{req}}$ represents marginal per-request computation time. This linear model captures the first-order behavior observed in production systems, though actual service times may exhibit slight sublinearity due to memory bandwidth saturation at large batch sizes.
+where $\BatchFixedOverheadTime$ represents fixed service overhead (kernel launch, weight loading from high-bandwidth memory (HBM)) and $\MarginalRequestServiceTime$ represents marginal per-request computation time. This linear model captures the first-order behavior observed in production systems, though actual service times may exhibit slight sublinearity due to memory bandwidth saturation at large batch sizes.
 
 The **Effective Service Rate**\index{Effective Service Rate} for batched processing is:
 
-$$\EffectiveServiceRate = \frac{B}{\BatchServiceTimeSvc} = \frac{B}{T_{\text{fixed}} + t_{\text{req}} \cdot B}$$
+$$\EffectiveServiceRate(\BatchSize) = \frac{\BatchSize}{\BatchServiceTime(\BatchSize)} = \frac{\BatchSize}{\BatchFixedOverheadTime+ \MarginalRequestServiceTime\cdot \BatchSize}$$
 
-The effective rate increases with batch size, approaching the asymptotic limit $1/t_{\text{req}}$ as $B \to \infty$.
+The effective rate increases with batch size, approaching the asymptotic limit $1/\MarginalRequestServiceTime$ as $\BatchSize\to \infty$.
 
 #### Response time analysis {#sec-appdx-inference-scale-response-time-analysis-ffc3}
 
-The total response time $T$ for a request consists of three components:
+The total response time $\RequestResponseTime$ for a request consists of three components:
 
-$$ \mathbb{E}[T] = \mathbb{E}[W] + \mathbb{E}[T_{\text{batch}}] + \mathbb{E}[T_{\text{svc}}] $$
+$$ \mathbb{E}[\RequestResponseTime] = \mathbb{E}[\QueueWaitTime] + \mathbb{E}[\BatchFormationDelay] + \mathbb{E}[\BatchServiceTime] $$
 
 where:
 
-- $\mathbb{E}[W]$ is the expected waiting time in queue before joining a batch
-- $\mathbb{E}[T_{\text{batch}}]$ is the expected per-request batch-accumulation delay before dispatch
-- $\mathbb{E}[T_{\text{svc}}]$ is the expected inference time once the batch executes
+- $\mathbb{E}[\QueueWaitTime]$ is the expected waiting time in queue before joining a batch
+- $\mathbb{E}[\BatchFormationDelay]$ is the expected per-request batch-accumulation delay before dispatch
+- $\mathbb{E}[\BatchServiceTime]$ is the expected inference time once the batch executes
 
-For dynamic batching with maximum wait time $T_{\text{max}}$ and maximum batch size $B_{\text{max}}$, the first request triggers the batching window. Let $Q_{\text{arr}} \sim \operatorname{Poisson}(\ArrivalRate{}T_{\text{max}})$ count subsequent arrivals during that window and let $k=B_{\text{max}}-1$. For $B_{\text{max}}>1$, the realized batch size is $B=\min(B_{\text{max}},1+Q_{\text{arr}})$, including the trigger request, so:
+For dynamic batching with maximum wait time $\BatchingWindow$ and maximum batch size $\MaxBatchSize$, the first request triggers the batching window. Let $\TriggeredWindowArrivalCount\sim \operatorname{Poisson}(\ArrivalRate{}\BatchingWindow)$ count subsequent arrivals during that window and let $\BatchFillArrivalCount=\MaxBatchSize-1$. For $\MaxBatchSize>1$, the realized batch size is $\BatchSize=\min(\MaxBatchSize,1+\TriggeredWindowArrivalCount)$, including the trigger request, so:
 
-$$\mathbb{E}[B] = \sum_{n=0}^{k-1}(n+1)\Pr(Q_{\text{arr}}=n) + B_{\text{max}}\Pr(Q_{\text{arr}}\geq k)$$
+$$\mathbb{E}[\BatchSize] = \sum_{n=0}^{\BatchFillArrivalCount-1}(\RealizedArrivalCount+1)\Pr(\TriggeredWindowArrivalCount=\RealizedArrivalCount) + \MaxBatchSize\Pr(\TriggeredWindowArrivalCount\geq \BatchFillArrivalCount)$$
 
-Let $\tau_k$ be the Erlang-distributed time of the $k$th subsequent arrival. A full batch closes when $\tau_k \leq T_{\text{max}}$, while a timeout batch closes at $T_{\text{max}}$ with $Q_{\text{arr}}=n<k$. The mean per-request accumulation delay within each realized batch is:
+Let $\SubsequentArrivalTime_k$ be the Erlang-distributed time of the $\BatchFillArrivalCount$th subsequent arrival. A full batch closes when $\SubsequentArrivalTime_k \leq \BatchingWindow$, while a timeout batch closes at $\BatchingWindow$ with $\TriggeredWindowArrivalCount=\RealizedArrivalCount<\BatchFillArrivalCount$. The mean per-request accumulation delay within each realized batch is:
 
-$$\mathbb{E}[T_{\text{batch}} \mid \text{full}] = \frac{1}{2}\mathbb{E}[\tau_k \mid \tau_k \leq T_{\text{max}}]$$
+$$\mathbb{E}[\BatchFormationDelay \mid \text{full}] = \frac{1}{2}\mathbb{E}[\SubsequentArrivalTime_k \mid \SubsequentArrivalTime_k \leq \BatchingWindow]$$
 
-$$\mathbb{E}[T_{\text{batch}} \mid Q_{\text{arr}}=n,\ \text{timeout}] = \frac{T_{\text{max}}}{2}\left(1+\frac{1}{n+1}\right), \qquad 0 \leq n < k$$
+$$\mathbb{E}[\BatchFormationDelay \mid \TriggeredWindowArrivalCount=\RealizedArrivalCount,\ \text{timeout}] = \frac{\BatchingWindow}{2}\left(1+\frac{1}{\RealizedArrivalCount+1}\right), \qquad 0 \leq \RealizedArrivalCount< \BatchFillArrivalCount$$
 
 Weighting each batch outcome by its realized request count gives the mean delay of a randomly selected request:
 
-$$\mathbb{E}[T_{\text{batch}}] = \frac{B_{\text{max}}\Pr(Q_{\text{arr}}\geq k)\mathbb{E}[\tau_k/2 \mid \tau_k\leq T_{\text{max}}] + \sum_{n=0}^{k-1}(n+1)\Pr(Q_{\text{arr}}=n)\mathbb{E}[T_{\text{batch}} \mid Q_{\text{arr}}=n,\ \text{timeout}]}{\mathbb{E}[B]}$$
+$$\mathbb{E}[\BatchFormationDelay] = \frac{\MaxBatchSize\Pr(\TriggeredWindowArrivalCount\geq \BatchFillArrivalCount)\mathbb{E}[\SubsequentArrivalTime_k/2 \mid \SubsequentArrivalTime_k\leq \BatchingWindow] + \sum_{n=0}^{\BatchFillArrivalCount-1}(\RealizedArrivalCount+1)\Pr(\TriggeredWindowArrivalCount=\RealizedArrivalCount)\mathbb{E}[\BatchFormationDelay \mid \TriggeredWindowArrivalCount=\RealizedArrivalCount,\ \text{timeout}]}{\mathbb{E}[\BatchSize]}$$
 
-When batches reliably fill before timeout, this expression approaches $\mathbb{E}[\tau_k]/2=(B_{\text{max}}-1)/(2\ArrivalRate)$. For $B_{\text{max}}=1$, the batch contains only its trigger request and accumulation delay is zero.
+When batches reliably fill before timeout, this expression approaches $\mathbb{E}[\SubsequentArrivalTime_k]/2=(\MaxBatchSize-1)/(2\ArrivalRate)$. For $\MaxBatchSize=1$, the batch contains only its trigger request and accumulation delay is zero.
 
 #### Optimal batch size derivation {#sec-appdx-inference-scale-optimal-batch-size-derivation-3a3c}
 
-The optimal batch size $B$ minimizes expected response time subject to throughput requirements:
+The optimal batch size $\BatchSize$ minimizes expected response time subject to throughput requirements:
 
-$$B = \operatorname{arg\,min}_{B} \mathbb{E}[T(B)] \quad \text{subject to} \quad \EffectiveServiceRate > \ArrivalRate$$
+$$\BatchSize= \operatorname{arg\,min}_{\BatchSize} \mathbb{E}[\RequestResponseTime(\BatchSize)] \quad \text{subject to} \quad \EffectiveServiceRate(\BatchSize) > \ArrivalRate$$
 
 The constraint ensures system stability (service rate exceeds arrival rate).
 
-For a high-traffic regime in which batches of size $B$ reliably fill before timeout, substituting the response time components gives:
+For a high-traffic regime in which batches of size $\BatchSize$ reliably fill before timeout, substituting the response time components gives:
 
-$$\mathbb{E}[T(B)] = \mathbb{E}[W(B)] + \frac{B-1}{2\ArrivalRate} + \BatchServiceTimeSvc$$
+$$\mathbb{E}[\RequestResponseTime(\BatchSize)] = \mathbb{E}[\QueueWaitTime(\BatchSize)] + \frac{\BatchSize-1}{2\ArrivalRate} + \BatchServiceTime(\BatchSize)$$
 
-For a tractable waiting-time estimate, use an M/G/1 surrogate that treats batches as Poisson "super-requests." If the request arrival rate is $\ArrivalRate$ and the average batch size is $B$, this surrogate uses batch arrival rate $\lambda_{\text{batch}}=\ArrivalRate/B$. This is not the exact process produced by grouping Poisson request arrivals, because fixed-size grouping yields Erlang inter-batch times; finite $K$ or $c>1$ requires a bulk-service model or simulation. Within the explicit surrogate, the Pollaczek-Khinchine formula gives:
+For a tractable waiting-time estimate, use an M/G/1 surrogate that treats batches as Poisson "super-requests." If the request arrival rate is $\ArrivalRate$ and the average batch size is $\BatchSize$, this surrogate uses batch arrival rate $\BatchArrivalRate=\ArrivalRate/\BatchSize$. This is not the exact process produced by grouping Poisson request arrivals, because fixed-size grouping yields Erlang inter-batch times; finite $\QueueSystemCapacity$ or $\QueueServerCount>1$ requires a bulk-service model or simulation. Within the explicit surrogate, the Pollaczek-Khinchine formula gives:
 
-$$\mathbb{E}[W] = \frac{\lambda_{\text{batch}} \cdot \mathbb{E}[T_{\text{svc}}^2]}{2(1 - \ServingUtilization)}$$
+$$\mathbb{E}[\QueueWaitTime] = \frac{\BatchArrivalRate\cdot \mathbb{E}[\BatchServiceTime^2]}{2(1 - \ServingUtilization)}$$
 
-where $\ServingUtilization = \lambda_{\text{batch}} \cdot \mathbb{E}[T_{\text{svc}}] = \ArrivalRate \cdot \mathbb{E}[T_{\text{svc}}]/B$ is the server utilization. The second moment $\mathbb{E}[T_{\text{svc}}^2]$ captures service time variability.
+where $\ServingUtilization = \BatchArrivalRate\cdot \mathbb{E}[\BatchServiceTime] = \ArrivalRate \cdot \mathbb{E}[\BatchServiceTime]/\BatchSize$ is the server utilization. The second moment $\mathbb{E}[\BatchServiceTime^2]$ captures service time variability.
 
 For the linear service time model with deterministic service in this surrogate:
 
-$$\mathbb{E}[W(B)] = \frac{\ArrivalRate \cdot \BatchServiceTimeSvc^2}{2B(1 - \ArrivalRate \cdot \BatchServiceTimeSvc/B)}$$
+$$\mathbb{E}[\QueueWaitTime(\BatchSize)] = \frac{\ArrivalRate \cdot \BatchServiceTime(\BatchSize)^2}{2\BatchSize(1 - \ArrivalRate \cdot \BatchServiceTime(\BatchSize)/\BatchSize)}$$
 
-For production sizing, teams often first enforce a utilization headroom target rather than solving the full latency minimization problem. With $\BatchServiceTimeSvc=T_{\text{fixed}}+t_{\text{req}} B$, the constraint $\ServingUtilization=\ArrivalRate \BatchServiceTimeSvc/B \leq \rho_{\text{target}}$ yields the target-utilization batch bound (@eq-optimal-batch-approx):
+For production sizing, teams often first enforce a utilization headroom target rather than solving the full latency minimization problem. With $\BatchServiceTime(\BatchSize)=\BatchFixedOverheadTime+\MarginalRequestServiceTime \BatchSize$, the constraint $\ServingUtilization=\ArrivalRate \BatchServiceTime(\BatchSize)/\BatchSize\leq \TargetServingUtilization$ yields the target-utilization batch bound (@eq-optimal-batch-approx):
 
-$$B_{\text{min}}(\rho_{\text{target}}) = \frac{\ArrivalRate T_{\text{fixed}}}{\rho_{\text{target}} - \ArrivalRate t_{\text{req}}}$$ {#eq-optimal-batch-approx}
+$$\TargetUtilizationBatchSize(\TargetServingUtilization) = \frac{\ArrivalRate \BatchFixedOverheadTime}{\TargetServingUtilization- \ArrivalRate \MarginalRequestServiceTime}$$ {#eq-optimal-batch-approx}
 
-where $\rho_{\text{target}}$ is the target utilization (typically 0.7--0.8 for production systems to maintain latency headroom) and $\rho_{\text{target}} > \ArrivalRate t_{\text{req}}$.
+where $\TargetServingUtilization$ is the target utilization (typically 0.7--0.8 for production systems to maintain latency headroom) and $\TargetServingUtilization> \ArrivalRate \MarginalRequestServiceTime$.
 
 ::: {#psp-appendix-inference-target-utilization-batch-sizing .callout-perspective title="Target-utilization batch sizing"}
 
-The target-utilization batch bound (@eq-optimal-batch-approx) reveals a fundamental insight: *minimum stable batch size grows with fixed overhead and arrival rate*. This means:
+The target-utilization batch bound (@eq-optimal-batch-approx) reveals a fundamental insight: *minimum utilization-feasible batch size grows with fixed overhead and arrival rate*. This means:
 
 1. **Higher traffic** $(\ArrivalRate)$: Required batch size increases.
-2. **Higher fixed overhead** $(T_{\text{fixed}})$: Required batch size increases to amortize overhead.
-3. **Higher target utilization** $(\rho_{\text{target}})$: Required batch size decreases, but with less latency headroom.
+2. **Higher fixed overhead** $(\BatchFixedOverheadTime)$: Required batch size increases to amortize overhead.
+3. **Higher target utilization** $(\TargetServingUtilization)$: Required batch size decreases, but with less latency headroom.
 
-This utilization-constrained sizing explains why large language models (LLMs) (high $T_{\text{fixed}}$ from weight loading) benefit from larger batches than vision models (low $T_{\text{fixed}}$), even at the same arrival rate.
+This utilization-constrained sizing explains why large language models (LLMs) (high $\BatchFixedOverheadTime$ from weight loading) benefit from larger batches than vision models (low $\BatchFixedOverheadTime$), even at the same arrival rate.
 
 :::
 
@@ -230,9 +230,11 @@ class PrefillServing:
     b_hi_str = fmt_int(b_hi)
     b_top_str = fmt_int(b_top)
     b_stab_str = fmt(b_stab_exact, precision=1, commas=False)
-    t_svc_eq_math = fmt_display_math(f"T_{{\\text{{svc}}}}(B) = {t_fixed_ms_value_str} + {t_req_ms_value_str} \\cdot B \\text{{ ms}}")
+    t_svc_eq_math = fmt_display_math(
+        f"\\BatchServiceTime(\\BatchSize) = {t_fixed_ms_value_str} + {t_req_ms_value_str} \\cdot \\BatchSize \\text{{ ms}}"
+    )
     b_min_eq_math = fmt_display_math(
-        f"B_{{\\text{{min}}}} \\approx \\frac{{{lam_str} \\times {fmt(t_fixed_s, precision=2, commas=False)}}}"
+        f"\\TargetUtilizationBatchSize \\approx \\frac{{{lam_str} \\times {fmt(t_fixed_s, precision=2, commas=False)}}}"
         f"{{{rho_target_str} - {lam_str} \\times {fmt(t_req_s, precision=4, commas=False)}}}"
         f" = \\frac{{{fmt(lam * t_fixed_s, precision=0, commas=False)}}}{{{fmt(rho_target - lam * t_req_s, precision=2, commas=False)}}}"
         f" \\approx {fmt(b_target_exact, precision=2, commas=False)}"
@@ -256,9 +258,9 @@ Consider a hypothetical prefill-stage sizing exercise for a GPT-3 class model (`
 
 - Arrival rate: $\ArrivalRate =$ `{python} PrefillServing.lam_str` requests/second
 - Hardware: `{python} PrefillServing.n_gpus_str`$\times$ A100 GPUs (one DGX A100 node) with tensor parallelism
-- Fixed prefill-stage service overhead: $T_{\text{fixed}} =$ `{python} PrefillServing.t_fixed_ms_value_str` ms
-- Marginal prefill-stage service time: $t_{\text{req}} =$ `{python} PrefillServing.t_req_ms_value_str` ms per request
-- Target utilization: $\rho_{\text{target}} =$ `{python} PrefillServing.rho_target_str`
+- Fixed prefill-stage service overhead: $\BatchFixedOverheadTime=$ `{python} PrefillServing.t_fixed_ms_value_str` ms
+- Marginal prefill-stage service time: $\MarginalRequestServiceTime=$ `{python} PrefillServing.t_req_ms_value_str` ms per request
+- Target utilization: $\TargetServingUtilization=$ `{python} PrefillServing.rho_target_str`
 
 For the prefill phase (processing input prompt), service time follows @eq-service-time-batch:
 
@@ -268,19 +270,19 @@ Applying @eq-optimal-batch-approx to compute the minimum batch size that meets t
 
 `{python} PrefillServing.b_min_eq_math`
 
-Rounding up gives $B=$ `{python} PrefillServing.b_target_str` as the smallest batch size that meets the target utilization headroom. Evaluating the surrogate response-time expression under the full-batch assumption then shows how larger batches reduce utilization but add batch-accumulation delay:
+Rounding up gives $\BatchSize=$ `{python} PrefillServing.b_target_str` as the smallest batch size that meets the target utilization headroom. Evaluating the surrogate response-time expression under the full-batch assumption then shows how larger batches reduce utilization but add batch-accumulation delay:
 
 Evaluating GPT-3 serving performance across batch sizes (@tbl-batch-size-comparison) exposes the trade-off between queuing delay and server utilization:
 
-| **Size $B$** |      **$\BatchServiceTimeSvc$ (ms)**       |                  **req/s**                  |         **$\ServingUtilization$**          |           **$\mathbb{E}[W]$ (ms)**          |       **$(B-1)/(2\ArrivalRate)$ (ms)**       |           **$\mathbb{E}[T]$ (ms)**           |
-|:-------------|:------------------------------------------:|:-------------------------------------------:|:------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|
-| **1**        | `{python} PrefillServing.cells[1]["svc"]`  |  `{python} PrefillServing.cells[1]["thru"]` | `{python} PrefillServing.cells[1]["rho"]`  |  `{python} PrefillServing.cells[1]["wait"]` | `{python} PrefillServing.cells[1]["accum"]`  | `{python} PrefillServing.cells[1]["total"]`  |
-| **4**        | `{python} PrefillServing.cells[4]["svc"]`  |  `{python} PrefillServing.cells[4]["thru"]` | `{python} PrefillServing.cells[4]["rho"]`  |  `{python} PrefillServing.cells[4]["wait"]` | `{python} PrefillServing.cells[4]["accum"]`  | `{python} PrefillServing.cells[4]["total"]`  |
-| **8**        | `{python} PrefillServing.cells[8]["svc"]`  |  `{python} PrefillServing.cells[8]["thru"]` | `{python} PrefillServing.cells[8]["rho"]`  |  `{python} PrefillServing.cells[8]["wait"]` | `{python} PrefillServing.cells[8]["accum"]`  | `{python} PrefillServing.cells[8]["total"]`  |
-| **16**       | `{python} PrefillServing.cells[16]["svc"]` | `{python} PrefillServing.cells[16]["thru"]` | `{python} PrefillServing.cells[16]["rho"]` | `{python} PrefillServing.cells[16]["wait"]` | `{python} PrefillServing.cells[16]["accum"]` | `{python} PrefillServing.cells[16]["total"]` |
-| **32**       | `{python} PrefillServing.cells[32]["svc"]` | `{python} PrefillServing.cells[32]["thru"]` | `{python} PrefillServing.cells[32]["rho"]` | `{python} PrefillServing.cells[32]["wait"]` | `{python} PrefillServing.cells[32]["accum"]` | `{python} PrefillServing.cells[32]["total"]` |
+| **Size $\BatchSize$** |  **$\BatchServiceTime(\BatchSize)$ (ms)**  |                  **req/s**                  |         **$\ServingUtilization$**          |    **$\mathbb{E}[\QueueWaitTime]$ (ms)**    |  **$(\BatchSize-1)/(2\ArrivalRate)$ (ms)**   | **$\mathbb{E}[\RequestResponseTime]$ (ms)**  |
+|:----------------------|:------------------------------------------:|:-------------------------------------------:|:------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|
+| **1**                 | `{python} PrefillServing.cells[1]["svc"]`  |  `{python} PrefillServing.cells[1]["thru"]` | `{python} PrefillServing.cells[1]["rho"]`  |  `{python} PrefillServing.cells[1]["wait"]` | `{python} PrefillServing.cells[1]["accum"]`  | `{python} PrefillServing.cells[1]["total"]`  |
+| **4**                 | `{python} PrefillServing.cells[4]["svc"]`  |  `{python} PrefillServing.cells[4]["thru"]` | `{python} PrefillServing.cells[4]["rho"]`  |  `{python} PrefillServing.cells[4]["wait"]` | `{python} PrefillServing.cells[4]["accum"]`  | `{python} PrefillServing.cells[4]["total"]`  |
+| **8**                 | `{python} PrefillServing.cells[8]["svc"]`  |  `{python} PrefillServing.cells[8]["thru"]` | `{python} PrefillServing.cells[8]["rho"]`  |  `{python} PrefillServing.cells[8]["wait"]` | `{python} PrefillServing.cells[8]["accum"]`  | `{python} PrefillServing.cells[8]["total"]`  |
+| **16**                | `{python} PrefillServing.cells[16]["svc"]` | `{python} PrefillServing.cells[16]["thru"]` | `{python} PrefillServing.cells[16]["rho"]` | `{python} PrefillServing.cells[16]["wait"]` | `{python} PrefillServing.cells[16]["accum"]` | `{python} PrefillServing.cells[16]["total"]` |
+| **32**                | `{python} PrefillServing.cells[32]["svc"]` | `{python} PrefillServing.cells[32]["thru"]` | `{python} PrefillServing.cells[32]["rho"]` | `{python} PrefillServing.cells[32]["wait"]` | `{python} PrefillServing.cells[32]["accum"]` | `{python} PrefillServing.cells[32]["total"]` |
 
-: **Batch Size Impact on GPT-3 Serving Performance**: Batch sizes of `{python} PrefillServing.b_last_unstable_str` or fewer cannot sustain `{python} PrefillServing.lam_str` QPS (utilization exceeds 100 percent); $B=$ `{python} PrefillServing.b_first_stable_str` is the smallest stable batch and $B=$ `{python} PrefillServing.b_target_str` the smallest that meets the `{python} PrefillServing.rho_target_pct_str` utilization target. Among the tabulated sizes, $B=$ `{python} PrefillServing.b_lo_str` has the lowest mean latency, and evaluating every integer batch size places the minimum of this model near $B=$ `{python} PrefillServing.b_best_str`. $B=$ `{python} PrefillServing.b_hi_str` has similar mean latency with lower utilization, while $B=32$ leaves more headroom but pays a large accumulation-delay penalty. {#tbl-batch-size-comparison}
+: **Batch Size Impact on GPT-3 Serving Performance**: Batch sizes of `{python} PrefillServing.b_last_unstable_str` or fewer cannot sustain `{python} PrefillServing.lam_str` QPS (utilization exceeds 100 percent); $\BatchSize=$ `{python} PrefillServing.b_first_stable_str` is the smallest stable batch and $\BatchSize=$ `{python} PrefillServing.b_target_str` the smallest that meets the `{python} PrefillServing.rho_target_pct_str` utilization target. Among the tabulated sizes, $\BatchSize=$ `{python} PrefillServing.b_lo_str` has the lowest mean latency, and evaluating every integer batch size places the minimum of this model near $\BatchSize=$ `{python} PrefillServing.b_best_str`. $\BatchSize=$ `{python} PrefillServing.b_hi_str` has similar mean latency with lower utilization, while $\BatchSize=32$ leaves more headroom but pays a large accumulation-delay penalty. {#tbl-batch-size-comparison}
 
 ```{python}
 #| echo: false
@@ -320,9 +322,9 @@ class GPT3ServingResults:
 
 Four operational regimes emerge across these batch sizes:
 
-1. **Unstable regime (batch sizes 1 to `{python} PrefillServing.b_last_unstable_str`)**\index{Batching!stability threshold}: Utilization exceeds 100 percent, so the system cannot keep up with arrivals and queues grow without bound. The stability boundary of @eq-stability-threshold, $B_{\text{min}} \approx$ `{python} PrefillServing.b_stab_str`, falls inside this range.
+1. **Unstable regime (batch sizes 1 to `{python} PrefillServing.b_last_unstable_str`)**\index{Batching!stability threshold}: Utilization exceeds 100 percent, so the system cannot keep up with arrivals and queues grow without bound. The stability boundary of @eq-stability-threshold, $\MinimumStableBatchSize\approx$ `{python} PrefillServing.b_stab_str`, falls inside this range.
 2. **Utilization-target threshold (batch size `{python} PrefillServing.b_target_str`)**\index{Batching!utilization headroom}: At `{python} GPT3ServingResults.b8_util_pct_str` utilization, the system meets the `{python} PrefillServing.rho_target_pct_str` target, but queuing delay still contributes substantially to latency (`{python} GPT3ServingResults.b8_wait_ms_str`). The steep occupancy trajectory charted in @fig-queuing-hockey-stick isolates why: batch sizes between the stability boundary and this threshold push utilization past the $\ServingUtilization \approx 0.80$ hockey-stick knee into the caution band, where queuing delay surges nonlinearly as the curve approaches saturation.
-3. **Latency knee (batch sizes `{python} PrefillServing.b_lo_str` to `{python} PrefillServing.b_hi_str`)**\index{Batching!latency knee}: Mean latency is lowest in this range, with the model's minimum near $B=$ `{python} PrefillServing.b_best_str`. Batch size `{python} PrefillServing.b_hi_str` trades a few milliseconds of additional total latency for lower utilization and queue wait time (`{python} GPT3ServingResults.b16_wait_ms_str` vs. `{python} GPT3ServingResults.b8_wait_ms_str`), while $B=$ `{python} PrefillServing.b_top_str` leaves still more utilization headroom but pays too much batch-accumulation delay.
+3. **Latency knee (batch sizes `{python} PrefillServing.b_lo_str` to `{python} PrefillServing.b_hi_str`)**\index{Batching!latency knee}: Mean latency is lowest in this range, with the model's minimum near $\BatchSize=$ `{python} PrefillServing.b_best_str`. Batch size `{python} PrefillServing.b_hi_str` trades a few milliseconds of additional total latency for lower utilization and queue wait time (`{python} GPT3ServingResults.b16_wait_ms_str` vs. `{python} GPT3ServingResults.b8_wait_ms_str`), while $\BatchSize=$ `{python} PrefillServing.b_top_str` leaves still more utilization headroom but pays too much batch-accumulation delay.
 4. **Diminishing returns (batch sizes beyond `{python} PrefillServing.b_top_str`)**\index{Batching!diminishing returns}: Further batch size increases reduce utilization in this surrogate but increase accumulation delay. The separate KV-cache example below supplies a decode-memory bound; it is not part of this prefill-time calculation.
 
 ::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The queuing hockey stick**: For an M/M/1 queue, $\ServingUtilization/(1-\ServingUtilization)$ is the expected number of requests in the system, including the request in service. Its hyperbolic rise near saturation explains why production systems retain utilization headroom; the shaded operating bands are illustrative rather than universal thresholds." fig-alt="Plot of the expected number of requests in an M/M/1 system versus serving utilization rho_serv from 0 to 1. The curve rises gradually at low utilization, bends upward through illustrative headroom and caution bands, and rises sharply as utilization approaches 1."}
@@ -508,9 +510,9 @@ class LittlesLawVerify:
 
 ::: {#nbk-inference-applying-littles-law-verify .callout-notebook title="Applying Little's Law to verify"}
 
-**Verification**: By Little's Law\index{Little's Law} [@little1961], $\RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystemLat$:
+**Verification**: By Little's Law\index{Little's Law} [@little1961], $\RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystem$:
 
-At $B=$ `{python} LittlesLawVerify.batch_size_str` with $\ArrivalRate =$ `{python} LittlesLawVerify.lam_str` req/s and $\mathbb{E}[T] =$ `{python} LittlesLawVerify.expected_total_ms_str`:
+At $\BatchSize=$ `{python} LittlesLawVerify.batch_size_str` with $\ArrivalRate =$ `{python} LittlesLawVerify.lam_str` req/s and $\mathbb{E}[\RequestResponseTime] =$ `{python} LittlesLawVerify.expected_total_ms_str`:
 
 $\RequestConcurrency =$ `{python} LittlesLawVerify.lam_str` $\times$ `{python} LittlesLawVerify.expected_total_s_str` = `{python} LittlesLawVerify.n_req_str` requests in system
 
@@ -529,44 +531,44 @@ Production systems must select batch size to meet Service Level Objectives (SLOs
 
 ##### Step 1 characterize service time {.unnumbered}
 
-Measure $T_{\text{fixed}}$ and $t_{\text{req}}$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $\BatchServiceTimeSvc = T_{\text{fixed}} + t_{\text{req}} B$.
+Measure $\BatchFixedOverheadTime$ and $\MarginalRequestServiceTime$ empirically by profiling inference at batch sizes 1, 8, and 32. Fit the linear model $\BatchServiceTime(\BatchSize) = \BatchFixedOverheadTime+ \MarginalRequestServiceTime \BatchSize$.
 
 ##### Step 2 compute stability threshold {.unnumbered}
 
-Find minimum batch size $B_{\text{min}}$ such that $\mu_{\text{eff}}(B_{\text{min}}) > \ArrivalRate$:
+Find minimum batch size $\MinimumStableBatchSize$ such that $\EffectiveServiceRate(\MinimumStableBatchSize) > \ArrivalRate$:
 
-$$B_{\text{min}} = \frac{T_{\text{fixed}} \ArrivalRate}{1 - t_{\text{req}} \ArrivalRate}$$ {#eq-stability-threshold}
+$$\MinimumStableBatchSize= \frac{\BatchFixedOverheadTime\ArrivalRate}{1 - \MarginalRequestServiceTime\ArrivalRate}$$ {#eq-stability-threshold}
 
-Choose an integer batch size strictly above this boundary, assuming $\ArrivalRate{}t_{\text{req}}<1$. Equality leaves no stability margin; if the denominator is nonpositive, batching alone cannot sustain the arrival rate.
+Choose an integer batch size strictly above this boundary, assuming $\ArrivalRate{}\MarginalRequestServiceTime<1$. Equality leaves no stability margin; if the denominator is nonpositive, batching alone cannot sustain the arrival rate.
 
 ##### Step 3 compute latency at candidate batch sizes {.unnumbered}
 
-Under the same Poisson-super-request surrogate and full-batch assumption, for each candidate $B \in \{B_{\text{min}}, 2B_{\text{min}}, ..., B_{\text{max}}\}$, compute:
+Under the same Poisson-super-request surrogate and full-batch assumption, for each candidate $\BatchSize\in \{\MinimumStableBatchSize, 2\MinimumStableBatchSize, ..., \MaxBatchSize\}$, compute:
 
-$$\mathbb{E}[T(B)] = \frac{\ArrivalRate \cdot \BatchServiceTimeSvc^2}{2B(1 - \ArrivalRate \BatchServiceTimeSvc/B)} + \frac{B-1}{2\ArrivalRate} + \BatchServiceTimeSvc$$
+$$\mathbb{E}[\RequestResponseTime(\BatchSize)] = \frac{\ArrivalRate \cdot \BatchServiceTime(\BatchSize)^2}{2\BatchSize(1 - \ArrivalRate \BatchServiceTime(\BatchSize)/\BatchSize)} + \frac{\BatchSize-1}{2\ArrivalRate} + \BatchServiceTime(\BatchSize)$$
 
 ##### Step 4 account for tail latency {.unnumbered}
 
 If measured response times are approximately Gaussian, their p99 can be estimated as:
 
-$$T_{\text{p99}} \approx \mathbb{E}[T] + 2.33 \cdot \sigma_T$$
+$$\TailRequestLatency \approx \mathbb{E}[\RequestResponseTime] + 2.33 \cdot \ResponseTimeStandardDeviation$$
 
-where $\sigma_T$ is the standard deviation of response time. This Gaussian rule is not a general heavy-traffic approximation because queuing response times are commonly skewed. For exponential response times, p99 is $-\ln(0.01)\mathbb{E}[T] \approx 4.6 \cdot \mathbb{E}[T]$; use measured percentiles for production sizing.
+where $\ResponseTimeStandardDeviation$ is the standard deviation of response time. This Gaussian rule is not a general heavy-traffic approximation because queuing response times are commonly skewed. For exponential response times, p99 is $-\ln(0.01)\mathbb{E}[\RequestResponseTime] \approx 4.6 \cdot \mathbb{E}[\RequestResponseTime]$; use measured percentiles for production sizing.
 
 ##### Step 5 select optimal batch size {.unnumbered}
 
 When the objective is maximum throughput under the increasing service-rate model, choose the largest stable, memory-feasible integer batch size whose p99 latency meets the SLO:
 
-$$B = \max\{B : T_{\text{p99}}(B) \leq \text{SLO}\}$$
+$$\BatchSize= \max\{\BatchSize: \TailRequestLatency(\BatchSize) \leq \text{SLO}\}$$
 
 Operating rules for batch size selection (@tbl-batch-decision-framework) balance stability, latency SLOs, and cost efficiency:
 
-| **Condition**                 | **Recommended Action**                  |       **Rationale**       |
-|:------------------------------|:----------------------------------------|:-------------------------:|
-| $B < B_{\text{min}}$          | Increase batch size or add replicas     |     System is unstable    |
-| $T_{\text{p99}} > \text{SLO}$ | Re-evaluate stable batch sizes or add replicas       |   Latency exceeds target  |
-| $\ServingUtilization < 0.5$   | Consider reducing replicas to save cost | System is overprovisioned |
-| $\ServingUtilization > 0.85$  | Add replicas for headroom               |  Approaching instability  |
+| **Condition**                         | **Recommended Action**                         |       **Rationale**       |
+|:--------------------------------------|:-----------------------------------------------|:-------------------------:|
+| $\BatchSize< \MinimumStableBatchSize$ | Increase batch size or add replicas            |     System is unstable    |
+| $\TailRequestLatency > \text{SLO}$    | Re-evaluate stable batch sizes or add replicas |   Latency exceeds target  |
+| $\ServingUtilization < 0.5$           | Consider reducing replicas to save cost        | System is overprovisioned |
+| $\ServingUtilization > 0.85$          | Add replicas for headroom                      |  Approaching instability  |
 
 : **Batch Size Decision Framework**: Systematic approach to selecting batch size based on stability, latency SLO, and utilization targets. {#tbl-batch-decision-framework}
 
@@ -574,7 +576,7 @@ These rules generate candidate configurations; load tests must verify their late
 
 #### Trade-off curves for visualizing the operating region {#sec-appdx-inference-scale-tradeoff-curves-visualizing-operating-region-9f95}
 
-@Fig-batch-tradeoff-curves charts the competing pressures of batch execution by plotting normalized throughput against batch service time across batch sizes $B \in [1, 128]$ on a logarithmic scale. While throughput climbs with diminishing returns as fixed overheads are amortized, batch service time expands steadily, defining the envelope where latency budgets constrain throughput gains.
+@Fig-batch-tradeoff-curves charts the competing pressures of batch execution by plotting normalized throughput against batch service time across batch sizes $\BatchSize\in [1, 128]$ on a logarithmic scale. While throughput climbs with diminishing returns as fixed overheads are amortized, batch service time expands steadily, defining the envelope where latency budgets constrain throughput gains.
 
 ::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-Off Curves**: Dimensionless schematic with batch service time t(B) = 1 + 0.15(B − 1) and throughput B/t(B), each normalized to its batch-1 value. Larger batches amortize fixed work but take longer to complete. These hypothetical curves are not a benchmark, exclude queuing and batch-formation delay, and establish neither a memory-capacity boundary nor an optimal batch size." fig-alt="Schematic normalized throughput and batch service time versus batch size. Throughput rises toward a ceiling while service time continues to increase. No optimal point or memory boundary is asserted."}
 
@@ -628,13 +630,13 @@ The queuing-theoretic framework provides the mathematical foundation for the bat
 
 @Sec-inference-scale-framework-selection-criteria-6c20 defines the KV cache and the paged allocation that manages it, and @sec-appdx-dam-taxonomy-transformer-arithmetic gives its per-token size. This section expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
 
-For a standard attention implementation at fixed model width, autoregressive generation without caching requires $\mathcal{O}(t^2)$ computation per token because each transformer layer recomputes the full prefix, including attention among its tokens. The KV cache stores previously computed key and value vectors, allowing each new token to attend to the prefix in $\mathcal{O}(t)$ computation. For serving at scale, this compute saving creates a critical memory-management challenge since KV cache memory can exceed model weights for long contexts.
+For a standard attention implementation at fixed model width, autoregressive generation without caching requires $\mathcal{O}(\SequenceLength^2)$ computation per token because each transformer layer recomputes the full prefix, including attention among its tokens. The KV cache stores previously computed key and value vectors, allowing each new token to attend to the prefix in $\mathcal{O}(\SequenceLength)$ computation. For serving at scale, this compute saving creates a critical memory-management challenge since KV cache memory can exceed model weights for long contexts.
 
 The cache size grows with context as calculated by @eq-kv-cache-size:
 
-$$\KvcacheMemory = 2 \times \NumberOfLayers \times d \times S \times B \times \ElementStorageSize$$ {#eq-kv-cache-size}
+$$\KvCacheMemory = 2 \times \LayerCount \times \HiddenDimension\times \SequenceLength\times \BatchSize\times \ElementStorageSize$$ {#eq-kv-cache-size}
 
-For standard multihead attention, where the aggregate KV width equals the hidden width, $\NumberOfLayers$ is the number of layers, $d$ is the hidden dimension, $S$ is sequence length, $B$ is batch size, $\ElementStorageSize$ is storage size per element in bytes, and the factor of 2 accounts for both keys and values. Grouped-query or multiquery attention instead uses the aggregate KV-head width in place of $d$.
+For standard multihead attention, where the aggregate KV width equals the hidden width, $\LayerCount$ is the number of layers, $\HiddenDimension$ is the hidden dimension, $\SequenceLength$ is sequence length, $\BatchSize$ is batch size, $\ElementStorageSize$ is storage size per element in bytes, and the factor of 2 accounts for both keys and values. Grouped-query or multiquery attention instead uses the aggregate KV-head width in place of $\HiddenDimension$.
 
 ```{python}
 #| echo: false
@@ -698,7 +700,7 @@ class AppdxKVCacheSizing:
     num_gpus_str = fmt_int(num_gpus)
 ```
 
-For the `{python} AppdxKVCacheSizing.gpt3_params_b_str` GPT-3 model ($\NumberOfLayers =$ `{python} AppdxKVCacheSizing.n_layers_str`, $d =$ `{python} AppdxKVCacheSizing.hidden_dim_prose_str`, FP16 $\ElementStorageSize =$ `{python} AppdxKVCacheSizing.s_elem_str` bytes) at its training context length $S =$ `{python} AppdxKVCacheSizing.seq_len_prose_str`, each request requires:
+For the `{python} AppdxKVCacheSizing.gpt3_params_b_str` GPT-3 model ($\LayerCount =$ `{python} AppdxKVCacheSizing.n_layers_str`, $\HiddenDimension=$ `{python} AppdxKVCacheSizing.hidden_dim_prose_str`, FP16 $\ElementStorageSize =$ `{python} AppdxKVCacheSizing.s_elem_str` bytes) at its training context length $\SequenceLength=$ `{python} AppdxKVCacheSizing.seq_len_prose_str`, each request requires:
 
 `{python} AppdxKVCacheSizing.kv_per_req_display_math`
 
@@ -706,4 +708,4 @@ Across `{python} AppdxKVCacheSizing.num_gpus_str`$\times$ A100 80-GB GPUs (`{pyt
 
 ## Summary {.unnumbered}
 
-Serving performance is bounded by queues and by memory. As utilization $\ServingUtilization$ approaches 1, queue depth and latency grow without bound, so production systems retain headroom suited to their workload and SLO. Larger batches raise throughput but add batch-accumulation delay, which produces a latency knee rather than monotonic improvement; the best batch size depends on whether the objective is minimum mean latency, maximum SLO-compliant throughput, or cost. Little's Law, $\RequestConcurrency = \ArrivalRate \RequestTimeInSystemLat$, gives a one-line consistency check on any serving measurement. The KV cache grows with sequence length, batch size, and KV-head width and can exceed the model weights (principle \ref{pri-autoregressive-bottleneck}); paging reduces fragmentation and reservation losses without removing the underlying footprint.
+Serving performance is bounded by queues and by memory. As utilization $\ServingUtilization$ approaches 1, queue depth and latency grow without bound, so production systems retain headroom suited to their workload and SLO. Larger batches raise throughput but add batch-accumulation delay, which produces a latency knee rather than monotonic improvement; the best batch size depends on whether the objective is minimum mean latency, maximum SLO-compliant throughput, or cost. Little's Law, $\RequestConcurrency = \ArrivalRate \RequestTimeInSystem$, gives a one-line consistency check on any serving measurement. The KV cache grows with sequence length, batch size, and KV-head width and can exceed the model weights (principle \ref{pri-autoregressive-bottleneck}); paging reduces fragmentation and reservation losses without removing the underlying footprint.
