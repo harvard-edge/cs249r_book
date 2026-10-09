@@ -70,8 +70,8 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
     </tr>
     <tr>
       <td>2</td>
-      <td><b>ML Systems</b></td>
-      <td><code>ml_systems/</code></td>
+      <td><b>System Paradigms</b></td>
+      <td><code>02_system_paradigms/</code></td>
       <td>How do deployment constraints shape system design?</td>
     </tr>
     <tr>

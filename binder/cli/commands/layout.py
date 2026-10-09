@@ -359,7 +359,7 @@ class LayoutCommand:
             epilog=(
                 "Examples:\n"
                 "  binder layout check <pdf> --skip-frontmatter\n"
-                "  binder layout check <pdf> --chapter \"ML Systems\" --csv\n\n"
+                "  binder layout check <pdf> --chapter \"System Paradigms\" --csv\n\n"
                 "CSV columns:\n"
                 "  chapter,sheet,label,gap_pct,pts,culprit,detail,size_hint,\n"
                 "  fix_hint,is_frontmatter,source_file,source_line,section,\n"

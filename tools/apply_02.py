@@ -1,4 +1,4 @@
-with open("books/vol1/02_ml_systems/02_ml_systems.qmd", "r") as f:
+with open("books/vol1/02_system_paradigms/02_system_paradigms.qmd", "r") as f:
     content = f.read()
 
 replacements = [
@@ -28,5 +28,5 @@ content = re.sub(r'([ \(\$])O([ \)\$/])', r'\1\\Operations\2', content)
 content = re.sub(r'([ \(\$])I([ \)\$/])', r'\1\\ArithmeticIntensity\2', content)
 content = re.sub(r'([ \(\$])B([ \)\$/])', r'\1\\BatchSize\2', content)
 
-with open("books/vol1/02_ml_systems/02_ml_systems.qmd", "w") as f:
+with open("books/vol1/02_system_paradigms/02_system_paradigms.qmd", "w") as f:
     f.write(content)

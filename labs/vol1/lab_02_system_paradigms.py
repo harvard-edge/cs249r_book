@@ -608,7 +608,7 @@ def _(
     mo.stop(not _ready)
     snapshots = {part: _captures[part].to_dict() for part in "ABCD"}
     report = build_lab_report(
-        get_lab_metadata("vol1/lab_02_ml_systems.py"), track=track_id,
+        get_lab_metadata("vol1/lab_02_system_paradigms.py"), track=track_id,
         scenario=profile["scenario"],
         learning_objectives=[
             "Find when transfer and distance make remote inference miss a deadline",

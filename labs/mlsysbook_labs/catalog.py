@@ -25,12 +25,12 @@ LAB_CATALOG: dict[str, LabMetadata] = {
         book_anchor="Volume I, Chapter 1: Introduction to Machine Learning Systems",
         updated_at="2026-09-15",
     ),
-    "vol1/lab_02_ml_systems.py": LabMetadata(
+    "vol1/lab_02_system_paradigms.py": LabMetadata(
         lab_id="v1_02_physics_of_deployment",
         title="Where Should Inference Run?",
         volume="Volume I",
         chapter="Chapter 2",
-        book_anchor="Volume I, Chapter 2: Machine Learning Systems",
+        book_anchor="Volume I, Chapter 2: System Paradigms",
         updated_at="2026-09-15",
     ),
     "vol1/lab_03_ml_workflow.py": LabMetadata(

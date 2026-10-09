@@ -248,7 +248,7 @@ class DoctorCommand:
         # Check for missing chapters (common ones).
         # Use discovered chapter names directly so duplicate names across volumes
         # (e.g., vol1/introduction and vol2/introduction) are not treated as errors.
-        expected_chapters = ["introduction", "ml_systems", "training", "ml_ops"]
+        expected_chapters = ["introduction", "02_system_paradigms", "training", "ml_ops"]
         discovered_names = {ch["name"] for ch in chapters}
         missing_chapters = [expected for expected in expected_chapters if expected not in discovered_names]
 

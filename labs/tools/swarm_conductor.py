@@ -145,7 +145,7 @@ def verify_lab(lab_path: Path, output_dir: Path) -> SwarmAuditResult:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lab", type=str, help="Specific lab path to audit (e.g. vol1/lab_02_ml_systems.py)")
+    parser.add_argument("--lab", type=str, help="Specific lab path to audit (e.g. vol1/lab_02_system_paradigms.py)")
     parser.add_argument("--output-dir", type=Path, default=Path("/tmp/swarm_audits"))
     args = parser.parse_args()
 
