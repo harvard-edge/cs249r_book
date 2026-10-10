@@ -163,8 +163,8 @@ class ValidationIssue:
                 pass
 
         final_sug = suggestion
-        if final_sug is None and err_def and err_def.suggestion_template:
-            final_sug = err_def.suggestion_template
+        if final_sug is None and err_def:
+            final_sug = err_def.suggestion_template or err_def.fix
             if kwargs and final_sug:
                 try:
                     final_sug = final_sug.format(**kwargs)

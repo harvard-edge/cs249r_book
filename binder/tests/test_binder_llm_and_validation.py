@@ -270,3 +270,90 @@ def test_dedicated_check_help_panels():
     finally:
         vmod.console = orig_console
 
+
+def test_check_catalog_loading_and_integrity():
+    """Ensure CheckCatalog loads all groups and validates error code schema."""
+    from binder.cli.core.catalog import get_check_catalog
+
+    catalog = get_check_catalog()
+    assert len(catalog.groups) >= 6
+    expected_groups = ["structure", "numbers", "figures", "prose", "refs", "epub"]
+    for grp in expected_groups:
+        group_doc = catalog.get_group(grp)
+        assert group_doc is not None
+        assert group_doc.group == grp
+        assert len(group_doc.title) > 0
+        assert len(group_doc.scopes) > 0
+        assert len(group_doc.error_codes) > 0
+        for err in group_doc.error_codes:
+            assert len(err.code) > 0
+            assert len(err.trigger) > 0
+            assert len(err.fix) > 0
+
+    # Cross-group error resolution
+    err_stack = catalog.get_error("purpose_stack_missing")
+    assert err_stack is not None
+    assert err_stack.code == "purpose_stack_missing"
+    assert "margin_stack.svg" in err_stack.trigger or "architecture stack" in err_stack.trigger
+
+    # Non-existent error returns None
+    assert catalog.get_error("non_existent_diagnostic_code_12345") is None
+
+
+def test_validation_issue_from_template_exact_and_fallback():
+    """Ensure ValidationIssue.from_template instantiates correctly with and without catalog matches."""
+    from binder.cli.commands.validate import ValidationIssue
+
+    # 1. Known catalog code without overrides
+    issue = ValidationIssue.from_template(
+        code="purpose_stack_missing",
+        file="books/vol1/01_intro/01_intro.qmd",
+        line=42,
+    )
+    assert issue.code == "purpose_stack_missing"
+    assert issue.file == "books/vol1/01_intro/01_intro.qmd"
+    assert issue.line == 42
+    assert "architecture stack diagram" in issue.message
+    assert "margin_stack.svg" in issue.suggestion
+    assert issue.severity == "error"
+    d = issue.to_dict()
+    assert d["code"] == "purpose_stack_missing"
+    assert d["file"] == "books/vol1/01_intro/01_intro.qmd"
+    assert d["line"] == 42
+
+    # 2. Template interpolation with kwargs
+    skip_issue = ValidationIssue.from_template(
+        code="heading_level_skip",
+        file="test.qmd",
+        line=15,
+        prev_level=1,
+        level=3,
+        skipped="H2",
+    )
+    assert skip_issue.message == "Heading jumps from H1 to H3 (skips H2)"
+    assert skip_issue.suggestion != ""
+
+    # 3. Fallback when code is not in catalog
+    fallback_issue = ValidationIssue.from_template(
+        code="completely_novel_custom_code",
+        file="test.qmd",
+        line=99,
+    )
+    assert fallback_issue.code == "completely_novel_custom_code"
+    assert fallback_issue.message == "completely_novel_custom_code"
+    assert fallback_issue.suggestion == ""
+
+    # 4. Explicit overrides take precedence
+    override_issue = ValidationIssue.from_template(
+        code="purpose_stack_missing",
+        file="test.qmd",
+        line=1,
+        message="Custom explicit message",
+        suggestion="Custom explicit suggestion",
+        severity="warning",
+    )
+    assert override_issue.message == "Custom explicit message"
+    assert override_issue.suggestion == "Custom explicit suggestion"
+    assert override_issue.severity == "warning"
+
+
