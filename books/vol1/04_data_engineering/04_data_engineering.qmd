@@ -43,7 +43,7 @@ notation-local: [\BoxMaximumHorizontalCoordinate, \BoxMaximumVerticalCoordinate,
 
 _Why does training data function like source code in a machine learning system?_
 
-In conventional software, programmers write logic that computers execute. In machine learning, programmers write optimization procedures that extract operational logic from data. This inversion makes training data resemble source code: changing it can change the learned system when the model is retrained, even if no traditional code changes. Yet data rarely receives the review, testing, and version control that even a one-line code change routinely receives. Subtle labeling inconsistencies can induce behavioral inconsistencies; missing edge cases can leave corresponding failures unmeasured; historical biases can propagate into learned behavior. A model trained only on that dataset cannot infer task-relevant evidence absent from it, and systematic label errors can shape what it learns. Unlike traditional source code, which sits inert until a programmer modifies it, the operating distribution can shift as the world changes, potentially changing production performance even when nothing in the codebase has been touched. Data engineering can consume substantial project effort, often more than modeling itself, because the work is consequential. A labeling error caught at collection costs a relabel; the same error found after deployment can cost a retraining run, an incident investigation, and the trust of the people the system failed. Every decision in the data pipeline (what to collect, how to label, when to filter, how to split) propagates forward to constrain model architecture, training dynamics, and deployment viability. Data engineering is therefore not preprocessing but programming in a different language, one where quality control, versioning, and monitoring determine whether the compiled system works today and continues working tomorrow. In D·A·M terms, the pipeline itself is a data-machine co-design problem: however well curated the data, the algorithm can only learn as fast as the machine can deliver it.
+In conventional software, programmers write logic that computers execute. In machine learning, programmers write optimization procedures that extract operational logic from data. This inversion makes training data resemble source code: changing it can change the learned system when the model is retrained, even if no traditional code changes. Yet data rarely receives the review, testing, and version control that even a one-line code change routinely receives. Subtle labeling inconsistencies can induce behavioral inconsistencies; missing edge cases can leave corresponding failures unmeasured; historical biases can propagate into learned behavior. A model trained only on that dataset cannot infer task-relevant evidence absent from it, and systematic label errors can shape what it learns. Unlike traditional source code, which sits inert until a programmer modifies it, the operating distribution can shift as the world changes, potentially changing production performance even when nothing in the codebase has been touched. Data engineering can consume substantial project effort, often more than modeling itself, because the work is consequential. A labeling error caught at collection costs a relabel; the same error found after deployment can cost a retraining run, an incident investigation, and the trust of the people the system failed. Every decision in the data pipeline (what to collect, how to label, when to filter, how to split) propagates forward to constrain model architecture, training dynamics, and deployment viability. Data engineering is therefore not preprocessing but programming in a different language, one where quality control, versioning, and monitoring determine whether the compiled system works today and continues working tomorrow. In D·A·M terms, data sits between the algorithm and the machine: it bounds what the model can learn, and the pipeline that delivers it bounds how fast the machine can learn it.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -70,9 +70,69 @@ from mlsysim import *
 from mlsysim.core.units import *
 ```
 
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LABELING-TO-COMPUTE COST RATIO CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Chapter opening (why data bounds cost) and the "Labeling/Compute
+# │          Rule" and "80/20 Split" prose following
+# │          @tbl-data-engineering-time-constants.
+# │
+# │ Goal: Quantify how labeling spend dwarfs a single training run's compute cost.
+# │ Show: A $100K labeling budget is roughly 1,000x the cost of one 8x A100
+# │       ResNet-50 run, motivating data-as-the-bottleneck.
+# │ How: Compare a fixed labeling budget against the cost of one 8x A100 training
+# │      run at the cloud GPU hourly rate.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple, fmt_percent
+from mlsysim.core.units import USD, hour
+
+# ┌── LEGO ───────────────────────────────────────────────
+class LabelingComputeRatio:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    labeling_budget = 100_000
+    a100_count = 8
+    train_hours_low = 4
+    train_hours_high = 6
+    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
+    effort_majority_pct = 80
+    effort_minority_pct = 20
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
+    train_cost_high = a100_count * train_hours_high * gpu_hour_cost_high
+    ratio_low = labeling_budget / train_cost_high
+    ratio_high = labeling_budget / train_cost_low
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(train_cost_low < train_cost_high, "Reference training cost range must be ordered.")
+    check(ratio_low > 500, f"Labeling/compute ratio unexpectedly low: {ratio_low:.0f}x.")
+    check(ratio_high > 1000, f"High-end labeling/compute ratio should exceed 1000x, got {ratio_high:.0f}x.")
+    check(effort_majority_pct + effort_minority_pct == 100, "Effort percentages must sum to 100")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    labeling_budget_str = fmt_usd(labeling_budget, precision=0, commas=False, scale="K")
+    train_cost_low_str = fmt_usd(train_cost_low, precision=0, commas=False)
+    train_cost_high_str = fmt_usd(train_cost_high, precision=0, commas=False)
+    ratio_low_mult_str = fmt_multiple(ratio_low, precision=1, commas=True)
+    ratio_high_mult_str = fmt_multiple(ratio_high, precision=1, commas=True)
+    ratio_low_round_mult_str = fmt_multiple(round(ratio_low, -2), precision=0, commas=True)
+    ratio_high_round_mult_str = fmt_multiple(round(ratio_high, -2), precision=0, commas=True)
+    effort_majority_pct_str = fmt_percent(effort_majority_pct / 100, precision=0, commas=False, style='prose')
+    effort_minority_pct_str = fmt_percent(effort_minority_pct / 100, precision=0, commas=False, style='prose')
+```
+
 ## Dataset Compilation {#sec-data-engineering-data-engineering-dataset-compilation-0496}
 
-The practitioner survey charted in the time-allocation breakdown of @sec-ml-workflow (@fig-ds-time) found that cleaning and organizing data, not modeling, was the most common answer to where data scientists spend their time, and that collecting datasets came second [@crowdflower2016data]. That chapter's lifecycle stages explain why. Raw inputs pass through collection, ingestion, analysis, labeling, validation, and preparation before they become ML-ready datasets, and each stage can introduce a defect that no later stage detects. That much effort, spent on stages that fail silently, is the case for treating the data pipeline as a system in its own right. The data axis of the D·A·M taxonomy becomes real only as infrastructure: acquisition systems, validation checks, labeling workflows, storage layouts, and governance.
+A machine learning system learns its behavior from data. The trained model is a compressed summary of its training data. It can represent only the evidence that data contains, and it treats the data's labels as the definition of a correct answer. The bitter lesson (@sec-introduction-bitter-lesson-79c7) explains why this dependence has grown rather than shrunk. Methods that learn from data at scale have repeatedly overtaken methods built on hand-encoded knowledge, so the knowledge that engineers once wrote into programs must now arrive through data. A missing accent in a speech corpus, a mislabeled class, or a feature computed one way in training and another in serving therefore becomes a defect in system behavior with no line of code to point to. In the lifecycle of @sec-ml-workflow, this work is Stage 2, which ends by handing a versioned dataset to model development; every later stage inherits what that dataset contains and what it lacks.
+
+Data constrains the machine as well as the model. Every training step reads its examples from storage, decodes them, and moves them to the accelerator, and an accelerator waiting on input computes nothing however fast it is. Datasets measured in terabytes also have physical mass. They are slow and expensive to move, and they spend energy at every level of the memory hierarchy they cross. Data therefore sits on two edges of the D·A·M taxonomy at once. Toward the algorithm, it bounds what the model can learn; toward the machine, it bounds how fast learning can proceed.
+
+Both bounds are expensive to meet. In the practitioner survey of @fig-ds-time, cleaning and organizing data was the most common answer to where data scientists spend their time [@crowdflower2016data], and in the image-classification cost comparison later in this chapter, labeling a dataset costs roughly `{python} LabelingComputeRatio.ratio_low_round_mult_str` to `{python} LabelingComputeRatio.ratio_high_round_mult_str` as much as one training run on it. Each stage between raw input and an ML-ready dataset (collection, ingestion, labeling, validation, and preparation) can also introduce a defect that no later stage detects. A component that bounds capability, bounds throughput, and dominates cost cannot be treated as preprocessing. It requires the same engineering discipline as the model and the machine: acquisition systems, validation checks, labeling workflows, storage layouts, and governance.
 
 ::: {#dfn-data-engineering-data-engineering .callout-definition title="Data engineering"}
 
@@ -92,9 +152,11 @@ The **dataset compilation**\index{Dataset compilation!definition} analogy makes 
 
 The analogy puts the data-as-code principle (\ref{pri-data-as-code}) to work. If the pipeline is the build and retraining is the recompilation step, datasets need immutable lineage, schema validation suites, and debugging when regressions appear. Compilation also forces a trust boundary between dataset splits. The training set is allowed to shape parameters; the validation set is allowed to shape modeling and pipeline choices; the test set is reserved for estimating generalization after those choices have been made. Leakage occurs when information crosses those boundaries: duplicate examples appearing in multiple splits, augmented variants of the same source record landing on both sides of the split, user records from the same household appearing in both training and test, or time-derived features computed using future observations. Preprocessing can leak too, a case @sec-data-engineering-ensuring-trainingserving-consistency-c683 takes up once normalization and encoding have been introduced.
 
-This chapter's running case is keyword spotting (KWS), the always-on wake-word detector in a smart speaker or phone, which takes over from the retinopathy screening case because its data problems span both the cloud training pipeline and a microcontroller-class device. In KWS, speaker-independent and time-aware splits enforce the split boundary physically: assigning each speaker's utterances to a single split prevents the acoustic model from memorizing speaker-specific vocal-tract resonances, ensuring evaluation reflects generalization to the target deployment population.
+Two of the book's recurring lighthouse workloads (@sec-introduction-lighthouse-models-9b1c) carry the chapter, one for each bound. Keyword spotting (KWS), the always-on wake-word detector behind phrases such as "Alexa" and "OK Google," carries the question of what the data must contain. It takes over from the diabetic retinopathy screening case of @sec-ml-workflow because its data problems span both a cloud training pipeline and a microcontroller-class device: the model must recognize a few words across accents, microphones, and rooms, stay silent through months of ordinary speech, and fit in tens of kilobytes on a TinyML-class device. Its reference corpus, the Multilingual Spoken Words Corpus [@mazumder2021multilingual], is real; the smart-speaker requirements and data budget that this chapter sets for it are an illustrative scenario. ResNet-50 image classification on one accelerator carries the question of how fast data must arrive, because image examples are large enough to stress storage, decoding, and transfer in ways that one-second audio clips do not.
 
-Like a traditional software compiler, a dataset compiler operates across discrete stages: acquisition, ingestion, processing, labeling, storage, and lifecycle maintenance. Yet while traditional source code occupies negligible disk footprint and compiles in milliseconds, training data carries physical mass. Pipeline efficiency is governed by the physical tension between movement cost and information density: *data gravity* imposes bandwidth, I/O, and latency taxes when moving large byte volumes, while *task-relevant signal* determines the supervisory value the model extracts.
+The split boundary appears in KWS before any model exists. Speaker-independent and time-aware splits enforce it physically: assigning each speaker's utterances to a single split prevents the acoustic model from memorizing speaker-specific vocal-tract resonances, ensuring evaluation reflects generalization to the target deployment population.
+
+Like a traditional software compiler, a dataset compiler operates across discrete stages: acquisition, ingestion, labeling, processing, storage, and lifecycle maintenance. Yet while traditional source code occupies negligible disk space and compiles in milliseconds, training data carries the physical mass described at the start of this section. Pipeline efficiency is governed by the physical tension between movement cost and information density: *data gravity* imposes bandwidth, I/O, and latency taxes when moving large byte volumes, while *task-relevant signal* determines the supervisory value the model extracts.
 
 ::: {.column-margin}
 ![](images/svg/data_engineering_data_gravity_entropy.svg){width="100%" fig-alt="Two-by-two quadrant with a data gravity axis increasing to the right and a task-signal axis increasing upward; the top-left cell is filled green and labeled high gain, while the other three cells are gray."}
@@ -1647,59 +1709,6 @@ class DataEngineeringTimeConstants:
 
 ```{=latex}
 \endgroup
-```
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LABELING-TO-COMPUTE COST RATIO CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Labeling/Compute Rule" and "80/20 Split" prose following
-# │          @tbl-data-engineering-time-constants.
-# │
-# │ Goal: Quantify how labeling spend dwarfs a single training run's compute cost.
-# │ Show: A $100K labeling budget is roughly 1,000x the cost of one 8x A100
-# │       ResNet-50 run, motivating data-as-the-bottleneck.
-# │ How: Compare a fixed labeling budget against the cost of one 8x A100 training
-# │      run at the cloud GPU hourly rate.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_usd, check, fmt_multiple, fmt_percent
-from mlsysim.core.units import USD, hour
-
-# ┌── LEGO ───────────────────────────────────────────────
-class LabelingComputeRatio:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    labeling_budget = 100_000
-    a100_count = 8
-    train_hours_low = 4
-    train_hours_high = 6
-    gpu_hour_cost_low = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    gpu_hour_cost_high = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    effort_majority_pct = 80
-    effort_minority_pct = 20
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    train_cost_low = a100_count * train_hours_low * gpu_hour_cost_low
-    train_cost_high = a100_count * train_hours_high * gpu_hour_cost_high
-    ratio_low = labeling_budget / train_cost_high
-    ratio_high = labeling_budget / train_cost_low
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(train_cost_low < train_cost_high, "Reference training cost range must be ordered.")
-    check(ratio_low > 500, f"Labeling/compute ratio unexpectedly low: {ratio_low:.0f}x.")
-    check(ratio_high > 1000, f"High-end labeling/compute ratio should exceed 1000x, got {ratio_high:.0f}x.")
-    check(effort_majority_pct + effort_minority_pct == 100, "Effort percentages must sum to 100")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    labeling_budget_str = fmt_usd(labeling_budget, precision=0, commas=False, scale="K")
-    train_cost_low_str = fmt_usd(train_cost_low, precision=0, commas=False)
-    train_cost_high_str = fmt_usd(train_cost_high, precision=0, commas=False)
-    ratio_low_mult_str = fmt_multiple(ratio_low, precision=1, commas=True)
-    ratio_high_mult_str = fmt_multiple(ratio_high, precision=1, commas=True)
-    effort_majority_pct_str = fmt_percent(effort_majority_pct / 100, precision=0, commas=False, style='prose')
-    effort_minority_pct_str = fmt_percent(effort_minority_pct / 100, precision=0, commas=False, style='prose')
 ```
 
 Operational timescales diverge across these stages by orders of magnitude: weeks for human annotation, hours for GPU training, and milliseconds for serving lookups. For the image-classification pipeline these two tables describe, which labels a million images and then trains ResNet-50 on them, annotation is the critical bottleneck in money as well as time. Suppose the team budgets `{python} LabelingComputeRatio.labeling_budget_str` for labeling, enough to cover crowd labels plus the review and relabeling passes that quality control requires. That budget dwarfs the `{python} LabelingComputeRatio.train_cost_low_str` to `{python} LabelingComputeRatio.train_cost_high_str` of a single 8$\times$ A100 ResNet-50 training run, a ratio of `{python} LabelingComputeRatio.ratio_low_mult_str` to `{python} LabelingComputeRatio.ratio_high_mult_str`. The labeling spend is also uneven. Clear images pass review once, while rare classes, occluded objects, and ambiguous scenes return for second opinions and expert adjudication; as an illustrative planning split, `{python} LabelingComputeRatio.effort_majority_pct_str` of the budget can go to the hardest `{python} LabelingComputeRatio.effort_minority_pct_str` of the examples.
