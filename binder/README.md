@@ -152,7 +152,7 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
     <tr>
       <td><b>Foundations</b></td>
       <td>Core concepts</td>
-      <td>Introduction, ML Systems, DL Primer, Architectures</td>
+      <td>Introduction, System Paradigms, DL Primer, Architectures</td>
     </tr>
     <tr>
       <td><b>Development</b></td>

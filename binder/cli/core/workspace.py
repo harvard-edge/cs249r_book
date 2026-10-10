@@ -70,7 +70,19 @@ def take_snapshot(repo_root: Path) -> Snapshot:
     workspace by :func:`create_workspace`.
     """
     repo_root = Path(repo_root).resolve()
-    commit = _git(repo_root, "stash", "create").strip() or _git(repo_root, "rev-parse", "HEAD").strip()
+    commit = ""
+    for attempt in range(5):
+        try:
+            commit = _git(repo_root, "stash", "create").strip()
+            break
+        except RuntimeError as err:
+            if ("could not write index" in str(err) or "index.lock" in str(err)) and attempt < 4:
+                import time
+                time.sleep(0.3)
+                continue
+            raise
+    if not commit:
+        commit = _git(repo_root, "rev-parse", "HEAD").strip()
     listed = _git(repo_root, "ls-files", "--others", "--exclude-standard", "-z")
     return Snapshot(repo_root, commit, tuple(path for path in listed.split("\0") if path))
 

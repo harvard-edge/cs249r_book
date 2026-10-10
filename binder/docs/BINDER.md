@@ -11,18 +11,18 @@ Most chapter work needs only **build** (and optionally **preview**). You do not 
 ./binder/binder setup
 
 # Day to day: build what you're editing
-./binder/binder build html --vol1 vol1/ml_systems      # fast HTML chapter
-./binder/binder build pdf --vol1 vol1/ml_systems       # PDF chapter
-./binder/binder build epub --vol1 vol1/ml_systems      # EPUB chapter
+./binder/binder build html --vol1 system_paradigms      # fast HTML chapter
+./binder/binder build pdf --vol1 system_paradigms       # PDF chapter
+./binder/binder build epub --vol1 system_paradigms      # EPUB chapter
 ./binder/binder build html --vol1                      # whole Volume I site
 ./binder/binder build pdf --vol1                       # whole Volume I PDF
 
 # Optional: live reload while editing
-./binder/binder preview vol1/ml_systems
+./binder/binder preview system_paradigms
 
 # When a commit is blocked, pre-commit prints the failing binder command.
 # Re-run that command locally to see details, or:
-./binder/binder check refs --path books/vol1/ml_systems/ml_systems.qmd
+./binder/binder check refs --path books/vol1/02_system_paradigms/02_system_paradigms.qmd
 ```
 
 Commit as usual; hooks handle validation. Run `./binder/binder check all --vol1` only when you want a full local sweep before pushing.

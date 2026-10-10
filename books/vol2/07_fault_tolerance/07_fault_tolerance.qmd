@@ -27,9 +27,19 @@ notation-local: [\BaseTrainingComputeCost, \BaseWorkerCount, \CheckpointExtraPau
 
 ## Purpose {.unnumbered .unlisted}
 
+::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlfleetstack{15}{20}{45}{100}{20}{30}{10}{0}
 \end{marginfigure}
+:::
+
+::: {.content-visible unless-format="pdf"}
+::: {.column-margin}
+![](images/svg/margin_stack.svg){width="100%" fig-alt="Fleet Machine Learning Systems Stack"}
+
+*Fleet stack focus for this chapter.*
+:::
+:::
 
 _Why does scale transform hardware failure from rare exception to routine condition that systems must absorb continuously?_
 
@@ -143,6 +153,8 @@ The failures to be absorbed differ first in how long they persist, from a transi
 
 The recovery target here is trustworthy execution: preserving valid training progress and restoring a service after its infrastructure or software fails. A restored model can still make poor predictions on changed inputs even when every component executes correctly. Evaluating that behavioral robustness requires a separate contract for model quality under distribution shifts and adversarial inputs, developed in @sec-robust-ai. The distinction lets us use model-quality signals to diagnose a fault without treating every quality regression as evidence of failed hardware.
 
+Because failures cannot be eliminated at this scale, fault-tolerant systems verify completion rather than assume it, treat failure as a normal code path, exercise recovery continuously, and account for partial failures that naive error handling may not anticipate. These techniques draw on decades of distributed systems research, but ML workloads change the economics. Training checkpoints are large but can be sized from the model and optimizer state, while some optimization algorithms tolerate bounded numerical perturbations without requiring bitwise replay. That tolerance must be established for the training method; stochasticity does not make arbitrary corruption or inconsistent recovery safe. A recovery design can exploit approximate execution only while preserving its declared convergence and quality requirements.
+
 The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU can go years without a hardware failure. That same workload on a 1,000-GPU cluster sees GPU-only failures every couple of days, and a production cluster fails more often once PCIe, power, storage, and network domains enter the failure budget. This shift from *rare exception* to *routine occurrence* demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
 
 ::: {.column-margin}
@@ -154,9 +166,7 @@ The transition from small-scale experimentation to large-scale production change
 *Fleet mean time between failures (MTBF) collapses from `{python} FleetReliabilityRates.gpu_mttf_sym_str` to `{python} FleetReliabilityRates.hours_between_sym_str` as GPUs multiply.*
 :::
 
-Because failures cannot be eliminated at this scale, fault-tolerant systems verify completion rather than assume it, treat failure as a normal code path, exercise recovery continuously, and account for partial failures that naive error handling may not anticipate. These techniques draw on decades of distributed systems research, but ML workloads change the economics. Training checkpoints are large but can be sized from the model and optimizer state, while some optimization algorithms tolerate bounded numerical perturbations without requiring bitwise replay. That tolerance must be established for the training method; stochasticity does not make arbitrary corruption or inconsistent recovery safe. A recovery design can exploit approximate execution only while preserving its declared convergence and quality requirements.
-
-### The mathematics of inevitable failure {#sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef}
+## The Mathematics of Inevitable Failure {#sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef}
 
 System reliability engineering provides the foundational framework for understanding failure at scale [@birolini2017]. Individual components exhibit failure rates characterized by the failure rate parameter $\ComponentFailureRate$,[^fn-fits-failure-rate] measured in failures per unit time. For a single component with constant failure rate $\ComponentFailureRate$, the probability of surviving without failure until time $\TimeInstant$ follows an exponential distribution,[^fn-poisson-failure-rate] as in @eq-single-component-reliability:
 
@@ -290,7 +300,7 @@ plt.close()
 
 :::
 
-### Quantitative reliability analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
+## Quantitative Reliability Analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
 
 The GPU-only calculation of @eq-system-mtbf supplies the scale intuition; a real training system then composes GPUs, HBM, links, power supplies, storage paths, and redundancy into one failure budget. Component rates are usually quoted in the FIT units introduced with the failure rate, so the `{python} FleetReliabilityRates.gpu_mttf_attr_str` GPU contributes `{python} FleetReliabilityRates.gpu_fit_str` FIT to whatever system contains it. The new question is how different component rates compose, and the composition rule depends on the redundancy structure and the independence assumptions. For series systems\index{Reliability!series system}\index{Series system!reliability calculation} (for example, a node where all `{python} FleetReliabilityRates.node_gpus_str` GPUs must work), failure of any component fails the whole. With independent constant-rate failures, the reliabilities multiply as in @eq-system-reliability-product, so the rates add even when the components differ:
 $$\SystemMtbf = \frac{1}{\sum \ComponentFailureRate_i}$$
@@ -399,7 +409,7 @@ Composition makes the distinction between raw faults and job interruptions essen
 
 These raw bit-error rates justify ECC, but they are not the interruption rates that set checkpoint cadence; the worked cascade that follows uses device MTTF values that already include the effect of that protection. The cascade also treats its GPU, PCIe, power, and network contributions as separate categories, so a measured whole-node rate that already includes those paths cannot be added to them again.
 
-### Cluster MTBF calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
+## Cluster MTBF Calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
 
 ```{python}
 #| echo: false
@@ -510,7 +520,7 @@ Consider a training cluster designed for large language model development, rough
 
 Together, these components define the failure domain used in the rate calculations in this worked example.
 
-#### Failure rate calculation per GPU subsystem {.unnumbered}
+### Failure rate calculation per GPU subsystem {.unnumbered}
 
 Each GPU operates within a failure domain that includes the GPU itself, its PCIe connection, and a proportional share of the node's network infrastructure. Power enters the sum only through supplies whose single failure stops the node, counted as $\SeriesPsuCount$ in the power equation. With the node's supplies in redundant sets, no single unit qualifies, so the power term below is zero in this first-order calculation. The approximation omits the residual risk that additional independent failures exhaust redundancy before repair. A fault upstream of the chassis, such as the loss of the circuits feeding it, can also take down the whole node; that risk belongs to the correlated failures treated later in this chapter.
 
@@ -522,11 +532,11 @@ Each GPU operates within a failure domain that includes the GPU itself, its PCIe
 
 `{python} FailureCascadeExample.lambda_net_eq_math`
 
-#### Total per-GPU failure rate calculation {.unnumbered}
+### Total per-GPU failure rate calculation {.unnumbered}
 
 `{python} FailureCascadeExample.lambda_total_eq_math`
 
-#### System failure rate and MTBF calculation {.unnumbered}
+### System failure rate and MTBF calculation {.unnumbered}
 
 `{python} FailureCascadeExample.lambda_system_eq_math`
 
@@ -832,13 +842,13 @@ plt.close()
 
 :::
 
-### Failure taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
+## Failure Taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
 
 The MTBF calculations in the reliability analysis quantify how often failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. Designing effective fault tolerance also requires understanding what kind of failures occur, which depends on precise vocabulary. A fault is the underlying defect or event, an error is the corrupted state it produces, and a failure is the externally visible behavior the training system must handle [@avizienis2004basic]. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely.
 
 No single label captures all of these differences. Reliability decisions require three orthogonal axes: persistence (transient, intermittent, or permanent), manifestation (fail-stop, degraded, or value-corrupting), and failure scope (one device, one node, a rack or power domain, or the whole job). A transient fault can therefore manifest as either a detected crash or silent corruption, while a permanent switch failure can remain confined to one rack or partition an entire job. The four subsections that follow are therefore not four parallel classes or mutually exclusive buckets [@constantinescu2008; @lamport1982byzantine]. Each takes the value of one axis that most changes recovery. Transient failures come from the persistence axis, because they show why a fault that clears can still leave state to repair. Fail-stop and Byzantine (value-corrupting) failures come from the manifestation axis, and correlated failures come from the scope axis. Two parts of the space are developed where they drive decisions. The intermittent and permanent persistence classes return with hardware faults (@sec-ft-fault-persistence-response), where persistence selects retry, quarantine, or replacement. The degraded manifestation, a gray failure that slows a worker without stopping it, returns with stragglers (@sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d).
 
-#### Transient failures {#sec-fault-tolerance-reliability-reliability-transient-failures-57b4}
+### Transient failures {#sec-fault-tolerance-reliability-reliability-transient-failures-57b4}
 
 A transient fault clears without physical repair, but the state it corrupts can persist after the disturbance ends. Recovery must therefore retry or validate affected work before relying on that state. Large-scale training systems encounter several forms of temporary disruption. Network packet loss\index{Transient fault!network packet loss} momentarily drops data while transport retransmission succeeds. Memory bit flips\index{Memory!bit flip} can result from cosmic-ray-induced single-event upsets.[^fn-seu-soft-error] Under temperature spikes, thermal throttling\index{Thermal throttling!performance degradation} temporarily reduces compute throughput without halting execution, while software timeouts\index{Software timeout!resource contention} emerge when transient contention delays communication beyond its allotted time.
 
@@ -848,7 +858,7 @@ Transient faults are particularly difficult to diagnose in ML training when they
 
 The appropriate response to transient failures depends on detection capability. Errors that trigger explicit exceptions can be handled through bounded retry logic. Silent corruption requires end-to-end validation. Checksums detect changed bytes in storage or transport, cross-rank digests reveal disagreement about a supposedly identical reduced buffer, and statistical or replay checks test whether the computation itself remains plausible. A rank that computes the wrong local gradient and then correctly checksums those wrong bytes passes an ordinary checksum; only independent recomputation, invariants, or model-level evidence can expose that error.
 
-#### Fail-stop failures {#sec-fault-tolerance-reliability-reliability-failstop-failures-5cdd}
+### Fail-stop failures {#sec-fault-tolerance-reliability-reliability-failstop-failures-5cdd}
 
 Fail-stop failures\index{Fail-stop failure!characteristics}\index{Fail-stop failure!detection and recovery} cause components to cease operation entirely and detectably. The failed component stops responding to requests and is suspected through timeout mechanisms, though a timeout alone cannot distinguish an outright crash from an isolated or delayed host. A GPU hardware failure\index{GPU!hardware failure} renders an individual accelerator unresponsive, while a broader node crash\index{Node!crash} abruptly terminates all training processes on the host. Similarly, a network partition\index{Network partition!fault tolerance} severs communication between a healthy node and the remaining cluster, and a storage failure\index{Storage!failure} prevents workers from writing or reading checkpoint shards.
 
@@ -858,7 +868,7 @@ A stopped component usually gives a clearer symptom than a component returning p
 
 A stopped rank announces itself only through silence, so detection rests on timeouts, and every timeout must separate a dead rank from one that is merely slow, such as a GPU still writing a large checkpoint while the collective waits. @Sec-fault-tolerance-reliability-reliability-failure-detection-mechanisms-efed sets that threshold once the full recovery-time budget is in view.
 
-#### Byzantine failures {#sec-fault-tolerance-reliability-reliability-byzantine-failures-8a24}
+### Byzantine failures {#sec-fault-tolerance-reliability-reliability-byzantine-failures-8a24}
 
 Where a fail-stop component ceases to participate, a value-corrupting component can keep running while returning incorrect results, as when a GPU returns wrong gradients without raising an error, a link delivers a corrupted packet whose error pattern the CRC happens not to cover, or a worker computes different results for identical inputs and state. Byzantine failures\index{Byzantine failure!classification} allow arbitrary behavior, including inconsistent messages to different participants [@lamport1982byzantine]. ML systems can encounter this broader failure model through silent data corruption\index{Silent data corruption!mechanism} or adversarial corruption. Numerical instability\index{Numerical instability!Byzantine failure} and determinism violations\index{Determinism!violation} also require validation when they break the execution contract, but ordinary rounding differences or intentionally stochastic outputs are not themselves evidence of a faulty worker. The recovery concern is a participant whose accepted contribution can corrupt shared state without a visible crash.
 
@@ -875,11 +885,11 @@ Whatever its source, a Byzantine contribution violates a contract that liveness 
 
 Redundant computation supplies one form of evidence against Byzantine failures. Workers repeating a computation from matching inputs, state, and random-number streams can compare results under a stated numerical tolerance. Statistical outlier detection and invariants provide additional evidence without fully repeating the computation. Each method has a coverage limit. Agreement can miss shared faults, while a statistical anomaly can arise from legitimate data variation. Detection overhead must therefore be evaluated together with the faults the method can expose.
 
-Byzantine-resilient distributed training algorithms exist but impose significant overhead. Krum [@blanchard2017machine] keeps the single worker gradient whose nearest neighbors lie closest to it and discards the rest, while coordinate-wise trimmed mean [@yin2018byzantine] drops the largest and smallest values in each coordinate before averaging what remains. Both compute aggregates that stay robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. Without such protection, corrupted gradients can push the optimizer toward an unreliable model state while the training job appears healthy. Reliability therefore has to protect semantic correctness, not only process liveness.[^fn-byzantine-consensus-overhead]
+Byzantine-resilient distributed training algorithms exist but impose significant overhead. Krum [@blanchard2017machine] keeps the single worker gradient whose nearest neighbors lie closest to it and discards the rest, while coordinate-wise trimmed mean [@yin2018byzantine] drops the largest and smallest values in each coordinate before averaging what remains. Both compute aggregates that stay robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. Without such protection, corrupted gradients can push the optimizer toward an unreliable model state while the training job appears healthy. Reliability must therefore protect semantic correctness rather than process liveness alone.[^fn-byzantine-consensus-overhead]
 
 [^fn-byzantine-consensus-overhead]: **Byzantine-resilient ML**\index{Byzantine-resilient ML!algorithmic overhead}\index{Byzantine fault tolerance!ML overhead}: Named after Lamport's 1982 "Byzantine Generals Problem," these algorithms (Krum\index{Byzantine fault tolerance!Krum algorithm}, trimmed mean\index{Byzantine fault tolerance!trimmed mean}, and signSGD, which aggregates only the signs of gradient coordinates by majority vote) tolerate a bounded fraction of corrupted workers, with the exact bound depending on the algorithm and assumptions. For $\AcceleratorCount$ workers, Krum requires pairwise distance computations over worker gradients, so overhead grows quadratically with worker count and directly competes with the throughput gains of data parallelism [@blanchard2017machine].
 
-#### Correlated failures {#sec-fault-tolerance-reliability-reliability-correlated-failures-95e8}
+### Correlated failures {#sec-fault-tolerance-reliability-reliability-correlated-failures-95e8}
 
 The reliability calculations in @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef assume independent failures. Real systems depart sharply from this assumption by exhibiting correlated failures, where common physical or operational dependencies take down multiple components simultaneously. At the node level, a power fault that exhausts the chassis's redundant supplies\index{Correlated failure!power supply}, such as the loss of the circuits feeding it, takes down every GPU in the chassis. At the cluster level, a top-of-rack network switch failure\index{Correlated failure!network switch} isolates all attached nodes, while a cooling system failure\index{Correlated failure!cooling system} can trigger thermal shutdowns across a row of racks. Beyond physical infrastructure, shared software dependencies create broad blast radii. A software bug\index{Correlated failure!software bug} in an updated CUDA driver can crash processes across nodes when they exercise the affected path, and operator error\index{Correlated failure!operator error} during cluster reconfiguration can render an entire fleet unreachable.
 
@@ -960,9 +970,9 @@ class TpuV4WarStoryScale:
 
 :::
 
-### The bathtub curve and hardware lifecycle {#sec-fault-tolerance-reliability-reliability-bathtub-curve-hardware-lifecycle-7d8a}
+## The Bathtub Curve and Hardware Lifecycle {#sec-fault-tolerance-reliability-reliability-bathtub-curve-hardware-lifecycle-7d8a}
 
-The failure taxonomy classifies failure types and domains, answering what kind of failures occur. Equally critical for fault tolerance design is determining *when* over an accelerator's operating lifespan those failures strike. @Fig-bathtub-curve plots the hazard function $\ComponentHazardRate(\TimeInstant)$ across component lifecycles, partitioning operational longevity into three distinct reliability regimes:
+The failure taxonomy classifies failure types and domains, answering what kind of failures occur. Equally critical for fault tolerance design is determining *when* over an accelerator's operating lifespan those failures strike. @Fig-bathtub-curve plots the hazard function $\ComponentHazardRate(\TimeInstant)$ across component lifecycles, partitioning operational longevity into three distinct reliability regimes.
 
 The first phase, infant mortality\index{Bathtub curve!infant mortality}, exhibits elevated failure rates from manufacturing defects, improper installation, and early-life failure of marginal components. This phase typically lasts days to weeks for electronic components. Burn-in testing[^fn-burnin-screening-hardware] operates components under stress conditions before deployment to precipitate infant mortality failures before production use.
 
@@ -1054,7 +1064,7 @@ plt.close()
 
 These three hazard regimes in @fig-bathtub-curve translate directly into admission control and maintenance policies. Before assigning new or repaired nodes to a long training run, operators use matrix-multiply, memory, and communication stress tests to expose marginal components. During service, temperature trends, error counts, and performance degradation help identify devices for scheduled replacement. Screening moves failures out of expensive production runs. An infant-mortality failure caught during a few hours of stress testing costs only idle time, while the same failure weeks into a pretraining run forces a checkpoint rollback, which is why operators often route fresh or repaired nodes to short jobs first. Monitoring then checks whether the constant-rate model remains appropriate as the fleet ages.
 
-### Model-type diversity in failure impact {#sec-fault-tolerance-reliability-reliability-modeltype-diversity-failure-impact-8ec0}
+## Model-Type Diversity in Failure Impact {#sec-fault-tolerance-reliability-reliability-modeltype-diversity-failure-impact-8ec0}
 
 ```{python}
 #| echo: false
@@ -1113,7 +1123,7 @@ Vision models illustrate how a smaller state budget can permit more frequent sav
 
 Scientific workflows can require state beyond the model and optimizer. An iterative molecular-search pipeline, for example, must retain which configurations have been evaluated if those results determine its next candidates. A training pipeline that samples scientific datasets must preserve the sampling state needed by its own recovery contract. The governing question is which prior decisions affect future work; the checkpoint boundary must include that state wherever it resides.
 
-### Economic framework for fault tolerance investment {#sec-fault-tolerance-reliability-reliability-economic-framework-fault-tolerance-investment-e032}
+## Economic Framework for Fault Tolerance Investment {#sec-fault-tolerance-reliability-reliability-economic-framework-fault-tolerance-investment-e032}
 
 Fault tolerance mechanisms consume resources: storage for checkpoints, bandwidth for checkpoint writes, compute cycles for redundant calculations, and engineering time for implementation and maintenance. Rational investment in fault tolerance requires quantifying both the cost of failures and the cost of prevention.
 
@@ -1853,7 +1863,7 @@ Asynchronous checkpointing\index{Checkpointing!asynchronous}\index{Asynchronous 
 
 [^fn-asyncckpt-storage-pipeline]: **Asynchronous checkpointing**\index{Checkpointing!asynchronous, pipeline overhead}: Pipelines durable writes behind training by first capturing a consistent snapshot in staging memory or storage. Training must not mutate values still being captured. After capture, background flushing can overlap independent computation, subject to staging capacity and sustained drain bandwidth. Exposed capture time and resource contention remain overhead even when the durable write finishes off the training critical path.
 
-The two approaches also differ in what they hold in memory. Beyond write time, checkpointing consumes memory for serialization, transfer buffers, and any copied snapshot. A synchronous writer can read stable training state while updates are paused, so it does not necessarily need a complete second copy, but the pause can leave accelerators idle even with fast storage. Independent input prefetching may continue; forward or backward work that changes the captured state must wait unless the snapshot mechanism explicitly permits overlap. Asynchronous capture instead requires retained values that later updates cannot change, so its buffering policy can increase peak memory demand.
+Memory footprint introduces a second contrast. Beyond write time, checkpointing consumes memory for serialization, transfer buffers, and any copied snapshot. A synchronous writer can read stable training state while updates are paused, so it does not necessarily need a complete second copy, but the pause can leave accelerators idle even with fast storage. Independent input prefetching may continue; forward or backward work that changes the captured state must wait unless the snapshot mechanism explicitly permits overlap. Asynchronous capture instead requires retained values that later updates cannot change, so its buffering policy can increase peak memory demand.
 
 #### The "stop-the-world" cost {#sec-fault-tolerance-reliability-stoptheworld-cost-beaa}
 
@@ -2082,13 +2092,13 @@ class CheckpointStorm:
 
 **Scenario**: A `{python} CheckpointStorm.storm_workers_str` distributed training cluster runs an embedding-heavy job whose per-worker model and embedding shard (`{python} CheckpointStorm.storm_shard_gb_str`) is several times the `{python} FaultToleranceCheckpointRecap.gpt3_shard_gb_str` per-GPU shard of the 175B running example. Every worker flushes its shard to shared storage at the same step instant.
 
-**Diagnosis**: Simultaneous un-coordinated writes\index{Checkpointing!uncoordinated}\index{Uncoordinated checkpointing|see{Checkpointing}} offer `{python} CheckpointStorm.storm_payload_tb_str` to shared network and storage paths in one burst, the checkpoint storm of definition \ref{dfn-data-storage-checkpoint-storm}. When that arrival rate exceeds sustained service capacity, queues grow and writers stall; finite buffering can also lead to drops or timeouts. The total byte count alone does not establish which resource fails first.
+**Diagnosis**: Simultaneous uncoordinated writes\index{Checkpointing!uncoordinated}\index{Uncoordinated checkpointing|see{Checkpointing}} offer `{python} CheckpointStorm.storm_payload_tb_str` to shared network and storage paths in one burst, the checkpoint storm of definition \ref{dfn-data-storage-checkpoint-storm}. When that arrival rate exceeds sustained service capacity, queues grow and writers stall; finite buffering can also lead to drops or timeouts. The total byte count alone does not establish which resource fails first.
 
 **Systems lesson**: A consistent capture need not become an uncontrolled storage burst. Staggered flushes, rate limits, and bounded host-memory or local-storage staging can keep background writes within the drain capacity. The system must still publish a generation only after it reaches the required durability tier.
 
 :::
 
-While @tbl-checkpoint-overhead-by-model suggests modest overhead percentages, real deployments often encounter checkpoint times far exceeding these theoretical estimates. Diagnosing such discrepancies requires examining the full system stack.
+Theoretical models project modest overhead percentages under uncontended conditions, yet real deployments often encounter checkpoint times far exceeding these estimates. Diagnosing such discrepancies requires examining the full system stack.
 
 ```{python}
 #| echo: false
@@ -2242,7 +2252,11 @@ For fault tolerance, checkpoint placement determines which failures the saved st
 
 ### Checkpoint coordination patterns {#sec-fault-tolerance-reliability-checkpoint-coordination-patterns-f670}
 
-Recovery from distributed checkpoints for sharded models requires understanding the coordination protocols that ensure checkpoint consistency. When training spans multiple workers, two primary approaches exist: centralized checkpointing\index{Checkpointing!centralized} where a coordinator gathers all state and writes a single checkpoint, and distributed checkpointing\index{Checkpointing!distributed} where each worker writes its own portion of the checkpoint.
+Recovery from distributed checkpoints for sharded models requires understanding the coordination protocols that ensure checkpoint consistency. Checkpoint coordination involves two orthogonal dimensions: whether workers synchronize to capture a consistent state (coordinated versus uncoordinated checkpointing), and how that state flows to persistent storage (centralized versus distributed checkpointing).
+
+In **uncoordinated checkpointing**\index{Checkpointing!uncoordinated}\index{Uncoordinated checkpointing|see{Checkpointing}}, each worker records its local state independently without synchronizing with peers. While this avoids coordination barriers during healthy execution, recovery must search across independent shards for a mutually consistent cut. Because distributed ML workers exchange gradients and activations at every step, an uncoordinated rollback can cause dependencies to cascade backward through the entire training run—the classic domino effect [@elnozahy2002survey]. Distributed ML systems therefore rely on **coordinated checkpointing**\index{Checkpointing!coordinated}\index{Coordinated checkpointing|see{Checkpointing}}, in which workers synchronize (either at step boundaries or through explicit two-phase commit protocols) to ensure that saved shards together define a globally consistent recovery line.
+
+Once coordination guarantees consistency, the architectural decision is how those shards reach persistent storage: whether workers funnel their state through a single coordinator or write their partitions directly in parallel.
 
 #### Centralized checkpointing {#sec-fault-tolerance-reliability-reliability-centralized-checkpointing-83a7}
 
@@ -2529,7 +2543,7 @@ The trade-off is software complexity. Survivor-preserving warm restarts require 
 
 ### Recovery automation pipeline {#sec-fault-tolerance-reliability-recovery-automation-pipeline}
 
-At the scale of 10,000+ GPUs, failures occur multiple times per day, so a human cannot handle each one. Recovery must be an autonomous control loop managed by the cluster's control plane. Published reports from large training fleets describe multi-stage automation that classifies failures and selects the minimum viable remediation [@dubey2024llama; @kokolis2025; @zu2024tpuv4].
+At the scale of 10,000+ GPUs, failures occur multiple times per day, so human operators cannot intervene manually on each incident. Recovery must be an autonomous control loop managed by the cluster control plane. Published reports from large training fleets describe multi-stage automation that classifies failures and selects the minimum viable remediation [@dubey2024llama; @kokolis2025; @zu2024tpuv4].
 
 The pipeline operates in four ordered stages:
 
@@ -2878,7 +2892,7 @@ Changing the global batch size changes the optimization regime as well as the am
 
 $$ \ScaledLearningRate= \BaseLearningRate\times \sqrt{\frac{\ResizedWorkerCount}{\BaseWorkerCount}} $$ {#eq-lr-scaling}
 
-where $\DeviceCount$ represents the number of data-parallel workers, with per-worker microbatch size and accumulation count held fixed so global batch size scales with $\DeviceCount$. For a shrink, the square-root rule reduces the learning rate less than linear scaling does; that arithmetic does not establish which policy is more stable. Either policy requires validation for the optimizer, schedule, and workload. Preserving the global batch instead can avoid introducing this change in optimization regime.
+where $\ResizedWorkerCount$ and $\BaseWorkerCount$ represent the resized and base counts of data-parallel workers, with per-worker microbatch size and accumulation count held fixed so global batch size scales directly with worker count. For a shrink, the square-root rule reduces the learning rate less than linear scaling does; that arithmetic does not establish which policy is more stable. Either policy requires validation for the optimizer, schedule, and workload. Preserving the global batch instead can avoid introducing this change in optimization regime.
 
 Gradient accumulation offers that alternative: each surviving worker processes additional micro-batches before synchronization to maintain the original effective batch size. If worker count drops by half, doubling the accumulation steps preserves the number of examples per update and can retain the existing learning-rate schedule. Each worker then performs twice as much micro-batch computation per update, although communication and overlap determine the wall-time increase. Equal batch size does not imply bitwise-identical updates or identical behavior from operations that depend on micro-batch statistics.
 
@@ -2944,7 +2958,7 @@ Elasticity and checkpointing provide the necessary resilience for long-running b
 
 ## Serving Fault Tolerance {#sec-fault-tolerance-reliability-reliability-serving-fault-tolerance-5375}
 
-When a user asks a voice assistant to turn off the lights, they will not tolerate a five-minute pause while the inference server reloads from a checkpoint. Serving models presents a fundamentally different challenge, because users expect millisecond-level responsiveness even when backend GPUs crash. The C³ budget for fault tolerance shifts accordingly. Training pays for coordination in synchronization time so that a failure does not erase completed compute, while serving pays in standing redundant compute and in routing coordination so that a failure does not break a latency contract.
+When users ask a voice assistant to turn off the lights, they will not tolerate a five-minute pause while the inference server reloads from a checkpoint. Serving models presents a fundamentally different challenge, because users expect millisecond-level responsiveness even when backend GPUs crash. The C³ budget for fault tolerance shifts accordingly. Training pays for coordination in synchronization time so that a failure does not erase completed compute, while serving pays in standing redundant compute and in routing coordination so that a failure does not break a latency contract.
 
 A serving replica is a runnable copy of the model that can accept requests; the routing layer chooses a replica, and a readiness check determines whether that replica can serve successfully. Replicas may share external state stores or keep request state in accelerator memory, so replacing compute does not necessarily replace the state a request needs. Serving fault tolerance asks how those mechanisms behave when replicas, GPUs, or state stores fail under live latency budgets. The focus here is narrower than a complete serving architecture: each mechanism is treated as a reliability boundary for real-time inference.
 
@@ -2954,9 +2968,9 @@ The first serving decision is where request state lives, because that choice det
 
 The stateless pattern appears when the input itself carries all context: an image classifier processes one image, an object detector processes one frame, a single-turn text classifier processes one snippet, and an embedding service maps one input to one vector. Fault tolerance can then focus on replica health and request routing. Redundant replicas\index{Replication!redundant replicas} serve requests in parallel, load balancing\index{Load balancing!serving fault tolerance} sends traffic only to healthy replicas, health checks\index{Health check!serving failover} remove failed replicas from rotation, and automatic replacement starts a new replica when capacity falls. When a replica fails, in-flight requests to that replica can be retried elsewhere, because no quality-bearing session state has been lost.
 
-The simplicity of stateless serving makes it the simpler architecture when the application permits it. However, many ML applications inherently require state across requests. Consider a chatbot: a single-turn question-answering system can operate statelessly, processing each question independently. A conversational assistant must preserve its history somewhere, but the model worker can still be stateless if each request carries the complete history or reads it from a durable external store. Worker-local state creates a stronger dependency when later requests rely on information available only at the selected replica.
+Stateless serving offers the simpler architecture when the application permits it. However, many ML applications inherently require state across requests. Consider a chatbot: a single-turn question-answering system can operate statelessly, processing each question independently. A conversational assistant must preserve its history somewhere, but the model worker can still be stateless if each request carries the complete history or reads it from a durable external store. Worker-local state creates a stronger dependency when later requests rely on information available only at the selected replica.
 
-Stateful serving appears when later work depends on retained session state. For a transformer, the key-value (KV) cache stores attention keys and values computed for earlier tokens so the worker can reuse them while generating subsequent tokens. This cache is derived state: if the authoritative token history and compatible model version remain available, a replacement can recompute it by processing that history again. Losing the history itself is a different failure because cache reconstruction no longer has its required input. Streaming speech recognition similarly maintains context from previous audio, recommendation sessions accumulate user context, and interactive editing maintains document state across edits. The fault-tolerance consequence is that failure loses quality-bearing state, not just serving capacity. KV cache loss requires reprocessing previous turns, session context loss forces users to repeat previous interactions, and accumulated user state loss degrades quality when context is unavailable. The mitigation choice follows the size, update rate, and quality value of that state: session affinity routes a session to the same replica, state checkpointing periodically saves session state, state replication maintains a standby copy, and graceful degradation keeps the service available at reduced quality if state cannot be recovered.
+Stateful serving appears when later work depends on retained session state. For a transformer, the key-value (KV) cache stores attention keys and values computed for earlier tokens so the worker can reuse them while generating subsequent tokens. This cache is derived state: if the authoritative token history and compatible model version remain available, a replacement can recompute it by processing that history again. Losing the history itself is a different failure because cache reconstruction no longer has its required input. Streaming speech recognition similarly maintains context from previous audio, recommendation sessions accumulate user context, and interactive editing maintains document state across edits. The fault-tolerance consequence is that failure loses quality-bearing state rather than serving capacity alone. KV cache loss requires reprocessing previous turns, session context loss forces users to repeat previous interactions, and accumulated user state loss degrades quality when context is unavailable. The mitigation choice follows the size, update rate, and quality value of that state: session affinity routes a session to the same replica, state checkpointing periodically saves session state, state replication maintains a standby copy, and graceful degradation keeps the service available at reduced quality if state cannot be recovered.
 
 ::: {.column-margin .margin-pointer}
 ↪ How the KV cache grows with sequence length and concurrency until it fills accelerator memory is developed in @sec-inference-scale-kv-cache-wall.
@@ -3079,12 +3093,12 @@ For stateful serving, session affinity\index{Session affinity!stateful failover}
 
 The choice depends on state size, update frequency, and the quality impact of state loss; @tbl-stateful-failover summarizes the trade-offs across the four common approaches:
 
-| **Approach**                | **Recovery Latency** | **State guarantee** | **Operational Complexity** |
-|:----------------------------|:--------------------:|:---------------:|:--------------------------:|
-| **State loss**              |         Fast         |       None      |            Low             |
+| **Approach**                | **Recovery Latency** |              **State guarantee**               | **Operational Complexity** |
+|:----------------------------|:--------------------:|:----------------------------------------------:|:--------------------------:|
+| **State loss**              |         Fast         |                      None                      |            Low             |
 | **Checkpointing**           |        Medium        | Consistent snapshot; later updates may be lost |           Medium           |
-| **Synchronous replication** |         Fast         |      Strong     |            High            |
-| **Distributed state**       |         Fast         |   Configurable  |           Medium           |
+| **Synchronous replication** |         Fast         |                     Strong                     |            High            |
+| **Distributed state**       |         Fast         |                  Configurable                  |           Medium           |
 
 : **Stateful Failover Approaches**: Recovery latency, state guarantees, and operational complexity distinguish four approaches to session-state failover. Checkpoint recovery may lose updates after the saved snapshot. Distributed storage can provide different consistency contracts, and synchronous replication provides its promised guarantee only under the specified acknowledgment and fault model. {#tbl-stateful-failover}
 

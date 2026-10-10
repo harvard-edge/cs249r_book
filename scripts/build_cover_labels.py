@@ -63,8 +63,8 @@ VOL1_CHAPTERS = [
         ]
     },
     {
-        'slug': '02_ml_systems',
-        'prefix': 'ml_systems',
+        'slug': '02_system_paradigms',
+        'prefix': 'system_paradigms',
         'font': FONT_ARIAL_BOLD,
         'labels': [
             {'text': 'workload', 'pill': (181, 131), 'targ': (236, 289), 'border': '#0090B0', 'color': '#0090B0'},

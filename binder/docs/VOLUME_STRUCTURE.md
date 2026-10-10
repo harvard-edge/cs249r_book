@@ -39,7 +39,7 @@ Establish the conceptual framework for understanding ML as a systems discipline.
 | Ch | Title | Purpose |
 |----|-------|---------|
 | 1 | Introduction | Why ML systems thinking matters |
-| 2 | ML Systems | Survey of the field, deployment paradigms |
+| 2 | System Paradigms | Survey of the field, deployment paradigms |
 | 3 | ML Workflow | End-to-end ML development process |
 | 4 | Data Engineering | Pipelines, preprocessing, data quality |
 

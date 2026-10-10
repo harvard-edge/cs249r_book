@@ -269,7 +269,7 @@ For faster development, you can work with a minimal set of chapters:
 chapters:
   - index.qmd
   - contents/core/introduction/introduction.qmd
-  # - contents/core/ml_systems/ml_systems.qmd    # Commented out
+  # - vol1/02_system_paradigms/02_system_paradigms.qmd    # Commented out
   # - contents/core/nn_computation/nn_computation.qmd      # Commented out
 ```
 

@@ -102,7 +102,7 @@ class MaintenanceCommand:
         # Tips
         tips = Panel(
             "[bold magenta]💡 Pro Tips:[/bold magenta]\n"
-            "• Use [cyan]./binder/binder build intro,ml_systems[/cyan] to build multiple chapters\n"
+            "• Use [cyan]./binder/binder build intro,system_paradigms[/cyan] to build multiple chapters\n"
             "• Use [cyan]./binder/binder preview[/cyan] for live development with hot reload\n"
             "• Use [cyan]./binder/binder doctor[/cyan] to check system health\n"
             "• Use [cyan]./binder/binder clean[/cyan] to clean up build artifacts",
