@@ -301,14 +301,14 @@ The textbook series follows a comprehensive systems progression across four core
 
 #### How This Curriculum Is Built and Verified
 
-Building an engineering curriculum of this scope in a field moving as fast as machine learning requires being completely transparent about how the material is developed, how AI tools are used, and how each volume is verified:
+Building an open engineering curriculum in a field moving as fast as machine learning requires being open and transparent about how the material is developed, how AI tools are used, and how each volume is verified:
 
-* **Volume I (Foundations)**: **Shipped & Headed to MIT Press.** Taught and battle-tested over multiple semesters at Harvard and adopted by universities worldwide. Every lab and chapter has been put in front of real students. I used AI as an editor and sounding board to stress-test sequencing, draft initial code cells, and write automated pre-commit tests.
-* **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Grounded in conversations with production engineers running massive clusters in industry. I used AI to explore initial outlines, pull historical systems papers, and sketch early cluster math. Crucially, every number and topology is backed by our [MLSys·im](https://mlsysbook.ai/mlsysim/) fleet simulator, and the chapters are vetted in one-on-one reviews with practicing distributed systems engineers.
-* **Volume III (Agentic Systems)**: **In-Development Draft (Uncontracted).** Agentic AI is an active frontier with few settled abstractions. I treat the model as a "stochastic computer" and use AI interactively to draft ideas, test edge cases, and challenge architectural boundaries. But every chapter is written, coded, and vetted by hand. **This is a live draft that will go through the same classroom teaching and expert reviews as Volumes I and II before publication.**
-* **Volume IV (Physical AI)**: **In-Development Draft (Uncontracted).** Robotics and physical AI require bridging classical control theory with modern foundation models. I use AI to help search across disparate literatures that don't traditionally talk to each other. But physical systems don't forgive hallucinations—real-world latency budgets, actuator physics, and safety require rigorous human engineering. **Like Volume III, this is a working draft open to early feedback.**
+* **Volume I (Foundations)**: **Shipped & Headed to MIT Press.** Taught and refined over multiple semesters at Harvard and adopted by universities worldwide, with every chapter and lab tested with real students. AI served as a helpful sounding board and editor for sequencing, drafting code cells, and writing automated tests.
+* **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Shaped by conversations with distributed systems engineers running large-scale clusters in industry. AI assisted in exploring outlines, finding seminal literature, and drafting early cluster calculations. Crucially, all numbers and topologies are verified against our [MLSys·im](https://mlsysbook.ai/mlsysim/) simulator and reviewed one-on-one with practicing systems engineers.
+* **Volume III (Agentic Systems)**: **In-Development Draft (Uncontracted).** Agentic AI is an exciting, emerging frontier. I treat the model as a "stochastic computer" and use AI interactively to explore early ideas, brainstorm edge cases, and test explanations. Every chapter is thoughtfully written, coded, and refined by hand. **This is a living draft that will undergo the same classroom teaching and expert review as earlier volumes before final publication.**
+* **Volume IV (Physical AI)**: **In-Development Draft (Uncontracted).** Embodied AI bridges classical control theory, robotics, and foundation models. I use AI to help survey connected ideas across disparate research fields, while ensuring the latency budgets, actuator dynamics, and safety constraints reflect real physical systems. **Like Volume III, this is an early draft, and community feedback is warmly welcome.**
 
-The philosophy is simple: tools propose, but I verify, rewrite, and take full responsibility.
+Across all four volumes, the guiding principle is simple: modern tools help explore and draft, but every idea is thoughtfully vetted, coded, and shaped by human hands.
 
 #### How the Volumes Connect
 
@@ -340,20 +340,22 @@ This repository—the books, software frameworks, and hardware kits—is my open
 
 <br>
 
-Yes. I use LLMs and generative AI tools across my workflow—to brainstorm analogies, draft early scaffolding, dig up relevant papers across disciplines, and stress-test explanations. If you are building a four-volume curriculum that spans everything from a single logic gate to a 10,000-accelerator datacenter while running a research lab and teaching full-time, of course you use modern tools. Anyone who claims otherwise in 2026 is either not building at scale or not being candid.
+Yes, and I want to be completely transparent about it.
 
-Here is the line I draw: **I never release anything until I have derived, coded, and verified it myself.**
+I use LLMs and modern AI tools throughout my workflow—much like an author might work with an editor, research assistant, or sounding board. They are wonderful for brainstorming analogies, drafting early scaffolding, searching across research papers, and exploring how to explain tricky concepts more clearly. In a field that moves as fast as ML systems, these tools help me keep an ambitious, four-volume open curriculum moving forward alongside full-time university teaching and research.
 
-An LLM can generate fluent prose that sounds convincing while being technically nonsensical or physically impossible. To keep this curriculum grounded, every chapter relies on concrete truth:
+At the same time, I am very thoughtful and deliberate about how I use them: **I only release material after I have personally derived, coded, and verified it myself.**
 
-* **Executable Python code and MLSys·im:** Systems engineering is an empirical science, not creative writing. We never rely on prose alone. Every single equation, memory footprint, compute roofline, and latency model is backed by executable Python cells embedded directly in the chapters, or validated against our open-source fleet simulator, [MLSys·im](https://mlsysbook.ai/mlsysim/). If there is a number on the page, it was computed from real silicon specs and running code—not dreamed up by a language model.
-* **Real classroom teaching:** An LLM doesn't sit in office hours. It doesn't see when a room full of students gets stuck on memory bandwidth versus compute throughput, or when an abstraction creates confusion. Deciding what to teach, what to leave out, and in what order—that comes strictly from years of teaching this material in the lecture hall.
-* **Automated sanity checks:** Every commit runs through `binder`, our custom validation suite. It mathematically checks unit consistency, verifies inline code references, audits citations, and fails the build if something doesn't add up.
-* **Open peer review:** Everything is open source on GitHub. When engineers at Google, Meta, NVIDIA, or frontier startups catch a mistake or an outdated hardware spec, we fix it in the open.
+Language models can write very smooth prose that sounds right on the surface while hiding subtle mathematical or physical errors. Because this curriculum is meant to teach real-world engineering, accuracy and pedagogical care come first:
 
-At the end of the day, authorship isn't about whether you used a pencil, a keyboard, or a language model. Authorship is accountability. I vet every derivation, I run the code, and I stand behind every page. If something is broken, that's on me.
+* **Executable Python code and MLSys·im:** We ground every quantitative concept in runnable code. The derivations, latency models, memory calculations, and scaling curves in these books are backed by executable Python cells right in the text, or cross-checked with our fleet simulator, [MLSys·im](https://mlsysbook.ai/mlsysim/). If there is a number or chart in a chapter, you can run the code and verify it against real hardware specifications.
+* **Classroom-tested pedagogy:** A textbook is more than an encyclopedia of facts; it is a learning journey. Knowing what order to introduce ideas, where students typically stumble, and what to leave out to keep mental models clean comes from years of teaching in the classroom and listening to students in office hours.
+* **Automated quality checks:** Every commit runs through our open-source validation suite (`binder`), which automatically checks that units balance, code references point to real definitions, citations resolve, and formatting remains consistent.
+* **Community and peer review:** This entire project is open source on GitHub. I am deeply grateful to the students, university colleagues, and industry engineers who read drafts, point out mistakes, and suggest improvements.
 
-Each volume also includes a dedicated [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) with more detail on how tools are used and audited.
+Ultimately, tools are here to help us create, but authorship is about taking personal care and responsibility. Every concept, code snippet, and diagram in this curriculum has been reviewed and vetted by me, and I hope it serves you well in your learning journey.
+
+Each volume also includes a detailed [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) with more information on how tools are used and verified.
 
 </details>
 
