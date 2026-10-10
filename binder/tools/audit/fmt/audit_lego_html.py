@@ -48,7 +48,7 @@ NUM_TOKEN = re.compile(r"\d[\d,]*\.?\d*")
 
 CHAPTER_LIST = {
     "vol1": [
-        "introduction", "02_system_paradigms", "ml_workflow", "data_engineering", "nn_computation",
+        "introduction", "02_system_paradigms", "ml_lifecycle", "data_engineering", "nn_computation",
         "nn_architectures", "frameworks", "training", "data_selection", "model_compression",
         "hw_acceleration", "benchmarking", "model_serving", "ml_ops", "responsible_engr",
         "conclusion", "appendix_algorithm", "appendix_assumptions",

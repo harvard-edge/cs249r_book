@@ -76,8 +76,8 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
     </tr>
     <tr>
       <td>3</td>
-      <td><b>ML Workflow</b></td>
-      <td><code>ml_workflow/</code></td>
+      <td><b>ML Lifecycle</b></td>
+      <td><code>03_ml_lifecycle/</code></td>
       <td>What does the end-to-end ML pipeline look like?</td>
     </tr>
     <tr>

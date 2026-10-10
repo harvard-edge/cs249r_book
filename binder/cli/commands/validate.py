@@ -14501,7 +14501,7 @@ class ValidateCommand:
         approved_layout_vectors = {
             ("vol1/frontmatter/_conventions.qmd", (17, 85)),
             ("vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
-            ("vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
+            ("vol1/ml_lifecycle/ml_lifecycle.qmd", (16, 44, 50)),
         }
 
         for file in files:

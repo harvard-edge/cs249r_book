@@ -75,8 +75,8 @@ VOL1_CHAPTERS = [
         ]
     },
     {
-        'slug': '03_ml_workflow',
-        'prefix': 'ml_workflow',
+        'slug': '03_ml_lifecycle',
+        'prefix': 'ml_lifecycle',
         'font': FONT_ARIAL_BOLD,
         'labels': [
             {'text': 'problem', 'pill': (176, 143), 'targ': (220, 334), 'border': '#0090B0', 'color': '#0090B0'},

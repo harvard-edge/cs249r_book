@@ -680,7 +680,7 @@ def _(
     _carried_req = _snapshots["A"]["chosen_result"]["requirement_label"]
     _carried_limit = _snapshots["A"]["chosen_result"]["requirement_limit"]
     report = build_lab_report(
-        get_lab_metadata("vol1/lab_03_ml_workflow.py"),
+        get_lab_metadata("vol1/lab_03_ml_lifecycle.py"),
         track=track_id, scenario=profile["scenario"],
         learning_objectives=[
             "Trace a requirement through lifecycle artifacts",

@@ -33,12 +33,12 @@ LAB_CATALOG: dict[str, LabMetadata] = {
         book_anchor="Volume I, Chapter 2: System Paradigms",
         updated_at="2026-09-15",
     ),
-    "vol1/lab_03_ml_workflow.py": LabMetadata(
+    "vol1/lab_03_ml_lifecycle.py": LabMetadata(
         lab_id="v1_03_constraint_tax",
         title="Carry the Constraint",
         volume="Volume I",
         chapter="Chapter 3",
-        book_anchor="Volume I, Chapter 3: ML Workflow",
+        book_anchor="Volume I, Chapter 3: ML Lifecycle",
         updated_at="2026-09-15",
     ),
     "vol1/lab_04_data_engr.py": LabMetadata(
