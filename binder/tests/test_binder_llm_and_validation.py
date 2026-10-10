@@ -234,3 +234,39 @@ def test_purpose_stack_validation_and_guidance():
         assert res.passed is False
         codes = {i.code for i in res.issues}
         assert "purpose_hook_missing" in codes
+
+
+def test_dedicated_check_help_panels():
+    """Ensure dedicated help panels for structure, numbers, figures, prose, and refs render cleanly."""
+    import binder.cli.commands.validate as vmod
+
+    cmd = object.__new__(ValidateCommand)
+    cmd.GROUPS = ValidateCommand.GROUPS
+
+    out = io.StringIO()
+    test_console = Console(file=out, color_system=None, width=120)
+    orig_console = vmod.console
+    try:
+        vmod.console = test_console
+
+        # Test group help panels
+        for grp in ["structure", "numbers", "figures", "prose", "refs", "epub"]:
+            out.seek(0)
+            out.truncate(0)
+            cmd._print_group_help(grp)
+            rendered = out.getvalue()
+            assert f"binder check {grp} — scopes" in rendered
+            assert "Error codes" in rendered
+            assert "Common invocations:" in rendered
+
+        # Test general check help
+        out.seek(0)
+        out.truncate(0)
+        cmd._print_check_help()
+        check_help = out.getvalue()
+        assert "--json" in check_help
+        assert "--plain" in check_help
+        assert "machine-readable" in check_help
+    finally:
+        vmod.console = orig_console
+
