@@ -697,6 +697,8 @@ class ValidateCommand:
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
                   note="Purpose sections unnumbered"),
+            Scope("purpose-stack", "_run_purpose_stack",
+                  note="every chapter opens with Purpose section, architecture stack SVG, caption, and hook question"),
             # Added 2026-08-17. purpose.md anti-pattern 8a: an appendix opens
             # with one unheaded orientation paragraph, never a chapter-style
             # Purpose heading or italic hook question. A sweep that reshaped the
@@ -6440,6 +6442,7 @@ class ValidateCommand:
                             message="Use GB/TB not GiB/TiB in prose (book-prose.md)",
                             severity="warning",
                             context=context,
+                            suggestion=f"{m.group(1)} → {m.group(1).replace('i', '')}",
                         )
                     )
 
@@ -7403,6 +7406,142 @@ class ValidateCommand:
         return ValidationRunResult(
             name="purpose-unnumbered",
             description="Ensure Purpose sections are unnumbered",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _PURPOSE_STACK_HOOK = re.compile(r"^\s*_[A-Z][^_]+\?_\s*$")
+
+    def _run_purpose_stack(self, root: Path) -> ValidationRunResult:
+        """Ensure every chapter has Purpose section, architecture stack SVG, caption, and hook question."""
+        start = time.time()
+        files = [f for f in self._qmd_files(root) if re.match(r"^\d{2}_", f.name)]
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            purpose_idx: Optional[int] = None
+            purpose_text = ""
+
+            for idx, line in enumerate(lines, 1):
+                if self._PURPOSE_HEADING.match(line):
+                    purpose_idx = idx
+                    purpose_text = line.strip()
+                    break
+
+            if purpose_idx is None:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=1,
+                        code="purpose_heading_missing",
+                        message="Chapter must begin with a '## Purpose {.unnumbered .unlisted}' section",
+                        severity="error",
+                        context=lines[0][:80] if lines else "",
+                        suggestion="## Purpose {.unnumbered .unlisted}",
+                    )
+                )
+                continue
+
+            if ".unnumbered" not in purpose_text or ".unlisted" not in purpose_text:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=purpose_idx,
+                        code="purpose_heading_classes",
+                        message="Purpose heading must include classes: {.unnumbered .unlisted}",
+                        severity="error",
+                        context=purpose_text[:80],
+                        suggestion="## Purpose {.unnumbered .unlisted}",
+                    )
+                )
+
+            # Scan the Purpose section: from purpose_idx until the next ## heading (or end of section/file)
+            has_stack = False
+            stack_idx: Optional[int] = None
+            has_caption = False
+            has_hook = False
+
+            for j in range(purpose_idx, min(len(lines), purpose_idx + 60)):
+                line_str = lines[j].strip()
+                if line_str.startswith("## ") and not line_str.startswith("## Purpose"):
+                    break
+                if "margin_stack.svg" in line_str:
+                    has_stack = True
+                    stack_idx = j + 1
+                    for k in range(j + 1, min(len(lines), j + 6)):
+                        caption_candidate = lines[k].strip()
+                        if caption_candidate.startswith("*") and caption_candidate.endswith("*") and not caption_candidate.startswith("**"):
+                            has_caption = True
+                            break
+                        if caption_candidate.startswith(":::"):
+                            break
+
+                if self._PURPOSE_STACK_HOOK.match(line_str):
+                    has_hook = True
+
+            if not has_stack:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=purpose_idx,
+                        code="purpose_stack_missing",
+                        message="Purpose section must include the architecture stack diagram (images/svg/margin_stack.svg)",
+                        severity="error",
+                        context=purpose_text[:80],
+                        suggestion=(
+                            "::: {.column-margin}\n"
+                            '![](images/svg/margin_stack.svg){width="100%" fig-alt="Systems Architecture Stack"}\n\n'
+                            "*Architecture stack focus for this chapter.*\n"
+                            ":::"
+                        ),
+                    )
+                )
+            else:
+                svg_path = file.parent / "images" / "svg" / "margin_stack.svg"
+                if not svg_path.is_file():
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=stack_idx or purpose_idx,
+                            code="purpose_stack_file_missing",
+                            message="Referenced architecture stack SVG does not exist on disk: images/svg/margin_stack.svg",
+                            severity="error",
+                            context=lines[(stack_idx or purpose_idx) - 1].strip()[:80],
+                            suggestion="Ensure images/svg/margin_stack.svg exists in the chapter directory",
+                        )
+                    )
+
+                if not has_caption:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=stack_idx or purpose_idx,
+                            code="purpose_stack_caption_missing",
+                            message="Purpose margin stack requires a single-line italic caption directly beneath the image",
+                            severity="error",
+                            context=lines[(stack_idx or purpose_idx) - 1].strip()[:80],
+                            suggestion="*Architecture stack focus for this chapter.*",
+                        )
+                    )
+
+            if not has_hook:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=purpose_idx,
+                        code="purpose_hook_missing",
+                        message="Purpose section must include an opening italic hook question (_Why/How ...?_)",
+                        severity="error",
+                        context=purpose_text[:80],
+                        suggestion="_Why does [core challenge] require [systems approach]?_",
+                    )
+                )
+
+        return ValidationRunResult(
+            name="purpose-stack",
+            description="Ensure every chapter has Purpose section with architecture stack SVG, caption, and hook question",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

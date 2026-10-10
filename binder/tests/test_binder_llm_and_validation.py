@@ -174,3 +174,63 @@ def test_maintain_volume_bib_resolves_script_independently_of_cwd(monkeypatch):
         repo_root = Path(__file__).resolve().parents[2]
         script = repo_root / "binder" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
         assert script.exists()
+
+
+def test_purpose_stack_validation_and_guidance():
+    """Ensure purpose-stack check provides clean, structured issue reports with template suggestions."""
+    with TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir)
+        cm = SimpleNamespace(repo_root=d, book_dir=d)
+        cmd = ValidateCommand(cm, None)
+
+        chap_dir = d / "01_test"
+        chap_dir.mkdir(parents=True)
+        svg_dir = chap_dir / "images" / "svg"
+        svg_dir.mkdir(parents=True)
+        svg_file = svg_dir / "margin_stack.svg"
+        svg_file.write_text("<svg></svg>", encoding="utf-8")
+
+        # 1. Valid chapter
+        qmd = chap_dir / "01_test.qmd"
+        qmd.write_text(
+            '# Test Chapter\n\n'
+            '## Purpose {.unnumbered .unlisted}\n\n'
+            '::: {.column-margin}\n'
+            '![](images/svg/margin_stack.svg){width="100%"}\n\n'
+            '*Architecture stack focus for this chapter.*\n'
+            ':::\n\n'
+            '_Why does the system behave this way?_\n\n'
+            'Chapter text begins here.\n',
+            encoding="utf-8",
+        )
+        res = cmd._run_purpose_stack(d)
+        assert res.passed is True
+        assert len(res.issues) == 0
+
+        # 2. Missing purpose heading
+        qmd.write_text('# Test Chapter\n\nChapter text without purpose.\n', encoding="utf-8")
+        res = cmd._run_purpose_stack(d)
+        assert res.passed is False
+        assert len(res.issues) == 1
+        assert res.issues[0].code == "purpose_heading_missing"
+        assert res.issues[0].line == 1
+        assert "## Purpose {.unnumbered .unlisted}" in res.issues[0].suggestion
+
+        # 3. Missing caption and missing hook question
+        qmd.write_text(
+            '# Test Chapter\n\n'
+            '## Purpose {.unnumbered .unlisted}\n\n'
+            '::: {.column-margin}\n'
+            '![](images/svg/margin_stack.svg){width="100%"}\n'
+            ':::\n\n'
+            'Chapter text begins without a hook question.\n',
+            encoding="utf-8",
+        )
+        res = cmd._run_purpose_stack(d)
+        assert res.passed is False
+        codes = {i.code for i in res.issues}
+        assert "purpose_stack_caption_missing" in codes
+        assert "purpose_hook_missing" in codes
+        cap_issue = next(i for i in res.issues if i.code == "purpose_stack_caption_missing")
+        assert cap_issue.line == 6
+        assert cap_issue.suggestion == "*Architecture stack focus for this chapter.*"
