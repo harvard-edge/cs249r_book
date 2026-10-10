@@ -33,6 +33,14 @@ notation-local: [\AdmittedCommand, \BalanceDivergenceTime, \BipedTiltAcceleratio
 \end{marginfigure}
 :::
 
+::: {.content-visible unless-format="pdf"}
+::: {.column-margin}
+![](images/svg/margin_stack.svg){width="100%" fig-alt="Physical AI Systems Stack"}
+
+*Physical AI stack focus for this chapter.*
+:::
+:::
+
 _Why must a moving machine keep checking its commands when its learned model stops responding?_
 
 A learned model can pause for a fraction of a second while it interprets a scene, but the machine carrying it keeps moving, and a loaded base covers tens of centimeters in that pause. Every delay between a decision and the current it becomes is therefore paid in clearance. A general-purpose computer hides such delays behind queues, retries, and priorities. A moving machine cannot, because a command that arrives late acts on a body that has already moved, and a check that waits on the model it checks protects nothing once that model stalls. Treating timing and communication as implementation details produces machines whose safeguards share a processor, a supply rail, or a memory bus with the model they guard, and so fail together with it. A machine that acts on learned decisions therefore needs a timed path between proposal and actuator whose delays are bounded, whose checks never wait on the proposer, and whose grant of authority to each proposal expires on its own. At the causal boundary, time granted to a proposal becomes motion that software cannot recall.
@@ -2331,145 +2339,6 @@ For readers seeking deeper exploration, six works trace the lineage from classic
 - @buttazzo2011hard offers an authoritative textbook treatment of hard real-time systems, fixed-priority and deadline-driven scheduling, and response-time analysis, complete with concrete task sets that readers can verify by hand.
 - @kopetz2011real develops real-time architectures from the time-triggered perspective. Its chapters on real-time entities, temporal accuracy, and communication clarify why our proposal mailbox exchanges idempotent state messages rather than transient event queues.
 - @simpson1990four presents the four-slot mechanism in its original flight-critical avionics context, demonstrating how four memory slots decouple an asynchronous reader and writer without locking, waiting, or sample loss.
-
-## Problems {#sec-nervous-problems}
-
-```{python}
-#| label: calc-nervous-problems
-#| echo: false
-#| warning: false
-#| message: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ END-OF-CHAPTER PROBLEM GIVENS (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-nervous-problems.
-# │ Goal:    Print each problem's givens from the registry and guard the
-# │          property each problem depends on, so a registry change cannot
-# │          silently turn a problem's intended answer around.
-# │ Show:    givens only (answers live in the private instructor solutions):
-# │          2 kHz tick; 15 ms jitter; 25 us DMA stalls every 100 us and a
-# │          190 us bench P99; 141.5 ms replacement copy; 28-axis humanoid at
-# │          1 kHz and 2 kHz; 5 mm impedance offset; 45 ms P99 dispatch-to-
-# │          admission and a 120 ms proposed lease.
-# │ How:     Reuses the chapter's LEGO classes; Atlas joint count and every
-# │          scenario time from the registry; the rest are problem givens.
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_length, fmt_velocity, fmt_force, fmt_stiffness, fmt_frequency, check
-
-class NervousProblems:
-    """Givens for the Chapter 4 problems, with guards on the answers they imply."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-    AISLE = Embodied.Scenario.WarehouseAisle
-    ATLAS = Embodied.Humanoid.Atlas
-    f_c = TickDelayBudget.f_c  # category: chosen (illustrative crossover)
-    phi_allow = TickDelayBudget.phi_allow  # category: chosen (illustrative allowance)
-    t_comp = TickDelayBudget.t_comp  # category: chosen (declared WCET)
-    t_bus = TickDelayBudget.t_bus  # category: illustrative
-    t_tick_fast = 0.5 * millisecond  # category: illustrative (problem given: a 2 kHz tick)
-    v = MachineLeaseBudget.v  # category: illustrative (drive limit)
-    v_aisle = AISLE.v_aisle  # category: chosen (aisle speed)
-    t_lease = MachineLeaseBudget.t_lease  # category: chosen
-    t_jitter_new = 15 * millisecond  # category: illustrative (problem given: a larger renewal jitter)
-    t_dma = 25 * microsecond  # category: illustrative (problem given: stall per DMA burst)
-    T_dma = 100 * microsecond  # category: illustrative (problem given: minimum burst spacing)
-    t_p99_bench = 190 * microsecond  # category: illustrative (problem given: bench P99 response)
-    t_copy_start = 141.5 * millisecond  # category: illustrative (problem given: replacement copy begins)
-    t_validate = AISLE.t_plan_validate  # category: illustrative
-    t_activate = AISLE.t_plan_activate  # category: illustrative
-    n_humanoid = ATLAS.dofs  # category: datasheet (hydraulic Atlas joint count)
-    t_tick_balance = 0.5 * millisecond  # category: illustrative (problem given: a 2 kHz balance-loop cycle)
-    v_latch = AISLE.v_latch_approach  # category: chosen
-    k_latch = AISLE.k_latch  # category: illustrative
-    f_latch_lim = AISLE.f_latch_limit  # category: illustrative
-    d_offset = 5 * millimeter  # category: illustrative (problem given: impedance equilibrium past the latch face)
-    t_p99_da = 45 * millisecond  # category: illustrative (problem given: bench P99 dispatch-to-admission)
-    t_lease_proposed = 120 * millisecond  # category: illustrative (problem given: a proposed lease)
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    ph_1k = calc_phase_lag_total(f_c, TickDelayBudget.t_tick, compute_delay=t_comp, phase_allowance=phi_allow)
-    ph_2k = calc_phase_lag_total(f_c, t_tick_fast, compute_delay=t_comp, transport_delay=t_bus, phase_allowance=phi_allow)
-    ph_2k_nobus = calc_phase_lag_total(f_c, t_tick_fast, compute_delay=t_comp, phase_allowance=phi_allow)
-    _rest = (TickDelayBudget.t_tick + t_bus + MachineLeaseBudget.t_act).to(millisecond)
-    _Dp = MachineLeaseBudget.d_clear - MachineLeaseBudget.delta_loc - MachineLeaseBudget.delta_margin
-    ceil_aisle = calc_watchdog_lease_bound(clearance_distance=_Dp, initial_velocity=v_aisle, max_deceleration=MachineLeaseBudget.a_brake)[
-        "t_total_delay_max"
-    ].to(millisecond)
-    floor_new = (MachineLeaseBudget.t_chunk_period + t_jitter_new).to(millisecond)
-    _base = (TickResponseBudget.t_resp).to(microsecond)
-    R = _base
-    for _ in range(20):
-        R = (_base + math.ceil((R / T_dma).to("dimensionless").magnitude) * t_dma).to(microsecond)
-    t_expiry = MultirateStall.t_expiry
-    t_admit_new = (math.ceil(t_copy_start.to(millisecond).magnitude) * millisecond + TickDelayBudget.t_tick + t_validate + t_activate).to(millisecond)
-    axes_per_bus = int((1 * millisecond / (2 * FieldbusSchedulability.t_frame)).to("dimensionless").magnitude)
-    f_velocity = (k_latch * v_latch * MachineLeaseBudget.t_lease_path).to(newton)
-    claimed_upper = (PartOneCoupledBudget.t_lease_upper - CaptureToBrakeLedger.t_age - t_p99_da).to(millisecond)
-    allocated_upper = PartOneCoupledBudget.t_lease_upper_admit
-    t_to_detect = (CaptureToBrakeLedger.t_replace + MachineLeaseBudget.t_lease_path).to(millisecond)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(not ph_1k["within_allowance"], "P1: a 1 kHz tick with the declared WCET must miss the allowance even without the bus.")
-    check(not ph_2k["within_allowance"] and ph_2k_nobus["within_allowance"], "P1: at 2 kHz only the bus term breaks the allowance.")
-    check(ceil_aisle > MachineLeaseBudget.t_ceiling, "P2: the ceiling must grow at the slower aisle speed.")
-    check(floor_new > t_lease, "P3: the larger jitter must push the floor past the 60 ms lease.")
-    check(R > TickResponseBudget.t_deadline, "P4: the DMA stalls must break the tick's deadline.")
-    check(t_p99_bench < TickResponseBudget.t_deadline, "P4: the bench P99 must look comfortable.")
-    check(t_copy_start < t_expiry < t_admit_new, "P5: the replacement arrives before expiry but is admitted after it.")
-    check(n_humanoid > axes_per_bus, "P6: one CAN FD bus must not carry the humanoid.")
-    check(f_velocity > f_latch_lim, "P7: a velocity target held over the lease path must exceed the latch limit.")
-    check(claimed_upper > t_lease_proposed > t_lease and allocated_upper > t_lease_proposed, "P10: both limits admit the proposed lease.")
-    check(
-        (allocated_upper - t_lease_proposed).to(millisecond).magnitude < 5,
-        "P10: the proposed lease must leave almost nothing under the allocated limit.",
-    )
-    check(t_to_detect > HumanoidFallDeadline.t_fall / 2, "P11: capture to detected stall must exceed half the fall timescale.")
-
-    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
-    f_fast_str = fmt_frequency((1 / t_tick_fast).to(ureg.kHz), unit=ureg.kHz, precision=0)
-    f_slow_str = fmt_frequency((1 / TickDelayBudget.t_tick_slow).to(hertz), unit=hertz, precision=0)
-    f_tick_str = fmt_frequency((1 / TickDelayBudget.t_tick).to(ureg.kHz), unit=ureg.kHz, precision=0)
-    v_aisle_str = fmt_velocity(v_aisle, unit=meter / second, precision=1)
-    t_jitter_new_str = fmt_latency(t_jitter_new, unit=millisecond, precision=0)
-    t_dma_str = fmt_latency(t_dma, unit=microsecond, precision=0)
-    T_dma_str = fmt_latency(T_dma, unit=microsecond, precision=0)
-    t_p99_bench_str = fmt_latency(t_p99_bench, unit=microsecond, precision=0)
-    t_copy_start_str = fmt_latency(t_copy_start, unit=millisecond, precision=1)
-    t_first_tick_str = fmt_latency(math.ceil(t_copy_start.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    t_second_tick_str = fmt_latency(
-        math.ceil(t_copy_start.to(millisecond).magnitude) * millisecond + TickDelayBudget.t_tick, unit=millisecond, precision=0
-    )
-    t_validate_str = fmt_latency(t_validate, unit=millisecond, precision=0)
-    t_activate_str = fmt_latency(t_activate, unit=millisecond, precision=0)
-    t_last_adm_str = fmt_latency(MultirateStall.t_last_adm, unit=millisecond, precision=0)
-    n_humanoid_str = fmt_int(n_humanoid)
-    f_balance_str = fmt_frequency((1 / t_tick_balance).to(ureg.kHz), unit=ureg.kHz, precision=0)
-    v_latch_str = fmt_velocity(v_latch, unit=meter / second, precision=2)
-    k_latch_str = fmt_stiffness(k_latch, unit=newton / millimeter, precision=0)
-    f_latch_lim_str = fmt_force(f_latch_lim, unit=newton, precision=0)
-    d_offset_str = fmt_length(d_offset, unit=millimeter, precision=0)
-    t_p99_da_str = fmt_latency(t_p99_da, unit=millisecond, precision=0)
-    t_lease_proposed_str = fmt_latency(t_lease_proposed, unit=millisecond, precision=0)
-```
-
-Each problem states its givens, which come from the running machine's registry values, the chapter's own calculations, or the capture-to-brake-onset ledger (@tbl-04-event-ledger). A given marked illustrative is an assumption for the exercise, not a measurement. The tag names the kind of work, and the parenthesis names the learning objective the problem assesses.
-
-1. **[Compute]** (Update rates) A designer proposes closing a joint loop through the permission tick and the fieldbus. Take the chapter's illustrative `{python} TickDelayBudget.f_c_str` crossover and `{python} TickDelayBudget.phi_allow_str`$^\circ$ allowance, the declared `{python} TickDelayBudget.t_comp_str` WCET as the computation delay, and the `{python} TickDelayBudget.t_bus_str` bus cycle. Using @eq-nervous-delay-phase, compute the phase lost at tick rates of `{python} NervousProblems.f_slow_str`, `{python} NervousProblems.f_tick_str`, and `{python} NervousProblems.f_fast_str` (illustrative), with and without the bus term, and the highest crossover each case supports. Which combination meets the allowance? Find the largest bus delay a `{python} NervousProblems.f_fast_str` tick could tolerate, and state what the results imply about where the joint loop must close.
-2. **[Compute]** (Lease sizing) The site runs its aisles at `{python} NervousProblems.v_aisle_str` rather than the `{python} MachineLeaseBudget.v_str` drive limit. With the chapter's $\ClearDistance$, $\LocalizationBound$, $\ProtectiveClearanceMargin$, $\CredibleBrakingDeceleration$, $\ActuatorResponseTime$, and `{python} MachineLeaseBudget.t_lease_str` lease, recompute the ceiling of @eq-nervous-prebrake, the stopping-budget terms of notebook \ref{nbk-nervous-watchdog-stopping-lease} (braking, the overheads, onset travel, and the lease path), and the clear distance that remains. Then evaluate the right side of @eq-nervous-lease-rule with the `{python} CaptureToBrakeLedger.t_replace_str` capture-to-admission age of @tbl-04-event-ledger. By how much could the lease grow at this speed, and why should the design not take that growth?
-3. **[Compute]** (Lease sizing) After a model update, the renewal jitter allowance grows from `{python} MachineLeaseBudget.t_renewal_jitter_str` to `{python} NervousProblems.t_jitter_new_str` (illustrative). Show that the `{python} MachineLeaseBudget.t_lease_str` lease now violates the left side of @eq-nervous-lease-rule, give the smallest whole-millisecond lease that satisfies it, and compute the extra clear distance that lease spends at the drive limit. Then find the largest jitter any lease could absorb at the drive limit, and the fastest speed at which your new lease still satisfies the rule. Which limit binds first?
-4. **[Compute]** (Percentiles and response bounds) A camera DMA engine shares the tick's memory path. Each burst stalls the tick for `{python} NervousProblems.t_dma_str`, and bursts can begin as often as every `{python} NervousProblems.T_dma_str` (both illustrative). Starting from the $\WorstCaseExecutionTime_i$, $\TaskBlockingTime_i$, and $\TaskInterferenceTime_i$ of notebook \ref{nbk-nervous-response-margin}, add an interference term $\lceil \WorstCaseResponseTime_i/\DmaBurstPeriod \rceil\,\DmaBurstStallTime$ and iterate $\WorstCaseResponseTime_i$ until it stops changing. Does the tick meet its `{python} TickResponseBudget.t_deadline_str` deadline? Find the smallest burst spacing, to the nearest ten microseconds, that restores it. A long bench run with the DMA engine active reports a $\text{p99}$ response of `{python} NervousProblems.t_p99_bench_str` (illustrative). State which of your numbers the handoff record may carry as a proven bound, and why the bench number cannot stand in for it.
-5. **[Compute]** (Mailbox exchanges) Use the stall of @fig-04-multirate-cadence-buffer, with its last admission at `{python} NervousProblems.t_last_adm_str`. Give the lease expiry, the tick that detects it, brake onset, and the base's travel from the last admission to brake onset at the drive limit. The application processor then recovers, and the receive interrupt starts copying a valid replacement at `{python} NervousProblems.t_copy_start_str` (illustrative); the tick at `{python} NervousProblems.t_first_tick_str` preempts the copy. Trace the counter and the reader's verdict at the ticks at `{python} NervousProblems.t_first_tick_str` and `{python} NervousProblems.t_second_tick_str`. Whole-plan validation of `{python} NervousProblems.t_validate_str` and activation of `{python} NervousProblems.t_activate_str` (row 2 of @tbl-04-event-ledger, illustrative) must follow the clean copy before admission. Is the replacement admitted before the lease expires? Find the latest clean copy that would be, and say what the machine does when the replacement misses it.
-6. **[Compute]** (Diagnosing handoff timing, transfer to a humanoid) A humanoid with the `{python} NervousProblems.n_humanoid_str` joints of the hydraulic Atlas exchanges position setpoints and feedback with every joint once per `{python} FieldbusSchedulability.cycle_time_str` cycle, using the chapter's `{python} FieldbusSchedulability.pdo_bytes_str`-byte records. With the CAN FD frame time of notebook \ref{nbk-nervous-fieldbus-serialization-latency-wcet-schedulability}, `{python} FieldbusSchedulability.t_frame_str` and two frames per axis, how many axes can one CAN FD bus serve, and how many buses does the humanoid need? Compute the occupancy of one EtherCAT frame with the notebook's header, forwarding delay, and link rate. Repeat both for a `{python} NervousProblems.f_balance_str` balance-loop cycle (illustrative), recommend a bus architecture, and name what the occupancy check leaves unproven.
-7. **[Design]** (Command interfaces) The arm approaches the cage-door latch at `{python} NervousProblems.v_latch_str`; the latch's contact stiffness is `{python} NervousProblems.k_latch_str`, and its force limit is `{python} NervousProblems.f_latch_lim_str` (illustrative). First, the proposer commands a velocity target and stalls just as contact begins, so the joint keeps its commanded velocity until the lease path ends authority. Compute the penetration and the spring force once the `{python} MachineLeaseBudget.t_lease_str` lease, one tick, and one bus cycle have elapsed, and the longest uncorrected contact time the limit tolerates. Second, under an impedance target whose equilibrium sits `{python} NervousProblems.d_offset_str` past the latch face (illustrative), find the largest controller stiffness $\PidProportionalGain$ that keeps the steady force within the limit, treating controller and latch as springs in series. Finally, for position, velocity, torque, and impedance targets, state what the permission path must check or predict before admitting a command in contact, and choose the interface you would admit for this task.
-8. **[Design]** (Independence of the permission path) A cost-down proposal powers the safety microcontroller from the application processor's converter, which locks out at `{python} PermissionRail.v_uvlo_str`, removing the permission rail's `{python} PermissionRail.t_holdup_str` hold-up, and clocks both processors from one oscillator. List the fault injections that must pass before the proposal could be accepted, each with a pass criterion stated in the chapter's timers: the `{python} MachineLeaseBudget.t_self_watchdog_str` self-watchdog, the `{python} MachineLeaseBudget.t_heartbeat_timeout_str` heartbeat timeout, and the lease path. Convert each timer to base travel at the drive limit, identify the fault that defeats all three timers at once, and state what the remaining hardware path, Safe Torque Off and the holding brake, can and cannot guarantee about the stop.
-9. **[Design]** (Handoff records) Fill every field of @tbl-04-schema-notebook for the latency limit of the $\SignalHandoff_5$ handoff, enforcer to actuator, in @tbl-04-synthesis-grid, using the `{python} FieldbusSchedulability.cycle_time_str` bus cycle and the `{python} FieldbusSchedulability.t_total_ethercat_str` EtherCAT occupancy of notebook \ref{nbk-nervous-fieldbus-serialization-latency-wcet-schedulability}. For each field, give the value or state why it is still open, choose the `bound_kind`, and name the measurement or analysis that would close each open field.
-10. **[Critique]** (Diagnosing handoff timing) A team measures a $\text{p99}$ dispatch-to-admission interval of `{python} NervousProblems.t_p99_da_str` on a bench (illustrative), records it with `bound_kind` set to `proven bound`, and argues that the right side of @eq-nervous-lease-rule, charged with the `{python} CaptureToBrakeLedger.t_age_str` capture-to-dispatch age plus that interval, now permits a `{python} NervousProblems.t_lease_proposed_str` lease that would ride out proposer hiccups. Compute the upper limit they claim, the upper limit with the `{python} CaptureToBrakeLedger.t_da_str` allocation of @tbl-04-event-ledger, the clear distance the longer lease spends at the drive limit, and what it leaves for the remaining stop terms. Write the critique, naming the record field that is wrong and the evidence that would be needed to support the claim.
-11. **[Critique]** (Lease sizing, transfer to a humanoid) A team ports the warehouse permission path unchanged to a biped whose characteristic fall timescale is `{python} HumanoidFallDeadline.t_fall_str` (@sec-nervous-coupled-budget). They argue that it fits, because the lease, one tick, and one bus cycle are well under that timescale. Compute that interval, and the full interval from capture to a delivered stop command after a stall (the ledger's capture-to-admission age plus the lease path), as fractions of $\BalanceDivergenceTime$, and the factor $e^{\TimeInstant/\BalanceDivergenceTime}$ by which a small lean grows over each under the linear model. Critique the argument: which state-dependent quantities decide the actual recovery deadline, and why is braking to rest the wrong response to an expired lease on this machine?
 
 ::: {.callout-chapter-connection title="From anatomy to closed-loop learning"}
 When an embodied machine modifies or rejects a human command before execution, the recorded demonstration no longer reflects unconstrained intent. The Body, the Brain, and the Nervous System establish physical limits, learned proposals, and a timed permission path. During data collection, such as teleoperated openings of the spring-latched cage door, that path may clamp, rate-limit, or refuse an operator's request, while the body may deliver motion that differs from the admitted command. The limit and handoff records preserve the conditions behind those interventions. In Part II, @sec-data begins from the reality that a physical machine manufactures its own training data, so each executed action changes the observations that follow and each record carries what the operator requested, what the permission path admitted, and what the body delivered. It then establishes what a demonstration must retain so that a policy can learn the task without mistaking the collecting machine's limitations for intended behavior.
