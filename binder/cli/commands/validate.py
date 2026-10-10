@@ -123,6 +123,69 @@ class ValidationIssue:
             payload["auto_fix_cmd"] = self.auto_fix_cmd
         return payload
 
+    @classmethod
+    def from_template(
+        cls,
+        code: str,
+        file: str,
+        line: int,
+        message: Optional[str] = None,
+        context: str = "",
+        suggestion: Optional[str] = None,
+        severity: str = "error",
+        rule_doc: Optional[str] = None,
+        auto_fix_cmd: Optional[str] = None,
+        **kwargs: Any,
+    ) -> "ValidationIssue":
+        """Construct a ValidationIssue using the central CheckCatalog template.
+
+        If message or suggestion are not supplied, they are populated from the central
+        `check_catalog.yaml` template. Any extra keyword arguments format message or
+        suggestion templates.
+        """
+        try:
+            from cli.core.catalog import get_check_catalog
+        except ImportError:
+            try:
+                from core.catalog import get_check_catalog
+            except ImportError:
+                from binder.cli.core.catalog import get_check_catalog
+
+        err_def = get_check_catalog().get_error(code)
+
+        final_msg = message
+        if not final_msg:
+            final_msg = err_def.message_template if (err_def and err_def.message_template) else (err_def.trigger if err_def else code)
+        if kwargs and final_msg:
+            try:
+                final_msg = final_msg.format(**kwargs)
+            except Exception:
+                pass
+
+        final_sug = suggestion
+        if final_sug is None and err_def and err_def.suggestion_template:
+            final_sug = err_def.suggestion_template
+            if kwargs and final_sug:
+                try:
+                    final_sug = final_sug.format(**kwargs)
+                except Exception:
+                    pass
+
+        final_rule_doc = rule_doc if rule_doc is not None else (err_def.rule_doc if err_def else "")
+        final_auto_fix = auto_fix_cmd if auto_fix_cmd is not None else (err_def.auto_fix_cmd if err_def else "")
+
+        return cls(
+            file=file,
+            line=line,
+            code=code,
+            message=final_msg or code,
+            severity=severity,
+            context=context,
+            suggestion=final_sug or "",
+            rule_doc=final_rule_doc,
+            auto_fix_cmd=final_auto_fix,
+        )
+
 
 @dataclass
 class ValidationRunResult:
@@ -1250,25 +1313,21 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _print_group_help(self, group: str) -> None:
-        """Dispatch to per-group help. Falls back to a generic listing."""
-        if group == "epub":
-            self._print_epub_help()
+        """Dispatch to per-group help using the central CheckCatalog."""
+        try:
+            from cli.core.catalog import get_check_catalog
+        except ImportError:
+            try:
+                from core.catalog import get_check_catalog
+            except ImportError:
+                from binder.cli.core.catalog import get_check_catalog
+
+        catalog = get_check_catalog()
+        group_doc = catalog.get_group(group)
+        if group_doc:
+            self._print_catalog_group_help(group_doc)
             return
-        if group == "structure":
-            self._print_structure_help()
-            return
-        if group == "numbers":
-            self._print_numbers_help()
-            return
-        if group == "figures":
-            self._print_figures_help()
-            return
-        if group == "prose":
-            self._print_prose_help()
-            return
-        if group == "refs":
-            self._print_refs_help()
-            return
+
         # Generic fallback: list scopes, default flag, runner method, and the
         # short note (if any). The Default column is the contract pre-commit /
         # CI rely on.
@@ -1291,452 +1350,67 @@ class ValidateCommand:
                       f"or [cyan]--all-scopes[/cyan] to include opt-in scopes.[/dim]")
         console.print()
 
+    def _print_catalog_group_help(self, group_doc: Any) -> None:
+        """Render a standardized, rich-formatted help panel from a CheckGroupDoc catalog entry."""
+        if group_doc.scopes:
+            scope_table = Table(show_header=True, header_style="bold cyan", box=None)
+            scope_table.add_column("Scope", style="yellow", width=20)
+            scope_table.add_column("When to run", style="white", width=28)
+            scope_table.add_column("Cost", style="dim", width=14)
+            scope_table.add_column("Key Invariant", style="dim", width=30)
+            for sc in group_doc.scopes:
+                scope_table.add_row(
+                    _rich_escape(sc.name),
+                    _rich_escape(sc.when),
+                    _rich_escape(sc.cost),
+                    _rich_escape(sc.invariant),
+                )
+            console.print(Panel(scope_table, title=f"./binder/binder check {group_doc.group} — scopes", border_style="cyan"))
+
+        if group_doc.error_codes:
+            code_table = Table(show_header=True, header_style="bold cyan", box=None)
+            code_table.add_column("Code", style="red", width=30)
+            code_table.add_column("Trigger", style="white", width=30)
+            code_table.add_column("Fix at source", style="green", width=34)
+            for err in group_doc.error_codes:
+                code_table.add_row(
+                    _rich_escape(err.code),
+                    _rich_escape(err.trigger),
+                    _rich_escape(err.fix),
+                )
+            console.print(Panel(code_table, title="Error codes", border_style="red"))
+
+        if group_doc.common_invocations:
+            console.print("[bold]Common invocations:[/bold]")
+            for cmd_str, desc in group_doc.common_invocations:
+                if desc:
+                    console.print(f"  [cyan]{cmd_str:<50}[/cyan] [dim]{desc}[/dim]")
+                else:
+                    console.print(f"  [cyan]{cmd_str}[/cyan]")
+
+        if group_doc.deep_dive:
+            console.print()
+            console.print(f"[dim]Deep dive: {group_doc.deep_dive}[/dim]")
+        console.print()
+
+    # Convenience aliases for backwards compatibility
     def _print_epub_help(self) -> None:
-        """Dedicated help for the `epub` group: the three scopes, the
-        error codes each can surface, and how to fix them at source.
-
-        This panel exists because the `epub` group is the most common
-        source of unexpected failures for new contributors — the error
-        codes (RSC-005, RSC-016, RSC-020, OPF-014, smoke-css-*) are
-        cryptic in isolation, but map cleanly to a few source-level
-        patterns. Printing the mapping here saves cross-referencing
-        the README when a CI failure is in hand.
-        """
-        # --- Scopes panel -----------------------------------------------
-        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
-        scope_table.add_column("Scope", style="yellow", width=12)
-        scope_table.add_column("When to run", style="white", width=30)
-        scope_table.add_column("Cost", style="dim", width=18)
-        scope_table.add_column("Needs", style="dim", width=12)
-        scope_table.add_row("hygiene", "Every commit (pre-commit)", "<1s, scans source", "—")
-        scope_table.add_row("smoke", "After build, for reader compat", "~200ms, scans built EPUB", "—")
-        scope_table.add_row("epubcheck", "CI, before release", "~7s per volume", "Java + epubcheck")
-        console.print(Panel(scope_table, title="./binder/binder check epub — scopes", border_style="cyan"))
-
-        # --- Error code table ------------------------------------------
-        # Scope is derivable from the code prefix: svg-/bib-* = hygiene,
-        # smoke-* = smoke, RSC-*/OPF-* = epubcheck. Dropping the column
-        # leaves room for readable Trigger / Fix copy.
-        code_table = Table(show_header=True, header_style="bold cyan", box=None)
-        code_table.add_column("Code", style="red", width=32)
-        code_table.add_column("Trigger", style="white", width=30)
-        code_table.add_column("Fix at source", style="green", width=32)
-
-        rows = [
-            ("svg-c0",
-             "C0 control char in SVG aria-label",
-             "Strip in Python plot title; or --fix"),
-            ("svg-dupe-marker",
-             "Duplicate <marker id=…/> in one SVG",
-             "Delete duplicate; or --fix"),
-            ("bib-url-escape-underscore",
-             r"\_ in bib url= or http doi=",
-             r"\_ → _ in the .bib; or --fix"),
-            ("bib-url-escape-percent",
-             r"\% in bib URL field",
-             r"\% → % in the .bib; or --fix"),
-            ("bib-url-raw-angle",
-             "raw < or > in bib URL field",
-             "%3C / %3E encode; or --fix"),
-            ("smoke-css-custom-property-decl",
-             "--var-name: value; in packaged CSS",
-             "Inline the literal value"),
-            ("smoke-css-custom-property-use",
-             "var(--x) in packaged CSS",
-             "Inline the literal value"),
-            ("smoke-external-resource",
-             "src=/<link href= to http(s)://",
-             "Package the asset or drop"),
-            ("RSC-016 (FATAL)",
-             "XML malformed (--, <br>, C0)",
-             "epub_postprocess sanitizes; fix at source if it recurs"),
-            ("RSC-005",
-             "Malformed markup (alt on wrong elem)",
-             "Fix the emitter in the Quarto filter"),
-            ("RSC-020",
-             "Invalid URL syntax in href",
-             "Same as bib-url-* above"),
-            ("RSC-012",
-             "Broken fragment ID",
-             "resolve_cross_references.py handles this"),
-            ("OPF-014",
-             "Missing mathml / other OPF property",
-             "epub_postprocess aligns nav mathml property"),
-        ]
-        for code, trigger, fix in rows:
-            code_table.add_row(code, trigger, fix)
-        console.print(Panel(code_table, title="Error codes", border_style="red"))
-
-        # --- Command quick reference -----------------------------------
-        console.print("[bold]Common invocations:[/bold]")
-        console.print("  [cyan]./binder/binder check epub[/cyan]                        [dim]# hygiene + smoke + epubcheck[/dim]")
-        console.print("  [cyan]./binder/binder check epub --scope hygiene[/cyan]        [dim]# source-only, fast[/dim]")
-        console.print("  [cyan]./binder/binder check epub --scope hygiene --fix[/cyan]  [dim]# auto-repair source issues[/dim]")
-        console.print("  [cyan]./binder/binder check epub --scope epubcheck --max-fatal 0 --max-errors 0[/cyan]")
-        console.print("  [dim]                                                    # CI-style strict gating[/dim]")
-        console.print("  [cyan]./binder/binder check epub --json[/cyan]                 [dim]# structured output[/dim]")
-        console.print("  [cyan]./binder/binder build epub --vol1 --skip-hygiene[/cyan]  [dim]# emergency build bypass[/dim]")
-        console.print()
-        console.print("[dim]Deep dive: binder/cli/README.md → \"EPUB Checks — Two Layers, One CLI Surface\"[/dim]")
-        console.print()
+        self._print_group_help("epub")
 
     def _print_structure_help(self) -> None:
-        """Dedicated help for the `structure` group: scopes, error codes, and source-level fixes."""
-        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
-        scope_table.add_column("Scope", style="yellow", width=20)
-        scope_table.add_column("When to run", style="white", width=28)
-        scope_table.add_column("Cost", style="dim", width=14)
-        scope_table.add_column("Key Invariant", style="dim", width=30)
-        scope_rows = [
-            ("concept-maps", "Every commit (pre-commit)", "<1s", "YAML structure & frontmatter wiring"),
-            ("heading-levels", "Every commit (pre-commit)", "<1s", "H1 → H2 → H3 hierarchy (no skipped levels)"),
-            ("h2-landings", "Every commit (pre-commit)", "<1s", "Orientation prose under H2 before H3"),
-            ("parts", "Every commit (pre-commit)", "<1s", "Valid part keys in book structure"),
-            ("purpose-unnumbered", "Every commit (pre-commit)", "<1s", "Purpose sections unnumbered"),
-            ("purpose-stack", "Every commit (pre-commit)", "<1s", "Purpose stack SVG & hook question"),
-            ("appendix-opening", "Every commit (pre-commit)", "<1s", "Unheaded orientation paragraph in appendices"),
-        ]
-        for sc, when, cost, inv in scope_rows:
-            scope_table.add_row(_rich_escape(sc), _rich_escape(when), _rich_escape(cost), _rich_escape(inv))
-        console.print(Panel(scope_table, title="./binder/binder check structure — scopes", border_style="cyan"))
-
-        code_table = Table(show_header=True, header_style="bold cyan", box=None)
-        code_table.add_column("Code", style="red", width=30)
-        code_table.add_column("Trigger", style="white", width=30)
-        code_table.add_column("Fix at source", style="green", width=34)
-
-        rows = [
-            ("purpose_heading_missing",
-             "Chapter lacks opening Purpose section",
-             "Add `## Purpose {.unnumbered .unlisted}`"),
-            ("purpose_heading_classes",
-             "Purpose heading lacks required classes",
-             "Use `## Purpose {.unnumbered .unlisted}`"),
-            ("purpose_stack_missing",
-             "Purpose lacks architecture stack diagram",
-             "Include margin stack SVG (images/svg/margin_stack.svg); no caption"),
-            ("purpose_stack_file_missing",
-             "margin_stack.svg not found on disk",
-             "Create or copy margin_stack.svg to images/svg/"),
-            ("purpose_hook_missing",
-             "Purpose lacks opening hook question",
-             "Add italic question `_Why/How does ...?_`"),
-            ("purpose_not_unnumbered",
-             "Purpose heading lacks {.unnumbered}",
-             "Add `{.unnumbered}` attribute to `## Purpose`"),
-            ("heading_level_skip",
-             "Heading jumps levels (e.g. H2 to H4)",
-             "Do not skip levels; insert intermediate heading"),
-            ("h2_missing_landing",
-             "H2 followed immediately by H3",
-             "Add orientation prose under H2 before H3"),
-            ("appendix_opening_shape",
-             "Appendix has Purpose heading or hook",
-             "Open with one unheaded orientation paragraph"),
-        ]
-        for code, trigger, fix in rows:
-            code_table.add_row(_rich_escape(code), _rich_escape(trigger), _rich_escape(fix))
-        console.print(Panel(code_table, title="Error codes", border_style="red"))
-
-        console.print("[bold]Common invocations:[/bold]")
-        console.print("  [cyan]./binder/binder check structure[/cyan]                     [dim]# all curated structure scopes[/dim]")
-        console.print("  [cyan]./binder/binder check structure --scope purpose-stack[/cyan]   [dim]# verify stack SVG and hook[/dim]")
-        console.print("  [cyan]./binder/binder check structure --scope h2-landings[/cyan]     [dim]# verify section landings[/dim]")
-        console.print("  [cyan]./binder/binder check structure --json[/cyan]                  [dim]# structured output for LLMs[/dim]")
-        console.print("  [cyan]./binder/binder check structure --plain[/cyan]                 [dim]# single-line compiler diagnostics[/dim]")
-        console.print()
+        self._print_group_help("structure")
 
     def _print_numbers_help(self) -> None:
-        """Dedicated help for the `numbers` group: scopes, error codes, and source-level fixes."""
-        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
-        scope_table.add_column("Scope", style="yellow", width=22)
-        scope_table.add_column("When to run", style="white", width=26)
-        scope_table.add_column("Cost", style="dim", width=14)
-        scope_table.add_column("Key Invariant", style="dim", width=30)
-        scope_rows = [
-            ("unit-spacing", "Every commit (pre-commit)", "<1s", "Space between number and physical unit"),
-            ("binary-units", "Every commit (pre-commit)", "<1s", "SI prefix discipline: GB/TB not GiB/TiB"),
-            ("percent-spacing", "Every commit (pre-commit)", "<1s", "No space before % symbol (50%)"),
-            ("percent-word-before", "Every commit (pre-commit)", "<1s", "Digits before 'percent' (5 percent)"),
-            ("percent-in-captions", "Every commit (pre-commit)", "<1s", "Spell out 'percent' in captions"),
-            ("percent-in-tables", "Every commit (pre-commit)", "<1s", "Use % symbol in tables"),
-            ("percent-in-prose", "Every commit (pre-commit)", "<1s", "Spell out 'percent' in body prose"),
-            ("currency", "Every commit (pre-commit)", "<1s", "Use $; USD defined once in notation"),
-            ("rendered-currency", "Post-render (opt-in)", "~5s", "HTML cache audit for USD / $$ artifacts"),
-        ]
-        for sc, when, cost, inv in scope_rows:
-            scope_table.add_row(_rich_escape(sc), _rich_escape(when), _rich_escape(cost), _rich_escape(inv))
-        console.print(Panel(scope_table, title="./binder/binder check numbers — scopes", border_style="cyan"))
-
-        code_table = Table(show_header=True, header_style="bold cyan", box=None)
-        code_table.add_column("Code", style="red", width=30)
-        code_table.add_column("Trigger", style="white", width=30)
-        code_table.add_column("Fix at source", style="green", width=34)
-
-        rows = [
-            ("binary_units",
-             "GiB/TiB used in text or table",
-             "Use GB/TB/MB/kB or fmt() helper"),
-            ("unit_spacing",
-             "Missing space before unit (100ms)",
-             "Insert space: `100 ms`, `32 GB`, `1.5 GHz`"),
-            ("percent_spacing",
-             "Space before % symbol (50 %)",
-             "Remove space: `50%`"),
-            ("percent_word_before",
-             "Spelled-out number before percent",
-             "Use digits: `5 percent` not `five percent`"),
-            ("percent_in_prose",
-             "% symbol used in body prose",
-             "Spell out: `50 percent` in running text"),
-            ("percent_in_table",
-             "Word 'percent' used in table",
-             "Use `%` symbol in table cells/headers"),
-            ("mitpress_percent_in_caption",
-             "% symbol used in caption",
-             "Spell out `percent` in captions"),
-            ("currency_usd_literal",
-             "Literal 'USD' in body prose",
-             "Use `$` symbol (`$100` not `USD 100`)"),
-            ("currency_fmt_prefix_suffix",
-             "Manual $ before fmt(..., currency=...)",
-             "Remove manual `$`; fmt() prepends it"),
-        ]
-        for code, trigger, fix in rows:
-            code_table.add_row(_rich_escape(code), _rich_escape(trigger), _rich_escape(fix))
-        console.print(Panel(code_table, title="Error codes", border_style="red"))
-
-        console.print("[bold]Common invocations:[/bold]")
-        console.print("  [cyan]./binder/binder check numbers[/cyan]                       [dim]# all curated numbers scopes[/dim]")
-        console.print("  [cyan]./binder/binder check numbers --scope binary-units[/cyan]    [dim]# audit binary units[/dim]")
-        console.print("  [cyan]./binder/binder check numbers --scope unit-spacing[/cyan]    [dim]# audit unit spacing[/dim]")
-        console.print("  [cyan]./binder/binder check numbers --json[/cyan]                   [dim]# structured output for LLMs[/dim]")
-        console.print("  [cyan]./binder/binder check numbers --plain[/cyan]                  [dim]# single-line compiler diagnostics[/dim]")
-        console.print()
+        self._print_group_help("numbers")
 
     def _print_figures_help(self) -> None:
-        """Dedicated help for the `figures` group: scopes, error codes, and source-level fixes."""
-        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
-        scope_table.add_column("Scope", style="yellow", width=24)
-        scope_table.add_column("When to run", style="white", width=26)
-        scope_table.add_column("Cost", style="dim", width=14)
-        scope_table.add_column("Key Invariant", style="dim", width=30)
-        scope_rows = [
-            ("captions", "Every commit (pre-commit)", "<1s", "Caption presence & syntax"),
-            ("caption-heads", "Every commit (pre-commit)", "<1s", "**Bold Title**: Text format"),
-            ("div-syntax", "Every commit (pre-commit)", "<1s", "Valid figure div markup"),
-            ("label-required", "Every commit (pre-commit)", "<1s", "Body images require {#fig-X}"),
-            ("margin-caption-required", "Every commit (pre-commit)", "<1s", "Margin figures require caption (stack exempted)"),
-            ("files", "Every commit (pre-commit)", "<1s", "Images exist and casing matches"),
-            ("alt-text-style", "Every commit (pre-commit)", "<1s", "Alt-text follows body prose rules (§10.12)"),
-        ]
-        for sc, when, cost, inv in scope_rows:
-            scope_table.add_row(_rich_escape(sc), _rich_escape(when), _rich_escape(cost), _rich_escape(inv))
-        console.print(Panel(scope_table, title="./binder/binder check figures — scopes", border_style="cyan"))
-
-        code_table = Table(show_header=True, header_style="bold cyan", box=None)
-        code_table.add_column("Code", style="red", width=34)
-        code_table.add_column("Trigger", style="white", width=28)
-        code_table.add_column("Fix at source", style="green", width=34)
-
-        rows = [
-            ("figure_missing_label",
-             "Body markdown image lacks {#fig-X}",
-             "Add `{#fig-NAME}` or wrap in margin div"),
-            ("margin_figure_missing_caption",
-             ".column-margin image lacks *caption*",
-             "Add `*Caption*` (margin_stack.svg exempted)"),
-            ("margin_figure_caption_above_image",
-             "Margin caption placed before image",
-             "Move `*Caption*` directly below image"),
-            ("caption_head_missing_bold",
-             "Caption does not start with bold title",
-             "Format as `**Bold Title**: Explanation`"),
-            ("caption_head_separator",
-             "Missing colon or space after title",
-             "Use `**Title**: Text` (colon + space)"),
-            ("caption_body_lowercase_after_colon",
-             "Lowercase word follows caption colon",
-             "Capitalize first word after colon"),
-            ("missing_image",
-             "Referenced image file does not exist",
-             "Verify path or generate/commit image asset"),
-            ("image_case_mismatch",
-             "Image path case differs from disk",
-             "Match exact filesystem casing"),
-            ("incomplete_figure",
-             "Empty caption or malformed block",
-             "Provide complete, valid figure markup"),
-        ]
-        for code, trigger, fix in rows:
-            code_table.add_row(_rich_escape(code), _rich_escape(trigger), _rich_escape(fix))
-        console.print(Panel(code_table, title="Error codes", border_style="red"))
-
-        console.print("[bold]Common invocations:[/bold]")
-        console.print("  [cyan]./binder/binder check figures[/cyan]                       [dim]# all curated figure scopes[/dim]")
-        console.print("  [cyan]./binder/binder check figures --scope margin-caption-required[/cyan]")
-        console.print("  [dim]                                                    # verify margin captions[/dim]")
-        console.print("  [cyan]./binder/binder check figures --scope caption-heads[/cyan]     [dim]# verify caption title formats[/dim]")
-        console.print("  [cyan]./binder/binder check figures --json[/cyan]                   [dim]# structured output for LLMs[/dim]")
-        console.print("  [cyan]./binder/binder check figures --plain[/cyan]                  [dim]# single-line compiler diagnostics[/dim]")
-        console.print()
+        self._print_group_help("figures")
 
     def _print_prose_help(self) -> None:
-        """Dedicated help for the `prose` group: scopes, error codes, and source-level fixes."""
-        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
-        scope_table.add_column("Scope", style="yellow", width=22)
-        scope_table.add_column("When to run", style="white", width=26)
-        scope_table.add_column("Cost", style="dim", width=14)
-        scope_table.add_column("Key Invariant", style="dim", width=30)
-        scope_rows = [
-            ("sentence-start", "Every commit (pre-commit)", "<1s", "Capitalize sentence starts"),
-            ("manual-et-al", "Every commit (pre-commit)", "<1s", "Use narrative @key, not hand-typed et al."),
-            ("underscore-italics", "Every commit (pre-commit)", "<1s", "*italic* in body prose; _ for Purpose hook"),
-            ("standalone-prose", "Every commit (pre-commit)", "<1s", "No series-dependent volume naming"),
-            ("contractions", "Every commit (pre-commit)", "<1s", "No informal contractions in body prose"),
-            ("spelling-dict", "Every commit (pre-commit)", "<1s", "Canonical MIT Press spellings (§10.7)"),
-            ("duplicate-words", "Every commit (pre-commit)", "<1s", "No repeated consecutive words"),
-            ("above-below", "Every commit (pre-commit)", "<1s", "No spatial above/below references"),
-            ("acknowledgements", "Every commit (pre-commit)", "<1s", "American spelling: Acknowledgments"),
-            ("compound-prefix", "Every commit (pre-commit)", "<1s", "pre-/non- closed up (§10.8)"),
-            ("concept-caps", "Every commit (pre-commit)", "<1s", "Lowercase concept terms (§10.3)"),
-            ("latin-abbrevs", "Every commit (pre-commit)", "<1s", "English in running text (§10.6)"),
-        ]
-        for sc, when, cost, inv in scope_rows:
-            scope_table.add_row(_rich_escape(sc), _rich_escape(when), _rich_escape(cost), _rich_escape(inv))
-        console.print(Panel(scope_table, title="./binder/binder check prose — scopes", border_style="cyan"))
-
-        code_table = Table(show_header=True, header_style="bold cyan", box=None)
-        code_table.add_column("Code", style="red", width=36)
-        code_table.add_column("Trigger", style="white", width=26)
-        code_table.add_column("Fix at source", style="green", width=34)
-
-        rows = [
-            ("contractions",
-             "Informal contraction in body prose",
-             "Expand: `can't` → `cannot`, `it's` → `it is`"),
-            ("duplicate_word",
-             "Repeated consecutive word",
-             "Remove duplicate ('the the' → 'the')"),
-            ("mitpress_above_below",
-             "Spatial ref 'above' or 'below'",
-             "Use `@sec-X`, 'preceding', 'following'"),
-            ("sentence_starts_lowercase",
-             "Sentence begins with lowercase word",
-             "Capitalize first word or join clause"),
-            ("manual_et_al",
-             "Hand-typed 'Author et al.'",
-             "Use narrative `@citekey` form for citeproc"),
-            ("underscore_italics",
-             "_word_ used in body prose",
-             "Use `*word*`; `_` reserved for Purpose hook"),
-            ("standalone_prose",
-             "'this volume' or 'Volume I'",
-             "Use 'this book' or describe topic directly"),
-            ("mitpress_spelling",
-             "Non-canonical spelling",
-             "Use canonical: `trade-off`, `dataset`, etc."),
-            ("mitpress_acknowledgements",
-             "'Acknowledgements' with extra 'e'",
-             "Use American spelling `Acknowledgments`"),
-            ("mitpress_compound_prefix",
-             "Hyphenated pre-/non- prefix",
-             "Close up: `pretraining`, `nonzero` (§10.8)"),
-            ("mitpress_concept_term_capitalization",
-             "Capitalized concept term",
-             "Lowercase: `memory wall`, `iron law` (§10.3)"),
-            ("mitpress_latin_running_text",
-             "e.g./i.e./etc. in running text",
-             "Use 'for example', 'that is' (§10.6)"),
-        ]
-        for code, trigger, fix in rows:
-            code_table.add_row(_rich_escape(code), _rich_escape(trigger), _rich_escape(fix))
-        console.print(Panel(code_table, title="Error codes", border_style="red"))
-
-        console.print("[bold]Common invocations:[/bold]")
-        console.print("  [cyan]./binder/binder check prose[/cyan]                         [dim]# all curated prose scopes[/dim]")
-        console.print("  [cyan]./binder/binder check prose --scope contractions[/cyan]     [dim]# audit contractions[/dim]")
-        console.print("  [cyan]./binder/binder check prose --scope above-below[/cyan]      [dim]# audit spatial refs[/dim]")
-        console.print("  [cyan]./binder/binder check prose --json[/cyan]                    [dim]# structured output for LLMs[/dim]")
-        console.print("  [cyan]./binder/binder check prose --plain[/cyan]                   [dim]# single-line compiler diagnostics[/dim]")
-        console.print()
+        self._print_group_help("prose")
 
     def _print_refs_help(self) -> None:
-        """Dedicated help for the `refs` group: scopes, error codes, and source-level fixes."""
-        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
-        scope_table.add_column("Scope", style="yellow", width=22)
-        scope_table.add_column("When to run", style="white", width=26)
-        scope_table.add_column("Cost", style="dim", width=14)
-        scope_table.add_column("Key Invariant", style="dim", width=30)
-        scope_rows = [
-            ("cross-refs", "Every commit (pre-commit)", "<1s", "Resolve @sec-, @fig-, @tbl-, @eq-, @lst-"),
-            ("citations", "Every commit (pre-commit)", "<1s", "Resolve [@key] in volume .bib"),
-            ("scaffold-citations", "Every commit (pre-commit)", "<1s", "No citations in Purpose or takeaways"),
-            ("duplicate-year", "Every commit (pre-commit)", "<1s", "No redundant year: [@k] (YYYY)"),
-            ("duplicate-key", "Every commit (pre-commit)", "<1s", "No duplicate citekey [@k; @k]"),
-            ("manual-bracket", "Every commit (pre-commit)", "<1s", "No manual attribution near [@k]"),
-            ("capitalized", "Every commit (pre-commit)", "<1s", "chapter 12 lowercase in prose (§10.3.2)"),
-            ("xref-case", "Every commit (pre-commit)", "<1s", "@Fig- at start, @fig- mid-sentence"),
-            ("callout-ref-noun", "Every commit (pre-commit)", "<1s", "\\ref{} needs preceding noun"),
-            ("callout-ref-form", "Every commit (pre-commit)", "<1s", "Custom callouts use \\ref{id}, never @id"),
-            ("redundant-xref-prefix", "Every commit (pre-commit)", "<1s", "No 'section @sec-X' or 'figure @fig-Y'"),
-            ("margin-pointers", "Every commit (pre-commit)", "<1s", "Pointer direction arrows & targets"),
-        ]
-        for sc, when, cost, inv in scope_rows:
-            scope_table.add_row(_rich_escape(sc), _rich_escape(when), _rich_escape(cost), _rich_escape(inv))
-        console.print(Panel(scope_table, title="./binder/binder check refs — scopes", border_style="cyan"))
-
-        code_table = Table(show_header=True, header_style="bold cyan", box=None)
-        code_table.add_column("Code", style="red", width=30)
-        code_table.add_column("Trigger", style="white", width=30)
-        code_table.add_column("Fix at source", style="green", width=34)
-
-        rows = [
-            ("broken_reference",
-             "Cross-reference target not found",
-             "Verify target label exists in volume"),
-            ("broken_citation",
-             "Citekey [@key] not in volume .bib",
-             "Add entry to volume .bib or fix citekey"),
-            ("scaffold_citation",
-             "Citation in Purpose or takeaways",
-             "Move citation to narrative section"),
-            ("duplicate_citation_year",
-             "Redundant year: `[@k] (2024)`",
-             "Remove redundant `(2024)` or use `@k`"),
-            ("duplicate_citation_key",
-             "Repeated citekey: `[@k; @k]`",
-             "Remove duplicate citekey from bracket"),
-            ("capitalized_ref",
-             "Capitalized 'Chapter X' in prose",
-             "Lowercase: `chapter X`, `section Y` (§10.3.2)"),
-            ("xref_sentence_start_case",
-             "Mismatched @fig- / @Fig- casing",
-             "Use `@Fig-` at start, `@fig-` mid-sentence"),
-            ("callout_ref_missing_noun",
-             "Bare \\ref{nbk-...} without noun",
-             "Prepend noun: `Notebook \\ref{nbk-...}`"),
-            ("callout_ref_form",
-             "@dfn- or @nbk- used as crossref",
-             "Use `\\ref{dfn-...}` for custom callouts"),
-            ("redundant_xref_prefix",
-             "'section @sec-X' or 'figure @fig-Y'",
-             "Use `@sec-X` or `@fig-Y` alone"),
-            ("margin_pointer_direction",
-             "Arrow does not match target position",
-             "Use `↩` for earlier, `↪` for later chapters"),
-        ]
-        for code, trigger, fix in rows:
-            code_table.add_row(_rich_escape(code), _rich_escape(trigger), _rich_escape(fix))
-        console.print(Panel(code_table, title="Error codes", border_style="red"))
-
-        console.print("[bold]Common invocations:[/bold]")
-        console.print("  [cyan]./binder/binder check refs[/cyan]                          [dim]# all curated refs scopes[/dim]")
-        console.print("  [cyan]./binder/binder check refs --scope cross-refs[/cyan]        [dim]# check broken links[/dim]")
-        console.print("  [cyan]./binder/binder check refs --scope citations[/cyan]         [dim]# check bib citations[/dim]")
-        console.print("  [cyan]./binder/binder check refs --json[/cyan]                     [dim]# structured output for LLMs[/dim]")
-        console.print("  [cyan]./binder/binder check refs --plain[/cyan]                    [dim]# single-line compiler diagnostics[/dim]")
-        console.print()
+        self._print_group_help("refs")
 
     # ------------------------------------------------------------------
 
@@ -5906,13 +5580,15 @@ class ValidateCommand:
                     if "{" in heading_text:
                         heading_text = heading_text[: heading_text.index("{")].strip()
                     issues.append(
-                        ValidationIssue(
+                        ValidationIssue.from_template(
+                            code="heading_level_skip",
                             file=self._relative_file(file),
                             line=idx,
-                            code="heading_level_skip",
-                            message=f"Heading jumps from H{prev_level} to H{level} (skips {skipped})",
                             severity="warning",
                             context=heading_text[:80],
+                            prev_level=prev_level,
+                            level=level,
+                            skipped=skipped,
                         )
                     )
 
@@ -6018,18 +5694,15 @@ class ValidateCommand:
                 if "{" in subsection_text:
                     subsection_text = subsection_text[: subsection_text.index("{")].strip()
                 issues.append(
-                    ValidationIssue(
+                    ValidationIssue.from_template(
+                        code="h2_missing_landing",
                         file=self._relative_file(file),
                         line=idx,
-                        code="h2_missing_landing",
-                        message=(
-                            "H2 section drops directly into an H3 subsection "
-                            "without intervening prose"
-                        ),
-                        severity="error",
                         context=(
                             f"{heading_text[:60]} → {subsection_text[:60]}"
                         ),
+                        heading_text=heading_text,
+                        subsection_text=subsection_text,
                     )
                 )
 
@@ -7772,12 +7445,10 @@ class ValidateCommand:
             for idx, line in enumerate(lines, 1):
                 if self._PURPOSE_HEADING.match(line) and ".unnumbered" not in line:
                     issues.append(
-                        ValidationIssue(
+                        ValidationIssue.from_template(
+                            code="purpose_not_unnumbered",
                             file=self._relative_file(file),
                             line=idx,
-                            code="purpose_not_unnumbered",
-                            message="Purpose section must include {.unnumbered}",
-                            severity="error",
                             context=line.strip()[:80],
                         )
                     )
@@ -7811,28 +7482,22 @@ class ValidateCommand:
 
             if purpose_idx is None:
                 issues.append(
-                    ValidationIssue(
+                    ValidationIssue.from_template(
+                        code="purpose_heading_missing",
                         file=self._relative_file(file),
                         line=1,
-                        code="purpose_heading_missing",
-                        message="Chapter must begin with a '## Purpose {.unnumbered .unlisted}' section",
-                        severity="error",
                         context=lines[0][:80] if lines else "",
-                        suggestion="## Purpose {.unnumbered .unlisted}",
                     )
                 )
                 continue
 
             if ".unnumbered" not in purpose_text or ".unlisted" not in purpose_text:
                 issues.append(
-                    ValidationIssue(
+                    ValidationIssue.from_template(
+                        code="purpose_heading_classes",
                         file=self._relative_file(file),
                         line=purpose_idx,
-                        code="purpose_heading_classes",
-                        message="Purpose heading must include classes: {.unnumbered .unlisted}",
-                        severity="error",
                         context=purpose_text[:80],
-                        suggestion="## Purpose {.unnumbered .unlisted}",
                     )
                 )
 
@@ -7854,45 +7519,32 @@ class ValidateCommand:
 
             if not has_stack:
                 issues.append(
-                    ValidationIssue(
+                    ValidationIssue.from_template(
+                        code="purpose_stack_missing",
                         file=self._relative_file(file),
                         line=purpose_idx,
-                        code="purpose_stack_missing",
-                        message="Purpose section must include the architecture stack diagram (images/svg/margin_stack.svg)",
-                        severity="error",
                         context=purpose_text[:80],
-                        suggestion=(
-                            "::: {.column-margin}\n"
-                            '![](images/svg/margin_stack.svg){width="100%" fig-alt="Systems Architecture Stack"}\n'
-                            ":::"
-                        ),
                     )
                 )
             else:
                 svg_path = file.parent / "images" / "svg" / "margin_stack.svg"
                 if not svg_path.is_file():
                     issues.append(
-                        ValidationIssue(
+                        ValidationIssue.from_template(
+                            code="purpose_stack_file_missing",
                             file=self._relative_file(file),
                             line=stack_idx or purpose_idx,
-                            code="purpose_stack_file_missing",
-                            message="Referenced architecture stack SVG does not exist on disk: images/svg/margin_stack.svg",
-                            severity="error",
                             context=lines[(stack_idx or purpose_idx) - 1].strip()[:80],
-                            suggestion="Ensure images/svg/margin_stack.svg exists in the chapter directory",
                         )
                     )
 
             if not has_hook:
                 issues.append(
-                    ValidationIssue(
+                    ValidationIssue.from_template(
+                        code="purpose_hook_missing",
                         file=self._relative_file(file),
                         line=purpose_idx,
-                        code="purpose_hook_missing",
-                        message="Purpose section must include an opening italic hook question (_Why/How ...?_)",
-                        severity="error",
                         context=purpose_text[:80],
-                        suggestion="_Why does [core challenge] require [systems approach]?_",
                     )
                 )
 
