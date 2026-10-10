@@ -190,14 +190,13 @@ def test_purpose_stack_validation_and_guidance():
         svg_file = svg_dir / "margin_stack.svg"
         svg_file.write_text("<svg></svg>", encoding="utf-8")
 
-        # 1. Valid chapter
+        # 1. Valid chapter (stack has no caption by default)
         qmd = chap_dir / "01_test.qmd"
         qmd.write_text(
             '# Test Chapter\n\n'
             '## Purpose {.unnumbered .unlisted}\n\n'
             '::: {.column-margin}\n'
-            '![](images/svg/margin_stack.svg){width="100%"}\n\n'
-            '*Architecture stack focus for this chapter.*\n'
+            '![](images/svg/margin_stack.svg){width="100%"}\n'
             ':::\n\n'
             '_Why does the system behave this way?_\n\n'
             'Chapter text begins here.\n',
@@ -206,6 +205,11 @@ def test_purpose_stack_validation_and_guidance():
         res = cmd._run_purpose_stack(d)
         assert res.passed is True
         assert len(res.issues) == 0
+
+        # Also verify margin_caption_required does not require a caption for margin_stack.svg
+        margin_res = cmd._run_margin_caption_required(d)
+        assert margin_res.passed is True
+        assert len(margin_res.issues) == 0
 
         # 2. Missing purpose heading
         qmd.write_text('# Test Chapter\n\nChapter text without purpose.\n', encoding="utf-8")
@@ -216,7 +220,7 @@ def test_purpose_stack_validation_and_guidance():
         assert res.issues[0].line == 1
         assert "## Purpose {.unnumbered .unlisted}" in res.issues[0].suggestion
 
-        # 3. Missing caption and missing hook question
+        # 3. Missing hook question
         qmd.write_text(
             '# Test Chapter\n\n'
             '## Purpose {.unnumbered .unlisted}\n\n'
@@ -229,8 +233,4 @@ def test_purpose_stack_validation_and_guidance():
         res = cmd._run_purpose_stack(d)
         assert res.passed is False
         codes = {i.code for i in res.issues}
-        assert "purpose_stack_caption_missing" in codes
         assert "purpose_hook_missing" in codes
-        cap_issue = next(i for i in res.issues if i.code == "purpose_stack_caption_missing")
-        assert cap_issue.line == 6
-        assert cap_issue.suggestion == "*Architecture stack focus for this chapter.*"

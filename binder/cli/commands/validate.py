@@ -698,7 +698,7 @@ class ValidateCommand:
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
                   note="Purpose sections unnumbered"),
             Scope("purpose-stack", "_run_purpose_stack",
-                  note="every chapter opens with Purpose section, architecture stack SVG, caption, and hook question"),
+                  note="every chapter opens with Purpose section, architecture stack SVG, and hook question"),
             # Added 2026-08-17. purpose.md anti-pattern 8a: an appendix opens
             # with one unheaded orientation paragraph, never a chapter-style
             # Purpose heading or italic hook question. A sweep that reshaped the
@@ -4435,6 +4435,10 @@ class ValidateCommand:
                     i for i, ln in enumerate(body)
                     if self._MARGIN_IMAGE.search(ln) or "\\includegraphics" in ln
                 ]
+                # Architecture stack figures in Purpose sections do not carry a caption by default.
+                if any("margin_stack.svg" in ln for ln in body):
+                    idx = cursor + 1
+                    continue
                 if image_at:
                     caption_at = [
                         i for i, ln in enumerate(body)
@@ -7460,7 +7464,6 @@ class ValidateCommand:
             # Scan the Purpose section: from purpose_idx until the next ## heading (or end of section/file)
             has_stack = False
             stack_idx: Optional[int] = None
-            has_caption = False
             has_hook = False
 
             for j in range(purpose_idx, min(len(lines), purpose_idx + 60)):
@@ -7470,13 +7473,6 @@ class ValidateCommand:
                 if "margin_stack.svg" in line_str:
                     has_stack = True
                     stack_idx = j + 1
-                    for k in range(j + 1, min(len(lines), j + 6)):
-                        caption_candidate = lines[k].strip()
-                        if caption_candidate.startswith("*") and caption_candidate.endswith("*") and not caption_candidate.startswith("**"):
-                            has_caption = True
-                            break
-                        if caption_candidate.startswith(":::"):
-                            break
 
                 if self._PURPOSE_STACK_HOOK.match(line_str):
                     has_hook = True
@@ -7492,8 +7488,7 @@ class ValidateCommand:
                         context=purpose_text[:80],
                         suggestion=(
                             "::: {.column-margin}\n"
-                            '![](images/svg/margin_stack.svg){width="100%" fig-alt="Systems Architecture Stack"}\n\n'
-                            "*Architecture stack focus for this chapter.*\n"
+                            '![](images/svg/margin_stack.svg){width="100%" fig-alt="Systems Architecture Stack"}\n'
                             ":::"
                         ),
                     )
@@ -7513,19 +7508,6 @@ class ValidateCommand:
                         )
                     )
 
-                if not has_caption:
-                    issues.append(
-                        ValidationIssue(
-                            file=self._relative_file(file),
-                            line=stack_idx or purpose_idx,
-                            code="purpose_stack_caption_missing",
-                            message="Purpose margin stack requires a single-line italic caption directly beneath the image",
-                            severity="error",
-                            context=lines[(stack_idx or purpose_idx) - 1].strip()[:80],
-                            suggestion="*Architecture stack focus for this chapter.*",
-                        )
-                    )
-
             if not has_hook:
                 issues.append(
                     ValidationIssue(
@@ -7541,7 +7523,7 @@ class ValidateCommand:
 
         return ValidationRunResult(
             name="purpose-stack",
-            description="Ensure every chapter has Purpose section with architecture stack SVG, caption, and hook question",
+            description="Ensure every chapter has Purpose section with architecture stack SVG and hook question",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
