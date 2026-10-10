@@ -91,7 +91,7 @@ A growing community of contributors helps improve every part of it: fixing error
 
 ## The Curriculum
 
-Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. Socratiq adds AI-guided reading, contextual quizzes, and spaced repetition inside the learning experience. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
+Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. SocratiQ adds AI-guided reading, contextual quizzes, and spaced repetition inside the learning experience. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
 
 <p align="center">
   <img src="README/curriculum-map.svg?v=4" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
@@ -137,7 +137,7 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">🛠️</td>
       <td><b>Hardware Kits</b></td>
       <td>Deploy ML to Arduino, Seeed, Grove, and Raspberry Pi devices. Real memory limits, real power budgets, real latency.</td>
-      <td><a href="https://mlsysbook.ai/kits">Browse labs</a></td>
+      <td><a href="https://mlsysbook.ai/kits/">Browse labs</a></td>
     </tr>
     <tr>
       <td align="center">🔮</td>
@@ -205,7 +205,7 @@ The learning loop is: **Read → Explore → Build → Model → Deploy → Prac
 
 Some projects are intentionally earlier-stage than the main curriculum:
 
-- [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
+- [SocratiQ](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
 - [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
 
 ---
@@ -236,7 +236,7 @@ This textbook teaches you to think at the intersection of machine learning and s
     <tr>
       <td>What a transformer is</td>
       <td align="center">→</td>
-      <td><b>Why KV-cache dominates memory at inference</b></td>
+      <td><b>Why the KV cache dominates memory at inference</b></td>
     </tr>
     <tr>
       <td>Models run on GPUs</td>
@@ -247,6 +247,16 @@ This textbook teaches you to think at the intersection of machine learning and s
       <td>Edge devices have limits</td>
       <td align="center">→</td>
       <td><b>How to co-design models and hardware</b></td>
+    </tr>
+    <tr>
+      <td>How to prompt an LLM</td>
+      <td align="center">→</td>
+      <td><b>How to architect agent loops, tool sandboxes, and context memory</b></td>
+    </tr>
+    <tr>
+      <td>How vision and robotics models infer</td>
+      <td align="center">→</td>
+      <td><b>How to close real-time sensor-actuator loops under physical constraints</b></td>
     </tr>
   </tbody>
 </table>
@@ -487,7 +497,7 @@ The companion frameworks, simulators, and labs are also open source under permis
     </tr>
     <tr>
       <td align="center"><h3>②</h3></td>
-      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="https://mlsysbook.ai/labs/">explore trade-offs</a> (Labs), <a href="https://mlsysbook.ai/mlsysim/">model constraints</a> (MLSys·im), or <a href="https://mlsysbook.ai/kits">deploy to real hardware</a> (Kits).</td>
+      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="https://mlsysbook.ai/labs/">explore trade-offs</a> (Labs), <a href="https://mlsysbook.ai/mlsysim/">model constraints</a> (MLSys·im), or <a href="https://mlsysbook.ai/kits/">deploy to real hardware</a> (Kits).</td>
     </tr>
     <tr>
       <td align="center"><h3>③</h3></td>
@@ -620,7 +630,7 @@ The companion frameworks, simulators, and labs are also open source under permis
     <tr>
       <td align="center">🧠</td>
       <td><b>Improve AI learning tools</b></td>
-      <td><a href="socratiq/README.md">Socratiq guide</a></td>
+      <td><a href="socratiq/README.md">SocratiQ guide</a></td>
     </tr>
     <tr>
       <td align="center">🐛</td>
