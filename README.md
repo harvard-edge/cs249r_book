@@ -305,10 +305,10 @@ Building an engineering curriculum of this scope in a field moving as fast as ma
 
 * **Volume I (Foundations)**: **Shipped & MIT Press Release.** Fully validated through multi-semester classroom adoption at Harvard and universities worldwide, alongside extensive peer review. AI served as a developmental editor and pedagogical sounding board for chapter sequencing, drafting computation cells, and pre-commit test automation.
 * **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Scope and operational challenges sourced directly from industry practitioners at conferences and meetups. AI was used to draft initial chapter outlines, generate first-pass text, formulate cluster calculations, unearth seminal historical distributed systems literature, and produce conceptual sketches as a visual boilerplate for ongoing diagram illustration. Extended [MLSys·im](https://mlsysbook.ai/mlsysim/) to fleet scale (3D parallelism, network topologies, collective communication). Validated through intensive one-on-one review sessions with distributed systems and ML fleet engineers—the longest and most critical part of the authoring process.
-* **Volume III (Agentic Systems)**: **In-Development Living Draft (Uncontracted).** Distilling an emerging, fluid field through the conceptual lens of the Stochastic Computer. AI was used experimentally through interactive agentic authoring workflows, simulated classroom experiences with diverse student personas, and simulated expert feedback panels to stress-test pedagogical delivery and architectural boundaries. While the author synthesizes and refines these chapters through intensive writing, **this text is an active work in progress that will undergo the same rigorous one-on-one expert review and classroom adoption as earlier volumes before final publication.**
+* **Volume III (Agentic Systems)**: **In-Development Living Draft (Uncontracted).** Distilling an emerging, fluid field through the conceptual lens of the Stochastic Computer. AI was used experimentally through interactive agentic authoring workflows, simulated classroom experiences with diverse student personas, and simulated expert feedback panels to stress-test pedagogical delivery and architectural boundaries. While I synthesize and refine these chapters through intensive writing, **this text is an active work in progress that will undergo the same rigorous one-on-one expert review and classroom adoption as earlier volumes before final publication.**
 * **Volume IV (Physical AI)**: **In-Development Living Draft (Uncontracted).** Cross-disciplinary synthesis bridging classical control theory, robotics, and scalable ML systems across the causal boundary. AI served as an interactive deep-search and synthesis tool to connect dots across disparate literatures that rarely cite each other, while human engineering judgment evaluates physical feasibility, latency budgets, and functional safety. **This text is an active work in progress that will undergo the same comprehensive expert review process before final publication.**
 
-Across all volumes, authorship is stewardship and accountability, not an ego claim over fundamental laws: the tool proposes, but the human engineer ratifies and assumes responsibility.
+Across all volumes, authorship is stewardship and accountability: the tools propose, but the human author ratifies and assumes responsibility.
 
 #### How the Volumes Connect
 
@@ -327,11 +327,11 @@ Each volume in the series expands the systems boundary, answering the question t
 
 <br>
 
-I consider myself a student of my own learning.
+I learn by teaching and building from first principles.
 
-Whenever I want to understand an emerging or complex systems discipline, I learn it by trying to teach and build it from first principles. Writing forces me to slow down: to identify invariants, formalize abstractions, derive quantitative limits, and separate durable engineering foundations from passing industry hype.
+Whenever I want to understand an emerging or complex systems discipline, I write about it and build it from scratch. Writing forces me to slow down: to identify invariants, formalize abstractions, derive quantitative limits, and separate durable engineering foundations from passing industry hype.
 
-This repository—the books, software frameworks, and hardware kits—is my open research and teaching instrument. It is how I clarify my own thinking for research, benchmarking programs (like MLPerf), and classroom instruction. If sharing this open process helps other engineers and students along the way, you are more than welcome to follow along.
+This repository—the books, software frameworks, and hardware kits—is my open research and teaching instrument. It is how I clarify my own thinking for research, benchmarking programs (like MLPerf), and classroom instruction. If sharing this open process helps other engineers and students along the way, you are welcome to follow along.
 
 </details>
 
@@ -340,13 +340,18 @@ This repository—the books, software frameworks, and hardware kits—is my open
 
 <br>
 
-Yes. I use it for literature searches, drafting passages, generating and iterating on diagrams, and exploring framings I would not have tried otherwise. Without it, a curriculum of this scope from one person would take decades.
+Yes. I use LLMs and generative AI tools throughout my workflow—for literature searches, drafting initial passages, brainstorming explanatory analogies, generating code scaffolding, and exploring visual concepts for diagrams. Without these tools, building and maintaining an integrated curriculum of this breadth alongside teaching and research would take decades.
 
-I think of it as hill climbing. The tool lets me draft faster and search wider, rapidly testing directions and surfacing material across fields I do not live in full-time. But hill climbing only works if you know which hill to climb. Deciding what to teach, in what order, at what depth, what to leave out, and where students will get stuck comes from teaching this material and watching people learn. The tool accelerates the search. It does not set the direction.
+However, I am deliberate and thoughtful about how I use them: **I do not release anything until I have fully vetted, derived, and verified it myself.**
 
-I also use it to learn. One of my reasons for building all of this is that writing and teaching is how I think things through, and AI helps me do that faster. I believe these tools can be used to build something genuinely useful for others, and that is what I am trying to do here.
+Here is the standard I hold this project to:
 
-The commit history reflects hundreds of hours of work over years of rewriting, debugging, verifying, and iterating on feedback. I build in the open on GitHub because I make mistakes. That is also why there are so many contributors listed at the bottom of this page. Every one of them has found something to fix, pointed out something I missed, or helped make the material better. That process is the real quality control.
+* **Human authorship and pedagogical intent:** An LLM can generate fluent text, but it cannot decide what to teach, in what sequence, what to leave out, or where a student will stumble. Those decisions come from years of teaching this material in the classroom and watching students learn. The tools propose; I decide, rewrite, and take full responsibility for every word.
+* **Traceability and first-principles math:** Plausible-sounding AI output is dangerous when it is subtly wrong. Every quantitative model and derived equation in this book is backed by executable Python cells that you can run and inspect. If a number or derivation appears in the text, it has been mathematically verified and grounded in real system specifications.
+* **Automated quality gates:** Every commit passes a battery of automated checks in our custom validation suite (`binder`), testing unit consistency, inline references, cross-references, citation integrity, and formatting invariants.
+* **Open peer review:** I publish this work openly on GitHub because errors happen. Dozens of contributors, industry engineers, and academic peers have caught mistakes and helped refine the text.
+
+Authorship is not claiming that no tool assisted you; authorship is the assumption of personal accountability. Every concept, code snippet, and diagram in this curriculum has been vetted by me, and I stand behind it.
 
 Each volume includes a detailed [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) on how AI was used and how the result was verified.
 
@@ -357,7 +362,7 @@ Each volume includes a detailed [Note on AI Assistance](https://mlsysbook.ai/vol
 
 <br>
 
-This is for anyone who wants to engineer intelligent systems, not only train models: students, working engineers moving into ML infrastructure, and educators building a course. We assume you can program in Python and have met basic machine learning ideas, but the book builds the systems concepts from the ground up. You do not need a background in computer architecture, distributed systems, or datacenter operations. Volume I starts at the foundations, and the rest of the curriculum (TinyTorch, labs, hardware kits, and the simulator) lets you learn by building rather than only by reading.
+This is for anyone who wants to engineer intelligent systems, not only train models: students, working engineers moving into ML infrastructure, and educators building a course. I assume you can program in Python and have met basic machine learning ideas, but the book builds the systems concepts from the ground up. You do not need a background in computer architecture, distributed systems, or datacenter operations. Volume I starts at the foundations, and the rest of the curriculum (TinyTorch, labs, hardware kits, and the simulator) lets you learn by building rather than only by reading.
 
 </details>
 
@@ -366,7 +371,7 @@ This is for anyone who wants to engineer intelligent systems, not only train mod
 
 <br>
 
-The two volumes differ in scope, not depth. Both are equally rigorous. Volume I is the single-machine world: how an ML system works on one node with a handful of accelerators, from data and a single neuron's computation up through training, optimization, and deployment. Volume II is the at-scale world: many machines across a network, distributed training, fault tolerance, fleet orchestration, inference at scale, and governance. Volume II does not assume you have read Volume I, so you can start there if you already have the foundations. The natural path, though, is Volume I to build the mental models and Volume II to apply them across the fleet. The analogy we follow is Hennessy and Patterson: *Computer Organization and Design* first, then *Computer Architecture: A Quantitative Approach*. Volumes III (Agentic Systems) and IV (Physical AI) each expand the boundary further. They are independent of each other and build naturally on Volume II, though neither strictly requires it.
+The two volumes differ in scope, not depth. Both are equally rigorous. Volume I is the single-machine world: how an ML system works on one node with a handful of accelerators, from data and a single neuron's computation up through training, optimization, and deployment. Volume II is the at-scale world: many machines across a network, distributed training, fault tolerance, fleet orchestration, inference at scale, and governance. Volume II does not assume you have read Volume I, so you can start there if you already have the foundations. The natural path, though, is Volume I to build the mental models and Volume II to apply them across the fleet. The progression mirrors Hennessy and Patterson: *Computer Organization and Design* first, then *Computer Architecture: A Quantitative Approach*. Volumes III (Agentic Systems) and IV (Physical AI) each expand the boundary further. They are independent of each other and build naturally on Volume II, though neither strictly requires it.
 
 </details>
 
@@ -384,7 +389,7 @@ You can just read the book. Each volume stands on its own. The rest of the curri
 
 <br>
 
-Deep learning books (Goodfellow et al.'s *Deep Learning*, Bishop, d2l.ai, fast.ai) teach you to design and train models: architectures, optimization, and the mathematics of learning. They mostly stop at the model. This book starts where they leave off. It treats the model as one component inside a system that has to ingest data, run on real silicon under power and latency budgets, serve predictions reliably, and keep working as the world drifts. You can finish a deep learning course knowing how a transformer learns and still not know why it stalls on a 4,000-accelerator training run, what the KV cache does to your serving memory, or why your accelerator sits idle. That gap is what we teach. Learn the model from a deep learning text, then learn the system here.
+Deep learning books (Goodfellow et al.'s *Deep Learning*, Bishop, d2l.ai, fast.ai) teach you to design and train models: architectures, optimization, and the mathematics of learning. They mostly stop at the model. This book starts where they leave off. It treats the model as one component inside a system that has to ingest data, run on real silicon under power and latency budgets, serve predictions reliably, and keep working as the world drifts. You can finish a deep learning course knowing how a transformer learns and still not know why it stalls on a 4,000-accelerator training run, what the KV cache does to your serving memory, or why your accelerator sits idle. That gap is what this curriculum teaches. Learn the model from a deep learning text, then learn the system here.
 
 </details>
 
@@ -393,7 +398,7 @@ Deep learning books (Goodfellow et al.'s *Deep Learning*, Bishop, d2l.ai, fast.a
 
 <br>
 
-This is the most common mix-up, because "ML systems" and "MLOps" sound interchangeable and several good practitioner books share the words. MLOps books are operations guides: how to wire up a feature store, a pipeline, and a deployment with today's tools. They are valuable, and they age with the tooling. This book teaches the layer underneath: the physics and quantitative reasoning that explain why those tools exist and what they cost. We ask which questions matter, why a design is the way it is, and what it cannot escape (bandwidth, latency, power, failure rates).
+This is the most common mix-up, because "ML systems" and "MLOps" sound interchangeable and several good practitioner books share the words. MLOps books are operations guides: how to wire up a feature store, a pipeline, and a deployment with today's tools. They are valuable, and they age with the tooling. This book teaches the layer underneath: the physics and quantitative reasoning that explain why those tools exist and what they cost. It focuses on which questions matter, why a design is the way it is, and what it cannot escape (bandwidth, latency, power, failure rates).
 
 Think of the difference between following a recipe and understanding how cooking works. A recipe gives you exact steps for one dish: this temperature, this pan, this many minutes. It works beautifully until the oven, the ingredients, or the kitchen changes. Understanding why heat, salt, acid, and time transform food is different. It lets you cook in any kitchen, rescue a dish that is going wrong, and invent one that no recipe covers.
 
@@ -410,7 +415,7 @@ References like Barroso, Hölzle, and Clidaras's *The Datacenter as a Warehouse-
 
 1. **Curriculum, not reference.** A synthesis lecture documents a finished design for practitioners who already know the field. This book teaches the discipline from the ground up, with learning objectives, worked quantitative examples, labs, and an AI tutor, and it carries the reader from a single neuron (Volume I) all the way to the warehouse-scale fleet (Volume II).
 
-2. **Vendor neutral, not a single stack.** A vendor reference can say "here is how we do it" and quote real production numbers. We generalize across accelerators (GPU and TPU), across cloud and edge, and teach *why* a design is the way it is, so the reasoning survives the next hardware generation and transfers anywhere.
+2. **Vendor neutral, not a single stack.** A vendor reference can say "here is how we do it" and quote real production numbers. The series generalizes across accelerators (GPU and TPU), across cloud and edge, and teaches *why* a design is the way it is, so the reasoning survives the next hardware generation and transfers anywhere.
 
 3. **Living, not a snapshot.** A printed edition is frozen until its next revision. This is open source, continuously updated, and surrounded by code you build yourself (TinyTorch), hardware kits, a simulator, and interview practice.
 
@@ -423,9 +428,9 @@ In short, a warehouse-scale reference tells you how one machine was built. This 
 
 <br>
 
-Because a textbook gives you something an LLM does not: perspective. An LLM is excellent at retrieval, and we are not trying to compete on retrieval. If a paragraph only delivers a fact you could get faster by asking a model, it has not earned its place. What a book builds instead is a structured mental model in the right order, the judgment to know which questions matter, and the reasoning behind why a design is the way it is and what it costs. Much of that comes from what a textbook chooses to leave out, since deciding what is central and what is peripheral is itself a lesson that an encyclopedic pile of facts cannot teach.
+Because a textbook gives you something an LLM does not: perspective. An LLM is excellent at retrieval, and I am not trying to compete on retrieval. If a paragraph only delivers a fact you could get faster by asking a model, it has not earned its place. What a book builds instead is a structured mental model in the right order, the judgment to know which questions matter, and the reasoning behind why a design is the way it is and what it costs. Much of that comes from what a textbook chooses to leave out, since deciding what is central and what is peripheral is itself a lesson that an encyclopedic pile of facts cannot teach.
 
-Bruce Davie makes this case well in ["Textbooks in Tokenland"](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach): an LLM generates text that is not grounded in communicative intent, while a textbook is written by people trying to convey a model of the world to a reader. We agree, and we go one step further by building an AI tutor (SocratiQ) into the reading experience. The goal is not textbook versus LLM. A good book gives you the perspective to ask meaningful questions, and the LLM helps you answer them. Use each for what it does best.
+Bruce Davie makes this case well in ["Textbooks in Tokenland"](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach): an LLM generates text that is not grounded in communicative intent, while a textbook is written by people trying to convey a model of the world to a reader. I agree, and integrate an interactive AI tutor (SocratiQ) directly into the reading experience. The goal is not textbook versus LLM. A good book gives you the perspective to ask meaningful questions, and the LLM helps you answer them. Use each for what it does best.
 
 </details>
 
