@@ -327,11 +327,11 @@ Each volume in the series expands the systems boundary, answering the question t
 
 <br>
 
-I learn by teaching and building from first principles.
+I have always learned best by building from scratch and teaching others.
 
-Whenever I want to understand an emerging or complex systems discipline, I write about it and build it from scratch. Writing forces me to slow down: to identify invariants, formalize abstractions, derive quantitative limits, and separate durable engineering foundations from passing industry hype.
+Whenever I want to really understand an emerging or complex systems area, writing about it and writing code for it forces me to slow down. It forces me to find the core invariants, work through the math, and separate what is fundamentally true about physics and hardware from whatever happens to be trending on social media this week.
 
-This repository—the books, software frameworks, and hardware kits—is my open research and teaching instrument. It is how I clarify my own thinking for research, benchmarking programs (like MLPerf), and classroom instruction. If sharing this open process helps other engineers and students along the way, you are welcome to follow along.
+This repository—the four textbook volumes, TinyTorch, our MLSys·im simulator, and the hands-on hardware kits—is my open workshop and teaching lab. It is how I clarify my own thinking for my students at Harvard, my research lab, and open benchmarking efforts like MLPerf. Putting it all out in the open is my way of giving back to the community. If following along helps you on your own engineering journey, I couldn't be happier to share it with you.
 
 </details>
 
@@ -364,7 +364,9 @@ Each volume also includes a detailed [Note on AI Assistance](https://mlsysbook.a
 
 <br>
 
-This is for anyone who wants to engineer intelligent systems, not only train models: students, working engineers moving into ML infrastructure, and educators building a course. I assume you can program in Python and have met basic machine learning ideas, but the book builds the systems concepts from the ground up. You do not need a background in computer architecture, distributed systems, or datacenter operations. Volume I starts at the foundations, and the rest of the curriculum (TinyTorch, labs, hardware kits, and the simulator) lets you learn by building rather than only by reading.
+This is for anyone who wants to understand how intelligent systems actually run, not just how models are trained: curious students, software engineers transitioning into ML infrastructure, hardware architects, and educators designing courses.
+
+All I assume is that you can program in Python and have encountered basic machine learning ideas (like what a neural network or a loss function is). We build all the systems concepts from the ground up. You do not need a prior background in computer architecture, networking, or distributed systems. Volume I starts at the physical foundations, and the rest of the curriculum (TinyTorch, interactive labs, hardware kits, and the simulator) lets you build intuition with your own hands.
 
 </details>
 
@@ -373,7 +375,11 @@ This is for anyone who wants to engineer intelligent systems, not only train mod
 
 <br>
 
-The two volumes differ in scope, not depth. Both are equally rigorous. Volume I is the single-machine world: how an ML system works on one node with a handful of accelerators, from data and a single neuron's computation up through training, optimization, and deployment. Volume II is the at-scale world: many machines across a network, distributed training, fault tolerance, fleet orchestration, inference at scale, and governance. Volume II does not assume you have read Volume I, so you can start there if you already have the foundations. The natural path, though, is Volume I to build the mental models and Volume II to apply them across the fleet. The progression mirrors Hennessy and Patterson: *Computer Organization and Design* first, then *Computer Architecture: A Quantitative Approach*. Volumes III (Agentic Systems) and IV (Physical AI) each expand the boundary further. They are independent of each other and build naturally on Volume II, though neither strictly requires it.
+They differ in systems scope, not in depth or rigor. Both are equally quantitative.
+
+Volume I is the single-node world: how an ML system works on one machine with a handful of accelerators, from the memory hierarchy and single-kernel efficiency up through quantization and on-device deployment. Volume II is the fleet-scale world: clustering thousands of accelerators across high-speed fabrics, 3D parallelism, network fault tolerance, and datacenter-scale serving.
+
+Volume II does not assume you have read Volume I cover-to-cover, so if you already have strong single-node systems foundations, you can jump straight in. But if you want the complete picture from the silicon up, starting with Volume I will give you the cleanest mental models. It's a natural progression—much like Hennessy and Patterson's *Computer Organization and Design* followed by *Computer Architecture: A Quantitative Approach*. Volumes III (Agentic Systems) and IV (Physical AI) push the boundary even further into autonomous loops and embodied robotics.
 
 </details>
 
@@ -382,7 +388,9 @@ The two volumes differ in scope, not depth. Both are equally rigorous. Volume I 
 
 <br>
 
-You can just read the book. Each volume stands on its own. The rest of the curriculum (TinyTorch, the labs, the hardware kits, the simulator, and the interview practice) exists to deepen what the book teaches by making you build and measure it, but none of it is required to follow the text. Start with the book, and reach for the hands-on pieces when you want a concept to become muscle memory.
+You can absolutely just read the book! Each volume is written to stand completely on its own as a self-contained textbook.
+
+The companion tools—TinyTorch, the interactive Marimo labs, the hardware kits, the MLSys·im simulator, and StaffML interview practice—are there whenever you want to take your understanding deeper. I built them because I found that while reading builds mental models, building and measuring make those concepts unforgettable. But there is zero pressure to do everything at once. Feel free to start with the book, and reach for the hands-on pieces whenever you want an idea to turn into muscle memory.
 
 </details>
 
@@ -391,7 +399,13 @@ You can just read the book. Each volume stands on its own. The rest of the curri
 
 <br>
 
-Deep learning books (Goodfellow et al.'s *Deep Learning*, Bishop, d2l.ai, fast.ai) teach you to design and train models: architectures, optimization, and the mathematics of learning. They mostly stop at the model. This book starts where they leave off. It treats the model as one component inside a system that has to ingest data, run on real silicon under power and latency budgets, serve predictions reliably, and keep working as the world drifts. You can finish a deep learning course knowing how a transformer learns and still not know why it stalls on a 4,000-accelerator training run, what the KV cache does to your serving memory, or why your accelerator sits idle. That gap is what this curriculum teaches. Learn the model from a deep learning text, then learn the system here.
+I love classic deep learning books—texts like Goodfellow, Bengio, and Courville's *Deep Learning*, Bishop's books, d2l.ai, and fast.ai are fantastic for learning the mathematics, architectures, and optimization of machine learning models.
+
+This curriculum starts where those books leave off. It treats the model not as the entire universe, but as one computational component inside an end-to-end system that must ingest streaming data, run on real silicon under tight power and thermal budgets, serve user queries within millisecond deadlines, and operate reliably across thousands of machines.
+
+You can finish a great deep learning course knowing all about backpropagation and attention, yet still wonder: *Why is our GPU cluster idling at 30% utilization? Why did serving memory blow up from the KV cache? How do we synchronize gradients across high-speed interconnects without stalling?*
+
+That systems gap is what we focus on. Learn the machine learning fundamentals from those wonderful books, and then come here to learn how to make them fly in the real world.
 
 </details>
 
@@ -400,11 +414,15 @@ Deep learning books (Goodfellow et al.'s *Deep Learning*, Bishop, d2l.ai, fast.a
 
 <br>
 
-This is the most common mix-up, because "ML systems" and "MLOps" sound interchangeable and several good practitioner books share the words. MLOps books are operations guides: how to wire up a feature store, a pipeline, and a deployment with today's tools. They are valuable, and they age with the tooling. This book teaches the layer underneath: the physics and quantitative reasoning that explain why those tools exist and what they cost. It focuses on which questions matter, why a design is the way it is, and what it cannot escape (bandwidth, latency, power, failure rates).
+It is an easy question to ask, especially because "ML systems" and "MLOps" sound very similar, and there are fantastic practitioner books in that space (such as Chip Huyen's *Designing Machine Learning Systems*).
 
-Think of the difference between following a recipe and understanding how cooking works. A recipe gives you exact steps for one dish: this temperature, this pan, this many minutes. It works beautifully until the oven, the ingredients, or the kitchen changes. Understanding why heat, salt, acid, and time transform food is different. It lets you cook in any kitchen, rescue a dish that is going wrong, and invent one that no recipe covers.
+MLOps books focus primarily on operational pipelines: how to configure feature stores, orchestrate workflow DAGs, and deploy services with today's industry tooling. They are extremely valuable practical guides.
 
-An MLOps book hands you the recipe for the stack you have today. This book teaches the underlying science, so you can reason about any stack, debug the one that is failing, and design the one that does not exist yet.
+This curriculum focuses on the engineering physics underneath: the hardware limits, quantitative trade-offs, and first principles that explain *why* those tools are designed the way they are, and what computational laws they can never escape—memory bandwidth, network latency, energy consumption, and hardware failure rates.
+
+I often compare it to the difference between following a recipe and understanding culinary science. A recipe gives you exact steps for today's dish: this temperature, this pan, this many minutes. It works beautifully until the oven changes, an ingredient is missing, or the scale grows ten-fold. Understanding how heat, salt, fat, and time interact is different. It allows you to cook in any kitchen, debug a dish when things go sideways, and invent entirely new recipes.
+
+Practitioner guides show you how to assemble today's popular software stack. This book teaches you the underlying science, so you can reason about any stack, debug the one that is failing, and design the systems of tomorrow.
 
 </details>
 
@@ -413,15 +431,15 @@ An MLOps book hands you the recipe for the stack you have today. This book teach
 
 <br>
 
-References like Barroso, Hölzle, and Clidaras's *The Datacenter as a Warehouse-Scale Computer* are excellent. They distill how one organization engineered one canonical system, written by the people who built it. This project is a different kind of artifact, and the two are complementary rather than competing.
+Books like Barroso, Hölzle, and Clidaras's *The Datacenter as a Warehouse-Scale Computer* are masterclasses in engineering. They offer an incredible, firsthand look at how world-class teams architected real-world hyperscale infrastructure. We admire that work deeply, and our goal is to complement it rather than compete with it:
 
-1. **Curriculum, not reference.** A synthesis lecture documents a finished design for practitioners who already know the field. This book teaches the discipline from the ground up, with learning objectives, worked quantitative examples, labs, and an AI tutor, and it carries the reader from a single neuron (Volume I) all the way to the warehouse-scale fleet (Volume II).
+1. **A progressive curriculum, not just a reference.** A synthesis monograph captures a mature, finished architecture for seasoned practitioners. This series is designed as an interactive learning curriculum that takes you by the hand—starting from a single neuron and memory hierarchy on one chip (Volume I) all the way to multi-node clusters and warehouse-scale fleets (Volume II), with quantitative exercises and self-check questions along the way.
 
-2. **Vendor neutral, not a single stack.** A vendor reference can say "here is how we do it" and quote real production numbers. The series generalizes across accelerators (GPU and TPU), across cloud and edge, and teaches *why* a design is the way it is, so the reasoning survives the next hardware generation and transfers anywhere.
+2. **Vendor-neutral foundations.** While single-organization retrospectives describe specific production choices, this curriculum generalizes across diverse accelerator architectures (GPUs, TPUs, custom ASICs) and deployment targets (cloud clusters to milliwatt microcontrollers). We emphasize the enduring mathematical and physical trade-offs so your knowledge transfers across any hardware generation.
 
-3. **Living, not a snapshot.** A printed edition is frozen until its next revision. This is open source, continuously updated, and surrounded by code you build yourself (TinyTorch), hardware kits, a simulator, and interview practice.
+3. **Hands-on and living.** A published monograph is a snapshot in time. This is an open, living workshop surrounded by runnable code you build yourself (TinyTorch), open hardware kits, cluster simulation (MLSys·im), and community-contributed improvements.
 
-In short, a warehouse-scale reference tells you how one machine was built. This curriculum teaches you to reason about why, and builds the judgment to design the next one.
+A warehouse-scale reference shows you how a legendary machine was built. This curriculum aims to give you the intuition and skills to design the next one.
 
 </details>
 
@@ -430,9 +448,17 @@ In short, a warehouse-scale reference tells you how one machine was built. This 
 
 <br>
 
-Because a textbook gives you something an LLM does not: perspective. An LLM is excellent at retrieval, and I am not trying to compete on retrieval. If a paragraph only delivers a fact you could get faster by asking a model, it has not earned its place. What a book builds instead is a structured mental model in the right order, the judgment to know which questions matter, and the reasoning behind why a design is the way it is and what it costs. Much of that comes from what a textbook chooses to leave out, since deciding what is central and what is peripheral is itself a lesson that an encyclopedic pile of facts cannot teach.
+It is a question I think about constantly as both an educator and an engineer!
 
-Bruce Davie makes this case well in ["Textbooks in Tokenland"](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach): an LLM generates text that is not grounded in communicative intent, while a textbook is written by people trying to convey a model of the world to a reader. I agree, and integrate an interactive AI tutor (SocratiQ) directly into the reading experience. The goal is not textbook versus LLM. A good book gives you the perspective to ask meaningful questions, and the LLM helps you answer them. Use each for what it does best.
+Language models are astonishing at retrieval, code generation, and summarizing facts. If a paragraph in a textbook only delivers a fact you could look up in three seconds with a prompt, it hasn't earned its place.
+
+What a textbook uniquely provides is **perspective and a coherent mental model**.
+
+When learning a deep engineering discipline, the hardest challenge is rarely finding individual facts—it is discovering the right sequence in which to absorb ideas, understanding how trade-offs constrain one another, and learning what *not* to worry about so your mental model stays clean. Deciding what to leave out is one of the most important pedagogical choices an author makes.
+
+Bruce Davie put this wonderfully in his essay [“Textbooks in Tokenland”](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach): language models generate text without communicative intent, while a textbook represents an intentional journey between a teacher and a student to build a shared understanding of how the world works.
+
+Rather than viewing textbooks and LLMs in opposition, we bring them together. The book provides the principled structure and quantitative narrative, while tools like our built-in SocratiQ tutor and interactive Marimo notebooks let you converse, ask questions, and test your understanding dynamically. Use the textbook for perspective, and use AI to explore!
 
 </details>
 
@@ -441,7 +467,11 @@ Bruce Davie makes this case well in ["Textbooks in Tokenland"](https://systemsap
 
 <br>
 
-Yes. All volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai), and the textbook is open source under a Creative Commons license (CC BY-NC-SA 4.0), so you can share and adapt it for non-commercial use with attribution. If you prefer print, a hardcopy edition is coming in 2026 with MIT Press. The surrounding tools are open source too, each under its own license.
+Yes, completely! Every volume is free to read online at [mlsysbook.ai](https://mlsysbook.ai).
+
+The entire textbook is open source under a Creative Commons license ([CC BY-NC-SA 4.0](LICENSE.md)), which means you are welcome to read, share, and adapt it for non-commercial educational use with attribution. If you prefer print, a hardcopy edition is coming in 2026 with MIT Press.
+
+The companion frameworks, simulators, and labs are also open source under permissive licenses (like MIT and Apache 2.0). Everything is right here in this repository—dive in and enjoy!
 
 </details>
 
