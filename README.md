@@ -299,16 +299,16 @@ The textbook series follows a comprehensive systems progression across four core
 
 > *Note: Volumes III and IV are in development. They change quickly as I iterate, so expect chapters to be added, reorganized, and rewritten. You are welcome to follow along as they take shape.*
 
-#### Transparency: AI Assistance and Verification Status
+#### How This Curriculum Is Built and Verified
 
-Building an engineering curriculum of this scope in a field moving as fast as machine learning requires being explicit about how the material is developed, how AI is used, and how each volume is validated:
+Building an engineering curriculum of this scope in a field moving as fast as machine learning requires being completely transparent about how the material is developed, how AI tools are used, and how each volume is verified:
 
-* **Volume I (Foundations)**: **Shipped & MIT Press Release.** Fully validated through multi-semester classroom adoption at Harvard and universities worldwide, alongside extensive peer review. AI served as a developmental editor and pedagogical sounding board for chapter sequencing, drafting computation cells, and pre-commit test automation.
-* **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Scope and operational challenges sourced directly from industry practitioners at conferences and meetups. AI was used to draft initial chapter outlines, generate first-pass text, formulate cluster calculations, unearth seminal historical distributed systems literature, and produce conceptual sketches as a visual boilerplate for ongoing diagram illustration. Extended [MLSys·im](https://mlsysbook.ai/mlsysim/) to fleet scale (3D parallelism, network topologies, collective communication). Validated through intensive one-on-one review sessions with distributed systems and ML fleet engineers—the longest and most critical part of the authoring process.
-* **Volume III (Agentic Systems)**: **In-Development Living Draft (Uncontracted).** Distilling an emerging, fluid field through the conceptual lens of the Stochastic Computer. AI was used experimentally as an interactive drafting and stress-testing tool—testing pedagogical delivery against student questions, mocking failure modes, and exploring architectural boundaries. Every chapter is rewritten, grounded in code, and refined by hand. **This text is an active work in progress that will undergo the same rigorous one-on-one expert review and classroom adoption as earlier volumes before final publication.**
-* **Volume IV (Physical AI)**: **In-Development Living Draft (Uncontracted).** Cross-disciplinary synthesis bridging classical control theory, robotics, and scalable ML systems across the causal boundary. AI served as a deep research assistant to surface citations and cross-references between classical control theory, robotics, and scalable ML systems. Human engineering judgment evaluates physical feasibility, latency budgets, and functional safety. **This text is an active work in progress that will undergo the same comprehensive expert review process before final publication.**
+* **Volume I (Foundations)**: **Shipped & Headed to MIT Press.** Taught and battle-tested over multiple semesters at Harvard and adopted by universities worldwide. Every lab and chapter has been put in front of real students. I used AI as an editor and sounding board to stress-test sequencing, draft initial code cells, and write automated pre-commit tests.
+* **Volume II (Scaling)**: **Community Preview (MIT Press Track).** Grounded in conversations with production engineers running massive clusters in industry. I used AI to explore initial outlines, pull historical systems papers, and sketch early cluster math. Crucially, every number and topology is backed by our [MLSys·im](https://mlsysbook.ai/mlsysim/) fleet simulator, and the chapters are vetted in one-on-one reviews with practicing distributed systems engineers.
+* **Volume III (Agentic Systems)**: **In-Development Draft (Uncontracted).** Agentic AI is an active frontier with few settled abstractions. I treat the model as a "stochastic computer" and use AI interactively to draft ideas, test edge cases, and challenge architectural boundaries. But every chapter is written, coded, and vetted by hand. **This is a live draft that will go through the same classroom teaching and expert reviews as Volumes I and II before publication.**
+* **Volume IV (Physical AI)**: **In-Development Draft (Uncontracted).** Robotics and physical AI require bridging classical control theory with modern foundation models. I use AI to help search across disparate literatures that don't traditionally talk to each other. But physical systems don't forgive hallucinations—real-world latency budgets, actuator physics, and safety require rigorous human engineering. **Like Volume III, this is a working draft open to early feedback.**
 
-Across all volumes, authorship is stewardship and accountability: the tools propose, but the human author ratifies and assumes responsibility.
+The philosophy is simple: tools propose, but I verify, rewrite, and take full responsibility.
 
 #### How the Volumes Connect
 
@@ -340,20 +340,20 @@ This repository—the books, software frameworks, and hardware kits—is my open
 
 <br>
 
-Yes. I use LLMs and generative AI tools across my authoring workflow—to draft initial scaffolds, brainstorm analogies, query literature across domains, and stress-test explanations. Anyone creating a comprehensive curriculum while teaching university courses and running a research lab either uses modern tools or moves too slowly to be relevant.
+Yes. I use LLMs and generative AI tools across my workflow—to brainstorm analogies, draft early scaffolding, dig up relevant papers across disciplines, and stress-test explanations. If you are building a four-volume curriculum that spans everything from a single logic gate to a 10,000-accelerator datacenter while running a research lab and teaching full-time, of course you use modern tools. Anyone who claims otherwise in 2026 is either not building at scale or not being candid.
 
-However, I am deliberate about where tools stop and human authorship begins: **I do not release anything until I have derived, implemented, and verified it myself.**
+Here is the line I draw: **I never release anything until I have derived, coded, and verified it myself.**
 
-An LLM can generate fluent prose that sounds persuasive while being mathematically wrong or physically impossible. To prevent that, every chapter is grounded in concrete, verifiable truth:
+An LLM can generate fluent prose that sounds convincing while being technically nonsensical or physically impossible. To keep this curriculum grounded, every chapter relies on concrete truth:
 
-* **Executable Python code and MLSys·im:** We do not trust prose alone. Every quantitative equation, parameter count, memory footprint, and latency budget is backed by executable Python cells embedded directly in the chapters, or validated against our architectural fleet simulator, [MLSys·im](https://mlsysbook.ai/mlsysim/). If a number, scaling curve, or hardware limit appears in the text, it was computed by real code and benchmarked against silicon specifications—not generated by an LLM guessing tokens.
-* **Classroom-grounded pedagogical judgment:** An LLM does not know where 150 students get confused, which abstraction creates misconceptions, or what must be left out to build a clean mental model. Those decisions come strictly from years of teaching this material in the lecture hall and watching students build systems. The tools propose; I structure, write, prune, and take full responsibility.
-* **Automated invariant gates:** Every commit passes a battery of automated checks in our custom validation suite (`binder`), mathematically enforcing unit consistency, reference resolution, citation integrity, and formatting contracts.
-* **Open peer review:** I publish this work openly on GitHub because errors happen. When engineers at Google, Meta, or frontier labs catch a discrepancy or a stale hardware number, we fix it in the open.
+* **Executable Python code and MLSys·im:** Systems engineering is an empirical science, not creative writing. We never rely on prose alone. Every single equation, memory footprint, compute roofline, and latency model is backed by executable Python cells embedded directly in the chapters, or validated against our open-source fleet simulator, [MLSys·im](https://mlsysbook.ai/mlsysim/). If there is a number on the page, it was computed from real silicon specs and running code—not dreamed up by a language model.
+* **Real classroom teaching:** An LLM doesn't sit in office hours. It doesn't see when a room full of students gets stuck on memory bandwidth versus compute throughput, or when an abstraction creates confusion. Deciding what to teach, what to leave out, and in what order—that comes strictly from years of teaching this material in the lecture hall.
+* **Automated sanity checks:** Every commit runs through `binder`, our custom validation suite. It mathematically checks unit consistency, verifies inline code references, audits citations, and fails the build if something doesn't add up.
+* **Open peer review:** Everything is open source on GitHub. When engineers at Google, Meta, NVIDIA, or frontier startups catch a mistake or an outdated hardware spec, we fix it in the open.
 
-Authorship is not claiming that no tool assisted your fingers on the keyboard; authorship is taking personal accountability. Every concept, code cell, and derivation in this curriculum has been vetted by me, and I stand behind it.
+At the end of the day, authorship isn't about whether you used a pencil, a keyboard, or a language model. Authorship is accountability. I vet every derivation, I run the code, and I stand behind every page. If something is broken, that's on me.
 
-Each volume includes a detailed [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) outlining exact tool usage and verification protocols.
+Each volume also includes a dedicated [Note on AI Assistance](https://mlsysbook.ai/vol1/frontmatter/ai_use.html) with more detail on how tools are used and audited.
 
 </details>
 
