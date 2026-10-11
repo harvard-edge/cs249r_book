@@ -631,6 +631,11 @@ class ValidateCommand:
                   note="callout title attribute sentence-case compliance"),
             Scope("unclosed-html-comments", "_run_unclosed_html_comments",
                   note="unclosed <!-- HTML comment tags that silently swallow prose"),
+            # Added 2026-10-11 (vol1 streamline): `\mbox{`{python} x`}` in
+            # prose is raw LaTeX, so the HTML build drops the computed value
+            # entirely (ch2, ch4, ch16 each lost a number this way).
+            Scope("raw-tex-inline-value", "_run_raw_tex_inline_value",
+                  note="raw LaTeX box (\\mbox/\\hbox/\\makebox) around an inline {python} value hides it from HTML"),
             # default=False until vol2 narrative callouts are normalized to the
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
@@ -8814,6 +8819,40 @@ class ValidateCommand:
         return ValidationRunResult(
             name="unclosed-html-comments",
             description="Flag unclosed <!-- HTML comment tags",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_raw_tex_inline_value(self, root: Path) -> ValidationRunResult:
+        """Flag raw LaTeX boxes wrapping inline {python} values in prose (dropped by HTML)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pat = re.compile(r"\\(?:mbox|hbox|makebox)\{[^{}]*`\{python\}")
+        for file in files:
+            in_code = False
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                if line.lstrip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                m = pat.search(line)
+                if m:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="raw_tex_inline_value",
+                            message="Raw LaTeX box around an inline {python} value; HTML drops it. Remove the box.",
+                            severity="error",
+                            context=line.strip()[:100],
+                        )
+                    )
+        return ValidationRunResult(
+            name="raw-tex-inline-value",
+            description="Flag raw LaTeX boxes around inline {python} values",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
