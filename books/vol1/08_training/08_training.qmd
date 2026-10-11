@@ -1693,7 +1693,7 @@ $$
 \ArithmeticIntensity = \frac{\Operations}{\DataVolume}
 $$
 
-Within the roofline model, operations above the hardware ridge point have a compute-throughput ceiling, while those below it have a memory-bandwidth ceiling. Launch overhead, limited parallelism, and imperfect execution can keep measured performance below either ceiling. @Sec-appdx-machine-foundations-roofline-model-2529 gives the formal definition of the Roofline Model and shows how to compute a hardware's ridge point.[^fn-ridge-point-precision]
+Within the roofline model, operations above the hardware ridge point have a compute-throughput ceiling, while those below it have a memory-bandwidth ceiling. Launch overhead, limited parallelism, and imperfect execution can keep measured performance below either ceiling. @Sec-hardware-acceleration-roofline-model-42ff develops the roofline model and the hardware ridge point, and @sec-appdx-machine-foundations-roofline-model-2529 works through the derivation.[^fn-ridge-point-precision]
 
 [^fn-ridge-point-precision]: **Ridge point and precision**\index{Ridge point!precision dependence}: The roofline ridge point—the arithmetic intensity threshold sepa&shy;ra&shy;ting memory-bound from compute-bound ope&shy;ra&shy;tions—shifts with numerical precision. On the same accelerator, a lower-precision Tensor Core path can expose much more arithmetic throughput at roughly the same memory bandwidth, raising the ridge point substantially. Switching from TF32-style execution to BF16 mixed precision can therefore change which optimization technique yields returns, making precision selection inseparable from roofline analysis.
 
@@ -3196,7 +3196,7 @@ Beyond convergence dynamics, batch size dictates communication frequency in dist
 
 ### Training state and checkpoints {#sec-model-training-training-state-checkpoints-5b3e}
 
-A run that takes `{python} GPT2RunTimeEnergy.run_days_str` on one accelerator does not run uninterrupted. Hardware fails, jobs are preempted, and numerical instabilities corrupt weights, so a training system must save the run's state to storage at intervals and restore it exactly. That saved state is a different mechanism from the activation checkpointing of @sec-model-training-activation-checkpointing-2ee1, which recomputes values inside one step; a training checkpoint is a file that carries the run across steps.
+A run that takes `{python} GPT2RunTimeEnergy.run_days_str` on one accelerator does not run uninterrupted. Hardware fails, jobs are preempted, and numerical instabilities corrupt weights, so a training system must save the run's state to storage at intervals and restore it exactly. That saved state is a different mechanism from the activation checkpointing of @sec-model-training-activation-checkpointing-2ee1, which recomputes values inside one step; a training checkpoint\index{Checkpointing!definition} is a file that carries the run across steps.
 
 ```{python}
 #| echo: false
@@ -4480,9 +4480,7 @@ Brain Float 16 (BF16)\index{BF16!dynamic range preservation}\index{BF16!hardware
 
 The range advantage of BF16 appears exactly where loss scaling was needed for FP16. A gradient below FP16's smallest normal value of $6.1 \times 10^{-5}$, which some hardware flushes to zero\index{FP16!subnormal flushing}, is still an ordinary normal number in BF16, whose smallest normal value of about $10^{-38}$ matches FP32's exponent range. BF16 therefore usually avoids the loss scaling needed by FP16, although accumulation precision and rounding still matter.
 
-NVIDIA's Hopper architecture (H100) introduces FP8\index{FP8!hardware acceleration} support with two formats. E4M3 uses four exponent bits and three mantissa bits (prioritizing precision for forward pass weights and activations), while E5M2\index{FP8!E4M3 and E5M2 formats} uses five exponent bits and two mantissa bits (prioritizing dynamic range for backward pass gradients).
-
-FP8 training doubles Tensor Core throughput again (`{python} MixedPrecisionHardwareDetail.h100_fp8_pflop_per_s_str` on H100 dense vs. `{python} MixedPrecisionHardwareDetail.h100_fp16_pflop_per_s_str` for FP16 dense, without sparsity). However, FP8's severely limited precision requires per-tensor scaling factors maintained in higher precision, adding algorithmic complexity. @Tbl-precision-decision-tree summarizes when each precision is appropriate:
+NVIDIA's Hopper architecture (H100) adds FP8\index{FP8!hardware acceleration} Tensor Core paths for 8-bit floating-point values, which double throughput again (`{python} MixedPrecisionHardwareDetail.h100_fp8_pflop_per_s_str` on H100 dense vs. `{python} MixedPrecisionHardwareDetail.h100_fp16_pflop_per_s_str` for FP16 dense, without sparsity); FP8's two bit layouts and the per-tensor scaling they require are developed in @sec-model-compression-numerical-format-comparison-8fa2. @Tbl-precision-decision-tree summarizes when each precision is appropriate:
 
 | **Precision** | **When to Use**                                      |   **Hardware Requirement** |
 |:--------------|:-----------------------------------------------------|---------------------------:|
@@ -5798,7 +5796,7 @@ The two foundational strategies, data parallelism and model parallelism, represe
 
 #### Data parallelism {#sec-model-training-data-parallelism-ad1c}
 
-Data parallelism\index{Data parallelism!gradient synchronization}\index{Data parallelism!framework implementation} replicates the entire model on each GPU, with each processing different batches. After computing gradients locally, GPUs synchronize via gradient averaging\index{Data parallelism!gradient averaging}. @Fig-train-data-parallelism diagrams this distributed execution flow: input batches split across four parallel GPU workers for independent forward and backward passes, converge into an AllReduce collective for gradient synchronization, and apply identical parameter updates across all replicas.
+Data parallelism\index{Data parallelism!gradient synchronization}\index{Data parallelism!framework implementation} replicates the entire model on each GPU, with each processing different batches. After computing gradients locally, GPUs synchronize via gradient averaging\index{Data parallelism!gradient averaging}. @Fig-train-data-parallelism diagrams this distributed execution flow: input batches split across four parallel GPU workers for independent forward and backward passes, converge into an AllReduce\index{AllReduce!definition} collective, which sums the gradients from every worker and returns the result to each of them, and apply identical parameter updates across all replicas.
 
 ::: {#fig-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism**: Each GPU holds a complete model copy, processes a different data shard, and synchronizes gradients. Throughput can approach linear scaling only while computation dominates synchronization, input, and imbalance costs." fig-alt="Diagram showing input data splitting into four batches, each assigned to a GPU for forward and backward computation, followed by gradient aggregation."}
 

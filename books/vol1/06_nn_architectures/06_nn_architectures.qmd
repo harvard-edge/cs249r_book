@@ -424,7 +424,7 @@ Each family section that follows reads its architecture through the same four qu
 
 ## MLPs: Dense Pattern Processing {#sec-network-architectures-multilayer-perceptrons-dense-pattern-processing-bc11}
 
-The MNIST digit classifier of @sec-neural-computation is the purest example of dense processing: each of its 784 pixel inputs connects to every hidden unit, and each hidden unit to every unit in the next layer. The same all-to-all pattern suits tabular inputs, such as the sender reputation, link count, and keyword features a spam filter scores, where no feature has a fixed neighbor. **MLPs**\index{MLP!definition}[^fn-perceptron-rosenblatt-etymology] represent the fully connected architecture of that classifier, now examined through the four-part systems lens.
+The MNIST digit classifier of @sec-neural-computation is the purest example of dense processing: each of its 784 pixel inputs connects to every hidden unit, and each hidden unit to every unit in the next layer. The same all-to-all pattern suits tabular inputs, such as the sender reputation, link count, and keyword features a spam filter scores, where no feature has a fixed neighbor. **MLPs**\index{MLP}[^fn-perceptron-rosenblatt-etymology] represent the fully connected architecture of that classifier, now examined through the four-part systems lens.
 
 [^fn-perceptron-rosenblatt-etymology]: **Perceptron**\index{Perceptron!etymology}: Formed from "perception" and the device suffix "-tron" (as in *cyclotron* and *klystron*), coined by Frank Rosenblatt\index{Rosenblatt, Frank} [@rosenblatt1957perceptron] for the atomic unit of neural computation: a weighted sum followed by a nonlinear activation, extending the earlier McCulloch-Pitts neuron\index{McCulloch-Pitts neuron}. MLPs are composed entirely of these units arranged in fully-connected layers, so the efficiency of this single operation, a multiply-accumulate, determines system throughput. Modern accelerators execute over $10^{14}$ of these operations per second, making the perceptron the computational primitive\index{Perceptron!computational primitive} that the entire ML hardware ecosystem is optimized around.
 
@@ -1065,7 +1065,7 @@ Because dense connectivity offers little weight reuse within a single-example fo
 
 The MLP's assumption that every input may interact directly with every output proves particularly costly for spatially structured data like images. Connecting every pixel of a high-resolution input to every hidden unit creates an unmanageable parameter footprint that exhausts accelerator memory and collapses arithmetic intensity into a memory-bandwidth-bound crawl. The earlier MNIST comparison showed the remedy at small scale: a shared filter needs `{python} MLPvsCNN.param_ratio_mult_str` fewer weights per feature detector than a dense unit that treats every pixel independently.
 
-CNNs\index{CNN!definition}[^fn-convolution-etymology-locality] build that remedy into the network itself [@fukushima1980neocognitron; @lecun1998; @krizhevsky2012imagenet]. Rather than materializing an all-to-all connectivity matrix, a CNN restricts each output activation to a local spatial patch and slides identical filter weights across the entire input aperture.
+CNNs\index{CNN}[^fn-convolution-etymology-locality] build that remedy into the network itself [@fukushima1980neocognitron; @lecun1998; @krizhevsky2012imagenet]. Rather than materializing an all-to-all connectivity matrix, a CNN restricts each output activation to a local spatial patch and slides identical filter weights across the entire input aperture.
 
 ::: {.column-margin}
 ![](images/svg/vol1_nn_architectures_margin_001.svg){width="100%" fig-alt="Two horizontal log-scale parameter-count bars labeled Dense 205M and Conv 37K, with the dense bar much longer."}
@@ -2164,6 +2164,10 @@ $$
 The parameters $\NormalizationScale$ (scale) and $\NormalizationShift$ (shift) are learned during training, while $\NumericalStabilityConstant$ (typically $10^{-5}$) prevents division by zero. The affine transform restores learned scale and shift flexibility, but fixed $\NormalizationScale$ and $\NormalizationShift$ cannot exactly invert varying statistics for every batch. Normalization permits larger learning rates by preventing intermediate activations from exploding into saturating non-linear regimes, accelerating convergence relative to unnormalized networks.
 
 While batch normalization enabled training of much deeper CNNs, it introduces severe distributed systems and sequence modeling constraints. When a mini-batch is split across several accelerators, computing true mini-batch statistics requires an all-reduce, a collective operation that sums each accelerator's partial statistics and returns the total to all of them over PCIe or NVLink, adding communication latency to every normalized layer. If instead computed locally on small per-accelerator batches, noisy empirical statistics destabilize optimization. Furthermore, batch normalization cannot handle variable-length sequences or text generation, which produces one token at a time, without complex padding masks and training-serving skew. Layer normalization\index{Layer normalization}\index{Normalization!layer} resolves these limitations by normalizing across the feature dimension rather than across the batch [@ba2016layer].
+
+::: {.column-margin .margin-pointer}
+↪ The AllReduce collective and its communication cost are developed in @sec-model-training-data-parallelism-ad1c.
+:::
 
 For an input vector $\LayerInputVector\in \mathbb{R}^{\HiddenDimension}$ with $\HiddenDimension$ features:
 $$
@@ -3639,6 +3643,10 @@ class KVCacheSizing:
 
 The KV cache\index{KV cache!linear growth}[^fn-kv-cache-depth] defined with the attention mechanism grows linearly with sequence length ($\mathcal{O}(\LayerCount \times 2 \times \AttentionHeadCount \times \SequenceLength\times \AttentionHeadDimension)$ per request, distinct from the $\mathcal{O}(\SequenceLength^2)$ attention score matrix during training), storing the key and value vectors for all previous tokens to avoid recomputing them [@pope2023efficiently; @kwon2023]. Keys and values from past tokens are retained because the newly generated token's query ($\QueryVector_{t}$) must attend across all historical context ($\KeyVector_1 \dots \KeyVector_{t-1}$ and $\AttentionValuesVector_1 \dots \AttentionValuesVector_{t-1}$) to compute its next representation. Prior queries ($\QueryVector_1 \dots \QueryVector_{t-1}$) are safely discarded because past tokens never attend forward to future tokens, while caching past keys and values avoids re-running the entire model forward pass over the full prompt at every generated token. For long contexts, this cache can become massive (for example, 100+ GB), and each decoding step reads prior keys and values. The resulting bandwidth pressure depends on context length, batching, attention architecture, cache layout, and hardware.
 
+::: {.column-margin .margin-pointer}
+↪ Budgeting KV cache memory across concurrent requests on a serving node is developed in @sec-model-serving-memory-kv-cache-d1ea.
+:::
+
 ```{python}
 #| echo: false
 #| label: context-memory-crossings
@@ -4348,7 +4356,7 @@ Match the architectural choice to its systems implication:
 Comparing this spectrum with the target machine's balance helps determine whether faster arithmetic or faster memory would improve performance. The roofline model\index{Roofline model!architecture comparison} [@williams2009] introduced with system balance plots achievable throughput against arithmetic intensity to show where a workload turns from memory bound to compute bound. This chapter needs only the comparison already introduced with system balance, a workload's intensity set against the machine's ratio of peak compute to memory bandwidth. For readers who want the full construction, @sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 computes the ridge point of an H100 and shows how the same operation falls on either side of it.
 
 ::: {.column-margin .margin-pointer}
-↪ The roofline model's analytical treatment, from the memory-bound slope to the ridge point, is developed in @sec-appdx-machine-foundations-roofline-model-2529.
+↪ The roofline model's analytical treatment, from the memory-bound slope to the ridge point, is developed in @sec-hardware-acceleration-roofline-model-42ff.
 :::
 
 Intensity is one column of a fuller profile. Persistent state, per-request state, the axis along which the work parallelizes, and the iron-law term that binds complete the comparison.
