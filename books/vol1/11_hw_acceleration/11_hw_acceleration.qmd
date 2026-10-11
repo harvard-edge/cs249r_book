@@ -3996,6 +3996,117 @@ Without batching, a `{python} Gpt2ThroughputCalc.h100_cost_usd_str` accelerator 
 
 :::
 
+Placed on one roofline, the layers and the decode step analyzed above fall on either side of two ridges, and only the stage-3 $3{\times}3$ convolution reaches a flat ceiling (@fig-hw-acceleration-h100-roofline-lighthouses).
+
+::: {#fig-hw-acceleration-h100-roofline-lighthouses fig-env="figure" fig-pos="htb" fig-cap="**ResNet-50 and GPT-2 XL on the H100 Roofline**: Attainable throughput against arithmetic intensity on log-log axes, with the dense FP16 ceiling and the INT8 ceiling sharing one bandwidth slope. INT8 raises the ridge from `{python} ResNet50Int8Crossing.ridge_fp16_str` to `{python} ResNet50Int8Crossing.ridge_int8_str`. Arrows connect each layer's FP16 point to its INT8 point. ResNet-50's stage-3 convolution clears the ridge in both precisions when its activations move at the format's width, but falls below the INT8 ridge when its activations stay FP16; its stage-2 expansion and classifier sit far below either ridge, and GPT-2 XL decode sits more than an order of magnitude further left." fig-alt="Log-log roofline with one diagonal blue bandwidth line rising to two flat orange ceilings, a lower solid one labeled FP16 and a higher dashed one labeled INT8, each with its ridge marked. Filled circles mark ResNet-50 layers at FP16 and open circles the same layers at INT8, joined by arrows. An open square for the stage-3 convolution with FP16 activations sits on the slope just left of the INT8 ridge. A filled and an open triangle at the far left mark GPT-2 XL decode at FP16 and with INT8 weights."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESNET-50 AND GPT-2 XL ON THE H100 ROOFLINE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-hw-acceleration-h100-roofline-lighthouses in
+# │          @sec-hardware-acceleration-calculating-memory-bandwidth-bounds-7fc0.
+# │
+# │ Goal: Place the chapter's analyzed layers and GPT-2 XL decode against the
+# │       FP16 and INT8 ceilings of one H100.
+# │ Show: Bandwidth slope, two flat ceilings and their ridges; ResNet-50 stage-3
+# │       and stage-2 1x1 layers at FP16 and INT8, and its classifier at FP16; the stage-3 layer with FP16 activations; GPT-2 XL
+# │       decode at FP16 and with INT8 weights.
+# │ How:  Intensities from ResNet50Int8Crossing, DenseLayerAnalysisCalc, and
+# │       Gpt2ThroughputCalc; INT8 decode intensity from the same FLOPs over
+# │       registry INT8 weight bytes; book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+from mlsysim import Models
+from mlsysim.core.units import BYTES_INT8, TB, TFLOP, byte, flop, second
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.6))
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+R = ResNet50Int8Crossing
+bw = R.bw.to(TB / second).magnitude                        # TB/s, so bw x (ops/byte) = Tops/s
+peak16 = R.fp16_peak.to(TFLOP / second).magnitude
+peak8 = R.int8_peak.to(TFLOP / second).magnitude
+r16, r8 = R.r16, R.r8
+gpt2_int8_ai = (Gpt2ThroughputCalc.gpt2_decode_flops
+                / Models.Language.GPT2.size_in_bytes(BYTES_INT8)).to(flop / byte).magnitude
+
+def _roof(ai, peak):
+    return min(peak, bw * ai)
+
+# (label, FP16 intensity, INT8 intensity or None, label offset in points)
+layers = [
+    ('Stage-3 3×3 conv', R.s3_fp16, R.s3_int8, (6, -14)),
+    ('Stage-2 1×1 expansion', R.p2_fp16, R.p2_int8, (-8, 12)),
+    ('Classifier (FC head)', DenseLayerAnalysisCalc.dense_ai, None, (8, -12)),
+]
+gpt2 = (Gpt2ThroughputCalc.gpt2_decode_ai, gpt2_int8_ai)
+x_min, x_max = 0.5, 4000
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+xs = np.logspace(np.log10(x_min), np.log10(r8), 50)
+ax.plot(xs, bw * xs, color=COLORS['BlueLine'], lw=2.2, zorder=2,
+        label=f"Bandwidth slope ({Gpt2ThroughputCalc.h100_bw_tb_per_s_str})")
+ax.plot([r16, x_max], [peak16, peak16], color=COLORS['OrangeLine'], lw=2.2, zorder=2,
+        label=f"FP16 dense ceiling ({Gpt2ThroughputCalc.h100_fp16_tflop_per_s_str})")
+ax.plot([r8, x_max], [peak8, peak8], color=COLORS['OrangeLine'], lw=2.2, ls='--', zorder=2,
+        label="INT8 ceiling")
+for r, p in ((r16, peak16), (r8, peak8)):
+    ax.vlines(r, 1, p, colors=COLORS['secondary'], linestyles=':', lw=1, zorder=1)
+
+for name, a16, a8, off in layers:
+    y16 = _roof(a16, peak16)
+    ax.scatter(a16, y16, s=46, color=COLORS['primary'], zorder=4)
+    if a8 is not None:
+        y8 = _roof(a8, peak8)
+        ax.annotate("", xy=(a8, y8), xytext=(a16, y16),
+                    arrowprops=dict(arrowstyle='->', color=COLORS['secondary'], lw=1, shrinkA=4, shrinkB=5))
+        ax.scatter(a8, y8, s=46, facecolors='white', edgecolors=COLORS['primary'], linewidths=1.4, zorder=4)
+    ax.annotate(name, (a16, y16), xytext=off, textcoords='offset points', fontsize=8.5,
+                ha='right' if off[0] < 0 else 'left', va='center', color=COLORS['primary'],
+                bbox=dict(facecolor='white', edgecolor='none', alpha=0.8, pad=0.5))
+
+mixed_y = _roof(R.s3_mixed, peak8)
+ax.annotate("", xy=(R.s3_mixed, mixed_y), xytext=(R.s3_fp16, _roof(R.s3_fp16, peak16)),
+            arrowprops=dict(arrowstyle='->', color=COLORS['secondary'], lw=1, ls='--', shrinkA=4, shrinkB=5))
+ax.scatter(R.s3_mixed, mixed_y, s=46, marker='s', facecolors='white', edgecolors=COLORS['primary'],
+           linewidths=1.4, zorder=5)
+ax.annotate("Stage-3 3×3 conv,\nFP16 activations", (R.s3_mixed, mixed_y), xytext=(-16, 10), textcoords='offset points',
+            fontsize=8.5, ha='right', va='center', color=COLORS['primary'],
+            bbox=dict(facecolor='white', edgecolor='none', alpha=0.8, pad=0.5))
+
+g16, g8 = gpt2
+ax.annotate("", xy=(g8, _roof(g8, peak8)), xytext=(g16, _roof(g16, peak16)),
+            arrowprops=dict(arrowstyle='->', color=COLORS['secondary'], lw=1, shrinkA=5, shrinkB=6))
+ax.scatter(g16, _roof(g16, peak16), s=60, marker='^', color=COLORS['primary'], zorder=4)
+ax.scatter(g8, _roof(g8, peak8), s=60, marker='^', facecolors='white', edgecolors=COLORS['primary'],
+           linewidths=1.4, zorder=4)
+ax.annotate("GPT-2 XL decode\n(batch 1)", (g16, _roof(g16, peak16)), xytext=(0, 18),
+            textcoords='offset points', fontsize=8.5, ha='left', va='bottom', color=COLORS['primary'])
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(r16, 1.35, f"FP16 ridge\n{R.ridge_fp16_str}", ha='right', va='bottom', fontsize=8,
+        color=COLORS['secondary'], bbox=dict(facecolor='white', edgecolor='none', pad=1))
+ax.text(r8 * 1.08, 1.35, f"INT8 ridge\n{R.ridge_int8_str}", ha='left', va='bottom', fontsize=8,
+        color=COLORS['secondary'], bbox=dict(facecolor='white', edgecolor='none', pad=1))
+ax.scatter([], [], s=46, color=COLORS['primary'], label='FP16 operands')
+ax.scatter([], [], s=46, facecolors='white', edgecolors=COLORS['primary'], linewidths=1.4, label='INT8 operands')
+ax.set_xscale('log')
+ax.set_yscale('log')
+ax.set_xlim(x_min, x_max)
+ax.set_ylim(1, 6000)
+ax.set_xlabel('Arithmetic intensity (operations/byte)')
+ax.set_ylabel('Attainable throughput (TFLOP/s or TOPS)')
+ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray')
+plt.show()
+plt.close()
+```
+
+:::
+
 ::: {#chk-hw-acceleration-machine-and-ceilings .callout-checkpoint title="The machine and its ceilings"}
 
 The first half of the chapter has assembled the accelerator and its two ceilings. Before turning to how software reaches them, check that you can work from the anatomy to a bound.

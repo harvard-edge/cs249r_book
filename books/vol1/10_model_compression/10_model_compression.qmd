@@ -386,13 +386,55 @@ TinyML makes physical fit a deployment requirement. A microcontroller with only 
 
 Meeting real-time deadlines on commodity mobile hardware depends as much on the hardware-supported precision path as on absolute memory capacity. When execution units provide hardware acceleration exclusively for fixed-point arithmetic, precision selection dictates whether a workload executes on energy-efficient neural processing units or falls back to power-hungry general-purpose cores. That choice decides the chapter's running case, a camera pipeline that must meet an interactive frame rate within a phone's thermal budget (Example \ref{exmp-model-compression-mobilenet-win}).
 
+```{python}
+#| echo: false
+#| label: camera-running-case-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CAMERA RUNNING CASE: ILLUSTRATIVE FRAME RATES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Example \ref{exmp-model-compression-mobilenet-win}; reused by
+# │          @fig-compression-waterfall in
+# │          @sec-model-compression-optimization-strategies-f2f6.
+# │
+# │ Goal:    Hold the running case's FP32 and INT8 frame rates in one place.
+# │ Show:    FP32 on the phone CPU at 8 FPS (125 ms per frame) and INT8 on the
+# │          integer accelerator at 35 FPS.
+# │ How:     Scenario frame rates from the labeled composite; frame time is
+# │          the reciprocal of frame rate.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import millisecond, second
+from mlsysim.fmt import check, fmt_int, fmt_time
+
+class CameraRunningCase:
+    """Illustrative frame rates of the camera running case, FP32 on CPU and INT8 on the integer accelerator."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    fp32_cpu_fps = 8    # scenario: labeled composite, FP32 MobileNetV2 on the phone CPU
+    int8_npu_fps = 35   # scenario: labeled composite, INT8 MobileNetV2 on the phone's integer accelerator
+    frame_budget = ModelDeviceComparison.frame_budget
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fp32_cpu_frame = (1 / (fp32_cpu_fps / second)).to(millisecond)
+    int8_npu_frame = (1 / (int8_npu_fps / second)).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(fp32_cpu_frame.magnitude - 125) < 0.5, f"Prose says about 125 ms per FP32 frame, got {fp32_cpu_frame}.")
+    check(fp32_cpu_frame > frame_budget, "Prose says the FP32 model misses the frame budget.")
+    check(int8_npu_frame < frame_budget, "Prose says the INT8 model on the accelerator meets the frame budget.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    fp32_cpu_fps_str = fmt_int(fp32_cpu_fps, commas=False)
+    int8_npu_fps_str = fmt_int(int8_npu_fps, commas=False)
+    fp32_cpu_frame_ms_str = fmt_time(round(fp32_cpu_frame.magnitude), "millisecond", precision=0, commas=False)
+```
+
 ::: {#exmp-model-compression-mobilenet-win .callout-example title="The running case: real-time blur on a phone"}
 
 **Scenario**: A labeled composite. A camera application deploys a MobileNetV2-based segmentation model for real-time background blur on mid-tier smartphones at `{python} ModelDeviceComparison.frame_rate_str` FPS.
 
-**Diagnosis**: An uncompressed FP32 MobileNetV2 model runs on the phone's CPU at only 8 FPS, about 125 ms per frame against a `{python} ModelDeviceComparison.frame_budget_ms_str` budget, while holding the CPU at a power level the thermal envelope cannot sustain. The phone's NPU or DSP accelerates integer matrix arithmetic, not FP32, so the uncompressed model cannot use it.
+**Diagnosis**: An uncompressed FP32 MobileNetV2 model runs on the phone's CPU at only `{python} CameraRunningCase.fp32_cpu_fps_str` FPS, about `{python} CameraRunningCase.fp32_cpu_frame_ms_str` per frame against a `{python} ModelDeviceComparison.frame_budget_ms_str` budget, while holding the CPU at a power level the thermal envelope cannot sustain. The phone's NPU or DSP accelerates integer matrix arithmetic, not FP32, so the uncompressed model cannot use it.
 
-**Systems lesson**: INT8 quantization cuts raw parameter payload by 4$\times$, but most of the gain from 8 FPS to 35 FPS comes from what INT8 unlocks, a move from the CPU onto the integer accelerator. The precision change is the enabler; the change of processor supplies most of the speed. The frame rates are illustrative, so speed and power still require device measurement.
+**Systems lesson**: INT8 quantization cuts raw parameter payload by 4$\times$, but most of the gain from `{python} CameraRunningCase.fp32_cpu_fps_str` FPS to `{python} CameraRunningCase.int8_npu_fps_str` FPS comes from what INT8 unlocks, a move from the CPU onto the integer accelerator. The precision change is the enabler; the change of processor supplies most of the speed. The frame rates are illustrative, so speed and power still require device measurement.
 
 :::
 
@@ -6581,7 +6623,138 @@ class BertCompression:
     wrong_order_loss_pct_str = fmt_percent(wrong_order_loss, precision=1, commas=False, style="prose")
 ```
 
-On the camera pipeline, the sequence follows from the dependencies between the tiers. Channel pruning comes first, with pruned channel counts kept on a multiple of the hardware's tile width so the smaller layers still fill the phone's matrix tiles. Distillation from the ResNet-50 teacher then serves as the recovery training for the pruned network, the prune-then-distill order described in @sec-model-compression-knowledge-distillation-1842. INT8 quantization comes last among the model changes, because range calibration must see the weight and activation distributions of the final structure, and because INT8 is what moves the model from the phone's CPU onto its integer accelerator. Batch-normalization folding and the remaining fusions are applied when the graph is compiled for the device. Each step is profiled on the phone before the next is taken, because each one changes the bottleneck that the next one faces.
+On the camera pipeline, the sequence follows from the dependencies between the tiers. Channel pruning comes first, with pruned channel counts kept on a multiple of the hardware's tile width so the smaller layers still fill the phone's matrix tiles. Distillation from the ResNet-50 teacher then serves as the recovery training for the pruned network, the prune-then-distill order described in @sec-model-compression-knowledge-distillation-1842. INT8 quantization comes last among the model changes, because range calibration must see the weight and activation distributions of the final structure, and because INT8 is what moves the model from the phone's CPU onto its integer accelerator. Batch-normalization folding and the remaining fusions are applied when the graph is compiled for the device. Each step is profiled on the phone before the next is taken, because each one changes the bottleneck that the next one faces. The steps also move different quantities, and most of the frame time comes off at the step that changes the processor (@fig-compression-waterfall).
+
+```{python}
+#| echo: false
+#| label: camera-compression-waterfall-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CAMERA PIPELINE COMPRESSION WATERFALL
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-compression-waterfall in
+# │          @sec-model-compression-optimization-strategies-f2f6.
+# │
+# │ Goal:    Give each model change in the camera sequence its weight memory
+# │          and its frame time against the frame budget.
+# │ Show:    FP32, channel-pruned FP32, and pruned INT8 MobileNetV2; weight
+# │          megabytes and frame milliseconds for each stage.
+# │ How:     Registry weight bytes for width 1.0 and width 0.75; the running
+# │          case's frame times scaled by the pruned network's arithmetic share.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.core.units import BYTES_FP32, BYTES_INT8, MB, millisecond
+from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_percent, fmt_time
+
+class CameraCompressionWaterfall:
+    """Weight memory and frame time after each model change in the camera sequence."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    full = Models.Vision.MobileNetV2
+    # scenario: channel pruning keeps 75 percent of every layer's channels,
+    # which yields the width-0.75 network of MobileNetWidthMultiplier
+    pruned = Models.Vision.MobileNetV2_Alpha0_75
+    flop_fraction = MobileNetWidthMultiplier.flop_fraction
+    fp32_cpu_frame = CameraRunningCase.fp32_cpu_frame    # running case, unpruned FP32 on the CPU
+    int8_npu_frame = CameraRunningCase.int8_npu_frame    # running case, unpruned INT8 on the accelerator
+    frame_budget = ModelDeviceComparison.frame_budget
+    # scenario: on a given processor, frame time scales with arithmetic, because
+    # channel pruning leaves dense tensors that run the same kernels on fewer channels
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fp32_mem = full.size_in_bytes(BYTES_FP32).to(MB)
+    pruned_mem = pruned.size_in_bytes(BYTES_FP32).to(MB)
+    pruned_int8_mem = pruned.size_in_bytes(BYTES_INT8).to(MB)
+    pruned_cpu_frame = (fp32_cpu_frame * flop_fraction).to(millisecond)
+    pruned_int8_frame = (int8_npu_frame * flop_fraction).to(millisecond)
+    int8_byte_cut = (pruned_mem / pruned_int8_mem).to("").magnitude
+    pruning_saving = fp32_cpu_frame - pruned_cpu_frame
+    int8_saving = pruned_cpu_frame - pruned_int8_frame
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(pruned_cpu_frame > 2 * frame_budget, "Caption says pruning alone leaves the CPU frame well over budget.")
+    check(pruned_int8_frame < frame_budget, "Caption says pruned INT8 on the accelerator meets the budget.")
+    check(int8_saving > pruning_saving, "Caption says the INT8 stage supplies most of the frame-time reduction.")
+    check(abs(int8_byte_cut - 4) < 1e-9, f"Caption says INT8 cuts the weights 4x, got {int8_byte_cut}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    fp32_mem_str = fmt_memory(fp32_mem, unit=MB, precision=1, commas=False)
+    pruned_mem_str = fmt_memory(pruned_mem, unit=MB, precision=1, commas=False)
+    pruned_int8_mem_str = fmt_memory(pruned_int8_mem, unit=MB, precision=1, commas=False)
+    fp32_cpu_frame_ms_str = fmt_time(round(fp32_cpu_frame.magnitude), "millisecond", precision=0, commas=False)
+    pruned_cpu_frame_ms_str = fmt_time(round(pruned_cpu_frame.magnitude), "millisecond", precision=0, commas=False)
+    pruned_int8_frame_ms_str = fmt_time(round(pruned_int8_frame.magnitude), "millisecond", precision=0, commas=False)
+    flop_fraction_pct_str = fmt_percent(round(flop_fraction * 100) / 100, precision=0, commas=False, style='prose')
+    int8_byte_cut_mult_str = fmt_multiple(int8_byte_cut, precision=0, commas=False)
+```
+
+::: {#fig-compression-waterfall fig-env="figure" fig-pos="htb" fig-cap="**Compression Waterfall for the Camera Pipeline**: MobileNetV2 weight memory (left) and frame time (right) after each model change, against the `{python} ModelDeviceComparison.frame_budget_ms_str` budget of a `{python} ModelDeviceComparison.frame_rate_str` FPS camera. Weight memory follows from the parameter counts. The FP32 frame time is the running case's illustrative value, and the hatched bars scale the running case's frame times by the share of arithmetic the pruned network keeps. Channel pruning to width 0.75 keeps `{python} CameraCompressionWaterfall.flop_fraction_pct_str` of the arithmetic but leaves the frame near `{python} CameraCompressionWaterfall.pruned_cpu_frame_ms_str` on the CPU. INT8 cuts the weights by `{python} CameraCompressionWaterfall.int8_byte_cut_mult_str` and moves the model onto the integer accelerator, which brings the frame to about `{python} CameraCompressionWaterfall.pruned_int8_frame_ms_str`. Folding and fusion, applied at compile time, are not modeled." fig-alt="Two bar panels side by side over three stages labeled FP32 on CPU, channel-pruned on CPU, and pruned INT8 on accelerator. The left panel shows weight memory in megabytes falling at each stage, with the largest drop at INT8. The right panel shows frame time in milliseconds against a dashed red frame-budget line; the first two bars sit far above the line and the third falls below it. The second and third frame-time bars are hatched."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CAMERA PIPELINE COMPRESSION WATERFALL (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-compression-waterfall in
+# │          @sec-model-compression-optimization-strategies-f2f6.
+# │
+# │ Goal: Show which model change moves weight memory and which moves frame
+# │       time in the camera sequence.
+# │ Show: Two bar panels over three stages; frame-budget line; hatched bars
+# │       for projected frame times.
+# │ How:  Values from CameraCompressionWaterfall and ModelDeviceComparison;
+# │       book_style.set_book_style().
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+import matplotlib.pyplot as plt
+from binder.tools.figures import style as book_style
+from mlsysim.core.units import MB, millisecond
+
+book_style.set_book_style()
+COLORS = book_style.COLORS
+fig, (ax_mem, ax_time) = plt.subplots(1, 2, figsize=(10, 3.6))
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+W = CameraCompressionWaterfall
+stages = ['FP32\non CPU', 'Channel-pruned\non CPU', 'Pruned INT8\non accelerator']
+mem = [W.fp32_mem.to(MB).magnitude, W.pruned_mem.to(MB).magnitude, W.pruned_int8_mem.to(MB).magnitude]
+mem_labels = [W.fp32_mem_str, W.pruned_mem_str, W.pruned_int8_mem_str]
+frame = [W.fp32_cpu_frame.to(millisecond).magnitude, W.pruned_cpu_frame.to(millisecond).magnitude,
+         W.pruned_int8_frame.to(millisecond).magnitude]
+frame_labels = [W.fp32_cpu_frame_ms_str, W.pruned_cpu_frame_ms_str, W.pruned_int8_frame_ms_str]
+projected = [False, True, True]
+budget = W.frame_budget.to(millisecond).magnitude
+x = range(len(stages))
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax_mem.bar(x, mem, width=0.55, color=COLORS['BlueL'], edgecolor=COLORS['BlueLine'], linewidth=1.2, zorder=2)
+for i, (v, lab) in enumerate(zip(mem, mem_labels)):
+    ax_mem.text(i, v + max(mem) * 0.03, lab, ha='center', va='bottom', fontsize=9)
+
+for i, (v, lab, proj) in enumerate(zip(frame, frame_labels, projected)):
+    ax_time.bar(i, v, width=0.55, color=COLORS['OrangeL'], edgecolor=COLORS['OrangeLine'],
+                linewidth=1.2, hatch='///' if proj else None, zorder=2)
+    ax_time.text(i, v + max(frame) * 0.03, lab, ha='center', va='bottom', fontsize=9)
+ax_time.axhline(budget, color=COLORS['RedLine'], linestyle='--', linewidth=1.5, zorder=3)
+ax_time.text(2.45, budget + max(frame) * 0.03,
+             f"{ModelDeviceComparison.frame_budget_ms_str} budget", ha='right', va='bottom',
+             fontsize=9, color=COLORS['RedLine'], fontweight='bold')
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+for ax, ylabel, top in ((ax_mem, 'Weight memory (MB)', max(mem)), (ax_time, 'Frame time (ms)', max(frame))):
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(stages, fontsize=9)
+    ax.set_ylabel(ylabel)
+    ax.set_ylim(0, top * 1.18)
+    ax.set_xlim(-0.6, 2.6)
+    ax.grid(axis='x', visible=False)
+ax_mem.set_title('Weight memory', fontsize=11)
+ax_time.set_title('Frame time', fontsize=11)
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
 
 A modeled BERT-Base pipeline attaches numbers to the same staging. Pruning, distillation, and quantization together reduce its footprint from `{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str` (rounded), a `{python} BertCompression.compression_ratio_mult_str` raw-footprint reduction. Each stage addresses a distinct bottleneck. Structural pruning removes redundant matrix multiplications, distillation supervises the compact student to recover representational capacity, and quantization packs weights and activations into lower-bit integers to relieve memory bandwidth pressure.
 

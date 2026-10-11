@@ -2910,7 +2910,7 @@ Every lever is now in view: pruning, reordering, labeling, creating, and learnin
 
 A naive active learning loop that scans the entire dataset every epoch to select the "best" samples can turn a compute-bound training job into an I/O-bound bottleneck. **Selection engineering**\index{Selection engineering!definition} begins where the algorithms of the preceding sections end. Once a technique is chosen, engineering must ensure that it delivers its promised speedup on real hardware and real data pipelines. Translating algorithmic filtering into realized throughput requires architectural patterns that bound scoring latency, preserve sequential storage access, and prevent accelerator starvation.
 
-The machine sets the scale for every one of those patterns. One ImageNet epoch of ResNet-50 on one H100 passes through four stages: images are read from local storage, decoded and augmented on host CPUs, copied across PCIe into accelerator memory, and consumed by the accelerator's arithmetic. Pruning shrinks the last stage directly; whether the other stages shrink, stay the same, or grow depends on how the selection is engineered.
+The machine sets the scale for every one of those patterns. One ImageNet epoch of ResNet-50 on one H100 passes through four stages: images are read from local storage, decoded and augmented on host CPUs, copied across PCIe into accelerator memory, and consumed by the accelerator's arithmetic. Pruning shrinks the last stage directly; whether the other stages shrink, stay the same, or grow depends on how the selection is engineered (@fig-data-selection-resnet-data-path).
 
 ```{python}
 #| echo: false
@@ -3003,6 +3003,82 @@ class ResNetEpochOnH100:
     run_saving_time_str = fmt_time(round(run_saving_time.magnitude) * hour, 'hour', precision=0, style='word')
     saving_over_score_mult_str = fmt_multiple(round(saving_over_score), precision=0)
 ```
+
+::: {#fig-data-selection-resnet-data-path fig-env="figure" fig-pos="htb" fig-cap="**ResNet-50 Data Path on One H100**: One ImageNet epoch crosses four stages: local storage, host decoding and augmentation, the PCIe link, and the accelerator. Loads under each stage are per full epoch at the compute-bound rate; notes above each stage name the lever that acts there. A materialized coreset halves the storage read and the arithmetic, stream-and-discard filtering halves only the arithmetic, offline distillation targets add bytes to every stage before the accelerator, and a scoring pass adds one third of an epoch of forward arithmetic once. The host stage, outlined in red, must decode and augment every image at the accelerator's rate." fig-alt="Four boxes left to right labeled local NVMe storage, host CPUs decode and augment, PCIe link, and H100 accelerator, joined by arrows. Under each box is its per-epoch load in bytes, images per second, or floating-point operations with time and energy. The host box has a thick red outline and a red note that it must keep pace with the accelerator. Above each box a colored note names the selection lever that acts on that stage."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESNET-50 DATA PATH ON ONE H100 (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-data-selection-resnet-data-path in
+# │          @sec-data-selection-selection-engineering-a4eb.
+# │
+# │ Goal: Show the four stages one ImageNet epoch crosses and which stage each
+# │       selection lever shrinks or loads.
+# │ Show: Storage, host, PCIe, and accelerator boxes with per-epoch loads below
+# │       and lever notes above; the host stage outlined as the one that must
+# │       keep pace with the accelerator.
+# │ How:  Every number is a ResNetEpochOnH100 or DistillationTargets output
+# │       string; book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+from matplotlib.patches import FancyBboxPatch
+from binder.tools.figures import style as book_style
+from mlsysim.fmt import check, sci_latex
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.1))
+ax.set_xlim(0, 10)
+ax.set_ylim(0.45, 3.85)
+ax.axis('off')
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+E = ResNetEpochOnH100
+check(E.keep_fraction == 0.5, "Lever notes say the coreset halves the read and the arithmetic.")
+stages = [
+    {'x': 1.2, 'name': 'Local NVMe\nstorage', 'line': COLORS['BlueLine'], 'fill': COLORS['BlueL'],
+     'load': f"{E.storage_gb_str} read\n{E.storage_time_str}",
+     'lever': "Materialized coreset:\nread halves\nStream-and-discard:\nread unchanged"},
+    {'x': 3.73, 'name': 'Host CPUs:\ndecode and augment', 'line': COLORS['GreenLine'], 'fill': COLORS['GreenL'],
+     'load': f"{E.image_rate_str} images/s\ndecoded and augmented",
+     'lever': "Augmentation adds\nhost work;\nechoing reuses it"},
+    {'x': 6.27, 'name': 'PCIe link', 'line': COLORS['VioletLine'], 'fill': COLORS['VioletL'],
+     'load': f"{E.pcie_gb_str} of tensors\n{E.pcie_time_str}",
+     'lever': f"Offline distillation\nlogits: +{DistillationTargets.logit_store_str}\nread per epoch"},
+    {'x': 8.8, 'name': 'H100\naccelerator', 'line': COLORS['OrangeLine'], 'fill': COLORS['OrangeL'],
+     'load': f"${sci_latex(E.epoch_flops, precision=1)}$ FLOPs\n{E.epoch_time_str}, {E.epoch_energy_str}",
+     'lever': f"Coreset:\narithmetic halves\nScoring pass:\n+{E.score_time_str}, once"},
+]
+box_w, box_h, box_y = 2.0, 0.9, 1.55
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+for i, s in enumerate(stages):
+    binding = i == 1
+    ax.add_patch(FancyBboxPatch(
+        (s['x'] - box_w / 2, box_y), box_w, box_h,
+        boxstyle="round,pad=0.02,rounding_size=0.06",
+        facecolor=s['fill'], edgecolor=COLORS['RedLine'] if binding else s['line'],
+        linewidth=2.6 if binding else 1.4, zorder=2))
+    ax.text(s['x'], box_y + box_h / 2, s['name'], ha='center', va='center',
+            fontsize=10, fontweight='bold', color=COLORS['primary'], zorder=3)
+    ax.text(s['x'], box_y - 0.12, s['load'], ha='center', va='top',
+            fontsize=9, color=COLORS['primary'])
+    ax.text(s['x'], box_y + box_h + 0.15, s['lever'], ha='center', va='bottom',
+            fontsize=8.5, color=s['line'], linespacing=1.15)
+    if i < len(stages) - 1:
+        ax.annotate("", xy=(stages[i + 1]['x'] - box_w / 2 - 0.03, box_y + box_h / 2),
+                    xytext=(s['x'] + box_w / 2 + 0.03, box_y + box_h / 2),
+                    arrowprops=dict(arrowstyle='-|>', color=COLORS['secondary'], lw=1.8,
+                                    mutation_scale=14))
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.text(stages[1]['x'], box_y - 0.72, "must keep pace with the accelerator", ha='center', va='top',
+        fontsize=9, fontweight='bold', color=COLORS['RedLine'])
+plt.show()
+plt.close()
+```
+
+:::
 
 ::: {#nbk-data-selection-pruned-epoch-h100 .callout-notebook title="One pruned ResNet-50 epoch on the H100"}
 
