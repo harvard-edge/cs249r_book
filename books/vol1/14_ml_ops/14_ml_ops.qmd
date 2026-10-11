@@ -2628,7 +2628,7 @@ Under the square-root approximation, $\RetrainingInterval^*$ scales with the squ
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Infrastructure
 from mlsysim.core.units import hour, USD
-from mlsysim.fmt import check, fmt_percent, fmt_usd
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_usd
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RetrainContention:
@@ -2657,9 +2657,83 @@ class RetrainContention:
     compute_cost_str = fmt_usd(compute_cost, precision=0)
     compute_share_pct_str = fmt_percent(compute_share, precision=1, commas=False, style='prose')
     run_cost_str = fmt_usd(run_cost, precision=0, commas=True)
+    retrain_accels_str = fmt_int(retrain_accels, commas=False)
+    retrain_time_str = fmt_time(retrain_time, 'hour', precision=0, commas=False)
+    accel_hours_str = fmt_int(round(accel_hours.to(hour).magnitude), commas=False)
 ```
 
-The run cost $\RetrainingRunCost$ bundles the four terms of @eq-retrain-cost, and on the ranking service the accelerator term is the smallest of them. In an illustrative scenario, a daily run that retrains on the previous day's logs occupies four H100s for six hours. Those twenty-four accelerator-hours cost `{python} RetrainContention.compute_cost_str` at the registry's training rate, about `{python} RetrainContention.compute_share_pct_str` of the `{python} RetrainContention.run_cost_str` run. Validation, deployment, and rollout risk make up the rest, which is why automating the validation path (@sec-ml-operations-model-validation-a891) shortens the economic interval more than faster training would. The accelerator-hours matter instead as contention. The serving copy of the tables already holds two accelerators, so on an eight-accelerator node a run that holds its own copy and training state on four more leaves room for exactly one further copy of the tables while it executes. That copy can be a canary, a shadow, or the hot standby of @tbl-ml-ops-release-control-footprint, but not more than one of them, so a team that releases and retrains on the same node must schedule the two so that a retraining run never evicts the copy that makes rollback immediate.
+The run cost $\RetrainingRunCost$ bundles the four terms of @eq-retrain-cost, and on the ranking service the accelerator term is the smallest of them. In an illustrative scenario, a daily run that retrains on the previous day's logs occupies four H100s for six hours. Those twenty-four accelerator-hours cost `{python} RetrainContention.compute_cost_str` at the registry's training rate, about `{python} RetrainContention.compute_share_pct_str` of the `{python} RetrainContention.run_cost_str` run. Validation, deployment, and rollout risk make up the rest, which is why automating the validation path (@sec-ml-operations-model-validation-a891) shortens the economic interval more than faster training would. The accelerator-hours matter instead as contention. The serving copy of the tables already holds two accelerators, so on an eight-accelerator node a run that holds its own copy and training state on four more leaves room for exactly one further copy of the tables while it executes (@fig-ml-ops-dlrm-node-day). That copy can be a canary, a shadow, or the hot standby of @tbl-ml-ops-release-control-footprint, but not more than one of them, so a team that releases and retrains on the same node must schedule the two so that a retraining run never evicts the copy that makes rollback immediate.
+
+::: {#fig-ml-ops-dlrm-node-day fig-env="figure" fig-pos="htb" fig-cap="**One Ranking Node's Day**: Accelerator occupancy on an eight-accelerator H100 node over one day, under one schedule that keeps rollback immediate. The serving copy of the `{python} OpsRunningCases.dlrm_gb_str` tables holds `{python} ReleaseControlFootprint.accels_per_copy_str` accelerators and the hot standby holds `{python} ReleaseControlFootprint.accels_per_copy_str` more. The daily retraining run holds `{python} RetrainContention.retrain_accels_str` accelerators for `{python} RetrainContention.retrain_time_str`, so while it runs the standby is the only further copy of the tables that fits. After the run, the candidate it produces can go out as a canary on `{python} ReleaseControlFootprint.accels_per_copy_str` of the freed accelerators. The schedule is illustrative and built from the chapter's worked numbers." fig-alt="Eight horizontal accelerator lanes across a 24-hour axis. The top two lanes hold the serving copy of the tables all day and the next two hold a hot standby all day. The bottom four lanes hold a retraining run for the first six hours. After the run, two of those lanes hold a canary copy and the last two are drawn as a dashed outline marked free."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ONE DLRM RANKING NODE'S DAY (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-ml-ops-dlrm-node-day in
+# │          @sec-ml-operations-quantitative-retraining-economics-1579.
+# │
+# │ Goal: Show that a daily retraining run and the release controls compete
+# │       for the same accelerators on a capacity-bound model.
+# │ Show: Eight accelerator lanes over 24 hours: serving copy, hot standby,
+# │       retraining run, then a canary and free accelerators after the run.
+# │ How:  Lane counts and run length from OpsRunningCases,
+# │       ReleaseControlFootprint, and RetrainContention; the schedule order
+# │       (run first, canary after) is the illustrative choice;
+# │       book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+from mlsysim.core.units import hour
+from mlsysim.fmt import check
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.6))
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+R, C = ReleaseControlFootprint, RetrainContention
+day_h = (24 * hour).to(hour).magnitude
+run_h = C.retrain_time.to(hour).magnitude
+copy_n = R.accels_per_copy
+check(copy_n + copy_n + C.retrain_accels == C.node_accels,
+      "Figure shows serving, standby, and the run filling the node while the run executes.")
+# (first lane, lane count, start hour, end hour, label, fill, line, dashed)
+blocks = [
+    (0, copy_n, 0, day_h, f"Serving copy of the tables ({OpsRunningCases.dlrm_gb_str} over {copy_n} × {OpsRunningCases.hbm_gib_str})",
+     COLORS['BlueL'], COLORS['BlueLine'], False),
+    (copy_n, copy_n, 0, day_h, "Hot standby (previous version, resident for rollback)",
+     COLORS['GreenL'], COLORS['GreenLine'], False),
+    (2 * copy_n, C.retrain_accels, 0, run_h,
+     f"Daily\nretraining\n{C.retrain_accels} × {C.retrain_time_str}\n= {C.accel_hours_str} accelerator-hours",
+     COLORS['OrangeL'], COLORS['OrangeLine'], False),
+    (2 * copy_n, copy_n, run_h, day_h, "Canary of the new candidate",
+     COLORS['VioletL'], COLORS['VioletLine'], False),
+    (3 * copy_n, C.node_accels - 3 * copy_n, run_h, day_h, "Free after the run",
+     'white', COLORS['secondary'], True),
+]
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+for lane0, n, h0, h1, label, fill, line, dashed in blocks:
+    ax.add_patch(plt.Rectangle((h0, lane0 + 0.06), h1 - h0, n - 0.12, facecolor=fill, edgecolor=line,
+                               linewidth=1.3, linestyle='--' if dashed else '-', zorder=2))
+    ax.text((h0 + h1) / 2, lane0 + n / 2, label, ha='center', va='center', fontsize=9,
+            color=COLORS['secondary'] if dashed else COLORS['primary'], linespacing=1.15, zorder=3)
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_xlim(-0.3, day_h + 0.3)
+ax.set_ylim(C.node_accels + 0.08, -0.08)
+ax.set_yticks([i + 0.5 for i in range(C.node_accels)])
+ax.set_yticklabels([f"GPU {i}" for i in range(C.node_accels)], fontsize=9)
+ax.set_xticks(range(0, int(day_h) + 1, int(run_h)))
+ax.set_xlabel('Hours from the start of the daily retraining run')
+ax.grid(axis='y', visible=False)
+ax.tick_params(axis='y', length=0)
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+
+:::
 
 #### Model limitations {.unnumbered}
 

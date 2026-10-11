@@ -1322,6 +1322,7 @@ class LatencyTableCalc:
     p_transfer_str = fmt_percent(round(p_transfer_value) / 100, precision=0, commas=False, style='symbol')
     p_inf_str = fmt_percent(round(p_inf_value) / 100, precision=0, commas=False, style='symbol')
     p_post_str = fmt_percent(round(p_post_value) / 100, precision=0, commas=False, style='symbol')
+    p_inf_prose_str = fmt_percent(round(p_inf_value) / 100, precision=0, commas=False, style='prose')
 ```
 
 ```{python}
@@ -1401,6 +1402,90 @@ class LatencyBudgetCalc:
 ```
 
 **Systems insight**: In this illustrative ResNet-50\index{ResNet-50!latency budget} serving budget, preprocessing consumes `{python} LatencyBudgetCalc.preprocess_pct_str` of latency despite model inference being the computationally intensive phase. If TensorRT reduces inference to the assumed `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, preprocessing would dominate at `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str`.
+
+:::
+
+Laid on the node's hardware, the same budget occupies three resources in turn, and the accelerator is busy for only about half of the request (@fig-model-serving-request-timeline).
+
+::: {#fig-model-serving-request-timeline fig-env="figure" fig-pos="htb" fig-cap="**One Request on One Node**: The reference ResNet-50 request drawn on the three resources it crosses. JPEG decode, resize, and normalization occupy a host CPU core, the input crosses PCIe, and the forward pass occupies the accelerator; softmax and top-5 selection are drawn on the host. Durations follow the illustrative profile of @tbl-model-serving-resnet50-latency-budget, so the accelerator is busy for `{python} LatencyTableCalc.p_inf_prose_str` of the `{python} LatencyTableCalc.l_total_ms_str` request and idle while the host prepares the input. Network transfer, serialization, and batching delay lie outside this budget and are not drawn." fig-alt="Three horizontal lanes labeled host CPU, PCIe, and GPU along a millisecond axis from 0 to about 10. The CPU lane holds consecutive bars for JPEG decode, resize, and normalize. A short bar on the PCIe lane follows, then a long forward-pass bar on the GPU lane, then a very short postprocessing bar back on the CPU lane. A hatched band on the GPU lane covers the time before the forward pass and is labeled accelerator idle."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ONE RESNET-50 REQUEST ON ONE NODE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-model-serving-request-timeline in
+# │          @sec-model-serving-latency-distribution-analysis-b0f8.
+# │
+# │ Goal: Show the latency budget as occupancy of the node's resources, so
+# │       the accelerator's idle time during host preprocessing is visible.
+# │ Show: CPU, PCIe, and GPU lanes on a millisecond axis with one bar per
+# │       phase; a hatched idle band on the GPU lane.
+# │ How:  Phase durations from LatencyTableCalc laid end to end;
+# │       book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+from mlsysim.core.units import ms
+from mlsysim.fmt import fmt_time
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 3.0))
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+L = LatencyTableCalc
+lanes = {'Host CPU': 2, 'PCIe': 1, 'GPU': 0}
+# (lane, duration, label, fill, line); phases run back to back in table order
+phases = [
+    ('Host CPU', L.l_jpeg_value, f'JPEG decode, {L.l_jpeg_ms_str}', COLORS['GreenL'], COLORS['GreenLine']),
+    ('Host CPU', L.l_resize_value, f'resize\n{L.l_resize_ms_str}', COLORS['GreenL'], COLORS['GreenLine']),
+    ('Host CPU', L.l_norm_value, f'normalize\n{L.l_norm_ms_str}', COLORS['GreenL'], COLORS['GreenLine']),
+    ('PCIe', L.l_transfer_value, f'copy to GPU, {L.l_transfer_ms_str}', COLORS['VioletL'], COLORS['VioletLine']),
+    ('GPU', L.l_inf_value, f'ResNet-50 forward pass (batch 1), {L.l_inf_ms_str}', COLORS['OrangeL'], COLORS['OrangeLine']),
+    ('Host CPU', L.l_post_value, f'softmax + top-5, {L.l_post_ms_str}', COLORS['GreenL'], COLORS['GreenLine']),
+]
+total = L.l_total_value.to(ms).magnitude
+bar_h = 0.56
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+for y in lanes.values():
+    ax.axhspan(y - 0.38, y + 0.38, color=COLORS['grid'], alpha=0.25, zorder=0, linewidth=0)
+t = 0.0
+gpu_start = None
+for lane, dur, label, fill, line in phases:
+    d = dur.to(ms).magnitude
+    y = lanes[lane]
+    ax.broken_barh([(t, d)], (y - bar_h / 2, bar_h), facecolors=fill, edgecolors=line, linewidth=1.2, zorder=2)
+    if lane == 'GPU' and gpu_start is None:
+        gpu_start = t
+    if d >= 2.5:
+        ax.text(t + d / 2, y, label, ha='center', va='center', fontsize=9, zorder=3)
+    elif d >= 0.9:
+        ax.text(t + d / 2, y, label, ha='center', va='center', fontsize=8.5, zorder=3)
+    elif t + d >= total:
+        ax.text(t + d, y + bar_h / 2 + 0.06, label, ha='right', va='bottom', fontsize=8.5, zorder=3)
+    else:
+        ax.text(t + d / 2, y + bar_h / 2 + 0.06, label, ha='center', va='bottom', fontsize=8.5,
+                linespacing=1.0, zorder=3)
+    t += d
+
+ax.broken_barh([(0, gpu_start)], (lanes['GPU'] - bar_h / 2, bar_h), facecolors='white',
+               edgecolors=COLORS['RedLine'], linewidth=1.0, hatch='///', zorder=1)
+ax.text(gpu_start / 2, lanes['GPU'], f"accelerator idle, {fmt_time(gpu_start * ms, 'millisecond', precision=0, commas=False)}", ha='center', va='center',
+        fontsize=9, fontweight='bold', color=COLORS['RedLine'], zorder=3,
+        bbox=dict(facecolor='white', edgecolor='none', pad=1.5))
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_yticks(list(lanes.values()))
+ax.set_yticklabels(list(lanes.keys()))
+ax.set_ylim(-0.55, 2.95)
+ax.set_xlim(0, total * 1.04)
+ax.set_xlabel('Time since the request reaches the server (ms)')
+ax.grid(axis='y', visible=False)
+ax.tick_params(axis='y', length=0)
+fig.tight_layout()
+plt.show()
+plt.close()
+```
 
 :::
 

@@ -2549,13 +2549,110 @@ Extending lighthouse \ref{lhs-benchmarking-mobilenet-deployment-validation}, the
 
 : **EdgeTPU vs. Host CPU MobileNetV2 Scenario**: Illustrative SingleStream-style latency, power, and energy values show how measurement boundaries alter comparative ratios. While end-to-end latency captures host preprocessing and link transfer overhead, the power and energy rows reflect active component execution alone rather than whole-system draw; these are illustrative values rather than controlled laboratory measurements. {#tbl-benchmarking-edgetpu-validation tbl-colwidths="[20,28,16,16,20]"}
 
-**What this reveals**: Under these assumptions, the `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` inference speedup narrows to ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str` end to end because preprocessing runs on the host CPU in both cases. The accelerator path incurs additional latency copying each input across the host-accelerator link and retrieving the result, a transfer overhead the CPU-only path never pays.
+**What this reveals**: Under these assumptions, the `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` inference speedup narrows to ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str` end to end because preprocessing runs on the host CPU in both cases (@fig-benchmarking-mobilenet-waterfall). The accelerator path incurs additional latency copying each input across the host-accelerator link and retrieving the result, a transfer overhead the CPU-only path never pays.
 
 Furthermore, the `{python} EdgeTPUSpeedupCalc.energy_ratio_mult_str` energy advantage applies specifically to the active inference interval ($P \times t_{\text{inference}}$), measuring component-level efficiency rather than total system consumption. This metric excludes host CPU preprocessing energy, interconnect transmission power, and baseline idle draw during non-inference phases. Because end-to-end latency improves by only `{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str`, host baseline power consumed during these non-accelerated phases narrows the whole-system battery efficiency gain.
 
 Workload arrival patterns determine whether component-level energy efficiency translates to extended battery life. For intermittent duty cycles, the lower active inference energy favors the accelerator, but total battery drain depends on sleep power, wake-up latency and energy overhead, host transfer costs, and any standby leakage the accelerator draws while awaiting work. For continuous streaming workloads such as video analytics, the accelerator's lower active energy per inference dominates cumulative energy consumption.
 
 The SingleStream result illustrates why benchmarking requires matching the MLPerf scenario to the deployment context: SingleStream emphasizes latency, while Offline benchmarks would optimize for bulk throughput rather than latency bounds.
+
+:::
+
+::: {#fig-benchmarking-mobilenet-waterfall fig-env="figure" fig-pos="htb" fig-cap="**From Claimed to Delivered Speedup on the Edge Board**: MobileNetV2 latency per inference (left) and active energy per inference (right) on the camera trap's board. INT8 cuts the host CPU's isolated latency by `{python} MobileNetTradeoffCalc.latency_speedup_mult_str`, and the accelerator cuts it a further `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` when only model compute is timed. Widening the boundary to include host preprocessing and the host-accelerator link (hatched) leaves a `{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str` end-to-end advantage, and the active-energy advantage is `{python} EdgeTPUSpeedupCalc.energy_ratio_mult_str` before idle and host power are counted. All values are the chapter's illustrative scenario, not measurements of a named product." fig-alt="Two bar panels. The left panel plots latency in milliseconds for two groups of bars. The isolated-compute group falls steeply from FP32 on the host CPU to INT8 on the host CPU to INT8 on the accelerator. The end-to-end group compares INT8 on the host CPU with INT8 on the accelerator, each bar split into a solid compute segment and a hatched segment for preprocessing and transfer. Ratio labels sit above arrows between bars. The right panel plots active energy per inference for the host CPU and the accelerator, with the accelerator bar shorter."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOBILENETV2 EDGE-BOARD SPEEDUP WATERFALL (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-benchmarking-mobilenet-waterfall in
+# │          @sec-benchmarking-inference-performance-evaluation-6793.
+# │
+# │ Goal: Show how the accelerator's isolated speedup shrinks as the
+# │       measurement boundary widens to the full request.
+# │ Show: Isolated latency for host FP32, host INT8, and accelerator INT8;
+# │       end-to-end latency for host and accelerator split into compute and
+# │       preprocessing plus link; active energy per inference.
+# │ How:  Values from MobileNetTradeoffCalc and EdgeTPUSpeedupCalc; the
+# │       hatched segments are end-to-end minus isolated latency;
+# │       book_style.set_book_style().
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+from binder.tools.figures import style as book_style
+from mlsysim.core.units import mJ, ms
+
+book_style.set_book_style()
+COLORS = book_style.COLORS
+fig, (ax_lat, ax_en) = plt.subplots(1, 2, figsize=(10, 3.9), gridspec_kw={'width_ratios': [3.2, 1]})
+
+# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+T, E = MobileNetTradeoffCalc, EdgeTPUSpeedupCalc
+host_fp32 = T.latency_fp32_ms
+host_int8 = E.cpu_latency.to(ms).magnitude
+acc_int8 = E.edgetpu_latency.to(ms).magnitude
+host_e2e = E.cpu_e2e.to(ms).magnitude
+acc_e2e = E.edgetpu_e2e.to(ms).magnitude
+xs = [0, 1, 2, 3.6, 4.6]
+compute = [host_fp32, host_int8, acc_int8, host_int8, acc_int8]
+overhead = [0, 0, 0, host_e2e - host_int8, acc_e2e - acc_int8]
+on_acc = [False, False, True, False, True]
+labels = [T.latency_fp32_ms_str, E.cpu_latency_ms_str, E.edgetpu_latency_ms_str, E.cpu_e2e_ms_str, E.edgetpu_e2e_ms_str]
+names = ['Host CPU\nFP32', 'Host CPU\nINT8', 'Accelerator\nINT8', 'Host CPU\nINT8', 'Accelerator\nINT8']
+energy = [E.cpu_energy.to(mJ).magnitude, E.edgetpu_energy.to(mJ).magnitude]
+top = host_fp32 * 1.3
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+for x, c, o, acc, lab in zip(xs, compute, overhead, on_acc, labels):
+    fill, line = (COLORS['OrangeL'], COLORS['OrangeLine']) if acc else (COLORS['GreenL'], COLORS['GreenLine'])
+    ax_lat.bar(x, c, width=0.6, color=fill, edgecolor=line, linewidth=1.2, zorder=2)
+    if o:
+        ax_lat.bar(x, o, bottom=c, width=0.6, color='white', edgecolor=COLORS['VioletLine'],
+                   linewidth=1.2, hatch='///', zorder=2)
+    ax_lat.text(x, c + o + top * 0.02, lab, ha='center', va='bottom', fontsize=9)
+
+def _step(ax, x0, y0, x1, y1, label):
+    ax.annotate("", xy=(x1 - 0.32, y1), xytext=(x0 + 0.32, y0),
+                arrowprops=dict(arrowstyle='-|>', color=COLORS['secondary'], lw=1.3, mutation_scale=12))
+    ax.text((x0 + x1) / 2 + 0.06, max(y0, y1) * 0.55 + min(y0, y1) * 0.45 + top * 0.05, label,
+            ha='left', va='bottom', fontsize=9.5, fontweight='bold', color=COLORS['primary'])
+
+_step(ax_lat, xs[0], host_fp32 * 0.92, xs[1], host_int8 + top * 0.08, T.latency_speedup_mult_str)
+_step(ax_lat, xs[1], host_int8 * 0.85, xs[2], acc_int8 + top * 0.08, E.inference_speedup_mult_str)
+_step(ax_lat, xs[3], host_e2e * 0.85, xs[4], acc_e2e + top * 0.08, E.e2e_speedup_mult_str)
+
+ax_en.bar([0, 1], energy, width=0.6, color=[COLORS['GreenL'], COLORS['OrangeL']],
+          edgecolor=[COLORS['GreenLine'], COLORS['OrangeLine']], linewidth=1.2, zorder=2)
+for i, (v, lab) in enumerate(zip(energy, [E.cpu_energy_mj_str, E.edgetpu_energy_mj_str])):
+    ax_en.text(i, v + max(energy) * 0.03, lab, ha='center', va='bottom', fontsize=9)
+ax_en.text(0.5, max(energy) * 1.22, f"{E.energy_ratio_mult_str} lower", ha='center', va='bottom',
+           fontsize=9.5, fontweight='bold', color=COLORS['primary'])
+
+# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+ax_lat.set_xticks(xs)
+ax_lat.set_xticklabels(names, fontsize=9)
+ax_lat.set_xlim(-0.6, 5.2)
+ax_lat.set_ylim(0, top)
+ax_lat.set_ylabel('Latency per inference (ms)')
+ax_lat.axvline(2.8, color=COLORS['grid'], linewidth=1.0, zorder=1)
+ax_lat.text(1.0, top * 0.97, 'Isolated model compute', ha='center', va='top', fontsize=10, fontweight='bold')
+ax_lat.text(4.1, top * 0.97, 'End to end', ha='center', va='top', fontsize=10, fontweight='bold')
+ax_lat.legend(handles=[Patch(facecolor='white', edgecolor=COLORS['VioletLine'], hatch='///',
+                             label='Host prep + link')],
+              loc='upper right', bbox_to_anchor=(1.0, 0.86), fontsize=9, frameon=False)
+ax_en.set_xticks([0, 1])
+ax_en.set_xticklabels(['Host CPU\nINT8', 'Accelerator\nINT8'], fontsize=9)
+ax_en.set_xlim(-0.6, 1.6)
+ax_en.set_ylim(0, max(energy) * 1.45)
+ax_en.set_ylabel('Active energy per inference (mJ)')
+for ax in (ax_lat, ax_en):
+    ax.grid(axis='x', visible=False)
+fig.tight_layout()
+plt.show()
+plt.close()
+```
 
 :::
 
