@@ -634,6 +634,10 @@ class ValidateCommand:
             # Added 2026-10-11 (vol1 streamline): `\mbox{`{python} x`}` in
             # prose is raw LaTeX, so the HTML build drops the computed value
             # entirely (ch2, ch4, ch16 each lost a number this way).
+            # Added 2026-10-11: \\ref{nbk-...} to a callout defined in another
+            # chapter renders as raw LaTeX in the per-chapter HTML build.
+            Scope("cross-chapter-callout-ref", "_run_cross_chapter_callout_ref",
+                  note="\\ref{} to a notebook/war-story/checkpoint defined in another file renders raw in HTML; point to its section instead"),
             Scope("raw-tex-inline-value", "_run_raw_tex_inline_value",
                   note="raw LaTeX box (\\mbox/\\hbox/\\makebox) around an inline {python} value hides it from HTML"),
             # default=False until vol2 narrative callouts are normalized to the
@@ -8819,6 +8823,41 @@ class ValidateCommand:
         return ValidationRunResult(
             name="unclosed-html-comments",
             description="Flag unclosed <!-- HTML comment tags",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_cross_chapter_callout_ref(self, root: Path) -> ValidationRunResult:
+        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp) defined in a different file."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        defs = {}
+        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)")
+        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)\}")
+        texts = {f: self._read_text(f) for f in files}
+        for f, t in texts.items():
+            for m in def_pat.finditer(t):
+                defs[m.group(1)] = f
+        for f, t in texts.items():
+            for idx, line in enumerate(t.splitlines(), 1):
+                for m in ref_pat.finditer(line):
+                    d = defs.get(m.group(1))
+                    if d is not None and d != f:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(f),
+                                line=idx,
+                                code="cross_chapter_callout_ref",
+                                message=f"\\ref{{{m.group(1)}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
+                                severity="error",
+                                context=line.strip()[:100],
+                            )
+                        )
+        return ValidationRunResult(
+            name="cross-chapter-callout-ref",
+            description="Flag cross-chapter \\ref to callout ids",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
