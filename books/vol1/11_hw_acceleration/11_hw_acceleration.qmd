@@ -43,7 +43,7 @@ notation-local: [\AffineOffset, \AffineScale, \AttentionOutputMatrix, \BatchNorm
 
 _Why does moving data cost more than computing it?_
 
-Arithmetic is inexpensive relative to data movement. In the time required to fetch a single scalar operand from off-chip DRAM, modern arithmetic units can execute dozens to hundreds of floating-point operations, and that DRAM access consumes on the order of a hundred times more energy than the computation itself. This fundamental imbalance—the memory wall—means specialized accelerators are not merely faster arithmetic engines. Rather, their microarchitectures are designed to stage, amortize, and hide data movement through wide spatial interconnects, deep on-chip memory hierarchies, and specialized execution pipelines. When general-purpose processor scaling faltered, hardware specialization enabled machine learning models to continue scaling by turning transistor budgets into high-throughput tensor datapaths.
+Arithmetic is inexpensive relative to data movement. In the time required to fetch a single scalar operand from off-chip DRAM, modern arithmetic units can execute dozens to hundreds of floating-point operations, and that DRAM access consumes on the order of a hundred times more energy than the computation itself. This fundamental imbalance, the memory wall, means specialized accelerators are not merely faster arithmetic engines. Rather, their microarchitectures are designed to stage, amortize, and hide data movement through wide spatial interconnects, deep on-chip memory hierarchies, and specialized execution pipelines. When general-purpose processor scaling faltered, hardware specialization enabled machine learning models to continue scaling by turning transistor budgets into high-throughput tensor datapaths.
 
 Delivered performance, however, depends on whether a model's tensor access patterns match the data paths of the underlying silicon. Hardware selection cannot be reduced to comparing peak FLOP/s: two accelerators with identical theoretical compute ratings often deliver radically different throughput on real workloads because one saturates its functional units while the other starves for data. A recommendation model dominated by sparse embedding lookups stresses memory bandwidth and interconnect latency, demanding a fundamentally different memory architecture than a dense transformer training run bounded by matrix multiply-accumulate throughput. If an operation is memory-bound, reducing theoretical operation count yields zero speedup because arithmetic is not the binding constraint. Matching workload characteristics to architectural dataflows determines whether an accelerator operates near its hardware ceiling or languishes at a fraction of its advertised peak. In D·A·M terms, the accelerator makes the machine constraint concrete, governing which algorithms and model architectures remain practical in production.
 
@@ -118,7 +118,9 @@ class HwAccelSetup:
 
 The anatomy of an accelerator\index{Accelerator!anatomy} is the arrangement of parts that every machine learning accelerator shares: arithmetic units built for tensor operations, on-chip memory that holds operands next to those units, a wide path to off-chip memory, and a host interface through which work arrives. Every inference and every training step on such a machine is a stream of operand movements that ends in multiply-accumulate operations, and the anatomy decides how far each operand travels before it is used. A matrix unit that can retire thousands of multiply-accumulates per cycle sits idle whenever its next operands are still in flight, and an off-chip access can take many processor cycles and cost orders of magnitude more energy than the low-precision operation it feeds. The arithmetic units are the easy part of the design; the rest of the anatomy exists to keep them fed.
 
-@Sec-model-compression closed on a deployment profile for ResNet-50 quantized to INT8 (@tbl-resnet50-int8-profile): a model four times smaller whose latency improves only when the runtime maps INT8 onto fast kernels. Data selection reduced the data term of the iron law and compression reduced the algorithm's work, but whether either saving reaches the wall clock is decided by the machine. This chapter supplies the machine side of that profile. It explains why the same INT8 weights run faster on one execution path than on another, and why the hardware, not the model, determines how much of every compression saving survives execution. The explanation starts with the memory wall: arithmetic is cheap relative to data movement, so specialized hardware matters less because it raises compute throughput than because it organizes memory, dataflow, and parallelism so that its arithmetic units stay fed.
+@Sec-model-compression closed on a deployment profile for ResNet-50 quantized to INT8 (@tbl-resnet50-int8-profile): a model four times smaller whose large-batch throughput rises severalfold on the reference H100 while its batch-one latency barely moves. Data selection reduced the data term of the iron law and compression reduced the algorithm's work, but whether either saving reaches the wall clock is decided by the machine. This chapter supplies the machine side of that profile. It explains why the same INT8 weights run faster on one execution path than on another, and why the hardware, not the model, determines how much of every compression saving survives execution. The explanation starts with the memory wall: arithmetic is cheap relative to data movement, so specialized hardware matters less because it raises compute throughput than because it organizes memory, dataflow, and parallelism so that its arithmetic units stay fed.
+
+One workload runs through the chapter. ResNet-50 quantized to INT8 carries the book's compute-bound regime (@tbl-lighthouse-examples): its convolutions reuse each weight across many image positions, so on a data-center accelerator most of its time can go to arithmetic rather than to moving bytes. Each section follows it one level deeper into the machine, from the matrix units that execute its convolutions to the compiler that lowers its graph, and asks what the INT8 path changes at that level. GPT-2 XL decoding one token at a time supplies the single contrast. It carries the bandwidth-bound regime: every generated token streams all of the model's weights from memory for about two operations per parameter, so the machine that keeps ResNet-50 busy spends most of a decode step waiting for bytes. MobileNetV2, whose depthwise layers trade arithmetic for a small parameter footprint, and keyword spotting (KWS), the power-bound lighthouse, return where the chapter reaches phone-class and embedded chips. DLRM appears where its embedding lookups, the capacity-bound regime, break the regular access patterns that accelerators assume. The reference machine is the NVIDIA H100, the data-center accelerator this book uses for training and serving examples; its numbers are one generation's instance of limits that every generation obeys.
 
 ::: {#dfn-hw-acceleration-hardware-acceleration .callout-definition title="Hardware acceleration"}
 
@@ -311,7 +313,7 @@ fit=(BB1)(DPE1)(DPE4)(B1),yshift=0mm](BB2){};
 
 Within each processing element, specialized units partition execution across distinct mathematical primitives: dedicated matrix units (Tensor Cores)\index{Tensor Core!matrix multiplication} execute dense matrix multiplication, vector units\index{Vector Unit!element-wise operations} evaluate element-wise arithmetic, and special function units (SFUs)\index{Special Function Unit!activation functions} approximate transcendental operations such as activations and exponentials. Their number, grouping, and names vary by vendor; some designs arrange them into an explicit 2D systolic grid, and others distribute matrix engines among wide parallel cores.
 
-The memory hierarchy amortizes the cost of data transport across tiers. High-bandwidth memory\index{HBM!throughput requirements} provides off-chip capacity and throughput, while shared on-chip storage and per-element caches or scratchpads cut off-chip traffic. Because moving a tensor tile across the package boundary costs orders of magnitude more energy than keeping it on chip, compilers and kernels must coordinate tile capacity, reuse, and prefetching to keep operands staged locally; more HBM bandwidth raises the off-chip ceiling, but without local reuse the execution units still stall. The system assumptions appendix (@sec-appdx-system-assumptions) collects reference specifications for the accelerators this volume uses, including the H100.
+The memory hierarchy amortizes the cost of data transport across tiers. High-bandwidth memory\index{HBM!throughput requirements} provides off-chip capacity and throughput, while shared on-chip storage and per-element caches or scratchpads cut off-chip traffic. Because moving a tensor tile across the package boundary costs orders of magnitude more energy than keeping it on chip, compilers and kernels must coordinate tile capacity, reuse, and prefetching to keep operands staged locally; more HBM bandwidth raises the off-chip ceiling, but without local reuse the execution units still stall. The system assumptions appendix (@sec-appdx-system-assumptions) collects reference specifications for the accelerators this book uses, including the H100.
 
 The host interface links the accelerator to the host CPU, which coordinates execution graphs, asynchronous I/O, and fallback operations while the accelerator executes dispatched kernels. Direct-memory-access engines can overlap host-device transfers with execution, but an operator unsupported by the accelerator backend may require a CPU round-trip. An operator outside the matrix-unit instruction set may instead use vector or other device kernels. These execution boundaries help set the effective speedup envelope. Kernel execution time matters little if transfers, launches, and synchronization dominate end-to-end latency. The three parts of the figure (the processing elements, the memory tiers, and the host link) are the parts this chapter takes apart in turn.
 
@@ -588,8 +590,6 @@ Whether an operation is limited by compute rate or by data movement dictates bot
 :::
 
 [^fn-arithmetic-intensity-roofline]: **Arithmetic intensity**\index{Arithmetic intensity!roofline diagnostic}: The ratio of compute operations to bytes transferred across the memory interface being modeled (FLOP/byte). For a matching arithmetic path, intensity above that level's ridge makes compute the lower modeled ceiling; intensity below it makes bandwidth the lower ceiling. Well-tiled matrix multiplications can approach their compute ceiling, while low-intensity kernels may benefit from more bandwidth or reuse. Profiling determines whether dependencies, dispatch, or another execution resource limits performance below either bound.
-
-One workload runs through the chapter. ResNet-50 quantized to INT8, the profile on which @sec-model-compression ended, carries the volume's compute-bound regime (@tbl-lighthouse-examples): its convolutions reuse each weight across many image positions, so on a data-center accelerator most of its time can go to arithmetic rather than to moving bytes. Each section follows it one level deeper into the machine, from the matrix units that execute its convolutions to the compiler that lowers its graph, and asks what the INT8 path changes at that level. GPT-2 XL decoding one token at a time supplies the single contrast. It carries the bandwidth-bound regime: every generated token streams all of the model's weights from memory for about two operations per parameter, so the machine that keeps ResNet-50 busy spends most of a decode step waiting for bytes. MobileNetV2, whose depthwise layers trade arithmetic for a small parameter footprint, and keyword spotting (KWS), the power-bound lighthouse, return where the chapter reaches phone-class and embedded chips. DLRM appears where its embedding lookups, the capacity-bound regime, break the regular access patterns that accelerators assume. The reference machine is the NVIDIA H100, the data-center accelerator this volume uses for training and serving examples; its numbers are one generation's instance of limits that every generation obeys.
 
 The chapter builds the machine from the bottom up (@tbl-hw-acceleration-chapter-spine). Hardware specialization explains why silicon is dedicated to tensor work at all and what moving one byte costs relative to computing with it. Compute primitives and compute units supply the arithmetic side of the anatomy, ending with the INT8 and sparse paths that ResNet-50's profile depends on. Memory systems supply the other side, from registers to host memory. Performance bounds then combine the two sides into the roofline's ceilings and show which ResNet-50 layers clear the H100's ridge at FP16 and which fall below it at INT8; this is the chapter's midpoint, marked by a checkpoint. The second half asks how software reaches those ceilings. Hardware mapping chooses where each operation runs and which operand stays local, and compilers and runtimes make those choices automatically. Three shorter sections then widen the view: multi-chip scaling, heterogeneous systems-on-chip for phones and embedded devices, and the choice of an accelerator for a workload and a budget.
 
@@ -1614,7 +1614,7 @@ class AcceleratorEfficiencyAnchor:
 1.  **DRAM-streaming baseline**: Loads $\GemmLeftOperand$, $\GemmRightOperand$, and the running $\GemmOutputMatrix$, computes $\GemmLeftOperand\times \GemmRightOperand+ \GemmOutputMatrix$, and writes $\GemmOutputMatrix$ back without cache or register reuse.
     - **Data movement**: 3 loads + 1 write = `{python} SystolicEnergy.vector_accesses_str` DRAM accesses (per operation).
     - **Energy**: ≈ `{python} SystolicEnergy.vector_accesses_str` $\times$ `{python} SystolicEnergy.dram_access_pj_str` + `{python} SystolicEnergy.compute_energy_pj_str` (compute) = `{python} SystolicEnergy.vector_energy_pj_per_op_str`.
-2.  Systolic Array (`{python} SystolicEnergy.systolic_size_str` $\times$ `{python} SystolicEnergy.systolic_size_str` size): Loads $\GemmLeftOperand$ and $\GemmRightOperand$ once at the edges. Data "pulses" through `{python} SystolicEnergy.systolic_size_str` processing elements.
+2.  **Systolic array** (`{python} SystolicEnergy.systolic_size_str` $\times$ `{python} SystolicEnergy.systolic_size_str`): Loads $\GemmLeftOperand$ and $\GemmRightOperand$ once at the edges. Data "pulses" through `{python} SystolicEnergy.systolic_size_str` processing elements.
     - **Data movement**: 2 loads per `{python} SystolicEnergy.systolic_size_str` operations = `{python} SystolicEnergy.systolic_access_str` DRAM accesses (per operation).
     - **Energy**: ≈ `{python} SystolicEnergy.systolic_access_str` $\times$ `{python} SystolicEnergy.dram_access_pj_str` + `{python} SystolicEnergy.compute_energy_pj_str` (compute) ≈ `{python} SystolicEnergy.systolic_energy_pj_per_op_str`.
 
@@ -2065,7 +2065,454 @@ minimum height=7.5mm,line width=0.75pt, fill=orange!15}]
 
 :::
 
-NVIDIA's Sparse Tensor Cores\index{Sparse Tensor Core!2:4 constraint} implement the 2:4 instance of this pattern\index{Sparsity!structured, 2:4 hardware support}, in which exactly two of every four contiguous values along the reduction dimension are nonzero [@NVIDIA2020; @nvidia_cusparse_block]. The storage side is the compressed 2:4 encoding that model compression introduced, the two retained values of each group plus a 4-bit metadata tag (2 bits per value) recording their original positions. The new material here is the datapath. During execution, the memory hierarchy transfers only the compressed weights and their metadata, halving the weight-value payload while adding metadata traffic; total transferred bytes therefore fall by less than half before other overheads. Inside the Sparse Tensor Core datapath, the 4-bit metadata steers an internal multiplexer network that selects the matching two values from an uncompressed four-element activation vector. These selected activations and the two nonzero weights are then routed into a half-sized dot-product multiplier tree. Because the hardware computes only on the nonzeros while streaming compressed weights, this design doubles the peak arithmetic instruction throughput, yielding an advertised 2$\times$ tensor-math speedup over dense operations when weights are fine-tuned to satisfy the pattern.
+NVIDIA's Sparse Tensor Cores\index{Sparse Tensor Core!2:4 constraint} implement the 2:4 instance of this pattern\index{Sparsity!structured, 2:4 hardware support}, in which exactly two of every four contiguous values along the reduction dimension are nonzero [@NVIDIA2020; @nvidia_cusparse_block]. The storage side is the compressed 2:4 encoding that model compression introduced, the two retained values of each group plus a 4-bit metadata tag (2 bits per value) recording their original positions. The new material here is the datapath. During execution, the memory hierarchy transfers only the compressed weights and their metadata, halving the weight-value payload while adding metadata traffic; total transferred bytes therefore fall by less than half before other overheads. Inside the Sparse Tensor Core datapath, the 4-bit metadata steers an internal multiplexer network that selects the matching two values from an uncompressed four-element activation vector. These selected activations and the two nonzero weights are then routed into a half-sized dot-product multiplier tree. Because the hardware computes only on the nonzeros while streaming compressed weights, this design doubles the peak arithmetic instruction throughput, yielding an advertised 2$\times$ tensor-math speedup over dense operations when weights are fine-tuned to satisfy the pattern (@fig-2-4-gemm).
+
+::: {#fig-2-4-gemm fig-env="figure" fig-pos="htb" fig-cap="**2:4 Structured Sparsity GEMM**: Left: standard dense matrix multiplication on Tensor Cores using full 8-element rows. Right: 2:4 sparse multiplication retains two nonzeros in every group of four and uses compact indices to select matching elements from the dense right-hand matrix. A supported sparse inner loop can halve the multiplied values, although metadata handling and the rest of the execution path determine end-to-end speedup. Source: PyTorch blog [@pytorch_sparsity_blog]." fig-alt="Side-by-side comparison of dense and 2:4 sparse GEMM on Tensor Cores. Left shows an 8-element dense row multiplication. Right shows a sparse row with two retained values per group of four and compact indices selecting matching elements from the dense right-hand matrix."}
+
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\sffamily]
+\tikzset{%
+ mysnake/.style={postaction={draw,decorate,decoration={snake,amplitude=3pt,segment length=19pt}}},
+helvetica/.style={align=flush center,font=\small\sffamily},
+Line/.style={line width=1.0pt,black!50,text=black},
+Box/.style={inner sep=5pt,
+    node distance=0.8,
+    draw=VioletLine,
+    line width=0.75pt,
+    fill=VioletL2,
+    text width=43mm,align=flush center,
+    minimum width=43mm, minimum height=7mm
+  },
+do path picture/.style={%
+    path picture={%
+      \pgfpointdiff{\pgfpointanchor{path picture bounding box}{south west}}%
+        {\pgfpointanchor{path picture bounding box}{north east}}%
+      \pgfgetlastxy\x\y%
+      \tikzset{x=\x/2,y=\y/2}%
+      #1
+    }
+  },
+  cross/.style={do path picture={
+    \draw [line cap=round] (-1,-1) -- (1,1) (-1,1) -- (1,-1);
+  }},
+}
+\definecolor{Blue1}{RGB}{23,68,150}
+\definecolor{Blue2}{RGB}{84,131,217}
+\definecolor{Blue3}{RGB}{145,177,237}
+\def\columns{3}
+\def\rows{3}
+\def\cellsize{5mm}
+\def\cellheight{5mm}
+
+\begin{scope}[local bounding box=LEFT]
+\node[draw,circle,line width=0.75pt,cross,minimum width=6mm](CI1){};
+\node[draw=black, line width=1.2pt,fill=GreenL, minimum width=0.9*\cellsize,
+                    minimum height=0.9*\cellheight,below=0.5 of CI1](AR) {};
+\node[right=1mm of AR](AR1){Accumulator (result)};
+
+\begin{scope}[local bounding box=M3,shift={(-0.2,1.5)}]
+\def\columns{8}
+\def\rows{1}
+\def\br{M3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+\begin{scope}[local bounding box=M1,shift={(-4.5,1.5)}]
+\def\columns{8}
+\def\rows{1}
+\def\br{M1}
+\def\rowone{Blue1,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\end{scope}
+
+\draw[Line,-latex](CI1)--(AR);
+\draw[Line,-latex](M3)|-(CI1);
+\draw[Line,-latex](M1)|-(CI1);
+%%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=3mm,inner ysep=11mm,
+yshift=8mm,fill=BackColor!50,fit=(AR1)(M1)(M3),line width=0.75pt](BB1){};
+\node[anchor=north west,align=center]at(BB1.north west){Dense operation\\ on Tensor Core};
+
+%%below matrix Blue
+\begin{scope}[local bounding box=DM1,shift={(0.2,-2.5)}]
+\def\columns{8}
+\def\rows{8}
+\def\br{DM1}
+\def\rowone{Blue1,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
+\def\rowtwo{Blue3,Blue2,Blue3,Blue2,Blue3,Blue3,Blue1,Blue1}
+\def\rowthree{Blue2,Blue1,Blue2,Blue3,Blue3,Blue2,Blue2,Blue1}
+\def\rowfour{Blue2,Blue3,Blue2,Blue3,Blue1,Blue2,Blue3,Blue3}
+\def\rowfive{Blue2,Blue2,Blue3,Blue1,Blue3,Blue1,Blue2,Blue3}
+\def\rowsix{Blue2,Blue3,Blue1,Blue3,Blue1,Blue3,Blue2,Blue2}
+\def\rowseven{Blue3,Blue3,Blue2,Blue1,Blue2,Blue2,Blue3,Blue3}
+\def\rowosam{Blue3,Blue2,Blue3,Blue2,Blue3,Blue1,Blue2,Blue1}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+\foreach \color [count=\x] in \rowfour {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-4\br) {};
+}
+\foreach \color [count=\x] in \rowfive {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-5\br) {};
+}
+\foreach \color [count=\x] in \rowsix {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-6\br) {};
+}
+\foreach \color [count=\x] in \rowseven {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-7\br) {};
+}
+\foreach \color [count=\x] in \rowosam {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-8\br) {};
+}
+\end{scope}
+
+%
+\draw[|-|,thick]([yshift=-5.5]cell-1-8DM1.south west)--node[below=0pt,
+                       font=\sffamily\small]{K}([yshift=-5.5]cell-8-8DM1.south east);
+\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Dense)};
+\draw[|-|,thick]([xshift=7.5]cell-8-8DM1.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=7.5]cell-8-1DM1.north east);
+%
+
+\node[below=22pt of DM1](SP){\textbf{Dense $M\times N\times K$ GEMM}};
+%%%last matrix Green
+\begin{scope}[local bounding box=DM3,shift={(6,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM3}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=GreenL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+%
+\node[below=0.35 of DM3,align=center](CM){C matrix\\ (Dense)};
+\draw[|-|,thick]([yshift=9.5]cell-1-1DM3.north west)--node[above=0pt,
+                       font=\sffamily\small]{N}([yshift=9.5]cell-4-1DM3.north east);
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM3.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=7.5]cell-4-1DM3.north east);
+%
+
+%
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM1)(cell-8-1DM1),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+%%%last upper matrix brown
+\begin{scope}[local bounding box=DM4,shift={(6,3.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM4}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+\node[above=0.2 of DM4,align=center](BM){Right-hand matrix\\ (Dense)};
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM4.south east)--node[right=0pt,
+                       font=\sffamily\small]{K}([xshift=7.5]cell-4-1DM4.north east);
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM4)(cell-1-8DM4),line width=3.5pt](BB4){};
+\draw[red,line width=1.5pt](BB4)--(BB1.east);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+\end{scope}
+%%%%%%%%%%
+%right part
+%%%%%%%%%%%%
+\begin{scope}[local bounding box=RIGHT,shift={(15.15,0)}]
+\node[draw,circle,line width=0.75pt,cross,minimum width=6mm](CI1){};
+\node[draw=black, line width=1.2pt,fill=GreenL, minimum width=0.9*\cellsize,
+                    minimum height=0.9*\cellheight,below=0.5 of CI1](AR) {};
+\node[right=1mm of AR](AR1){Accumulator (result)};
+
+\begin{scope}[local bounding box=M3,shift={(1,1.5)}]
+\def\columns{4}
+\def\rows{1}
+\def\br{M3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+
+\begin{scope}[local bounding box=M2,shift={(-1.3,1.5)}]
+\def\columns{4}
+\def\rows{1}
+\def\br{M2}
+\def\cellsize{2.5mm}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=OrangeL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+\begin{scope}[local bounding box=M1,shift={(-3.8,1.5)}]
+\def\columns{4}
+\def\rows{1}
+\def\br{M1}
+\def\rowone{Blue2,Blue3,Blue1,Blue3}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\end{scope}
+\node[Box,above=of M3)](CM){Choose matching K/2 elements out of K elements};
+%%
+\begin{scope}[local bounding box=M4,shift={($(CM.north)+(-2.3,1.5)$)}]
+\def\columns{8}
+\def\rows{1}
+\def\br{M4}
+\def\rowone{BrownL,BrownL!20,BrownL!20,BrownL,BrownL!20,BrownL,BrownL,BrownL!20}
+%
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=1pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\end{scope}
+%\fill[red](cell-8-1M4)circle(2pt);
+\foreach \x in{1,...,8}{
+\draw[Line,-latex](cell-\x-1M4)--(cell-\x-1M4|-CM.north);
+}
+\foreach \x in{1,...,4}{
+\draw[Line,latex-](cell-\x-1M3)--(cell-\x-1M3|-CM.south);
+}
+\draw[Line,-latex](CI1)--(AR);
+\draw[Line,-latex](M3)|-(CI1);
+\draw[Line,-latex](M1)|-(CI1);
+\draw[Line,-latex](M2)|-node[left,pos=0.3]{Select}(CM);
+%%fitting
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=3mm,inner ysep=3mm,
+yshift=0mm,fill=BackColor!50,fit=(AR1)(M1)(M4)(CM),line width=0.75pt](BB1){};
+\node[anchor=north west,align=center]at(BB1.north west){Sparse operation\\ on Tensor Core};
+
+%%below matrix Blue
+\begin{scope}[local bounding box=DM1,shift={(0.2,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM1}
+\def\rowone{Blue2,Blue3,Blue1,Blue3}
+\def\rowtwo{Blue2,Blue3,Blue1,Blue2}
+\def\rowthree{Blue2,Blue1,Blue3,Blue2}
+\def\rowfour{Blue2,Blue3,Blue1,Blue3}
+\def\rowfive{Blue3,Blue1,Blue1,Blue2}
+\def\rowsix{Blue2,Blue2,Blue1,Blue3}
+\def\rowseven{Blue3,Blue1,Blue2,Blue3}
+\def\rowosam{Blue3,Blue2,Blue1,Blue2}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+
+%
+\foreach \color [count=\x] in \rowone {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+    minimum height=\cellheight] at (cell-\x-1\br) {};
+}
+\foreach \color [count=\x] in \rowtwo {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-2\br) {};
+}
+\foreach \color [count=\x] in \rowthree {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-3\br) {};
+}
+\foreach \color [count=\x] in \rowfour {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-4\br) {};
+}
+\foreach \color [count=\x] in \rowfive {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-5\br) {};
+}
+\foreach \color [count=\x] in \rowsix {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-6\br) {};
+}
+\foreach \color [count=\x] in \rowseven {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-7\br) {};
+}
+\foreach \color [count=\x] in \rowosam {
+    \node[fill=\color,draw=black!80,line width=2pt, minimum size=\cellsize,
+               minimum height=\cellheight] at (cell-\x-8\br) {};
+}
+\end{scope}
+\node[below=0.7 of DM1,align=center](NZ){Non-zero data\\ values};
+\draw[|-|,thick]([yshift=-5.5]cell-1-8DM1.south west)--node[below=0pt,
+                       font=\sffamily\small]{K/2}([yshift=-5.5]cell-4-8DM1.south east);
+\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Sparse)};
+\begin{scope}[local bounding box=DM2,shift={(3.4,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM2}
+\def\cellsize{2.5mm}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=OrangeL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+\node[below=0.7 of DM2,align=center](2B){2-bits\\ indices};
+\draw[|-|,thick]([yshift=-5.5]cell-1-8DM2.south west)--node[below=0pt,
+                       font=\sffamily\small]{K/2}([yshift=-5.5]cell-4-8DM2.south east);
+\draw[|-|,thick]([xshift=9.5]cell-4-8DM2.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=9.5]cell-4-1DM2.north east);
+%
+\node[draw=none,inner xsep=0mm,inner ysep=0mm,
+yshift=0mm,fill=none,fit=(NZ)(2B),line width=0.75pt](BB2){};
+\node[below=2pt of BB2](SP){\textbf{Sparse $M\times N\times K$ GEMM}};
+%%%last matrix Green
+\begin{scope}[local bounding box=DM3,shift={(6,-2.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM3}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=GreenL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+%
+\node[below=0.7 of DM3,align=center](CM){C matrix\\ (Dense)};
+\draw[|-|,thick]([yshift=9.5]cell-1-1DM3.north west)--node[above=0pt,
+                       font=\sffamily\small]{N}([yshift=9.5]cell-4-1DM3.north east);
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM3.south east)--node[right=0pt,
+                       font=\sffamily\small]{M}([xshift=7.5]cell-4-1DM3.north east);
+%
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM1)(cell-4-1DM2),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+%%%last upper matrix brown
+\begin{scope}[local bounding box=DM4,shift={(6,3.5)}]
+\def\columns{4}
+\def\rows{8}
+\def\br{DM4}
+
+\foreach \x in {1,...,\columns}{
+    \foreach \y in {1,...,\rows}{
+        %
+        \node[draw=black!80, fill=BrownL, minimum width=\cellsize,
+                    minimum height=\cellheight, line width=2pt] (cell-\x-\y\br) at (\x*\cellsize,-\y*\cellheight) {};
+    }
+}
+\end{scope}
+%
+\node[above=0.2 of DM4,align=center](BM){Right-hand matrix\\ (Dense)};
+\draw[|-|,thick]([xshift=7.5]cell-4-8DM4.south east)--node[right=0pt,
+                       font=\sffamily\small]{K}([xshift=7.5]cell-4-1DM4.north east);
+\node[left=1mm of DM1.west,rotate=90,anchor=south]{A matrix (Sparse)};
+%fitting
+\node[draw=red,inner xsep=1.2mm,inner ysep=1.2mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM4)(cell-1-8DM4),line width=3.5pt](BB4){};
+\draw[red,line width=1.5pt](BB4)--(BB1.east);
+\node[draw=red,inner xsep=1.0mm,inner ysep=1.0mm,outer sep=0pt,
+yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
+\draw[red,line width=1.5pt](BB3)--(BB1.south east);
+\end{scope}
+\path[]($(RIGHT)!0.5!(LEFT)$)--++(90:6)coordinate(GO);
+\path[]($(RIGHT)!0.5!(LEFT)$)--++(270:6)coordinate(DO);
+\path[VioletLine!60,mysnake,line width=1pt](GO)--(DO);
+\end{tikzpicture}
+```
+
+:::
 
 The 2:4 pattern reinforces the central reality of the memory wall: hardware accelerators gain efficiency not by computing on zeros faster, but by eliminating their transfer entirely. The reduced weight payload can lower traffic across HBM and on-chip SRAM. A roofline comparison must use consistent accounting: useful dense-equivalent operations can stay fixed while bytes decrease, whereas the count of physically executed sparse operations also decreases. Metadata and activation traffic remain in either traffic budget.
 
@@ -2476,7 +2923,7 @@ Production machine learning workloads combine regular dense matrix kernels with 
 
 Within a single neural network, memory access behavior varies sharply across layer types. Convolutional layers exhibit high spatial locality and register reuse as small weight kernels slide across input feature maps. Fully connected layers and dense attention execute regular matrix multiplications, but their large parameter matrices or key-value caches can exceed on-chip SRAM capacity and become bandwidth bound when operational reuse is low. Variable sequence lengths complicate memory buffer allocation, but the attention operations within each sequence remain regular, contiguous matrix multiplies.
 
-True memory irregularity arises from three distinct architectural patterns: unstructured sparsity,[^fn-sparsity-memory-access] embedding lookups, and dynamic token routing. In unstructured sparsity, nonzero weights or activations are stored in compressed formats (such as CSR or COO) that require pointer indirection to decode operand coordinates. In embedding tables, sparse categorical IDs select arbitrary rows from tables spanning tens of gigabytes in DRAM, transforming sequential memory transfers into uncoalesced, scattered reads. DLRM, the volume's capacity-bound lighthouse, is the extreme case. Its embedding tables exceed one accelerator's memory, and each lookup fetches a short row from an address known only when the input arrives, so neither caches nor prefetchers can anticipate it. In Mixture-of-Experts (MoE)\index{MoE!dynamic computation paths} models, routing gates direct tokens to different expert networks based on input context; while deterministic for a given input, token assignments vary across batches, disrupting prefetch pipelines and unbalancing execution queues across parallel cores.
+True memory irregularity arises from three distinct architectural patterns: unstructured sparsity,[^fn-sparsity-memory-access] embedding lookups, and dynamic token routing. In unstructured sparsity, nonzero weights or activations are stored in compressed formats (such as CSR or COO) that require pointer indirection to decode operand coordinates. In embedding tables, sparse categorical IDs select arbitrary rows from tables spanning tens of gigabytes in DRAM, transforming sequential memory transfers into uncoalesced, scattered reads. DLRM, the book's capacity-bound lighthouse, is the extreme case. Its embedding tables exceed one accelerator's memory, and each lookup fetches a short row from an address known only when the input arrives, so neither caches nor prefetchers can anticipate it. In Mixture-of-Experts (MoE)\index{MoE!dynamic computation paths} models, routing gates direct tokens to different expert networks based on input context; while deterministic for a given input, token assignments vary across batches, disrupting prefetch pipelines and unbalancing execution queues across parallel cores.
 
 [^fn-sparsity-memory-access]: [offset=-17mm] **Sparsity and memory irregularity**\index{Sparsity!memory access irregularity}: Unstructured sparse formats commonly gather nonzero elements through indirect addressing, which can weaken sequential access and make metadata overhead significant. Structured sparsity preserves hardware-friendly blocks, so its access behavior differs from arbitrary pruning. Without suitable kernels or hardware support, an unstructured sparse model can run slower than its dense counterpart despite performing fewer arithmetic operations.
 
@@ -2712,6 +3159,7 @@ class InterconnectHierarchy:
     # The "bandwidth taper" must hold: HBM > NVLink > PCIe > Network
     check(hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_bw, "Bandwidth hierarchy violated. HBM > NVLink > PCIe > Network")
     check(taper_hbm > taper_nvlink > taper_pcie > taper_net, "bandwidth taper HBM > NVLink > PCIe > Network must hold")
+    check(taper_pcie / taper_net < 2, "PCIe and the NIC are comparable, so the equation uses > rather than >> for that step")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_a100_gb_per_s_str = fmt_bandwidth(nvlink_a100, unit=GB / second, precision=0, commas=False)
@@ -2722,7 +3170,7 @@ class InterconnectHierarchy:
     # Bandwidth-taper equation — one consistent chip (H100-class) so HBM, NVLink,
     # PCIe (Gen5), and the NDR network link cannot mix incompatible generations.
     taper_eq_math = fmt_display_math(
-        rf"\begin{{aligned}} \text{{HBM ({taper_hbm.to(GB/second).magnitude:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink.to(GB/second).magnitude:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie.to(GB/second).magnitude:.0f} GB/s)}} \gg \text{{Network ({taper_net.to(GB/second).magnitude:.0f} GB/s)}} \end{{aligned}}"
+        rf"\begin{{aligned}} \text{{HBM ({taper_hbm.to(GB/second).magnitude:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink.to(GB/second).magnitude:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie.to(GB/second).magnitude:.0f} GB/s)}} > \text{{Network ({taper_net.to(GB/second).magnitude:.0f} GB/s)}} \end{{aligned}}"
     )
 ```
 
@@ -2860,12 +3308,14 @@ class RooflineGap:
     h_v100 = Hardware.Cloud.V100
     h_a100 = Hardware.Cloud.A100
     h_h100 = Hardware.Cloud.H100
+    h_b200 = Hardware.Cloud.B200
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Ridge Points (FLOP/byte) directly from Twins
     v100_ridge = h_v100.ridge_point().to(flop / byte).magnitude
     a100_ridge = h_a100.ridge_point().to(flop / byte).magnitude
     h100_ridge = h_h100.ridge_point().to(flop / byte).magnitude
+    b200_ridge = h_b200.ridge_point().to(flop / byte).magnitude
 
     # Step 2: FP32 Ridge for A100
     a100_ridge_fp32 = (h_a100.compute.precision_flops['fp32'] / h_a100.memory.bandwidth).to(flop / byte).magnitude
@@ -2889,6 +3339,7 @@ class RooflineGap:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Ridge points must climb: H100 > A100 > V100
     check(h100_ridge > a100_ridge > v100_ridge, f"Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
+    check(abs(b200_ridge / h100_ridge - 1) < 0.1, "Prose says the B200 ridge holds near the H100 level.")
     check(relu_gap >= 1000, f"ReLU gap ({relu_gap:.0f}x) is too small.")
     check(dense_matmul_ai > h100_ridge, f"Large matmul should clear the H100 ridge, got AI={dense_matmul_ai:.0f}.")
     check(
@@ -2911,6 +3362,9 @@ class RooflineGap:
     v100_ridge_str = fmt_arithmetic_intensity(h_v100.ridge_point(), unit=flop / byte, commas=False)
     a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, commas=False)
     h100_ridge_str = fmt_arithmetic_intensity(h_h100.ridge_point(), unit=flop / byte, commas=False)
+    v100_ridge_int_str = fmt_arithmetic_intensity(round(v100_ridge) * flop / byte, unit=flop / byte, precision=0, commas=False)
+    h100_ridge_int_str = fmt_arithmetic_intensity(round(h100_ridge) * flop / byte, unit=flop / byte, precision=0, commas=False)
+    b200_ridge_int_str = fmt_arithmetic_intensity(round(b200_ridge) * flop / byte, unit=flop / byte, precision=0, commas=False)
 
     legacy_ai_str = fmt(legacy_ai, precision=0, commas=False)
     relu_ai_str = fmt(relu_ai, precision=3, commas=False)
@@ -3092,7 +3546,7 @@ plt.close()
 
 :::
 
-Because both curves are normalized to the V100, the separation between them measures how far the hardware ridge point, the threshold a kernel must clear to become compute bound, has risen since that generation. @Fig-rising-ridge plots that same ratio generation by generation, leaving out the H200 exception, so the doubling of the gap appears directly as the ridge point roughly doubling from V100 (139 FLOP/byte) to H100 (295 FLOP/byte) and then holding near that level on B200 (281 FLOP/byte). A kernel that cleared the V100 ridge comfortably can fall below the H100 ridge without any change to its code, so newer hardware demands more operational reuse before execution reaches peak throughput.
+Because both curves are normalized to the V100, the separation between them measures how far the hardware ridge point, the threshold a kernel must clear to become compute bound, has risen since that generation. @Fig-rising-ridge plots that same ratio generation by generation, leaving out the H200 exception, so the doubling of the gap appears directly as the ridge point roughly doubling from V100 (`{python} RooflineGap.v100_ridge_int_str`) to H100 (`{python} RooflineGap.h100_ridge_int_str`) and then holding near that level on B200 (`{python} RooflineGap.b200_ridge_int_str`). A kernel that cleared the V100 ridge comfortably can fall below the H100 ridge without any change to its code, so newer hardware demands more operational reuse before execution reaches peak throughput.
 
 ::: {#fig-rising-ridge fig-env="figure" fig-pos="htb" fig-cap="**The Rising Ridge**: Hardware arithmetic intensity (FLOP/byte) over time computed as each chip's dense FP16 tensor peak divided by its memory bandwidth. This is the arithmetic intensity a kernel must reach before compute rather than bandwidth limits it. As compute capability grows faster than memory bandwidth, the ridge point rises from V100 through H100 and remains high on B200. This trend explains why architectures with high data reuse flourish while low-reuse workloads face a growing performance penalty." fig-alt="Line plot showing dense-FP16 arithmetic intensity ridge points: about 140 FLOP/byte for V100, 153 for A100, 295 for H100, and 281 for B200. Shaded regions indicate memory-rich and compute-dense zones."}
 
@@ -4941,34 +5395,38 @@ A single convolution can be implemented with dozens of valid tiling strategies, 
 # │ Context: @sec-hardware-acceleration-compiler-support-172e introduction
 # │
 # │ Goal: Demonstrate the practical impact of ML compiler optimizations.
-# │ Show: The 5-6× speedup achieved via graph and memory optimizations.
-# │ How: Contrast raw framework latency with optimized compiler output.
+# │ Show: Batch-one ResNet-50 on the reference H100, eager framework vs compiled engine.
+# │ How: The shared serving profile (mlsysim.engine.serving_profile), the same
+# │      model the serving chapter's runtime comparison uses.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt
+from mlsysim.engine.serving_profile import resnet50_h100_profile
+from mlsysim.fmt import check, fmt_count, fmt_multiple, fmt_time
 
 class CompilerSpeedupCalc:
-    """ResNet-50 latency improvement from ML compiler graph and memory optimizations."""
+    """ResNet-50 batch-one latency, eager FP16 vs compiled FP16 engine, on the reference H100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    naive_inference_ms = 47  # scenario assumption (illustrative, not a measurement)
-    optimized_inference_ms = 8  # scenario assumption (illustrative, not a measurement)
+    profile = resnet50_h100_profile()
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    compiler_speedup = naive_inference_ms / optimized_inference_ms
+    naive_inference = profile.eager_fp16(batch=1)
+    optimized_inference = profile.tensorrt("fp16", batch=1)
+    compiler_speedup = (naive_inference / optimized_inference).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(compiler_speedup, 1) == 5.9, f"Compiler speedup mismatch: {compiler_speedup}")
+    check(compiler_speedup > 5, "compiling the batch-one graph should remove most of its fixed cost")
+    check(profile.fused_kernels < profile.eager_kernels, "fusion must reduce the kernel count")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    # Surface suffix-bearing aliases for prose; raw ints kept above for the
-    # arithmetic at line 5070.
-    naive_inference_ms_str = fmt_time(naive_inference_ms, 'millisecond', precision=0, commas=False)
-    optimized_inference_ms_str = fmt_time(optimized_inference_ms, 'millisecond', precision=0, commas=False)
+    naive_inference_ms_str = fmt_time(naive_inference, 'millisecond', precision=2, commas=False)
+    optimized_inference_ms_str = fmt_time(optimized_inference, 'millisecond', precision=2, commas=False)
     compiler_speedup_mult_str = fmt_multiple(compiler_speedup, precision=1, commas=False)
+    eager_kernels_str = fmt_count(profile.eager_kernels, commas=False)
+    fused_kernels_str = fmt_count(profile.fused_kernels, commas=False)
 ```
 
-In this scenario, inference latency drops from `{python} CompilerSpeedupCalc.naive_inference_ms_str` to `{python} CompilerSpeedupCalc.optimized_inference_ms_str`, a `{python} CompilerSpeedupCalc.compiler_speedup_mult_str` improvement without altering the model's mathematical output. The latencies are illustrative rather than measured, but the mechanism is general. Graph rewrites, kernel selection, memory planning, and scheduling systematically apply kernel fusion (@sec-hardware-acceleration-kernel-fusion-7faf) and memory-efficient tiling (@sec-hardware-acceleration-memoryefficient-tiling-strategies-9fce) to convert theoretical hardware FLOP/s into delivered throughput [@chen2018tvm; @nvidia2024tensorrt].
+On the reference H100, the modeled batch-one forward pass falls from `{python} CompilerSpeedupCalc.naive_inference_ms_str` in an eager framework to `{python} CompilerSpeedupCalc.optimized_inference_ms_str` as a compiled FP16 engine, a `{python} CompilerSpeedupCalc.compiler_speedup_mult_str` improvement without altering the model's mathematical output. The arithmetic per image is unchanged. The gain comes from fusing the network's `{python} CompilerSpeedupCalc.eager_kernels_str` framework kernels into `{python} CompilerSpeedupCalc.fused_kernels_str` and launching them as one graph instead of one Python dispatch at a time, which removes the fixed cost that dominates a single image. The latencies are modeled rather than measured, and @sec-model-serving-inference-runtime-selection-5eef separates the same gap into the contribution of each runtime, but the mechanism is general. Graph rewrites, kernel selection, memory planning, and scheduling systematically apply kernel fusion (@sec-hardware-acceleration-kernel-fusion-7faf) and memory-efficient tiling (@sec-hardware-acceleration-memoryefficient-tiling-strategies-9fce) to convert theoretical hardware FLOP/s into delivered throughput [@chen2018tvm; @nvidia2024tensorrt].
 
 This pipeline embodies the hardware-software co-design principle introduced in @sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28. Machine learning compilers bridge high-level model specifications and low-level execution engines by restructuring computations, selecting hardware-specialized kernels, and planning tensor storage lifetimes [@chen2018tvm]. They build on classical compiler foundations while introducing tensor- and graph-level transformations.
 
@@ -5271,7 +5729,7 @@ Data center scaling and edge deployment represent opposite ends of a deployment 
 
 ## Heterogeneous SoC Design {#sec-hardware-acceleration-heterogeneous-soc-ai-acceleration-b1bb}
 
-Edge, mobile, and automotive deployments operate under strict physical constraints: sealed enclosures without active fans limit thermal dissipation to a few watts, while battery capacity caps total energy consumption. To deliver machine learning capabilities within these boundaries, heterogeneous SoC\index{System-on-chip!heterogeneous AI acceleration} architectures integrate general-purpose CPU cores, GPU shader arrays, digital signal processors (DSPs), and specialized neural processing units (NPUs) onto a single silicon die sharing a unified memory subsystem. The workload mapping problem introduced for discrete accelerators persists, but it expands to include hardware operator coverage, cross-engine transfer overheads, real-time deadlines, and dynamic thermal throttling. Two of the volume's lighthouses take over from ResNet-50 here. MobileNetV2, the compute-bound vision model built for phone cameras, runs its convolutions on a phone's NPU within a few watts. Keyword spotting (KWS), the power-bound lighthouse, listens continuously on a DSP or microcontroller within milliwatts. Both run on silicon that shares one memory system among every engine on the chip.
+Edge, mobile, and automotive deployments operate under strict physical constraints: sealed enclosures without active fans limit thermal dissipation to a few watts, while battery capacity caps total energy consumption. To deliver machine learning capabilities within these boundaries, heterogeneous SoC\index{System-on-chip!heterogeneous AI acceleration} architectures integrate general-purpose CPU cores, GPU shader arrays, digital signal processors (DSPs), and specialized neural processing units (NPUs) onto a single silicon die sharing a unified memory subsystem. The workload mapping problem introduced for discrete accelerators persists, but it expands to include hardware operator coverage, cross-engine transfer overheads, real-time deadlines, and dynamic thermal throttling. Two of the book's lighthouses take over from ResNet-50 here. MobileNetV2, compute-bound in its efficient regime and built for phone cameras, runs its convolutions on a phone's NPU within a few watts. Keyword spotting (KWS), the power-bound lighthouse, listens continuously on a DSP or microcontroller within milliwatts. Both run on silicon that shares one memory system among every engine on the chip.
 
 ### Mobile SoC architecture evolution {#sec-hardware-acceleration-mobile-soc-architecture-evolution-6ca8}
 
@@ -5329,7 +5787,7 @@ Heterogeneous acceleration demonstrates that system efficiency is fundamentally 
 
 ## Choosing an Accelerator {#sec-hardware-acceleration-choosing-accelerator-6b2d}
 
-Every section of this chapter ends in the same question asked at a different level: which machine should run a given workload. The question cannot be answered from a datasheet, because the resource that binds belongs to the workload on a particular machine rather than to the machine alone. The volume's five lighthouses make the point on a single reference machine. Their bytes and operations differ by orders of magnitude, and each one exhausts a different resource of an H100 first (@tbl-hw-acceleration-lighthouse-memory-compute).
+Every section of this chapter ends in the same question asked at a different level: which machine should run a given workload. The question cannot be answered from a datasheet, because the resource that binds belongs to the workload on a particular machine rather than to the machine alone. The book's five lighthouses make the point on a single reference machine. Their bytes and operations differ by orders of magnitude, and each one exhausts a different resource of an H100 first (@tbl-hw-acceleration-lighthouse-memory-compute).
 
 ```{python}
 #| echo: false
@@ -5406,7 +5864,7 @@ class LighthouseMemoryCompute:
 | **DLRM**                   | Capacity bound  | `{python} LighthouseMemoryCompute.dlrm_bytes_str` of tables | Tables dominate either way                            | Few per lookup                                                  | Memory capacity: tables exceed one device's `{python} LighthouseMemoryCompute.h100_mem_str` |
 | **Keyword spotting (KWS)** | Power bound     | `{python} LighthouseMemoryCompute.kws_fp16_str`          | `{python} LighthouseMemoryCompute.kws_int8_str`          | `{python} LighthouseMemoryCompute.kws_ops_str`                  | None on an H100; built for a microcontroller's milliwatt budget            |
 
-: **Lighthouse Memory and Compute**: Model bytes and operations for the volume's five lighthouses from the model registry, with the resource each exhausts first on one H100. The operation counts are per inference, and per generated token for GPT-2 XL decode; DLRM's bytes are dominated by its embedding tables, whose lookups perform little arithmetic. {#tbl-hw-acceleration-lighthouse-memory-compute tbl-colwidths="[16,13,14,14,16,27]"}
+: **Lighthouse Memory and Compute**: Model bytes and operations for the book's five lighthouses from the model registry, with the resource each exhausts first on one H100. The operation counts are per inference, and per generated token for GPT-2 XL decode; DLRM's bytes are dominated by its embedding tables, whose lookups perform little arithmetic. {#tbl-hw-acceleration-lighthouse-memory-compute tbl-colwidths="[16,13,14,14,16,27]"}
 
 The table turns the chapter's diagnosis into a selection rule. ResNet-50 rewards arithmetic throughput on a supported INT8 path, GPT-2 XL decode rewards memory bandwidth, DLRM rewards memory capacity, and MobileNetV2 and KWS reward energy per inference on chips that never see a data center. The rest of the section applies that rule at three levels: the configurations accelerator families adopt for their target deployments, the cost of delivered throughput, and the energy each request consumes.
 
