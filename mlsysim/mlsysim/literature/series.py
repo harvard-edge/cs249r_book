@@ -183,3 +183,16 @@ class Series:
         "Number of standard ONNX operators defined through each opset release.",
         numeric=("opset", "operators"),
     )
+    InferenceXDeepSeekR1 = TrendSeries(
+        "inferencex_dsr1_fp8_1k1k",
+        _lit("SemiAnalysis InferenceX (formerly InferenceMAX), open benchmark results (Apache-2.0), "
+             "DeepSeek-R1-0528, FP8, 1,024 input / 1,024 output tokens, snapshot 2026-10-12",
+             "https://github.com/SemiAnalysisAI/InferenceX",
+             "one row per measured serving configuration (hardware, framework, parallelism, concurrency), "
+             "latest published curve per configuration from inferencex.semianalysis.com/api/v1/benchmarks; "
+             "interactivity is median output tokens/s per user (1/TPOT); throughputs are per GPU; "
+             "run_url links the GitHub Actions run that produced each row"),
+        "Measured per-GPU throughput versus per-user interactivity for LLM serving configurations.",
+        numeric=("isl", "osl", "conc", "disagg", "num_prefill_gpu", "num_decode_gpu", "interactivity_tok_s_user",
+                 "output_tok_s_gpu", "total_tok_s_gpu", "joules_per_output_token"),
+    )
