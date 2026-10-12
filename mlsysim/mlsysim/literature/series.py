@@ -196,3 +196,26 @@ class Series:
         numeric=("isl", "osl", "conc", "disagg", "num_prefill_gpu", "num_decode_gpu", "interactivity_tok_s_user",
                  "output_tok_s_gpu", "total_tok_s_gpu", "joules_per_output_token"),
     )
+    AcceleratorPowerRatings = TrendSeries(
+        "accelerator_power_ratings",
+        _lit("Published accelerator power ratings from vendor white papers, datasheets, and architecture "
+             "papers (per-row source_key and source_note); transcription verified 2026-09-29",
+             "https://doi.org/10.1145/3079856.3080246",
+             "ratings mix TDP, maximum board power, maximum TGP, and maximum power as each vendor states "
+             "them (power_metric column); they are design envelopes, not measured workload power; parts "
+             "without a citable published rating (MI100, Gaudi 1, TPU v4 onward, wafer-scale) are omitted; "
+             "url points to the TPU v1 paper, the earliest row's architecture source"),
+        "Published power rating per accelerator package by release year, 2012-2025.",
+        numeric=("release_year", "power_w"),
+    )
+    AISupercomputers = TrendSeries(
+        "ai_supercomputers",
+        _lit("Epoch AI, Data on AI Supercomputers (CC BY 4.0), snapshot 2026-10-12; method of Pilz et al. "
+             "(2025), Trends in AI Supercomputers", "https://epoch.ai/data/ai-supercomputers",
+             "existing single-cluster systems in Epoch's standard-analysis set; h100_equivalents is Epoch's "
+             "performance-normalized size; power_mw is facility power as Epoch records or estimates it; "
+             "some Chinese systems are anonymized and rounded; two owner names corrected from "
+             "'Univeristy' to 'University'"),
+        "Size, chip count, and power of AI supercomputers by first operational date.",
+        numeric=("h100_equivalents", "total_chips", "power_mw"),
+    )
