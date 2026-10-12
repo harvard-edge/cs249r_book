@@ -968,6 +968,15 @@ MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/H100 teaching examples.",
 )
 
+MLPERF_INFERENCE_V50_RESNET50_H100 = Provenance(
+    id="prov:mlperf-inference-v50-resnet50-h100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="MLPerf Inference v5.0 Datacenter, closed division, ResNet-50: Cisco UCS C885A M8 (8x H100-SXM-80GB, TensorRT, INT8), result 5.0-0005; Offline 715,761 samples/s, Server 652,002 samples/s at p99 10.86 ms under a 15 ms bound",
+    url="https://github.com/mlcommons/inference_results_v5.0/tree/main/closed/Cisco/results/C885A_H100_SXMx8_TRT/resnet50",
+    verified="2026-10-12",
+    notes="Per-accelerator figures divide the eight-GPU system result by eight, as MLCommons and NVIDIA do; MLPerf itself reports system throughput.",
+)
+
 NVIDIA_NIM_LLAMA3_8B_H100 = Provenance(
     id="prov:nvidia-nim-llama3-8b-h100",
     kind=ProvenanceKind.INDUSTRY_REPORT,
