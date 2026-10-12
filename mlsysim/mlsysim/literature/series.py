@@ -240,3 +240,14 @@ class Series:
         "Storage throughput sustained per MLPerf Storage training submission by emulated accelerator count.",
         numeric=("num_accelerators", "num_hosts", "num_runs", "au_mean_pct", "io_GBps"),
     )
+    MLPerfTrainingLLMScaling = TrendSeries(
+        "mlperf_training_llm_scaling",
+        _lit("MLCommons, MLPerf Training results v3.1, v4.1, v5.0, v5.1 (Apache-2.0), snapshot 2026-10-12",
+             "https://mlcommons.org/benchmarks/training/",
+             "one row per system x LLM benchmark (gpt3 = GPT-3 175B pretraining slice; llama31_405b); "
+             "minutes recomputed from MLLOG run_start to run_stop of successful runs (olympic mean when "
+             ">= 5 runs), so they can differ slightly from official RCP-normalized scores; global batch "
+             "size varies with scale, so time-to-train mixes strong scaling with batch-dependent convergence"),
+        "Time-to-train of MLPerf Training LLM benchmarks by accelerator count and system.",
+        numeric=("accelerators", "runs", "min_minutes", "mean_minutes", "score_minutes", "global_batch_size", "trained_samples_median"),
+    )

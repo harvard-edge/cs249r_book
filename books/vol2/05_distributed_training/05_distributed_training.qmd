@@ -2606,6 +2606,133 @@ plt.close()
 
 :::
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED SCALING IN MLPERF TRAINING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after @fig-scaling-tax and @fig-mlperf-training-scaling.
+# │
+# │ Goal: Show the scaling tax in end-to-end benchmark runs.
+# │ Show: Eos GPT-3 512 -> 10,752 H100 (21×) cut time 14.9× (71% efficiency);
+# │       five same-round series keep 71-84% of ideal at their largest size.
+# │ How: Relative scaling efficiency (T0·N0)/(T·N) between the smallest and
+# │      largest configuration of each series in
+# │      Literature.Series.MLPerfTrainingLLMScaling.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_multiple, fmt_percent, fmt_percent_range
+
+def _series(rows, rnd, submitter, benchmark, accel):
+    """One submitter's same-round configurations of one benchmark, by size."""
+    pts = [
+        r for r in rows if r["round"] == rnd and r["submitter"].startswith(submitter) and r["benchmark"] == benchmark and accel in r["accelerator"]
+    ]
+    return sorted(pts, key=lambda r: r["accelerators"])
+
+def _efficiency(pts):
+    """Scaling efficiency of the largest configuration relative to the smallest."""
+    a, z = pts[0], pts[-1]
+    return (a["score_minutes"] * a["accelerators"]) / (z["score_minutes"] * z["accelerators"])
+
+def _build(rows, specs):
+    return [(label, _series(rows, *key)) for label, key in specs]
+
+def _effs(series):
+    return [_efficiency(p) for _, p in series]
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MLPerfScaling:
+    """Relative scaling efficiency of same-round MLPerf Training LLM series."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.MLPerfTrainingLLMScaling.entries
+    specs = (
+        ("GPT-3, NVIDIA H100 (v3.1)", ("v3.1", "NVIDIA", "gpt3", "H100-SXM5")),
+        ("GPT-3, Google TPU v5p (v4.1)", ("v4.1", "Google", "gpt3", "TPU-v5p")),
+        ("GPT-3, Google Trillium (v4.1)", ("v4.1", "Google", "gpt3", "TPU-trillium")),
+        ("Llama 3.1 405B, NVIDIA H100 (v5.0)", ("v5.0", "NVIDIA", "llama31_405b", "H100-SXM5")),
+        ("Llama 3.1 405B, GB200 (v5.0)", ("v5.0", "IBM+CoreWeave", "llama31_405b", "Blackwell")),
+    )
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    series = _build(rows, specs)
+    effs = _effs(series)
+    eos = series[0][1]
+    eos_n_mult = eos[-1]["accelerators"] / eos[0]["accelerators"]
+    eos_t_mult = eos[0]["score_minutes"] / eos[-1]["score_minutes"]
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(all(len(p) >= 3 for _, p in series), "Each plotted series has at least three sizes.")
+    check(all(e < 1 for e in effs), "Prose says no series reaches ideal scaling.")
+    check(0.65 <= min(effs) and max(effs) <= 0.9, f"Prose says 71-84 percent at the largest size, got {effs}.")
+    check(20 <= eos_n_mult <= 22 and 14 <= eos_t_mult <= 16, "Prose quotes 21x accelerators for 14.9x less time on Eos.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    eos_n0_str = fmt_count(eos[0]["accelerators"], label="H100 GPU", plural_label="H100 GPUs")
+    eos_n1_str = fmt_int(eos[-1]["accelerators"])
+    eos_t0_str = fmt_int(eos[0]["score_minutes"])
+    eos_t1_str = fmt(round(eos[-1]["score_minutes"], 1), precision=1)
+    eos_n_mult_str = fmt_multiple(round(eos_n_mult))
+    eos_t_mult_str = fmt_multiple(round(eos_t_mult, 1))
+    eos_eff_pct_str = fmt_percent(round(effs[0], 2), precision=0, style="prose")
+    eff_range_str = fmt_percent_range(round(min(effs), 2), round(max(effs), 2), precision=0, style="prose")
+    series_count_str = fmt_int(len(series))
+```
+
+Published benchmark runs show the tax in practice. MLPerf Training times complete runs to a fixed quality target, and several submitters report the same system at several sizes within one round [@mattson2020mlperf; @mlcommons2025training]. @Fig-mlperf-training-scaling plots `{python} MLPerfScaling.series_count_str` such series for the GPT-3 and Llama 3.1 405B benchmarks against the ideal line through each series' smallest configuration. On NVIDIA's Eos cluster, GPT-3 trained in about `{python} MLPerfScaling.eos_t0_str` minutes on `{python} MLPerfScaling.eos_n0_str` and `{python} MLPerfScaling.eos_t1_str` minutes on `{python} MLPerfScaling.eos_n1_str`, so a `{python} MLPerfScaling.eos_n_mult_str` increase in accelerators cut the time `{python} MLPerfScaling.eos_t_mult_str`, a scaling efficiency (@eq-distributed-training-scaling-efficiency, measured relative to the smallest configuration rather than one device) of `{python} MLPerfScaling.eos_eff_pct_str`. Across the series, the largest configuration keeps `{python} MLPerfScaling.eff_range_str` of ideal. Two effects compound in these numbers. Communication and coordination grow with worker count, and the larger configurations also train with larger global batches, which can require more samples to reach the target (@sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961). Separating the two requires the step-level accounting that follows.
+
+::: {#fig-mlperf-training-scaling fig-env="figure" fig-pos="htb" fig-cap="**Measured Scaling in MLPerf Training**: Time to train against accelerator count on logarithmic axes for five same-round series of the GPT-3 175B and Llama 3.1 405B benchmarks. Each dashed line is ideal scaling from that series' smallest configuration, and the label gives the scaling efficiency of its largest configuration relative to its smallest. Global batch size grows with scale in several series, so the gap from ideal includes batch-dependent convergence as well as communication and coordination. Times are recomputed from the published run logs and can differ slightly from official scores. Data from @mlcommons2025training." fig-alt="Log-log line chart of time to train in minutes from about 3 to 250 against accelerators from about 500 to 11,000. Five solid lines with markers fall from left to right, each beside a dashed ideal line that starts at its first point and falls faster. GPT-3 on NVIDIA H100 runs from 58 minutes at 512 GPUs to 3.9 minutes at 10,752, labeled 71 percent. The other series, GPT-3 on TPU v5p and Trillium and Llama 3.1 405B on H100 and GB200, end between 73 and 84 percent."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED SCALING IN MLPERF TRAINING (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-mlperf-training-scaling.
+# │
+# │ Goal: Plot measured time-to-train against accelerators with ideal lines.
+# │ Show: Five series, dashed ideal per series, efficiency label at the end.
+# │ How: MLPerfScaling (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.8))
+_C = MLPerfScaling
+_cols = [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"], COLORS["VioletLine"], COLORS["RedLine"]]
+for (_lab, _p), _e, _c in zip(_C.series, _C.effs, _cols):
+    _n = [r["accelerators"] for r in _p]
+    _t = [r["score_minutes"] for r in _p]
+    ax.plot(_n, _t, "-o", ms=4, lw=1.8, color=_c, label=_lab, zorder=3)
+    ax.plot([_n[0], _n[-1]], [_t[0], _t[0] * _n[0] / _n[-1]], "--", lw=1, color=_c, alpha=0.7, zorder=2)
+    ax.annotate(
+        f"{_e:.0%}",
+        (_n[-1], _t[-1]),
+        xytext=(6, 0),
+        textcoords="offset points",
+        fontsize=8,
+        color=_c,
+        va="center",
+        bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", pad=0.2),
+        zorder=5,
+    )
+ax.set_xscale("log")
+ax.set_yscale("log")
+_xt = [512, 1024, 2048, 4096, 8192]
+ax.set_xticks(_xt)
+ax.set_xticklabels([f"{t:,}" for t in _xt])
+ax.minorticks_off()
+ax.set_xlabel("Accelerators")
+ax.set_ylabel("Time to train (minutes, log scale)")
+ax.legend(fontsize=7.5, loc="lower left", frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
 Predicting a run requires returning to the Fleet Law (principle \ref{pri-distributed-step-time}) from @sec-distributed-training-systems-physics-cluster-a42d. As the fleet-scale counterpart of the single-machine iron law, it separates compute, communication, and coordination into additive terms, labeled here with their C³ names:
 
 $$ \DistributedStepTime(\DeviceCount) = \underbrace{\frac{\IronLawComputeTime}{\DeviceCount}}_{\text{Compute Term}} + \underbrace{\CommunicationTime(\DeviceCount)}_{\text{Communication Term}} + \underbrace{\SynchronizationTime(\DeviceCount)}_{\text{Coordination Term}} - \OverlappedTime $$
