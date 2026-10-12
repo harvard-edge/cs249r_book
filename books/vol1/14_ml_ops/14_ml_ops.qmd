@@ -69,6 +69,79 @@ A **silent failure**\index{Silent failure!definition} is a production model that
 
 Data distributions shift, user behavior changes, and the world moves on from the conditions under which the model was trained. ML models that succeed in development can fail to achieve sustained production use when postdeployment ownership and monitoring are absent. The root cause is an operational mismatch\index{Operational mismatch!ML vs. traditional software}: availability-focused monitoring tracks server uptime, request latency, and request success rates, while ML monitoring must also track statistical health, including accuracy over time, input-distribution shift, and per-segment prediction quality. A model can degrade substantially while throwing no exceptions, triggering no infrastructure alarms, and maintaining perfect uptime.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED TEMPORAL DECAY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the operational-mismatch paragraph and
+# │          @fig-temporal-shift.
+# │
+# │ Goal: Show that accuracy loss over time is measured, not hypothetical.
+# │ Show: Six Wild-Time datasets lose 4.0 to 18.5 points on later-period data.
+# │ How: id_mean minus ood_mean per row of Literature.Series.TemporalShiftWildTime.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt
+
+# ┌── LEGO ───────────────────────────────────────────────
+class TemporalShiftDrop:
+    """Performance drop from training-period to later-period test data."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.TemporalShiftWildTime.entries
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    drops = [r["id_mean"] - r["ood_mean"] for r in rows]
+    min_drop, max_drop = min(drops), max(drops)
+    dataset_count = len(rows)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(3 <= min_drop and max_drop <= 20, f"Prose quotes drops of ~4 to ~18.5 points, got {min_drop:.1f} to {max_drop:.1f}.")
+    check(dataset_count == 6, "Prose says six datasets (Wild-Time Table 1).")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    min_drop_str = fmt(min_drop, precision=0 if abs(min_drop - round(min_drop)) < 1e-9 else 1, commas=False)
+    max_drop_str = fmt(max_drop, precision=1, commas=False)
+```
+
+The degradation is measurable. In the Wild-Time benchmark, @yao2022wildtime train a model on data from one period and test it both on held-out data from that period and on data from later years, across six real datasets that span yearbook portraits, satellite imagery, hospital records, news, and scientific papers. @Fig-temporal-shift shows the result. On every dataset the same model scores lower on the later data, by `{python} TemporalShiftDrop.min_drop_str` to `{python} TemporalShiftDrop.max_drop_str` points of accuracy or of area under the curve (AUC), although nothing about the model or its serving path changed. The loss comes entirely from the world moving away from the training data, and only monitoring that compares predictions against fresh outcomes can see it.
+
+::: {#fig-temporal-shift fig-env="figure" fig-pos="htb" fig-cap="**Measured Accuracy Loss over Time**: For six datasets, performance of the same trained model on held-out test data from its training period (blue) and on data from a later period (red), with error bars showing one standard deviation over three training seeds. The label gives each drop in percentage points. MIMIC mortality is scored by AUC; the others by accuracy. Data from @yao2022wildtime." fig-alt="Dumbbell chart with six rows sorted by drop size: Yearbook portraits accuracy falls from 98.0 to 79.5 percent, MIMIC mortality AUC from 90.9 to 72.9, MIMIC readmission accuracy from 73.0 to 61.3, HuffPost news from 79.4 to 70.4, arXiv papers from 53.8 to 45.9, and FMoW satellite from 58.1 to 54.1. Blue dots mark training-period performance and red dots later-period performance, each with error bars, and each row is labeled with its drop in points."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED TEMPORAL DECAY (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-temporal-shift.
+# │
+# │ Goal: Compare training-period and later-period performance per dataset.
+# │ Show: Dumbbells with seed error bars, sorted by drop.
+# │ How: TemporalShiftDrop (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
+_rows = sorted(TemporalShiftDrop.rows, key=lambda r: r["id_mean"] - r["ood_mean"])
+for _i, _r in enumerate(_rows):
+    _a, _b = _r["id_mean"], _r["ood_mean"]
+    ax.plot([_b, _a], [_i, _i], color=COLORS["grid"], lw=2.5, zorder=1)
+    ax.errorbar(_a, _i, xerr=_r["id_std"], fmt="o", color=COLORS["BlueLine"], ms=7, capsize=2, zorder=3, label="Test data from the training period" if _i == 0 else None)
+    ax.errorbar(_b, _i, xerr=_r["ood_std"], fmt="o", color=COLORS["RedLine"], ms=7, capsize=2, zorder=3, label="Test data from a later period" if _i == 0 else None)
+    ax.text(_a + _r["id_std"] + 1.5, _i, f"$-${_a - _b:.1f} pts", va="center", fontsize=8, color=COLORS["primary"])
+ax.set_yticks(range(len(_rows)))
+ax.set_yticklabels([f"{r['dataset']} ({r['metric']})" for r in _rows])
+ax.set_xlim(40, 106); ax.set_xlabel("Performance (%)")
+ax.legend(loc="lower right", fontsize=8, frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
 The discipline that makes these invisible failures visible is **machine learning operations (MLOps)**\index{MLOps!emergence}\index{MLOps!production deployment challenges}. MLOps synthesizes monitoring, automation, and governance into production architectures that detect degradation, trigger retraining, and maintain system health throughout a model's operational lifetime. It inherits the automation and operations lineage of DevOps [@kreuzberger2023], but addresses a different failure mode. Conventional services can often be tested against deterministic code paths, while ML systems depend on training data distributions, learned parameters, and environmental conditions that shift continuously.
 
 The operational mismatch connects directly to the book's analytical foundations. If benchmarking provides the *sensors* for the system, MLOps is the complete *control system*, and the degradation equation\index{Degradation equation!operational implementation} (@eq-degradation) names the quantity it controls. Accuracy falls by a fitted sensitivity $\FittedSensitivity$ times the divergence between the serving and training distributions, so operations must measure that divergence continuously and estimate $\FittedSensitivity$ from paired drift and outcome data, because divergence alone does not prove that accuracy will fall. MLOps also formalizes interfaces and responsibilities across traditionally isolated domains (data science, machine learning engineering, and systems operations [@amershi2019]) through continuous retraining, A/B evaluation, graduated rollout, and standardized artifact tracking that supports reproducibility and auditability.
@@ -515,7 +588,7 @@ class AutomationROI:
 
 The debt is larger than manual retraining alone, because modeling code constitutes only a small fraction of a real-world deployment. Core modeling code is one peripheral component among ten around the ML system, alongside nine supporting subsystems spanning data verification, feature extraction, configuration, and machine resource management (@fig-technical-debt). Their presence broadens the maintenance surface; the diagram does not measure each component's cost.
 
-::: {#fig-technical-debt fig-env="figure" fig-pos="htb" fig-cap="**Hidden Infrastructure of ML Systems**: ML code is one of ten components arranged around the ML system at the center, alongside data collection, data verification, feature extraction, configuration, machine resource management, serving infrastructure, monitoring, analysis tools, and process management tools. Modeling occupies one box and the remaining nine identify the operational surface a deployment must also carry; box counts do not measure code volume or maintenance cost. Source: [@sculley2015hidden]." fig-alt="Hub-and-spoke diagram with the ML system at the center, connected by arrows to ten surrounding components: data collection, data verification, feature extraction, configuration, machine resource management, serving infrastructure, monitoring, analysis tools, process management tools, and ML code."}
+::: {#fig-technical-debt fig-env="figure" fig-pos="htb" fig-cap="**Hidden Infrastructure of ML Systems**: ML code is one of ten components arranged around the ML system at the center, alongside data collection, data verification, feature extraction, configuration, machine resource management, serving infrastructure, monitoring, analysis tools, and process management tools. Modeling occupies one circle and the remaining nine identify the operational surface a deployment must also carry; circle counts do not measure code volume or maintenance cost. Source: [@sculley2015hidden]." fig-alt="Hub-and-spoke diagram with the ML system at the center, connected by arrows to ten surrounding components: data collection, data verification, feature extraction, configuration, machine resource management, serving infrastructure, monitoring, analysis tools, process management tools, and ML code."}
 
 ```{.tikz}
 \scalebox{0.73}{%
@@ -1309,7 +1382,7 @@ How often to run this pipeline is not a property of the pipeline. Each run consu
 
 Training pipelines produce model candidates; model validation\index{Model validation!candidate selection}\index{Model validation!predeployment assessment} determines which candidates merit production deployment. Unlike research evaluation, where a model that beats a benchmark on a static test set may be considered successful, production validation must assess operational readiness under representative conditions and establish the monitoring and rollback controls needed after the distribution changes. This is where MLOps manages the verification gap\index{Verification gap!MLOps management} (@eq-verification-gap; principle \ref{pri-verification-gap}) rather than closing it. No test suite covers the deployment population, so validation keeps re-estimating performance as that population changes.
 
-The evaluation process begins with performance testing against a holdout test set\index{Holdout test set!performance evaluation} sampled to represent the current production population and refreshed as that population changes. Core metrics such as accuracy, area under the curve (AUC), precision, recall, and F1 score [@rainio2024] are computed and tracked longitudinally to detect degradation from data drift [@ibm_data_drift], the shift of the input distribution away from the one the model trained on. @Sec-ml-operations-model-infrastructure-monitoring-3988 shows how such drift appears in live telemetry.
+The evaluation process begins with performance testing against a holdout test set\index{Holdout test set!performance evaluation} sampled to represent the current production population and refreshed as that population changes. Core metrics such as accuracy, AUC, precision, recall, and F1 score [@rainio2024] are computed and tracked longitudinally to detect degradation from data drift [@ibm_data_drift], the shift of the input distribution away from the one the model trained on. @Sec-ml-operations-model-infrastructure-monitoring-3988 shows how such drift appears in live telemetry.
 
 Beyond static evaluation, production pipelines expose candidate weights to live traffic in controlled stages\index{Deployment!controlled, risk mitigation} (shadow, canary, and blue-green deployment) while bounding the blast radius, and @sec-ml-operations-model-deployment-b9b9 develops each. Validation defines the evidence every stage must produce before a candidate advances.
 
