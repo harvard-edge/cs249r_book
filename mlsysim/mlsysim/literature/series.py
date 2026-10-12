@@ -273,3 +273,14 @@ class Series:
         numeric=("gpu_num", "jobs", "job_share", "gpu_seconds", "gpu_time_share", "gpu_seconds_completed",
                  "gpu_seconds_failed", "gpu_seconds_canceled"),
     )
+    MLPerfInferenceDGXH100 = TrendSeries(
+        "mlperf_inference_dgx_h100",
+        _lit("MLCommons, MLPerf Inference datacenter results v3.1, v4.0, v4.1, v5.0 (Apache-2.0), NVIDIA "
+             "closed-division DGX-H100_H100-SXM-80GBx8_TRT system, snapshot 2026-10-12",
+             "https://mlcommons.org/benchmarks/inference-datacenter/",
+             "same 8x H100-SXM-80GB hardware in every round; software version per the round's system "
+             "description; values from each run's mlperf_log_summary.txt, all VALID; llama2-70b at the "
+             "99.9 accuracy target; pub_month is the round's publication month"),
+        "Throughput of one fixed eight-H100 system across MLPerf Inference rounds as its software changed.",
+        numeric=("value",),
+    )

@@ -3116,6 +3116,117 @@ TensorRT uses kernel autotuning\index{Kernel Autotuning!hardware benchmarking} t
 
 The trade-off for TensorRT's aggressive optimization is reduced flexibility and high compilation cost. Build time depends on model size, tactic search, and hardware. By default, an engine targets a particular hardware and shape profile; compatibility modes can broaden supported hardware, and dynamic-shape profiles admit a declared range. Changes outside the engine’s supported contract require a new build. This makes TensorRT a common fit for stable, high-volume production deployments, while `torch.compile` is often a better fit for development and lower-volume services where rapid iteration matters more than extracting the last percentage of throughput.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SOFTWARE-ONLY GAINS ON FIXED HARDWARE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph closing the TensorRT section and
+# │          @fig-mlperf-software-gains.
+# │
+# │ Goal: Measure how much delivered performance comes from software alone.
+# │ Show: Same 8x H100 system, four MLPerf Inference rounds: GPT-J 2.7×,
+# │       Llama 2 70B 1.4×, SDXL 1.25×; ResNet-50 and BERT unchanged.
+# │ How: Offline throughput relative to each benchmark's first round in
+# │      Literature.Series.MLPerfInferenceDGXH100.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_multiple
+
+def _offline(rows, benchmark):
+    return sorted([r for r in rows if r["benchmark"] == benchmark and r["scenario"] == "Offline"], key=lambda r: r["pub_month"])
+
+def _gain(rows, benchmark):
+    pts = _offline(rows, benchmark)
+    return pts[-1]["value"] / pts[0]["value"]
+
+# ┌── LEGO ───────────────────────────────────────────────
+class SoftwareGains:
+    """Offline throughput gains of one fixed DGX H100 across MLPerf Inference rounds."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.MLPerfInferenceDGXH100.entries
+    benchmarks = (
+        ("gptj-99", "GPT-J 6B"),
+        ("llama2-70b-99.9", "Llama 2 70B"),
+        ("stable-diffusion-xl", "Stable Diffusion XL"),
+        ("bert-99", "BERT-Large"),
+        ("resnet50", "ResNet-50"),
+    )
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    gptj_gain = _gain(rows, "gptj-99")
+    llama_gain = _gain(rows, "llama2-70b-99.9")
+    sdxl_gain = _gain(rows, "stable-diffusion-xl")
+    resnet_gain = _gain(rows, "resnet50")
+    bert_gain = _gain(rows, "bert-99")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(2.4 <= gptj_gain <= 3.0, f"Prose says GPT-J rose ~2.7x, got {gptj_gain:.2f}.")
+    check(1.3 <= llama_gain <= 1.6 and 1.1 <= sdxl_gain <= 1.4, "Prose quotes Llama 2 ~1.4x and SDXL ~1.25x.")
+    check(abs(resnet_gain - 1) < 0.01 and abs(bert_gain - 1) < 0.01, "Prose says ResNet-50 and BERT did not move.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    gptj_gain_mult_str = fmt_multiple(round(gptj_gain, 1))
+    llama_gain_mult_str = fmt_multiple(round(llama_gain, 1))
+    sdxl_gain_mult_str = fmt_multiple(round(sdxl_gain, 1))
+```
+
+Results on fixed hardware show how much of a platform's delivered performance lives in this software layer. NVIDIA submitted the same eight-GPU DGX H100 system to four consecutive MLPerf Inference rounds between September 2023 and April 2025, while its software moved from TensorRT 9.0 to 10.8 [@reddi2020mlperf; @mlcommons2025inference]. @Fig-mlperf-software-gains plots each benchmark's offline throughput relative to its first submission on that system. GPT-J throughput rose `{python} SoftwareGains.gptj_gain_mult_str`, Llama 2 70B `{python} SoftwareGains.llama_gain_mult_str`, and Stable Diffusion XL `{python} SoftwareGains.sdxl_gain_mult_str`, with no change to the silicon. ResNet-50 and BERT, whose kernels had already been tuned for years, did not move. Software gains concentrate on workloads that are new to a platform and fade as their kernels approach the hardware's limits, so a comparison of two accelerators that does not hold the software version fixed measures the software as much as the silicon.
+
+::: {#fig-mlperf-software-gains fig-env="figure" fig-pos="htb" fig-cap="**Software-Only Gains on Fixed Hardware**: Offline throughput of one NVIDIA DGX H100 system (eight H100 SXM GPUs with 80 GB of memory each) across four MLPerf Inference rounds, relative to each benchmark's first submission on that system. The hardware is identical in every round; the software stack changed from TensorRT 9.0 to 10.8. Llama 2 70B uses the 99.9 percent accuracy target. Data from @mlcommons2025inference." fig-alt="Line chart of throughput relative to the first round, from 1 to about 2.8, across MLPerf Inference rounds v3.1 (September 2023), v4.0 (March 2024), v4.1 (August 2024), and v5.0 (April 2025). GPT-J rises from 1 to about 2.3 at v4.0 and 2.7 at v4.1. Llama 2 70B rises from 1 at v4.0 to about 1.1 at v4.1 and 1.4 at v5.0. Stable Diffusion XL rises from 1 to about 1.2. ResNet-50 and BERT stay flat at 1.0 between v3.1 and v4.0."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SOFTWARE-ONLY GAINS ON FIXED HARDWARE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-mlperf-software-gains.
+# │
+# │ Goal: Plot relative offline throughput per benchmark across rounds.
+# │ Show: One line per benchmark, end labels with the gain.
+# │ How: SoftwareGains (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
+_C = SoftwareGains
+_rounds = ["v3.1", "v4.0", "v4.1", "v5.0"]
+_months = {"v3.1": "Sep 2023", "v4.0": "Mar 2024", "v4.1": "Aug 2024", "v5.0": "Apr 2025"}
+_cols = [COLORS["RedLine"], COLORS["BlueLine"], COLORS["VioletLine"], COLORS["GreenLine"], COLORS["OrangeLine"]]
+_dy = {"bert-99": -10, "resnet50": -24}
+for (_b, _lab), _c in zip(_C.benchmarks, _cols):
+    _p = _offline(_C.rows, _b)
+    _x = [_rounds.index(r["round"]) for r in _p]
+    _y = [r["value"] / _p[0]["value"] for r in _p]
+    ax.plot(_x, _y, "-o", ms=5, lw=1.8, color=_c, zorder=3)
+    _left = _b == "stable-diffusion-xl"
+    ax.annotate(
+        f"{_lab} ({_y[-1]:.1f}×)",
+        (_x[-1], _y[-1]),
+        xytext=(-4 if _left else 8, 14 if _left else _dy.get(_b, 0)),
+        textcoords="offset points",
+        fontsize=8,
+        color=_c,
+        va="center",
+        ha="right" if _left else "left",
+        bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", pad=0.2),
+        zorder=5,
+    )
+ax.set_xticks(range(len(_rounds)))
+ax.set_xticklabels([f"{r}\n{_months[r]}" for r in _rounds])
+ax.set_xlim(-0.2, len(_rounds) - 0.2)
+ax.set_ylim(0.7, 3.0)
+ax.set_xlabel("MLPerf Inference round (same eight-H100 system)")
+ax.set_ylabel("Throughput relative to first round")
+plt.show()
+plt.close()
+```
+
+:::
+
 ### The Triton language {#sec-performance-engineering-triton}
 
 Between hand-written CUDA and fully automated graph compilers sits Triton\index{Triton!kernel programming},[^fn-triton-tiled-compiler] a Python-based language for writing GPU kernels. Triton occupies a middle ground: the programmer specifies the algorithm (tiling strategy, fusion pattern) while Triton handles low-level concerns (thread block scheduling, memory coalescing, shared memory management).
