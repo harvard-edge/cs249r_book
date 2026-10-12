@@ -160,7 +160,100 @@ Across deployment targets, the disparity in weight memory spans about six orders
 ↩ The bitter lesson, that general methods which scale with compute keep displacing hand-engineered ones, is established in @sec-introduction-bitter-lesson-79c7.
 :::
 
-Bridging this gap requires an engineering framework with predictable physical trade-offs. Every compression technique removes specific structure from the model, whether unnecessary weights, surplus numerical bits, or redundant operator subgraphs. Designing a production deployment requires identifying which resource binds first on the target platform and analyzing how successive approximations compound across the memory hierarchy. The framework this chapter builds works on three levels: what the model computes (its structure), how many bits represent each value (its precision), and how the result executes on the target processor (its implementation). Benefits compound only when transformations relieve distinct binding bottlenecks and the runtime supports the resulting graph.
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SMALLEST CAPABLE MODEL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the bitter-lesson sentence in
+# │          @sec-model-compression-optimization-framework-9e21 and
+# │          @fig-smallest-capable-model.
+# │
+# │ Goal: Show how fast the size needed for a fixed benchmark score fell.
+# │ Show: Smallest dense model at >= 60% MMLU: Gopher 280B (Dec 2021) →
+# │       Qwen2.5-Coder-3B (Sep 2024), ~93× smaller.
+# │ How: Running minimum of parameters among Literature.Series.MMLUDenseModels
+# │      rows at or above the threshold, ordered by release date.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_count, fmt_multiple, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class SmallestCapableModel:
+    """Smallest dense model clearing a fixed MMLU score over time."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    threshold = 0.60
+    rows = sorted(Literature.Series.MMLUDenseModels.entries, key=lambda r: r["date"])
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    frontier = []
+    for _r in rows:
+        if _r["mmlu"] >= threshold and (not frontier or _r["parameters"] < frontier[-1]["parameters"]):
+            frontier.append(_r)
+    first, last = frontier[0], frontier[-1]
+    shrink = first["parameters"] / last["parameters"]
+    span_years = (dt.date.fromisoformat(last["date"]) - dt.date.fromisoformat(first["date"])).days / 365.25
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(first["model"].startswith("Gopher") and "Qwen2.5" in last["model"], "Prose names Gopher and Qwen2.5-Coder-3B.")
+    check(50 <= shrink <= 150, f"Expected ~93x shrink, got {shrink:.0f}.")
+    check(span_years < 3, f"Prose says under three years, got {span_years:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    threshold_pct_str = fmt_percent(threshold, precision=0, style="prose")
+    first_params_str = fmt_count(first["parameters"], scale="B", scale_style="word", precision=0)
+    last_params_str = fmt_count(last["parameters"], scale="B", scale_style="word", precision=0)
+    shrink_mult_str = fmt_multiple(round(shrink), precision=0)
+```
+
+The record of language models shows how much ground that counterweight can recover. @Fig-smallest-capable-model follows the smallest dense model reported to score at least `{python} SmallestCapableModel.threshold_pct_str` on the Massive Multitask Language Understanding (MMLU) benchmark [@hendrycks2021mmlu] at each point in time. That size fell from `{python} SmallestCapableModel.first_params_str` parameters for Gopher at the end of 2021 to `{python} SmallestCapableModel.last_params_str` for a Qwen2.5 model in 2024, about `{python} SmallestCapableModel.shrink_mult_str` smaller in under three years [@epochai2026benchmarks]. Better training data, longer training, and distillation from larger models all contributed, so the decline is not compression alone, but it shows that a capability first reached at frontier scale can later fit a far smaller deployment budget.
+
+::: {#fig-smallest-capable-model fig-env="figure" fig-pos="htb" fig-cap="**Smallest Model Reaching a Fixed Score**: Parameter counts of dense language models against release date on a logarithmic axis, with models scoring at least 60 percent on the MMLU benchmark in blue and the rest in gray. The red step line tracks the smallest model at or above that score released up to each date. Scores are as reported by each source, and parameter counts come from model names, so the line is a lower envelope of reported results rather than a controlled comparison. Data from @epochai2026benchmarks." fig-alt="Scatter plot of parameters on a logarithmic axis from about 10 to the 8.7 to 10 to the 11.7 against release dates from mid-2021 to early 2025. Blue points mark models at or above 60 percent MMLU and gray points those below. A red step line descends from Gopher 280B in late 2021 through Chinchilla 70B, Llama 2 34B, and Mistral 7B to Qwen2.5-Coder-3B in late 2024."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SMALLEST CAPABLE MODEL (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-smallest-capable-model.
+# │
+# │ Goal: Show the shrinking size needed to reach a fixed MMLU score.
+# │ Show: All dense models (above/below threshold) and the running minimum.
+# │ How: SmallestCapableModel (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+_S = SmallestCapableModel
+def _yr(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+_below = [r for r in _S.rows if r["mmlu"] < _S.threshold]
+_above = [r for r in _S.rows if r["mmlu"] >= _S.threshold]
+ax.scatter([_yr(r["date"]) for r in _below], [r["parameters"] for r in _below], s=14, color=COLORS["grid"], label="MMLU below 60%", zorder=2)
+ax.scatter([_yr(r["date"]) for r in _above], [r["parameters"] for r in _above], s=18, color=COLORS["BlueLine"], label="MMLU at or above 60%", zorder=3)
+_fx = [_yr(r["date"]) for r in _S.frontier] + [max(_yr(r["date"]) for r in _above)]
+_fy = [r["parameters"] for r in _S.frontier] + [_S.frontier[-1]["parameters"]]
+ax.step(_fx, _fy, where="post", color=COLORS["RedLine"], lw=1.8, label="Smallest model at or above 60%", zorder=4)
+for _r in _S.frontier:
+    if _r["model"] in ("Gopher 280B", "Chinchilla 70B", "LLAMA 2 34B", "Mistral 7B", "Qwen2.5-Coder-3B"):
+        ax.annotate(_r["model"].replace("LLAMA", "Llama"), (_yr(_r["date"]), _r["parameters"]), xytext=(4, 4), textcoords="offset points",
+                    fontsize=7.5, color=COLORS["RedLine"], bbox=dict(facecolor="white", alpha=0.8, edgecolor="none", pad=0.3))
+ax.set_xticks([2022, 2023, 2024, 2025]); ax.set_xlim(2021.5, 2025.2)
+ax.set_yscale("log"); ax.set_xlabel("Release date"); ax.set_ylabel("Parameters (log scale)")
+ax.legend(loc="upper right", fontsize=8, frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
+Bridging the gap between frontier models and fixed deployment targets requires an engineering framework with predictable physical trade-offs. Every compression technique removes specific structure from the model, whether unnecessary weights, surplus numerical bits, or redundant operator subgraphs. Designing a production deployment requires identifying which resource binds first on the target platform and analyzing how successive approximations compound across the memory hierarchy. The framework this chapter builds works on three levels: what the model computes (its structure), how many bits represent each value (its precision), and how the result executes on the target processor (its implementation). Benefits compound only when transformations relieve distinct binding bottlenecks and the runtime supports the resulting graph.
 
 ```{python}
 #| echo: false
@@ -1594,7 +1687,7 @@ This perspective leads to the Lottery Ticket Hypothesis[^fn-lottery-ticket-spars
 
 The discovery procedure is an iterative pruning-and-rewinding loop. After training to convergence and pruning low-magnitude connections, the surviving weights reset to their initialization state $\ModelParameters_0$, which isolates a sparse subnetwork (@fig-winning-ticket). Repeating the cycle can isolate a sparse subnetwork that, in the reported settings, trains to accuracy comparable with the original network [@frankle2019lottery]. Whether the same procedure succeeds depends on architecture, scale, optimizer, and training budget.
 
-::: {#fig-winning-ticket fig-env="figure" fig-pos="htb" fig-cap="**Lottery Ticket Iteration Cycle**: The original procedure repeatedly trains, prunes low-magnitude weights, and resets surviving weights to their initial state $\ModelParameters_0$. The cycle tests whether the resulting sparse subnetwork can match the dense baseline when trained in isolation; the outcome is empirical rather than guaranteed." fig-alt="Cyclic flowchart with four stages: dense network, train to convergence, prune smallest weights, reset remaining weights to initial values. Arrows form an iterative loop used to test for a winning-ticket subnetwork."}
+::: {#fig-winning-ticket fig-env="figure" fig-pos="htb" fig-cap="**Lottery Ticket Iteration Cycle**: The original procedure repeatedly trains, prunes low-magnitude weights, and resets surviving weights to their initial state $\ModelParameters_0$. The cycle tests whether the resulting sparse subnetwork can match the dense baseline when trained in isolation; the outcome is empirical rather than guaranteed." fig-alt="Left, a flowchart starts at randomly initialize the weights and then cycles through train the network until convergence, prune a percentage of the lowest weights, and reset weights to initial values, with the loop labeled Iterate. Right, a dense network diagram highlights in red the surviving neurons and connections, labeled as the winning lottery ticket subnetwork."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\small\sffamily]
@@ -3858,7 +3951,7 @@ Three approaches form an engineering decision ladder governed by training and va
 
 ::: {#fig-quantization-roadmap fig-env="figure" fig-pos="htb" fig-cap="**Quantization Engineering Workflow**: The tiers order deployment paths by engineering and validation effort, not by format or guaranteed accuracy. PTQ serves as the initial candidate because it operates over frozen weights with zero retraining cost; QAT introduces simulated quantization into the training loop when quality recovery demands backpropagation; specialized sub-4-bit and binary formats require custom kernel execution and extensive hardware-specific validation. Representation choices such as INT8 versus INT4, per-channel scaling, and mixed precision apply across these stages rather than defining separate maturity levels." fig-alt="Tiered diagram with three levels ordered by engineering effort: post-training calibration without retraining, quantization-aware retraining for accuracy recovery, and specialized sub-4-bit formats requiring custom execution support."}
 
-```{tikz}
+```{.tikz}
 \begin{tikzpicture}[line join=round,font=\sffamily]
 \tikzset{
 Box/.style={align=flush center,
@@ -4383,7 +4476,7 @@ Calibration ranges can be **symmetric**\index{Quantization!symmetric} (a zero-ce
 
 Once calibration identifies clipping boundaries $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$, the range must be mapped onto integer endpoints. Two mapping schemes dominate (@fig-calibration-ranges). The symmetric layout forces real zero to integer zero by mapping $[-1, 1]$ directly onto $[-127, 127]$, whereas the asymmetric layout accommodates skewed activation intervals such as $[-0.5, 1.5]$ across $[-128, 127]$ by shifting the integer zero-point offset $\QuantizationZeroPoint$.
 
-::: {#fig-calibration-ranges fig-env="figure" fig-pos="htb" fig-cap="**Calibration Range Selection**: Symmetric vs. asymmetric affine quantization mappings. Symmetric quantization (left) forces real zero to map to integer zero, using equal-magnitude negative and positive clipping bounds at the expense of wasted dynamic range for skewed activation distributions; asymmetric quantization (right) uses an explicit zero-point offset $\QuantizationZeroPoint$ to map non-centered ranges $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$ efficiently." fig-alt="Two side-by-side mapping diagrams. Left shows symmetric calibration with range from – 1 to 1 mapping to – 127 to 127 with zero aligned. Right shows asymmetric calibration with range – 0.5 to 1.5 mapping with shifted zero point."}
+::: {#fig-calibration-ranges fig-env="figure" fig-pos="htb" fig-cap="**Calibration Range Selection**: Symmetric vs. asymmetric affine quantization mappings. Symmetric quantization (left) forces real zero to map to integer zero, using equal-magnitude negative and positive clipping bounds at the expense of wasted dynamic range for skewed activation distributions; asymmetric quantization (right) uses an explicit zero-point offset $\QuantizationZeroPoint$ to map non-centered ranges $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$ efficiently." fig-alt="Two side-by-side mapping diagrams. Left shows symmetric calibration with range from -1 to 1 mapping to -127 to 127 with zero aligned. Right shows asymmetric calibration with range -0.5 to 1.5 mapping to -128 to 127 with a shifted zero point."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\large\sffamily]
@@ -4847,7 +4940,7 @@ Executing low-precision inference requires transforming floating-point inputs be
 ↪ How a single Tensor Core matrix instruction takes low-precision input tiles into higher-precision accumulator registers is developed in @sec-hardware-acceleration-tensor-cores-771f.
 :::
 
-::: {#fig-weight-activations-quantization fig-env="figure" fig-pos="htb" fig-cap="**Quantized Matrix Multiplication Pipeline**: Color-coded computation stage. Floating-point weights and activation inputs are quantized to INT8 (violet), fed into integer SIMD/Tensor Core matrix multiplication (blue), accumulated in 32-bit registers (red), and requantized back to INT8 (green) before non-linear activation. From the HarvardX TinyML course." fig-alt="Matrix multiplication diagram. Violet boxes quantize floating-point inputs to INT8 before matrix multiplication, a blue block performs the multiplication, a red box shows the INT32 intermediate output, a green block requantizes before activation, and a green box shows the final INT8 output."}
+::: {#fig-weight-activations-quantization fig-env="figure" fig-pos="htb" fig-cap="**Quantized Matrix Multiplication Pipeline**: Floating-point weights and activation inputs are quantized to INT8 (violet), fed into integer SIMD/Tensor Core matrix multiplication (blue), accumulated in 32-bit registers (red), and requantized back to INT8 (green) before non-linear activation. From the HarvardX TinyML course." fig-alt="Matrix multiplication diagram. Violet boxes quantize floating-point inputs to INT8 before matrix multiplication, a blue block performs the multiplication, a red box shows the INT32 intermediate output, a green block requantizes before activation, and a green box shows the final INT8 output."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -5359,9 +5452,9 @@ class GPT2DecodeQuantization:
 
 :::
 
-Across three vision networks (Inception v3, MobileNet v1, and ResNet v2), INT8 conversion contracts weight storage by exactly $4\times$, from 135 MB to 33.75 MB for Inception, while the latency change varies with the architecture and its kernels (@fig-quantization-impact).
+Across three vision networks (Inception v3, MobileNet v1, and ResNet v2), INT8 conversion contracts weight storage by exactly $4\times$ (135 MB to 33.75 MB for the illustrative Inception bar), while the latency change varies with the architecture and its kernels (@fig-quantization-impact).
 
-::: {#fig-quantization-impact fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Quantization Scenario**: Paired bars separate FP32 and INT8 alternatives. The right panel shows raw weight storage, where reducing each weight from 32 to 8 bits produces an exact fourfold decrease; the left panel shows illustrative, architecture-dependent latency changes." fig-alt="Two paired bar charts compare FP32 and INT8. The left chart shows illustrative inference time in milliseconds for Inception v3, MobileNet v1, and ResNet v2. The right chart shows raw weight storage in megabytes, with every INT8 bar one quarter the FP32 bar."}
+::: {#fig-quantization-impact fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Quantization Scenario**: Paired bars separate FP32 and INT8 alternatives. The right panel shows illustrative weight storage, where reducing each weight from 32 to 8 bits produces an exact fourfold decrease; the left panel shows illustrative, architecture-dependent latency changes." fig-alt="Two paired bar charts compare FP32 and INT8. The left chart shows illustrative inference time in milliseconds for Inception v3, MobileNet v1, and ResNet v2. The right chart shows raw weight storage in megabytes, with every INT8 bar one quarter the FP32 bar."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\sffamily]
@@ -6783,7 +6876,7 @@ That pruned graph is the distillation student. Teacher supervision recovers its 
 
 Sequencing matters because these transformations interact through shared parameters and activation distributions. Structural pruning removes channels or attention heads, altering the dynamic range and variance of surviving weight tensors. Quantizing before pruning can leave ranges poorly matched to the resulting distributions, so recalibration or joint adaptation may be needed. In the staged candidate, floating-point recovery lets the pruned network adapt, and distillation supplies a teacher signal before final quantization. QAT itself updates floating-point master weights through approximate gradients; it does not require direct integer weight updates. Alternative schedules should be compared at matched recovery and calibration budgets.
 
-Combining techniques also changes the size-quality trade-off itself [@han2016deep]. In one reported setting (@fig-compression-methods), while individual SVD and pruning curves suffer steep accuracy cliffs below 20 percent and 10 percent model size respectively, combining pruning with quantization extends the zero-loss plateau down to roughly 3 percent of original parameter footprint. This comparison does not isolate transformation order. The magnitude of these gains remains model- and runtime-specific, requiring engineers to validate each transformation stage independently.
+Combining techniques also changes the size-quality trade-off itself [@han2016deep]. In one reported setting (@fig-compression-methods), while individual SVD and pruning curves suffer steep accuracy cliffs below about 15 percent and 6 percent model size respectively, combining pruning with quantization extends the zero-loss plateau down to roughly 3 percent of original parameter footprint. This comparison does not isolate transformation order. The magnitude of these gains remains model- and runtime-specific, requiring engineers to validate each transformation stage independently.
 
 ::: {#fig-compression-methods fig-env="figure" fig-pos="htb" fig-cap="**Compression Methods in One Reported Setting**: The cited comparison plots accuracy change against model-size ratio for pruning, quantization, their combination, and SVD. In this setting, pruning plus quantization reaches the smallest ratio near baseline accuracy; the ordering is model- and implementation-specific. Source: [@han2016deep]." fig-alt="Line graph of accuracy change versus model-size ratio with four series for pruning plus quantization, pruning, quantization, and SVD. The combined method reaches the smallest size near baseline accuracy in this reported setting."}
 
