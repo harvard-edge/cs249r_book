@@ -78,6 +78,132 @@ The runtime mechanisms developed so far govern execution integrity rather than t
 
 Engineering decisions are also comparative. A new configuration, `candidate_v2`, with an updated system prompt, refined tool schemas, a revised recovery policy, or a different base model, is ready for deployment. The engineering team must decide whether `candidate_v2` reliably outperforms the incumbent `baseline_v1` across the full distribution of repair tasks the system will encounter.
 
+The base model is only one of those levers, and published results show the others moving acceptance as far. A terminal-task benchmark reports the same models run inside many independently built agent scaffolds, the prompts, tool definitions, and control loop that surround the model [@merrill2026terminal]; @fig-vol3-scaffold-spread plots every model evaluated in at least five of them.
+
+```{python}
+#| label: calc-vol3-scaffold-spread
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SAME MODEL, DIFFERENT SCAFFOLDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-scaffold-spread and the paragraph after it.
+# │ Goal: Show that the configuration around a model moves acceptance by
+# │       more than sampling noise.
+# │ Show: Widest and median within-model spread; the median reported
+# │       standard error; the widest model's range and scaffold count.
+# │ How:  Literature.TerminalBenchHarness, models with >= 5 scaffolds.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class ScaffoldSpread:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = Literature.TerminalBenchHarness.entries
+    min_scaffolds = 5
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    by_model, spreads = {}, {}
+    for _r in rows:
+        by_model.setdefault(_r["model"], []).append(_r["accuracy"])
+    for _m in list(by_model):
+        if len(by_model[_m]) < min_scaffolds:
+            del by_model[_m]
+        else:
+            spreads[_m] = max(by_model[_m]) - min(by_model[_m])
+    widest = max(spreads, key=spreads.get)
+    widest_lo, widest_hi, widest_n = min(by_model[widest]), max(by_model[widest]), len(by_model[widest])
+    median_spread = float(np.median(list(spreads.values())))
+    median_se = float(np.median([r["accuracy_se"] for r in rows if r["accuracy_se"]]))
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(median_spread > 4 * median_se, "Prose says the typical spread is several standard errors")
+    check(widest_hi - widest_lo > 0.2, "Prose says the widest spread exceeds 20 points")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_models_str = fmt_int(len(by_model))
+    widest_lo_str = fmt_percent(round(widest_lo, 2), precision=0, style="prose")
+    widest_hi_str = fmt_percent(round(widest_hi, 2), precision=0, style="prose")
+    widest_n_str = fmt_int(widest_n)
+    median_spread_str = fmt_int(round(100 * median_spread))
+    median_se_str = fmt_int(round(100 * median_se))
+```
+
+:::: {#fig-vol3-scaffold-spread fig-env="figure" fig-pos="htb" fig-cap="**One Model, Many Scaffolds**: Each row is one model; each dot is its accuracy on the same terminal-task benchmark inside a different agent scaffold, with the bar spanning lowest to highest and the count of scaffolds at right. Diamonds mark the benchmark's own reference scaffold. Rows are sorted by median accuracy, and for many models the within-row spread rivals the gap between neighboring model generations, so a reported score describes a configuration, not a model. Data from @merrill2026terminal leaderboard entries via @epochai2026benchmarks." fig-alt="Horizontal dot plot with sixteen model names on the vertical axis and accuracy from 0 to 100 percent on the horizontal axis. Each row has several blue dots joined by a light blue bar from its lowest to highest value, often one red diamond, and a label at right giving the spread in points and the number of scaffolds. Spreads range from 3 to 22 points. An annotation on the Claude Opus 4.6 row points to its range from 58 to 80 percent."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SAME MODEL, DIFFERENT SCAFFOLDS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-scaffold-spread
+# │
+# │ Goal: Show the within-model spread across agent scaffolds.
+# │ Show: Dot strip per model (>= 5 scaffolds), min-max bar, reference
+# │       scaffold marked, spread and count labels.
+# │ How: Literature.TerminalBenchHarness (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5.6))
+rows = Literature.TerminalBenchHarness.entries
+by = {}
+for r in rows:
+    by.setdefault(r["model"], []).append(r)
+by = {m: v for m, v in by.items() if len(v) >= 5}
+order = sorted(by, key=lambda m: np.median([r["accuracy"] for r in by[m]]))
+names = {
+    "gpt-5-nano-2025-08-07": "GPT-5 nano",
+    "gemini-2.5-pro": "Gemini 2.5 Pro",
+    "Qwen3-Coder-480B-A35B-Instruct": "Qwen3-Coder-480B",
+    "grok-4-0709": "Grok 4",
+    "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+    "gpt-5-mini-2025-08-07": "GPT-5 mini",
+    "claude-opus-4-1-20250805": "Claude Opus 4.1",
+    "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+    "gpt-5-codex": "GPT-5-Codex",
+    "gpt-5.1-codex": "GPT-5.1-Codex",
+    "claude-opus-4-5-20251101": "Claude Opus 4.5",
+    "gemini-3-pro-preview": "Gemini 3 Pro",
+    "claude-opus-4-6": "Claude Opus 4.6",
+    "gpt-5.3-codex": "GPT-5.3-Codex",
+    "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
+    "gpt-5.5": "GPT-5.5",
+}
+for i, m in enumerate(order):
+    acc = np.array([r["accuracy"] for r in by[m]]) * 100
+    ref = np.array([r["accuracy"] for r in by[m] if r["harness"] == "Terminus 2"]) * 100
+    oth = np.array([r["accuracy"] for r in by[m] if r["harness"] != "Terminus 2"]) * 100
+    ax.plot([acc.min(), acc.max()], [i, i], color=COLORS["BlueL"], lw=6, solid_capstyle="round", zorder=1)
+    ax.scatter(oth, [i] * len(oth), s=22, color=COLORS["BlueLine"], zorder=3, label="Other scaffold" if i == 0 else None)
+    ax.scatter(ref, [i] * len(ref), s=40, marker="D", color=COLORS["RedLine"], zorder=4, label="Benchmark's reference scaffold" if i == 0 else None)
+    ax.text(acc.max() + 2.2, i, f"{acc.max() - acc.min():.0f} pts  (n={len(acc)})", va="center", fontsize=8, color=COLORS["secondary"])
+ax.set_yticks(range(len(order)))
+ax.set_yticklabels([names.get(m, m) for m in order])
+ax.set_xlim(0, 100)
+ax.set_xlabel("Terminal-task accuracy (%)")
+ax.grid(axis="y", visible=False)
+k = order.index("claude-opus-4-6")
+lo = min(r["accuracy"] for r in by["claude-opus-4-6"]) * 100
+hi = max(r["accuracy"] for r in by["claude-opus-4-6"]) * 100
+ax.annotate(
+    f"Same model: {lo:.0f}% to {hi:.0f}%",
+    (lo, k),
+    xytext=(18, k + 1.3),
+    fontsize=8.5,
+    arrowprops=dict(arrowstyle="-", color=COLORS["secondary"], lw=0.7),
+)
+ax.legend(loc="upper left", frameon=False, fontsize=8.5)
+plt.show()
+plt.close()
+```
+
+::::
+
+The widest row in @fig-vol3-scaffold-spread is one model scored between `{python} ScaffoldSpread.widest_lo_str` and `{python} ScaffoldSpread.widest_hi_str` across `{python} ScaffoldSpread.widest_n_str` scaffolds, and the median spread across the `{python} ScaffoldSpread.n_models_str` models is `{python} ScaffoldSpread.median_spread_str` points, against a median reported standard error of about `{python} ScaffoldSpread.median_se_str` points. The differences are therefore real, not sampling noise, and they come from exactly the components `candidate_v2` changes. An evaluation that attributes a score to the base model alone credits the wrong part of the system, which is why the configuration under test is declared in full before any trial runs.
+
 Transforming noisy, individual agent trials into a defensible release decision requires an end-to-end evaluation pipeline. That pipeline begins with an acceptance contract, which specifies precisely what evidence credits a task, which invariants must hold, and how missing or malformed artifacts are penalized. To make trials interpretable and secure, the evaluation system isolates task fixtures behind a protected grading boundary that sits beyond the agent's reach. Behind this boundary, the grading harness partitions criteria between deterministic mechanical checks (static analysis, invariant assertions, hidden unit tests) and calibrated judgments for open-ended properties.
 
 Because agent behavior is stochastic, moving from single runs to configuration comparison demands statistical rigor. Evaluating `candidate_v2` against `baseline_v1` requires paired trials on the same sampled tasks and decision metrics that reflect operational reality, including acceptance, consistency over repeated runs, and the cost per accepted task introduced in @sec-vol3-intro-horizon-arithmetic. The same evidence pipeline extends past offline benchmarking. Traces explain why a metric moved and are retained under storage and privacy budgets, postmortems test a suspected failure mechanism through a controlled intervention, and staged canaries gate live traffic exposure. Together, these mechanisms assemble every trial into an evidence-backed release decision for `candidate_v2`, starting with the acceptance contract for a single trial.
@@ -389,6 +515,93 @@ Here $\ConfidenceCriticalQuantile$ is the standard normal quantile for the selec
 For zero acceptances in 50 independent tasks, @eq-wilson-interval gives a lower limit of zero and an upper limit of $\ConfidenceCriticalQuantile^2/(50+\ConfidenceCriticalQuantile^2)$, which panel B of @fig-vol3-sample-size-confidence-intervals marks. Read with the outcomes reversed, the same arithmetic prices a clean record: zero observed violations in 50 tasks remains consistent with a violation rate up to that limit.
 
 These binary examples assume complete verdicts. If an evaluation sweep leaves trials unresolved due to timeouts, infrastructure failures, or grader crashes, the evaluation team must prespecify a handling protocol before examining the data, such as the default of @sec-vol3-evaluation-contract-verdicts that counts them as not accepted and reports both-outcome bounds. Simply discarding uncompleted tasks introduces severe survivorship bias, skewing results toward trivial tasks that execute rapidly and pass without contention.
+
+```{python}
+#| label: calc-vol3-leaderboard-rank-ties
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LEADERBOARD RANK TIES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-leaderboard-rank-ties and the paragraph after it.
+# │ Goal: Show that adjacent leaderboard ranks are rarely distinguishable.
+# │ Show: Tied neighbors among the top 25; the gap a pair needs.
+# │ How:  Literature.SweBenchVerifiedRuns; independent-samples z test on
+# │       the reported standard errors (conservative relative to pairing).
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int
+
+class RankTies:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = sorted(Literature.SweBenchVerifiedRuns.entries, key=lambda r: -r["mean_score"])
+    top_n = 25
+    z = 1.96  # two-sided 95 percent
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    top = rows[:top_n]
+    pairs = list(zip(top[:-1], top[1:]))
+    tied = 0
+    for _a, _b in pairs:
+        tied += abs(_a["mean_score"] - _b["mean_score"]) < z * np.hypot(_a["stderr"], _b["stderr"])
+    typical_se = float(np.median([r["stderr"] for r in top]))
+    needed_gap = z * np.sqrt(2) * typical_se
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(tied >= len(pairs) - 2, "Prose says nearly every neighboring pair is tied")
+    check(0.04 < needed_gap < 0.07, "Prose says a pair needs about five points to separate")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_models_str = fmt_int(len(rows))
+    top_n_str = fmt_int(top_n)
+    tied_str = fmt_int(tied)
+    n_pairs_str = fmt_int(len(pairs))
+    needed_gap_str = fmt_int(round(100 * needed_gap))
+```
+
+Published leaderboards show how quickly intervals of this kind swallow a ranking. @Fig-vol3-leaderboard-rank-ties plots one evaluator's runs of `{python} RankTies.n_models_str` models on a repository-repair benchmark [@jimenez2024swebench], all under the same scaffold, with the standard error reported for each run [@epochai2026benchmarks].
+
+:::: {#fig-vol3-leaderboard-rank-ties fig-env="figure" fig-pos="htb" fig-cap="**Neighboring Ranks Are Statistical Ties**: The `{python} RankTies.top_n_str` highest-scoring of `{python} RankTies.n_models_str` models on a repository-repair benchmark, each run by one evaluator under one scaffold, with 95 percent intervals from the reported standard errors. `{python} RankTies.tied_str` of the `{python} RankTies.n_pairs_str` neighboring pairs differ by less than an independent-samples test can resolve; only ranks several places apart separate. Model identifiers are the evaluator's, including the reasoning-effort suffix. Data from @epochai2026benchmarks runs of @jimenez2024swebench." fig-alt="Dot plot of 25 model identifiers on the vertical axis, sorted by score, against tasks resolved from about 67 to 87 percent. Each dot has a horizontal interval bar about 7 to 8 points wide, and the bars of adjacent rows overlap along the whole list."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LEADERBOARD RANK TIES (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-leaderboard-rank-ties
+# │
+# │ Goal: Show overlapping intervals down a leaderboard.
+# │ Show: Top-25 scores with 95% intervals from reported standard errors.
+# │ How: Literature.SweBenchVerifiedRuns (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 6.0))
+rows = sorted(Literature.SweBenchVerifiedRuns.entries, key=lambda r: -r["mean_score"])[:25][::-1]
+y = np.arange(len(rows))
+ax.errorbar(
+    [100 * r["mean_score"] for r in rows],
+    y,
+    xerr=[196 * r["stderr"] for r in rows],
+    fmt="o",
+    color=COLORS["BlueLine"],
+    elinewidth=1.4,
+    capsize=2,
+    ms=4.5,
+)
+ax.set_yticks(y)
+ax.set_yticklabels([r["model"] for r in rows], fontsize=8)
+ax.set_xlabel("Tasks resolved (%), with 95% interval")
+ax.grid(axis="y", visible=False)
+plt.show()
+plt.close()
+```
+
+::::
+
+With standard errors near two points, two systems need a gap of about `{python} RankTies.needed_gap_str` points before independent intervals separate them, and `{python} RankTies.tied_str` of the `{python} RankTies.n_pairs_str` neighboring pairs fall short of it. A leaderboard position is therefore a weak signal for the release decision this chapter builds toward. The paired design developed next does better on the same budget, because it compares the two systems task by task and cancels the difficulty variance that independent intervals must carry.
 
 ### Paired outcome comparison {#sec-vol3-evaluation-paired}
 

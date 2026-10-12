@@ -287,6 +287,124 @@ An isolated retrieval probe[^fn-needle-haystack-probe] asks whether specified in
 
 Context organization directly influences task success even when all required facts are present in the prompt. Evaluating multi-document question answering and key-value retrieval, @liu2024lost reported marked sensitivity to the position of relevant information across model architectures, with accuracy dropping substantially when key facts appeared in the middle of the input. This position sensitivity, known as **lost in the middle**\index{Lost in the middle!definition}, means systems engineers cannot treat context as an unordered bag of tokens. Placement policies must be validated against the target workload, as positional degradation profiles vary across model families and prompt geometries.
 
+Length degrades comprehension even when every required fact remains in the input. One long-context benchmark isolates that effect by rewriting each of its stories at lengths from a few hundred tokens to the full text while preserving the details its questions depend on, so a change in score across lengths reflects the surrounding material rather than missing evidence [@fictionlive2025bench]. Answering requires following the order of events and drawing inferences from implicitly stated information, a task closer to a repair decision than to returning a planted value. @Fig-vol3-context-length-comprehension plots the scores against the length of story in context, as aggregated by @epochai2026benchmarks.
+
+```{python}
+#| label: calc-vol3-context-length-comprehension
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPREHENSION VS. CONTEXT LENGTH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-context-length-comprehension and the paragraph after it.
+# │ Goal: Quantify how far comprehension falls as the same story lengthens.
+# │ Show: Median score at the shortest version, at 8K and 60K tokens; how
+# │       many models hold 90% at 60K.
+# │ How:  Literature.LongContextComprehension, models scored at every
+# │       length through 60K tokens.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class ContextLengthComprehension:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    lengths = ("0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k")
+    cols = tuple("score_" + n for n in lengths)
+    questions = 36  # questions per length, from the benchmark methodology
+    hold_bar = 0.90
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    scored = tuple(filter(lambda e, c=cols: all(e[k] is not None for k in c), Literature.LongContextComprehension.entries))
+    median_short = float(np.median([e["score_0"] for e in scored]))
+    median_8k = round(float(np.median([e["score_8k"] for e in scored])), 2)  # whole percent: 36 questions per cell
+    median_60k = round(float(np.median([e["score_60k"] for e in scored])), 2)
+    n_hold = len(tuple(filter(lambda e, bar=hold_bar: e["score_60k"] >= bar, scored)))
+    lo_60k = min(e["score_60k"] for e in scored)
+    hi_60k = max(e["score_60k"] for e in scored)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(median_short > median_8k >= median_60k, "Prose says the median falls with length")
+    check(n_hold < len(scored) / 10, "Prose says only a few models hold 90% at 60K")
+    check(median_short - median_60k > 1 / 3, "Caption says the median model loses more than a third by 60K")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_scored_str = fmt_int(len(scored))
+    n_hold_str = fmt_int(n_hold)
+    questions_str = fmt_int(questions)
+    median_short_str = fmt_percent(median_short, style="prose")
+    median_8k_str = fmt_percent(median_8k, precision=0, style="prose")
+    median_60k_str = fmt_percent(median_60k, precision=0, style="prose")
+    hold_bar_str = fmt_percent(hold_bar, style="prose")
+    lo_60k_str = fmt_int(round(100 * lo_60k))
+    hi_60k_str = fmt_percent(round(hi_60k, 2), precision=0, style="prose")
+```
+
+:::: {#fig-vol3-context-length-comprehension fig-env="figure" fig-pos="htb" fig-cap="**Comprehension Falls with Context Length**: Accuracy on the same stories as the version placed in context grows from the shortest rewrite to 192K tokens. The shaded band spans the middle half of the `{python} ContextLengthComprehension.n_scored_str` models scored at every length through 60K tokens; colored lines trace six individual models. A few models stay near the top at every length, while the median model loses more than a third of its accuracy by 60K tokens. Each point rests on `{python} ContextLengthComprehension.questions_str` questions, so single-length wiggles are within sampling noise. Data from @fictionlive2025bench via @epochai2026benchmarks." fig-alt="Line chart of comprehension accuracy from 0 to 100 percent against story length placed in context, with eleven categories from 0 to 192k tokens. A gray band falls from near 100 percent at 0 tokens to roughly between 40 and 70 percent at 60k. Three colored lines stay between about 80 and 100 percent across all lengths. One orange line falls to about 50 percent, and two lines fall below 40 percent by 8k tokens and stop at 60k. A legend below the chart names the band and six models."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPREHENSION VS. CONTEXT LENGTH (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-context-length-comprehension
+# │
+# │ Goal: Show comprehension degrading with context length, and how much
+# │       models differ at the same length.
+# │ Show: Interquartile band over fully scored models; six model traces.
+# │ How: Literature.LongContextComprehension (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.4))
+
+# ┌── 1. DATA ─────────────────────────────────────────────────────────────────
+entries = Literature.LongContextComprehension.entries
+lengths = ["0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k", "120k", "192k"]
+x = np.arange(len(lengths))
+band_cols = ["score_" + n for n in lengths[: lengths.index("60k") + 1]]
+band = np.array([[e[c] for c in band_cols] for e in entries if all(e[c] is not None for c in band_cols)]) * 100
+traces = [
+    ("gpt-5-2025-08-07_medium", "GPT-5 (medium)", "BlueLine", "o"),
+    ("grok-4-0709", "Grok 4", "VioletLine", "s"),
+    ("kimi-k2.5", "Kimi K2.5", "GreenLine", "^"),
+    ("deepinfra/Qwen3-Next-80B-A3B-Instruct", "Qwen3-Next-80B-A3B", "OrangeLine", "D"),
+    ("chutes/gpt-oss-120b", "gpt-oss-120b", "BrownLine", "v"),
+    ("nvidia-nemotron-nano-9b-v2", "Nemotron Nano 9B v2", "RedLine", "P"),
+]
+
+# ┌── 2. RENDER ───────────────────────────────────────────────────────────────
+ax.fill_between(
+    x[: len(band_cols)],
+    np.percentile(band, 25, axis=0),
+    np.percentile(band, 75, axis=0),
+    color=COLORS["grid"],
+    alpha=0.35,
+    lw=0,
+    label=f"Middle half of {len(band)} models",
+)
+for key, label, color, marker in traces:
+    row = next(e for e in entries if e["model"] == key)
+    y = np.array([row["score_" + n] if row["score_" + n] is not None else np.nan for n in lengths]) * 100
+    ok = ~np.isnan(y)
+    ax.plot(x[ok], y[ok], "-", marker=marker, color=COLORS[color], ms=4, lw=1.6, label=label)
+
+# ┌── 3. DECORATE ─────────────────────────────────────────────────────────────
+ax.set_xticks(x)
+ax.set_xticklabels(lengths)
+ax.set_ylim(0, 105)
+ax.set_xlabel("Story length placed in context (tokens)")
+ax.set_ylabel("Comprehension accuracy (%)")
+ax.legend(frameon=False, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=4)
+plt.show()
+plt.close()
+```
+
+::::
+
+Two features of @fig-vol3-context-length-comprehension bear on the working budget. The decline starts early and runs deep. Across the `{python} ContextLengthComprehension.n_scored_str` fully scored models, the median falls from `{python} ContextLengthComprehension.median_short_str` on the shortest version to `{python} ContextLengthComprehension.median_8k_str` at 8K tokens and `{python} ContextLengthComprehension.median_60k_str` at 60K, and only `{python} ContextLengthComprehension.n_hold_str` stay at or above `{python} ContextLengthComprehension.hold_bar_str` at 60K. The models also differ widely at a single length, from `{python} ContextLengthComprehension.lo_60k_str` to `{python} ContextLengthComprehension.hi_60k_str` at 60K tokens, which is the empirical content of the definition above. Usable working context belongs to a specified model, configuration, and workload, and the budget is found by evaluation rather than read from the window.
+
 A first-order mechanism explains why appending distractor tokens cannot be treated as free. Within an individual attention head, a query assigns weight to each visible key through a softmax operation [@vaswani2017]. For a target key with scaled logit $\TargetKeyLogit$ alongside $\CompetingKeyCount$ other keys with logits $\CompetingKeyLogit_j = \QueryVector\cdot\KeyVector_j/\sqrt{\AttentionHeadDimension}$ for head dimension $\AttentionHeadDimension$, the target's weight is
 
 $$

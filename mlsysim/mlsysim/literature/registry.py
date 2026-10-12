@@ -177,6 +177,9 @@ class KaplanScalingLaws:
     list = entries  # parity with the Registry `.list` convention
 
 
+from . import series as _series
+
+
 class Literature(Registry):
     """Registry namespace for Literature."""
     Training = Training
@@ -194,3 +197,15 @@ class Literature(Registry):
     ComputeTrend = ComputeTrend
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
     KaplanScalingLaws = KaplanScalingLaws
+    AgentTimeHorizon = _series.AgentTimeHorizon
+    LowestPriceAtCapability = _series.LowestPriceAtCapability
+    TerminalBenchHarness = _series.TerminalBenchHarness
+    LongContextComprehension = _series.LongContextComprehension
+    SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
+    CybenchSolveRate = _series.CybenchSolveRate
+    OSWorldStepBudget = _series.OSWorldStepBudget
+    FrontierSweTrials = _series.FrontierSweTrials
+    SweBenchTrajectories = _series.SweBenchTrajectories
+    RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
+    RepeatedSamplingMajority = _series.RepeatedSamplingMajority
+    InjectionDefenseResults = _series.InjectionDefenseResults
