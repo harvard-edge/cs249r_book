@@ -11,7 +11,6 @@ hardware, memory optimization, fine-tuning, and compilation beyond the 20 core m
 6. triton_fused_gelu: Triton GPU kernel that fuses bias + GELU (NVIDIA GPUs)
 7. mps_matmul: Apple Silicon GPU matrix multiply via Metal Performance Shaders
 8. cuda_matmul: CUDA SGEMM in three teaching stages (naive, coalesced, tiled) through ctypes
-
 """
 
 from .simd_ops import simd_matmul, simd_fused_bias_gelu, has_simd_support, simd_build_info
