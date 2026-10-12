@@ -132,7 +132,7 @@ In a single machine, the memory bus moves data between the processor and memory.
 ↩ Communication dominance at scale, the network wall, is established in @sec-introduction-communication-becomes-dominant-e1b6.
 :::
 
-::: {#fig-network-bandwidth-scaling fig-env="figure" fig-pos="htb" fig-cap="**Historical network bandwidth scaling**: Intra-node NVLink, inter-node InfiniBand and Ethernet, and the PCIe host bus, plotted per direction on a common log scale from 2010 to 2024. The aggregate NVLink budget exceeds the external-port budgets in these configurations; collective completion time also depends on payloads, provisioning, routing, and overlap." fig-alt="Log-scale chart of interconnect bandwidth from 2010 to 2024 for Ethernet, InfiniBand, NVLink, and PCIe. All four rise steadily, with NVLink roughly an order of magnitude above the others by 2024. An arrow labeled NVLink appears points to NVLink's first point in 2016, and the band between the NVLink and InfiniBand lines from 2016 onward is shaded and labeled intra-node vs. external-port gap."}
+::: {#fig-network-bandwidth-scaling fig-env="figure" fig-pos="htb" fig-cap="**Historical network bandwidth scaling**: Intra-node NVLink, inter-node InfiniBand and Ethernet, and the PCIe host bus, plotted per direction on a common log scale by the year each generation first shipped, 2010 to 2025. The aggregate NVLink budget exceeds the external-port budgets in these configurations; collective completion time also depends on payloads, provisioning, routing, and overlap. Rates and dates are from the IEEE, IBTA, PCI-SIG, and NVIDIA sources compiled in the book's interconnect-generation table." fig-alt="Log-scale chart of per-direction interconnect bandwidth from 2010 to 2025 for Ethernet, InfiniBand, NVLink, and PCIe, by first product year. All four rise steadily, with NVLink roughly an order of magnitude above the others by 2024. An arrow labeled NVLink appears points to NVLink's first point in 2016, and the band between the NVLink and InfiniBand lines from 2016 onward is shaded and labeled intra-node vs. external-port gap."}
 
 ```{python}
 #| echo: false
@@ -144,10 +144,24 @@ from mlsysim import viz
 # Documented TIME slate (figure-visual-language §2.1); shared with @fig-alpha-beta-crossover.
 SLATE_TIME = "#5E6B73"  # time/latency slate, same value as the margin-device TIME constant
 
-data = pd.read_csv("vol2/03_network_fabrics/data/bandwidth_trends.csv")
-# The CSV records NVLink as its bidirectional per-GPU total; halve it so every
-# series is per direction, like the per-port InfiniBand/Ethernet and PCIe rates.
-data.loc[data["Technology"] == "NVLink", "Bandwidth_Gbps"] = data.loc[data["Technology"] == "NVLink", "Bandwidth_Gbps"] / 2
+from mlsysim import Literature
+
+# Per-direction rates by first commercial product year: per port for Ethernet
+# and InfiniBand, per x16 link after encoding for PCIe, and a GPU's summed
+# links for NVLink. Within a family, the fastest generation shipping each year.
+def _bandwidth_trend(rows):
+    best = {}
+    for r in rows:
+        if r["first_product_year"] is None:
+            continue
+        fam = "PCIe (x16)" if r["family"] == "PCIe" else r["family"]
+        key = (fam, int(r["first_product_year"]))
+        best[key] = max(best.get(key, 0.0), r["line_rate_gbps"])
+    out = [{"Year": y, "Technology": f, "Bandwidth_Gbps": v} for (f, y), v in best.items()]
+    order = {"Ethernet": 0, "InfiniBand": 1, "NVLink": 2, "PCIe (x16)": 3}
+    return pd.DataFrame(out).sort_values(["Technology", "Year"], key=lambda c: c.map(order) if c.name == "Technology" else c)
+
+data = _bandwidth_trend(Literature.Series.InterconnectGenerations.entries)
 
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(6, 3.7))
 _groups = list(dict.fromkeys(data["Technology"]))
@@ -177,9 +191,8 @@ for _i, _g in enumerate(_groups):
         markeredgewidth=1.4,
         linewidth=1.8,
     )
-    if _g in _label_at:
-        _lx, _ly, _ha = _label_at[_g]
-        ax.text(_lx, _ly, str(_g), ha=_ha, va="center", fontsize=11, color=_c, fontweight="bold")
+    if _g != "NVLink":
+        continue  # the three external links run close together; they go in the legend
     else:
         ax.annotate(
             str(_g),
@@ -213,6 +226,10 @@ ax.text(
     color=COLORS["VioletLine"],
     fontstyle="italic",
     linespacing=1.15,
+)
+_h, _l = ax.get_legend_handles_labels()
+ax.legend(
+    [h for h, l in zip(_h, _l) if l != "NVLink"], [l for l in _l if l != "NVLink"], loc="lower right", fontsize=9, frameon=True, framealpha=0.95
 )
 # The band's left edge marks where NVLink appears; point at its first plotted year.
 ax.annotate(

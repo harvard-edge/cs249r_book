@@ -782,7 +782,7 @@ class InterconnectAlphaBeta:
 
 The same comparison across generations shows that the roughly ninefold per-direction cliff between a GPU's NVLink capacity and its one InfiniBand port, which @sec-compute-bandwidth-hierarchy established for the H100 generation, is not an artifact of one product cycle (@fig-bandwidth-divergence). Every point in the figure is per direction, so NVLink values are half the bidirectional datasheet totals, exactly as for the NVLink 4.0 row of @tbl-interconnect-parameters. A gap of that order has persisted for a decade even as both tiers grew. A GPU's NVLink aggregate and a single network port are different endpoint boundaries, but that persistent gap is why collective design must be hierarchy-aware, because unpartitioned traffic routed across the slower external fabric saturates it long before the local links are busy.
 
-::: {#fig-bandwidth-divergence fig-env="figure" fig-pos="htb" fig-cap="**Interconnect bandwidth conventions**: Selected advertised intra-node and inter-node capacities, expressed per direction. NVLink points sum a GPU's links; PCIe uses one x16 interface, and InfiniBand uses one port. These capacities reveal a hierarchy but are not equal-sized endpoint budgets or achieved collective rates. Algorithm selection additionally requires startup cost, port count, routing, and contention." fig-alt="Log-scale line chart of one-way capacity from 2012 to 2024: an orange intra-node curve per GPU rising from PCIe 3.0 through NVLink 1.0 to 5.0, and a lower violet curve for one InfiniBand port from FDR to XDR. The band between the two curves is shaded gray, and a double-headed arrow at 2024 marks a ninefold gap between NVLink 5.0 and InfiniBand XDR."}
+::: {#fig-bandwidth-divergence fig-env="figure" fig-pos="htb" fig-cap="**Interconnect bandwidth conventions**: Selected advertised intra-node and inter-node capacities, expressed per direction. NVLink points sum a GPU's links; PCIe uses one x16 interface, and InfiniBand uses one port. These capacities reveal a hierarchy but are not equal-sized endpoint budgets or achieved collective rates. Algorithm selection additionally requires startup cost, port count, routing, and contention. Points sit at each generation's first commercial product year; rates and dates are from the IEEE, IBTA, PCI-SIG, and NVIDIA sources compiled in the book's interconnect-generation table." fig-alt="Log-scale line chart of one-way capacity from 2011 to 2025: an orange intra-node curve per GPU rising from PCIe 3.0 through NVLink 1.0 to 5.0, and a lower violet curve for one InfiniBand port from FDR to XDR. The band between the two curves is shaded gray, and a double-headed arrow at 2025 marks a ninefold gap between NVLink 5.0 and InfiniBand XDR."}
 
 ```{python}
 #| echo: false
@@ -793,9 +793,25 @@ import matplotlib.ticker as ticker
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.8, 4.1))
-df = pd.read_csv("vol2/06_collective_communication/data/bandwidth_trends.csv")
-# NVLink rows are aggregate bidirectional GPU capacities; other rows are one-way.
-df.loc[df["Technology"].str.startswith("NVLink"), "Bandwidth_GBps"] /= 2
+from mlsysim import Literature
+
+# Per-direction capacities by first commercial product year: PCIe 3.0 x16 then
+# each NVLink generation per GPU (summed links), and one InfiniBand port.
+def _divergence_rows(rows):
+    pick = {"PCIe 3.0 x16": ("PCIe 3.0", "Intra-node")}
+    for i in range(1, 6):
+        pick[f"NVLink {i}"] = (f"NVLink {i}.0", "Intra-node")
+    for g in ("FDR", "EDR", "HDR", "NDR", "XDR"):
+        pick[g] = (f"InfiniBand {g}", "Inter-node")
+    out = []
+    for r in rows:
+        key = next((k for k in pick if r["generation"].startswith(k)), None)
+        if key and r["first_product_year"] is not None:
+            name, kind = pick[key]
+            out.append({"Year": int(r["first_product_year"]), "Technology": name, "Type": kind, "Bandwidth_GBps": r["per_direction_GBps"]})
+    return pd.DataFrame(out).sort_values("Year")
+
+df = _divergence_rows(Literature.Series.InterconnectGenerations.entries)
 
 intra = df[df["Type"] == "Intra-node"]
 inter = df[df["Type"] == "Inter-node"]
@@ -833,11 +849,10 @@ ax.text(
 )
 ax.text(2025.9, 4.2, 'Inter-node, one InfiniBand (IB) port', ha='right', va='bottom', fontsize=11.5, fontweight='bold', color=COLORS['VioletLine'])
 
-# Gap between the newest intra-node and inter-node points, computed from the data.
-last_year = int(inter["Year"].max())
-hi = float(intra.loc[intra["Year"] == last_year, "Bandwidth_GBps"].iloc[0])
-lo = float(inter.loc[inter["Year"] == last_year, "Bandwidth_GBps"].iloc[0])
-gx = last_year
+# Gap between the newest generation on each tier, computed from the data.
+hi = float(intra.sort_values("Year")["Bandwidth_GBps"].iloc[-1])
+lo = float(inter.sort_values("Year")["Bandwidth_GBps"].iloc[-1])
+gx = int(inter["Year"].max())
 ax.annotate('', xy=(gx, hi), xytext=(gx, lo), arrowprops=dict(arrowstyle="<->", color=COLORS["primary"], lw=1.2, shrinkA=7, shrinkB=7))
 ax.text(gx + 0.3, (hi * lo) ** 0.5, f'{hi / lo:.0f}\u00d7\ngap', ha='left', va='center', fontsize=12, fontweight='bold', color=COLORS['primary'])
 

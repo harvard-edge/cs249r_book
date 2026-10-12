@@ -370,3 +370,15 @@ class Series:
         "Measured NCCL all-reduce time and bandwidth by message size on one eight-H100 node.",
         numeric=("size_bytes", "count", "oop_time_us", "oop_algbw_GBps", "oop_busbw_GBps", "ip_time_us", "ip_algbw_GBps", "ip_busbw_GBps"),
     )
+    InterconnectGenerations = TrendSeries(
+        "interconnect_generations",
+        _lit("Interconnect generation rates and dates from IEEE 802.3, IBTA, PCI-SIG, and NVIDIA primary "
+             "sources (per-row source_spec_url and source_product_url), compiled 2026-10-12",
+             "https://standards.ieee.org/ieee/802.3/",
+             "line_rate_gbps and per_direction_GBps are per direction: per port for Ethernet and InfiniBand "
+             "(4x), per x16 link after encoding for PCIe, and the sum of a GPU's links for NVLink (half "
+             "NVIDIA's bidirectional total); spec_year is the standard's publication (GPU launch for NVLink); "
+             "first_product_year is the first commercial product; blanks mean unconfirmed (see notes)"),
+        "Per-direction bandwidth of Ethernet, InfiniBand, NVLink, and PCIe generations with spec and product years.",
+        numeric=("line_rate_gbps", "per_direction_GBps", "spec_year", "first_product_year"),
+    )
