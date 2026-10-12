@@ -326,3 +326,15 @@ class Series:
         "Gender-classification error by skin-type and gender subgroup, before and after a public audit.",
         numeric=("target", "error_may2017_pct", "error_aug2018_pct"),
     )
+    AIBenchmarkSoCs = TrendSeries(
+        "ai_benchmark_socs",
+        _lit("ETH Zurich AI Benchmark, mobile processor ranking (ai-benchmark.com), snapshot 2026-10-12; "
+             "method of Ignatov et al. (2019)", "https://ai-benchmark.com/ranking_processors.html",
+             "one row per mobile SoC; ai_score is the benchmark's aggregate inference score; subscores for "
+             "INT8 and FP16 CNN and transformer workloads; lib is the software delegate used, so scores "
+             "reflect each chip's software path as well as its silicon; year is the SoC release year; "
+             "published scores cited as facts, no redistribution license stated by the source"),
+        "Measured on-device AI inference scores of mobile systems-on-chip by release year.",
+        numeric=("year", "int8_cnns", "int8_transformer", "int8_accuracy", "fp16_cnns", "fp16_transformer",
+                 "fp16_accuracy", "int16_cnns", "int8_parallel", "fp16_parallel", "ai_score"),
+    )
