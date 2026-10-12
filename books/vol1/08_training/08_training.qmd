@@ -2143,7 +2143,7 @@ Any throughput mismatch among these stages creates **accelerator bubbles**\index
 
 Across the three decoupled subsystems of @fig-training-pipeline, each stage occupies a distinct hardware domain: host storage and CPU cores ingest and preprocess data, accelerator compute engines execute the model loop, and evaluation pipelines periodically preempt execution to calculate validation metrics. Any latency imbalance among them therefore becomes idle accelerator cycles. At the ingestion boundary, the data pipeline stages raw records from persistent storage into host memory, applies transformations such as augmentation and normalization [@lecun2012], and packs tensors into dense batches. These batches transfer over the host-accelerator interconnect (such as PCIe) into accelerator memory. At the validation boundary, the evaluation pipeline periodically runs held-out data through the model without computing gradients. Because validation occupies the same accelerator cores needed for training, its invocation frequency represents a direct trade-off between monitoring resolution and overall training throughput.
 
-Within the accelerator, the training iteration forms a closed feedback loop governed by strict data and memory dependencies. @Fig-training-loop traces this cyclic sequence across three stages (predict, gradients, and update), showing how intermediate activations and parameter gradients feed the optimizer before returning updated weights to the next iteration.
+Within the accelerator, the training iteration forms a closed feedback loop governed by strict data and memory dependencies. @Fig-training-loop traces this cyclic sequence across three stages (predict, gradients, and update), showing how predictions, the loss, and parameter gradients feed the optimizer before returning updated weights to the next iteration.
 
 ::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**The Iterative Training Loop**: Each iteration sequences forward prediction, gradient computation by backpropagation, and an optimizer update. Updated parameters return to the next forward pass while the next batch remains a separate input. Data dependencies and memory residency set the step's minimum execution time and memory floor." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Forward Pass (Model), labeled Next Iteration."}
 
@@ -3132,7 +3132,7 @@ The optimizer's memory traffic is exposed on this dependency path. The FP32 Adam
 
 #### Batch size and parameter updates {#sec-model-training-batch-size-parameter-updates-4d0b}
 
-Increasing batch size improves accelerator utilization by raising the arithmetic intensity of matrix multiplications and reducing synchronization frequency. However, modifying batch size alters optimization dynamics. Scaling batch size without retuning the learning-rate schedule can degrade convergence, creating an optimization gap where hardware efficiency comes at the expense of model quality. @Fig-linear-scaling-failure isolates this dynamic across synthetic loss trajectories: holding the learning rate fixed while expanding from batch 32 to batch 256 leaves an acute optimization gap (dashed silver curve), whereas linearly scaling the learning rate restores convergence along the baseline path (green curve).
+Increasing batch size improves accelerator utilization by raising the arithmetic intensity of matrix multiplications and reducing synchronization frequency. However, modifying batch size alters optimization dynamics. Scaling batch size without retuning the learning-rate schedule can degrade convergence, creating an optimization gap where hardware efficiency comes at the expense of model quality. @Fig-linear-scaling-failure isolates this dynamic across synthetic loss trajectories: holding the learning rate fixed while expanding from batch 32 to batch 256 leaves an acute optimization gap (dashed silver curve), whereas linearly scaling the learning rate brings convergence close to the baseline path (green curve).
 
 ::: {#fig-linear-scaling-failure fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Linear-Scaling Scenario**: Synthetic training-loss curves (arbitrary units) compare a batch-32 baseline with batch 256 under a fixed or linearly scaled learning rate. The curves illustrate why increasing batch size may require retuning; they are not measured traces or a guarantee that linear scaling preserves convergence." fig-alt="Synthetic line chart of loss vs. epochs. A batch-32 baseline and a batch-256 run with a scaled learning rate converge faster than the illustrative batch-256 run with a fixed learning rate."}
 
@@ -3769,7 +3769,7 @@ class ResNetOverlap:
 
 Prefetching\index{Data prefetching!accelerator utilization}\index{Data prefetching!buffer management} and overlapping\index{Pipeline!overlapping, latency hiding} put the systematic framework to work on the bottleneck the data pipeline left open. ResNet-50's host workers prepare images more slowly than the H100 consumes them, so the accelerator is busy only about `{python} ResNetOverlap.overlap_pct_str` of the time (@sec-model-training-data-pipeline-8e71). That figure already assumes the host prepares the next batch while the accelerator computes the current one. Run serially, preparation and computation add, and the accelerator would be busy only about `{python} ResNetOverlap.serial_pct_str`. Overlap recovers the difference by hiding host work behind computation, but it cannot raise the supply rate itself, so closing the rest of the gap for ResNet-50 requires more host workers or decoding on the accelerator. The techniques below are most effective when profiling shows computational units idle while waiting for data.
 
-Training machine learning models involves significant data movement between storage, memory, and computational units. The data pipeline consists of sequential transfers: from disk storage to CPU memory, CPU memory to GPU memory, and through the GPU processing units. In ML training, a "Read" operation is rarely a simple disk fetch: for image workloads it encompasses JPEG decoding, random crops, and color jitter applied on CPU cores before the tensor is ready to transfer; for language workloads it encompasses tokenization, subword encoding, and sequence padding. The Gantt schedule sequenced in @fig-fetching-naive isolates the serial bottleneck of unbuffered ingestion: the GPU Train row remains completely idle during file-open intervals (Open 1, Open 2) and read stages (Read 1, Read 2), stretching epoch duration out to 01:35 because compute steps cannot begin until host-side decoding and transfer finish.
+Training machine learning models involves significant data movement between storage, memory, and computational units. The data pipeline consists of sequential transfers: from disk storage to CPU memory, CPU memory to GPU memory, and through the GPU processing units. In ML training, a "Read" operation is rarely a simple disk fetch: for image workloads it encompasses JPEG decoding, random crops, and color jitter applied on CPU cores before the tensor is ready to transfer; for language workloads it encompasses tokenization, subword encoding, and sequence padding. The Gantt schedule sequenced in @fig-fetching-naive isolates the serial bottleneck of unbuffered ingestion: the GPU Train row remains completely idle during file-open intervals (Open 1, Open 2) and read stages (Read 1, Read 2), stretching the two-epoch schedule out to 01:35 because compute steps cannot begin until host-side decoding and transfer finish.
 
 ```{python}
 #| echo: false
@@ -4146,6 +4146,103 @@ class MixedPrecisionIntro:
 ```
 
 A neural network's stored FP32 weights require `{python} MixedPrecisionIntro.bytes_fp32_value_str` bytes per parameter, while FP16 and BF16 weights use `{python} MixedPrecisionIntro.bytes_fp16_value_str` bytes. For a model with $10^9$ parameters, the working copy of the weights shrinks from `{python} MixedPrecisionIntro.model_1b_fp32_gb_str` to `{python} MixedPrecisionIntro.model_1b_fp16_gb_str`. That saving does not carry over to the static training state. The common FP16 recipe keeps FP32 master weights and FP32 Adam moments, so it spends 2 + 2 + 4 + 8 = 16 bytes per parameter on weights, gradients, master copy, and moments, exactly what FP32 Adam spends on its 4 + 4 + 8. Mixed precision's memory benefit therefore comes from the tensors that really are stored in 16 bits, above all the activations, together with the halved bytes moved for every 16-bit read, write, and gradient exchange.
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRECISION LADDER (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Throughput paragraph in mixed-precision training and
+# │          @fig-precision-ladder.
+# │
+# │ Goal: Show that accelerator throughput gains arrive through lower precision.
+# │ Show: V100 → B200 FP32 ~4.8×, FP16/BF16 tensor 18×, lowest format (FP4)
+# │       72× the V100 FP16 tensor rate; B200 FP16 ~30× its own FP32.
+# │ How: precision_flops (dense) from the hardware registry; V100's FP16 tensor
+# │      rate is its peak_flops.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.fmt import check, fmt_multiple
+
+# ┌── LEGO ───────────────────────────────────────────────
+class PrecisionLadder:
+    """Peak dense throughput by number format across accelerator generations."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    chips = ["V100", "A100", "H100", "B200"]
+    formats = ["fp32", "tf32", "fp16_dense", "fp8", "fp4"]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    def _rate(chip, fmt):
+        h = getattr(Hardware.Cloud, chip)
+        pf = h.compute.precision_flops
+        if fmt == "fp16_dense" and fmt not in pf:
+            return h.compute.peak_flops.to("TFLOPs/s").magnitude
+        return pf[fmt].to("TFLOPs/s").magnitude if fmt in pf else None
+    rates = {}
+    for _c in chips:
+        rates[_c] = {}
+        for _f in formats:
+            rates[_c][_f] = _rate(_c, _f)
+    fp32_growth = rates["B200"]["fp32"] / rates["V100"]["fp32"]
+    fp16_growth = rates["B200"]["fp16_dense"] / rates["V100"]["fp16_dense"]
+    lowest_growth = rates["B200"]["fp4"] / rates["V100"]["fp16_dense"]
+    b200_fp16_over_fp32 = rates["B200"]["fp16_dense"] / rates["B200"]["fp32"]
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(fp32_growth < fp16_growth < lowest_growth, "Growth must rise as precision falls.")
+    check(20 <= b200_fp16_over_fp32 <= 40, f"Expected B200 FP16 ~30x its FP32, got {b200_fp16_over_fp32:.0f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    fp32_growth_mult_str = fmt_multiple(round(fp32_growth, 1), precision=1)
+    fp16_growth_mult_str = fmt_multiple(round(fp16_growth), precision=0)
+    lowest_growth_mult_str = fmt_multiple(round(lowest_growth), precision=0)
+    b200_fp16_over_fp32_mult_str = fmt_multiple(round(b200_fp16_over_fp32), precision=0)
+```
+
+Mixed precision's throughput benefit is larger than its memory benefit. @Fig-precision-ladder plots peak dense throughput by number format across four generations of data center accelerators. From V100 to B200 the FP32 rate grew `{python} PrecisionLadder.fp32_growth_mult_str`, the FP16/BF16 tensor rate grew `{python} PrecisionLadder.fp16_growth_mult_str`, and the lowest supported format, 4-bit floating point (FP4) on B200, delivers `{python} PrecisionLadder.lowest_growth_mult_str` the V100's FP16 tensor rate. Hardware gains now arrive almost entirely through lower precision. On B200 the FP16/BF16 tensor path is `{python} PrecisionLadder.b200_fp16_over_fp32_mult_str` faster than FP32, so a training job that stays in FP32 leaves nearly all of the chip's arithmetic idle.
+
+::: {#fig-precision-ladder fig-env="figure" fig-pos="htb" fig-cap="**Peak Throughput by Number Format**: Peak dense throughput of four generations of data center accelerators in each number format they support, on a logarithmic axis. Each step down in precision roughly doubles the peak rate on the same silicon, and nearly all of the generational gain arrives in the 16-bit and lower formats rather than in FP32. Vendor peak specifications [@nvidia2020v100datasheet; @nvidia2021a10080gb; @nvidia2023h100; @nvidia2024blackwell]." fig-alt="Grouped bar chart on a logarithmic axis for four accelerator generations, V100, A100, H100, and B200, in release order. FP32 bars rise only from 15.7 to 75 TFLOP/s. TF32 bars run 156, 494, and 1,125. FP16/BF16 tensor bars run 125, 312, 989, and 2,250. FP8 bars are 1,979 on H100 and 4,500 on B200, and an FP4 bar on B200 reaches 9,000. Each bar is labeled with its value."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRECISION LADDER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-precision-ladder.
+# │
+# │ Goal: Plot peak dense throughput by number format and generation.
+# │ Show: Grouped log-scale bars, V100 to B200.
+# │ How: PrecisionLadder (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+_labels = {"fp32": ("FP32 (no tensor cores)", COLORS["primary"]), "tf32": ("TF32 tensor", COLORS["BlueLine"]),
+           "fp16_dense": ("FP16/BF16 tensor", COLORS["GreenLine"]), "fp8": ("FP8 tensor", COLORS["OrangeLine"]),
+           "fp4": ("FP4 tensor", COLORS["RedLine"])}
+_x = np.arange(len(PrecisionLadder.chips)); _w = 0.16
+for _i, _f in enumerate(PrecisionLadder.formats):
+    _vals = [PrecisionLadder.rates[c][_f] for c in PrecisionLadder.chips]
+    _xs = [xi + (_i - 2) * _w for xi, v in zip(_x, _vals) if v]
+    _vs = [v for v in _vals if v]
+    _bars = ax.bar(_xs, _vs, width=_w, color=_labels[_f][1], label=_labels[_f][0], edgecolor="white", linewidth=0.5)
+    for _b, _v in zip(_bars, _vs):
+        ax.text(_b.get_x() + _b.get_width() / 2, _v * 1.12, f"{_v:.1f}" if _v < 100 and _v % 1 else f"{_v:,.0f}",
+                ha="center", va="bottom", fontsize=6.5, rotation=90)
+ax.set_xticks(_x)
+ax.set_xticklabels([f"{getattr(Hardware.Cloud, c).name.replace('NVIDIA ', '')}\n({getattr(Hardware.Cloud, c).release_year})" for c in PrecisionLadder.chips])
+ax.set_yscale("log"); ax.set_ylim(5, 4e4)
+ax.set_ylabel("Peak dense throughput (TFLOP/s, log scale)")
+ax.legend(loc="upper left", fontsize=8, frameon=True, framealpha=0.95, ncol=2)
+plt.show()
+plt.close()
+```
+
+:::
 
 The numerical differences between these formats shape their use cases. @Tbl-precision-comparison shows that BF16's 8-bit exponent\index{BF16!exponent range preservation} gives it approximately the same normal exponent range as FP32, while FP16's 5-bit exponent gives a minimum positive normal value of about $6.1 \times 10^{-5}$ and a maximum finite value of $65{,}504$. FP16 subnormals extend toward $6 \times 10^{-8}$, although their treatment depends on the operation and hardware mode. FP32 provides about seven decimal digits of precision, FP16 about three, and BF16 about two to three. BF16 therefore trades mantissa precision for the exponent range that often simplifies deep-learning training.
 
@@ -5757,7 +5854,7 @@ The red curve's widening gap from the dashed ideal is that communication overhea
 
 Every parallelism strategy in this section inherits from earlier computing traditions\index{Training!infrastructure evolution}. Modern training platforms integrate paradigms developed across four computing eras, each shaped by the physical constraints and dominant workloads of its time.
 
-Neural network training combines requirements drawn simultaneously from high-performance computing (HPC) and warehouse-scale systems. From HPC, training inherits dense matrix multiplication (GEMM) kernels operating near accelerator compute limits, requiring tightly synchronized parallel execution across devices. From warehouse-scale computing\index{Warehouse-scale computing!training evolution}, multi-day training jobs inherit the necessity of cluster-wide orchestration, asynchronous data ingestion, and automated fault recovery across failure-prone nodes. @Fig-evolution-systems sequences this architectural lineage across four overlapping computing eras, from early mainframe mainstays (ENIAC, IBM System/360) and vector HPC supercomputers (CDC 6600, Cray-1) through warehouse-scale cloud clusters to modern GPU and TPU hypercomputing clusters.
+Neural network training combines requirements drawn simultaneously from high-performance computing (HPC) and warehouse-scale systems. From HPC, training inherits dense matrix multiplication (GEMM) kernels operating near accelerator compute limits, requiring tightly synchronized parallel execution across devices. From warehouse-scale computing\index{Warehouse-scale computing!training evolution}, multi-day training jobs inherit the necessity of cluster-wide orchestration, asynchronous data ingestion, and automated fault recovery across failure-prone nodes. @Fig-evolution-systems sequences this architectural lineage across four overlapping computing eras, from early mainframe mainstays (ENIAC, IBM System/360) and HPC supercomputers (the scalar CDC 6600 and the vector Cray-1) through warehouse-scale cloud clusters to modern GPU and TPU hypercomputing clusters.
 
 ::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
 
@@ -6337,7 +6434,7 @@ When a selected workload is partitioned across $\AcceleratorCount$ devices, the 
 
 When a model exceeds the memory capacity of a single accelerator, its depth can be partitioned across sequential devices. @Fig-layers-blocks stages this pipeline allocation across a four-accelerator execution chain, grouping 24 transformer blocks into contiguous six-block partitions (Blocks 1–6 through 19–24) that exchange boundary activations over the interconnect.
 
-::: {#fig-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Model Partitioning**: Distributing consecutive transformer layers across sequential devices bounds network communication to intermediate activations (forward) and boundary gradients (backward). However, sequential layer dependencies leave downstream devices idle during forward passes unless micro-batches are pipelined." fig-alt="Diagram showing transformer blocks 1 – 6 on Device 1, blocks 7 – 12 on Device 2, blocks 13 – 18 on Device 3, and blocks 19 – 24 on Device 4."}
+::: {#fig-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Model Partitioning**: Distributing consecutive transformer layers across sequential devices bounds network communication to intermediate activations (forward) and boundary gradients (backward). However, sequential layer dependencies leave downstream devices idle during forward passes unless micro-batches are pipelined." fig-alt="Diagram showing transformer blocks 1 to 6 on Device 1, blocks 7 to 12 on Device 2, blocks 13 to 18 on Device 3, and blocks 19 to 24 on Device 4, with arrows labeled Activations between devices."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\sffamily\small]
