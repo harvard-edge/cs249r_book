@@ -1731,6 +1731,124 @@ Evaluating adversarial defenses closes the budget loop: the system must measure 
 
 Empirical attack evaluation must be adaptive to the defense\index{Adaptive Evaluation!gradient masking pitfalls}. The evaluator should know the preprocessing, detector, randomness, ensemble, and rejection rule; optimize through differentiable components; use expectation over transformation for randomness; test transfer and query-based attacks when gradients are unavailable; and include the complete pipeline rather than a saved model alone. Multiple random restarts and attack budgets can strengthen evidence within that threat model, but a passed PGD test proves neither that PGD found the inner maximum nor that semantic, physical, or differently normed attacks are covered. Only a certificate establishes a guarantee, and only for its stated input, norm, radius, and assumptions.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STANDARDIZED ROBUSTNESS EVALUATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the adaptive-evaluation paragraph and
+# │          @fig-robustbench-progress.
+# │
+# │ Goal: Show measured progress and residual cost of adversarial defenses
+# │       under one standardized attack.
+# │ Show: Best AutoAttack accuracy 44% (2018) -> 75% (2024) at clean ~94%;
+# │       four published defenses fall to ~0% under the standardized attack.
+# │ How: Year maxima and filters over Literature.Series.RobustBenchCIFAR10Linf.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+def _dated(rows):
+    return [r for r in rows if r["year"] and r["unreliable"] != "True"]
+
+def _best(rows, year):
+    return max((r for r in rows if int(r["year"]) == year), key=lambda r: r["autoattack_acc"])
+
+def _broken(rows, floor):
+    return [r for r in rows if r["autoattack_acc"] < floor]
+
+# ┌── LEGO ───────────────────────────────────────────────
+class RobustBenchProgress:
+    """Best robust accuracy by year and defenses broken by AutoAttack."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = _dated(Literature.Series.RobustBenchCIFAR10Linf.entries)
+    first_year, last_year = 2018, 2024
+    broken_floor = 5.0  # percent AutoAttack accuracy; below this a defense provides no robustness
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    best_first = _best(rows, first_year)
+    best_last = _best(rows, last_year)
+    broken = _broken(rows, broken_floor)
+    entry_count = len(rows)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(40 <= best_first["autoattack_acc"] <= 48 and 70 <= best_last["autoattack_acc"] <= 80, "Prose quotes ~44% (2018) and ~75% (2024).")
+    check(best_last["clean_acc"] - best_last["autoattack_acc"] > 15, "Prose says a large clean-robust gap remains.")
+    check(len(broken) == 4, f"Prose says four defenses fall to near zero, got {len(broken)}.")
+    check(all(r["clean_acc"] > 85 for r in broken), "Prose says the broken defenses kept high clean accuracy.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    entry_count_str = fmt_int(entry_count)
+    best_first_pct_str = fmt_percent(round(best_first["autoattack_acc"] / 100, 2), precision=0, style="prose")
+    best_last_pct_str = fmt_percent(round(best_last["autoattack_acc"] / 100, 2), precision=0, style="prose")
+    best_last_clean_pct_str = fmt_percent(round(best_last["clean_acc"] / 100, 2), precision=0, style="prose")
+    best_last_fail_pct_str = fmt_percent(round(1 - best_last["autoattack_acc"] / 100, 2), precision=0, style="prose")
+    broken_floor_str = fmt_percent(broken_floor / 100, precision=0, style="prose")
+```
+
+RobustBench applies that discipline to published defenses at scale. It re-evaluates each defense against the same ensemble of adaptive attacks, AutoAttack, under one fixed threat model, which for CIFAR-10 is a perturbation of at most 8/255 per pixel in the $\ell_\infty$ norm [@croce2021robustbench; @croce2020autoattack]. @Fig-robustbench-progress plots the `{python} RobustBenchProgress.entry_count_str` dated entries. The best accuracy under attack rose from `{python} RobustBenchProgress.best_first_pct_str` in 2018 to `{python} RobustBenchProgress.best_last_pct_str` in 2024, while the same model kept `{python} RobustBenchProgress.best_last_clean_pct_str` accuracy on clean images, so even the strongest defense still fails on about `{python} RobustBenchProgress.best_last_fail_pct_str` of attacked inputs. The four entries at the bottom of the plot are published defenses that keep high clean accuracy yet fall below `{python} RobustBenchProgress.broken_floor_str` accuracy under the standardized attack, the result an evaluation that is not adaptive to the defense can miss.
+
+::: {#fig-robustbench-progress fig-env="figure" fig-pos="htb" fig-cap="**Standardized Robustness Evaluation of Published Defenses**: Clean accuracy (gray) and accuracy under AutoAttack (red) for CIFAR-10 defenses on the RobustBench leaderboard by publication year, at a perturbation budget of 8/255 in the $\ell_\infty$ norm. Filled red points trained only on CIFAR-10; hollow points used additional data. The line tracks the best robust accuracy published by each year. Points near zero are defenses that do not withstand the standardized attack. Data from @croce2021robustbench." fig-alt="Scatter plot of CIFAR-10 accuracy from 0 to 100 percent against publication years 2018 to 2024. Gray clean-accuracy points cluster between about 80 and 95 percent. Red robust-accuracy points spread lower, between about 30 and 75 percent, with a stepped line for the best so far rising from 44 percent in 2018 to about 66 percent in 2020 and 75 percent in 2024. Four red points sit near zero in 2019 and 2020."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STANDARDIZED ROBUSTNESS EVALUATION (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-robustbench-progress.
+# │
+# │ Goal: Show clean and AutoAttack accuracy by year with best-so-far line.
+# │ Show: Gray clean points, red robust points (hollow = extra data), step line.
+# │ How: RobustBenchProgress (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+_C = RobustBenchProgress
+_rng = np.random.default_rng(0)  # horizontal jitter only, so points within one year do not overlap
+_jit = {id(r): _rng.uniform(-0.18, 0.18) for r in _C.rows}
+_x = lambda r: int(r["year"]) + _jit[id(r)]
+ax.scatter([_x(r) for r in _C.rows], [r["clean_acc"] for r in _C.rows], s=14, color=COLORS["grid"], label="Clean accuracy", zorder=2)
+_ex = [r for r in _C.rows if r["additional_data"] == "True"]
+_no = [r for r in _C.rows if r["additional_data"] != "True"]
+ax.scatter(
+    [_x(r) for r in _no], [r["autoattack_acc"] for r in _no], s=20, color=COLORS["RedLine"], label="Under attack, CIFAR-10 data only", zorder=3
+)
+ax.scatter(
+    [_x(r) for r in _ex],
+    [r["autoattack_acc"] for r in _ex],
+    s=20,
+    facecolors="white",
+    edgecolors=COLORS["RedLine"],
+    linewidths=1.2,
+    label="Under attack, additional data",
+    zorder=3,
+)
+_years = list(range(_C.first_year, _C.last_year + 1))
+_run, _bx, _by = 0.0, [], []
+for _y in _years:
+    _run = max(_run, max(r["autoattack_acc"] for r in _C.rows if int(r["year"]) == _y))
+    _bx.append(_y - 0.5)
+    _by.append(_run)
+_bx.append(_years[-1] + 0.5)
+_by.append(_run)
+ax.step(_bx, _by, where="post", color=COLORS["RedLine"], lw=1.6, label="Best under attack so far", zorder=4)
+ax.set_xticks(_years)
+ax.set_xlim(_C.first_year - 0.6, _C.last_year + 0.6)
+ax.set_ylim(-3, 100)
+ax.set_xlabel("Publication year")
+ax.set_ylabel("CIFAR-10 accuracy (%)")
+ax.legend(fontsize=7.5, loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False)
+plt.show()
+plt.close()
+```
+
+:::
+
 ### Robustness of generative models {#sec-robust-ai-robustness-generative-ai-941b}
 
 The defenses above were built for classifiers, and generative models need the same discipline in a new form. An aligned language model of the Archetype A (GPT-4/Llama-3) class can pass its safety evaluations and still comply with a harmful request once an automatically optimized suffix is appended to the prompt, and suffixes optimized against open models transfer to other models [@zou2023]. That suffix is an adversarial example in token space, found by gradient-guided search over discrete tokens rather than continuous pixels. Generative models also fail without any attacker. Their output is open-ended text rather than a label, so the robustness question changes from whether a label flips under perturbation to whether the generated content preserves factuality, policy constraints, and task intent across prompt variations. A fluent answer can be factually baseless while latency and uptime stay healthy, which makes hallucination\index{Hallucination!generative AI} the generative form of silent failure.

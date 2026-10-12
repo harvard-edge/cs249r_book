@@ -305,3 +305,13 @@ class Series:
         "Top-1 accuracy of ImageNet models on the original test set and on shifted test sets.",
         numeric=("val", "imagenet_v2", "objectnet", "imagenet_r", "imagenet_sketch"),
     )
+    RobustBenchCIFAR10Linf = TrendSeries(
+        "robustbench_cifar10_linf",
+        _lit("Croce et al. (2021), RobustBench, model_info/cifar10/Linf/*.json (MIT), snapshot 2026-10-12",
+             "https://github.com/RobustBench/robustbench",
+             "CIFAR-10, L-infinity threat model, epsilon 8/255; clean_acc and autoattack_acc in percent as "
+             "evaluated by RobustBench with AutoAttack; additional_data marks training beyond CIFAR-10; "
+             "unreliable is RobustBench's flag (empty when not set); year parsed from the venue string"),
+        "Clean and AutoAttack accuracy of published CIFAR-10 L-infinity defenses by publication year.",
+        numeric=("clean_acc", "autoattack_acc"),
+    )
