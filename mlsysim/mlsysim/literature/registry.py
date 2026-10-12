@@ -209,3 +209,11 @@ class Literature(Registry):
     RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
     RepeatedSamplingMajority = _series.RepeatedSamplingMajority
     InjectionDefenseResults = _series.InjectionDefenseResults
+    ModelsByDomain = _series.ModelsByDomain
+    OpenXEmbodimentComposition = _series.OpenXEmbodimentComposition
+    LeRobotHubMonthly = _series.LeRobotHubMonthly
+    LeRobotEpisodeHistogram = _series.LeRobotEpisodeHistogram
+    EdgeInferenceOrin = _series.EdgeInferenceOrin
+    KittiOdometry = _series.KittiOdometry
+    CaliforniaDisengagements = _series.CaliforniaDisengagements
+    WaymoSafetyImpact = _series.WaymoSafetyImpact
