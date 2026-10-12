@@ -600,60 +600,48 @@ Scenario B (high throughput): Batch size 8.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models, Ops, Literature, BYTES_FP16, BYTES_INT8, BYTES_FP32
 from mlsysim.core.units import flop, second, millisecond, microsecond
+from mlsysim.engine.serving_profile import resnet50_h100_profile
 from mlsysim.fmt import check, fmt, fmt_time, fmt_rate, fmt_percent, fmt_multiple, fmt_math
 
 class ResNetH100Profile:
     """ResNet-50 on one H100: modeled forward-pass time per engine and batch size."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # The shared model (mlsysim.engine.serving_profile) is the single source; the
+    # compression chapter's INT8 deployment profile calls the same function.
+    _p = resnet50_h100_profile()
     resnet = Models.Vision.ResNet50
     h100 = Hardware.Cloud.H100
-    a100 = Hardware.Cloud.A100
-    python_dispatch = Ops.RuntimeOverheads.PythonDispatch
-    kernel_launch = Ops.RuntimeOverheads.KernelLaunch
-    int8_offline_img_s = Literature.Benchmarks.ResNet50H100InferenceOfflinePerGpu  # MLPerf Inference v5.0, measured
-    a100_sustained_img_s = 3000  # scenario anchor shared with the data engineering and training chapters
-    # scenario assumption: one eager kernel per operation: 53 convolutions,
-    # 53 batch normalizations, 49 ReLUs, 16 residual adds, 2 pools, 1 FC layer
-    eager_kernels = 53 + 53 + 49 + 16 + 2 + 1
-    # scenario assumption: a graph compiler folds batch norm, ReLU, and the
-    # residual add into each convolution: 53 fused convolutions, 2 pools, 1 FC
-    fused_kernels = 53 + 2 + 1
-    kernel_floor = 5 * microsecond  # scenario assumption: least device time one kernel takes at batch one
+    python_dispatch = _p.python_dispatch
+    kernel_launch = _p.kernel_launch
+    kernel_floor = _p.kernel_floor
+    eager_kernels = _p.eager_kernels
+    fused_kernels = _p.fused_kernels
+    int8_offline_img_s = _p.int8_offline_img_s
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    flops = resnet.inference_flops.to(flop)
-    sustained_fraction = (a100_sustained_img_s * 3 * flops.magnitude) / a100.compute.peak_flops.to(flop / second).magnitude
-    fp16_rate = h100.compute.precision_flops["fp16_dense"]
-    per_image_fp16 = (flops / (fp16_rate * sustained_fraction)).to(microsecond)
-    per_image_int8 = (1 / (int8_offline_img_s / second)).to(microsecond)
+    sustained_fraction = _p.sustained_fraction
+    per_image_fp16 = _p.per_image_fp16
+    per_image_int8 = _p.per_image_int8
+    per_image_tf32 = _p.per_image_tf32
     weights_fp16 = resnet.size_in_bytes(BYTES_FP16)
     weights_int8 = resnet.size_in_bytes(BYTES_INT8)
-    weight_read_fp16 = (weights_fp16 / h100.memory.bandwidth).to(microsecond)
-    weight_read_int8 = (weights_int8 / h100.memory.bandwidth).to(microsecond)
+    weight_read_fp16 = _p.weight_read_fp16
+    weight_read_int8 = _p.weight_read_int8
+    weight_read_fp32 = _p.weight_read_fp32
     eager_issue = (eager_kernels * (python_dispatch + kernel_launch)).to(millisecond)
-
-    def engine_ms(n_launch, host_per_launch, n_kernels, weight_read, per_image, batch=1,
-                  floor=kernel_floor):
-        t = n_launch * host_per_launch + n_kernels * floor + weight_read + batch * per_image
-        return t.to(millisecond)
-
-    # Eager FP16, the reference profile: affine in batch size
-    eager_fixed = (eager_issue + eager_kernels * kernel_floor + weight_read_fp16).to(millisecond)
+    eager_b1 = _p.eager_fp16(1)
+    eager_fixed = _p.eager_fp16(0)
     eager_per_image = per_image_fp16.to(millisecond)
-    eager_b1 = (eager_fixed + eager_per_image).to(millisecond)
     overhead_share_b1 = (eager_issue / eager_b1).to("").magnitude
-    # Runtime ladder at batch one: what each engine removes
-    torchscript_b1 = engine_ms(eager_kernels, kernel_launch, eager_kernels, weight_read_fp16, per_image_fp16)
-    onnx_b1 = engine_ms(fused_kernels, kernel_launch, fused_kernels, weight_read_fp16, per_image_fp16)
-    trt_fp16_b1 = engine_ms(1, kernel_launch, fused_kernels, weight_read_fp16, per_image_fp16)
-    trt_int8_b1 = engine_ms(1, kernel_launch, fused_kernels, weight_read_int8, per_image_int8)
-    eager_ceiling_img_s = (1 / per_image_fp16).to(1 / second).magnitude
-    # FP32 engines run on TF32 Tensor Cores; same sustained fraction
-    per_image_tf32 = (flops / (h100.compute.precision_flops["tf32"] * sustained_fraction)).to(microsecond)
-    weight_read_fp32 = (resnet.size_in_bytes(BYTES_FP32) / h100.memory.bandwidth).to(microsecond)
-    trt_fp32_b1 = engine_ms(1, kernel_launch, fused_kernels, weight_read_fp32, per_image_tf32)
-    tf32_ceiling_img_s = (1 / per_image_tf32).to(1 / second).magnitude
+    torchscript_b1 = _p.torchscript_fp16(1)
+    onnx_b1 = _p.onnx_fp16(1)
+    trt_fp32_b1 = _p.tensorrt("fp32", 1)
+    trt_fp16_b1 = _p.tensorrt("fp16", 1)
+    trt_int8_b1 = _p.tensorrt("int8", 1)
+    trt_fp16_b16 = _p.tensorrt("fp16", 16)
+    eager_ceiling_img_s = _p.large_batch_throughput("fp16")
+    tf32_ceiling_img_s = _p.large_batch_throughput("fp32")
     int8_ceiling_img_s = int8_offline_img_s
 
     def eager_ms(batch, _fixed=eager_fixed, _per=eager_per_image):
@@ -787,7 +775,7 @@ class ResNetServingSpectrum:
     # Cloud: TensorRT FP16 engine on the reference H100, from the chapter's profile
     P = ResNetH100Profile
     cloud_inf_b1_ms = P.trt_fp16_b1
-    cloud_inf_b16_ms = P.engine_ms(1, P.kernel_launch, P.fused_kernels, P.weight_read_fp16, P.per_image_fp16, batch=16)
+    cloud_inf_b16_ms = P.trt_fp16_b16
     cloud_throughput = round(P.eager_ceiling_img_s, -2)  # FP16 large-batch ceiling at the sustained fraction
     cloud_vram = 2 * GB  # scenario assumption: batch-32 engine residency
 

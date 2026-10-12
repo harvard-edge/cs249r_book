@@ -438,7 +438,7 @@ class CameraRunningCase:
 
 :::
 
-The chapter follows that camera pipeline through the structural and hardware tiers of the stack. MobileNetV2 is the volume's compute-bound lighthouse in its efficient regime. Depthwise separable convolutions keep its arithmetic small, and at batch one on a phone its frame time goes to arithmetic and activation traffic rather than to reading weights. The precision tier needs a workload whose time is set by bytes, so it follows GPT-2 XL decoding on the same phone. GPT-2 XL is the volume's bandwidth-bound lighthouse, and every token it generates streams every weight. Two callouts mark the ends of the memory constraint. DLRM [@naumov2019deep], the capacity-bound lighthouse, shows precision deciding whether embedding tables fit, and keyword spotting (KWS) [@zhang2017hello], the power-bound lighthouse, shows precision deciding whether a model fits a microcontroller's SRAM and energy budget. ResNet-50, the compute-bound lighthouse, serves twice, as the teacher that distills into MobileNetV2 and as the subject of the closing INT8 deployment profile. Rather than running every technique on all five, the chapter returns to each workload where it exposes the binding resource most clearly.
+The chapter follows that camera pipeline through the structural and hardware tiers of the stack. MobileNetV2 is the book's compute-bound lighthouse in its efficient regime. Depthwise separable convolutions keep its arithmetic small, and at batch one on a phone its frame time goes to arithmetic and activation traffic rather than to reading weights. The precision tier needs a workload whose time is set by bytes, so it follows GPT-2 XL decoding on the same phone. GPT-2 XL is the book's bandwidth-bound lighthouse, and every token it generates streams every weight. Two callouts mark the ends of the memory constraint. DLRM [@naumov2019deep], the capacity-bound lighthouse, shows precision deciding whether embedding tables fit, and keyword spotting (KWS) [@zhang2017hello], the power-bound lighthouse, shows precision deciding whether a model fits a microcontroller's SRAM and energy budget. ResNet-50, the compute-bound lighthouse, serves twice, as the teacher that distills into MobileNetV2 and as the subject of the closing INT8 deployment profile. Rather than running every technique on all five, the chapter returns to each workload where it exposes the binding resource most clearly.
 
 ::: {.column-margin .margin-pointer}
 ↩ The iron law of ML systems, which splits execution time into data-movement, compute, and fixed-overhead terms, is established in @sec-introduction-iron-law-ml-systems-c32a.
@@ -3541,7 +3541,7 @@ Silicon-level energy measurements explain why systems exploit quantization, but 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import pJ, flop
-from mlsysim.fmt import check, fmt_energy_per_op
+from mlsysim.fmt import check, fmt_energy, fmt_energy_per_op, fmt_multiple
 
 class EnergyCosts:
     """Energy per addition operation across numerical precisions (Horowitz 2014)."""
@@ -3557,17 +3557,28 @@ class EnergyCosts:
     energy_add_fp16_pj = ENERGY_ADD_FP16_PJ.to(pJ / flop).magnitude
     energy_add_int32_pj = ENERGY_ADD_INT32_PJ.to(pJ / flop).magnitude
     energy_add_int8_pj = ENERGY_ADD_INT8_PJ.to(pJ / flop).magnitude
+    # SRAM reads by array size (Horowitz 2014, 45 nm)
+    sram_8kb_pj = Hardware.Tech.Memory.SRAM_8KB.energy_per_access.to(pJ).magnitude
+    sram_1mb_pj = Hardware.Tech.Memory.SRAM_1MB.energy_per_access.to(pJ).magnitude
 
-    # ┌── 2. EXECUTE—(values are direct from constants) ─────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    sram_8kb_ratio = sram_8kb_pj / energy_add_int8_pj
+    sram_1mb_ratio = sram_1mb_pj / energy_add_int8_pj
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(energy_add_fp32_pj > energy_add_int8_pj, "FP32 add must cost more energy than INT8 add.")
+    check(160 < sram_8kb_ratio < 170 and 1600 < sram_1mb_ratio < 1700, "Figure marks about 167x and 1,667x the INT8 add.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     energy_add_fp32_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_FP32_PJ, commas=False)
     energy_add_fp16_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_FP16_PJ, commas=False)
     energy_add_int32_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_INT32_PJ, commas=False)
     energy_add_int8_pj_per_op_str = fmt_energy_per_op(ENERGY_ADD_INT8_PJ, commas=False)
+    sram_8kb_pj_str = fmt_energy(sram_8kb_pj * pJ, unit=pJ, precision=0, commas=False)
+    sram_1mb_pj_str = fmt_energy(sram_1mb_pj * pJ, unit=pJ, precision=0, commas=False)
+    int8_add_pj_str = fmt_energy(energy_add_int8_pj * pJ, unit=pJ, precision=2, commas=False)
+    sram_8kb_ratio_mult_str = fmt_multiple(round(sram_8kb_ratio), precision=0, commas=False)
+    sram_1mb_ratio_mult_str = fmt_multiple(round(sram_1mb_ratio), precision=0, commas=True)
 ```
 
 #### Energy costs {#sec-model-compression-energy-costs-d1d5}
@@ -3582,7 +3593,7 @@ The reference costs in @tbl-model-compression-energy-hierarchy use the cheapest 
 
 : **Relative Energy per Operation**: Relative energy cost of representative arithmetic and memory operations, normalized to an 8-bit integer add. A 32-bit float add costs `{python} QuantizationEnergyPhysics.energy_float_add_ratio_mult_str` more than its 8-bit integer counterpart, but a single `{python} QuantizationEnergyPhysics.energy_dram_read_bits_value_str`-bit DRAM read costs `{python} QuantizationEnergyPhysics.energy_dram_read_ratio_mult_str` more, placing this DRAM access more than four orders of magnitude above the INT8 add. These per-event reference costs explain why shrinking data movement can save substantial energy; total inference energy also depends on access counts, arithmetic counts, and where operands reside [@horowitz2014]. {#tbl-model-compression-energy-hierarchy tbl-colwidths="[34,33,33]"}
 
-Across arithmetic precisions and on-chip SRAM tiers, a read from an 8 KB SRAM (5.00 pJ, marked by the $\approx 167\times$ trajectory) dwarfs an 8-bit integer addition (0.03 pJ) (@fig-quantized-energy). In the reference 45 nm technology model, a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_pj_per_op_str`, whereas an 8-bit integer addition consumes `{python} EnergyCosts.energy_add_int8_pj_per_op_str`. Floating-point arithmetic follows the same progression. A 32-bit floating-point addition consumes approximately `{python} EnergyCosts.energy_add_fp32_pj_per_op_str`, whereas a 16-bit floating-point addition requires `{python} EnergyCosts.energy_add_fp16_pj_per_op_str`. Relative to the 0.03 pJ INT8 add, on-chip SRAM reads span 5 to 50 pJ, a factor of 167 to 1,667$\times$, which shows that operand placement within the cache hierarchy dictates energy consumption as heavily as the arithmetic format itself. Off-chip DRAM access is costlier still. At scale, these per-operation disparities compound across billions of parameters and operations. For workloads dominated by off-chip weight traffic, moving unquantized parameters across high-capacitance DRAM buses can saturate bandwidth and account for substantial accelerator energy [@patterson2021carbon], whereas on energy-constrained edge devices, redundant bit width directly exhausts battery reserves and violates thermal limits.
+Across arithmetic precisions and on-chip SRAM tiers, a read from an 8 KB SRAM (`{python} EnergyCosts.sram_8kb_pj_str`, marked by the `{python} EnergyCosts.sram_8kb_ratio_mult_str` trajectory) dwarfs an 8-bit integer addition (`{python} EnergyCosts.int8_add_pj_str`) (@fig-quantized-energy). In the reference 45 nm technology model, a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_pj_per_op_str`, whereas an 8-bit integer addition consumes `{python} EnergyCosts.energy_add_int8_pj_per_op_str`. Floating-point arithmetic follows the same progression. A 32-bit floating-point addition consumes approximately `{python} EnergyCosts.energy_add_fp32_pj_per_op_str`, whereas a 16-bit floating-point addition requires `{python} EnergyCosts.energy_add_fp16_pj_per_op_str`. Relative to the `{python} EnergyCosts.int8_add_pj_str` INT8 add, on-chip SRAM reads span `{python} EnergyCosts.sram_8kb_pj_str` to `{python} EnergyCosts.sram_1mb_pj_str`, a factor of `{python} EnergyCosts.sram_8kb_ratio_mult_str` to `{python} EnergyCosts.sram_1mb_ratio_mult_str`, which shows that operand placement within the cache hierarchy dictates energy consumption as heavily as the arithmetic format itself. Off-chip DRAM access is costlier still. At scale, these per-operation disparities compound across billions of parameters and operations. For workloads dominated by off-chip weight traffic, moving unquantized parameters across high-capacitance DRAM buses can saturate bandwidth and account for substantial accelerator energy [@patterson2021carbon], whereas on energy-constrained edge devices, redundant bit width directly exhausts battery reserves and violates thermal limits.
 
 ::: {#fig-quantized-energy fig-env="figure" fig-pos="htb" fig-cap="**Energy per Operation by Precision**: Representative 45 nm energy costs range from 0.03 pJ for an INT8 add to 3.10 pJ for an INT32 multiply and 5 to 50 pJ for the SRAM reads shown. The diagonal marks a read from the 8 KB SRAM at approximately 167 times the INT8-add energy; the complete SRAM range spans approximately 167 to 1,667 times that baseline. Energy figures from [@horowitz2014]." fig-alt="Bar chart of representative 45 nanometer operation energy. An INT8 add uses 0.03 picojoules, an INT32 multiply uses 3.10 picojoules, and SRAM reads range from 5 to 50 picojoules. The diagonal marks a read from the 8 KB SRAM as approximately 167 times the INT8-add energy; the complete SRAM range spans approximately 167 to 1,667 times that baseline."}
 
@@ -5606,7 +5617,7 @@ class ConvFusionCalc:
 *The idealized intermediate stream falls from six transfers to two.*
 :::
 
-The intended function is preserved, although batch-normalization folding changes the arithmetic sequence. In the idealized intermediate stream, traffic drops from 6 transfers to 2 transfers (`{python} ConvFusionCalc.transfer_reduction_mult_str` reduction).
+The intended function is preserved, although batch-normalization folding changes the arithmetic sequence, and the intermediate traffic falls by `{python} ConvFusionCalc.transfer_reduction_mult_str`.
 
 The same principle extends beyond CNNs. GEMM bias-activation fusion eliminates intermediate writes in transformer linear layers by computing element-wise operations in registers immediately after each matrix multiplication output element, and IO-aware attention tiling reduces HBM traffic by processing attention in SRAM-sized tiles without materializing the full $\SequenceLength{\times}\SequenceLength$ attention matrix [@dao2022]. Neither depends on compression; both belong to the general fusion toolkit.
 
@@ -7062,7 +7073,6 @@ Evaluating compression requires balancing statistical quality against physical e
 # │          drops and ratios.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import warnings
 from mlsysim.fmt import (
     check,
     fmt_memory,
@@ -7070,58 +7080,53 @@ from mlsysim.fmt import (
     fmt_percent,
     fmt_pp,
     fmt_energy,
+    fmt_power,
+    fmt_rate,
     fmt_time,
 )
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNet50Int8Metrics:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Models, Hardware, Engine
-    from mlsysim.solvers import CompressionModel
+    from mlsysim import Models, Hardware
+    from mlsysim.core.units import BYTES_FP32, BYTES_INT8
+    from mlsysim.engine.serving_profile import resnet50_h100_profile
 
     m = Models.Vision.ResNet50
-    h = Hardware.Cloud.H100                           # volume reference machine
+    h = Hardware.Cloud.H100                           # book reference machine
+    profile = resnet50_h100_profile()                 # shared with the serving chapter
 
     # Scenario inputs, not measurements from a single benchmark run
     fp32_top1 = 76.1
     int8_top1 = 75.8
-    per_class_min_drop = 0.1
-    per_class_max_drop = 1.2
     calibration_error_fp32 = 2.1
     calibration_error_int8 = 3.4
-    cpu_speedup = 1.2
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # The compression solver applies an illustrative INT8 speedup factor, so
-    # this is a modeled profile rather than an H100 benchmark.
-    # Suppress any precision-fallback warning for the FP32 base metrics.
-    _prev_filters = warnings.filters[:]
-    warnings.filterwarnings("ignore", message="Precision.*not in", category=UserWarning)
-    from mlsysim.solvers import SingleNodeModel
-
-    p_fp32 = SingleNodeModel().solve(m, h, batch_size=1, precision="fp32")
-    warnings.filters[:] = _prev_filters
-
-    # Use CompressionModel to construct an internally consistent INT8 scenario
-    c_int8 = CompressionModel().solve(m, h, method="quantization", target_bitwidth=8)
-
-    fp32_latency = p_fp32.latency
-    int8_latency = fp32_latency / c_int8.inference_speedup
-    fp32_size = p_fp32.memory_footprint
-    int8_size = fp32_size / c_int8.compression_ratio
-    fp32_energy = p_fp32.energy
-    int8_energy = fp32_energy / c_int8.inference_speedup
+    # Batch-one latency: compiled engine, FP32 math on TF32 Tensor Cores vs INT8.
+    fp32_latency = profile.tensorrt("fp32", batch=1)
+    int8_latency = profile.tensorrt("int8", batch=1)
+    # Large-batch throughput: modeled for TF32, MLPerf-measured for INT8.
+    fp32_throughput = profile.large_batch_throughput("fp32")
+    int8_throughput = profile.large_batch_throughput("int8")
+    fp32_size = m.size_in_bytes(BYTES_FP32)
+    int8_size = m.size_in_bytes(BYTES_INT8)
+    # Energy per image at full board power: TDP / throughput.
+    fp32_energy = (h.tdp / (fp32_throughput / second)).to(mJ)
+    int8_energy = (h.tdp / (int8_throughput / second)).to(mJ)
 
     top1_drop = fp32_top1 - int8_top1
     latency_speedup = (fp32_latency / int8_latency).to("").magnitude
+    throughput_gain = int8_throughput / fp32_throughput
     size_reduction = (fp32_size / int8_size).to("").magnitude
     energy_improvement = (fp32_energy / int8_energy).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0 < top1_drop < 1, "INT8 accuracy drop should be sub-point.")
-    check(latency_speedup > 1.0, "INT8 should provide speedup over FP32.")
-    check(size_reduction > 3, "INT8 size reduction should be close to 4x.")
-    check(cpu_speedup < latency_speedup, "GPU INT8 speedup should exceed CPU speedup.")
+    check(1.0 < latency_speedup < 2.0, "batch-one INT8 gain is small: fixed costs dominate one image.")
+    check(throughput_gain > 3 * latency_speedup, "large-batch INT8 gain should far exceed the batch-one gain.")
+    check(abs(size_reduction - 4) < 0.01, "INT8 weights are a quarter of FP32 weights.")
+    check(abs(energy_improvement - throughput_gain) < 1e-6, "at constant board power, energy per image tracks throughput.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     fp32_top1_str = fmt_percent(fp32_top1 / 100, precision=1, commas=False, style='symbol')
@@ -7130,10 +7135,15 @@ class ResNet50Int8Metrics:
     int8_top1_prose_str = fmt_percent(int8_top1 / 100, precision=1, commas=False, style='prose')
     fp32_latency_ms_str = fmt_time(fp32_latency, 'millisecond', precision=2, commas=False)
     int8_latency_ms_str = fmt_time(int8_latency, 'millisecond', precision=2, commas=False)
+    latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=1, commas=False)
+    fp32_throughput_str = fmt_rate(fp32_throughput, unit="img/s", precision=0)
+    int8_throughput_str = fmt_rate(int8_throughput, unit="img/s", precision=0)
+    throughput_gain_mult_str = fmt_multiple(throughput_gain, precision=1, commas=False)
     fp32_size_mb_str = fmt_memory(fp32_size, unit=MB, precision=1, commas=False)
     int8_size_mb_str = fmt_memory(int8_size, unit=MB, precision=1, commas=False)
-    fp32_energy_j_str = fmt_energy(fp32_energy, unit=joule, precision=2, commas=False)
-    int8_energy_j_str = fmt_energy(int8_energy, unit=joule, precision=2, commas=False)
+    fp32_energy_mj_str = fmt_energy(fp32_energy, unit=mJ, precision=1, commas=False)
+    int8_energy_mj_str = fmt_energy(int8_energy, unit=mJ, precision=1, commas=False)
+    tdp_w_str = fmt_power(h.tdp, unit=watt, precision=0)
     calibration_error_fp32_str = fmt_percent(calibration_error_fp32 / 100, precision=1, commas=False, style='symbol')
     calibration_error_fp32_prose_str = fmt_percent(calibration_error_fp32 / 100, precision=1, commas=False, style='prose')
     calibration_error_int8_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='symbol')
@@ -7141,10 +7151,10 @@ class ResNet50Int8Metrics:
     top1_drop_pp_str = fmt_pp(top1_drop, precision=1, commas=False, style="symbol")
     top1_drop_pp_prose_str = fmt_pp(top1_drop, precision=1, commas=False, style="prose")
     size_reduction_mult_str = fmt_multiple(round(size_reduction), precision=0, commas=False)
-    energy_improvement_mult_str = fmt_multiple(round(energy_improvement), precision=0, commas=False)
+    energy_improvement_mult_str = fmt_multiple(energy_improvement, precision=1, commas=False)
 ```
 
-ResNet-50, the camera pipeline's teacher and the volume's compute-bound lighthouse, shows how one compression decision ripples across physical and statistical dimensions. Quantizing it from FP32 to INT8 on the reference H100 changes latency, artifact size, energy, accuracy, and confidence calibration at once, and a deployment profile must report all five rather than an isolated accuracy number (@tbl-resnet50-int8-profile).
+ResNet-50, the camera pipeline's teacher and the book's compute-bound lighthouse, shows how one compression decision ripples across physical and statistical dimensions. Quantizing it from FP32 to INT8 on the reference H100 changes latency, throughput, artifact size, energy, accuracy, and confidence calibration at once, and a deployment profile must report all six rather than an isolated accuracy number (@tbl-resnet50-int8-profile).
 
 ```{=latex}
 \begingroup
@@ -7154,18 +7164,19 @@ ResNet-50, the camera pipeline's teacher and the volume's compute-bound lighthou
 | **Metric**            | **FP32 baseline**                                         | **INT8 result**                                                                                               | **Deployment reading**                                                |
 |:----------------------|:----------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------|
 | **Top-1 accuracy**    | `{python} ResNet50Int8Metrics.fp32_top1_str`              | `{python} ResNet50Int8Metrics.int8_top1_str` (`{python} ResNet50Int8Metrics.top1_drop_pp_str` drop)           | Aggregate accuracy mostly holds, but subgroup checks still matter.    |
-| **Modeled latency**   | `{python} ResNet50Int8Metrics.fp32_latency_ms_str`        | `{python} ResNet50Int8Metrics.int8_latency_ms_str`                                                            | GPU latency improves when the runtime maps INT8 to fast kernels.      |
+| **Batch-one latency** | `{python} ResNet50Int8Metrics.fp32_latency_ms_str`        | `{python} ResNet50Int8Metrics.int8_latency_ms_str` (`{python} ResNet50Int8Metrics.latency_speedup_mult_str`)  | Fixed per-request costs dilute the gain for one image.                |
+| **Large-batch throughput** | `{python} ResNet50Int8Metrics.fp32_throughput_str`        | `{python} ResNet50Int8Metrics.int8_throughput_str` (`{python} ResNet50Int8Metrics.throughput_gain_mult_str`)  | INT8 Tensor Cores pay off once arithmetic dominates.                  |
 | **Model size**        | `{python} ResNet50Int8Metrics.fp32_size_mb_str`           | `{python} ResNet50Int8Metrics.int8_size_mb_str` (`{python} ResNet50Int8Metrics.size_reduction_mult_str`)      | The artifact becomes easier to cache, transmit, and deploy on edge.   |
-| **Energy/inference**  | `{python} ResNet50Int8Metrics.fp32_energy_j_str`          | `{python} ResNet50Int8Metrics.int8_energy_j_str` (`{python} ResNet50Int8Metrics.energy_improvement_mult_str`) | Modeled at constant power, so it tracks latency; measure it directly. |
+| **Energy/inference**  | `{python} ResNet50Int8Metrics.fp32_energy_mj_str`         | `{python} ResNet50Int8Metrics.int8_energy_mj_str` (`{python} ResNet50Int8Metrics.energy_improvement_mult_str`) | Assumes full board power at large batch; measure it directly.         |
 | **Confidence-calibration error** | `{python} ResNet50Int8Metrics.calibration_error_fp32_str` | `{python} ResNet50Int8Metrics.calibration_error_int8_str`                                                     | Confidence calibration can drift even when accuracy looks acceptable. |
 
-: **Illustrative ResNet-50 INT8 Deployment Profile**: The values form a modeled scenario, not measurements from one hardware run. A real profile must measure accuracy, latency, artifact size, energy, and calibration on the target system. {#tbl-resnet50-int8-profile tbl-colwidths="[21,19,24,36]"}
+: **ResNet-50 INT8 Deployment Profile on the Reference H100**: Latency and FP32 throughput come from the modeled H100 engine profile, INT8 throughput is the MLPerf Inference measurement, and the accuracy and calibration values are illustrative. A real profile must measure all six on the target system. {#tbl-resnet50-int8-profile tbl-colwidths="[21,19,24,36]"}
 
 ```{=latex}
 \endgroup
 ```
 
-In this illustrative profile, converting weights and activations to INT8 reduces the model footprint by `{python} ResNet50Int8Metrics.size_reduction_mult_str` (from `{python} ResNet50Int8Metrics.fp32_size_mb_str` to `{python} ResNet50Int8Metrics.int8_size_mb_str`), while the scenario assigns a `{python} ResNet50Int8Metrics.energy_improvement_mult_str` reduction in per-inference energy. That energy figure is the modeled latency speedup applied to energy, which assumes average power stays constant; it is not a separate result, and a measured profile could differ in either direction. The latency scenario starts from a modeled H100 FP32 baseline of `{python} ResNet50Int8Metrics.fp32_latency_ms_str` and applies an illustrative speedup factor to obtain `{python} ResNet50Int8Metrics.int8_latency_ms_str`. While aggregate top-1 accuracy drops by only `{python} ResNet50Int8Metrics.top1_drop_pp_prose_str` (from `{python} ResNet50Int8Metrics.fp32_top1_prose_str` to `{python} ResNet50Int8Metrics.int8_top1_prose_str`), confidence-calibration error (the gap between predicted probability and observed accuracy, distinct from the range calibration of quantization) increases from `{python} ResNet50Int8Metrics.calibration_error_fp32_prose_str` to `{python} ResNet50Int8Metrics.calibration_error_int8_prose_str`. Post-quantization probability distributions drift, which can compromise safety-critical confidence thresholds even when top-1 classification accuracy appears preserved. Production deployment decisions require corresponding quality, latency, and energy measurements using a supported execution path on target hardware.
+Converting weights to INT8 shrinks the artifact by `{python} ResNet50Int8Metrics.size_reduction_mult_str` (from `{python} ResNet50Int8Metrics.fp32_size_mb_str` to `{python} ResNet50Int8Metrics.int8_size_mb_str`), but the speed gain depends on how the model is served. At batch one, a compiled INT8 engine is only `{python} ResNet50Int8Metrics.latency_speedup_mult_str` faster than its FP32 counterpart (`{python} ResNet50Int8Metrics.int8_latency_ms_str` against `{python} ResNet50Int8Metrics.fp32_latency_ms_str`), because launch overhead, per-kernel floors, and the weight read form most of a single image's time and shrink little with precision. At large batch the arithmetic dominates, and INT8 throughput of `{python} ResNet50Int8Metrics.int8_throughput_str`, as MLPerf Inference measured it, is `{python} ResNet50Int8Metrics.throughput_gain_mult_str` the modeled FP32 rate. Energy per image follows throughput only if the board draws its full `{python} ResNet50Int8Metrics.tdp_w_str` in both precisions; the `{python} ResNet50Int8Metrics.energy_improvement_mult_str` energy figure is that assumption, not a separate measurement. The runtime comparison in @sec-model-serving-inference-runtime-selection-5eef derives both latency figures from the same engine profile. While aggregate top-1 accuracy drops by only `{python} ResNet50Int8Metrics.top1_drop_pp_prose_str` (from `{python} ResNet50Int8Metrics.fp32_top1_prose_str` to `{python} ResNet50Int8Metrics.int8_top1_prose_str`), confidence-calibration error (the gap between predicted probability and observed accuracy, distinct from the range calibration of quantization) increases from `{python} ResNet50Int8Metrics.calibration_error_fp32_prose_str` to `{python} ResNet50Int8Metrics.calibration_error_int8_prose_str`. Post-quantization probability distributions drift, which can compromise safety-critical confidence thresholds even when top-1 classification accuracy appears preserved. Production deployment decisions require corresponding quality, latency, and energy measurements using a supported execution path on target hardware.
 
 Suppose the application requires at least 75.5 percent top-1 accuracy and no more than 3.0 percent confidence-calibration error, measured with the same validation data and calibration metric as the profile. The INT8 candidate passes the accuracy limit but fails the calibration limit. Its modeled resource savings therefore do not justify acceptance. Retain the baseline for comparison, try confidence recalibration or a less aggressive quantization configuration, and repeat the quality checks before validating resource gains on the target runtime.
 
