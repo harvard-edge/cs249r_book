@@ -249,3 +249,143 @@ InjectionDefenseResults = _Series(
     ),
     "Prompt-injection benchmark: utility and attack success per model and defense.",
 )
+
+# ---------------------------------------------------------------------------
+# Physical AI series (added 2026-10-12)
+# ---------------------------------------------------------------------------
+
+ModelsByDomain = _Series(
+    "epoch_models_by_domain",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Epoch AI, Data on AI Models (all_ai_models.csv): training compute by domain (Robotics, Language, Vision)",
+        url="https://epoch.ai/data/ai-models",
+        verified="2026-10-12",
+        notes=(
+            "Rows with a training-compute estimate only. A model tagged with several "
+            "domains appears once per matching domain_group. Compute values are Epoch's "
+            "estimates (confidence column), not first-party measurements; Epoch tags NVIDIA "
+            "Cosmos world models as Robotics. " + _EPOCH_LICENSE
+        ),
+    ),
+    "Training compute (FLOP) and publication date of AI models, by domain group.",
+)
+
+OpenXEmbodimentComposition = _Series(
+    "open_x_embodiment_composition",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Open X-Embodiment dataset overview spreadsheet: episodes, robot, morphology, control frequency per constituent dataset",
+        url="https://github.com/google-deepmind/open_x_embodiment",
+        verified="2026-10-12",
+        notes=(
+            "Exported from the official Google Sheet linked in the repository README "
+            "(repo @ 9eeb68b9). 72 datasets; episode total 2,419,193 matches the sheet's own "
+            "total. The sheet is a live document and cannot be pinned to a revision."
+        ),
+    ),
+    "Composition of the Open X-Embodiment robot-learning collection.",
+)
+
+LeRobotHubMonthly = _Series(
+    "lerobot_hub_monthly",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Hugging Face Hub API: datasets tagged LeRobot, new and cumulative count by creation month",
+        url="https://huggingface.co/api/datasets?filter=LeRobot",
+        verified="2026-10-12",
+        notes=(
+            "81 API pages (80,132 unique datasets). Counts include only datasets still public "
+            "at fetch time, so earlier cumulative values are lower bounds."
+        ),
+    ),
+    "Public LeRobot-format datasets on the Hugging Face Hub, by creation month.",
+)
+
+LeRobotEpisodeHistogram = _Series(
+    "lerobot_hub_episode_histogram",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Hugging Face Hub LeRobot datasets: episodes per dataset, power-of-two bins by creation year",
+        url="https://huggingface.co/api/datasets?filter=LeRobot",
+        verified="2026-10-12",
+        notes=(
+            "Episode counts parsed from each dataset card's embedded meta/info.json for the "
+            "59,031 datasets that carry one; a 25-dataset spot check against info.json matched "
+            "21 exactly (cards can lag the data). Bin b holds counts in [bin_lo, bin_hi)."
+        ),
+    ),
+    "Distribution of episodes per public LeRobot dataset.",
+)
+
+EdgeInferenceOrin = _Series(
+    "mlperf_inference_edge_orin",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="MLPerf Inference Edge, closed division, results for NVIDIA Orin-family systems (v3.1, v4.0, v4.1)",
+        url="https://github.com/mlcommons/inference_results_v3.1",
+        verified="2026-10-12",
+        notes=(
+            "Parsed from the mlcommons inference_results repositories (v3.1 @ f7b504d4, "
+            "v4.0 @ 343c3d2c, v4.1 @ 198fc467), loadgen-valid results only. Single-stream "
+            "latency metrics as reported (p50, p90 with early stopping)."
+        ),
+    ),
+    "Measured inference latency and throughput on Orin-family edge systems.",
+)
+
+KittiOdometry = _Series(
+    "kitti_odometry_leaderboard",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="KITTI odometry benchmark leaderboard: translation and rotation error per method",
+        url="https://www.cvlibs.net/datasets/kitti/eval_odometry.php",
+        verified="2026-10-12",
+        notes=(
+            "127 methods. sensor_group comes from the page's sensor icons: stereo, laser, or "
+            "none (a mix of monocular, some lidar-inertial, and event-camera methods). "
+            "Runtimes are self-reported on different hardware."
+        ),
+    ),
+    "Odometry drift (percent of distance) by method and sensor type.",
+)
+
+CaliforniaDisengagements = _Series(
+    "ca_dmv_disengagements",
+    Provenance(
+        kind=ProvenanceKind.INDUSTRY_REPORT,
+        ref="California DMV autonomous vehicle disengagement and mileage reports, per company, report year, and permit type",
+        url="https://web.archive.org/web/20260519/https://www.dmv.ca.gov/portal/vehicle-industry-services/autonomous-vehicles/disengagement-reports/",
+        verified="2026-10-12",
+        notes=(
+            "Report year runs Dec 1 to Nov 30. 2020 onward from the DMV consolidated "
+            "CSVs (per-VIN rows summed per permit); 2019 from the DMV spreadsheets; "
+            "earlier years from each company's filed PDF (text layer or OCR, as "
+            "source_method records). What counts as a reportable disengagement is "
+            "self-defined by each company under 13 CCR 227.50, and the DMV states the "
+            "reports are not designed for comparison across companies. Commercial "
+            "deployment miles are excluded by regulation. The live DMV page returned 404 "
+            "on the fetch date; files came from the DMV-hosted bundle the archived page links."
+        ),
+    ),
+    "Autonomous testing miles and reported disengagements filed with the California DMV.",
+)
+
+WaymoSafetyImpact = _Series(
+    "waymo_safety_impact_headline",
+    Provenance(
+        kind=ProvenanceKind.INDUSTRY_REPORT,
+        ref="Waymo Safety Impact data hub: rider-only crash rates vs. a location-adjusted human benchmark, by outcome and data cut",
+        url="https://waymo.com/safety/impact/",
+        verified="2026-10-12",
+        notes=(
+            "Rows: All Locations (mileage blended), All Crashes, dynamic (location-adjusted) "
+            "benchmark built from 2022 human crash data. pct_reduction is the rate ratio "
+            "minus one; 95% confidence intervals by the rate-ratio method the data "
+            "dictionary cites. The 202606 cut uses the corrected v2 file the release notes "
+            "name as the replacement. ro_miles_millions is cumulative rider-only miles "
+            "through the cut (before 202512, the sum of operating-depot rows)."
+        ),
+    ),
+    "Waymo rider-only crash-rate reductions with confidence intervals, by outcome and data cut.",
+)
