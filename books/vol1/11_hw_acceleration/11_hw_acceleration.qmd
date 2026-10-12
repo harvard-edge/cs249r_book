@@ -134,7 +134,7 @@ One workload runs through the chapter. ResNet-50 quantized to INT8 carries the b
 
 The definition becomes concrete in the generic chip of @fig-accelerator-anatomy, which serves as this chapter's map. External high-bandwidth memory (HBM) feeds shared on-chip storage (an L2 cache), which distributes operands into rows of processing elements\index{Processing element!accelerator building block}, each equipped with a private scratchpad or cache, a matrix unit, a vector unit, and a special function unit. A host interface connects the chip to the CPU that issues its work.
 
-::: {#fig-accelerator-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Modern AI Accelerator**: This generic schematic combines common components rather than depicting one product. A host interface connects the accelerator to a CPU, a high-bandwidth device-memory interface feeds shared on-chip storage, and processing elements contain matrix, vector, and special-function units with local memory. Real accelerators differ in which units they provide and whether storage is hardware-managed cache or software-managed scratchpad." fig-alt="Generic schematic of an AI accelerator chip linked by a host interface to a host CPU and by a memory interface to high-bandwidth memory. Inside the chip, rows of processing elements surround shared on-chip storage. An enlarged processing element contains local memory, a matrix unit, a vector unit, and a special function unit. A separate dashed link connects host DRAM to the host CPU."}
+::: {#fig-accelerator-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Modern AI Accelerator**: This generic schematic combines common components rather than depicting one product. A host interface connects the accelerator to a CPU, a high-bandwidth device-memory interface feeds shared on-chip storage, and processing elements contain matrix, vector, and special-function units with local memory. Real accelerators differ in which units they provide and whether storage is hardware-managed cache or software-managed scratchpad." fig-alt="Generic schematic of an AI accelerator chip linked by a host interface to a host CPU and by a memory interface to high-bandwidth memory. Inside the chip, rows of processing elements surround shared on-chip storage. An enlarged processing element contains an L1 cache or scratchpad, a tensor core, a vector unit, and a special function unit (SFU). A separate dashed link connects host DRAM to the host CPU."}
 
 ```{.tikz}
 \begin{tikzpicture}[line cap=round,line join=round,font=\sffamily\small]
@@ -2710,9 +2710,88 @@ The boundary between memory-bound and compute-bound execution emerges directly f
 
 In a strictly sequential model without overlap, $\IronLawMemoryTime > \IronLawComputeTime$ identifies memory-bound execution. When hardware overlaps memory transfers with computation, the larger term sets the theoretical lower bound on execution time. In practice, however, data dependencies, memory controller queueing, and partial pipeline overlap dictate how much arithmetic hardware remains idle while waiting for operands.
 
-The structural widening between model footprints and available memory bandwidth is what turns $\IronLawMemoryTime$ into the binding constraint across generations. Parameter count is a capacity quantity. In low-batch dense decoding with weights streamed from device memory, weight traffic per generated token grows with the parameter count. Sparse expert models read selected experts rather than every stored parameter, so their total parameter counts do not directly specify per-token traffic. @Fig-memory-wall plots this logarithmic divergence relative to 2014, contrasting the roughly $4{,}900\times$ increase in model parameters (red scatter points) against the modest $17\times$ scaling in accelerator memory bandwidth (blue circles) to isolate the widening shaded memory-wall gap [@krizhevsky2012imagenet; @brown2020language; @chowdhery2022palm; @dubey2024llama]. Even high-bandwidth accelerators such as NVIDIA B200 and AMD MI300X/MI325X cannot close this growth-rate gap through bandwidth scaling alone [@nvidia2024blackwell; @amd2023mi300x]. Parameter counts for proprietary systems such as GPT-4 and Gemini are not officially disclosed, so they are not plotted as factual data points.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEMORY WALL TREND (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-memory-wall and the paragraph that introduces it.
+# │
+# │ Goal: Compare growth in dense model parameters with growth in per-device
+# │       accelerator memory bandwidth since 2014.
+# │ Show: ~3,900× dense-parameter growth (VGG-16 to PaLM) against
+# │       ~33× per-device bandwidth growth (one K80 GPU to B200).
+# │ How: Registry parameters, bandwidths, and release years; growth indices
+# │      relative to the 2014 baselines. The MoE model is plotted at total
+# │      parameters but excluded from the trend and the headline multiple.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Hardware, Models
+from mlsysim.fmt import check, fmt_multiple
 
-::: {#fig-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Model Size vs. Hardware Bandwidth**: Both series are the base-10 logarithm of growth relative to 2014, so each unit on the vertical axis is a tenfold increase. Over the plotted decade parameter counts peak at roughly 4,900$\times$ against bandwidth's 17$\times$. The shaded band is a gap between logarithms rather than a difference, so its width reads as a ratio, and the two fitted trends diverge at a constant rate." fig-alt="Scatter plot with two fitted trend lines from 2012 to 2025. The vertical axis is base-10 logarithm of growth relative to 2014, running from about negative one to four. Red model-size points rise to about 3.7 and blue bandwidth points to about 1.2, with a gray band shaded between the two trend lines from 2016 onward, labeled in bold as the AI memory wall."}
+# ┌── LEGO ───────────────────────────────────────────────
+class MemoryWallTrend:
+    """Dense model-size growth vs per-device memory-bandwidth growth since 2014."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    chips = [
+        ("NVIDIA K80 (one GPU)", Hardware.Cloud.K80),
+        ("Google TPU v2", Hardware.Cloud.TPUv2),
+        ("NVIDIA V100", Hardware.Cloud.V100),
+        ("NVIDIA A100", Hardware.Cloud.A100),
+        ("Google TPU v4", Hardware.Cloud.TPUv4),
+        ("NVIDIA H100", Hardware.Cloud.H100),
+        ("AMD MI300X", Hardware.Cloud.MI300X),
+        ("Google TPU v6e", Hardware.Cloud.TPUv6),
+        ("AMD MI325X", Hardware.Cloud.MI325X),
+        ("NVIDIA B200", Hardware.Cloud.B200),
+    ]
+    dense_models = [
+        ("AlexNet", Models.Vision.AlexNet),
+        ("VGG-16", Models.Vision.VGG16),
+        ("ResNet-50", Models.Vision.ResNet50),
+        ("BERT-Large", Models.Language.BERT_Large),
+        ("GPT-3", Models.Language.GPT3),
+        ("PaLM", Models.Language.PaLM_540B),
+        ("Llama 3.1 405B", Models.Language.Llama3_405B),
+    ]
+    moe_models = [("DeepSeek-V3", Models.Language.DeepSeek_V3)]
+    baseline_chip = Hardware.Cloud.K80
+    baseline_model = Models.Vision.VGG16
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    _bw0 = baseline_chip.memory.bandwidth.to("GB/s").magnitude
+    _p0 = baseline_model.parameters.to("count").magnitude
+    chip_names = [n for n, _ in chips]
+    chip_years = [h.release_year for _, h in chips]
+    chip_bw_gbs = [h.memory.bandwidth.to("GB/s").magnitude for _, h in chips]
+    chip_index = list(np.asarray(chip_bw_gbs) / _bw0)
+    dense_names = [n for n, _ in dense_models]
+    dense_years = [m.release_year for _, m in dense_models]
+    dense_params = [m.parameters.to("count").magnitude for _, m in dense_models]
+    dense_index = list(np.asarray(dense_params) / _p0)
+    moe_names = [n for n, _ in moe_models]
+    moe_years = [m.release_year for _, m in moe_models]
+    moe_params = [m.parameters.to("count").magnitude for _, m in moe_models]
+    moe_index = list(np.asarray(moe_params) / _p0)
+    bandwidth_growth = max(chip_index)
+    model_growth = max(dense_index)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(baseline_chip.release_year == 2014 and baseline_model.release_year == 2014,
+          "Both growth indices are relative to 2014.")
+    check(25 <= bandwidth_growth <= 40, f"Expected ~33x per-device bandwidth growth, got {bandwidth_growth:.1f}.")
+    check(3000 <= model_growth <= 4500, f"Expected ~3,900x dense-parameter growth, got {model_growth:.0f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    bandwidth_growth_mult_str = fmt_multiple(round(bandwidth_growth), precision=0)
+    model_growth_mult_str = fmt_multiple(round(model_growth, -2), precision=0, commas=True)
+```
+
+The structural widening between model footprints and available memory bandwidth is what turns $\IronLawMemoryTime$ into the binding constraint across generations. Parameter count is a capacity quantity. In low-batch dense decoding with weights streamed from device memory, weight traffic per generated token grows with the parameter count. Sparse expert models read selected experts rather than every stored parameter, so their total parameter counts do not directly specify per-token traffic. @Fig-memory-wall plots this logarithmic divergence relative to 2014, contrasting the roughly `{python} MemoryWallTrend.model_growth_mult_str` increase in dense model parameters (filled red points) against the `{python} MemoryWallTrend.bandwidth_growth_mult_str` increase in per-device accelerator memory bandwidth (blue points) to isolate the widening shaded memory-wall gap [@krizhevsky2012imagenet; @simonyan2014very; @brown2020language; @chowdhery2022palm; @dubey2024llama]. DeepSeek-V3 appears as an open marker at its total parameter count and is left out of the trend for exactly that reason [@deepseek2025v3]. Even high-bandwidth accelerators such as NVIDIA B200 and AMD MI300X/MI325X cannot close this growth-rate gap through bandwidth scaling alone [@nvidia2024blackwell; @amd2023mi300x]. Parameter counts for proprietary systems such as GPT-4 and Gemini are not officially disclosed, so they are not plotted as factual data points.
+
+::: {#fig-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Model Size vs. Hardware Bandwidth**: Both series are the base-10 logarithm of growth relative to 2014 (VGG-16 for parameters, one GPU of the dual-GPU K80 board for bandwidth), so each unit on the vertical axis is a tenfold increase. Over the plotted decade dense parameter counts grow roughly `{python} MemoryWallTrend.model_growth_mult_str` against per-device bandwidth's `{python} MemoryWallTrend.bandwidth_growth_mult_str`. The open marker is a sparse expert model plotted at total parameters and excluded from the fit. The shaded band is a gap between logarithms rather than a difference, so its width reads as a ratio, and the two fitted trends diverge at a constant rate. Method after @gholami2024." fig-alt="Scatter plot with two fitted trend lines from 2012 to 2026. The vertical axis is base-10 logarithm of growth relative to 2014, running from about negative one to four. Red model-size points rise to about 3.5 and blue bandwidth points to about 1.5, with one open red marker for DeepSeek-V3 above the red trend and a gray band shaded between the two trend lines from 2016 onward, labeled in bold as the AI memory wall."}
 
 ```{python}
 #| echo: false
@@ -2722,10 +2801,10 @@ The structural widening between model footprints and available memory bandwidth 
 # │ Context: @fig-memory-wall—model size vs hardware bandwidth divergence
 # │
 # │ Goal: Plot model parameter counts and accelerator bandwidth over time;
-# │       show ~4,900× model growth vs ~17× bandwidth growth.
+# │       show ~3,900× dense-model growth vs ~33× per-device bandwidth growth.
 # │ Show: Scatter + trend lines; processor and model milestones.
-# │ How: TPU v2, A100, H100 bandwidth from the registry; other proc/model
-# │      data hardcoded; book_style.setup_plot().
+# │ How: MemoryWallTrend (registry parameters, bandwidths, release years);
+# │      book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -2739,42 +2818,16 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
 # DATA
 # =============================================================================
 
-proc_names = [
-    "NVIDIA Tesla K80",
-    "Google TPU v2",
-    "NVIDIA Tesla V100",
-    "NVIDIA A100",
-    "Google TPU v4",
-    "NVIDIA H100",
-    "AMD MI300X",
-    "Google TPU v6e",
-    "AMD MI325X",
-    "NVIDIA B200",
-]
-proc_years = [2014, 2017, 2017, 2020, 2021, 2022, 2024, 2024, 2025, 2025]
-# TPU v2, A100 and H100 bandwidths come from the hardware registry so this figure
-# cannot drift from the ridge-point figure and prose that read the same twins.
-# TPU v2 is 700 GB/s per chip (Jouppi et al. 2020, CACM, Table 3).
-proc_bw = [
-    480,
-    Hardware.Cloud.TPUv2.memory.bandwidth.to(GB / second).magnitude,
-    900,
-    Hardware.Cloud.A100.memory.bandwidth.to(GB / second).magnitude,
-    1200,
-    Hardware.Cloud.H100.memory.bandwidth.to(GB / second).magnitude,
-    5300,
-    1640,
-    6000,
-    8000,
-]
-proc_index = np.asarray(proc_bw) / proc_bw[0]
-proc_log_index = np.log10(proc_index)
+# All values come from the registry through MemoryWallTrend (defined above),
+# so the plotted points, the fitted trends, and the prose multiples share one source.
+proc_names = MemoryWallTrend.chip_names
+proc_years = MemoryWallTrend.chip_years
+proc_log_index = np.log10(MemoryWallTrend.chip_index)
 
-model_names = ["AlexNet", "VGG-16", "ResNet-50", "BERT Large", "GPT-3", "PaLM", "Llama 3.1", "DeepSeek-V3", "Llama 4 Maverick"]
-model_years = [2012, 2014, 2015, 2018, 2020, 2022, 2024.3, 2024.9, 2025.3]
-model_params = [60, 138, 25.6, 340, 175000, 540000, 405000, 671000, 400000]
-model_index = np.asarray(model_params) / model_params[1]
-model_log_index = np.log10(model_index)
+model_names = MemoryWallTrend.dense_names
+model_years = MemoryWallTrend.dense_years
+model_log_index = np.log10(MemoryWallTrend.dense_index)
+moe_log_index = np.log10(MemoryWallTrend.moe_index)
 
 # =============================================================================
 # PLOT: Model Size vs Hardware Bandwidth
@@ -2794,14 +2847,16 @@ mask = years_range >= 2016
 # TPU v2 and V100 share 2017 and sit ~0.1 apart on the log axis, so their markers
 # are dodged apart horizontally for display only; the fit uses the true years.
 proc_plot_years = np.asarray(proc_years, dtype=float)
-proc_plot_years[proc_names.index("Google TPU v2")] -= 0.15
-proc_plot_years[proc_names.index("NVIDIA Tesla V100")] += 0.15
-proc_plot_years[proc_names.index("NVIDIA Tesla K80")] -= 0.15
+for _name, _dx in {"Google TPU v2": -0.15, "NVIDIA V100": 0.15, "Google TPU v6e": -0.2, "NVIDIA B200": 0.2}.items():
+    proc_plot_years[proc_names.index(_name)] += _dx
+model_plot_years = np.asarray(model_years, dtype=float)
+moe_plot_years = np.asarray(MemoryWallTrend.moe_years, dtype=float) + 0.35
 ax.scatter(
     proc_plot_years, proc_log_index, s=45, color=COLORS["BlueLine"], edgecolors="white", linewidths=0.8, zorder=4, label="Bandwidth growth index"
 )
 
-ax.scatter(model_years, model_log_index, s=45, color=COLORS["RedLine"], edgecolors="white", linewidths=0.8, zorder=4, label="Model-size growth index")
+ax.scatter(model_plot_years, model_log_index, s=45, color=COLORS["RedLine"], edgecolors="white", linewidths=0.8, zorder=4, label="Dense model-size growth index")
+ax.scatter(moe_plot_years, moe_log_index, s=45, facecolors="white", edgecolors=COLORS["RedLine"], linewidths=1.2, zorder=4, label="Sparse expert model (total parameters)")
 
 ax.plot(years_range, proc_trend, '--', color=COLORS["BlueLine"], lw=1.0, alpha=0.9)
 
@@ -2834,29 +2889,32 @@ default_model_label_style = {
 # Key = data-point name
 # -----------------------------------------------------------------------------
 visible_proc_labels = {
-    "NVIDIA Tesla K80": {"xytext": (0, 5), "ha": "center"},
+    "NVIDIA K80 (one GPU)": {"xytext": (0, 5), "ha": "center"},
     "Google TPU v2": {"xytext": (0, -10), "ha": "center", "va": "center"},
-    "NVIDIA Tesla V100": {
+    "NVIDIA V100": {
         "xytext": (-15, 25),
         "ha": "center",
         "arrowprops": dict(arrowstyle="-", color=COLORS["BlueLine"], lw=0.8),
     },
     "Google TPU v6e": {"xytext": (0, -10), "ha": "center", "va": "center"},
-    "AMD MI325X": {"xytext": (10, -13), "ha": "center", "va": "center"},
+    "AMD MI325X": {
+        "xytext": (-48, 12),
+        "ha": "center",
+        "arrowprops": dict(arrowstyle="-", color=COLORS["BlueLine"], lw=0.8),
+    },
     "NVIDIA B200": {"xytext": (0, 5), "ha": "center"},
 }
 
 visible_model_labels = {
     "PaLM": {"xytext": (0, 5), "ha": "center"},
-    "DeepSeek-V3": {"xytext": (25, 8), "ha": "center", "va": "center"},
-    "Llama 4 Maverick": {"xytext": (5, -10), "ha": "center", "va": "center"},
+    "Llama 3.1 405B": {"xytext": (-6, -10), "ha": "right", "va": "center"},
 }
 
 # -----------------------------------------------------------------------------
 # Draw processor labels
 # -----------------------------------------------------------------------------
 proc_points = dict(zip(proc_names, zip(proc_plot_years, proc_log_index)))
-model_points = dict(zip(model_names, zip(model_years, model_log_index)))
+model_points = dict(zip(model_names, zip(model_plot_years, model_log_index)))
 
 for name, custom_style in visible_proc_labels.items():
     x, y = proc_points[name]
@@ -2868,6 +2926,11 @@ for name, custom_style in visible_model_labels.items():
     x, y = model_points[name]
     style = default_model_label_style.copy()
     style.update(custom_style)
+    ax.annotate(name, (x, y), **style)
+
+for name, x, y in zip(MemoryWallTrend.moe_names, moe_plot_years, moe_log_index):
+    style = default_model_label_style.copy()
+    style.update({"xytext": (6, 0), "ha": "left", "va": "center"})
     ax.annotate(name, (x, y), **style)
 
 mask = years_range >= 2016
@@ -3457,7 +3520,7 @@ class ComputeBandwidthDivergence:
 
 Peak computational capability has expanded faster than memory bus performance across accelerator generations, and the size of that mismatch is what sets how much data reuse a kernel needs to stay fed. @Fig-compute-memory-imbalance plots these two growth trajectories on a logarithmic scale normalized to the V100 baseline, isolating how the shaded gap between peak compute and memory bandwidth widens to a `{python} ComputeBandwidthDivergence.gap_growth_mult_str` reuse burden on B200.
 
-::: {#fig-compute-memory-imbalance fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Bandwidth Divergence**: Peak dense FP16 throughput and memory bandwidth across five NVIDIA datacenter generations, each normalized to its V100 baseline on a log scale. Over `{python} ComputeBandwidthDivergence.span_str` compute grows `{python} ComputeBandwidthDivergence.compute_growth_mult_str` while bandwidth grows `{python} ComputeBandwidthDivergence.bandwidth_growth_mult_str`, so the shaded separation between the curves widens by `{python} ComputeBandwidthDivergence.gap_growth_mult_str`. That separation is the data reuse a kernel must supply to keep the arithmetic units busy. The H200 step is the instructive exception: bandwidth rose while peak compute held flat, narrowing the gap for one generation." fig-alt="Line graph on a log scale comparing compute growth against memory bandwidth growth across five GPU generations from 2017 to 2024, each normalized to 1 at the V100. The compute line rises to roughly 18 and the bandwidth line to roughly 9, with the area between them shaded. At the H200 point the bandwidth line rises while the compute line stays flat, so the shaded area narrows before widening again."}
+::: {#fig-compute-memory-imbalance fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Bandwidth Divergence**: Peak dense FP16 throughput and memory bandwidth across five NVIDIA datacenter generations, each normalized to its V100 baseline on a log scale. Over `{python} ComputeBandwidthDivergence.span_str` compute grows `{python} ComputeBandwidthDivergence.compute_growth_mult_str` while bandwidth grows `{python} ComputeBandwidthDivergence.bandwidth_growth_mult_str`, so the shaded separation between the curves widens by `{python} ComputeBandwidthDivergence.gap_growth_mult_str`. That separation is the data reuse a kernel must supply to keep the arithmetic units busy. The H200 step is the instructive exception: bandwidth rose while peak compute held flat, narrowing the gap for one generation. Peak rates and bandwidths from NVIDIA product documentation [@nvidia2020v100datasheet; @nvidia2021a10080gb; @nvidia2023h100; @nvidia2024blackwell]." fig-alt="Line graph on a log scale comparing compute growth against memory bandwidth growth across five GPU generations from 2017 to 2024, each normalized to 1 at the V100. The compute line rises to roughly 18 and the bandwidth line to roughly 9, with the area between them shaded. At the H200 point the bandwidth line rises while the compute line stays flat, so the shaded area narrows before widening again."}
 
 ```{python}
 #| echo: false
@@ -3560,7 +3623,7 @@ Because both curves are normalized to the V100, the separation between them meas
 # │ Goal: Plot hardware ridge point (FLOP/byte) over time using one precision
 # │       basis; explain why low-reuse ops become memory-bound.
 # │ Show: Line plot; chip annotations; ridge values.
-# │ How: Compute dense FP16 ridge points from local hardware constants.
+# │ How: Dense FP16 ridge points and release years from the hardware registry.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -3574,8 +3637,8 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
 # DATA: Ridge Points (Peak FLOP/s/Memory Bandwidth)
 # =============================================================================
 
-years = [2017, 2020, 2022, 2024]
 chips = ['V100', 'A100', 'H100', 'B200']
+years = [getattr(Hardware.Cloud, c).release_year for c in chips]
 ridges = [
     Hardware.Cloud.V100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.V100.memory.bandwidth.to(TB / second).magnitude,
     Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs / second).magnitude / Hardware.Cloud.A100.memory.bandwidth.to(TB / second).magnitude,
@@ -3722,6 +3785,98 @@ Across generations, the ridge point\index{Ridge Point!hardware comparison} $\Roo
 ```{=latex}
 \endgroup
 ```
+
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CROSS-VENDOR BANDWIDTH AND COMPUTE ENVELOPE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after @tbl-ridge-points and @fig-bandwidth-envelope.
+# │
+# │ Goal: Show that the compute-bandwidth divergence holds across vendors.
+# │ Show: Best-device dense FP16/BF16 throughput ~55× and best bandwidth ~13×
+# │       since TPU v2 (2017); best bandwidth ~8 TB/s since early 2025.
+# │ How: Running maxima over Literature.Series.AcceleratorBandwidthCompute
+# │      (Epoch AI), ordered by release date.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.core.units import TB, second
+from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_multiple
+
+# ┌── LEGO ───────────────────────────────────────────────
+class BandwidthEnvelope:
+    """Best-device bandwidth and FP16 tensor throughput over time, all vendors."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = sorted(Literature.Series.AcceleratorBandwidthCompute.entries, key=lambda r: r["date"])
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    bw_env, fl_env = [], []
+    _bw = _fl = 0.0
+    for _r in rows:
+        _bw = max(_bw, _r["memory_bandwidth_bytes_per_s"]); _fl = max(_fl, _r["fp16_tensor_flops"])
+        bw_env.append((_r["date"], _bw)); fl_env.append((_r["date"], _fl))
+    baseline = rows[0]
+    compute_growth = fl_env[-1][1] / baseline["fp16_tensor_flops"]
+    bandwidth_growth = bw_env[-1][1] / baseline["memory_bandwidth_bytes_per_s"]
+    best_bandwidth_tbs = bw_env[-1][1] / 1e12
+    for _d, _v in bw_env:
+        if _v == bw_env[-1][1]:
+            bandwidth_plateau_since = _d
+            break
+    device_count = len(rows)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(baseline["device"].startswith("Google TPU v2"), "Baseline is TPU v2, the earliest device with an FP16 tensor rate.")
+    check(compute_growth > 3 * bandwidth_growth, "Compute must outgrow bandwidth by a wide margin.")
+    check(bandwidth_plateau_since[:4] == "2025", "Prose says best bandwidth has held since early 2025.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    device_count_str = fmt_int(device_count)
+    compute_growth_mult_str = fmt_multiple(round(compute_growth), precision=0)
+    bandwidth_growth_mult_str = fmt_multiple(round(bandwidth_growth), precision=0)
+    best_bandwidth_str = fmt_bandwidth(best_bandwidth_tbs * TB / second, unit="TB/s", precision=0)
+```
+
+The three generations in that table come from one vendor, but the divergence is industry-wide. @Fig-bandwidth-envelope tracks the best memory bandwidth and the best dense FP16/BF16 tensor throughput among `{python} BandwidthEnvelope.device_count_str` accelerators from every major vendor released since 2017 [@epochai2026hardware]. Measured from TPU v2, the best compute rate grew about `{python} BandwidthEnvelope.compute_growth_mult_str` while the best bandwidth grew about `{python} BandwidthEnvelope.bandwidth_growth_mult_str`, so the ridge point of the leading devices rose several-fold. Since early 2025 the best bandwidth has held near `{python} BandwidthEnvelope.best_bandwidth_str`, and the best dense FP16 rate has leveled as well, because new devices put their added arithmetic into FP8 and FP4 paths rather than 16-bit ones.
+
+::: {#fig-bandwidth-envelope fig-env="figure" fig-pos="htb" fig-cap="**Compute and Bandwidth Across Vendors**: Dense FP16/BF16 tensor throughput and memory bandwidth of machine learning accelerators from all major vendors with at least 16 GB of off-chip memory, each relative to TPU v2 (2017) on a logarithmic axis. Points are individual devices; step lines track the best device released to date. Compute pulls away from bandwidth, and both best-device envelopes level off in 2025 and 2026 as added arithmetic moves into lower-precision formats. Data from @epochai2026hardware." fig-alt="Scatter plot with two step lines on a logarithmic axis from 2017 to 2026, both starting at 1 for TPU v2. A red step line for best dense FP16 throughput climbs to about 55 by 2025 and stays flat. A blue step line for best memory bandwidth climbs more slowly to about 13 by early 2025 and stays flat. Faint red and blue points mark individual devices below each line."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CROSS-VENDOR BANDWIDTH AND COMPUTE ENVELOPE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-bandwidth-envelope.
+# │
+# │ Goal: Plot best-device compute and bandwidth growth across vendors.
+# │ Show: Per-device points and running-maximum step lines, relative to TPU v2.
+# │ How: BandwidthEnvelope (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+_E = BandwidthEnvelope
+def _yr(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+_b0 = _E.baseline["memory_bandwidth_bytes_per_s"]; _f0 = _E.baseline["fp16_tensor_flops"]
+ax.scatter([_yr(r["date"]) for r in _E.rows], [r["memory_bandwidth_bytes_per_s"] / _b0 for r in _E.rows], s=10, color=COLORS["BlueLine"], alpha=0.35)
+ax.scatter([_yr(r["date"]) for r in _E.rows], [r["fp16_tensor_flops"] / _f0 for r in _E.rows], s=10, color=COLORS["RedLine"], alpha=0.35)
+ax.step([_yr(d) for d, _ in _E.bw_env], [v / _b0 for _, v in _E.bw_env], where="post", color=COLORS["BlueLine"], lw=2, label="Memory bandwidth (best device to date)")
+ax.step([_yr(d) for d, _ in _E.fl_env], [v / _f0 for _, v in _E.fl_env], where="post", color=COLORS["RedLine"], lw=2, label="Dense FP16/BF16 throughput (best device to date)")
+ax.set_yscale("log"); ax.set_xlim(_yr(_E.baseline["date"]) - 0.3, 2026.9)
+ax.set_xlabel("Release date"); ax.set_ylabel("Growth relative to TPU v2 (log scale)")
+ax.legend(loc="upper left", fontsize=8, frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
 
 For a kernel whose reuse stays fixed, the rising ridge shows up as a ceiling on achievable utilization that falls with each generation.
 
@@ -4622,7 +4777,7 @@ Static spatial mappings suffice for regular dense operations whose shapes and lo
 
 #### Memory allocation {#sec-hardware-acceleration-memory-allocation-faec}
 
-While computation placement determines where operations execute, memory allocation defines where data resides and how it flows through the hierarchy. The goal is to keep reused data near the processing elements without exceeding faster-tier capacity. GPUs expose global memory, shared memory, caches, and registers that kernels coordinate through tiling [@NVIDIA2020]. TPUs use on-chip SRAM buffers to stage horizontal activations and vertical weights for the 2D systolic-array dataflow [@jouppi2017] of @fig-systolic-array, while wafer-scale processors partition memory and computation to control interconnect traffic [@Cerebras2021]. General-purpose processors and accelerators both use memory hierarchies, but many accelerators expose more placement decisions to compilers and kernels. When allocation fails to exploit locality, processing elements stall waiting for operands, driving down utilization and dissipating energy across the memory bus.
+While computation placement determines where operations execute, memory allocation defines where data resides and how it flows through the hierarchy. The goal is to keep reused data near the processing elements without exceeding faster-tier capacity. GPUs expose global memory, shared memory, caches, and registers that kernels coordinate through tiling [@NVIDIA2020]. TPUs use on-chip SRAM buffers to stage the activations that flow horizontally through the 2D systolic-array dataflow [@jouppi2017] of @fig-systolic-array, with partial sums flowing vertically, while wafer-scale processors partition memory and computation to control interconnect traffic [@Cerebras2021]. General-purpose processors and accelerators both use memory hierarchies, but many accelerators expose more placement decisions to compilers and kernels. When allocation fails to exploit locality, processing elements stall waiting for operands, driving down utilization and dissipating energy across the memory bus.
 
 The severity of these penalties varies by workload. Convolutional networks rely on structured, localized access patterns and benefit from well-defined memory layouts that facilitate predictable reuse [@chen2016eyeriss]. Transformers require access to large parameter sets and intermediate activations, making them sensitive to capacity and bandwidth. Graph neural networks add irregular sparse structures that complicate allocation and prefetching.
 
