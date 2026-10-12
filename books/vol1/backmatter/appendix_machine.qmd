@@ -185,7 +185,7 @@ Moving data costs more energy than computing on it, so raising reuse per byte pa
 
 #### Scaling rules {.unnumbered}
 
-Memory and compute requirements for training and inference follow from a few arithmetic relationships (@tbl-scaling-rules-ref).[^fn-training-memory-footprint] The examples use Llama 3 8B.
+Memory and compute requirements for training and inference follow from a few arithmetic relationships (@tbl-scaling-rules-ref).[^fn-training-memory-footprint] The examples use Llama 3 8B. @Sec-model-training-optimization-algorithm-system-implications-f9f2 derives the 16 bytes per parameter of training state and why switching to 16-bit arithmetic does not shrink it.
 
 | **Rule**                          |             **Formula**              |                                                                     **Example (Llama 3 8B)**                                                                      |
 |:----------------------------------|:------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------:|
@@ -366,7 +366,7 @@ class BrakingBudget:
     travel_cm_str = fmt_qty(round(travel.to(ureg.centimeter).magnitude) * ureg.centimeter, unit=ureg.centimeter, precision=0, commas=False)
 ```
 
-Latency budgets depend on application-specific safety requirements, user expectations, and service-level objectives. @Tbl-latency-targets-ref lists illustrative targets rather than universal limits.
+Latency budgets depend on application-specific safety requirements, user expectations, and service-level objectives. @Tbl-latency-targets-ref lists illustrative targets rather than universal limits; @sec-model-serving-latency-budget-ef40 shows how a serving system divides such a budget among its stages.
 
 | **Application**        | **Budget** | **Constraint**                       |
 |:-----------------------|:----------:|:-------------------------------------|
@@ -436,7 +436,7 @@ For matrix multiplications, arithmetic intensity scales with the batch dimension
 - **FLOPs**: $2 \times \BatchSize\times \LayerInputWidth \times \LayerOutputWidth$ (multiply-adds).
 - **Bytes**: Moving $\LayerInputMatrix$, $\WeightMatrix$, and $\LayerOutputMatrix$ costs approximately $\ElementStorageSize(\BatchSize\LayerInputWidth + \LayerInputWidth\LayerOutputWidth + \BatchSize\LayerOutputWidth)$ bytes.
 
-Doubling $\BatchSize$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving, although activation traffic, cache behavior, shape, precision, and the ridge point determine whether it reaches the compute ceiling.
+Doubling $\BatchSize$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving (@sec-model-serving-batching-helps-f1dc develops the serving side, including the latency it adds), although activation traffic, cache behavior, shape, precision, and the ridge point determine whether it reaches the compute ceiling.
 
 :::
 
@@ -499,7 +499,7 @@ class H100RooflineExample:
 
 Consider an NVIDIA H100\index{H100!roofline analysis}, the book's reference machine, with dense FP16 Tensor Core performance of `{python} H100RooflineExample.h100_fp16_tflop_per_s_str` and HBM3 bandwidth of `{python} H100RooflineExample.h100_bw_tb_per_s_str`. The ridge point is `{python} H100RooflineExample.h100_fp16_tflop_per_s_str`/`{python} H100RooflineExample.h100_bw_tb_per_s_str` = `{python} H100RooflineExample.ridge_point_flops_per_byte_str` (the Tera prefixes cancel, yielding FLOP/byte).
 
-Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM)\index{GEMM!arithmetic intensity} on two square matrices of size `{python} H100RooflineExample.n_gemm_str` by `{python} H100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} H100RooflineExample.gemm_intensity_str`, so `{python} H100RooflineExample.gemm_intensity_str` > `{python} H100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU\index{ReLU!arithmetic intensity} on an FP16 tensor performs 1 comparison while reading 2 bytes and writing 2 bytes (4 bytes total), yielding an arithmetic intensity of only $1/4 =$ `{python} H100RooflineExample.relu_intensity_str`. Because `{python} H100RooflineExample.relu_intensity_str` $\ll$ `{python} H100RooflineExample.ridge_point_flops_per_byte_str`, the operation is severely bandwidth-bound, achieving only about `{python} H100RooflineExample.relu_util_str` of peak FLOP/s. This contrast explains why modern frameworks fuse operations. Combining ReLU directly with the preceding MatMul kernel avoids writing the intermediate result to memory and reading it back.
+Two common operations fall on opposite sides of that ridge. General matrix multiply (GEMM)\index{GEMM!arithmetic intensity} on two square matrices of size `{python} H100RooflineExample.n_gemm_str` by `{python} H100RooflineExample.n_gemm_str` has arithmetic intensity of approximately `{python} H100RooflineExample.gemm_intensity_str`, so `{python} H100RooflineExample.gemm_intensity_str` > `{python} H100RooflineExample.ridge_point_flops_per_byte_str` and the operation is compute bound. An element-wise ReLU\index{ReLU!arithmetic intensity} on an FP16 tensor performs 1 comparison while reading 2 bytes and writing 2 bytes (4 bytes total), yielding an arithmetic intensity of only $1/4 =$ `{python} H100RooflineExample.relu_intensity_str`. Because `{python} H100RooflineExample.relu_intensity_str` $\ll$ `{python} H100RooflineExample.ridge_point_flops_per_byte_str`, the operation is severely bandwidth-bound, achieving only about `{python} H100RooflineExample.relu_util_str` of peak FLOP/s. This contrast is why frameworks fuse an element-wise operation into the preceding matrix multiply, so the intermediate result never makes a round trip through memory; @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 develops fusion and the launch overhead it removes.
 
 Precision moves the ridge. At INT8 the H100's peak rate doubles to `{python} H100RooflineExample.h100_int8_tops_str` while its memory bandwidth stays fixed, so the ridge rises to about `{python} H100RooflineExample.int8_ridge_value_str` operations per byte. A convolution layer that sits above the FP16 ridge can fall below the INT8 ridge, which is why quantized ResNet-50 inference can turn bandwidth bound on the same chip (@sec-hardware-acceleration-hardware-balance).
 
@@ -623,7 +623,7 @@ class AmdahlExample:
 *   With $\WorkerCount=$ `{python} AmdahlSetup.n_8_str`, speedup is 1/(`{python} AmdahlSetup.s_str` + `{python} AmdahlSetup.p_str`/`{python} AmdahlSetup.n_8_str`) ≈ `{python} AmdahlExample.amdahl_8_speedup_mult_str`.
 *   With $\WorkerCount \to \infty$, speedup is capped at 1/`{python} AmdahlSetup.s_str` = `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
 
-No matter how many accelerators are added, this fixed workload cannot run faster than `{python} AmdahlExample.amdahl_inf_speedup_mult_str`.
+No matter how many accelerators are added, this fixed workload cannot run faster than `{python} AmdahlExample.amdahl_inf_speedup_mult_str`. The same ceiling limits a single-node optimization: @sec-benchmarking-endtoend-vs-component-latency-9952 applies it to a measured pipeline, where an unchanged preprocessing stage caps the gain from a faster model.
 
 #### Weak scaling (Gustafson's Law) {#sec-appdx-machine-foundations-weak-scaling-gustafsons-law-eb7e}
 
@@ -884,7 +884,7 @@ To see this in practice, consider sustaining `{python} LittlesLawExample.lambda_
 
 This sizes worker pools, but memory needs another assumption. If every in-system request simultaneously holds `{python} LittlesLawExample.mem_per_req_gb_str` of device state, the average population implies `{python} LittlesLawExample.total_mem_gb_str`; queued requests may instead stay in host memory or share batched state. If `{python} LittlesLawExample.max_concurrent_str` device slots ($\DeviceRequestCapacity$, the most requests the device can hold at once) each remain occupied for `{python} LittlesLawExample.w_latency_ms_str`, their throughput proxy is `{python} LittlesLawExample.max_throughput_math`; Little's law alone does not fix a maximum; device capacity does.
 
-Serving systems use this relation to size request concurrency (@sec-model-serving-littles-law-9352).
+Serving systems use this relation to size request concurrency, and @sec-model-serving-littles-law-9352 pairs it with a queueing model to show how latency degrades as utilization nears saturation.
 
 These physics-based models (roofline, Amdahl, Gustafson, and Little) locate *where* a bottleneck lies. Acting on a diagnosis requires the hardware structures that impose the bounds: the memory hierarchy, the links that move data between tiers, and the classes of hardware that package them.
 
@@ -1009,7 +1009,7 @@ class HierarchyEnergy:
     energy_ratio_mult_str = fmt_multiple(energy_ratio_value, precision=0, commas=False)
 ```
 
-The memory hierarchy\index{Memory hierarchy!appendix refresher} limits ML systems in both time and energy. Each access farther from the arithmetic units costs more energy, because the signal must drive longer, higher-capacitance wires (@tbl-hierarchy-energy-ref).
+The memory hierarchy\index{Memory hierarchy!appendix refresher} limits ML systems in both time and energy. Each access farther from the arithmetic units costs more energy, because the signal must drive longer, higher-capacitance wires (@tbl-hierarchy-energy-ref). @Sec-hardware-acceleration-memory-hierarchy-1839 shows how accelerator design stages data in the upper tiers to avoid the off-chip cost.
 
 | **Tier**            | **Technology** |   **Energy per 32-bit Access**   | **Relative to a Register**                      |
 |:--------------------|:--------------:|:--------------------------------:|:-----------------------------------------------:|
@@ -1334,8 +1334,8 @@ BF16\index{BF16!appendix refresher}[^fn-bf16-precision-appendix] [@google_bfloat
 The choice of numerical format is a direct application of the iron law of ML systems (principle \ref{pri-iron-law}). Reducing precision from FP32 to BF16 or FP16 halves the data volume term, potentially doubling throughput on memory-bound workloads. However, the *type* of 16-bit format determines the engineering complexity:
 
 *   **Dynamic range (the exponent)**: BF16 preserves the eight-bit exponent of FP32 and therefore the same normal exponent range [@kalamkar2019].
-*   **Precision (the mantissa)**: FP16\index{FP16!appendix refresher} has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, raises underflow risk. FP16 training therefore often uses **loss scaling**\index{Loss scaling!appendix refresher}, an operational step that multiplies gradients by a large constant to keep more values representable [@micikevicius2017mixed].
-*   **Energy efficiency**: INT8\index{INT8!appendix refresher} operations can be substantially more efficient than floating-point equivalents because they move less data and use simpler integer arithmetic paths. Moving to INT8 for inference is a primary lever for deploying neural networks under tight memory, latency, or power budgets [@jacob2018; @krishnamoorthi2018quantizing].
+*   **Precision (the mantissa)**: FP16\index{FP16!appendix refresher} has a larger 10-bit mantissa than BF16 (7 bits), offering higher precision for values within its range. Its five-bit exponent, however, raises underflow risk. FP16 training therefore often uses **loss scaling**\index{Loss scaling!appendix refresher}, an operational step that multiplies gradients by a large constant to keep more values representable [@micikevicius2017mixed]; @sec-model-training-mixedprecision-training-9218 develops the full mixed-precision recipe.
+*   **Energy efficiency**: INT8\index{INT8!appendix refresher} operations can be substantially more efficient than floating-point equivalents because they move less data and use simpler integer arithmetic paths. Moving to INT8 for inference is a primary lever for deploying neural networks under tight memory, latency, or power budgets [@jacob2018; @krishnamoorthi2018quantizing]; @sec-model-compression-numerical-format-comparison-8fa2 compares the formats on accuracy cost and hardware support.
 
 :::
 
