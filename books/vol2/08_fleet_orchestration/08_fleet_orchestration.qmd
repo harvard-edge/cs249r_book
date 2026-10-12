@@ -94,6 +94,109 @@ from mlsysim.fmt import MarkdownStr, check, fmt
 
 Consider two research teams sharing a 1,000-GPU cluster: Team A submits a 512-GPU job that will run for a month, while Team B submits hundreds of 8-GPU experiments that each run for an hour. If the scheduler continually admits whichever jobs fit, Team B's small experiments can indefinitely block Team A's large training run. The scheduling problem is the challenge of navigating this multi-dimensional conflict between throughput, fairness, and cluster utilization.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED JOB-SIZE MIX (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the two-team scheduling scenario and
+# │          @fig-acme-job-size.
+# │
+# │ Goal: Show that the small-jobs-versus-large-run conflict is the normal
+# │       production mix.
+# │ Show: Kalos (2023): 86% of 19,907 GPU jobs use one GPU and 0.1% of GPU
+# │       time; jobs of 256+ GPUs are ~4% of jobs and ~96% of GPU time.
+# │ How: Sums over Literature.Series.AcmeKalosJobSizes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+def _share(rows, field, pred):
+    return sum(r[field] for r in rows if pred(r["gpu_num"])) / sum(r[field] for r in rows)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class JobSizeMix:
+    """Job-count and GPU-time shares by job size in the Kalos LLM cluster."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.AcmeKalosJobSizes.entries
+    large_threshold = 256  # GPUs; the smallest job size in the trace's large-run cluster
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    job_count = sum(r["jobs"] for r in rows)
+    single_job_share = _share(rows, "jobs", lambda n: n == 1)
+    single_time_share = _share(rows, "gpu_seconds", lambda n: n == 1)
+    large_job_share = _share(rows, "jobs", lambda n: n >= 256)
+    large_time_share = _share(rows, "gpu_seconds", lambda n: n >= 256)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0.8 <= single_job_share <= 0.9 and single_time_share < 0.005, "Prose: most jobs are single-GPU and use almost no GPU time.")
+    check(large_job_share < 0.06 and large_time_share > 0.9, "Prose: a few percent of jobs hold over 90 percent of GPU time.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    job_count_str = fmt_int(job_count)
+    single_job_pct_str = fmt_percent(round(single_job_share, 2), precision=0, style="prose")
+    single_time_pct_str = fmt_percent(round(single_time_share, 3), precision=1, style="prose")
+    large_threshold_str = fmt_int(large_threshold)
+    large_job_pct_str = fmt_percent(round(large_job_share, 2), precision=0, style="prose")
+    large_time_pct_str = fmt_percent(round(large_time_share, 2), precision=0, style="prose")
+```
+
+Production traces show that this mix is the normal case rather than a contrived one. In the Kalos cluster that Shanghai AI Laboratory used for language-model development in 2023, `{python} JobSizeMix.single_job_pct_str` of `{python} JobSizeMix.job_count_str` GPU jobs requested a single GPU, yet together they consumed `{python} JobSizeMix.single_time_pct_str` of the cluster's GPU time. Jobs of `{python} JobSizeMix.large_threshold_str` GPUs or more made up `{python} JobSizeMix.large_job_pct_str` of submissions and consumed `{python} JobSizeMix.large_time_pct_str` of GPU time [@hu2024characterization]. @Fig-acme-job-size plots both distributions. Counted by jobs, the cluster is a stream of small experiments; counted by GPU-hours, it is a handful of large training runs. A scheduler must serve both views at once, which is why fairness, packing, and preemption policies cannot be judged by either count alone.
+
+::: {#fig-acme-job-size fig-env="figure" fig-pos="htb" fig-cap="**Jobs versus GPU Time by Job Size**: Cumulative share of GPU jobs (gray) and of GPU time (red) against the number of GPUs each job requested, for the Kalos LLM-development cluster from March to August 2023. Almost every job is small, while almost all GPU time goes to jobs of 256 GPUs or more. Data from the AcmeTrace release of @hu2024characterization." fig-alt="Two step curves against GPUs per job on a logarithmic axis from 1 to 1,024. The gray curve, cumulative share of jobs, jumps to 86 percent at one GPU and passes 95 percent by 128 GPUs. The red curve, cumulative share of GPU time, stays below 5 percent through 128 GPUs, then climbs at 256, 504, 512, and 1,024 GPUs to reach 100 percent. A shaded region marks jobs of 256 GPUs or more."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED JOB-SIZE MIX (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-acme-job-size.
+# │
+# │ Goal: Contrast cumulative job share with cumulative GPU-time share.
+# │ Show: Two step curves over GPUs per job; shaded large-job region.
+# │ How: JobSizeMix (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
+_C = JobSizeMix
+_rows = sorted(_C.rows, key=lambda r: r["gpu_num"])
+_x = [r["gpu_num"] for r in _rows]
+_jobs = np.cumsum([r["jobs"] for r in _rows]) / sum(r["jobs"] for r in _rows)
+_time = np.cumsum([r["gpu_seconds"] for r in _rows]) / sum(r["gpu_seconds"] for r in _rows)
+ax.axvspan(_C.large_threshold * 0.85, 1400, color=COLORS["RedL"], alpha=0.6, zorder=0)
+ax.step(_x, 100 * _jobs, where="post", color=COLORS["primary"], lw=2, label="Cumulative share of jobs", zorder=3)
+ax.step(_x, 100 * _time, where="post", color=COLORS["RedLine"], lw=2, label="Cumulative share of GPU time", zorder=3)
+ax.text(
+    _C.large_threshold * 0.95,
+    50,
+    f"Jobs of {_C.large_threshold}+ GPUs:\n{_C.large_job_share:.0%} of jobs,\n{_C.large_time_share:.0%} of GPU time",
+    fontsize=8,
+    ha="left",
+    va="center",
+    bbox=dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.4),
+    zorder=5,
+)
+ax.set_xscale("log", base=2)
+ax.set_xlim(0.8, 1400)
+ax.set_ylim(0, 103)
+_xt = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+ax.set_xticks(_xt)
+ax.set_xticklabels([f"{t:,}" for t in _xt])
+ax.minorticks_off()
+ax.set_xlabel("GPUs requested per job")
+ax.set_ylabel("Cumulative share (%)")
+ax.legend(fontsize=8, loc="center left", frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
 Partitioning computation (@sec-distributed-training-systems), synchronizing it efficiently (@sec-collective-communication), and recovering from hardware failures (@sec-fault-tolerance-reliability) solve the single-job scaling problem, but each of those mechanisms assumed that the job already held its accelerators. Fault tolerance assumed more than that. Its recovery paths drew on a spare pool deep enough to replace a drained node and on spot capacity whose loss the job could absorb, and neither exists unless something outside the job grants it, holds it in reserve, or takes it back. That something is orchestration, the policy that decides which jobs run, where they run, when one is preempted for another, and how competing demands share the fleet. A useful allocation must first be feasible, then worth granting under the fleet's fairness, latency, and cost objectives. That ordering motivates the progression from admission and packing constraints to control-plane designs, topology-aware placement, elastic and cost-aware policies, schedulers built around ML workload signals, and finally the serving and multi-tenant contracts under which many owners share one fleet. Training and serving draw on the same fleet, so the capacity envelope this chapter allocates is the one both depend on; how a serving system spends its share, request by request, is the subject of @sec-inference-scale.
 
 In the Fleet Stack (shown in the margin), orchestration occupies the Reliability & Control row of the distribution band, but the infrastructure band beneath it constrains its decisions. The scheduler must account for GPU heterogeneity, NVLink topology, rack power limits, and network bisection bandwidth. When scheduling goes wrong, debugging can require examining all four bands to identify whether the root cause lies in infrastructure (hardware constraints), distribution (algorithm limitations), serving (workload mismatch), or governance (policy misconfiguration). Orchestration connects physical infrastructure to distributed algorithms, translating resource requests into placements that respect both hardware topology and organizational policy.

@@ -262,3 +262,14 @@ class Series:
         "Root-cause component and category of each unexpected Llama 3 405B training interruption.",
         numeric=("interruption_count", "published_pct"),
     )
+    AcmeKalosJobSizes = TrendSeries(
+        "acme_kalos_job_sizes",
+        _lit("Hu et al. (2024), Characterization of Large Language Model Development in the Datacenter "
+             "(NSDI 24); AcmeTrace data/job_trace/trace_kalos.csv (CC BY 4.0), snapshot 2026-10-12",
+             "https://github.com/InternLM/AcmeTrace",
+             "Kalos cluster (Shanghai AI Laboratory, A100, March to August 2023); GPU jobs aggregated "
+             "by requested gpu_num; gpu_seconds as given in the trace, split by final job state"),
+        "Job count and GPU time by requested GPUs per job in an LLM-development cluster.",
+        numeric=("gpu_num", "jobs", "job_share", "gpu_seconds", "gpu_time_share", "gpu_seconds_completed",
+                 "gpu_seconds_failed", "gpu_seconds_canceled"),
+    )
