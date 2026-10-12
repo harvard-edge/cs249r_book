@@ -130,12 +130,33 @@ _rows = sorted(TemporalShiftDrop.rows, key=lambda r: r["id_mean"] - r["ood_mean"
 for _i, _r in enumerate(_rows):
     _a, _b = _r["id_mean"], _r["ood_mean"]
     ax.plot([_b, _a], [_i, _i], color=COLORS["grid"], lw=2.5, zorder=1)
-    ax.errorbar(_a, _i, xerr=_r["id_std"], fmt="o", color=COLORS["BlueLine"], ms=7, capsize=2, zorder=3, label="Test data from the training period" if _i == 0 else None)
-    ax.errorbar(_b, _i, xerr=_r["ood_std"], fmt="o", color=COLORS["RedLine"], ms=7, capsize=2, zorder=3, label="Test data from a later period" if _i == 0 else None)
+    ax.errorbar(
+        _a,
+        _i,
+        xerr=_r["id_std"],
+        fmt="o",
+        color=COLORS["BlueLine"],
+        ms=7,
+        capsize=2,
+        zorder=3,
+        label="Test data from the training period" if _i == 0 else None,
+    )
+    ax.errorbar(
+        _b,
+        _i,
+        xerr=_r["ood_std"],
+        fmt="o",
+        color=COLORS["RedLine"],
+        ms=7,
+        capsize=2,
+        zorder=3,
+        label="Test data from a later period" if _i == 0 else None,
+    )
     ax.text(_a + _r["id_std"] + 1.5, _i, f"$-${_a - _b:.1f} pts", va="center", fontsize=8, color=COLORS["primary"])
 ax.set_yticks(range(len(_rows)))
 ax.set_yticklabels([f"{r['dataset']} ({r['metric']})" for r in _rows])
-ax.set_xlim(40, 106); ax.set_xlabel("Performance (%)")
+ax.set_xlim(40, 106)
+ax.set_xlabel("Performance (%)")
 ax.legend(loc="lower right", fontsize=8, frameon=True, framealpha=0.95)
 plt.show()
 plt.close()
@@ -228,7 +249,7 @@ These interfaces determine how infrastructure components partition responsibilit
 from math import ceil
 from mlsysim import Models, Hardware, BYTES_INT8
 from mlsysim.core.units import GB, GiB, KB, MiB
-from mlsysim.fmt import check, fmt_memory
+from mlsysim.fmt import check, fmt_memory, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class OpsRunningCases:
@@ -254,12 +275,12 @@ class OpsRunningCases:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     dlrm_gb_str = fmt_memory(dlrm_bytes, unit=GB, precision=0, commas=False)
-    hbm_gib_str = fmt_memory(hbm, unit=GiB, precision=0, commas=False)
+    hbm_gb_str = fmt_memory_capacity(hbm, unit=GiB, precision=0, commas=False)
     kws_kb_str = fmt_memory(kws_bytes, unit=KB, precision=0, commas=False)
-    flash_mib_str = fmt_memory(flash, unit=MiB, precision=0, commas=False)
+    flash_mb_str = fmt_memory_capacity(flash, unit=MiB, precision=0, commas=False)
 ```
 
-Two of the book's lighthouse workloads (@sec-introduction-lighthouse-models-9b1c) carry the chapter, one for each end of the deployment spectrum. The cloud half follows a ranking service built on DLRM, the recommendation model that @sec-model-serving set against ResNet-50's compute-bound service. DLRM's home regime is capacity-bound. Its `{python} OpsRunningCases.dlrm_gb_str` of embedding tables exceed the `{python} OpsRunningCases.hbm_gib_str` of one H100, so even its smallest deployment spans two accelerators before throughput enters the calculation, and every operational control that needs a second copy of the model pays for it in memory. A ranking model is also the workload whose world moves fastest. User interests and the item catalog change daily, click labels arrive within hours, and the model's own rankings shape the clicks it later trains on. The edge half follows the keyword spotter, whose home regime is power-bound. Its `{python} OpsRunningCases.kws_kb_str` INT8 model listens continuously on a microcontroller with `{python} OpsRunningCases.flash_mib_str` of flash, where every radio transmission and flash write draws on a small energy budget. @Sec-data-engineering-data-debt-hidden-liability-3335 left that spotter six months after launch with a detection rate four percentage points below its target, and the edge sections of this chapter pick up the drop. The device cannot be reached by hand, its audio cannot leave it, and a failed update must not disable it.
+Two of the book's lighthouse workloads (@sec-introduction-lighthouse-models-9b1c) carry the chapter, one for each end of the deployment spectrum. The cloud half follows a ranking service built on DLRM, the recommendation model that @sec-model-serving set against ResNet-50's compute-bound service. DLRM's home regime is capacity-bound. Its `{python} OpsRunningCases.dlrm_gb_str` of embedding tables exceed the `{python} OpsRunningCases.hbm_gb_str` of one H100, so even its smallest deployment spans two accelerators before throughput enters the calculation, and every operational control that needs a second copy of the model pays for it in memory. A ranking model is also the workload whose world moves fastest. User interests and the item catalog change daily, click labels arrive within hours, and the model's own rankings shape the clicks it later trains on. The edge half follows the keyword spotter, whose home regime is power-bound. Its `{python} OpsRunningCases.kws_kb_str` INT8 model listens continuously on a microcontroller with `{python} OpsRunningCases.flash_mb_str` of flash, where every radio transmission and flash write draws on a small energy budget. @Sec-data-engineering-data-debt-hidden-liability-3335 left that spotter six months after launch with a detection rate four percentage points below its target, and the edge sections of this chapter pick up the drop. The device cannot be reached by hand, its audio cannot leave it, and a failed update must not disable it.
 
 ```{python}
 #| echo: false
@@ -300,16 +321,16 @@ The week-two problem takes concrete shape on the ranking service in an illustrat
 
 The chapter builds the operations loop in the order a team needs it (@tbl-ml-ops-chapter-spine). Technical debt explains why ML systems accumulate the hidden coupling that makes silent failure likely. Development infrastructure builds the pipeline that can rebuild and trace any model exactly, and releasing models moves a candidate onto live traffic with a tested path back. Production monitoring then watches the deployed model for the evidence the loop runs on, and retraining decisions turn that evidence into a choice to retrain, roll back, or wait. Incident response and governance handle the failures that monitoring surfaces, operational maturity decides which control a team should add next, and two case studies carry the loop to the edge and into the clinic.
 
-| **Section**                          | **Loop step**        | **Question it answers**                                        | **Machine cost on the ranking service**                                                  |
-|:-------------------------------------|:---------------------|:---------------------------------------------------------------|:-----------------------------------------------------------------------------------------|
-| **Technical Debt**                   | Why the loop exists  | Where hidden coupling accumulates                              | Glue code and unused features that still move bytes                                      |
-| **Development Infrastructure**       | Release (prepare)    | How a model is rebuilt and traced exactly                      | Versioned copies of data, features, and `{python} OpsRunningCases.dlrm_gb_str` of tables |
-| **Releasing Models**                 | Release, recover     | How a candidate reaches traffic and how it is withdrawn        | A second resident copy of the tables for each release control                            |
-| **Production Monitoring**            | Detect               | Whether predictions are still right                            | Telemetry bytes per second and their retention                                           |
-| **Retraining Decisions**             | Decide               | Whether a new model is worth its run                           | Accelerator-hours that contend with serving                                              |
-| **Incident Response and Governance** | Diagnose, recover    | Which layer failed, and who acts                               | Replay and slice queries over logged requests                                            |
-| **Operational Maturity**             | All steps            | Which control to add next                                      | Operational spend matched to the model's value                                           |
-| **Case Studies**                     | All steps            | How the loop changes at the edge and in the clinic             | Flash banks, radio energy, and clinician review time                                     |
+| **Section**                          | **Loop step**       | **Question it answers**                                 | **Machine cost on the ranking service**                                                  |
+|:-------------------------------------|:--------------------|:--------------------------------------------------------|:-----------------------------------------------------------------------------------------|
+| **Technical Debt**                   | Why the loop exists | Where hidden coupling accumulates                       | Glue code and unused features that still move bytes                                      |
+| **Development Infrastructure**       | Release (prepare)   | How a model is rebuilt and traced exactly               | Versioned copies of data, features, and `{python} OpsRunningCases.dlrm_gb_str` of tables |
+| **Releasing Models**                 | Release, recover    | How a candidate reaches traffic and how it is withdrawn | A second resident copy of the tables for each release control                            |
+| **Production Monitoring**            | Detect              | Whether predictions are still right                     | Telemetry bytes per second and their retention                                           |
+| **Retraining Decisions**             | Decide              | Whether a new model is worth its run                    | Accelerator-hours that contend with serving                                              |
+| **Incident Response and Governance** | Diagnose, recover   | Which layer failed, and who acts                        | Replay and slice queries over logged requests                                            |
+| **Operational Maturity**             | All steps           | Which control to add next                               | Operational spend matched to the model's value                                           |
+| **Case Studies**                     | All steps           | How the loop changes at the edge and in the clinic      | Flash banks, radio energy, and clinician review time                                     |
 
 : **Chapter Map**: Each section builds one step of the operations loop and names the machine resource that step consumes on the DLRM ranking service. {#tbl-ml-ops-chapter-spine tbl-colwidths="[24,16,30,30]"}
 
@@ -985,12 +1006,11 @@ The data dependency debt and training-serving skew analyzed in @sec-ml-operation
 
 [^fn-feature-store-ops]: **Feature store**\index{Feature store!scale}: Uber's Michelangelo platform described a centralized feature store for sharing and serving features across production models [@hermann2017michelangelo]. At that scale, the consistency guarantee must hold under an online latency budget: what distinguishes a feature store from a shared library of feature code is that the shared feature path also has to serve fresh features fast enough for real-time inference.
 
-Feature stores resolve the tension between batch throughput and online latency by keeping two synchronized storage tiers behind one API, an offline store for high-throughput training scans and an online store for point lookups under a tail-latency SLO, both reading from the same versioned transformation logic. Historical retrieval must also be point-in-time correct, so that each training example sees only the feature values that existed at its observation time. @Sec-data-engineering-feature-stores-bridging-training-serving-55c8 develops both mechanisms, including the as-of join that enforces point-in-time correctness. Operations depends on them because a ranking model trained on leaked features looks excellent offline and fails on live traffic.
+Feature stores resolve the tension between batch throughput and online latency by keeping two synchronized storage tiers behind one API, an offline store for high-throughput training scans and an online store for point lookups under a tail-latency service-level objective (SLO), both reading from the same versioned transformation logic. Historical retrieval must also be point-in-time correct, so that each training example sees only the feature values that existed at its observation time. @Sec-data-engineering-feature-stores-bridging-training-serving-55c8 develops both mechanisms, including the as-of join that enforces point-in-time correctness. Operations depends on them because a ranking model trained on leaked features looks excellent offline and fails on live traffic.
 
 ::: {.column-margin .margin-pointer}
 ↩ The dual-storage architecture and temporal join semantics of feature stores are established in @sec-data-engineering-feature-stores-bridging-training-serving-55c8.
 :::
-
 
 Beyond consistency, feature stores support versioning, metadata management, and feature reuse across models. A ranking model and a fraud model built on the same user activity frequently depend on overlapping features that can be centrally maintained, validated, and shared. Integration with data pipelines and model registries preserves lineage: when an upstream feature definition is updated or deprecated, downstream models can be automatically identified and scheduled for retraining.
 
@@ -1365,7 +1385,7 @@ Automated CI/CD pipelines assume deterministic and reproducible code execution, 
 
 Testing difficulties compound this state vulnerability. Standard unit-testing harnesses and mocking frameworks do not interface cleanly with interactive notebook documents. Cell-level assertions are rarely parameterized or wired into test runners, leaving notebooks significantly less tested than modular Python code.
 
-Two tools help. Papermill\index{Papermill!notebook parameterization} enables parameterization and headless execution of notebooks, injecting runtime configurations and executing cells top-to-bottom as discrete pipeline stages [@papermillDocs]. nbconvert converts validated notebooks into static executable Python scripts for production environments [@nbconvertDocs], exposing exported code to linters and CI test runners. Teams must still select or refactor exploratory cells and verify clean, ordered execution.
+Two tools help. Papermill\index{Papermill!notebook parameterization} enables parameterization and headless execution of notebooks, injecting runtime configurations and executing cells top-to-bottom as discrete pipeline stages [@papermillDocs]. The nbconvert tool converts validated notebooks into static executable Python scripts for production environments [@nbconvertDocs], exposing exported code to linters and CI test runners. Teams must still select or refactor exploratory cells and verify clean, ordered execution.
 
 Extracting code from notebooks into tested modules introduces refactoring overhead, but it prevents hidden state assumptions from causing training-serving skew in production, a silent failure whose cost grows with every day it goes undetected, as the silent-failure calculation in the monitoring discussion shows (notebook \ref{nbk-ml-ops-cost-silent-failures}).
 
@@ -1600,12 +1620,11 @@ Request scheduling, batching, and runtime selection belong to the serving system
 
 The endpoint contributes two of those stages, parsing and serialization, and its capacity model adds a third when it scales to zero. Protocol and serialization costs are developed in @sec-model-serving-interface-protocols-serialization-5510, and the cold start that scale-to-zero capacity pays after every idle period in @sec-model-serving-model-loading-initialization-cc5a. Operations inherits both as stages to trace, so that a regression in either is not mistaken for a model problem.
 
-
 The keyword spotter keeps these operational goals (controlled rollout, fast rollback, stage-level telemetry) but changes the constraints under which they must be met, because its devices have limited power, memory, and connectivity.
 
 ### Edge AI deployment {#sec-ml-operations-edge-ai-deployment-patterns-dc1d}
 
-Consider the keyword spotter after its detection drop. When its model degrades, an engineer cannot SSH into the device, roll back to a previous version, and restart. The device sits in someone's home on intermittent Wi-Fi, and its `{python} OpsRunningCases.kws_kb_str` model shares `{python} OpsRunningCases.flash_mib_str` of flash with the firmware that runs it. Every operational assumption from cloud MLOps (instant rollback, centralized logging, real-time monitoring) must be reimagined.
+Consider the keyword spotter after its detection drop. When its model degrades, an engineer cannot SSH into the device, roll back to a previous version, and restart. The device sits in someone's home on intermittent Wi-Fi, and its `{python} OpsRunningCases.kws_kb_str` model shares `{python} OpsRunningCases.flash_mb_str` of flash with the firmware that runs it. Every operational assumption from cloud MLOps (instant rollback, centralized logging, real-time monitoring) must be reimagined.
 
 Edge AI\index{Edge AI!deployment patterns} runs machine learning inference at or near the data source rather than in centralized cloud infrastructure [@reddi2020]. Workloads governed by strict latency deadlines, bandwidth-constrained uplinks, data-privacy guarantees, or sub-watt power envelopes require executing inference directly on edge silicon. This operational paradigm introduces three interdependent systems constraints: resource limits, hierarchical tiered execution, and fail-safe over-the-air update mechanisms.
 
@@ -1617,6 +1636,8 @@ Resource constraints dominate edge deployment decisions. Edge devices require ag
 
 ::: {.column-margin}
 ![](images/svg/vol1_ml_ops_margin_003.svg){width="100%" fig-alt="Vertical log-scale ladder of three orange bars, smallest at bottom: sensor at 1 mW, gateway at 1 W, automotive at tens of watts."}
+
+*Power budgets across the three edge tiers span about four orders of magnitude.*
 :::
 
 These constraints shape a natural deployment hierarchy across three tiers. Sensor-level processing handles immediate data filtering and feature extraction on microcontroller-class devices consuming 1–100&nbsp;mW. Edge gateway processing performs intermediate inference on application processors with 1–10&nbsp;W power budgets. Cloud coordination manages model distribution, aggregated learning, and complex reasoning requiring GPU-class resources. This hierarchy enables system-wide optimization, because computationally expensive operations migrate upward while latency-critical decisions remain local.
@@ -1655,7 +1676,7 @@ Graceful degradation is a core operational pattern for edge AI. When thermal lim
 from math import ceil
 from mlsysim import Models, Hardware, BYTES_INT8, BYTES_FP16
 from mlsysim.core.units import GB, KB, MB, MiB
-from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ReleaseControlFootprint:
@@ -1693,19 +1714,19 @@ class ReleaseControlFootprint:
     resnet_mb_str = fmt_memory(resnet_bytes, unit=MB, precision=1, commas=False)
     kws_bank_kb_str = fmt_memory(kws_bank, unit=KB, precision=0, commas=False)
     two_banks_kb_str = fmt_memory(2 * kws_bank, unit=KB, precision=0, commas=False)
-    flash_mib_str = fmt_memory(flash, unit=MiB, precision=0, commas=False)
+    flash_mb_str = fmt_memory_capacity(flash, unit=MiB, precision=0, commas=False)
 ```
 
-Every control in this section keeps a second version of the model alive, and for a capacity-bound model that second version, not the extra arithmetic, is the dominant cost (@tbl-ml-ops-release-control-footprint). A shadow deployment scores every request twice. A canary, an A/B test, and a blue-green switch divert traffic rather than adding work, yet each must hold the candidate's full embedding tables in accelerator memory whatever share of traffic it serves, and a hot standby for immediate rollback holds the previous version for the same reason. The ranking service's `{python} ReleaseControlFootprint.canary_pct_str` canary therefore doubles the accelerators that hold tables, from two to four, while it carries a twentieth of the requests. A compute-bound ResNet-50 service pays the opposite way. Its `{python} ReleaseControlFootprint.resnet_mb_str` of FP16 weights fit beside the serving copy on one accelerator, so its canary costs almost no memory and only its share of compute. The keyword spotter's dual-bank update costs flash instead of accelerator memory, a second `{python} ReleaseControlFootprint.kws_bank_kb_str` bank that brings the model's share of the device's `{python} ReleaseControlFootprint.flash_mib_str` to `{python} ReleaseControlFootprint.two_banks_kb_str`.
+Every control in this section keeps a second version of the model alive, and for a capacity-bound model that second version, not the extra arithmetic, is the dominant cost (@tbl-ml-ops-release-control-footprint). A shadow deployment scores every request twice. A canary, an A/B test, and a blue-green switch divert traffic rather than adding work, yet each must hold the candidate's full embedding tables in accelerator memory whatever share of traffic it serves, and a hot standby for immediate rollback holds the previous version for the same reason. The ranking service's `{python} ReleaseControlFootprint.canary_pct_str` canary therefore doubles the accelerators that hold tables, from two to four, while it carries a twentieth of the requests. A compute-bound ResNet-50 service pays the opposite way. Its `{python} ReleaseControlFootprint.resnet_mb_str` of FP16 weights fit beside the serving copy on one accelerator, so its canary costs almost no memory and only its share of compute. The keyword spotter's dual-bank update costs flash instead of accelerator memory, a second `{python} ReleaseControlFootprint.kws_bank_kb_str` bank that brings the model's share of the device's `{python} ReleaseControlFootprint.flash_mb_str` to `{python} ReleaseControlFootprint.two_banks_kb_str`.
 
-| **Release control**                                                          | **Extra resident memory**                                                                                                                                                                  | **Extra inference work**                                                     | **What it buys**                                       |
-|:-----------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|:-------------------------------------------------------|
-| **Shadow deployment**                                                        | Second copy of the tables (`{python} ReleaseControlFootprint.copy_gb_str`); `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s | Every request scored twice                                                   | Output and latency comparison with no user exposure    |
-| **Canary (`{python} ReleaseControlFootprint.canary_pct_sym_str` of traffic)** | Second copy; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                                            | None; a share of requests is diverted                                        | Live quality evidence on a bounded share of users      |
-| **A/B test**                                                                 | Second copy; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                                            | None; traffic is split between variants                                      | A statistically valid outcome comparison               |
-| **Blue-green switch**                                                        | Full second environment; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                                | Duplicate provisioned capacity during the switch                             | Rollback by a single routing change                    |
-| **Hot standby**                                                              | Previous version resident; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                              | None until rollback                                                          | Immediate rollback without a cold start                |
-| **KWS dual-bank update**                                                     | Second flash bank (`{python} ReleaseControlFootprint.kws_bank_kb_str` in `{python} ReleaseControlFootprint.flash_mib_str` of flash)                                                         | None                                                                         | Automatic revert after a failed update                 |
+| **Release control**                                                           | **Extra resident memory**                                                                                                                                                                                       | **Extra inference work**                         | **What it buys**                                    |
+|:------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------|:----------------------------------------------------|
+| **Shadow deployment**                                                         | Second copy of the tables (`{python} ReleaseControlFootprint.copy_gb_str`); `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s | Every request scored twice                       | Output and latency comparison with no user exposure |
+| **Canary (`{python} ReleaseControlFootprint.canary_pct_sym_str` of traffic)** | Second copy; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                                                                | None; a share of requests is diverted            | Live quality evidence on a bounded share of users   |
+| **A/B test**                                                                  | Second copy; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                                                                | None; traffic is split between variants          | A statistically valid outcome comparison            |
+| **Blue-green switch**                                                         | Full second environment; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                                                    | Duplicate provisioned capacity during the switch | Rollback by a single routing change                 |
+| **Hot standby**                                                               | Previous version resident; `{python} ReleaseControlFootprint.accels_per_copy_str` $\rightarrow$ `{python} ReleaseControlFootprint.accels_two_copies_str` H100s                                                  | None until rollback                              | Immediate rollback without a cold start             |
+| **KWS dual-bank update**                                                      | Second flash bank (`{python} ReleaseControlFootprint.kws_bank_kb_str` in `{python} ReleaseControlFootprint.flash_mb_str` of flash)                                                                              | None                                             | Automatic revert after a failed update              |
 
 : **Release Controls on a Capacity-Bound Model**: Extra resident memory and inference work that each release control adds to the DLRM ranking service on H100 accelerators, and to the keyword spotter's flash. Every server-side control holds a second full copy of the embedding tables regardless of the traffic share it serves, so release safety for this model is paid in memory rather than arithmetic. {#tbl-ml-ops-release-control-footprint tbl-colwidths="[20,34,22,24]"}
 
@@ -1788,7 +1809,7 @@ Statistical monitoring has to separate two axes of distribution shift,[^fn-drift
 
 [^fn-drift-covariate-shift]: **Covariate shift**\index{Drift!covariate shift}: Importance-weighting corrections for covariate shift assume that the support of the training distribution covers the deployment distribution: every deployment input could have appeared in training, just with different probability. When deployment contains genuinely out-of-distribution inputs (new product categories, new demographics, adversarial inputs), the correction can fail and the model can produce confidently wrong outputs with no warning signal, making support coverage the hidden assumption that determines whether drift correction or full retraining may be required.
 
-Operations adds one distinction that the definitions alone do not make. **Model decay**\index{Model decay!definition} is the observed decline in prediction quality over time while the model code stays unchanged, and data drift is only one possible cause of it, alongside concept drift and changes in the surrounding pipeline. Monitoring model outputs alone can miss input drift or mistake a benign output change for quality loss, so operations also tracks the input feature statistics behind the divergence $\StatisticalDivergence$, measured with PSI\index{Population stability index!drift detection}, KS tests\index{Kolmogorov-Smirnov test!continuous drift}, or the Wasserstein distance, also called earth mover's distance\index{Earth mover's distance!multi-dimensional drift} (the probability mass that must move, and how far, to turn one distribution into the other). These statistics can warn earlier than labeled performance because ground-truth feedback is often delayed.
+Operations adds one distinction that the definitions alone do not make. **Model decay**\index{Model decay!definition} is the observed decline in prediction quality over time while the model code stays unchanged, and data drift is only one possible cause of it, alongside concept drift and changes in the surrounding pipeline. Monitoring model outputs alone can miss input drift or mistake a benign output change for quality loss, so operations also tracks the input feature statistics behind the divergence $\StatisticalDivergence$, measured with the population stability index (PSI)\index{Population stability index!drift detection}, KS tests\index{Kolmogorov-Smirnov test!continuous drift}, or the Wasserstein distance, also called earth mover's distance\index{Earth mover's distance!multi-dimensional drift} (the probability mass that must move, and how far, to turn one distribution into the other). These statistics can warn earlier than labeled performance because ground-truth feedback is often delayed.
 
 The signature of data drift in live telemetry is a feature distribution that moves in step with a quality metric, and three synchronized telemetry tiers aligned over time expose how covariate shift erodes model performance (@fig-data-drift). Across the top panel, discrete request samples transition from predominantly green (online sales) to orange (in-store sales); the figure's "online store" and "offline store" labels name sales channels, not the feature-store tiers of @sec-ml-operations-feature-stores-c01c. The middle panel charts this shift as an expanding offline area in the sales_channel feature distribution, directly matching the steep decline of the model accuracy curve in the bottom panel. This temporal alignment motivates comparing input feature distributions with outcome metrics; their co-movement supplies a diagnostic hypothesis rather than establishing the cause by itself.
 
@@ -2050,13 +2071,13 @@ Schema validation catches structural corruption (missing columns, wrong types, n
 
 Gradual long-term degradation evades coarse detection thresholds: small day-to-day changes in a quality metric compound into material degradation over a year without tripping monthly alerts. Seasonal patterns compound this complexity; a model trained in summer may perform well through autumn but fail in winter conditions it never observed. Detecting such gradual degradation requires multi-timescale monitoring: performance baselines across multiple time horizons (daily, weekly, quarterly), sliding window comparisons that detect slow trends, and seasonal profiles that account for cyclical variation.
 
-Statistical distance measures quantify this divergence by comparing serving distributions against training baselines. Three are common: the population stability index (PSI) for categorical and binned features, the Kolmogorov-Smirnov (KS) statistic of the CI/CD distribution screen for continuous distributions, and Jensen-Shannon divergence\index{Jensen-Shannon divergence!distribution shift} for symmetric, bounded comparison of probability distributions. Each needs an alert threshold, and sample size makes that choice harder than it looks.
+Statistical distance measures quantify this divergence by comparing serving distributions against training baselines. Three are common: PSI for categorical and binned features, the Kolmogorov-Smirnov (KS) statistic of the CI/CD distribution screen for continuous distributions, and Jensen-Shannon divergence\index{Jensen-Shannon divergence!distribution shift} for symmetric, bounded comparison of probability distributions. Each needs an alert threshold, and sample size makes that choice harder than it looks.
 
 Feature-by-feature comparisons can miss changes in how inputs occur together. Consider two binary sensor flags. In the training population, equal groups have both flags off or both on; in the serving population, equal groups have one flag on and the other off. Each flag is still equally often on and off, so its individual histogram is unchanged, but the relationship between flags has reversed. Even perfect training-serving feature parity would not detect this population change. Monitoring selected feature combinations, relevant cohorts, or a joint-distribution statistic complements marginal screens; labeled outcomes are still needed to determine whether the change harms predictions.
 
 In high-throughput production monitoring, statistical significance alone is an inadequate alert policy. With large samples, tests such as the two-sample KS test or the chi-square test (the standard test for differences in categorical frequencies) can detect small genuine differences that have little operational significance. The mechanism is the sample-size term in the test's critical value. The KS critical value $\KolmogorovSmirnovCriticalThreshold$ used in the data pipeline's drift test (@sec-data-engineering-quality-validation-monitoring-498f) scales with $\sqrt{(\DriftTestSampleSize_0 + \DriftTestSampleSize_t)/(\DriftTestSampleSize_0 \DriftTestSampleSize_t)}$, so it shrinks roughly as $1/\sqrt{\DriftTestSampleSize}$, and a monitor that compares millions of serving requests against a large training sample rejects equality for shifts far smaller than the 0.1 gate of @lst-ops-validate-skew. These detections are not necessarily statistical false positives, but paging on each one creates unnecessary alerts. Conversely, small-sample edge telemetry may lack power to detect a meaningful change. Monitoring must consider effect size, sampling uncertainty, and the cost of missed change together.
 
-Production monitoring therefore combines distribution-distance measures with uncertainty and operational thresholds. A common measure is the population stability index (PSI)\index{Population stability index!drift quantification}[^fn-psi-statistic-origin] that @sec-data-engineering-detecting-responding-data-drift-509a defined for the data pipeline, the binned relative entropy between expected (training) and actual (serving) frequencies across fixed bins. A monitoring pipeline computes it over $\PopulationStabilityBinCount$ fixed bins, where $\text{expected}_i$ and $\text{actual}_i$ are aligned, strictly positive bin proportions that sum to one in each distribution, so @eq-psi restates the same index in that notation:
+Production monitoring therefore combines distribution-distance measures with uncertainty and operational thresholds. A common measure is PSI\index{Population stability index!drift quantification}[^fn-psi-statistic-origin] that @sec-data-engineering-detecting-responding-data-drift-509a defined for the data pipeline, the binned relative entropy between expected (training) and actual (serving) frequencies across fixed bins. A monitoring pipeline computes it over $\PopulationStabilityBinCount$ fixed bins, where $\text{expected}_i$ and $\text{actual}_i$ are aligned, strictly positive bin proportions that sum to one in each distribution, so @eq-psi restates the same index in that notation:
 $$ \text{PSI} = \sum_{i=1}^{\PopulationStabilityBinCount} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right) $$ {#eq-psi}
 
 Every bin's contribution is non-negative, so shifts in either direction raise the index, and the scorecard bands become an escalation policy. An illustrative policy is:
@@ -2067,7 +2088,7 @@ Every bin's contribution is non-negative, so shifts in either direction raise th
 
 Production monitors require a documented zero-bin policy, such as Laplace smoothing, because any empty bin in the denominator yields an undefined logarithm. Monitors must also preserve fixed bin boundaries across comparison periods; PSI is a drift signal, not an automatic retraining trigger, because divergence alone does not establish that accuracy has changed (principle \ref{pri-statistical-drift}).
 
-[^fn-psi-statistic-origin]: **PSI (population stability index)**\index{Population stability index!credit risk origin}: PSI is widely used in credit-risk scorecard monitoring to compare expected and observed binned populations; Yurdakul and Naranjo analyze its statistical properties [@yurdakul2020]. The common 0.1 and 0.25 bands are useful operational conventions, not universal statistical laws. ML operations adopted PSI because it works on binned categorical or continuous features and provides an interpretable drift score that non-specialists can review.
+[^fn-psi-statistic-origin]: **PSI**\index{Population stability index!credit risk origin}: PSI is widely used in credit-risk scorecard monitoring to compare expected and observed binned populations; Yurdakul and Naranjo analyze its statistical properties [@yurdakul2020]. The common 0.1 and 0.25 bands are useful operational conventions, not universal statistical laws. ML operations adopted PSI because it works on binned categorical or continuous features and provides an interpretable drift score that non-specialists can review.
 
 KL divergence\index{Kullback-Leibler divergence!distribution comparison} underlies two of them for binned distributions. It measures how far the serving distribution $\CurrentDistribution$ sits from the training reference $\TrainingDistribution$, the same pair that the degradation equation compares, and @sec-appdx-data-foundations-measuring-drift-divergence-a6dd defines it with a worked example. Two of its properties shape monitoring policy. KL divergence is asymmetric and becomes infinite wherever the serving distribution puts mass that the reference lacks, so monitors must preserve direction and smooth previously unseen bins. PSI is algebraically its symmetric (Jeffreys) form, $\KlDivergence(\text{actual} \lVert \text{expected}) + \KlDivergence(\text{expected} \lVert \text{actual})$, which is why shifts in either direction add to it, and Jensen-Shannon divergence\index{Jensen-Shannon divergence!distribution shift} avoids the infinite case by comparing both distributions against their average $\JensenShannonMixtureDistribution= \frac{1}{2}(\CurrentDistribution + \TrainingDistribution)$, which yields a symmetric value bounded between 0 and 1 with base-2 logarithms. A shift that is plainly visible on a histogram can still produce a small aggregate PSI, which is why thresholds must be calibrated per feature.
 
@@ -2474,7 +2495,7 @@ ML monitoring has several layers. The prompts in this checklist test whether eac
 - [ ] **Infrastructure utilization**: Explain why a GPU reporting high kernel-active time can still be memory-bound, and which measurements (achieved FLOP rate, memory traffic, stall counters) would confirm it before choosing a remedy.
 - [ ] **Telemetry sampling**: Explain what retaining one request trace in `{python} ObservabilitySampling.sampling_ratio_str` preserves for trend monitoring, and what short-lived anomalies it can miss.
 - [ ] **Data freshness**: Detect stale feature ingestion pipelines before plausible predictions mask obsolete real-world states.
-- [ ] **Data drift**: Evaluate population stability index (PSI) or KL divergence metrics to detect when serving inputs diverge from the training baseline.
+- [ ] **Data drift**: Evaluate PSI or KL divergence metrics to detect when serving inputs diverge from the training baseline.
 - [ ] **Model accuracy**: Account for delayed ground-truth labels when interpreting real-time task performance alerts.
 - [ ] **Cohort bias**: Apply stratified cohort analysis to detect subgroup degradation hidden by aggregate top-level accuracy.
 
@@ -2794,29 +2815,52 @@ R, C = ReleaseControlFootprint, RetrainContention
 day_h = (24 * hour).to(hour).magnitude
 run_h = C.retrain_time.to(hour).magnitude
 copy_n = R.accels_per_copy
-check(copy_n + copy_n + C.retrain_accels == C.node_accels,
-      "Figure shows serving, standby, and the run filling the node while the run executes.")
+check(copy_n + copy_n + C.retrain_accels == C.node_accels, "Figure shows serving, standby, and the run filling the node while the run executes.")
 # (first lane, lane count, start hour, end hour, label, fill, line, dashed)
 blocks = [
-    (0, copy_n, 0, day_h, f"Serving copy of the tables ({OpsRunningCases.dlrm_gb_str} over {copy_n} × {OpsRunningCases.hbm_gib_str})",
-     COLORS['BlueL'], COLORS['BlueLine'], False),
-    (copy_n, copy_n, 0, day_h, "Hot standby (previous version, resident for rollback)",
-     COLORS['GreenL'], COLORS['GreenLine'], False),
-    (2 * copy_n, C.retrain_accels, 0, run_h,
-     f"Retraining\nrun\n{C.retrain_accels} × {C.retrain_time_str}\n= {C.accel_hours_str} accelerator-hours",
-     COLORS['OrangeL'], COLORS['OrangeLine'], False),
-    (2 * copy_n, copy_n, run_h, day_h, "Canary of the new candidate",
-     COLORS['VioletL'], COLORS['VioletLine'], False),
-    (3 * copy_n, C.node_accels - 3 * copy_n, run_h, day_h, "Free after the run",
-     'white', COLORS['secondary'], True),
+    (
+        0,
+        copy_n,
+        0,
+        day_h,
+        f"Serving copy of the tables ({OpsRunningCases.dlrm_gb_str} over {copy_n} × {OpsRunningCases.hbm_gb_str})",
+        COLORS['BlueL'],
+        COLORS['BlueLine'],
+        False,
+    ),
+    (copy_n, copy_n, 0, day_h, "Hot standby (previous version, resident for rollback)", COLORS['GreenL'], COLORS['GreenLine'], False),
+    (
+        2 * copy_n,
+        C.retrain_accels,
+        0,
+        run_h,
+        f"Retraining\nrun\n{C.retrain_accels} × {C.retrain_time_str}\n= {C.accel_hours_str} accelerator-hours",
+        COLORS['OrangeL'],
+        COLORS['OrangeLine'],
+        False,
+    ),
+    (2 * copy_n, copy_n, run_h, day_h, "Canary of the new candidate", COLORS['VioletL'], COLORS['VioletLine'], False),
+    (3 * copy_n, C.node_accels - 3 * copy_n, run_h, day_h, "Free after the run", 'white', COLORS['secondary'], True),
 ]
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 for lane0, n, h0, h1, label, fill, line, dashed in blocks:
-    ax.add_patch(plt.Rectangle((h0, lane0 + 0.06), h1 - h0, n - 0.12, facecolor=fill, edgecolor=line,
-                               linewidth=1.3, linestyle='--' if dashed else '-', zorder=2))
-    ax.text((h0 + h1) / 2, lane0 + n / 2, label, ha='center', va='center', fontsize=9,
-            color=COLORS['secondary'] if dashed else COLORS['primary'], linespacing=1.15, zorder=3)
+    ax.add_patch(
+        plt.Rectangle(
+            (h0, lane0 + 0.06), h1 - h0, n - 0.12, facecolor=fill, edgecolor=line, linewidth=1.3, linestyle='--' if dashed else '-', zorder=2
+        )
+    )
+    ax.text(
+        (h0 + h1) / 2,
+        lane0 + n / 2,
+        label,
+        ha='center',
+        va='center',
+        fontsize=9,
+        color=COLORS['secondary'] if dashed else COLORS['primary'],
+        linespacing=1.15,
+        zorder=3,
+    )
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.set_xlim(-0.3, day_h + 0.3)
@@ -3042,10 +3086,10 @@ class SliceAnalysisCalc:
 
 | **User Segment**     |                     **Traffic %**                      |                          **Accuracy**                         | **Impact**               |
 |:---------------------|:------------------------------------------------------:|:-------------------------------------------------------------:|:-------------------------|
-| **Desktop users** | `{python} SliceAnalysisCalc.desktop_traffic_str` | `{python} SliceAnalysisCalc.desktop_accuracy_str` | Nominal |
-| **Mobile (iOS)** | `{python} SliceAnalysisCalc.ios_traffic_str` | `{python} SliceAnalysisCalc.ios_accuracy_str` | Nominal |
-| **Mobile (Android)** | `{python} SliceAnalysisCalc.android_traffic_str` | `{python} SliceAnalysisCalc.android_accuracy_str` | Minor degradation |
-| **Tablet users** | `{python} SliceAnalysisCalc.tablet_traffic_str` | `{python} SliceAnalysisCalc.tablet_accuracy_str` | Severe, investigate |
+| **Desktop users**    |    `{python} SliceAnalysisCalc.desktop_traffic_str`    |       `{python} SliceAnalysisCalc.desktop_accuracy_str`       | Nominal                  |
+| **Mobile (iOS)**     |      `{python} SliceAnalysisCalc.ios_traffic_str`      |         `{python} SliceAnalysisCalc.ios_accuracy_str`         | Nominal                  |
+| **Mobile (Android)** |    `{python} SliceAnalysisCalc.android_traffic_str`    |       `{python} SliceAnalysisCalc.android_accuracy_str`       | Minor degradation        |
+| **Tablet users**     |    `{python} SliceAnalysisCalc.tablet_traffic_str`     |        `{python} SliceAnalysisCalc.tablet_accuracy_str`       | Severe, investigate      |
 | **Overall**          | **`{python} SliceAnalysisCalc.total_traffic_pct_str`** | **`{python} SliceAnalysisCalc.overall_accuracy_pct_tbl_str`** | **Masks tablet problem** |
 
 : **Slice Analysis Example**: Overall accuracy of `{python} SliceAnalysisCalc.overall_accuracy_pct_str` appears acceptable, but tablet users (`{python} SliceAnalysisCalc.tablet_traffic_pct_str` of traffic) experience `{python} SliceAnalysisCalc.tablet_accuracy_pct_str` accuracy, a severe degradation masked by aggregation. Effective debugging requires systematic slice analysis across key dimensions. {#tbl-slice-analysis-example tbl-colwidths="[28,22,22,28]"}
@@ -3562,13 +3606,13 @@ Operational constraints in machine learning systems are governed by the physical
 
 The edge case in @sec-ml-operations-oura-ring-case-study-2444 follows the keyword spotter from its detection drop through deployment and monitoring, reusing the three-tier partition that a published wearable design makes concrete. The clinical case, ClinAIOps, places clinicians inside the operations loop. Despite their contrasting operating regimes, both deployments must satisfy the same core MLOps disciplines. @Tbl-ml-ops-principle-mapping maps these foundational principles across the two environments, demonstrating how physical hardware limits and regulatory mandates alter implementation mechanisms without altering the underlying operational requirements.
 
-| **Principle**              | **Keyword-spotting edge design**                                                       | **ClinAIOps**                                                                               |
-|:---------------------------|:---------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|
-| **Reproducibility**        | Versioned audio datasets, DSP front end, and firmware alongside model weights          | Audit trails, decision provenance                                                           |
-| **Separation of concerns** | Independent data, training, and serving layers with an edge-specific OTA pipeline      | Distinct clinical validation and deployment stages with regulatory compliance isolation     |
-| **Consistency**            | One feature-extraction kernel shared by training and on-device inference               | Standardized clinical data pipelines ensuring training-serving parity                       |
-| **Observable degradation** | Aggregate on-device proxies (wake rate, false-wake reports, duty cycle)                | Cohort-specific monitoring, outcome tracking                                                |
-| **Cost-aware automation**  | Updates gated on accuracy gain against radio energy, flash wear, and rollout risk      | Automated model updates with human-in-the-loop gates balancing update cost and patient risk |
+| **Principle**              | **Keyword-spotting edge design**                                                  | **ClinAIOps**                                                                               |
+|:---------------------------|:----------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------|
+| **Reproducibility**        | Versioned audio datasets, DSP front end, and firmware alongside model weights     | Audit trails, decision provenance                                                           |
+| **Separation of concerns** | Independent data, training, and serving layers with an edge-specific OTA pipeline | Distinct clinical validation and deployment stages with regulatory compliance isolation     |
+| **Consistency**            | One feature-extraction kernel shared by training and on-device inference          | Standardized clinical data pipelines ensuring training-serving parity                       |
+| **Observable degradation** | Aggregate on-device proxies (wake rate, false-wake reports, duty cycle)           | Cohort-specific monitoring, outcome tracking                                                |
+| **Cost-aware automation**  | Updates gated on accuracy gain against radio energy, flash wear, and rollout risk | Automated model updates with human-in-the-loop gates balancing update cost and patient risk |
 
 : **MLOps Principles by Case Study**: Side-by-side mapping of the five foundational MLOps principles to the keyword-spotting edge design and the ClinAIOps framework, showing how domain constraints reshape implementation without changing which principles apply. {#tbl-ml-ops-principle-mapping tbl-colwidths="[16,41,43]"}
 
@@ -3578,7 +3622,7 @@ The keyword spotter is the chapter's power-bound case. Six months after launch, 
 
 #### Context and motivation {#sec-ml-operations-context-motivation-df0a}
 
-Keyword spotting partitions its computation across three tiers. The microcontroller runs the audio front end and the `{python} OpsRunningCases.kws_kb_str` INT8 DS-CNN continuously in its always-on island, a companion device or hub runs a heavier verification model when the detector fires, and the cloud aggregates fleet statistics and retrains. The partition is not peculiar to keyword spotting. A published sleep-staging wearable, the Oura Ring\index{Oura Ring!wearable ML case study}\index{Edge AI!Oura Ring case study}, uses the same three tiers, and its published evaluation makes the work of each tier concrete [@altini2021promise]. The ring captures accelerometry, optical photoplethysmography (PPG) for pulse rate and heart-rate variability, and skin temperature, and its 15–22 mAh battery rules out continuous Bluetooth Low Energy (BLE) streaming. Sensor preprocessing and lightweight activity classification run in the ring's microcontroller firmware, the heavier multi-sensor sleep-stage sequence model runs on the companion phone during periodic synchronization, and historical aggregation and retraining run in the cloud. The versioning, telemetry, over-the-air, and lifecycle controls described below are a design for the keyword spotter informed by that partition, not a reported account of any vendor's production system.
+Keyword spotting partitions its computation across three tiers. The microcontroller runs the audio front end and the `{python} OpsRunningCases.kws_kb_str` INT8 DS-CNN continuously in its always-on island, a companion device or hub runs a heavier verification model when the detector fires, and the cloud aggregates fleet statistics and retrains. The partition is not peculiar to keyword spotting. A published sleep-staging wearable, the Oura Ring\index{Oura Ring!wearable ML case study}\index{Edge AI!Oura Ring case study}, uses the same three tiers, and its published evaluation makes the work of each tier concrete [@altini2021promise]. The ring captures accelerometry, optical photoplethysmography (PPG) for pulse rate and heart-rate variability, and skin temperature, and its 15–22 mAh battery rules out continuous Bluetooth Low Energy (BLE) streaming. Sensor preprocessing and lightweight activity classification run in the ring's microcontroller firmware, the heavier multi-sensor sleep-stage sequence model runs on the companion phone during periodic synchronization, and historical aggregation and retraining run in the cloud. The versioning, telemetry, over-the-air, and lifecycle controls described later are a design for the keyword spotter informed by that partition, not a reported account of any vendor's production system.
 
 ```{python}
 #| echo: false
@@ -3637,7 +3681,6 @@ class OuraValidationGap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     participants_str = fmt_count(participants, label="participant")
     recording_nights_str = fmt_count(recording_nights, label="night")
-    recording_hr_str = fmt_time(recording_hours, unit=hour, precision=0, commas=True, style="word")
     cross_validation_fold_count_str = fmt_int(cross_validation_folds, commas=False)
     accel_only_pct_str = fmt_percent(accel_only_accuracy, precision=0, commas=False, style='prose')
     enhanced_pct_str = fmt_percent(enhanced_accuracy, precision=0, commas=False, style='prose')
@@ -4184,17 +4227,17 @@ Infrastructure components implement these principles across three critical opera
 
 The chapter's operating rules fit on one page (@tbl-ml-ops-key-equations). Together they let an engineer estimate, before an incident forces the question, what a control costs and when it pays for itself.
 
-| **Quantity**                    | **Formula**                                                                                                                                                                      | **Where derived**                             |
-|:--------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------|
-| **Skew cost**                   | $\text{Skew Cost} = \text{Rate}_{\text{skew}} \times \DailyQueryVolume\times \ErroneousPredictionCost$                                                                           | @eq-skew-cost                                 |
-| **Retraining gate**             | $\text{Retrain if: } \FiniteChange\text{Accuracy} \times \text{Value per Point} > \text{Training Cost} + \text{Deployment Risk}$                                                   | @eq-retrain-decision                          |
-| **A/B sample size**             | $\RequiredUsersPerVariant= \frac{2(\ConfidenceCriticalQuantile+ \PowerCriticalQuantile)^2 \OutcomeStandardDeviation^2}{\MinimumDetectableEffect^2}$                                   | @eq-ab-sample-size                            |
-| **Detection delay**             | Evidence budget in labeled examples divided by the labeled-outcome arrival rate                                                                                                  | Notebook \ref{nbk-ml-ops-drift-detection-delay} |
-| **Population stability index**  | $\text{PSI} = \sum_{i=1}^{\PopulationStabilityBinCount} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right)$                   | @eq-psi                                       |
-| **Telemetry cost rate**         | $\text{Cost rate} \approx \TelemetrySeriesCount \TelemetrySamplingFrequency\left(\IngestionPricePerSample+ \SampleStorageSize \TelemetryRetentionDuration \StorageCapacityPrice\right)$ | @eq-observability-cost                        |
-| **Monitoring benefit and cost** | $\text{Monitoring Benefit/Cost} = \frac{\text{Incidents Prevented} \times \text{Avg Incident Cost}}{\text{Annual Monitoring Cost}}$                                                 | @eq-monitoring-roi                            |
-| **Accuracy decay**              | $\AccuracyAfterDeployment(\DeploymentAge) = \InitialAccuracy \cdot e^{-\AccuracyDecayRate \DeploymentAge}$                                                                        | @eq-accuracy-decay                            |
-| **Optimal retraining interval** | $\RetrainingInterval^* \approx \sqrt{\frac{2 \cdot \RetrainingRunCost}{\DailyQueryVolume\cdot \AccuracyPayoffPerQuery\cdot \InitialAccuracy \cdot \AccuracyDecayRate}}$            | @eq-optimal-retrain                           |
+| **Quantity**                    | **Formula**                                                                                                                                                                             | **Where derived**                               |
+|:--------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------|
+| **Skew cost**                   | $\text{Skew Cost} = \text{Rate}_{\text{skew}} \times \DailyQueryVolume\times \ErroneousPredictionCost$                                                                                  | @eq-skew-cost                                   |
+| **Retraining gate**             | $\text{Retrain if: } \FiniteChange\text{Accuracy} \times \text{Value per Point} > \text{Training Cost} + \text{Deployment Risk}$                                                        | @eq-retrain-decision                            |
+| **A/B sample size**             | $\RequiredUsersPerVariant= \frac{2(\ConfidenceCriticalQuantile+ \PowerCriticalQuantile)^2 \OutcomeStandardDeviation^2}{\MinimumDetectableEffect^2}$                                     | @eq-ab-sample-size                              |
+| **Detection delay**             | Evidence budget in labeled examples divided by the labeled-outcome arrival rate                                                                                                         | Notebook \ref{nbk-ml-ops-drift-detection-delay} |
+| **Population stability index**  | $\text{PSI} = \sum_{i=1}^{\PopulationStabilityBinCount} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right)$                         | @eq-psi                                         |
+| **Telemetry cost rate**         | $\text{Cost rate} \approx \TelemetrySeriesCount \TelemetrySamplingFrequency\left(\IngestionPricePerSample+ \SampleStorageSize \TelemetryRetentionDuration \StorageCapacityPrice\right)$ | @eq-observability-cost                          |
+| **Monitoring benefit and cost** | $\text{Monitoring Benefit/Cost} = \frac{\text{Incidents Prevented} \times \text{Avg Incident Cost}}{\text{Annual Monitoring Cost}}$                                                     | @eq-monitoring-roi                              |
+| **Accuracy decay**              | $\AccuracyAfterDeployment(\DeploymentAge) = \InitialAccuracy \cdot e^{-\AccuracyDecayRate \DeploymentAge}$                                                                              | @eq-accuracy-decay                              |
+| **Optimal retraining interval** | $\RetrainingInterval^* \approx \sqrt{\frac{2 \cdot \RetrainingRunCost}{\DailyQueryVolume\cdot \AccuracyPayoffPerQuery\cdot \InitialAccuracy \cdot \AccuracyDecayRate}}$                 | @eq-optimal-retrain                             |
 
 : **Key Equations**: The chapter's operating rules in the notation of the sections that derive them, in chapter order. The skew cost and retraining gate are stated with the principles, the sample size with A/B testing, the delay, PSI, and cost rules with monitoring, and the decay and interval with the retraining decision; the interval is the square-root approximation valid while decay over one interval is small. {#tbl-ml-ops-key-equations tbl-colwidths="[22,58,20]"}
 

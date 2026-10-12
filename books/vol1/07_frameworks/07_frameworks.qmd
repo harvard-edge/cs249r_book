@@ -163,15 +163,15 @@ An ML framework translates logical intent into physical execution under the cons
 
 This chapter follows a model's graph downward, one level at a time (@tbl-frameworks-chapter-spine): the decoding step above carries the execution level, and a two-layer MNIST training step, traced at the end, gathers every level. The execution section takes the graph to kernels and decides when each operation runs. The differentiation section builds the backward graph that training adds and accounts for the values it must keep. The abstraction section reaches the bottom of the descent, where tensors occupy device memory and kernels operate on them. Modules then assemble those pieces back into a model, and the anatomy of one training step traces a single step through every level. The chapter closes with the major frameworks and how to choose among them.
 
-| **Section**                                         | **Level of the graph**              | **Question it answers**                                   | **Iron law term most affected**     |
-|:----------------------------------------------------|:------------------------------------|:----------------------------------------------------------|:------------------------------------|
-| **Evolution of Framework Abstractions**             | Libraries, autodiff, compilers      | How the levels of the stack came to exist                 | (context)                           |
-| **Execution: From Graphs to Kernels**               | Graph to kernels                    | When each operation runs, and how many launches it costs  | Fixed overhead $\Latency$           |
-| **Differentiation: Automatic Gradient Computation** | Forward graph to backward graph     | How gradients are computed, and which values must be kept | Bytes moved $\DataVolume$, and $\Operations$ |
-| **Abstraction: Tensors, Devices, and Operations**   | Tensors in device memory            | Where each value lives and which kernel runs on it        | Hardware efficiency $\EfficiencyHw$ |
-| **Modules: From Operations to Models**              | Operations to a model               | How parameters and training state are organized           | (organization)                      |
-| **Anatomy of a Training Step**                      | Execution, differentiation, and abstraction in one step | Where one step's time and bytes go                        | All terms                           |
-| **Major Frameworks** and **Choosing a Framework**   | Complete systems                    | Which framework fits a given constraint                   | All terms                           |
+| **Section**                                         | **Level of the graph**                                  | **Question it answers**                                   | **Iron law term most affected**              |
+|:----------------------------------------------------|:--------------------------------------------------------|:----------------------------------------------------------|:---------------------------------------------|
+| **Evolution of Framework Abstractions**             | Libraries, autodiff, compilers                          | How the levels of the stack came to exist                 | (context)                                    |
+| **Execution: From Graphs to Kernels**               | Graph to kernels                                        | When each operation runs, and how many launches it costs  | Fixed overhead $\Latency$                    |
+| **Differentiation: Automatic Gradient Computation** | Forward graph to backward graph                         | How gradients are computed, and which values must be kept | Bytes moved $\DataVolume$, and $\Operations$ |
+| **Abstraction: Tensors, Devices, and Operations**   | Tensors in device memory                                | Where each value lives and which kernel runs on it        | Hardware efficiency $\EfficiencyHw$          |
+| **Modules: From Operations to Models**              | Operations to a model                                   | How parameters and training state are organized           | (organization)                               |
+| **Anatomy of a Training Step**                      | Execution, differentiation, and abstraction in one step | Where one step's time and bytes go                        | All terms                                    |
+| **Major Frameworks** and **Choosing a Framework**   | Complete systems                                        | Which framework fits a given constraint                   | All terms                                    |
 
 : **Chapter Map**: Each section of the chapter lowers the model's computational graph one level closer to the hardware and names the iron law term that level most affects. {#tbl-frameworks-chapter-spine}
 
@@ -500,7 +500,7 @@ The execution strategy of an ML framework is constrained by the memory wall\inde
 ↩ The memory wall and the growth-rate ratio behind it are established in @sec-ml-systems-deployment-spectrum-71be.
 :::
 
-The physical root of this imbalance is accelerator chip topography: silicon is partitioned between tiny, ultra-fast on-chip storage (registers and SRAM scratchpads, operating at tens of terabytes per second but holding only tens of megabytes) and large off-chip device memory (High Bandwidth Memory [HBM] or GDDR, holding tens to a few hundred GB but reached across external memory buses with hundreds of cycles of latency). When evaluating an unoptimized sequence of three operations, such as $\text{LayerNorm} \to \text{Dropout} \to \text{ReLU}$, a framework dispatches three separate GPU kernels. The first reads inputs from HBM and writes intermediate results back to HBM; the second reads those results and writes back again; the third reads them a final time. Shuttling intermediate tensors across the external bus three times dwarfs the computation time, leaving arithmetic units idle.
+The physical root of this imbalance is accelerator chip topography: silicon is partitioned between tiny, ultra-fast on-chip storage (registers and SRAM scratchpads, operating at tens of terabytes per second but holding only tens of megabytes) and large off-chip device memory such as high-bandwidth memory (HBM) or GDDR (holding tens to a few hundred GB but reached across external memory buses with hundreds of cycles of latency). When evaluating an unoptimized sequence of three operations, such as $\text{LayerNorm} \to \text{Dropout} \to \text{ReLU}$, a framework dispatches three separate GPU kernels. The first reads inputs from HBM and writes intermediate results back to HBM; the second reads those results and writes back again; the third reads them a final time. Shuttling intermediate tensors across the external bus three times dwarfs the computation time, leaving arithmetic units idle.
 
 The memory wall classifies operations as either compute-bound\index{Compute-bound!operation classification} (limited by arithmetic throughput) or memory-bound\index{Memory-bound!operation classification} (limited by data movement). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory bound, though the large matrix multiplications that dominate total compute time can be compute bound.
 
@@ -835,10 +835,11 @@ from mlsysim.fmt import check, fmt_percent, fmt_time
 
 class DispatchOverhead:
     """Fixed per-operation host cost vs. small and large kernel durations."""
+
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     per_op_overhead = Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch
-    small_kernel = 1 * microsecond      # scenario assumption: ReLU on a small vector
-    large_kernel = 100 * microsecond    # scenario assumption: large matrix multiply
+    small_kernel = 1 * microsecond  # scenario assumption: ReLU on a small vector
+    large_kernel = 100 * microsecond  # scenario assumption: large matrix multiply
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     small_share = (per_op_overhead / (per_op_overhead + small_kernel)).to("").magnitude
     large_share = (per_op_overhead / (per_op_overhead + large_kernel)).to("").magnitude
@@ -1249,8 +1250,9 @@ class OperatorSurface:
     tf_ratio = tf_latest["ops"] / xla_latest
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(pt_latest["aten_schemas"] > 2 * pt_first["aten_schemas"] and tf_latest["ops"] > 2 * tf_first["ops"],
-          "Both eager surfaces more than doubled.")
+    check(
+        pt_latest["aten_schemas"] > 2 * pt_first["aten_schemas"] and tf_latest["ops"] > 2 * tf_first["ops"], "Both eager surfaces more than doubled."
+    )
     check(max(core_latest, xla_latest, onnx_latest, jax_latest) < 250, "Every compiler-facing set stays near 100-200 operators.")
     check(10 <= min(pt_ratio, tf_ratio) and max(pt_ratio, tf_ratio) <= 20, f"Expected ~13-14x gaps, got {tf_ratio:.1f} and {pt_ratio:.1f}.")
 
@@ -1296,9 +1298,11 @@ import datetime as dt
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.6))
+
 def _yr(s):
     d = dt.date.fromisoformat(s)
     return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
 _O = OperatorSurface
 _core = [r for r in _O.pytorch if r["core_aten"]]
 _series = [
@@ -1312,9 +1316,14 @@ _series = [
 for _rows, _key, _label, _color, _marker, _ls in _series:
     ax.plot([_yr(r["date"]) for r in _rows], [r[_key] for r in _rows], _ls, marker=_marker, ms=4, color=_color, label=_label)
 for _rows, _key, _dy in ((_O.pytorch, "aten_schemas", 0), (_O.tensorflow, "ops", 0)):
-    ax.annotate(f"{int(_rows[-1][_key]):,}", (_yr(_rows[-1]["date"]), _rows[-1][_key]), xytext=(6, _dy), textcoords="offset points", va="center", fontsize=8)
-ax.set_xlabel("Release date"); ax.set_ylabel("Operators (log scale)")
-ax.set_xlim(2016.8, 2027.2); ax.set_yscale("log"); ax.set_ylim(60, 6000)
+    ax.annotate(
+        f"{int(_rows[-1][_key]):,}", (_yr(_rows[-1]["date"]), _rows[-1][_key]), xytext=(6, _dy), textcoords="offset points", va="center", fontsize=8
+    )
+ax.set_xlabel("Release date")
+ax.set_ylabel("Operators (log scale)")
+ax.set_xlim(2016.8, 2027.2)
+ax.set_yscale("log")
+ax.set_ylim(60, 6000)
 ax.legend(loc="upper left", fontsize=7.5, frameon=True, framealpha=0.95, ncol=2)
 plt.show()
 plt.close()
@@ -1463,12 +1472,13 @@ from mlsysim.fmt import check, fmt_count, fmt_percent, fmt_time
 
 class PythonTaxTimeline:
     """Five-op eager vs. compiled timeline for @fig-python-tax and its lead-in paragraph."""
+
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     python_dispatch = Ops.RuntimeOverheads.PythonDispatch
     kernel_launch = Ops.RuntimeOverheads.KernelLaunch
-    n_ops = 5                          # scenario assumption
-    kernel_time = 1 * microsecond      # scenario assumption: one small kernel
-    fused_efficiency = 0.8             # scenario assumption: fused kernel avoids 20 percent of memory time
+    n_ops = 5  # scenario assumption
+    kernel_time = 1 * microsecond  # scenario assumption: one small kernel
+    fused_efficiency = 0.8  # scenario assumption: fused kernel avoids 20 percent of memory time
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     eager_compute = n_ops * kernel_time
     fused_compute = eager_compute * fused_efficiency
@@ -1477,10 +1487,10 @@ class PythonTaxTimeline:
     check(eager_idle_share > 0.90, f"Prose says idle over 90 percent, got {eager_idle_share:.3f}.")
     check(abs(fused_compute.to(microsecond).magnitude - 4) < 1e-9, "Prose says 4 us fused vs 5 us unfused.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    n_ops_str = fmt_count(n_ops, precision=0, commas=False)                                    # 5
-    kernel_us_str = fmt_time(kernel_time, microsecond, precision=0, commas=False)              # 1 μs
-    eager_compute_us_str = fmt_time(eager_compute, microsecond, precision=0, commas=False)     # 5 μs
-    fused_compute_us_str = fmt_time(fused_compute, microsecond, precision=0, commas=False)     # 4 μs
+    n_ops_str = fmt_count(n_ops, precision=0, commas=False)  # 5
+    kernel_us_str = fmt_time(kernel_time, microsecond, precision=0, commas=False)  # 1 μs
+    eager_compute_us_str = fmt_time(eager_compute, microsecond, precision=0, commas=False)  # 5 μs
+    fused_compute_us_str = fmt_time(fused_compute, microsecond, precision=0, commas=False)  # 4 μs
     eager_idle_pct_str = fmt_percent(round(eager_idle_share * 100) / 100, precision=0, commas=False, style="prose")  # 91 percent
 ```
 
@@ -1570,13 +1580,13 @@ The resulting workflow is a systems decision. Rapid prototyping favors eager exe
 Set side by side across six dimensions (@tbl-framework-execution-models), the three execution models differ most in when the graph is built and how much of it a compiler can see.
 
 | **Aspect**               | **Eager + Autograd Tape** **(PyTorch default)** | **Static graph**\index{Static graph!execution model comparison} **(TensorFlow&nbsp;1.x)** | **JIT Compilation** **(torch.compile)** |
-|:-------------------------|:------------------------------------------------|:--------------------------------------------------------------------------|:----------------------------------------|
-| **Execution Model**      | Immediate                                       | Deferred                                                                  | Hybrid                                  |
-| **Graph Construction**   | During forward pass                             | Before execution                                                          | First execution (cached)                |
-| **Optimization**         | Per-operation kernels                           | Ahead-of-time                                                             | JIT compilation                         |
-| **Dynamic Control Flow** | Python control flow                             | Graph control flow                                                        | Captured regions or breaks              |
-| **Debugging**            | Easy (standard Python)                          | Difficult (symbolic)                                                      | Moderate (mixed)                        |
-| **Performance**          | Baseline                                        | High (optimized)                                                          | High (compiled regions)                 |
+|:-------------------------|:------------------------------------------------|:------------------------------------------------------------------------------------------|:----------------------------------------|
+| **Execution Model**      | Immediate                                       | Deferred                                                                                  | Hybrid                                  |
+| **Graph Construction**   | During forward pass                             | Before execution                                                                          | First execution (cached)                |
+| **Optimization**         | Per-operation kernels                           | Ahead-of-time                                                                             | JIT compilation                         |
+| **Dynamic Control Flow** | Python control flow                             | Graph control flow                                                                        | Captured regions or breaks              |
+| **Debugging**            | Easy (standard Python)                          | Difficult (symbolic)                                                                      | Moderate (mixed)                        |
+| **Performance**          | Baseline                                        | High (optimized)                                                                          | High (compiled regions)                 |
 
 : **Execution Model Trade-Offs**: Each execution model occupies a distinct position in the flexibility-optimization trade-off space. Eager execution maximizes debugging flexibility but limits cross-operation optimization; static graphs maximize optimization but require control flow to be represented in the graph; hybrid JIT compilation compiles captured regions while falling back to eager execution for unsupported patterns. {#tbl-framework-execution-models tbl-colwidths="[25,25,25,25]"}
 
@@ -1752,21 +1762,23 @@ Long-lived production inference ($\DevelopmentIterationCount\approx 0$, $\Produc
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_math, sci_latex
+
 class CompilationContinuumModel:
     """Illustrative cost model (arbitrary units) shared by @fig-compilation-continuum and its prose."""
+
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    eager_compile, eager_per_exec = 0.0, 10e-6     # scenario assumption, arbitrary units
+    eager_compile, eager_per_exec = 0.0, 10e-6  # scenario assumption, arbitrary units
     jit_compile, jit_per_exec = 10.0, 5e-6
     aot_compile, aot_per_exec = 30.0, 2e-6
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    eager_jit_cross = (jit_compile - eager_compile) / (eager_per_exec - jit_per_exec)   # 2.0e6
-    jit_aot_cross = (aot_compile - jit_compile) / (jit_per_exec - aot_per_exec)         # 6.67e6
+    eager_jit_cross = (jit_compile - eager_compile) / (eager_per_exec - jit_per_exec)  # 2.0e6
+    jit_aot_cross = (aot_compile - jit_compile) / (jit_per_exec - aot_per_exec)  # 6.67e6
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(eager_jit_cross < jit_aot_cross, "Regions must order eager < JIT < AOT.")
     check(abs(eager_jit_cross - 2e6) < 1 and abs(jit_aot_cross - 6.667e6) < 1e3, "Prose cites ~2e6 and ~6.7e6.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    eager_jit_cross_math = fmt_math(sci_latex(eager_jit_cross, precision=0))   # $2 \times 10^{6}$
-    jit_aot_cross_math = fmt_math(sci_latex(jit_aot_cross, precision=1))       # $6.7 \times 10^{6}$
+    eager_jit_cross_math = fmt_math(sci_latex(eager_jit_cross, precision=0))  # $2 \times 10^{6}$
+    jit_aot_cross_math = fmt_math(sci_latex(jit_aot_cross, precision=1))  # $6.7 \times 10^{6}$
 ```
 
 The cases form a continuum of increasing reuse (@fig-compilation-continuum). Each strategy's total time starts at its one-time compilation cost and grows at its per-execution cost, so eager wins at low execution counts, JIT wins once its compilation is amortized, and AOT wins only at the largest counts, where its higher upfront cost is fully repaid. The figure's crossovers (near `{python} CompilationContinuumModel.eager_jit_cross_math` and `{python} CompilationContinuumModel.jit_aot_cross_math` executions) come from an illustrative cost model in arbitrary units, not from the ResNet-50 scenario, whose eager-to-compiled breakeven sits near `{python} CompilationBenchmark.resnet_breakeven_images_str`. What carries over is the order of the regions, not their positions.
@@ -1868,12 +1880,12 @@ These throughput differences are not uniform across workloads, so the execution 
 ↩ The workload archetypes and the iron law term that dominates each are established in @sec-ml-systems-workload-archetypes-fd10.
 :::
 
-| **Archetype**                 | **Dominant Iron Law Term**                                    | **Candidate Framework Strategy**                | **Rationale**                                                                                                                                                                  |
-|:------------------------------|:--------------------------------------------------------------|:------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **ResNet-50 (compute-bound)** | $\frac{\Operations}{\PeakRate \cdot \EfficiencyHw}$ (Compute) | Compiled dense kernels                          | Regular dense kernels benefit from layout selection, precision lowering, and backend specialization; fusion helps most in surrounding memory- or launch-bound regions          |
-| **GPT-2 (bandwidth-bound)**   | $\frac{\DataVolume}{\Bandwidth}$ (Memory Bandwidth)           | Fused attention + graph compilation             | Fused attention eliminates intermediate activation round-trips, while compilation removes kernel launch overhead; streaming parameter and KV-cache traffic remain bandwidth-limited |
-| **DLRM (capacity-bound)**     | Capacity first, then $\frac{\DataVolume}{\Bandwidth}+\Latency$ (gathers) | Specialized lookup kernels and measured capture | Irregular gathers limit some optimizations; measure compilation benefits in dense regions and surrounding dispatch                                                             |
-| **DS-CNN (power-bound)**      | Energy and memory capacity (feasibility gates)                | Static-arena microcontroller runtime           | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                                    |
+| **Archetype**                 | **Dominant Iron Law Term**                                               | **Candidate Framework Strategy**                | **Rationale**                                                                                                                                                                       |
+|:------------------------------|:-------------------------------------------------------------------------|:------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **ResNet-50 (compute-bound)** | $\frac{\Operations}{\PeakRate \cdot \EfficiencyHw}$ (Compute)            | Compiled dense kernels                          | Regular dense kernels benefit from layout selection, precision lowering, and backend specialization; fusion helps most in surrounding memory- or launch-bound regions               |
+| **GPT-2 (bandwidth-bound)**   | $\frac{\DataVolume}{\Bandwidth}$ (Memory Bandwidth)                      | Fused attention + graph compilation             | Fused attention eliminates intermediate activation round-trips, while compilation removes kernel launch overhead; streaming parameter and KV-cache traffic remain bandwidth-limited |
+| **DLRM (capacity-bound)**     | Capacity first, then $\frac{\DataVolume}{\Bandwidth}+\Latency$ (gathers) | Specialized lookup kernels and measured capture | Irregular gathers limit some optimizations; measure compilation benefits in dense regions and surrounding dispatch                                                                  |
+| **DS-CNN (power-bound)**      | Energy and memory capacity (feasibility gates)                           | Static-arena microcontroller runtime            | Fixed memory and a small native runtime must fit the target before latency can be optimized                                                                                         |
 
 : **Framework Execution Strategy by Workload**: Each workload archetype pairs with a candidate execution strategy aligned to its dominant iron law term. Fusion cannot lift the bandwidth-bound row's weight-streaming limit; only larger batches or lower precision move it. For the power-bound row, memory capacity is a feasibility gate that must be met before any iron law term matters. For the capacity-bound row, the bandwidth and latency are those of irregular embedding gathers and the network exchange that follows them, not the streaming peak. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
 
@@ -2018,13 +2030,17 @@ The compilation continuum ends at the far edge\index{Edge deployment!TinyML fram
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, KiB, MiB
 from mlsysim.fmt import MarkdownStr, check, fmt_memory_capacity
+
 class KwsTinyTarget:
     """Cortex-M4 MCU target for the KWS lighthouse (registry: Nordic nRF52840)."""
+
     mcu = Hardware.Tiny.nRF52840
-    check(mcu.memory.sram_capacity.to(KiB).magnitude == 256 and mcu.memory.flash_capacity.to(MiB).magnitude == 1, "Callout says 256 KB RAM, 1 MB flash.")
-    mcu_name_str = MarkdownStr(mcu.name)      # registry name: "Nordic nRF52840 (Cortex-M4F)"
-    sram_kb_str = fmt_memory_capacity(mcu.memory.sram_capacity, unit=KiB, precision=0, commas=False)   # 256 KB
-    flash_mb_str = fmt_memory_capacity(mcu.memory.flash_capacity, unit=MiB, precision=0, commas=False) # 1 MB
+    check(
+        mcu.memory.sram_capacity.to(KiB).magnitude == 256 and mcu.memory.flash_capacity.to(MiB).magnitude == 1, "Callout says 256 KB RAM, 1 MB flash."
+    )
+    mcu_name_str = MarkdownStr(mcu.name)  # registry name: "Nordic nRF52840 (Cortex-M4F)"
+    sram_kb_str = fmt_memory_capacity(mcu.memory.sram_capacity, unit=KiB, precision=0, commas=False)  # 256 KB
+    flash_mb_str = fmt_memory_capacity(mcu.memory.flash_capacity, unit=MiB, precision=0, commas=False)  # 1 MB
 ```
 
 ::: {#lhs-frameworks-lighthouse-example-smart-doorbell-tinyml .callout-lighthouse title="Lighthouse example: KWS on TinyML"}
@@ -2171,14 +2187,16 @@ Mathematically, while forward mode computes Jacobian-vector products ($\Function
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import BYTES_FP32, GB
 from mlsysim.fmt import check, fmt_count, fmt_memory
+
 class JacobianMemory:
     """Full Jacobian size for a 100,000-wide layer in FP32, which VJPs never materialize."""
-    width = 100_000                    # scenario assumption: input and output width
+
+    width = 100_000  # scenario assumption: input and output width
     elements = width * width
     jacobian_bytes = elements * BYTES_FP32
     check(elements == 10**10, "Prose says 10^10 elements.")
     check(abs(jacobian_bytes.to(GB).magnitude - 40) < 1e-9, "Prose says 40 GB in FP32.")
-    width_str = fmt_count(width, precision=0, commas=True)                       # 100,000
+    width_str = fmt_count(width, precision=0, commas=True)  # 100,000
     jacobian_gb_str = fmt_memory(jacobian_bytes, unit=GB, precision=0, commas=False)  # 40 GB
 ```
 
@@ -2945,12 +2963,12 @@ class DeviceBandwidthHierarchy:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     h100 = Hardware.Cloud.H100
-    pcie = h100.interconnect.bandwidth            # PCIe Gen5 x16, per direction
-    nvlink = h100.nvlink.bandwidth                # NVLink 4.0, bidirectional total
-    hbm_bw = h100.memory.bandwidth                # HBM3
-    tensor_rows = 1000                            # scenario assumption: activation tensor shape
+    pcie = h100.interconnect.bandwidth  # PCIe Gen5 x16, per direction
+    nvlink = h100.nvlink.bandwidth  # NVLink 4.0, bidirectional total
+    hbm_bw = h100.memory.bandwidth  # HBM3
+    tensor_rows = 1000  # scenario assumption: activation tensor shape
     tensor_cols = 1000
-    transfer_bytes_1gb = 1 * GB                   # scenario assumption: bulk transfer
+    transfer_bytes_1gb = 1 * GB  # scenario assumption: bulk transfer
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     tensor_bytes = tensor_rows * tensor_cols * BYTES_FP32
@@ -2969,22 +2987,21 @@ class DeviceBandwidthHierarchy:
     check(pcie_tensor > nvlink_tensor > hbm_tensor, "Table must order PCIe > NVLink > HBM transfer time.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    pcie_name_str = MarkdownStr(h100.interconnect.name)          # "PCIe Gen5 x16"
-    nvlink_name_str = MarkdownStr(h100.nvlink.name)              # "NVLink 4.0"
-    pcie_gb_per_s_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)                 # 64 GB/s
-    pcie_bidir_gb_per_s_str = fmt_bandwidth(2 * pcie, unit=GB / second, precision=0, commas=False)       # 128 GB/s
-    nvlink_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)             # 900 GB/s
+    pcie_name_str = MarkdownStr(h100.interconnect.name)  # "PCIe Gen5 x16"
+    nvlink_name_str = MarkdownStr(h100.nvlink.name)  # "NVLink 4.0"
+    pcie_gb_per_s_str = fmt_bandwidth(pcie, unit=GB / second, precision=0, commas=False)  # 64 GB/s
+    pcie_bidir_gb_per_s_str = fmt_bandwidth(2 * pcie, unit=GB / second, precision=0, commas=False)  # 128 GB/s
+    nvlink_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)  # 900 GB/s
     nvlink_per_direction_gb_per_s_str = fmt_bandwidth(nvlink_per_direction, unit=GB / second, precision=0, commas=False)  # 450 GB/s
-    hbm_gb_per_s_str = fmt_bandwidth(hbm_bw, unit=GB / second, precision=0, commas=True)                 # 3,350 GB/s
-    hbm_tb_per_s_str = fmt_bandwidth(hbm_bw, unit=TB / second, precision=2, commas=False)                # 3.35 TB/s
-    tensor_mb_str = fmt_memory(tensor_bytes, unit=MB, precision=0, commas=False)                         # 4 MB
-    pcie_tensor_us_str = fmt_time(pcie_tensor, microsecond, precision=1, commas=False)                   # 62.5 μs
-    nvlink_tensor_us_str = fmt_time(nvlink_tensor, microsecond, precision=1, commas=False)               # 8.9 μs
-    hbm_tensor_us_str = fmt_time(hbm_tensor, microsecond, precision=1, commas=False)                     # 1.2 μs
-    pcie_1gb_ms_str = fmt_time(pcie_1gb, millisecond, precision=1, commas=False)                         # 15.6 ms
-    pcie_to_hbm_gap_mult_str = fmt_multiple(pcie_to_hbm_gap, precision=1, commas=False)                  # 52.3×
-    nvlink_to_pcie_mult_str = fmt_multiple(nvlink_to_pcie_bidir, precision=1, commas=False)              # 7.0×
-
+    hbm_gb_per_s_str = fmt_bandwidth(hbm_bw, unit=GB / second, precision=0, commas=True)  # 3,350 GB/s
+    hbm_tb_per_s_str = fmt_bandwidth(hbm_bw, unit=TB / second, precision=2, commas=False)  # 3.35 TB/s
+    tensor_mb_str = fmt_memory(tensor_bytes, unit=MB, precision=0, commas=False)  # 4 MB
+    pcie_tensor_us_str = fmt_time(pcie_tensor, microsecond, precision=1, commas=False)  # 62.5 μs
+    nvlink_tensor_us_str = fmt_time(nvlink_tensor, microsecond, precision=1, commas=False)  # 8.9 μs
+    hbm_tensor_us_str = fmt_time(hbm_tensor, microsecond, precision=1, commas=False)  # 1.2 μs
+    pcie_1gb_ms_str = fmt_time(pcie_1gb, millisecond, precision=1, commas=False)  # 15.6 ms
+    pcie_to_hbm_gap_mult_str = fmt_multiple(pcie_to_hbm_gap, precision=1, commas=False)  # 52.3×
+    nvlink_to_pcie_mult_str = fmt_multiple(nvlink_to_pcie_bidir, precision=1, commas=False)  # 7.0×
 ```
 
 Tensors and their memory layouts establish what the framework computes with. Where that data physically resides\index{Memory management!device placement}, and how it moves between locations\index{Device management!CPU-GPU transfers}, determines whether computation happens at full speed or crawls.
@@ -3013,11 +3030,11 @@ Three principles govern device and memory management: respect the bandwidth hier
 
 [^fn-nvlink-bandwidth-hierarchy]: **NVLink**\index{NVLink!bandwidth hierarchy}: NVIDIA's high-bandwidth GPU-to-GPU interconnect, providing `{python} DeviceBandwidthHierarchy.nvlink_gb_per_s_str` bidirectional bandwidth (`{python} DeviceBandwidthHierarchy.nvlink_name_str` on the H100) compared to `{python} DeviceBandwidthHierarchy.pcie_bidir_gb_per_s_str` for its `{python} DeviceBandwidthHierarchy.pcie_name_str` host link. This `{python} DeviceBandwidthHierarchy.nvlink_to_pcie_mult_str` bandwidth advantage determines whether tensor parallelism, splitting one large tensor computation across multiple GPUs, is practical for a given model size: GPUs connected only by PCIe can make the $\DataVolume/\Bandwidth$ communication term dominate total training time, erasing the benefit of additional compute.
 
-| **Interconnect** |                                                                             **Bandwidth**                                                                             |                   **Transfer Time**                   | **Path**       |
-|:-----------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------:|:---------------|
-| **`{python} DeviceBandwidthHierarchy.pcie_name_str`** | `{python} DeviceBandwidthHierarchy.pcie_gb_per_s_str` | `{python} DeviceBandwidthHierarchy.pcie_tensor_us_str` | Host to device |
-| **`{python} DeviceBandwidthHierarchy.nvlink_name_str`** | `{python} DeviceBandwidthHierarchy.nvlink_per_direction_gb_per_s_str` per direction (`{python} DeviceBandwidthHierarchy.nvlink_gb_per_s_str` bidirectional) | `{python} DeviceBandwidthHierarchy.nvlink_tensor_us_str` | GPU to GPU |
-| **HBM3** | `{python} DeviceBandwidthHierarchy.hbm_gb_per_s_str` | `{python} DeviceBandwidthHierarchy.hbm_tensor_us_str` | On device |
+| **Interconnect**                                        |                                                                        **Bandwidth**                                                                        |                    **Transfer Time**                     | **Path**       |
+|:--------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------:|:---------------|
+| **`{python} DeviceBandwidthHierarchy.pcie_name_str`**   |                                                    `{python} DeviceBandwidthHierarchy.pcie_gb_per_s_str`                                                    |  `{python} DeviceBandwidthHierarchy.pcie_tensor_us_str`  | Host to device |
+| **`{python} DeviceBandwidthHierarchy.nvlink_name_str`** | `{python} DeviceBandwidthHierarchy.nvlink_per_direction_gb_per_s_str` per direction (`{python} DeviceBandwidthHierarchy.nvlink_gb_per_s_str` bidirectional) | `{python} DeviceBandwidthHierarchy.nvlink_tensor_us_str` | GPU to GPU     |
+| **HBM3**                                                |                                                     `{python} DeviceBandwidthHierarchy.hbm_gb_per_s_str`                                                    |  `{python} DeviceBandwidthHierarchy.hbm_tensor_us_str`   | On device      |
 
 : **Device Transfer Overhead**: A `{python} DeviceBandwidthHierarchy.tensor_mb_str` tensor takes far longer to cross a host link than to move within device memory. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2$\times$ total bandwidth; the NVLink row lists both its per-direction and bidirectional rates. These transfer costs can dominate lightweight operations, making device placement critical. {#tbl-device-transfer-overhead tbl-colwidths="[25,25,20,30]"}
 
@@ -3238,13 +3255,13 @@ class DataloaderThroughput:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     host_link = Hardware.Cloud.H100.interconnect
-    img_per_sec = 1000 / second       # scenario assumption: accelerator consumption rate
-    img_res = 224                     # scenario assumption
+    img_per_sec = 1000 / second  # scenario assumption: accelerator consumption rate
+    img_res = 224  # scenario assumption
     img_channels = 3
-    batch_size = 64                   # scenario assumption, matches lst-dataloader-throughput
+    batch_size = 64  # scenario assumption, matches lst-dataloader-throughput
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    raw_image_bytes = img_res * img_res * img_channels * byte          # uint8
+    raw_image_bytes = img_res * img_res * img_channels * byte  # uint8
     dataloader = (img_per_sec * raw_image_bytes).to(MB / second)
     batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32
     batch_transfer = (batch_bytes / host_link.bandwidth).to(millisecond)
@@ -3261,7 +3278,6 @@ class DataloaderThroughput:
     dataloader_mb_per_s_str = fmt_bandwidth(dataloader, unit=MB / second, precision=1, commas=False)
     batch_mb_str = fmt_memory(batch_bytes, unit=MB, precision=1, commas=False)
     batch_transfer_ms_str = fmt_time(batch_transfer, millisecond, precision=1, commas=False)
-
 ```
 
 Streams and events address placement and movement by overlapping transfers with computation so that the GPU rarely stalls on a single tensor. Scheduling alone, however, cannot help if data arrives too slowly in the first place. The next constraint is input delivery: data must arrive fast enough to sustain throughput. The core systems principle is straightforward: the data pipeline\index{Data pipeline!throughput optimization} must sustain the accelerator's consumption rate. An accelerator processing `{python} DataloaderThroughput.img_per_sec_str` images per second at `{python} DataloaderThroughput.img_res_str` by `{python} DataloaderThroughput.img_res_str` resolution requires approximately `{python} DataloaderThroughput.dataloader_mb_per_s_str` of sustained raw uint8 image throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the iron law drops below 1.
@@ -3432,7 +3448,6 @@ class KernelDispatchAnchor:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16, unit=TFLOP / second, precision=0, commas=False)
-
 ```
 
 The kernel manager dispatches\index{Kernel dispatch!hardware selection} each supported operation to an implementation for the current backend. For matrix multiplication, this may be a CPU BLAS backend such as Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs], cuBLAS\index{cuBLAS!kernel selection} on NVIDIA GPUs [@nvidia_cublas], or accelerator-specific tensor instructions. Selection depends on dimensions, dtype, layout, backend, and library heuristics. A $4096{\times}4096$ FP16 GEMM on an H100\index{H100!Tensor Core throughput} may use a Tensor Core path whose published dense peak is `{python} KernelDispatchAnchor.h100_fp16_tflop_per_s_str` [@choquette2023; @nvidia2022h100]. If the backend has no implementation for an operator, execution may fall back, be partitioned, or fail, depending on the framework and runtime.
@@ -3500,13 +3515,15 @@ Beyond GEMM, frameworks implement BLAS operations\index{BLAS!vector and matrix o
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import BYTES_FP32, BYTES_INT8, byte
 from mlsysim.fmt import check, fmt_count, fmt_multiple
+
 class PrecisionBytes:
     """Bytes per parameter in FP32 vs. INT8 and the resulting memory reduction."""
+
     reduction = (BYTES_FP32 / BYTES_INT8).to("").magnitude
     check(reduction == 4, "Prose says INT8 cuts memory 4x.")
     fp32_bytes_str = fmt_count(BYTES_FP32.to(byte).magnitude, precision=0, commas=False, label="byte")  # verified: "4 bytes"
     int8_bytes_str = fmt_count(BYTES_INT8.to(byte).magnitude, precision=0, commas=False, label="byte")  # verified: "1 byte"
-    reduction_mult_str = fmt_multiple(reduction, precision=0, commas=False)                    # 4×
+    reduction_mult_str = fmt_multiple(reduction, precision=0, commas=False)  # 4×
 ```
 
 Training in FP32 uses `{python} PrecisionBytes.fp32_bytes_str` per parameter; quantizing to INT8 reduces this to `{python} PrecisionBytes.int8_bytes_str`, cutting memory by `{python} PrecisionBytes.reduction_mult_str` and enabling 2--4$\times$ throughput improvements on hardware with INT8 acceleration. Training typically keeps numerically sensitive accumulations in higher precision, while inference can often run many operations in FP16 or INT8 with little quality loss. Frameworks maintain separate kernel implementations for each precision format and handle workflows where different layers operate at different bit widths within a single forward pass.
@@ -3836,10 +3853,11 @@ from mlsysim.fmt import check, fmt_count
 
 class TrainingStepDims:
     """Single source of the 784 -> 128 -> 10 MLP shapes and batch used by the anatomy section."""
+
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     mnist = Datasets.MNIST
-    batch = 32                # scenario assumption, matches lst-training-step-anatomy
-    hidden_units = 128        # scenario assumption: two-layer version of ch5's 784-128-64-10 network
+    batch = 32  # scenario assumption, matches lst-training-step-anatomy
+    hidden_units = 128  # scenario assumption: two-layer version of ch5's 784-128-64-10 network
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     input_features = mnist.image_width * mnist.image_height * mnist.image_channels
     output_classes = mnist.num_classes
@@ -3920,7 +3938,6 @@ class HbmCapacityFootnote:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bw, unit=TB / second, precision=2, commas=False)
-
 ```
 
 [^fn-hbm-capacity-constraint]: **HBM (high bandwidth memory)**\index{HBM!capacity constraint}: Provides `{python} HbmCapacityFootnote.h100_bw_tb_per_s_str` on the H100, making it the memory tier that most directly feeds accelerator arithmetic; HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.h100_mem_gb_str` capacity\index{H100!HBM capacity} sets the hard ceiling on total live training state. Weights, activations, gradients, optimizer state, and temporary workspace must fit during execution. When they do not, the framework must resort to offloading, selective recomputation, or placement across devices, each adding complexity to what the programmer perceives as a single `loss.backward()` call.
@@ -4119,8 +4136,12 @@ class MnistTrainingStepCalc:
     t_launch = driver_launches * driver_launch
     t_overhead = t_python + t_launch
     # Excluded optimizer step: FP32 Adam reads p, g, m, v and writes p, m, v (7 x 4 bytes per parameter).
-    n_params = (TrainingStepDims.input_features * TrainingStepDims.hidden_units + TrainingStepDims.hidden_units
-                + TrainingStepDims.hidden_units * TrainingStepDims.output_classes + TrainingStepDims.output_classes)
+    n_params = (
+        TrainingStepDims.input_features * TrainingStepDims.hidden_units
+        + TrainingStepDims.hidden_units
+        + TrainingStepDims.hidden_units * TrainingStepDims.output_classes
+        + TrainingStepDims.output_classes
+    )
     adam_step_bytes = n_params * 7 * BYTES_FP32
     ridge_fp32 = (peak_flops / mem_bw).to(flop / byte).magnitude
     relu_below_ridge = ridge_fp32 / (TrainingStepCalc.relu_flops / TrainingStepCalc.relu_mem).to(flop / byte).magnitude
@@ -4157,7 +4178,7 @@ The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_s
 - Under a one-kernel-per-modeled-operator assumption, the `{python} MnistTrainingStepCalc.mnist_forward_ops_str` selected forward operators and `{python} MnistTrainingStepCalc.mnist_backward_ops_str` backward operators require `{python} MnistTrainingStepCalc.mnist_driver_launches_str` driver launches. Python enters each forward operation and calls `backward()` once, giving `{python} MnistTrainingStepCalc.mnist_python_entries_str` entries. The illustrative host cost is therefore `{python} MnistTrainingStepCalc.mnist_python_entries_str` × `{python} MnistTrainingStepCalc.mnist_python_cost_str` plus `{python} MnistTrainingStepCalc.mnist_driver_launches_str` × `{python} MnistTrainingStepCalc.mnist_launch_cost_str`, or `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`.
 - The excluded optimizer step is not small. An FP32 Adam update reads each parameter, its gradient, and two moments and writes three of them, 28 bytes per parameter, so the `{python} MnistTrainingStepCalc.mnist_n_params_str` parameters of this network move about `{python} MnistTrainingStepCalc.mnist_adam_step_mb_str`, more than the whole modeled forward and backward traffic. Counting its launches and the omitted Python calls only raises the host cost above this lower bound.
 
-This dispatch model excludes autograd traversal overhead, allocation, and the operations omitted from the table. The backward engine launches its internal kernels without a separate Python call for each one; a profile must establish the actual launch count, particularly for loss kernels. Host costs are added without overlap here. In this model, $\HostSoftwareTime$ exceeds the ideal lower bounds $\IronLawComputeTime$ and $\IronLawMemoryTime$ by more than an order of magnitude, so the overhead ratio of @eq-dispatch-overhead sits far above 1 and the step is overhead-bound\index{Overhead-bound!small model training} under these assumptions. This is the small-MLP regime of notebook \ref{nbk-frameworks-dispatch-tax}, now reached from a real training loop. Profiling has a specific job here, which is to confirm that measured kernel times, achieved bandwidth, and host-device overlap match the model before acting on it. If dispatch dominates, the following mechanisms target the launch overhead:
+This dispatch model excludes autograd traversal overhead, allocation, and the operations omitted from the table. The backward engine launches its internal kernels without a separate Python call for each one; a profile must establish the actual launch count, particularly for loss kernels. Host costs are added without overlap here. In this model, $\HostSoftwareTime$ exceeds the ideal lower bounds $\IronLawComputeTime$ and $\IronLawMemoryTime$ by more than an order of magnitude, so the overhead ratio of @eq-dispatch-overhead sits far above 1 and the step is overhead-bound\index{Overhead-bound!small model training} under these assumptions. This is the small multilayer perceptron (MLP) regime of notebook \ref{nbk-frameworks-dispatch-tax}, now reached from a real training loop. Profiling has a specific job here, which is to confirm that measured kernel times, achieved bandwidth, and host-device overlap match the model before acting on it. If dispatch dominates, the following mechanisms target the launch overhead:
 
 - Kernel fusion (`torch.compile`): Fusing consecutive memory-bound operations into a single kernel avoids intermediate round-trips to HBM and collapses launch boundaries.
 - Batch size scaling: Increasing the batch size scales the arithmetic payload linearly while keeping dispatch overhead constant, amortizing fixed launch latency across more compute operations.
@@ -4169,12 +4190,12 @@ The tensor operations in this training step map to heterogeneous hardware archit
 
 Each backend maps common tensor semantics to silicon-specific primitives. A single `loss.backward()` invocation routes to different execution pipelines depending on device placement. Differences in floating-point summation order, reduction trees, and non-deterministic atomic operations introduce numerical variation across backends, requiring equivalence to be validated against explicit numerical tolerances rather than bitwise identity.
 
-| **Hardware**                                        | **Backend library**                                    | **Execution mechanism**                                           |
-|:----------------------------------------------------|:-------------------------------------------------------|:------------------------------------------------------------------|
-| **CUDA GPU**\index{GPU backend!CUDA implementation} | cuBLAS [@nvidia_cublas; @choquette2021]                | GEMM kernels and CUDA streams for async execution                 |
-| **CPU**\index{CPU backend!optimized BLAS libraries} | Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs] | Thread-level parallelism around optimized kernels                 |
-| **TPU**\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific HLO operations |
-| **Apple Silicon**                                   | Metal Performance Shaders                              | MPS backend                                                       |
+| **Hardware**                                        | **Backend library**                                    | **Execution mechanism**                           |
+|:----------------------------------------------------|:-------------------------------------------------------|:--------------------------------------------------|
+| **CUDA GPU**\index{GPU backend!CUDA implementation} | cuBLAS [@nvidia_cublas; @choquette2021]                | GEMM kernels and CUDA streams for async execution |
+| **CPU**\index{CPU backend!optimized BLAS libraries} | Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs] | Thread-level parallelism around optimized kernels |
+| **TPU**\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific HLO operations        |
+| **Apple Silicon**                                   | Metal Performance Shaders                              | MPS backend                                       |
 
 : **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[15,44,41]"}
 
@@ -4419,7 +4440,6 @@ Suppose a team deploys a fixed-shape vision model to a CPU-only embedded Linux d
 
 The embedded project has already fixed the deployment target, but it leaves two choices open: which development environment the team can maintain and which compatible export path meets its budget. Eager development and compiled deployment can coexist along either path, so the team need not trade away its debugging workflow to obtain a compact inference runtime.
 
-
 ::: {#psp-frameworks-framework-selection-constraints .callout-perspective title="Framework selection constraints"}
 
 Rather than seeking the "best" framework, effective selection first eliminates candidates that cannot satisfy hard constraints: deployment target, required operations, compiler path, and team expertise. Only then should soft preferences such as performance, development speed, and ecosystem rank the survivors.
@@ -4448,7 +4468,6 @@ The two hypothetical measurements establish latency and memory feasibility only 
 #### Model requirements {#sec-ml-frameworks-model-requirements-ca8b}
 
 For the fixed-shape vision model, the first filter is successful conversion of every required operation with acceptable numerical results. Training support is needed in the development framework but not in the deployed runtime. TensorFlow\index{TensorFlow!full framework}, TensorFlow Lite\index{TensorFlow Lite!mobile deployment}, and TensorFlow Lite Micro\index{TensorFlow Lite Micro!microcontroller deployment} expose different operator and training capabilities. A missing inference operator, by contrast, can invalidate the deployment path even when the rest of the graph fits, which is why operator coverage is the discriminating row among the capabilities in @tbl-tf-comparison.
-
 
 ::: {#psp-frameworks-dynamic-vs-static-computational-graphs .callout-perspective title="Dynamic vs. static computational graphs"}
 
@@ -4654,13 +4673,13 @@ These challenges are linked through the iron law of ML systems (@sec-introductio
 
 The counting rules developed across the chapter fit on one page (@tbl-framework-cost-formulas). Together they let an engineer estimate, before profiling, whether a step is bound by dispatch, by memory traffic, or by arithmetic.
 
-| **Cost**                         | **Formula**                                                                                                                              | **Where derived**                                         |
-|:---------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------|
-| **Dispatch overhead ratio**      | $\frac{\DispatchedOperationCount\cdot \OperationDispatchOverhead}{\IronLawComputeTime + \IronLawMemoryTime}$; overhead-bound above 1     | @eq-dispatch-overhead                                     |
-| **Elementwise chain traffic**    | $2\ChainedOperationCount\TensorElementCount\ElementStorageSize$ bytes unfused; $2\TensorElementCount\ElementStorageSize$ bytes fused     | @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 |
-| **Compilation breakeven**        | $\CompilationBreakevenCount= \frac{\CompilationTime}{\EagerExecutionTime- \CompiledExecutionTime}$ executions                           | @eq-compile-breakeven                                     |
-| **Saved activation bytes**       | $\ActivationMemory \approx \BatchSize \times \LayerCount \times \SequenceLength \times \HiddenDimension \times \LayerSavedTensorCount\times \ElementStorageSize$ | @sec-ml-frameworks-memory-management-strategies-b008 |
-| **Host-to-device transfer time** | $\Time= \Latency + \DataVolume/\Bandwidth$                                                                                               | @sec-ml-frameworks-device-memory-management-9404          |
+| **Cost**                         | **Formula**                                                                                                                                                      | **Where derived**                                              |
+|:---------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------|
+| **Dispatch overhead ratio**      | $\frac{\DispatchedOperationCount\cdot \OperationDispatchOverhead}{\IronLawComputeTime + \IronLawMemoryTime}$; overhead-bound above 1                             | @eq-dispatch-overhead                                          |
+| **Elementwise chain traffic**    | $2\ChainedOperationCount\TensorElementCount\ElementStorageSize$ bytes unfused; $2\TensorElementCount\ElementStorageSize$ bytes fused                             | @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 |
+| **Compilation breakeven**        | $\CompilationBreakevenCount= \frac{\CompilationTime}{\EagerExecutionTime- \CompiledExecutionTime}$ executions                                                    | @eq-compile-breakeven                                          |
+| **Saved activation bytes**       | $\ActivationMemory \approx \BatchSize \times \LayerCount \times \SequenceLength \times \HiddenDimension \times \LayerSavedTensorCount\times \ElementStorageSize$ | @sec-ml-frameworks-memory-management-strategies-b008           |
+| **Host-to-device transfer time** | $\Time= \Latency + \DataVolume/\Bandwidth$                                                                                                                       | @sec-ml-frameworks-device-memory-management-9404               |
 
 : **Key Equations**: Each counting rule appears in the notation of the section that derives it, so that a step can be estimated before it is profiled. The elementwise rule assumes each of $\ChainedOperationCount$ unfused operations reads and writes all $\TensorElementCount$ elements of $\ElementStorageSize$ bytes once; the activation rule is written for a transformer layer stack, and an MLP drops the sequence length. {#tbl-framework-cost-formulas tbl-colwidths="[24,52,24]"}
 

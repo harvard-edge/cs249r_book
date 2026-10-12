@@ -391,14 +391,14 @@ Every number in the chapter uses one reference machine, an NVIDIA H100 with `{py
 
 The chapter follows GPT-2 XL's run from estimate to execution (@tbl-training-chapter-spine). The first half converts the run's operation count into time and energy, accounts for the arithmetic and bytes of one step, and assembles the pipeline that executes it, including the checkpoints that let a long run survive failure. The second half diagnoses a measured step, removes its binding term one technique at a time until GPT-2 XL trains on a single accelerator, and closes with when and how to add accelerators.
 
-| **Section**                                  | **Question it answers**                                       | **Law term or constraint it moves**                                  | **Running case**                     |
-|:---------------------------------------------|:--------------------------------------------------------------|:---------------------------------------------------------------------|:-------------------------------------|
-| **Training-Time Law**                        | How long, and how much energy, a run takes                    | All terms of $\TrainingTime = \Operations/(\PeakRate \times \EfficiencyHw)$ | GPT-2 XL run on one H100             |
-| **Computation and Memory Costs of Training** | What one step costs in FLOPs and in bytes                     | $\Operations$ per step; the memory constraint                        | GPT-2 XL step; Llama 3 8B fine-tuning |
-| **Pipeline Architecture**                    | How data, compute, updates, and saved state flow through a step | $\EfficiencyHw$ lost between stages                                | ResNet-50 input feed; GPT-2 XL step  |
-| **Identifying Bottlenecks**                  | Which stage limits a measured step                            | $\EfficiencyHw$, diagnosed                                           | GPT-2 XL profile                     |
-| **Pipeline Optimizations**                   | Which technique removes the binding term                      | $\PeakRate$ (precision), $\EfficiencyHw$ (overlap, IO), memory (accumulation, checkpointing) | GPT-2 XL on one H100                 |
-| **Scaling Training Systems**                 | When to add accelerators, and what synchronization costs      | $\PeakRate \times \EfficiencyHw$ across devices, less communication  | GPT-2 XL on an eight-H100 node       |
+| **Section**                                  | **Question it answers**                                         | **Law term or constraint it moves**                                                          | **Running case**                      |
+|:---------------------------------------------|:----------------------------------------------------------------|:---------------------------------------------------------------------------------------------|:--------------------------------------|
+| **Training-Time Law**                        | How long, and how much energy, a run takes                      | All terms of $\TrainingTime = \Operations/(\PeakRate \times \EfficiencyHw)$                  | GPT-2 XL run on one H100              |
+| **Computation and Memory Costs of Training** | What one step costs in FLOPs and in bytes                       | $\Operations$ per step; the memory constraint                                                | GPT-2 XL step; Llama 3 8B fine-tuning |
+| **Pipeline Architecture**                    | How data, compute, updates, and saved state flow through a step | $\EfficiencyHw$ lost between stages                                                          | ResNet-50 input feed; GPT-2 XL step   |
+| **Identifying Bottlenecks**                  | Which stage limits a measured step                              | $\EfficiencyHw$, diagnosed                                                                   | GPT-2 XL profile                      |
+| **Pipeline Optimizations**                   | Which technique removes the binding term                        | $\PeakRate$ (precision), $\EfficiencyHw$ (overlap, IO), memory (accumulation, checkpointing) | GPT-2 XL on one H100                  |
+| **Scaling Training Systems**                 | When to add accelerators, and what synchronization costs        | $\PeakRate \times \EfficiencyHw$ across devices, less communication                          | GPT-2 XL on an eight-H100 node        |
 
 : **Chapter Map**: Each section answers one question about the training run and names the term of the training-time law, or the memory constraint, that its techniques move. Memory does not appear in the law; it decides whether a configuration runs at all. {#tbl-training-chapter-spine tbl-colwidths="[24,28,30,18]"}
 
@@ -592,7 +592,7 @@ Together, these dimensions provide the vocabulary for analyzing the computationa
 
 Neural network training consists of repeated matrix operations and nonlinear transformations. These operations are conceptually simple but create the system-level challenges that dominate modern training infrastructure. The introduction of backpropagation\index{Backpropagation!historical introduction}[^fn-backpropagation-rumelhart-provenance] by @rumelhart1986 and the development of efficient matrix computation libraries such as Basic Linear Algebra Subprograms (BLAS)\index{BLAS!matrix computation foundation}[^fn-blas-gemm-acceleration] [@dongarra1988] laid the groundwork for modern training architectures.
 
-[^fn-backpropagation-rumelhart-provenance]: **Backpropagation provenance**\index{Backpropagation!provenance}: The algorithm was independently derived by @linnainmaa1970representation for automatic differentiation of computer programs and by @werbos1974beyond in a Harvard PhD thesis on economic modeling, over a decade before @rumelhart1986 popularized it for neural networks. This delay between derivation and broad adoption recurs in ML systems history: attention mechanisms predated transformers by decades, but the 2017 Transformer showed that attention-heavy models could train efficiently on contemporary GPU systems; later TPU and GPU clusters enabled much larger deployments. A framework's backward pass traverses the computational graph in reverse topological order and applies the chain rule; independent subgraphs may expose parallel work during that traversal.
+[^fn-backpropagation-rumelhart-provenance]: **Backpropagation provenance**\index{Backpropagation!provenance}: The algorithm was independently derived by @linnainmaa1970representation for automatic differentiation of computer programs and by @werbos1974beyond in a Harvard PhD thesis on economic modeling, over a decade before @rumelhart1986 popularized it for neural networks. This delay between derivation and broad adoption recurs in ML systems history: attention mechanisms predated transformers by decades, but the 2017 Transformer showed that attention-heavy models could train efficiently on contemporary GPU systems; later Tensor Processing Unit (TPU) and GPU clusters enabled much larger deployments. A framework's backward pass traverses the computational graph in reverse topological order and applies the chain rule; independent subgraphs may expose parallel work during that traversal.
 
 [^fn-blas-gemm-acceleration]: **BLAS (basic linear algebra subprograms)**\index{BLAS!training compute hierarchy}: The original BLAS specification standardized reusable Fortran-callable vector operations [@lawson1979]; later BLAS extensions added matrix-vector and matrix-matrix routines, giving the familiar Level 1, Level 2, and Level 3 hierarchy [@dongarra1988]. Training is dominated by Level 3 operations precisely because their high arithmetic intensity, $\mathcal{O}(\SquareGemmDimension)$ FLOP/byte, can sustain high compute utilization. Frameworks commonly dispatch dense matrix multiplication to optimized libraries such as cuBLAS and oneDNN or to compiler-generated kernels.
 
@@ -1521,7 +1521,10 @@ class GPT2ActivationLedger:
     extra_buffers = total_act - line_items_total
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(0.1 < (extra_buffers / total_act).to("").magnitude < 0.3, "Prose: the library total exceeds the line items by a modest share (about 45 of 287 GB).")
+    check(
+        0.1 < (extra_buffers / total_act).to("").magnitude < 0.3,
+        "Prose: the library total exceeds the line items by a modest share (about 45 of 287 GB).",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     line_items_total_gb_str = fmt_memory(line_items_total, unit=GB, precision=1, commas=False)
@@ -1635,8 +1638,13 @@ class LlamaFinetuneMemory:
     optimizer = model.size_in_bytes(BYTES_ADAM_STATE)
     full_static = weights + gradients + master_weights + optimizer
     activations = calc_activation_memory(
-        n_layers=model.layers, seq_len=seq, batch_size=batch, hidden_dim=model.hidden_dim,
-        n_heads=model.heads, precision_bytes=2, strategy="selective",
+        n_layers=model.layers,
+        seq_len=seq,
+        batch_size=batch,
+        hidden_dim=model.hidden_dim,
+        n_heads=model.heads,
+        precision_bytes=2,
+        strategy="selective",
     )
     full_total = full_static + activations
     # Adapter pair A (d x r) and B (r x d_out) on each query and value projection
@@ -1648,7 +1656,9 @@ class LlamaFinetuneMemory:
     headroom = capacity - lora_total
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(full_static.to(GB).magnitude - 128) < 1, f"Prose says full fine-tuning holds about 128 GB of static state, got {full_static.to(GB):.1f}.")
+    check(
+        abs(full_static.to(GB).magnitude - 128) < 1, f"Prose says full fine-tuning holds about 128 GB of static state, got {full_static.to(GB):.1f}."
+    )
     check(full_static > capacity, "Full fine-tuning static state must overflow one H100.")
     check(lora_total < capacity, "Adapter fine-tuning must fit one H100.")
     check(adapter_fraction < 0.002, f"Adapters should be about 0.1 percent of the parameters, got {adapter_fraction:.4f}.")
@@ -1806,7 +1816,12 @@ for op in ops:
         bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1),
     )
 
-ax.annotate("", xy=(900, peak_flops * 0.95), xytext=(50, peak_bw * 50 * 0.95), arrowprops=dict(arrowstyle="->", color=COLORS['VioletLine'], shrinkA=7, shrinkB=5, lw=2.0))
+ax.annotate(
+    "",
+    xy=(900, peak_flops * 0.95),
+    xytext=(50, peak_bw * 50 * 0.95),
+    arrowprops=dict(arrowstyle="->", color=COLORS['VioletLine'], shrinkA=7, shrinkB=5, lw=2.0),
+)
 ax.text(
     700,
     260,
@@ -3400,7 +3415,7 @@ Checkpoint cadence decides how much work a failure discards. Because every updat
 
 ::: {#ws-training-palm-loss-spikes .callout-war-story title="The PaLM loss spikes (2022)"}
 
-**Context**: PaLM's 540-billion-parameter run used 6,144 Tensor Processing Unit (TPU) v4 chips across two 3,072-chip Pods connected through Google's data-center network and suffered severe training-instability spikes absent from smaller runs [@chowdhery2022palm].
+**Context**: PaLM's 540-billion-parameter run used 6,144 TPU v4 chips across two 3,072-chip Pods connected through Google's data-center network and suffered severe training-instability spikes absent from smaller runs [@chowdhery2022palm].
 
 **Failure mode**: The training loss spiked roughly 20 times despite gradient clipping. The spikes occurred at highly irregular intervals, sometimes late in training, never appeared in smaller models, and had no identified principled mitigation.
 
@@ -3625,14 +3640,14 @@ Even well-designed pipeline architectures rarely reach hardware peak throughput 
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Bottleneck the profile shows**             | **Technique**                    | **Law term moved**                              | **Memory effect**                                  | **Developed in**                                                     |
-|:---------------------------------------------|:---------------------------------|:------------------------------------------------|:---------------------------------------------------|:---------------------------------------------------------------------|
-| **Accelerator idle while input is prepared** | Prefetching and overlap          | $\EfficiencyHw$ ↑                               | Prefetch buffers ↑ in host or device memory        | @sec-model-training-data-prefetching-pipeline-overlapping-e984       |
-| **Arithmetic rate at FP32**                  | Mixed precision (FP16/BF16)      | $\PeakRate$ ↑; bytes moved ↓                    | Activations ↓; static state unchanged              | @sec-model-training-mixedprecision-training-9218                     |
-| **Attention's quadratic HBM traffic**        | FlashAttention (IO-aware tiling) | $\EfficiencyHw$ ↑; same model FLOPs             | Attention scores ↓ from quadratic to linear        | @sec-model-training-flash-attention-ioaware-attention-optimization-3da0 |
-| **Batch too large for memory**               | Gradient accumulation            | $\EfficiencyHw$ may ↓ at smaller micro-batches  | Activations ↓ to one micro-batch                   | @sec-model-training-gradient-accumulation-308f                       |
-| **Activations exceed memory**                | Activation checkpointing         | $\EfficiencyHw$ ↓ (recomputation adds work)     | Activations ↓ to segment boundaries                | @sec-model-training-activation-checkpointing-2ee1                    |
-| **Kernel launches and intermediate traffic** | Kernel fusion                    | $\EfficiencyHw$ ↑                               | Intermediates ↓                                    | @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8       |
+| **Bottleneck the profile shows**             | **Technique**                    | **Law term moved**                             | **Memory effect**                           | **Developed in**                                                        |
+|:---------------------------------------------|:---------------------------------|:-----------------------------------------------|:--------------------------------------------|:------------------------------------------------------------------------|
+| **Accelerator idle while input is prepared** | Prefetching and overlap          | $\EfficiencyHw$ ↑                              | Prefetch buffers ↑ in host or device memory | @sec-model-training-data-prefetching-pipeline-overlapping-e984          |
+| **Arithmetic rate at FP32**                  | Mixed precision (FP16/BF16)      | $\PeakRate$ ↑; bytes moved ↓                   | Activations ↓; static state unchanged       | @sec-model-training-mixedprecision-training-9218                        |
+| **Attention's quadratic HBM traffic**        | FlashAttention (IO-aware tiling) | $\EfficiencyHw$ ↑; same model FLOPs            | Attention scores ↓ from quadratic to linear | @sec-model-training-flash-attention-ioaware-attention-optimization-3da0 |
+| **Batch too large for memory**               | Gradient accumulation            | $\EfficiencyHw$ may ↓ at smaller micro-batches | Activations ↓ to one micro-batch            | @sec-model-training-gradient-accumulation-308f                          |
+| **Activations exceed memory**                | Activation checkpointing         | $\EfficiencyHw$ ↓ (recomputation adds work)    | Activations ↓ to segment boundaries         | @sec-model-training-activation-checkpointing-2ee1                       |
+| **Kernel launches and intermediate traffic** | Kernel fusion                    | $\EfficiencyHw$ ↑                              | Intermediates ↓                             | @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8          |
 
 : **Matching Optimizations to Bottlenecks**: Each technique removes one profiled bottleneck by moving one factor of the training-time law, @eq-training-iron-law, and changes memory, which decides whether a configuration runs at all. Kernel fusion is developed with the frameworks that apply it. {#tbl-optimization tbl-colwidths="[22,18,18,20,22]"}
 
@@ -4181,6 +4196,7 @@ class PrecisionLadder:
         if fmt == "fp16_dense" and fmt not in pf:
             return h.compute.peak_flops.to("TFLOPs/s").magnitude
         return pf[fmt].to("TFLOPs/s").magnitude if fmt in pf else None
+
     rates = {}
     for _c in chips:
         rates[_c] = {}
@@ -4222,21 +4238,36 @@ import numpy as np
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
-_labels = {"fp32": ("FP32 (no tensor cores)", COLORS["primary"]), "tf32": ("TF32 tensor", COLORS["BlueLine"]),
-           "fp16_dense": ("FP16/BF16 tensor", COLORS["GreenLine"]), "fp8": ("FP8 tensor", COLORS["OrangeLine"]),
-           "fp4": ("FP4 tensor", COLORS["RedLine"])}
-_x = np.arange(len(PrecisionLadder.chips)); _w = 0.16
+_labels = {
+    "fp32": ("FP32 (no tensor cores)", COLORS["primary"]),
+    "tf32": ("TF32 tensor", COLORS["BlueLine"]),
+    "fp16_dense": ("FP16/BF16 tensor", COLORS["GreenLine"]),
+    "fp8": ("FP8 tensor", COLORS["OrangeLine"]),
+    "fp4": ("FP4 tensor", COLORS["RedLine"]),
+}
+_x = np.arange(len(PrecisionLadder.chips))
+_w = 0.16
 for _i, _f in enumerate(PrecisionLadder.formats):
     _vals = [PrecisionLadder.rates[c][_f] for c in PrecisionLadder.chips]
     _xs = [xi + (_i - 2) * _w for xi, v in zip(_x, _vals) if v]
     _vs = [v for v in _vals if v]
     _bars = ax.bar(_xs, _vs, width=_w, color=_labels[_f][1], label=_labels[_f][0], edgecolor="white", linewidth=0.5)
     for _b, _v in zip(_bars, _vs):
-        ax.text(_b.get_x() + _b.get_width() / 2, _v * 1.12, f"{_v:.1f}" if _v < 100 and _v % 1 else f"{_v:,.0f}",
-                ha="center", va="bottom", fontsize=6.5, rotation=90)
+        ax.text(
+            _b.get_x() + _b.get_width() / 2,
+            _v * 1.12,
+            f"{_v:.1f}" if _v < 100 and _v % 1 else f"{_v:,.0f}",
+            ha="center",
+            va="bottom",
+            fontsize=6.5,
+            rotation=90,
+        )
 ax.set_xticks(_x)
-ax.set_xticklabels([f"{getattr(Hardware.Cloud, c).name.replace('NVIDIA ', '')}\n({getattr(Hardware.Cloud, c).release_year})" for c in PrecisionLadder.chips])
-ax.set_yscale("log"); ax.set_ylim(5, 4e4)
+ax.set_xticklabels(
+    [f"{getattr(Hardware.Cloud, c).name.replace('NVIDIA ', '')}\n({getattr(Hardware.Cloud, c).release_year})" for c in PrecisionLadder.chips]
+)
+ax.set_yscale("log")
+ax.set_ylim(5, 4e4)
 ax.set_ylabel("Peak dense throughput (TFLOP/s, log scale)")
 ax.legend(loc="upper left", fontsize=8, frameon=True, framealpha=0.95, ncol=2)
 plt.show()
@@ -4411,8 +4442,13 @@ class MixedPrecisionMemory:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     act_fp16 = calc_activation_memory(
-        n_layers=gpt2.layers, seq_len=seq_len, batch_size=batch_size, hidden_dim=gpt2.hidden_dim,
-        n_heads=gpt2.heads, precision_bytes=BYTES_FP16.to(byte).magnitude, strategy="none",
+        n_layers=gpt2.layers,
+        seq_len=seq_len,
+        batch_size=batch_size,
+        hidden_dim=gpt2.hidden_dim,
+        n_heads=gpt2.heads,
+        precision_bytes=BYTES_FP16.to(byte).magnitude,
+        strategy="none",
     )
     act_fp32 = act_fp16 * 2
     p_fp32 = gpt2.size_in_bytes(BYTES_FP32)
@@ -5677,18 +5713,18 @@ Eight worker processes, page-locked (pinned) host memory for asynchronous DMA tr
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Metric**                   |                       **FP32 baseline**                       |                         **Optimized**                          | **Technique applied**                        |
-|:-----------------------------|:-------------------------------------------------------------:|:--------------------------------------------------------------:|:---------------------------------------------|
-| **Static training state**    |       `{python} GPT2WalkthroughCalc.static_gb_str`            |        `{python} GPT2WalkthroughCalc.static_gb_str`            | Unchanged at 16 bytes per parameter          |
-| **Activations per step**     |       `{python} GPT2WalkthroughCalc.act_fp32_gb_str`          |        `{python} GPT2WalkthroughCalc.act_accum_gb_str`         | FP16, FlashAttention, two micro-batches of 16 |
-| **Total memory**             |    **`{python} GPT2WalkthroughCalc.total_fp32_gb_str`**       |     **`{python} GPT2WalkthroughCalc.total_accum_gb_str`**      | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` smaller |
-| **Fits one H100**            |                              No                               |                              Yes                               | Capacity `{python} GPT2WalkthroughCalc.capacity_gb_str` |
-| **Accelerator busy time**    |                              N/A                              |                     Whole step (ideal)                         | Prefetching, eight workers                   |
-| **Throughput**               |                              N/A                              |      `{python} GPT2WalkthroughCalc.tokens_per_s_str`           | At the assumed utilization |
-| **Run time**                 |                              N/A                              |       `{python} GPT2WalkthroughCalc.run_days_str`              | One accelerator                              |
-| **Facility energy**          |                              N/A                              |   `{python} GPT2WalkthroughCalc.facility_energy_kwh_str`       | Accelerator power $\times$ PUE `{python} GPT2WalkthroughCalc.pue_str` |
-| **Electricity cost**         |                              N/A                              |   `{python} GPT2WalkthroughCalc.electricity_cost_str`          | At `{python} GPT2WalkthroughCalc.electricity_rate_str`   |
-| **Carbon**                   |                              N/A                              |       `{python} GPT2WalkthroughCalc.carbon_t_str`              | Average grid intensity                       |
+| **Metric**                |                  **FP32 baseline**                   |                     **Optimized**                      | **Technique applied**                                                 |
+|:--------------------------|:----------------------------------------------------:|:------------------------------------------------------:|:----------------------------------------------------------------------|
+| **Static training state** |     `{python} GPT2WalkthroughCalc.static_gb_str`     |      `{python} GPT2WalkthroughCalc.static_gb_str`      | Unchanged at 16 bytes per parameter                                   |
+| **Activations per step**  |    `{python} GPT2WalkthroughCalc.act_fp32_gb_str`    |    `{python} GPT2WalkthroughCalc.act_accum_gb_str`     | FP16, FlashAttention, two micro-batches of 16                         |
+| **Total memory**          | **`{python} GPT2WalkthroughCalc.total_fp32_gb_str`** | **`{python} GPT2WalkthroughCalc.total_accum_gb_str`**  | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` smaller      |
+| **Fits one H100**         |                          No                          |                          Yes                           | Capacity `{python} GPT2WalkthroughCalc.capacity_gb_str`               |
+| **Accelerator busy time** |                         N/A                          |                   Whole step (ideal)                   | Prefetching, eight workers                                            |
+| **Throughput**            |                         N/A                          |    `{python} GPT2WalkthroughCalc.tokens_per_s_str`     | At the assumed utilization                                            |
+| **Run time**              |                         N/A                          |      `{python} GPT2WalkthroughCalc.run_days_str`       | One accelerator                                                       |
+| **Facility energy**       |                         N/A                          | `{python} GPT2WalkthroughCalc.facility_energy_kwh_str` | Accelerator power $\times$ PUE `{python} GPT2WalkthroughCalc.pue_str` |
+| **Electricity cost**      |                         N/A                          |  `{python} GPT2WalkthroughCalc.electricity_cost_str`   | At `{python} GPT2WalkthroughCalc.electricity_rate_str`                |
+| **Carbon**                |                         N/A                          |      `{python} GPT2WalkthroughCalc.carbon_t_str`       | Average grid intensity                                                |
 
 : **GPT-2 XL on One H100**: Memory figures are calculated from the model shape; the busy-time result follows from the tokenization and step-time scenario; run time, energy, cost, and carbon follow from the assumed utilization, the accelerator's thermal design power, and registry values for facility overhead, electricity price, and grid carbon intensity. The FP32 baseline does not fit, so it has no run to measure. {#tbl-training-gpt2-final-profile tbl-colwidths="[24,20,22,34]"}
 
@@ -5919,7 +5955,6 @@ name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
 : **Computing Era Characteristics**: Each computing era optimized for different workload patterns, and modern training systems inherit requirements from multiple predecessors. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale distributed processing, while adding specialized support for the gradient-based optimization and massive parameter state management central to neural network training. {#tbl-computing-eras}
 
 The same inheritance appears inside one training system as pressure at three scales. At data scale, large corpora require high-throughput input pipelines to avoid accelerator starvation. At model scale, billion-parameter architectures force a choice between replicating weights across devices and partitioning the model. At infrastructure scale, coordinating multiple accelerators introduces synchronization overhead that can dominate training time. The stage interfaces formalized in @sec-ml-workflow-stage-interface-specification-ae3c govern what each scale may assume of the others.
-
 
 ### Single-node multi-GPU training {#sec-model-training-singlenode-multigpu-training-c87f}
 
@@ -6207,7 +6242,10 @@ class GPT2NodeAllReduce:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(ring_factor - 1.75) < 1e-9, f"Ring factor for eight accelerators should be 1.75, got {ring_factor}.")
     check(10 < allreduce_time.magnitude < 13, f"Prose says about 12 ms per AllReduce, got {allreduce_time:.1f}.")
-    check(share_full < 0.03 and 0.12 < share_split < 0.2, f"Prose says about 2 percent at batch 32 and about 14 percent at batch 4, got {share_full:.3f}, {share_split:.3f}.")
+    check(
+        share_full < 0.03 and 0.12 < share_split < 0.2,
+        f"Prose says about 2 percent at batch 32 and about 14 percent at batch 4, got {share_full:.3f}, {share_split:.3f}.",
+    )
     check(15 < llama_zero3.magnitude < 17, "Llama 3 8B under ZeRO-3 across eight should be about 16 GB per accelerator.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -6230,7 +6268,7 @@ class GPT2NodeAllReduce:
 
 Synchronizing gradients is the step that data parallelism adds, and for GPT-2 XL inside one server its cost can be derived directly. Each replica holds FP16 gradients of `{python} GPT2NodeAllReduce.grad_gb_str`, and every replica must end the step with their sum. Ring AllReduce\index{Ring AllReduce!bandwidth optimization} [@patarasuk2009bandwidth] arranges the $\AcceleratorCount$ accelerators in a logical ring and splits the gradient into $\AcceleratorCount$ chunks. In a reduce-scatter phase, each accelerator passes a chunk to its neighbor $\AcceleratorCount - 1$ times, adding the chunk it receives to its own, until each holds one fully summed chunk; in an all-gather phase, the summed chunks circulate $\AcceleratorCount - 1$ more times until every accelerator holds all of them. Each accelerator therefore sends $2(\AcceleratorCount-1)/\AcceleratorCount$ of the gradient bytes $\DataVolume$, nearly twice the gradient however large the ring, and over a link of bandwidth $\Bandwidth$ the bandwidth term of the synchronization time is
 
-$$ \CommunicationTime \approx \frac{2(\AcceleratorCount-1)}{\AcceleratorCount} \cdot \frac{\DataVolume}{\Bandwidth} $$ {#eq-ring-allreduce}
+$$ \CommunicationTime \approx \frac{2(\AcceleratorCount-1)}{\AcceleratorCount} \cdot \frac{\DataVolume}{\Bandwidth} $$ {#eq-training-ring-allreduce}
 
 For `{python} GPT2NodeAllReduce.n_str` H100s the factor is `{python} GPT2NodeAllReduce.ring_factor_str`, so each accelerator sends `{python} GPT2NodeAllReduce.sent_gb_str` per step, which takes about `{python} GPT2NodeAllReduce.allreduce_ms_str` at `{python} GPT2NodeAllReduce.link_bw_str` per direction over NVLink. Against a `{python} GPT2NodeAllReduce.compute_full_ms_str` step when each replica processes the full batch of 32 sequences, synchronization is about `{python} GPT2NodeAllReduce.share_full_pct_str` of the step even without overlap. Splitting a fixed batch of 32 eight ways shrinks each replica's compute to `{python} GPT2NodeAllReduce.compute_split_ms_str` while the gradient bytes stay the same, raising the unhidden share to about `{python} GPT2NodeAllReduce.share_split_pct_str`. Data parallelism inside one server is cheap for GPT-2 XL as long as each replica keeps enough work to amortize a synchronization whose size depends only on the parameter count; frameworks hide most of what remains by launching bucketed AllReduce calls while the backward pass is still computing earlier layers' gradients.
 
@@ -6858,7 +6896,9 @@ class TrainingCarbonFootprint:
     cf_co2_str = fmt_emissions(cf_co2, unit=metric_ton, precision=1, commas=False)
     cf_household_months_str = fmt_time(cf_household_months, 'month', precision=1, commas=False, style='word')
     cf_flops_eqn_str = fmt_math(f"{cf_flops_mantissa_str} \\times 10^{{{cf_flops_exp_str}}}")
-    cf_sustained_tflop_per_s_str = fmt_flop_rate(round(cf_sustained_flops.to(TFLOP / second).magnitude) * TFLOP / second, unit=TFLOP / second, precision=0, commas=False)
+    cf_sustained_tflop_per_s_str = fmt_flop_rate(
+        round(cf_sustained_flops.to(TFLOP / second).magnitude) * TFLOP / second, unit=TFLOP / second, precision=0, commas=False
+    )
 
 # Export for prose
 ```
@@ -7126,18 +7166,18 @@ The same pressures shaped the hardware. Dense matrix patterns drove Tensor Cores
 
 The counting rules developed across the chapter fit on one page (@tbl-training-key-equations). Together they estimate, before any profiler runs, how long a run takes, what it costs in energy, whether its step fits in memory, and which stage of its pipeline binds.
 
-| **Quantity**                      | **Formula**                                                                                                                                  | **Where derived**                                              |
-|:----------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------|
-| **Training time**                 | $\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$                                                                         | @eq-training-iron-law                                          |
-| **Training work**                 | $\Operations \approx 6\Parameters\DatasetSize$ FLOPs (2 forward, 4 backward per parameter per token)                                        | @sec-model-training-running-example-training-gpt2-19cd         |
-| **Training energy**               | $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power                                                                        | @sec-model-training-iron-law-training-performance-a53f         |
-| **Training memory**               | $\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$; 16 bytes per parameter of static state in mixed-precision Adam | @eq-total-training-memory                                      |
-| **Activation memory**             | $\ActivationMemory = \BatchSize \times \sum_{\LayerIndex=1}^{\LayerCount} \left(\LayerIntermediateStateMemory + \ActivationMemory^{(\LayerIndex)}\right)$ | @eq-activation-memory-per-batch                                |
-| **Pipeline throughput**           | $\TrainingThroughput=\min\left(\PreprocessingThroughput, \frac{\HostTransferBandwidth}{\BatchDataVolume}, \frac{\SustainedComputeRate}{\BatchOperations}\right)$ | @eq-training-bottleneck                                        |
-| **Model FLOPs utilization**       | $\ModelFlopsUtilization = \ModelStepOperations/ (\PeakRate \cdot \TrainingStepTime)$                                                        | @sec-model-training-identifying-bottlenecks-f57f               |
-| **Checkpointed activations**      | $\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount)\times \ActivationMemory^{(\ell)}$, minimized at $\ActivationCheckpointCount= \sqrt{\LayerCount}$ | @tbl-checkpoint-tradeoffs                                      |
-| **Effective batch**               | $\BatchSize= \AccumulationStepCount\times \MicrobatchSize$ per device                                                                      | @eq-gradient-accumulation-equivalence                          |
-| **Ring AllReduce time**           | $\CommunicationTime \approx \frac{2(\AcceleratorCount-1)}{\AcceleratorCount} \cdot \frac{\DataVolume}{\Bandwidth}$                          | @eq-ring-allreduce                                             |
+| **Quantity**                 | **Formula**                                                                                                                                                                                              | **Where derived**                                      |
+|:-----------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------|
+| **Training time**            | $\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$                                                                                                                                      | @eq-training-iron-law                                  |
+| **Training work**            | $\Operations \approx 6\Parameters\DatasetSize$ FLOPs (2 forward, 4 backward per parameter per token)                                                                                                     | @sec-model-training-running-example-training-gpt2-19cd |
+| **Training energy**          | $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power                                                                                                                                     | @sec-model-training-iron-law-training-performance-a53f |
+| **Training memory**          | $\TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory$; 16 bytes per parameter of static state in mixed-precision Adam                                    | @eq-total-training-memory                              |
+| **Activation memory**        | $\ActivationMemory = \BatchSize \times \sum_{\LayerIndex=1}^{\LayerCount} \left(\LayerIntermediateStateMemory + \ActivationMemory^{(\LayerIndex)}\right)$                                                | @eq-activation-memory-per-batch                        |
+| **Pipeline throughput**      | $\TrainingThroughput=\min\left(\PreprocessingThroughput, \frac{\HostTransferBandwidth}{\BatchDataVolume}, \frac{\SustainedComputeRate}{\BatchOperations}\right)$                                         | @eq-training-bottleneck                                |
+| **Model FLOPs utilization**  | $\ModelFlopsUtilization = \ModelStepOperations/ (\PeakRate \cdot \TrainingStepTime)$                                                                                                                     | @sec-model-training-identifying-bottlenecks-f57f       |
+| **Checkpointed activations** | $\ActivationCheckpointCount\times \ActivationMemory^{(\ell)} + (\LayerCount/\ActivationCheckpointCount)\times \ActivationMemory^{(\ell)}$, minimized at $\ActivationCheckpointCount= \sqrt{\LayerCount}$ | @tbl-checkpoint-tradeoffs                              |
+| **Effective batch**          | $\BatchSize= \AccumulationStepCount\times \MicrobatchSize$ per device                                                                                                                                    | @eq-gradient-accumulation-equivalence                  |
+| **Ring AllReduce time**      | $\CommunicationTime \approx \frac{2(\AcceleratorCount-1)}{\AcceleratorCount} \cdot \frac{\DataVolume}{\Bandwidth}$                                                                                       | @eq-training-ring-allreduce                            |
 
 : **Key Equations**: The chapter's counting rules in the notation of the sections that derive them, so that a training run can be estimated before it is profiled. The activation rule sums per-example saved state over layers; the transformer estimates in the chapter specialize it to batch, sequence length, and hidden width. {#tbl-training-key-equations tbl-colwidths="[22,56,22]"}
 
@@ -7192,11 +7232,11 @@ class TrainingMemoryCompute:
 
 Compute and memory deserve equal weight in that estimate, because the step that fits is not always the step that is cheapest to compute (@tbl-training-memory-compute).
 
-| **Workload (step)**                                  | **FLOPs per step**                                  | **Static state**                                         | **Activations**                                                                                     | **Fits one H100**                                       |
-|:-----------------------------------------------------|:---------------------------------------------------:|:--------------------------------------------------------:|:----------------------------------------------------------------------------------------------------|:--------------------------------------------------------|
-| **GPT-2 XL, 32 sequences of 1,024 tokens**           | `{python} TrainingMemoryCompute.gpt2_step_str`      | `{python} StepToRunScale.gpt2_state_gb_str`              | `{python} GPT2FlashAttentionMemory.act_stored_gb_str` stored; `{python} GPT2FlashAttentionMemory.act_flash_gb_str` with FlashAttention | With FlashAttention and two micro-batches of 16        |
-| **ResNet-50, 32 images**                             | `{python} TrainingMemoryCompute.resnet_step_str`    | `{python} TrainingMemoryCompute.resnet_static_gb_str`    | About `{python} TrainingMemoryCompute.resnet_act_gb_str` (FP32 scenario)                            | Yes; the binding term is the input feed                 |
-| **Llama 3 8B fine-tuning, 4 sequences of 2,048 tokens** | `{python} TrainingMemoryCompute.llama_step_str`     | `{python} LlamaFinetuneMemory.full_static_gb_str` (full) | `{python} LlamaFinetuneMemory.activations_gb_str`                                                   | Only with adapters (`{python} LlamaFinetuneMemory.lora_total_gb_str`) |
+| **Workload (step)**                                     |                **FLOPs per step**                |                     **Static state**                     | **Activations**                                                                                                                        | **Fits one H100**                                                     |
+|:--------------------------------------------------------|:------------------------------------------------:|:--------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------|
+| **GPT-2 XL, 32 sequences of 1,024 tokens**              |  `{python} TrainingMemoryCompute.gpt2_step_str`  |       `{python} StepToRunScale.gpt2_state_gb_str`        | `{python} GPT2FlashAttentionMemory.act_stored_gb_str` stored; `{python} GPT2FlashAttentionMemory.act_flash_gb_str` with FlashAttention | With FlashAttention and two micro-batches of 16                       |
+| **ResNet-50, 32 images**                                | `{python} TrainingMemoryCompute.resnet_step_str` |  `{python} TrainingMemoryCompute.resnet_static_gb_str`   | About `{python} TrainingMemoryCompute.resnet_act_gb_str` (FP32 scenario)                                                               | Yes; the binding term is the input feed                               |
+| **Llama 3 8B fine-tuning, 4 sequences of 2,048 tokens** | `{python} TrainingMemoryCompute.llama_step_str`  | `{python} LlamaFinetuneMemory.full_static_gb_str` (full) | `{python} LlamaFinetuneMemory.activations_gb_str`                                                                                      | Only with adapters (`{python} LlamaFinetuneMemory.lora_total_gb_str`) |
 
 : **Memory and Compute per Training Step**: Step FLOPs follow from six FLOPs per parameter per token or three forward passes per image; static state is 16 bytes per trained parameter in the mixed-precision Adam recipe; activations come from the chapter's per-layer estimates or, for ResNet-50, its stated FP32 scenario. {#tbl-training-memory-compute tbl-colwidths="[24,14,16,28,18]"}
 

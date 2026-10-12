@@ -159,15 +159,15 @@ The silicon contract (principle \ref{pri-silicon-contract}) says which hardware 
 
 The digit passes through five stages in the life of a model. The *forward pass* carries the image through three weight matrices to ten class scores, the *loss* reduces those scores to one number that says how wrong they are, the *backward pass* carries that signal back through the layers with the chain rule, the *update* adjusts every parameter, and *serving* runs the forward pass alone with frozen weights. The iron law of ML systems (principle \ref{pri-iron-law}) charges each stage for the bytes it moves, the operations it performs, and its fixed overhead, and @tbl-nn-computation-stage-costs shows how differently the five stages spend those terms. The loss costs almost nothing, yet it is the only signal training receives; the update does little arithmetic but touches every parameter; the backward pass cannot run without the activations the forward pass left behind. Training repeats the first four stages millions of times and serving repeats only the first, and that asymmetry produces the chapter's central result, the gap between what training and inference must hold in memory.
 
-| **Stage**         | **Work**                                                              | **Data moved**                                                   | **State left behind**                          | **Usually dominant cost**                    |
-|:------------------|:----------------------------------------------------------------------|:-----------------------------------------------------------------|:-----------------------------------------------|:---------------------------------------------|
-| **Forward pass**  | One MAC per weight per example (`{python} MNISTInference.total_macs_str` per digit) | Every weight read; each layer's activations written and read     | Activations, kept until the backward pass       | Bytes at small batch, operations at large     |
-| **Loss**          | A few operations per class                                            | Ten scores per example                                           | One number per batch                            | Negligible                                    |
-| **Backward pass** | Up to twice the forward pass                                          | Weights and saved activations read; gradients written            | Gradients                                       | Operations or bytes, as in the forward pass   |
-| **Update**        | A few operations per parameter                                        | Every weight, gradient, and optimizer value read and written     | Optimizer state                                 | Bytes                                         |
-| **Serving**       | The forward pass alone                                                | Weights plus two short-lived activation buffers                  | Nothing beyond the weights                      | Bytes and fixed overhead at small batch       |
+| **Stage**         | **Work**                                                                            | **Data moved**                                               | **State left behind**                     | **Usually dominant cost**                   |
+|:------------------|:------------------------------------------------------------------------------------|:-------------------------------------------------------------|:------------------------------------------|:--------------------------------------------|
+| **Forward pass**  | One MAC per weight per example (`{python} MNISTInference.total_macs_str` per digit) | Every weight read; each layer's activations written and read | Activations, kept until the backward pass | Bytes at small batch, operations at large   |
+| **Loss**          | A few operations per class                                                          | Ten scores per example                                       | One number per batch                      | Negligible                                  |
+| **Backward pass** | Up to twice the forward pass                                                        | Weights and saved activations read; gradients written        | Gradients                                 | Operations or bytes, as in the forward pass |
+| **Update**        | A few operations per parameter                                                      | Every weight, gradient, and optimizer value read and written | Optimizer state                           | Bytes                                       |
+| **Serving**       | The forward pass alone                                                              | Weights plus two short-lived activation buffers              | Nothing beyond the weights                | Bytes and fixed overhead at small batch     |
 
-: **Where Each Stage Spends the Iron Law**: Work, data movement, and retained state for the five stages in the life of a model, for the running 784-128-64-10 network. Training repeats the first four stages for every batch, while serving runs only the forward pass. Later sections derive each row, and the summary returns to the table. {#tbl-nn-computation-stage-costs tbl-colwidths="[14,24,24,19,19]"}
+: **Where Each Stage Spends Its Budget**: Work, data movement, and retained state for the five stages in the life of a model, for the running 784-128-64-10 network. Training repeats the first four stages for every batch, while serving runs only the forward pass. Later sections derive each row, and the summary returns to the table. {#tbl-nn-computation-stage-costs tbl-colwidths="[14,24,24,19,19]"}
 
 ::: {#exmp-nn-computation-running-example-mnist-digit-recognition .callout-example title="Running example: MNIST digit recognition"}
 
@@ -1538,7 +1538,7 @@ On the machine, a layer is one matrix multiplication over all of its neurons at 
 
 ### Parameters and connections {#sec-neural-computation-parameters-connections-27c9}
 
-Each of those multiplications reads the layer's learnable parameters[^fn-parameter-memory-cost], its weights and biases, alongside the incoming activations. The parameters decide which transformation a layer applies, and their organization fixes both what the network can learn and how many bytes every pass must move.
+Each of those multiplications reads the layer's learnable parameters,[^fn-parameter-memory-cost] its weights and biases, alongside the incoming activations. The parameters decide which transformation a layer applies, and their organization fixes both what the network can learn and how many bytes every pass must move.
 
 [^fn-parameter-memory-cost]: **Parameter memory cost**\index{Parameter!memory multiplier}: Parameter count is a misleading proxy for memory importance. The normalization layers that @sec-network-architectures-normalization-layers-mathematical-foundations-0fb7 introduces, for example, add a few learned scale and shift parameters per layer that barely affect byte budgets but can strongly affect model behavior when training choices change. Conversely, the bulk of parameters in dense weight matrices require extra state during training: gradients plus optimizer bookkeeping beyond the stored weights themselves. A model that fits in memory for inference may therefore require several times more memory for training, a cost quantified later in the training memory budget.
 
@@ -1664,9 +1664,9 @@ class DenseLayerLighthouseShare:
     """Feed-forward share of a standard transformer layer's weights."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    hidden_dim = Models.Language.GPT2.hidden_dim   # GPT-2 model width
-    attention_projections = 4                      # query, key, value, output
-    ffn_expansion = 4                              # feed-forward widens to 4·d
+    hidden_dim = Models.Language.GPT2.hidden_dim  # GPT-2 model width
+    attention_projections = 4  # query, key, value, output
+    ffn_expansion = 4  # feed-forward widens to 4·d
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     attention_weights = attention_projections * hidden_dim**2
@@ -1729,7 +1729,6 @@ class MnistArchCheckpointRecap:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mnist_arch_str = MarkdownStr("784 → 128 → 64 → 10")
 ```
-
 
 ### Architecture design {#sec-neural-computation-architecture-design-523c}
 
@@ -2134,12 +2133,12 @@ Every connectivity choice ends in a parameter count. How parameters\index{Model 
 \renewcommand{\arraystretch}{1.2}
 ```
 
-| **Layer**             |                                     **Weights**                                     |               **Biases**              |           **Parameters**          |                   **MACs per Image**                  |
-|:----------------------|:-----------------------------------------------------------------------------------:|:-------------------------------------:|:---------------------------------:|:-----------------------------------------------------:|
-| **Input → Hidden1**   | `{python} MnistModelSizeLocal.w1_dims_math` = `{python} MnistModelSizeLocal.w1_str` | `{python} MnistModelSizeLocal.b1_str` | `{python} MnistModelSizeLocal.p1_str` |          `{python} MnistModelSizeLocal.w1_str`          |
-| **Hidden1 → Hidden2** | `{python} MnistModelSizeLocal.w2_dims_math` = `{python} MnistModelSizeLocal.w2_str` | `{python} MnistModelSizeLocal.b2_str` | `{python} MnistModelSizeLocal.p2_str` |          `{python} MnistModelSizeLocal.w2_str`          |
-| **Hidden2 → Output**  | `{python} MnistModelSizeLocal.w3_dims_math` = `{python} MnistModelSizeLocal.w3_str` | `{python} MnistModelSizeLocal.b3_str` | `{python} MnistModelSizeLocal.p3_str` |          `{python} MnistModelSizeLocal.w3_str`          |
-| **Total**             |                     `{python} MnistModelSizeLocal.w_total_str`                      | `{python} MnistModelSizeLocal.b_total_str` | **`{python} MnistModelSizeLocal.p_total_str`** | **`{python} MnistModelSizeLocal.w_total_str`** |
+| **Layer**             |                                     **Weights**                                     |                 **Biases**                 |                 **Parameters**                 |               **MACs per Image**               |
+|:----------------------|:-----------------------------------------------------------------------------------:|:------------------------------------------:|:----------------------------------------------:|:----------------------------------------------:|
+| **Input → Hidden1**   | `{python} MnistModelSizeLocal.w1_dims_math` = `{python} MnistModelSizeLocal.w1_str` |   `{python} MnistModelSizeLocal.b1_str`    |     `{python} MnistModelSizeLocal.p1_str`      |     `{python} MnistModelSizeLocal.w1_str`      |
+| **Hidden1 → Hidden2** | `{python} MnistModelSizeLocal.w2_dims_math` = `{python} MnistModelSizeLocal.w2_str` |   `{python} MnistModelSizeLocal.b2_str`    |     `{python} MnistModelSizeLocal.p2_str`      |     `{python} MnistModelSizeLocal.w2_str`      |
+| **Hidden2 → Output**  | `{python} MnistModelSizeLocal.w3_dims_math` = `{python} MnistModelSizeLocal.w3_str` |   `{python} MnistModelSizeLocal.b3_str`    |     `{python} MnistModelSizeLocal.p3_str`      |     `{python} MnistModelSizeLocal.w3_str`      |
+| **Total**             |                      `{python} MnistModelSizeLocal.w_total_str`                     | `{python} MnistModelSizeLocal.b_total_str` | **`{python} MnistModelSizeLocal.p_total_str`** | **`{python} MnistModelSizeLocal.w_total_str`** |
 
 : **MNIST Parameters and MACs by Layer**: Weight, bias, parameter, and per-image multiply-accumulate counts for the 784-128-64-10 network. A dense layer performs one MAC per weight for each input, so the weight and MAC columns match. Layer 1 (Input → Hidden1) dominates both because it multiplies the 784-dimensional input by 128 hidden units; deeper layers shrink rapidly as the representation compresses toward the 10-class output. {#tbl-nn-computation-mnist-params tbl-colwidths="[20,30,12,16,22]"}
 
@@ -2185,21 +2184,17 @@ Layered processing in biological vision helped motivate hierarchical models, wit
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_multiple, check
 
-
 def _dw_net(hidden_layers, width, input_dim, out_dim):
     """Layer widths of a fully connected network with equal hidden widths."""
     return [input_dim] + [width] * hidden_layers + [out_dim]
-
 
 def _dw_sweep(hidden_layer_counts, widths, input_dim, out_dim):
     """Networks for paired (hidden-layer count, width) settings."""
     return [_dw_net(h, w, input_dim, out_dim) for h, w in zip(hidden_layer_counts, widths)]
 
-
 def _dw_macs(widths):
     """Forward MACs per example: one per weight."""
     return sum(a * b for a, b in zip(widths[:-1], widths[1:]))
-
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DepthWidthCost:
@@ -2208,13 +2203,12 @@ class DepthWidthCost:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     input_dim = MNISTInference.input_dim
     out_dim = MNISTInference.out_dim
-    mnist_widths = [MNISTInference.input_dim, MNISTInference.h1_dim,
-                    MNISTInference.h2_dim, MNISTInference.out_dim]
-    sweep_hidden_layers = 2                          # matches the running network
-    sweep_widths = [2**k for k in range(6, 13)]      # 64 ... 4,096
+    mnist_widths = [MNISTInference.input_dim, MNISTInference.h1_dim, MNISTInference.h2_dim, MNISTInference.out_dim]
+    sweep_hidden_layers = 2  # matches the running network
+    sweep_widths = [2**k for k in range(6, 13)]  # 64 ... 4,096
     sweep_fixed_width = 512
-    sweep_depths = list(range(1, 33))                # 1 ... 32 hidden layers
-    callout_deep = (10, 100)                         # (hidden layers, width)
+    sweep_depths = list(range(1, 33))  # 1 ... 32 hidden layers
+    callout_deep = (10, 100)  # (hidden layers, width)
     callout_wide = (2, 500)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -2222,11 +2216,11 @@ class DepthWidthCost:
     depth_sweep_nets = _dw_sweep(sweep_depths, [sweep_fixed_width] * len(sweep_depths), input_dim, out_dim)
     width_sweep_macs = [_dw_macs(n) for n in width_sweep_nets]
     depth_sweep_macs = [_dw_macs(n) for n in depth_sweep_nets]
-    depth_sweep_retained = [sum(n) for n in depth_sweep_nets]   # input + every layer output
+    depth_sweep_retained = [sum(n) for n in depth_sweep_nets]  # input + every layer output
     mnist_macs = _dw_macs(mnist_widths)
 
-    width_double_factor = width_sweep_macs[-1] / width_sweep_macs[-2]       # 2,048 → 4,096
-    depth_double_factor = depth_sweep_macs[-1] / depth_sweep_macs[15]       # 16 → 32 layers
+    width_double_factor = width_sweep_macs[-1] / width_sweep_macs[-2]  # 2,048 → 4,096
+    depth_double_factor = depth_sweep_macs[-1] / depth_sweep_macs[15]  # 16 → 32 layers
     retained_double_factor = depth_sweep_retained[-1] / depth_sweep_retained[15]
 
     callout_deep_units = callout_deep[0] * callout_deep[1]
@@ -2293,13 +2287,10 @@ fig, (ax_w, ax_d) = plt.subplots(1, 2, figsize=(10, 4))
 # ┌── LEFT: width sweep ───────────────────────────────────────────────────────
 widths = DepthWidthCost.sweep_widths
 macs_w = DepthWidthCost.width_sweep_macs
-ax_w.plot(widths, macs_w, color=COLORS['BlueLine'], lw=2, marker='o', ms=4,
-          label='Two hidden layers of equal width')
+ax_w.plot(widths, macs_w, color=COLORS['BlueLine'], lw=2, marker='o', ms=4, label='Two hidden layers of equal width')
 guide = [macs_w[-1] * (w / widths[-1]) ** 2 for w in widths]
-ax_w.plot(widths, guide, color=COLORS['primary'], lw=1, ls='--',
-          label=r'Slope two (MACs $\propto$ width$^2$)')
-ax_w.plot([MNISTInference.h1_dim], [DepthWidthCost.mnist_macs], marker='D', ms=7,
-          color=COLORS['crimson'], ls='none', label='MNIST 784→128→64→10')
+ax_w.plot(widths, guide, color=COLORS['primary'], lw=1, ls='--', label=r'Slope two (MACs $\propto$ width$^2$)')
+ax_w.plot([MNISTInference.h1_dim], [DepthWidthCost.mnist_macs], marker='D', ms=7, color=COLORS['crimson'], ls='none', label='MNIST 784→128→64→10')
 ax_w.set_xscale('log', base=2)
 ax_w.set_yscale('log')
 ax_w.set_xticks(widths)
@@ -2320,8 +2311,7 @@ ax_d.set_xlim(0, depths[-1] + 1)
 ax_d.set_ylim(0, None)
 ax_d.set_title('Depth: linear growth')
 ax_a = ax_d.twinx()
-ax_a.plot(depths, act_d, color=COLORS['OrangeLine'], lw=2, ls='--',
-          label='Retained activations per example')
+ax_a.plot(depths, act_d, color=COLORS['OrangeLine'], lw=2, ls='--', label='Retained activations per example')
 ax_a.set_ylabel('Retained activations (thousand values)', color=COLORS['OrangeLine'])
 ax_a.set_ylim(0, None)
 ax_a.grid(False)
@@ -2511,7 +2501,6 @@ The error measurement drives the adjustment of network parameters: gradient desc
 ### Forward pass computation {#sec-neural-computation-forward-pass-computation-e5dd}
 
 An MNIST image becomes ten class scores by moving through weighted layers and nonlinear activations. That computation is **forward propagation**\index{Forward propagation!definition}\index{Forward propagation!computation process}: input data flows through the network's layers to generate predictions. During training, those predictions are paired with ground-truth targets at the loss function, closing the training loop of @fig-forward-propagation. The forward pass itself underlies both inference and training.
-
 
 When an image of a handwritten digit enters the network, it undergoes a series of transformations through the layers. For the 784-128-64-10 digit classifier, a $28{\times}28$ pixel image is processed through multiple layers to ultimately produce probabilities for each possible digit (0–9).
 
@@ -2856,8 +2845,7 @@ machines = [
     ("Desktop CPU (FP32)", Hardware.Cloud.ReferenceCPU, COLORS["BrownLine"], "--"),
     ("Data-center accelerator (FP32)", Hardware.Cloud.H100, COLORS["BlueLine"], "-"),
 ]
-points = [("batch 1", MnistFlopsCalc.single_image_arith_intensity, "o"),
-          ("batch 32", MnistFlopsCalc.batch_arith_intensity, "s")]
+points = [("batch 1", MnistFlopsCalc.single_image_arith_intensity, "o"), ("batch 32", MnistFlopsCalc.batch_arith_intensity, "s")]
 
 # ┌── 2. EXECUTE: attainable = min(peak, bandwidth x intensity) ──────────────────
 ai = np.logspace(-1.3, 3, 400)
@@ -2869,10 +2857,16 @@ for label, hw, color, ls in machines:
     for name, x, marker in points:
         y = min(peak, bw * x)
         ax.plot(x, y, marker, color=COLORS["crimson"], ms=7, zorder=4)
-        ax.annotate(f"{name}\n{y * 1000:,.0f} GFLOP/s" if y < 1 else f"{name}\n{y:,.0f} TFLOP/s",
-                    xy=(x, y), xytext=(8, -30) if ls == "--" else (-78, 6), textcoords="offset points",
-                    fontsize=9, color=COLORS["primary"])
-ax.set_xscale("log"); ax.set_yscale("log")
+        ax.annotate(
+            f"{name}\n{y * 1000:,.0f} GFLOP/s" if y < 1 else f"{name}\n{y:,.0f} TFLOP/s",
+            xy=(x, y),
+            xytext=(8, -30) if ls == "--" else (-78, 6),
+            textcoords="offset points",
+            fontsize=9,
+            color=COLORS["primary"],
+        )
+ax.set_xscale("log")
+ax.set_yscale("log")
 ax.set_xlabel("Arithmetic intensity (FLOP/byte)")
 ax.set_ylabel("Attainable FP32 rate (TFLOP/s)")
 ax.set_xlim(ai[0], ai[-1])
@@ -2987,13 +2981,16 @@ true_digit = 7
 predicted = np.zeros(10)
 predicted[true_digit] = CrossEntropyExample.p_correct
 predicted[0] = predicted[9] = (1 - CrossEntropyExample.p_correct) / 2
-target = np.zeros(10); target[true_digit] = 1.0
-ax_p.bar([true_digit], [target[true_digit]], width=0.8, color="none", edgecolor=COLORS["crimson"], lw=1.6, ls="--",
-         label="True label (one-hot)")
-ax_p.bar(digits, predicted, width=0.55, color=COLORS["BlueL"], edgecolor=COLORS["BlueLine"], lw=1.0,
-         label="Predicted probability")
-ax_p.annotate(f"$p_7$ = {CrossEntropyExample.p_correct:.1f}", xy=(true_digit, predicted[true_digit]),
-              xytext=(true_digit - 3.2, 0.9), arrowprops=dict(arrowstyle="->", color=COLORS["primary"]))
+target = np.zeros(10)
+target[true_digit] = 1.0
+ax_p.bar([true_digit], [target[true_digit]], width=0.8, color="none", edgecolor=COLORS["crimson"], lw=1.6, ls="--", label="True label (one-hot)")
+ax_p.bar(digits, predicted, width=0.55, color=COLORS["BlueL"], edgecolor=COLORS["BlueLine"], lw=1.0, label="Predicted probability")
+ax_p.annotate(
+    f"$p_7$ = {CrossEntropyExample.p_correct:.1f}",
+    xy=(true_digit, predicted[true_digit]),
+    xytext=(true_digit - 3.2, 0.9),
+    arrowprops=dict(arrowstyle="->", color=COLORS["primary"]),
+)
 ax_p.set_xticks(digits)
 ax_p.set_xlabel("Digit class")
 ax_p.set_ylabel("Probability")
@@ -3006,17 +3003,19 @@ ax_p.grid(axis="x", visible=False)
 p = np.linspace(0.005, 1.0, 400)
 ax_l.plot(p, -np.log(p), color=COLORS["BlueLine"], lw=2)
 uniform_p = 1 / len(digits)
-marks = [(uniform_p, "uniform guess", COLORS["OrangeLine"], (0.22, 2.9)),
-         (CrossEntropyExample.p_correct, f"$p_7$ = {CrossEntropyExample.p_correct:.1f}", COLORS["GreenLine"], (0.55, 1.3)),
-         (CrossEntropyExample.p_correct_confident, f"$p_7$ = {CrossEntropyExample.p_correct_confident:.1f}", COLORS["VioletLine"], (0.80, 0.85))]
+marks = [
+    (uniform_p, "uniform guess", COLORS["OrangeLine"], (0.22, 2.9)),
+    (CrossEntropyExample.p_correct, f"$p_7$ = {CrossEntropyExample.p_correct:.1f}", COLORS["GreenLine"], (0.55, 1.3)),
+    (CrossEntropyExample.p_correct_confident, f"$p_7$ = {CrossEntropyExample.p_correct_confident:.1f}", COLORS["VioletLine"], (0.80, 0.85)),
+]
 for pv, label, color, xytext in marks:
     lv = -math.log(pv)
     ax_l.plot(pv, lv, "o", color=color, ms=7, zorder=3)
-    ax_l.annotate(f"{label}\nloss {lv:.2f}", xy=(pv, lv), xytext=xytext, color=color,
-                  arrowprops=dict(arrowstyle="->", color=color))
+    ax_l.annotate(f"{label}\nloss {lv:.2f}", xy=(pv, lv), xytext=xytext, color=color, arrowprops=dict(arrowstyle="->", color=color))
 ax_l.set_xlabel("Predicted probability of the correct class")
 ax_l.set_ylabel(r"Cross-entropy loss, $-\log p$")
-ax_l.set_xlim(0, 1.02); ax_l.set_ylim(0, 5.3)
+ax_l.set_xlim(0, 1.02)
+ax_l.set_ylim(0, 5.3)
 ax_l.set_title("Loss grows as the correct-class probability falls")
 fig.tight_layout()
 plt.show()
@@ -3103,7 +3102,7 @@ plt = book_style.plt
 fig, axes = plt.subplots(1, 2, figsize=(10, 4.0), sharey=True)
 
 # ┌── 1. LOAD: an illustrative one-weight loss curve and two learning rates ─────
-w_min, curvature = 2.0, 1.0                      # loss = curvature * (w - w_min)^2
+w_min, curvature = 2.0, 1.0  # loss = curvature * (w - w_min)^2
 w_start = -1.2
 lr_good, lr_large = 0.3, 0.97
 n_steps = 6
@@ -3121,19 +3120,16 @@ def descend(lr):
     return np.array(ws)
 
 w_axis = np.linspace(-1.6, 5.6, 300)
-runs = [(axes[0], lr_good, COLORS["GreenLine"], "Well-chosen learning rate"),
-        (axes[1], lr_large, COLORS["RedLine"], "Learning rate too large")]
+runs = [(axes[0], lr_good, COLORS["GreenLine"], "Well-chosen learning rate"), (axes[1], lr_large, COLORS["RedLine"], "Learning rate too large")]
 for ax, lr, color, title in runs:
     ws = descend(lr)
     ax.plot(w_axis, loss(w_axis), color=COLORS["BlueLine"], lw=2, label="Loss")
     ax.plot(ws, loss(ws), "o", color=color, ms=6, zorder=3, label="Weight after each step")
     for a, b in zip(ws[:-1], ws[1:]):
-        ax.annotate("", xy=(b, loss(b)), xytext=(a, loss(a)),
-                    arrowprops=dict(arrowstyle="->", color=color, lw=1.2))
+        ax.annotate("", xy=(b, loss(b)), xytext=(a, loss(a)), arrowprops=dict(arrowstyle="->", color=color, lw=1.2))
     # tangent at the starting weight: the slope the first step follows
     t = np.linspace(w_start - 0.5, w_start + 1.1, 2)
-    ax.plot(t, loss(w_start) + grad(w_start) * (t - w_start), ls="--", color=COLORS["secondary"], lw=1.2,
-            label="Slope at the start")
+    ax.plot(t, loss(w_start) + grad(w_start) * (t - w_start), ls="--", color=COLORS["secondary"], lw=1.2, label="Slope at the start")
     ax.set_title(title)
     ax.set_xlabel(r"Weight $w$")
     ax.set_xlim(-1.8, 5.8)
@@ -3258,7 +3254,7 @@ The distribution of parameters affects information flow through layers. In digit
 
 Initialization sets the starting scale, but the backward cascade still multiplies it layer after layer. As gradients flow backward through many layers, they can vanish or explode\index{Exploding gradient problem!training instability}\index{Gradient!vanishing and exploding}. Vanishing also has a numeric form, because each floating-point format has a smallest magnitude it can store at full precision, $1.18 \times 10^{-38}$ in FP32 and $6.10 \times 10^{-5}$ in FP16, the 2-byte half-precision format that halves memory and traffic relative to 4-byte FP32.[^fn-fp32-precision-format] Below it, values enter the *subnormal*\index{Subnormal numbers!gradient underflow} range, where the format gives up precision bits to represent ever-smaller magnitudes. Some accelerator modes skip that range for speed and flush such values straight to zero, and values smaller still underflow to zero on any hardware. A gradient that reaches zero this way stops updating its weight entirely. At the other extreme, values beyond the representable maximum can overflow to `Inf` and propagate `NaN`, destabilizing training.
 
-[^fn-fp32-precision-format]: **FP32 and reduced-precision formats**\index{FP32!numerical precision}\index{BF16!reduced-precision format}\index{FP16!half precision}: The IEEE 754 binary32 format uses 32 bits (1 sign bit, 8 exponent bits, 23 fraction bits), whereas 16-bit alternatives split exponent and fraction differently: IEEE 754 FP16 allocates 5 exponent and 10 fraction bits, providing high precision but a narrow dynamic range ($6.1 \times 10^{-5}$ to $65{,}504$), so FP16 training multiplies the loss by a scale factor before the backward pass to keep small gradients representable (dynamic loss scaling). Brain Floating Point (BF16) allocates 8 exponent bits matching FP32's normal exponent range to reduce underflow risk relative to FP16; sufficiently small values can still underflow. Integer formats such as INT8 quarter the 32-bit footprint, a deployment technique that @sec-model-compression-quantization-precision-cd46 develops, and the loss-scaling recipe belongs to the mixed-precision training of @sec-model-training-mixedprecision-training-9218. The formats are collected for reference in @sec-appdx-machine-foundations-numerical-representations-c889.
+[^fn-fp32-precision-format]: **FP32 and reduced-precision formats**\index{FP32!numerical precision}\index{BF16!reduced-precision format}\index{FP16!half precision}: The IEEE 754 binary32 format uses 32 bits (1 sign bit, 8 exponent bits, 23 fraction bits), whereas 16-bit alternatives split exponent and fraction differently: IEEE 754 FP16 allocates 5 exponent and 10 fraction bits, providing high precision but a narrow dynamic range ($6.1 \times 10^{-5}$ to $65{,}504$), so FP16 training multiplies the loss by a scale factor before the backward pass to keep small gradients representable (dynamic loss scaling). Brain Floating Point (BF16) allocates 8 exponent bits matching FP32's normal exponent range to reduce underflow risk relative to FP16; sufficiently small values can still underflow. Integer formats such as INT8 quarter the 32-bit footprint, a deployment technique that @sec-model-compression-quantization-precision-cd46 develops, and the loss-scaling recipe belongs to the mixed-precision training of @sec-model-training-mixedprecision-training-9218; the formats are collected for reference in @sec-appdx-machine-foundations-numerical-representations-c889.
 
 Arithmetic without branches is not arithmetic without risk, and the danger of an unhandled overflow is not unique to machine learning. Safety-critical systems have failed catastrophically when a numerical invariant was violated.
 
@@ -3361,8 +3357,8 @@ class SevenThreeTrace:
     """Backward trace of a seven misread as a three."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    p_three = 0.6   # scenario assumption: probability on the wrong class
-    p_seven = 0.1   # scenario assumption: probability on the true class
+    p_three = 0.6  # scenario assumption: probability on the wrong class
+    p_seven = 0.1  # scenario assumption: probability on the true class
     dims = [784, 128, 64, 10]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -3617,40 +3613,50 @@ def timeline(batch):
     acts = [batch * d * bytes_per / 1000 for d in dims]
     labels, A, G = [], [], []
     live = [acts[0]]
-    labels.append("load\nbatch"); A.append(sum(live)); G.append(0.0)
-    for l in range(n_layers):                      # forward: keep every output
+    labels.append("load\nbatch")
+    A.append(sum(live))
+    G.append(0.0)
+    for l in range(n_layers):  # forward: keep every output
         live.append(acts[l + 1])
-        labels.append(f"F{l+1}"); A.append(sum(live)); G.append(G[-1])
+        labels.append(f"F{l+1}")
+        A.append(sum(live))
+        G.append(G[-1])
     grads = 0.0
-    for l in reversed(range(n_layers)):            # backward: free as consumed
-        live.pop()                                 # layer l's output no longer needed
+    for l in reversed(range(n_layers)):  # backward: free as consumed
+        live.pop()  # layer l's output no longer needed
         grads += layer_params[l] * bytes_per / 1000
-        labels.append(f"B{l+1}"); A.append(sum(live)); G.append(grads)
-    live.pop()                                     # input freed after B1
-    labels.append("update"); A.append(0.0); G.append(grads)
+        labels.append(f"B{l+1}")
+        A.append(sum(live))
+        G.append(grads)
+    live.pop()  # input freed after B1
+    labels.append("update")
+    A.append(0.0)
+    G.append(grads)
     infer_peak = max(acts[i] + acts[i + 1] for i in range(n_layers))
     return labels, np.array(A), np.array(G), infer_peak
 
-series = [("Weights", "BlueL", "BlueLine"), ("Adam state", "VioletL", "VioletLine"),
-          ("Gradients", "OrangeL", "OrangeLine"), ("Saved activations", "RedL", "RedLine")]
+series = [
+    ("Weights", "BlueL", "BlueLine"),
+    ("Adam state", "VioletL", "VioletLine"),
+    ("Gradients", "OrangeL", "OrangeLine"),
+    ("Saved activations", "RedL", "RedLine"),
+]
 for ax, batch in zip(axes, (_MNIST_BATCH_SIZE, 32 * _MNIST_BATCH_SIZE)):
     labels, A, G, infer_peak = timeline(batch)
     x = np.arange(len(labels))
     stack = [np.full_like(A, param_kb), np.full_like(A, 2 * param_kb), G, A]
     bottom = np.zeros_like(A)
     for vals, (name, fill, line) in zip(stack, series):
-        ax.bar(x, vals, bottom=bottom, width=0.72, color=COLORS[fill],
-               edgecolor=COLORS[line], linewidth=0.6, label=name)
+        ax.bar(x, vals, bottom=bottom, width=0.72, color=COLORS[fill], edgecolor=COLORS[line], linewidth=0.6, label=name)
         bottom = bottom + vals
-    ax.axhline(param_kb + infer_peak, color=COLORS["GreenLine"], ls="--", lw=1.5,
-               label="Inference peak (weights + two buffers)")
+    ax.axhline(param_kb + infer_peak, color=COLORS["GreenLine"], ls="--", lw=1.5, label="Inference peak (weights + two buffers)")
     ax.axvline(n_layers + 0.5, color=COLORS["secondary"], lw=0.8, ls=":")
     top = bottom.max() * 1.12
     ax.set_ylim(0, top)
     ax.text(n_layers / 2, top * 0.95, "forward", ha="center", va="top", fontsize=9, color=COLORS["secondary"])
-    ax.text(n_layers + 0.5 + (n_layers + 1) / 2, top * 0.95, "backward + update", ha="center", va="top",
-            fontsize=9, color=COLORS["secondary"])
-    ax.set_xticks(x); ax.set_xticklabels(labels)
+    ax.text(n_layers + 0.5 + (n_layers + 1) / 2, top * 0.95, "backward + update", ha="center", va="top", fontsize=9, color=COLORS["secondary"])
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
     ax.set_title(f"Batch {batch:,}")
     ax.grid(axis="x", visible=False)
 axes[0].set_ylabel("Live memory (KB, FP32)")
@@ -3742,21 +3748,38 @@ _d = np.array([r["domain"] if r["domain"] in _dom else "Other" for r in _G.rows]
 for _k, _c in list(_dom.items()) + [("Other", COLORS["grid"])]:
     _m = _d == _k
     ax.scatter(_G.years[_m], 10 ** _G.log_params[_m], s=10, color=_c, alpha=0.7 if _k != "Other" else 0.6, label=_k, zorder=3 if _k != "Other" else 2)
-for _lo, _hi, _sl, _ic, _txt, _xm, _lift in ((1950, _G.split_year, _G.early_slope, _G.early_intercept, _G.early_doubling_str, 1980, 8),
-                                            (_G.split_year, 2026.8, _G.late_slope, _G.late_intercept, _G.late_doubling_str, 2012.5, 2500)):
+for _lo, _hi, _sl, _ic, _txt, _xm, _lift in (
+    (1950, _G.split_year, _G.early_slope, _G.early_intercept, _G.early_doubling_str, 1980, 8),
+    (_G.split_year, 2026.8, _G.late_slope, _G.late_intercept, _G.late_doubling_str, 2012.5, 2500),
+):
     _xx = np.linspace(_lo, _hi, 50)
     ax.plot(_xx, 10 ** (_sl * _xx + _ic), "--", color=COLORS["primary"], lw=1.2)
-    ax.text(_xm, 10 ** (_sl * _xm + _ic) * _lift, f"{_txt}-month doubling", ha="center",
-            bbox=dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.4), zorder=6)
+    ax.text(
+        _xm,
+        10 ** (_sl * _xm + _ic) * _lift,
+        f"{_txt}-month doubling",
+        ha="center",
+        bbox=dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.4),
+        zorder=6,
+    )
 for _n in ("Perceptron Mark I", "LeNet-5", "AlexNet", "GPT-3 175B (davinci)", "PaLM (540B)"):
     for _x, _r in zip(_G.years, _G.rows):
         if _r["model"] == _n:
-            ax.annotate(_n.replace(" (davinci)", "").replace(" (540B)", ""), (_x, _r["parameters"]), xytext=(-6, -14) if _n.startswith("GPT-3") else (-6, 6), textcoords="offset points",
-                        ha="right", zorder=7, bbox=dict(facecolor="white", alpha=1.0, edgecolor="none", pad=0.3))
+            ax.annotate(
+                _n.replace(" (davinci)", "").replace(" (540B)", ""),
+                (_x, _r["parameters"]),
+                xytext=(-6, -14) if _n.startswith("GPT-3") else (-6, 6),
+                textcoords="offset points",
+                ha="right",
+                zorder=7,
+                bbox=dict(facecolor="white", alpha=1.0, edgecolor="none", pad=0.3),
+            )
             break
 ax.axhline(MnistModelSizeLocal.total_params, color=COLORS["primary"], lw=0.8, ls=":", zorder=1)
 ax.text(1952, MnistModelSizeLocal.total_params * 1.6, "running network (MNIST classifier)", ha="left", va="bottom", color=COLORS["primary"])
-ax.set_yscale("log"); ax.set_xlabel("Publication date"); ax.set_ylabel("Parameters (log scale)")
+ax.set_yscale("log")
+ax.set_xlabel("Publication date")
+ax.set_ylabel("Parameters (log scale)")
 ax.legend(loc="upper left", frameon=True, framealpha=0.95, markerscale=2)
 plt.show()
 plt.close()
@@ -3891,7 +3914,7 @@ The MNIST running example and the GPT-2 lighthouse show how model scale changes 
 
 :::
 
-@Fig-model-bytes-tiers sets the three footprints against the memory that would hold them. Each step to the right is a step down the memory hierarchy, from a microcontroller's on-chip SRAM through an accelerator's L2 cache to its high-bandwidth device memory (HBM), toward storage that is larger, farther from the arithmetic, and slower to read.
+@Fig-model-bytes-tiers sets the three footprints against the memory that would hold them. Each step to the right is a step down the memory hierarchy, from a microcontroller's on-chip SRAM through an accelerator's L2 cache to its high-bandwidth memory (HBM), toward storage that is larger, farther from the arithmetic, and slower to read.
 
 ::: {#fig-model-bytes-tiers fig-env="figure" fig-pos="htb" fig-cap="**Where the Bytes Live**: FP32 footprints of the MNIST network and the ResNet-50 and GPT-2 lighthouses on a log scale, for weights alone (inference) and for weights plus gradients plus two Adam buffers (training, before activations). Dashed lines mark the capacity of a microcontroller's on-chip SRAM, an accelerator's L2 cache, and its high-bandwidth device memory. MNIST's training state crosses a tier boundary that its weights do not; ResNet-50 and GPT-2 sit in device memory either way, and what changes is how much of it they claim." fig-alt="Horizontal log-scale bar chart from 10 KB to 1 TB. For MNIST MLP, ResNet-50, and GPT-2, a blue weights-only bar and a longer orange training-state bar. Dashed red vertical lines labeled microcontroller SRAM (ESP32-S3) near 0.5 MB, accelerator L2 cache (H100) near 50 MB, and accelerator HBM (H100) near 80 GB. MNIST weights fall left of the SRAM line, ResNet-50 weights just past the L2 line, GPT-2 training state below the HBM line."}
 
@@ -3932,18 +3955,23 @@ tiers = [
 y = np.arange(len(models))
 weights = np.array([n * bpp for _, n in models])
 train = weights * 4  # weights + gradients + two Adam buffers, before activations
-ax.barh(y + 0.18, train, height=0.34, color=COLORS["OrangeL"], edgecolor=COLORS["OrangeLine"],
-        label="Training state (weights + gradients + Adam), before activations")
-ax.barh(y - 0.18, weights, height=0.34, color=COLORS["BlueL"], edgecolor=COLORS["BlueLine"],
-        label="Weights only (inference)")
+ax.barh(
+    y + 0.18,
+    train,
+    height=0.34,
+    color=COLORS["OrangeL"],
+    edgecolor=COLORS["OrangeLine"],
+    label="Training state (weights + gradients + Adam), before activations",
+)
+ax.barh(y - 0.18, weights, height=0.34, color=COLORS["BlueL"], edgecolor=COLORS["BlueLine"], label="Weights only (inference)")
 ax.set_xscale("log")
 ax.set_xlim(1e4, 1e12)
-ax.set_yticks(y); ax.set_yticklabels([m for m, _ in models])
+ax.set_yticks(y)
+ax.set_yticklabels([m for m, _ in models])
 ax.invert_yaxis()
 for name, cap in tiers:
     ax.axvline(cap, color=COLORS["crimson"], lw=1.2, ls="--")
-    ax.text(cap, 1.02, name, transform=ax.get_xaxis_transform(), fontsize=9,
-            color=COLORS["crimson"], ha="center", va="bottom")
+    ax.text(cap, 1.02, name, transform=ax.get_xaxis_transform(), fontsize=9, color=COLORS["crimson"], ha="center", va="bottom")
 ticks = [1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12]
 ax.set_xticks(ticks)
 ax.set_xticklabels(["10 KB", "100 KB", "1 MB", "10 MB", "100 MB", "1 GB", "10 GB", "100 GB", "1 TB"])
@@ -4080,8 +4108,8 @@ class EpochTimeEnergy:
     batch = MnistEpochLocal.batch_size
     fwd_flops_per_image = 2 * MNISTInference.total_macs
     train_ratio = MnistTrainingArithmetic.training_ratio
-    intensity_b32 = MnistFlopsCalc.batch_arith_intensity           # FLOP/byte
-    intensity_b1 = MnistFlopsCalc.single_image_arith_intensity     # FLOP/byte
+    intensity_b32 = MnistFlopsCalc.batch_arith_intensity  # FLOP/byte
+    intensity_b1 = MnistFlopsCalc.single_image_arith_intensity  # FLOP/byte
     # Launched operations per step: 3 forward layers (bias + ReLU fused), loss,
     # 5 backward matrix products (no input gradient for raw pixels), 2 ReLU
     # masks, and 1 fused optimizer update.
@@ -4121,7 +4149,7 @@ class EpochTimeEnergy:
     check(total_cpu < total_acc, "At this scale the CPU should finish the epoch first.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    _ms = lambda q: round(q.to(millisecond).magnitude) * millisecond   # whole milliseconds for prose
+    _ms = lambda q: round(q.to(millisecond).magnitude) * millisecond  # whole milliseconds for prose
     steps_str = fmt(steps, precision=0, commas=True)
     flops_step_mflop_str = fmt_flops(flops_step, unit=MFLOPs, precision=1, commas=False)
     work_cpu_ms_str = fmt_time(_ms(work_epoch_cpu), unit="millisecond", precision=0, commas=False)
@@ -4196,7 +4224,6 @@ If any concepts feel unclear, review the earlier sections on forward passes, los
 Training transforms randomly initialized weights into parameters that encode useful patterns, but deployment executes those parameters under a different resource profile. During inference,\index{Inference!deployment phase}\index{Training vs. inference!resource differences}[^fn-inference-phase-shift] the same mathematical operators face a different operating regime: online latency deadlines or offline throughput targets replace the training objective, gradients and optimizer state disappear from memory, and target execution environments range from milliwatt edge processors to multi-accelerator cloud servers. This transition reshapes how memory bandwidth, compute capacity, and pipeline stages govern system performance. Because ordinary inference never updates the weights, a deployed model adapts to a changing world only through monitored data collection, validation, and retraining, a loop that operations practice owns.
 
 [^fn-inference-phase-shift]: **Inference**\index{Inference!etymology}: From Latin *inferre* ("to bring in, to conclude"), borrowed from logic where it means deriving conclusions from premises. The ML usage marks a systems boundary: training executes forward and backward passes and maintains optimizer state, while ordinary inference executes the forward graph with frozen parameters. Removing gradients, optimizer state, and most saved activations can reduce memory and computation substantially, but the ratio depends on architecture, batch size, precision, runtime workspace, and serving strategy.
-
 
 The training memory estimate of @sec-neural-computation-memory-training-vs-inference counted four kinds of state. Inference keeps exactly one of them, the weights, and replaces the saved activations with a pair of short-lived buffers. Persistent weights plus rolling activations is the whole of inference memory for a feed-forward network, and this section quantifies that contrast for the running network, then shows how batching trades latency for reuse and why the stages around the network can dominate once the network itself is fast.
 
@@ -5013,12 +5040,12 @@ The 1989 ZIP-code study reported its model, recognition, throughput, and trainin
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Metric**              |                               **Reported Result**                                |
+| **Metric**              | **Reported Result**                                                              |
 |:------------------------|:---------------------------------------------------------------------------------|
-| **Error and rejection** |           1% classification error after rejecting 12.1% of test digits           |
+| **Error and rejection** | 1% classification error after rejecting 12.1% of test digits                     |
 | **Throughput**          | 10–12 classifications/sec including acquisition; over 30/sec after normalization |
-| **Model parameters**    |               ~`{python} UspsLenetSpecs.lenet_1_params_count_str`                |
-| **Training**            |                23 passes; about 3 days on a Sun-4/260 workstation                |
+| **Model parameters**    | ~`{python} UspsLenetSpecs.lenet_1_params_count_str`                              |
+| **Training**            | 23 passes; about 3 days on a Sun-4/260 workstation                               |
 
 : **Early ZIP-Code Recognition Results**: Measurements from the 1989 backpropagation system applied to USPS-supplied digit images. The rejection result shows why an operational error rate must be read together with the fraction of inputs withheld from automatic classification [@lecun1989]. {#tbl-usps-numbers}
 
@@ -5075,7 +5102,7 @@ class DamMnistLedger:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     side = 28
-    side_doubled = 56          # scenario assumption: doubled input resolution
+    side_doubled = 56  # scenario assumption: doubled input resolution
     h1 = 128
     total_macs = 784 * 128 + 128 * 64 + 64 * 10
 
@@ -5223,7 +5250,6 @@ Teams assume automatic feature learning removes the need for domain knowledge. S
 Engineers assume that stacking more layers is the primary path to higher accuracy, since depth enables hierarchical feature extraction. In practice, depth alone encounters diminishing returns. ResNet showed that very deep residual networks can train effectively, yet its 1,202-layer CIFAR-10 network tested worse than its 110-layer counterpart [@he2016]. EfficientNet, a family of image classifiers, later demonstrated that compound scaling of width, depth, and input resolution can outperform depth-only scaling at a given resource budget [@tan2019efficientnet]. Depth is not the problem. Teams should profile capacity utilization and scale the dimension that gives the best accuracy per FLOP, since depth adds sequential steps and saved activations while width adds arithmetic inside each step (@eq-depth-width-cost).
 
 :::
-
 
 ::: {.fallacy-pitfall}
 

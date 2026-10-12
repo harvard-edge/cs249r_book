@@ -14,20 +14,20 @@ This appendix is designed as a reference. Reach for it when translating a profil
 
 Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
 
-| **Symptom or need**                                                   | **Section**                                                        |
-|:----------------------------------------------------------------------|:-------------------------------------------------------------------|
-| A general matrix multiply (GEMM) runs far below peak throughput        | @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d  |
-| Sparsity is proposed to save memory or compute                         | @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0         |
-| A layer's parameters and FLOPs are needed before hardware is chosen    | @sec-appdx-algorithm-foundations-computational-complexity-cheat-sheet-0c6c |
-| Tensor code fails on shape or contiguity, or a copy dominates a loop   | @sec-appdx-algorithm-foundations-shapes-strides-1aea                |
-| A broadcast allocates a much larger tensor than intended               | @sec-appdx-algorithm-foundations-broadcasting-ec16                  |
-| Gradients look wrong, or the backward pass costs more than expected    | @sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7     |
-| Training runs out of memory                                            | @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e     |
-| A chain of elementwise operations is memory bound                      | @sec-appdx-algorithm-foundations-operator-fusion-5d73               |
-| Softmax overflows, or the loss becomes NaN in reduced precision        | @sec-appdx-data-foundations-logits-numerical-stability-13e2         |
-| A bound on gradient cost relative to the forward pass                  | @sec-appdx-algorithm-baur-strassen                                  |
-| Attention memory or traffic grows with sequence length                 | @sec-appdx-algorithm-flash-attention                                |
-| A compute budget must be split between parameters and training tokens  | @sec-appdx-algorithm-chinchilla-derivation                          |
+| **Symptom or need**                                                   | **Section**                                                                |
+|:----------------------------------------------------------------------|:---------------------------------------------------------------------------|
+| A general matrix multiply (GEMM) runs far below peak throughput       | @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d         |
+| Sparsity is proposed to save memory or compute                        | @sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0                |
+| A layer's parameters and FLOPs are needed before hardware is chosen   | @sec-appdx-algorithm-foundations-computational-complexity-cheat-sheet-0c6c |
+| Tensor code fails on shape or contiguity, or a copy dominates a loop  | @sec-appdx-algorithm-foundations-shapes-strides-1aea                       |
+| A broadcast allocates a much larger tensor than intended              | @sec-appdx-algorithm-foundations-broadcasting-ec16                         |
+| Gradients look wrong, or the backward pass costs more than expected   | @sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7            |
+| Training runs out of memory                                           | @sec-appdx-algorithm-foundations-true-cost-training-memory-e54e            |
+| A chain of elementwise operations is memory bound                     | @sec-appdx-algorithm-foundations-operator-fusion-5d73                      |
+| Softmax overflows, or the loss becomes NaN in reduced precision       | @sec-appdx-data-foundations-logits-numerical-stability-13e2                |
+| A bound on gradient cost relative to the forward pass                 | @sec-appdx-algorithm-baur-strassen                                         |
+| Attention memory or traffic grows with sequence length                | @sec-appdx-algorithm-flash-attention                                       |
+| A compute budget must be split between parameters and training tokens | @sec-appdx-algorithm-chinchilla-derivation                                 |
 
 : **Where to Look**: Each row pairs a profiler symptom or a design question with the section that carries its derivation or reference formula. {#tbl-appdx-algorithm-lookup tbl-colwidths="[55,45]"}
 
@@ -70,7 +70,7 @@ In attention mechanisms, query ($\AttentionQueryMatrix$) and key ($\AttentionKey
 
 ### General matrix multiply (GEMM) {#sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d}
 
-Most training and inference FLOPs are GEMMs[^fn-gemm-blas-routines]. For matrices of size $\GemmRowDimension{\times}\GemmInnerDimension$ and $\GemmInnerDimension{\times}\GemmColumnDimension$, GEMM performs $2\GemmRowDimension \GemmColumnDimension \GemmInnerDimension$ floating-point operations (multiply-accumulate counts as two operations).
+Most training and inference FLOPs are GEMMs.[^fn-gemm-blas-routines] For matrices of size $\GemmRowDimension{\times}\GemmInnerDimension$ and $\GemmInnerDimension{\times}\GemmColumnDimension$, GEMM performs $2\GemmRowDimension \GemmColumnDimension \GemmInnerDimension$ floating-point operations (multiply-accumulate counts as two operations).
 
 [^fn-gemm-blas-routines]: **General matrix multiply (GEMM)**\index{GEMM!appendix refresher}: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine [@dongarra1988]. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\GemmOutputMatrix= \GemmProductScale\GemmLeftOperand\GemmRightOperand+ \GemmAccumulatorScale\GemmOutputMatrix$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
 
@@ -465,7 +465,7 @@ Compilers transform graphs into static single-assignment (SSA) form\index{Static
 
 #### Operator fusion {#sec-appdx-algorithm-foundations-operator-fusion-5d73}
 
-Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to HBM and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero, which makes them strongly memory bound.
+Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to high-bandwidth memory (HBM) and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero, which makes them strongly memory bound.
 
 Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $\ChainedOperationCount$ elementwise operations on a tensor of $\TensorElementCount$ elements of $\ElementStorageSize$ bytes each, fusion reduces memory traffic from $2\ChainedOperationCount \TensorElementCount\ElementStorageSize$ bytes (each operation reads and writes) to $2\TensorElementCount\ElementStorageSize$ bytes (one read, one write), a $\ChainedOperationCount\times$ reduction. @Sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 develops fusion as a framework decision, and @sec-hardware-acceleration-kernel-fusion-7faf shows the accelerator-side limits on how much a single kernel can fuse.
 
@@ -695,7 +695,7 @@ The independence of $\ReverseModeWorkConstant\le 5$ from input dimension $\Funct
 * **Reverse-mode backward pass**: Computes both weight gradients $\frac{\partial \LossFunction}{\partial \WeightMatrix} = \LayerInputMatrix^T \frac{\partial \LossFunction}{\partial \LayerOutputMatrix}$ ($2\Parameters$ FLOPs) and input activation gradients $\frac{\partial \LossFunction}{\partial \LayerInputMatrix} = \frac{\partial \LossFunction}{\partial \LayerOutputMatrix} \WeightMatrix^T$ ($2\Parameters$ FLOPs), totaling $4\Parameters$ FLOPs per token.
 * **Total training work**: $2\Parameters(\text{fwd}) + 4\Parameters(\text{bwd}) = 6\Parameters$ FLOPs per token. The backward compute factor is exactly $\frac{4\Parameters}{2\Parameters} = 2$, well within the Baur–Strassen theoretical bound of $\ReverseModeWorkConstant\le 5$.
 
-If we instead used forward-mode AD or finite differences to compute $\nabla \ScalarGraphFunction\in \mathbb{R}^\Parameters$, evaluating each partial derivative separately would require $\Parameters$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla \ScalarGraphFunction) = \mathcal{O}(\Parameters\cdot \ElementaryOperationCount) = \mathcal{O}(\Parameters^2)$ FLOPs. For $\Parameters= 175 \times 10^9$, that method would require $2 \times (175 \times 10^9)^2 \approx 6.1 \times 10^{22}$ FLOPs per token, $\Parameters$ times the forward-pass work and therefore prohibitive at this scale. Reverse-mode AD replaces this $\mathcal{O}(\Parameters)$ factor with a constant multiplier of 2 for the dense-layer accounting above.
+If we instead used forward-mode automatic differentiation (AD) or finite differences to compute $\nabla \ScalarGraphFunction\in \mathbb{R}^\Parameters$, evaluating each partial derivative separately would require $\Parameters$ forward passes: $\text{Work}_{\text{ForwardMode}}(\nabla \ScalarGraphFunction) = \mathcal{O}(\Parameters\cdot \ElementaryOperationCount) = \mathcal{O}(\Parameters^2)$ FLOPs. For $\Parameters= 175 \times 10^9$, that method would require $2 \times (175 \times 10^9)^2 \approx 6.1 \times 10^{22}$ FLOPs per token, $\Parameters$ times the forward-pass work and therefore prohibitive at this scale. Reverse-mode AD replaces this $\mathcal{O}(\Parameters)$ factor with a constant multiplier of 2 for the dense-layer accounting above.
 
 :::
 

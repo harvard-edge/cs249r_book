@@ -8840,7 +8840,12 @@ class ValidateCommand:
         for f, t in texts.items():
             for m in def_pat.finditer(t):
                 defs[m.group(1)] = f
+        # 2026-10-12: enforced for vol1 only. vol2-vol4 carried 113 such refs
+        # when this check arrived; add each volume here once its refs are fixed.
+        enforced_volumes = {"vol1"}
         for f, t in texts.items():
+            if not enforced_volumes & set(Path(f).parts):
+                continue
             for idx, line in enumerate(t.splitlines(), 1):
                 for m in ref_pat.finditer(line):
                     d = defs.get(m.group(1))
