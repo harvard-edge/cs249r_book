@@ -1,4 +1,5 @@
 ---
+number-offset: [8]
 quiz: data_selection_quizzes.json
 concepts: data_selection_concepts.yml
 engine: jupyter
@@ -43,7 +44,7 @@ notation-local: [\CandidateScoringCost, \CenterCount, \CleanLabelSampleCount, \C
 
 _How can a carefully selected subset retain most of the value of a much larger dataset?_
 
-Training pays to acquire, label, score, move, and process examples even though their learning value differs. Large datasets contain redundant, noisy, or target-misaligned samples, while scarce regions may lack the cases a model needs, such as the rare conditions under which a deployed system is most likely to fail. Training on every example treats a near-duplicate and a rare failure case as equally worth paying for, and at scale much of the compute budget can go to relearning what the model already knows. Data selection turns that heterogeneity into a systems optimization. It can remove avoidable work before training, direct labels and training steps toward informative cases as learning proceeds, or create missing examples when scarcity is the binding constraint. It can also invest once in reusable representation learning when that cost can be amortized across downstream tasks. The objective is therefore not the smallest dataset but the lowest end-to-end cost of reaching target quality without losing rare cases, underrepresented groups, or deployment-relevant coverage. Every strategy adds its own overhead: examples must be scored, generated, shuffled, stored, or validated, and those costs can erase the savings they promise. That judgment must be made end to end, because gains in labeling or training can be erased by selection latency, storage access, or distributed coordination. A method is worth applying only when the learning it preserves or creates exceeds the work required to apply it. This distinction matters across repeated experiments, where useful reductions compound, and across adaptation, where the value of an example changes with the model and target distribution. Data engineering established that data is the source code of ML systems; data selection asks which evidence is useful now and which is still missing. In D·A·M terms, it is data-algorithm co-design: shape the training signal so each unit of machine work yields more useful learning.
+Training pays to acquire, label, score, move, and process examples even though their learning value differs. Large datasets contain redundant, noisy, or target-misaligned samples, while scarce regions may lack the cases a model needs, such as the rare conditions under which a deployed system is most likely to fail. Training on every example treats a near-duplicate and a rare failure case as equally worth paying for, and at scale much of the compute budget can go to relearning what the model already knows. That heterogeneity turns the choice of examples into a systems optimization rather than a data-cleaning chore. The objective is therefore not the smallest dataset but the lowest end-to-end cost of reaching target quality without losing rare cases, underrepresented groups, or deployment-relevant coverage. Every strategy adds its own overhead: examples must be scored, generated, shuffled, stored, or validated, and those costs can erase the savings they promise. That judgment must be made end to end, because gains in labeling or training can be erased by selection latency, storage access, or distributed coordination. A method is worth applying only when the learning it preserves or creates exceeds the work required to apply it. This distinction matters across repeated experiments, where useful reductions compound, and across adaptation, where the value of an example changes with the model and target distribution. In D·A·M terms, it is data-algorithm co-design: shape the training signal so each unit of machine work yields more useful learning.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -65,7 +66,7 @@ Training pays to acquire, label, score, move, and process examples even though t
 
 ## The Data Wall {#sec-data-selection-data-selection-fundamentals-e839}
 
-The **data wall**\index{Data wall!definition} is the point at which the compute available for training grows faster than the supply of novel, high-quality examples to spend it on.[^fn-data-wall-scaling] Every example a training run processes costs the same forward pass, backward pass, and optimizer update, whether it teaches the model something new or repeats what the model already knows. A duplicated image, a mislabeled record, and a rare boundary case cost the same arithmetic but do not contribute the same learning signal. @Sec-model-training made each of those steps as cheap as one machine allows and accounted for a whole run as roughly $6\Parameters\DatasetSize$ floating-point operations for $\Parameters$ parameters and $\DatasetSize$ tokens. Once each step is cheap, the next saving lies upstream, in which examples deserve a step at all. That question opens the optimization sequence of Part III. Before any technique simplifies or accelerates the work, data selection asks whether the work is necessary.
+The **data wall**\index{Data wall!definition} is the point at which the compute available for training grows faster than the supply of novel, high-quality examples to spend it on.[^fn-data-wall-scaling] Every example a training run processes costs the same forward pass, backward pass, and optimizer update, whether it teaches the model something new or repeats what the model already knows. A duplicated image, a mislabeled record, and a rare boundary case cost the same arithmetic but do not contribute the same learning signal. @Sec-model-training made each of those steps as cheap as one machine allows and accounted for a whole run as roughly $6\Parameters\DatasetSize$ floating-point operations for $\Parameters$ parameters and $\DatasetSize$ tokens. Once each step is cheap, the next saving lies upstream, in which examples deserve a step at all. @Sec-model-training costed a full GPT-2 XL run on one H100; this chapter asks how many of those steps were worth taking.
 
 ::: {.column-margin}
 ```{=latex}
@@ -80,81 +81,9 @@ Increasing the amount of training data has long been a standard way to improve m
 
 [^fn-scaling-laws-origin]: **Scaling laws**\index{Scaling laws!power-law origin}: Jared Kaplan and colleagues at Johns Hopkins and OpenAI empirically demonstrated in 2020 that language model loss follows power-law relationships with model size, dataset size, and compute budget over the regimes they studied [@kaplan2020scaling]. Their fitted data exponent was approximately $\Glyph{\alpha} = 0.095$ in $\LossFunction \propto \DataScalingLossFactor$. The value is not universal, but the diminishing-return shape makes it possible to reason about when selection becomes more cost-effective than collection.
 
-```{python}
-#| echo: false
-#| label: scaling-asymmetry-calc
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SCALING ASYMMETRY TABLE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-scaling-asymmetry in "Data Selection Fundamentals" section
-# │
-# │ Goal: Quantify the growth rate gap between compute and data.
-# │ Show: That compute grows 10×/3yr while data only grows 2×/5yr.
-# │ How: Contrast historical growth factors for TFLOP/s and high-quality tokens.
-# │
-# │ Scope: chapter-anchor — opening scaling-asymmetry table is reused by the
-# │        fallacies section as the chapter's data-wall callback.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_multiple, fmt_time
-
-# ┌── LEGO ───────────────────────────────────────────────
-class ScalingAsymmetry:
-    """
-    Namespace for Scaling Asymmetry Table.
-    Scenario: Comparing growth rates of Compute vs Data.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Hardware: 10x every 3 years (approx 2.15x/year)
-    gpu_growth_factor = 10.0
-    gpu_period_years = 3.0
-
-    # Data: 2x every 5 years (approx 1.15x/year)
-    web_growth_factor = 2.0
-    web_period_years = 5.0
-
-    # Labels: 1.5x every 5 years (approx 1.08x/year)
-    label_growth_factor = 1.5
-    label_period_years = 5.0
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Annualized growth rates: Rate = Factor^(1/Period)
-    gpu_annual = gpu_growth_factor ** (1.0 / gpu_period_years)
-    web_annual = web_growth_factor ** (1.0 / web_period_years)
-
-    # Step 2: Divergence
-    gap_ratio = gpu_annual / web_annual
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(gap_ratio >= 1.5, f"GPU growth ({gpu_annual:.2f}x/yr) is not fast enough vs. Data ({web_annual:.2f}x/yr). Gap: {gap_ratio:.2f}x")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpu_growth_mult_str = fmt_multiple(round(gpu_growth_factor), precision=0, commas=False)
-    # Custom "years" suffix uses fmt_int() suffix discipline.
-    gpu_period_years_str = fmt_time(round(gpu_period_years), 'year', precision=0, commas=False, style='word')
-
-    web_data_growth_mult_str = fmt_multiple(round(web_growth_factor), precision=0, commas=False)
-    web_data_period_years_str = fmt_time(round(web_period_years), 'year', precision=0, commas=False, style='word')
-
-    label_data_growth_mult_str = fmt_multiple(label_growth_factor, precision=1, commas=False)
-    label_data_period_years_str = fmt_time(round(label_period_years), 'year', precision=0, commas=False, style='word')
-```
-
-@Tbl-scaling-asymmetry uses an illustrative growth scenario in which GPU compute rises `{python} ScalingAsymmetry.gpu_growth_mult_str` every `{python} ScalingAsymmetry.gpu_period_years_str` while accessible high-quality data grows more slowly. These are scenario inputs, not measured universal rates.
-
-| **Resource**            |                                                                                                   **Growth Rate** | **Implication**                                                                   |
-|:------------------------|------------------------------------------------------------------------------------------------------------------:|:----------------------------------------------------------------------------------|
-| **GPU Compute**         |               ~`{python} ScalingAsymmetry.gpu_growth_mult_str` / `{python} ScalingAsymmetry.gpu_period_years_str` | Hardware throughput can rise quickly in a given era                               |
-| **Training Data (Web)** |     ~`{python} ScalingAsymmetry.web_data_growth_mult_str` / `{python} ScalingAsymmetry.web_data_period_years_str` | High-quality web text is finite; much already scraped                             |
-| **Labeled Data**        | ~`{python} ScalingAsymmetry.label_data_growth_mult_str` / `{python} ScalingAsymmetry.label_data_period_years_str` | Human annotation throughput is inherently bounded                                 |
-| **Synthetic Data**      |                                                                                                 Potentially large | Bounded by generator quality (models trained on model-generated data can degrade) |
-
-: **Scaling Asymmetry in ML Resources**: In the illustrated scaling regime, compute grows faster than high-quality data supply, creating a compute-to-data imbalance that makes data selection valuable. {#tbl-scaling-asymmetry .striped .hover tbl-colwidths="[16,13,71]"}
-
 [^fn-data-wall-scaling]: **Data wall**\index{Data wall!scaling constraint}: Unlike compute (which scales with capital expenditure) or algorithms (which improve through research), the stock of high-quality human-generated text grows slowly; Epoch AI's updated projections estimated that, under the paper's modeled consumption assumptions, models could use datasets roughly equal in size to the stock of public human-generated text between 2026 and 2032 [@villalobos2022will]. The point for systems design is not a fixed calendar deadline; it is that data can become a supply constraint rather than merely an economic one. The wall does not change how many operations $(\Operations)$ a run performs. It lowers the learning each of those operations yields, because once quality data runs short, additional compute spent on repeated or weaker data yields diminishing accuracy regardless of hardware throughput.
 
-Scaling dataset size eventually encounters the finite stock of high-quality human speech and text. Foundation-model training sets have grown steeply, and @fig-running-out-of-human-data shows the largest of them closing on the estimated stock of public text, between $10^{14}$ and $10^{15}$ tokens. That is the wall at frontier scale, on fleets far larger than one machine.
+Scaling dataset size eventually encounters the finite stock of high-quality human speech and text. @Sec-data-engineering measured that climb, and @fig-running-out-of-human-data sets the largest training corpora against the estimated stock of public text, between $10^{14}$ and $10^{15}$ tokens, which they reach late this decade at the fitted rate. That is the wall at frontier scale, on fleets far larger than one machine.
 
 GPT-2 XL\index{GPT-2!data selection} shows the same wall on one machine. The arithmetic needs only the corpus size, the token budget of the original run, and the fitted compute-optimal balance between parameters and tokens.
 
@@ -333,7 +262,7 @@ A learning-theory view of this problem counts the samples needed to reach a test
 
 The engineering toolkit for intelligent data selection follows a deliberate optimization ordering\index{Data selection!optimization ordering}, first asking whether a sample is worth processing and only then how to process the remaining workload efficiently. Static pruning\index{Static pruning!definition} fixes the retained subset before target-model training; scoring may itself require proxy training. Dynamic selection\index{Dynamic selection!definition} adapts which examples the training loop sees, and which receive labels, as training proceeds, through curriculum learning and active learning. Synthetic generation\index{Synthetic data generation!definition} creates high-value samples through augmentation, simulation, or examples labeled by a larger trained model (a *teacher*) when real data runs short.
 
-Each stage can increase the information density of the data that reaches the model when measured quality gains justify its overhead, forming a complementary toolkit rather than a rigid execution sequence: pruning reduces *what* the pipeline contains, dynamic selection focuses *how* the training loop schedules it, and synthesis expands *what* the pipeline can access. Learning from unlabeled data complements these three levers by redefining what constitutes a supervision signal; rather than selecting among labeled examples, semi-supervised and self-supervised methods derive learning targets from the structure of unannotated data. The three levers act at different points of the pipeline, before training, during it, and on demand, and their use and ordering depend on the workload (@fig-data-selection-pipeline).
+Learning from unlabeled data complements these three levers by redefining what constitutes a supervision signal; rather than selecting among labeled examples, semi-supervised and self-supervised methods derive learning targets from the structure of unannotated data. The three levers act at different points of the pipeline, before training, during it, and on demand, and their use and ordering depend on the workload (@fig-data-selection-pipeline).
 
 ::: {#fig-data-selection-pipeline fig-cap="**An Example Data Selection Pipeline**: One possible combination of interventions for increasing data value. The three intervention points are Static Pruning before target training, Dynamic Selection during training, and Synthetic Generation on demand. The sequence is illustrative rather than required: synthetic data can enter independently and can itself be pruned or dynamically selected. The final evaluation determines whether the quality gain justifies the compute cost through the Information-Compute Ratio (ICR)." fig-alt="Illustrative flow diagram from raw data through static pruning, dynamic selection, and synthetic generation to a model. The final arrow is labeled Evaluate ICR. Labels place pruning before target training, dynamic selection during training, and generation on demand."}
 ```{.tikz}
@@ -551,7 +480,7 @@ filllcolor=cyan!90!,Linewidth=0.7pt, filllcirclecolor=cyan!20}};
 
 :::
 
-Two lighthouses carry the chapter, one in each half. GPT-2 XL, bandwidth-bound when it decodes one token at a time but compute-bound when it trains on long batches (@sec-model-training), carries the first half: the wall itself, the compute-optimal diagnosis of whether a run is data-starved, and the deduplication and quality filtering that decide which of its tokens are worth six FLOPs per parameter. ResNet-50 on ImageNet\index{ResNet-50!data selection}, the book's compute-bound lighthouse, carries the second half: coreset selection, curriculum ordering, labels, augmentation, the input pipeline that must feed it, and the decision of which lever to fund. Its training crosses into an input-bound regime whenever the host cannot decode images as fast as the accelerator consumes them (@sec-model-training-staged-pipeline), and that crossing returns when selection runs on the machine. The measures of value in the next section use both. Both lighthouses run on the book's reference machine, the H100, so every saving can be stated in accelerator seconds and joules. The recommendation lighthouse (DLRM), MobileNetV2, and keyword spotting return only in the closing comparison of @sec-data-selection-decision-framework-0261, where each turns out to be bound by a different resource.
+Two lighthouses carry the chapter, each in its own role. GPT-2 XL, bandwidth-bound when it decodes one token at a time but compute-bound when it trains on long batches (@sec-model-training), carries the wall itself, the compute-optimal diagnosis of whether a run is data-starved, and token-level deduplication. ResNet-50 on ImageNet\index{ResNet-50!data selection}, the book's compute-bound lighthouse, carries coresets, labels, augmentation, the input pipeline that must feed it, and the decision of which lever to fund. Its training crosses into an input-bound regime whenever the host cannot decode images as fast as the accelerator consumes them (@sec-model-training-staged-pipeline), and that crossing returns when selection runs on the machine. The measures of value in the next section use both. Both lighthouses run on the book's reference machine, the H100, so every saving can be stated in accelerator seconds and joules. The recommendation lighthouse (DLRM), MobileNetV2, and keyword spotting return only in the closing comparison of @sec-data-selection-decision-framework-0261, where each turns out to be bound by a different resource.
 
 Every lever in the chapter removes work at one stage of the machine and adds work of its own, so each must pass a test before it is accepted (@tbl-data-selection-chapter-spine). Measuring data value builds the yardsticks: the information-compute ratio, learning-curve metrics, the compute-optimal diagnosis, and the selection inequality. Static pruning removes duplicates, defective records, and redundant examples before training. Dynamic selection reorders examples and chooses which ones receive labels as the model learns. Synthetic data generation creates the examples the corpus lacks, and learning from unlabeled data replaces labels with structure the data already contains. Selection engineering runs those levers on the machine without starving the accelerator, including across several accelerators. Choosing a selection strategy compares the cost of each lever and picks among them, and the cross-layer section hands the curated result to model compression.
 
@@ -1210,7 +1139,7 @@ Web-scale scraping routinely gathers boilerplate text, duplicate images, and mal
 
 Empirical scaling studies show that dataset volume alone does not dictate model accuracy: large-scale corpora harbor substantial redundancy\index{Data redundancy!empirical evidence}. In many regimes, a significant fraction of training examples contributes negligible gradient signal while consuming full forward-backward compute.
 
-On CIFAR-10, @paul2021deep report that EL2N pruning (which scores each example by its prediction error early in training) removed half of the training data without reducing accuracy. On ImageNet-1K, @ganguli2022 report that a self-supervised prototype metric discarded 20 percent of the data without sacrificing performance. The pattern extends to language modeling, where web-scraped corpora like The Pile[^fn-the-pile-diversity] and C4[^fn-c4-dataset-filtering] contain enough duplicate and templated content to make deduplication a systems issue. In datasets studied by @lee2022, approximate near-duplicate removal affected 3.04 percent of C4 and 13.63 percent of RealNews, and deduplicated training reduced memorization while preserving or improving perplexity.
+On CIFAR-10, @paul2021deep report that EL2N pruning (which scores each example by its prediction error early in training) removed half of the training data without reducing accuracy. On ImageNet-1K, @ganguli2022 report that a self-supervised prototype metric discarded 20 percent of the data without sacrificing performance. The pattern extends to language modeling, where web-scraped corpora like The Pile[^fn-the-pile-diversity] and C4[^fn-c4-dataset-filtering] contain enough duplicate and templated content to make deduplication a systems issue. In the datasets studied by @lee2022, deduplicated training reduced memorization while preserving or improving perplexity.
 
 [^fn-the-pile-diversity]: **The Pile**\index{Pile, The!data diversity}: An approximately 886 GB English text corpus (reported as 825 gibibytes by the source) aggregating twenty-two sub-datasets, including PubMed, ArXiv, GitHub, Project Gutenberg, Common Crawl, Stack Exchange, Wikipedia, and USPTO patents [@gao2020pile]. Its multi-source design makes it a useful example of data diversity: each source family has a different duplication, quality, and domain-coverage profile, so selection pipelines must preserve coverage while removing redundant text.
 
@@ -2317,7 +2246,7 @@ class DistillationTargets:
 
 For ResNet-50 on ImageNet the offline footprint is concrete. Storing FP32 logits for `{python} DistillationTargets.classes_str` classes across every training image takes `{python} DistillationTargets.logit_store_str`, against `{python} DistillationTargets.label_store_str` for the integer labels they replace, a `{python} DistillationTargets.expansion_mult_str` expansion that every epoch must read back through the input pipeline. That storage and read traffic, rather than the loss function, is what data selection must budget for.
 
-Together, transformation-based augmentation (@sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7), generative synthesis (@sec-data-selection-generative-synthesis-creating-new-samples-a43d), and supervisory distillation provide complementary ways to generate training signals. Synthetic generation manufactures missing signals when empirical collection hits physical, legal, or economic constraints. Orchestrating these techniques across the data, algorithm, and machine dimensions requires balancing data storage footprint, pipeline preprocessing throughput, and accelerator utilization within a unified systems budget.
+Together, transformation-based augmentation (@sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7), generative synthesis (@sec-data-selection-generative-synthesis-creating-new-samples-a43d), and supervisory distillation provide complementary ways to generate training signals. Synthetic generation manufactures missing signals when empirical collection hits physical, legal, or economic constraints. 
 
 Generation supplies labeled examples the corpus lacks. A complementary route reduces how many labels training needs in the first place, by extracting supervision from the unlabeled data the corpus already holds.
 
@@ -2581,7 +2510,7 @@ The systems trade-off in semi-supervised learning exchanges labeling effort for 
 
 The efficiency column counts labels only, relative to the full labeled set. It does not claim that FixMatch matches a fully supervised model, which would have to be compared at equal accuracy. These efficiency gains also depend on benign distribution assumptions. Semi-supervised learning assumes that unlabeled data comes from the same distribution as labeled data, and it struggles when unlabeled data contains out-of-distribution samples (the model confidently mislabels them), when class imbalance is severe (pseudo-labels amplify majority class bias), or when the labeled set does not cover all classes (preventing label propagation for unseen classes). Always validate on a held-out set with true labels to catch distribution mismatch.
 
-Despite these limitations, semi-supervised learning can reduce label requirements while maintaining accuracy on suitable tasks. Across the techniques, coreset selection and deduplication prune low-value samples before training; curriculum learning changes the presentation order; active learning chooses which samples receive human annotation; and semi-supervised learning extracts additional signal from an unlabeled pool. Each technique can reduce dependence on task-specific labels, but none eliminates the need for labeled evaluation. The progression raises a related possibility, that task-specific labels may not be necessary for pretraining. The structure of data itself (cat images resemble other cat images, and coherent sentences follow grammatical patterns) may provide a supervision signal, while downstream quality still requires task-aligned validation.
+Despite these limitations, semi-supervised learning can reduce label requirements while maintaining accuracy on suitable tasks.  Each technique can reduce dependence on task-specific labels, but none eliminates the need for labeled evaluation. The progression raises a related possibility, that task-specific labels may not be necessary for pretraining. The structure of data itself (cat images resemble other cat images, and coherent sentences follow grammatical patterns) may provide a supervision signal, while downstream quality still requires task-aligned validation.
 
 ### Self-supervised learning {#sec-data-selection-selfsupervised-learning-7518}
 
@@ -3165,7 +3094,7 @@ class RandomAccessPenalty:
 
 Data loaders\index{Data loading!shard-based sequential I/O} resolve this conflict through data-machine co-design. Sharded dataset formats, such as WebDataset and FFCV, pack thousands of individual examples into contiguous, sequentially readable archive chunks. Rather than fetching scattered individual samples from disk, the loader streams large sequential shards into host memory and populates a **shuffle buffer**\index{Shuffle buffer!approximate random sampling}. The training loop samples pseudo-randomly from this in-memory buffer, preserving peak storage read bandwidth while satisfying the statistical requirement of randomized mini-batches.
 
-Converting a logical set of selected indices into sequential physical reads requires choosing between two storage strategies. For static pruning (such as a fixed coreset or a deduplicated corpus), the pipeline can materialize the subset offline by repacking the retained records into new, contiguous shards. This step incurs a one-time sequential read and write cost alongside additional disk storage, but ensures that every subsequent training epoch transfers only retained bytes from storage. Conversely, when the selection policy updates dynamically across training iterations or active-learning rounds, repeatedly repacking multi-terabyte shards on disk would choke the filesystem on write bandwidth. Data loaders instead stream the original, full-volume shards sequentially into host memory and discard unselected records before populating the shuffle buffer. This online filtering preserves sequential read throughput and eliminates seek penalties, but it leaves physical storage traffic unchanged: the host continues to read 100 percent of the corpus bytes from disk even when accelerators train on only a 10 percent subset. Systems engineers must price this ongoing read traffic on storage-bound nodes and include offline materialization costs when evaluating the selection inequality.
+Converting a logical set of selected indices into sequential physical reads requires choosing between two storage strategies. For static pruning (such as a fixed coreset or a deduplicated corpus), the pipeline can materialize the subset offline by repacking the retained records into new, contiguous shards. This step incurs a one-time sequential read and write cost alongside additional disk storage, but ensures that every subsequent training epoch transfers only retained bytes from storage. Conversely, when the selection policy updates dynamically across training iterations or active-learning rounds, repeatedly repacking multi-terabyte shards on disk would choke the filesystem on write bandwidth. Data loaders instead stream the original, full-volume shards sequentially into host memory and discard unselected records before populating the shuffle buffer. This online filtering preserves sequential read throughput and eliminates seek penalties, but it leaves physical storage traffic unchanged: the host continues to read 100 percent of the corpus bytes from disk even when accelerators train on only a 10 percent subset. Systems engineers must count this ongoing read traffic on storage-bound nodes and include offline materialization costs when evaluating the selection inequality.
 
 In distributed training across multiple accelerators, each worker maintains an independent shuffle buffer over a non-overlapping shard. Because randomization is local to each worker's memory buffer rather than global across the corpus, rare classes or boundary cases concentrated in specific shards receive uneven exposure across workers unless the dataset is stratified and shards are balanced prior to distribution.
 
@@ -3364,7 +3293,7 @@ The scoring schedule therefore defines the meaning of a query, not merely its co
 
 Several strategies mitigate this staleness problem, each with distinct overhead characteristics:
 
-- **Synchronous scoring**\index{Synchronous scoring!active learning}: All workers pause training and score simultaneously, guaranteeing consistency but at substantial cost in GPU utilization.
+- **Synchronous scoring**\index{Synchronous scoring!active learning}: All workers pause training and score simultaneously, guaranteeing consistency but at substantial cost in accelerator utilization.
 - **Periodic score refresh**\index{Periodic score refresh!active learning}: Workers re-score every $\ScoreRefreshInterval$ epochs rather than every batch, trading freshness for reduced overhead.
 - **Checkpoint-robust selection**: The system selects samples that exhibit high uncertainty under multiple model checkpoints, favoring decisions that are less sensitive to checkpoint choice. Agreement across past checkpoints is a robustness heuristic; ranking quality still needs validation as the model evolves.
 
@@ -3630,7 +3559,7 @@ class CostBreakdown:
 
 : **Illustrative ImageNet-Scale Cost Breakdown**: Itemized acquisition, labeling, storage, and compute costs under the stated scenario assumptions. Each amount follows from the rate shown beside it, using the book's published crowd-labeling, object-storage, and cloud-GPU rates. Data costs dominate this particular calculation because licensing and annotation are included while the training run itself is short. {#tbl-data-selection-imagenet-cost-breakdown tbl-colwidths="[30,38,32]"}
 
-**Systems insight**: Acquisition and labeling can dwarf compute cost in supervised vision workloads, as they do under these assumptions. The compute figure covers the whole training campaign at the compute-bound rate of notebook \ref{nbk-data-selection-pruned-epoch-h100}, not one run: a published model is the survivor of sweeps, restarts, and ablations, and costing a single run would understate compute roughly thirtyfold. Even so, acquisition and labeling remain the larger share. The run count is an assumption like any other, so a complete ROI calculation must state it and price both categories rather than assuming which one dominates.
+**Systems insight**: Acquisition and labeling can dwarf compute cost in supervised vision workloads, as they do under these assumptions. The compute figure covers the whole training campaign at the compute-bound rate of notebook \ref{nbk-data-selection-pruned-epoch-h100}, not one run: a published model is the survivor of sweeps, restarts, and ablations, and costing a single run would understate compute roughly thirtyfold. Even so, acquisition and labeling remain the larger share. The run count is an assumption like any other, so a complete ROI calculation must state it and count both categories rather than assuming which one dominates.
 
 :::
 
@@ -3661,7 +3590,7 @@ The balance between investment and savings varies across selection strategies. @
 \endgroup
 ```
 
-The profiles in @tbl-roi-profiles demonstrate that data savings never come for free. Deduplication requires an upfront investment in hashing or embedding infrastructure, but can pay off across many epochs and runs by eliminating redundant storage and compute. Coreset selection demands training a proxy model to score the dataset; it only breaks even if the compute saved by dropping samples exceeds the cost of that proxy training. Active learning shifts the cost from human labelers to machine inference, generating high ROI when human time is expensive, though it introduces human-in-the-loop latency that can stall automated pipelines. Finally, data augmentation requires zero new data acquisition but shifts the burden to the CPU or GPU, trading compute cycles for effective dataset expansion. In all cases, a technique is worth adopting only when its specific benefit outweighs its structural investment.
+The profiles in @tbl-roi-profiles compare those costs directly. Deduplication requires an upfront investment in hashing or embedding infrastructure, but can pay off across many epochs and runs by eliminating redundant storage and compute. Coreset selection demands training a proxy model to score the dataset; it only breaks even if the compute saved by dropping samples exceeds the cost of that proxy training. Active learning shifts the cost from human labelers to machine inference, generating high ROI when human time is expensive, though it introduces human-in-the-loop latency that can stall automated pipelines. Finally, data augmentation requires zero new data acquisition but shifts the burden to the CPU or GPU, trading compute cycles for effective dataset expansion. In all cases, a technique is worth adopting only when its specific benefit outweighs its structural investment.
 
 ### Break-even analysis {#sec-data-selection-breakeven-analysis-9a38}
 
@@ -3866,7 +3795,7 @@ Once the dominant constraint is named, @tbl-technique-selection compares which t
 
 ::: {#lhs-data-selection-lighthouse-data-selection .callout-lighthouse title="Lighthouse data selection"}
 
-Data selection principles apply to all five lighthouse models, though the dominant constraint determines the technique. @Tbl-data-selection-lighthouse-priorities maps each workload to a priority. Compute-bound ResNet-50 training benefits from coreset selection, while GPT-2/Llama training relies on deduplication and quality filtering to cut the raw tokens it must process. MobileNetV2 is compute-bound in its efficient regime, and its binding deployment constraints, latency and power, apply at inference, where no choice of training data changes the cost of a prediction. The data lever that matters is therefore the one that helps a small model generalize, augmentation matched to its capacity (compact networks underfit under distortion that a large model absorbs), and the work is validating that the augmentation preserves the invariances the deployment environment requires. DLRM, the capacity-bound lighthouse, spends much of its terabyte-scale embedding capacity on cold IDs that appear rarely in training data. It uses interaction deduplication to cut redundant examples and embedding pruning to shrink those tables, but removing repeated interactions shrinks a table only when IDs disappear or the allocation, hashing, or sharing policy changes. Finally, keyword spotting, the power-bound lighthouse, is bound for data selection by a scarce, costly seed set as much as by its power and memory budget, and it overcomes that scarcity by using augmentation and synthesis to build robust datasets from minimal seed samples.
+Data selection principles apply to all five lighthouse models, though the dominant constraint determines the technique. @Tbl-data-selection-lighthouse-priorities maps each workload to a priority. Compute-bound ResNet-50 training benefits from coreset selection, while GPT-2 XL training relies on deduplication and quality filtering to cut the raw tokens it must process. MobileNetV2 is compute-bound in its efficient regime, and its binding deployment constraints, latency and power, apply at inference, where no choice of training data changes the cost of a prediction. The data lever that matters is therefore the one that helps a small model generalize, augmentation matched to its capacity (compact networks underfit under distortion that a large model absorbs), and the work is validating that the augmentation preserves the invariances the deployment environment requires. DLRM, the capacity-bound lighthouse, spends much of its terabyte-scale embedding capacity on cold IDs that appear rarely in training data. It uses interaction deduplication to cut redundant examples and embedding pruning to shrink those tables, but removing repeated interactions shrinks a table only when IDs disappear or the allocation, hashing, or sharing policy changes. Finally, keyword spotting, the power-bound lighthouse, is bound for data selection by a scarce, costly seed set as much as by its power and memory budget, and it overcomes that scarcity by using augmentation and synthesis to build robust datasets from minimal seed samples.
 
 ```{=latex}
 \begingroup
@@ -3876,7 +3805,7 @@ Data selection principles apply to all five lighthouse models, though the domina
 | **Lighthouse**       | **Primary Bottleneck**                         | **Data Selection Priority**                                                                                          |
 |:---------------------|:-----------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
 | **ResNet-50**        | Compute                                        | Coreset selection directly reduces training FLOPs                                                                    |
-| **GPT-2/Llama**      | Training compute (tokens $\times$ FLOPs/token) | Deduplication and quality filtering cut tokens processed; curriculum may improve token efficiency                    |
+| **GPT-2 XL**         | Training compute (tokens $\times$ FLOPs/token) | Deduplication and quality filtering cut tokens processed; curriculum may improve token efficiency                    |
 | **MobileNetV2**      | Latency/Power                                  | Validate augmentation against the target model and deployment invariances                                            |
 | **DLRM**             | Memory capacity                                | Interaction deduplication cuts examples; embedding pruning shrinks tables only when cold IDs are dropped or rehashed |
 | **Keyword Spotting** | Data scarcity (small seed set)                 | Augmentation and synthesis create datasets from minimal seeds                                                        |
@@ -4663,7 +4592,7 @@ The governing invariant of data selection is that training examples provide vast
 
 ::: {.callout-chapter-connection title="From data to algorithms"}
 
-Data selection changes *what* the system learns from, and its savings end where the trained model begins. A model trained on a carefully curated subset has the same parameter count, numerical precision, and memory footprint as one trained on the full corpus, so it can still overflow a phone's memory or leave inference bound by memory bandwidth. @Sec-model-compression turns to *how* the model represents what it has learned. It starts from the deployment envelope the model must fit and adjusts three things to fit it: the model's structure through pruning and distillation, its numerical precision through quantization, and the way the remaining operations map onto the hardware that executes them.
+Data selection changes *what* the system learns from. @Sec-model-compression turns to *how* the model represents what it has learned. It starts from the deployment envelope the model must fit and adjusts three things to fit it: the model's structure through pruning and distillation, its numerical precision through quantization, and the way the remaining operations map onto the hardware that executes them.
 
 :::
 
