@@ -284,3 +284,13 @@ class Series:
         "Throughput of one fixed eight-H100 system across MLPerf Inference rounds as its software changed.",
         numeric=("value",),
     )
+    AcceleratorFlopsPerWatt = TrendSeries(
+        "accelerator_flops_per_watt",
+        _lit("Epoch AI, Machine Learning Hardware database (CC BY 4.0), snapshot 2026-10-12",
+             "https://epoch.ai/data/machine-learning-hardware",
+             "accelerators with both a dense FP16/BF16 tensor rate and a TDP, released 2017 onward; "
+             "flops_per_w = fp16_tensor_flops / tdp_w, a peak-arithmetic ratio, not measured energy per "
+             "workload; board variants of one chip appear as separate rows, as in Epoch's table"),
+        "Dense FP16 tensor throughput per watt of TDP for ML accelerators by release date.",
+        numeric=("fp16_tensor_flops", "tdp_w", "flops_per_w"),
+    )
