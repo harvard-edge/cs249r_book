@@ -200,7 +200,7 @@ The consequence is a gap between failure cadence and job length. At `{python} Fl
 
 Scale and reliability diverge sharply across training generations. By pairing accelerator counts (left axis, log scale) with modeled system MTBF (opposing right axis), @fig-cluster-scaling-trend tracks how training fleets expanded by four orders of magnitude from 2012 (AlexNet on two GPUs) to 2024 (Llama 3 on over 16,000 GPUs), driven by the compute budgets that scaling laws reward (@sec-vol2-intro-ai-scaling-laws-a043). Applying the same per-device planning rate across those sizes compresses system MTBF from tens of thousands of hours to under ten hours. The opposing axis illustrates the scaling model rather than a history of measured failure rates, showing why recovery becomes an active scheduling constraint.
 
-::: {#fig-cluster-scaling-trend fig-env="figure" fig-pos="htb" fig-cap="**The rise of fleet-scale training**: Accelerator count for state-of-the-art training runs from 2012 to 2024, with system mean time between failures on the opposing axis. Cluster size rises about four orders of magnitude and system MTBF falls correspondingly, which is what turns fault tolerance from a reliability feature into a scheduling constraint." fig-alt="Log-scale scatter of training cluster accelerator count from 2012 (AlexNet, 2 GPUs) to 2024 (Llama 3, 16,384 GPUs) with a second axis for system mean time between failures. A red-shaded band with a dashed boundary marks the region where system MTBF falls under 10 hours; PaLM, GPT-4, and Llama 3 sit inside it. A double-headed arrow at the right spans AlexNet to Llama 3 and is labeled about 10 to the 4th times."}
+::: {#fig-cluster-scaling-trend fig-env="figure" fig-pos="htb" fig-cap="**The rise of fleet-scale training**: Accelerator count for state-of-the-art training runs from 2012 to 2024, with system mean time between failures on the opposing axis. Cluster size rises about four orders of magnitude and system MTBF falls correspondingly, which is what turns fault tolerance from a reliability feature into a scheduling constraint. Counts are published values except the hollow marker, an estimate of the 2020 Microsoft/OpenAI machine size; MTBF applies one per-device planning rate." fig-alt="Log-scale scatter of training cluster accelerator count from 2012 (AlexNet, 2 GPUs) through Megatron-LM, an estimated GPT-3-era machine (hollow marker), PaLM, LLaMA, and DeepSeek-V3 to 2024 (Llama 3, 16,384 GPUs), with a second axis for system mean time between failures. A red-shaded band with a dashed boundary marks the region where system MTBF falls under 10 hours; PaLM, the GPT-3-era machine, and Llama 3 sit inside it. A double-headed arrow at the right spans AlexNet to Llama 3 and is labeled about 10 to the 4th times."}
 
 ```{python}
 #| echo: false
@@ -214,22 +214,42 @@ fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
 color_accel = COLORS['BlueLine']
 color_mtbf = COLORS['RedLine']
 
-df = pd.read_csv("vol2/07_fault_tolerance/data/cluster_size_trend.csv")
-df_sorted = df.sort_values('year')
+from mlsysim import Literature, Models
 
-# Plot Accelerator count
-ax1.scatter(df['year'], df['accelerators'], s=60, color=color_accel, edgecolor='white', linewidth=0.8, zorder=3)
+# Same registry-backed landmark runs as the cluster-size figure in the
+# introduction; the GPT-3-era count is the 2020 Microsoft/OpenAI machine size.
+_runs = Literature.TrainingRuns
+df = pd.DataFrame(
+    [
+        ("AlexNet", 2012, float(_runs.AlexNetGpus), False),
+        ("Megatron-LM", 2019, float(_runs.MegatronLm2019Gpus), False),
+        ("GPT-3 machine (est.)", 2020, float(_runs.MicrosoftOpenAI2020Gpus), True),
+        ("PaLM", 2022, Models.Language.PaLM_540B.training_accelerators_ref.magnitude, False),
+        ("LLaMA", 2023, float(_runs.Llama1_65B_Gpus), False),
+        ("DeepSeek-V3", 2024, float(_runs.DeepSeekV3Gpus), False),
+        ("Llama 3", 2024, Models.Language.Llama3_405B.training_accelerators_ref.magnitude, False),
+    ],
+    columns=["model", "year", "accelerators", "estimated"],
+)
+df_sorted = df.sort_values(['year', 'accelerators'])
+
+# Plot Accelerator count (hollow marker = estimate, not a published count)
+_known, _est = df[~df['estimated']], df[df['estimated']]
+ax1.scatter(_known['year'], _known['accelerators'], s=60, color=color_accel, edgecolor='white', linewidth=0.8, zorder=3)
+ax1.scatter(_est['year'], _est['accelerators'], s=60, facecolors='white', edgecolors=color_accel, linewidth=1.6, zorder=3)
 
 # Annotate models
-for idx, row in df.iterrows():
-    y_offset = 10 if idx % 2 == 0 else -15
-    x_offset, ha = 0, 'center'
-    if row['model'].startswith('GPT-3'):
-        # Longer "(est)" label: place right of the point to clear GPT-2.
-        x_offset, y_offset, ha = 8, -12, 'left'
-    elif row['model'] == 'GPT-2':
-        # Upper-left keeps the label off the rising GPT-2 -> GPT-3 segment.
-        x_offset, y_offset, ha = -6, 6, 'right'
+_off = {
+    "AlexNet": (0, 10, 'center'),
+    "Megatron-LM": (0, 10, 'center'),
+    "GPT-3 machine (est.)": (-8, 6, 'right'),
+    "PaLM": (0, 10, 'center'),
+    "LLaMA": (-8, -4, 'right'),
+    "DeepSeek-V3": (-16, -16, 'center'),
+    "Llama 3": (-8, 4, 'right'),
+}
+for _, row in df.iterrows():
+    x_offset, y_offset, ha = _off[row['model']]
     ax1.annotate(
         row['model'], (row['year'], row['accelerators']), xytext=(x_offset, y_offset), textcoords='offset points', ha=ha, fontsize=10, alpha=0.9
     )
