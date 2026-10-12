@@ -251,3 +251,14 @@ class Series:
         "Time-to-train of MLPerf Training LLM benchmarks by accelerator count and system.",
         numeric=("accelerators", "runs", "min_minutes", "mean_minutes", "score_minutes", "global_batch_size", "trained_samples_median"),
     )
+    Llama3Interruptions = TrendSeries(
+        "llama3_interruptions",
+        _lit("Llama Team, AI @ Meta (2024), The Llama 3 Herd of Models, arXiv:2407.21783 v3, Table 5 "
+             "(root causes of unexpected interruptions over a 54-day Llama 3 405B pre-training period)",
+             "https://arxiv.org/abs/2407.21783",
+             "transcribed exactly; counts sum to 419, matching the text; the published percentage for "
+             "Faulty GPU (30.1) disagrees with 148/419 (35.3) while every other row matches its count, so "
+             "derive shares from interruption_count"),
+        "Root-cause component and category of each unexpected Llama 3 405B training interruption.",
+        numeric=("interruption_count", "published_pct"),
+    )
