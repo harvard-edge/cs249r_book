@@ -36,37 +36,49 @@ DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity",
 # @fig-ai-training-compute-growth. The scalar-anchor YAML schema used by the
 # other literature data files cannot express a multi-field series, so this
 # curated milestone list lives in Python (per the mlsysim taxonomy rule:
-# "composing / series -> Python"). Values are order-of-magnitude
-# training-compute (FLOP) estimates, not vendor disclosures.
+# "composing / series -> Python"). Values are Epoch AI's training-compute
+# (FLOP) estimates for each model, not vendor disclosures.
+#
+# 2026-10-12: re-pinned to the Epoch AI Notable AI Models dataset. The
+# earlier rows for 2012-2019 were 2.5x to 67x off the published estimates
+# (AlphaGo Zero 3e22 vs 6.5e20, Transformer 5e20 vs 7.4e18, BERT-Large and
+# GPT-2 about 10x high), which made a hand-drawn six-month reference line
+# look like a fit. Epoch has no ResNet-50 entry, so the 2015 ResNet row is
+# ResNet-152 (ImageNet). AlphaGo Zero is Epoch's direct-training figure,
+# which excludes self-play data generation.
 # ---------------------------------------------------------------------------
 from ..core.provenance import Provenance, ProvenanceKind
 
 _COMPUTE_TREND_PROVENANCE = Provenance(
     kind=ProvenanceKind.LITERATURE,
-    ref="Sevilla et al. (2022), Compute Trends Across Three Eras of Machine Learning (Epoch AI)",
-    url="https://arxiv.org/abs/2202.05924",
-    verified="2026-05-30",
+    ref=(
+        "Epoch AI, Notable AI Models dataset (training compute column); "
+        "methodology in Sevilla et al. (2022), Compute Trends Across Three Eras "
+        "of Machine Learning"
+    ),
+    url="https://epoch.ai/data/notable-ai-models",
+    verified="2026-10-12",
 )
 
 # (model, calendar year, training FLOP, era)
 _COMPUTE_TREND_ROWS = (
-    ("AlexNet", 2012, 1.2e18, "Deep Learning"),
-    ("VGG-16", 2014, 3.0e19, "Deep Learning"),
-    ("ResNet-50", 2015, 5.0e19, "Deep Learning"),
-    ("GoogLeNet", 2014, 2.0e19, "Deep Learning"),
-    ("AlphaGoZero", 2017, 3.0e22, "Deep Learning"),
-    ("Transformer", 2017, 5.0e20, "Large Scale"),
-    ("BERT-Large", 2018, 3.0e21, "Large Scale"),
-    ("GPT-2-XL", 2019, 2.0e22, "Large Scale"),
-    ("T5-11 billion", 2019, 5.0e22, "Large Scale"),
+    ("AlexNet", 2012, 4.7e17, "Deep Learning"),
+    ("VGG-16", 2014, 1.2e19, "Deep Learning"),
+    ("ResNet-152", 2015, 1.0e19, "Deep Learning"),
+    ("GoogLeNet", 2014, 1.5e18, "Deep Learning"),
+    ("AlphaGoZero", 2017, 6.5e20, "Deep Learning"),
+    ("Transformer", 2017, 7.4e18, "Large Scale"),
+    ("BERT-Large", 2018, 2.9e20, "Large Scale"),
+    ("GPT-2-XL", 2019, 1.9e21, "Large Scale"),
+    ("T5-11 billion", 2019, 3.3e22, "Large Scale"),
     ("GPT-3", 2020, 3.1e23, "Large Scale"),
-    ("Gopher", 2021, 6.0e23, "Large Scale"),
+    ("Gopher", 2021, 6.3e23, "Large Scale"),
     ("PaLM", 2022, 2.5e24, "Large Scale"),
-    ("GPT-4-class", 2023, 2.0e25, "Large Scale"),
-    ("Llama-3-70 billion", 2024, 8.0e24, "Large Scale"),
+    ("GPT-4-class", 2023, 2.1e25, "Large Scale"),
+    ("Llama-3-70 billion", 2024, 7.9e24, "Large Scale"),
     ("Gemini-Ultra", 2024, 5.0e25, "Large Scale"),
     ("Llama 3.1 405B", 2024, 3.8e25, "Large Scale"),
-    ("Grok-3", 2025, 3.0e26, "Large Scale"),
+    ("Grok-3", 2025, 3.5e26, "Large Scale"),
 )
 
 
