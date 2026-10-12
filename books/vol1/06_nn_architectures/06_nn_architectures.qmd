@@ -919,7 +919,46 @@ The function `mlp_layer_matrix` mirrors @eq-dense-layer directly, using high-lev
 
 The implementation in @lst-mlp_layer_compute exposes this hardware execution pattern directly. Computing layer outputs requires accumulating weighted contributions across all inputs for each sample in the batch. The outermost loop iterates across batch samples, the middle loop iterates over output neurons, and the innermost loop executes repeated multiply-accumulate (MAC) operations[^fn-mac-energy-cost] pairing each input feature with its corresponding parameter.
 
-[^fn-mac-energy-cost]: **MAC (multiply-accumulate)**\index{MAC!definition}: The atomic operation of neural networks: multiply two values and add to a running sum. In Horowitz's 45 nm reference, an FP32 multiply plus add costs about 4.6 pJ, while a 32-bit off-chip DRAM access costs about 640 pJ [@horowitz2014]. These technology-specific values illustrate why data movement can dominate arithmetic energy; they are not universal constants for current hardware. \index{MAC!energy cost}
+```{python}
+#| echo: false
+#| label: mac-energy-footnote
+from mlsysim import Hardware
+from mlsysim.core.units import pJ, flop, BYTES_FP32
+from mlsysim.fmt import fmt_magnitude, check
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MAC ENERGY FOOTNOTE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: fn-mac-energy-cost, the first MAC definition in this chapter.
+# │
+# │ Goal: Give the arithmetic and DRAM energy of one MAC before DenseLayerEnergy.
+# │ Show: About 4.6 pJ for an FP32 multiply plus add vs. about 640 pJ per 32-bit DRAM read.
+# │ How: Read the 45 nm energy hierarchy from Hardware.Tech (Horowitz 2014).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MacEnergyFootnote:
+    """Arithmetic vs. off-chip access energy for one FP32 MAC operand."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    e_mul = Hardware.Tech.Op.FlopFp32.energy
+    e_add = Hardware.Tech.Op.AddFp32.energy
+    e_dram_byte = Hardware.Tech.Memory.DRAM.energy_per_byte
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    e_mac = ((e_mul + e_add) * flop).to(pJ)
+    e_dram_word = (BYTES_FP32 * e_dram_byte).to(pJ)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(e_dram_word > 100 * e_mac, "A DRAM word should cost over 100x one FP32 MAC.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    e_mac_pj_str = fmt_magnitude(e_mac, unit=pJ, precision=1, commas=False)
+    e_dram_word_pj_str = fmt_magnitude(e_dram_word, unit=pJ, precision=0, commas=False)
+```
+
+[^fn-mac-energy-cost]: **MAC (multiply-accumulate)**\index{MAC!definition}: The atomic operation of neural networks: multiply two values and add to a running sum. In Horowitz's 45 nm reference, an FP32 multiply plus add costs about `{python} MacEnergyFootnote.e_mac_pj_str` pJ, while a 32-bit off-chip DRAM access costs about `{python} MacEnergyFootnote.e_dram_word_pj_str` pJ [@horowitz2014]. These technology-specific values illustrate why data movement can dominate arithmetic energy; they are not universal constants for current hardware. \index{MAC!energy cost}
 
 ::: {#lst-mlp_layer_compute lst-cap="**Dense Layer Computation**: Nested loops reveal $\mathcal{O}(\BatchSize \times \LayerOutputWidth \times \LayerInputWidth)$ complexity where each output neuron requires num_inputs multiply-accumulate operations, so the reference MNIST input layer requires 100,352 MACs per sample."}
 
