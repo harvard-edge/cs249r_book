@@ -1758,6 +1758,99 @@ Training a single large language model\index{LLM} consumes thousands of GPU\inde
 ↩ The bitter lesson, the historical pattern in which methods that scale with compute overtake hand-built knowledge, is established in @sec-introduction-bitter-lesson-79c7.
 :::
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FRONTIER TRAINING COST (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Cost-of-access paragraph in efficiency as responsibility and
+# │          @fig-frontier-training-cost.
+# │
+# │ Goal: Quantify how fast the cost of a frontier training run grows.
+# │ Show: ~2.9× per year across Epoch's frontier-flagged models since 2016;
+# │       the most expensive run near $390M (2023 US$).
+# │ How: Least-squares fit of log10(cost) on publication date over frontier
+# │      rows of Literature.Series.NotableModels.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_text, fmt_usd
+
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
+# ┌── LEGO ───────────────────────────────────────────────
+class FrontierTrainingCost:
+    """Training compute cost of notable and frontier models over time."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    start_year = 2016
+    rows = [r for r in Literature.Series.NotableModels.entries if r["training_cost_2023usd"] and r["date"][:4] >= "2016"]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    frontier = [r for r in rows if r["frontier"] == 1]
+    fit_slope, fit_intercept = np.polyfit([_decimal_year(r["date"]) for r in frontier], np.log10([r["training_cost_2023usd"] for r in frontier]), 1)
+    growth_per_year = 10 ** fit_slope
+    priciest = max(frontier, key=lambda r: r["training_cost_2023usd"])
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(2 <= growth_per_year <= 4, f"Expected ~2.9x per year, got {growth_per_year:.2f}.")
+    check(priciest["training_cost_2023usd"] > 1e8, "The priciest frontier run exceeds $100M.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    growth_mult_str = fmt_multiple(round(growth_per_year, 1), precision=1)
+    priciest_usd_str = fmt_usd(priciest["training_cost_2023usd"], precision=0, scale="M")
+    priciest_model_str = fmt_text(priciest["model"])
+    priciest_year_str = fmt_int(int(priciest["date"][:4]), commas=False)
+```
+
+The growth in training compute carries a price, and the price decides who can take part. @Fig-frontier-training-cost plots the estimated compute cost of training notable models since 2016 in constant 2023 dollars. Across the models that Epoch AI flags as frontier at release, the cost of a training run rose about `{python} FrontierTrainingCost.growth_mult_str` per year, and the most expensive run in the data, `{python} FrontierTrainingCost.priciest_model_str` in `{python} FrontierTrainingCost.priciest_year_str`, cost about `{python} FrontierTrainingCost.priciest_usd_str` [@epochai2026notable]. @cottier2024rising, using their own selection of frontier runs, estimate 2.4$\times$ per year. Either rate concentrates frontier training in the few organizations able to fund it, so efficiency is a question of access as well as of energy.
+
+::: {#fig-frontier-training-cost fig-env="figure" fig-pos="htb" fig-cap="**Cost of Training Notable Models**: Estimated compute cost of the final training run of notable models since 2016, in constant 2023 U.S. dollars on a logarithmic axis. Red points are models flagged as frontier at release; the dashed line is a least-squares fit to them. Costs follow the amortized hardware and energy method of @cottier2024rising. Data from @epochai2026notable." fig-alt="Scatter plot of training cost on a logarithmic axis from about 10 dollars to several hundred million dollars against publication dates from 2016 to 2026. Gray points mark notable models and red points frontier models. A dashed fitted line rises through the red points from about 3,000 dollars in 2016 to about 100 million dollars in 2025. GPT-3 175B, PaLM, GPT-4, Gemini 1.0 Ultra, Llama 3.1-405B, and Grok 3 are labeled."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FRONTIER TRAINING COST (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-frontier-training-cost.
+# │
+# │ Goal: Plot training cost of notable models with a frontier fit.
+# │ Show: Gray notable points, red frontier points, fitted growth line.
+# │ How: FrontierTrainingCost (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+_C = FrontierTrainingCost
+_yr = _decimal_year
+_oth = [r for r in _C.rows if r["frontier"] != 1]
+ax.scatter([_yr(r["date"]) for r in _oth], [r["training_cost_2023usd"] for r in _oth], s=14, color=COLORS["grid"], label="Notable model", zorder=2)
+ax.scatter([_yr(r["date"]) for r in _C.frontier], [r["training_cost_2023usd"] for r in _C.frontier], s=22, color=COLORS["RedLine"], label="Frontier model", zorder=3)
+_xs = [_yr(r["date"]) for r in _C.frontier]
+_xx = np.linspace(min(_xs), max(_xs), 50)
+ax.plot(_xx, 10 ** (_C.fit_slope * _xx + _C.fit_intercept), "--", color=COLORS["primary"], lw=1.2,
+        label=f"Fit to frontier models ({_C.growth_per_year:.1f}$\\times$ per year)")
+_off = {"GPT-3 175B (davinci)": (8, -2, "left"), "PaLM (540B)": (8, -2, "left"), "GPT-4 (Mar 2023)": (8, -3, "left"),
+        "Gemini 1.0 Ultra": (0, 12, "center"), "Llama 3.1-405B": (8, -8, "left"), "Grok 3": (-8, 4, "right")}
+for _r in _C.frontier:
+    if _r["model"] in _off:
+        _dx, _dy, _ha = _off[_r["model"]]
+        ax.annotate(_r["model"].replace(" (davinci)", "").replace(" (Mar 2023)", ""), (_yr(_r["date"]), _r["training_cost_2023usd"]),
+                    xytext=(_dx, _dy), textcoords="offset points", fontsize=7.5, ha=_ha,
+                    bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", pad=0.3), zorder=5)
+ax.set_yscale("log"); ax.set_xlabel("Publication date"); ax.set_ylabel("Training compute cost (2023 US\\$, log scale)")
+ax.legend(loc="upper left", fontsize=8, frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
 [^fn-green-ai-efficiency]: **Green AI**\index{Green AI!compute reporting}: @schwartz2020 contrasted "Red AI\index{Red AI!performance at any cost}" (performance at any cost) with "Green AI" (efficiency as primary metric). The compute-growth anchor comes from AI and Compute's 2012--2018 trend analysis (the fit that gives a 3.4-month doubling time), which reported a 300,000$\times$ increase in compute used in the largest AI training runs over that six-year window [@amodei2018aicompute]; comparisons that extend to later frontier models span a longer window and report larger factors. The Green AI proposal (reporting FLOPs alongside accuracy for every published result) reframes efficiency from an engineering preference into a scientific reporting obligation, making the resource cost of marginal accuracy gains visible and comparable across research groups.
 
 At the hardware level, environmental impact scales with total electrical energy draw across the machine lifecycle, mediated by accelerator utilization, data-center cooling overhead (power usage effectiveness), and local electrical grid carbon intensity. Within the accelerator package, data movement can dominate energy dissipation. In the 45 nm reference behind the energy-movement principle (\ref{pri-energy-movement}), a single off-chip DRAM access costs two to three orders of magnitude more energy than a 32-bit floating-point operation, although total energy also depends on access width, event counts, reuse, and the device. Algorithmic and runtime optimizations reduce environmental burden only when they reduce measured watt-hours for a verified quality target under production load, curbing this physical dissipation at the silicon level.
