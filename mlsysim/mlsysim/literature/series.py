@@ -229,3 +229,14 @@ class Series:
         "Training compute, accelerator count, duration, and utilization of notable training runs.",
         numeric=("training_compute_flop", "hardware_quantity", "training_time_hours", "mfu", "frontier"),
     )
+    MLPerfStorageV1Training = TrendSeries(
+        "mlperf_storage_v1_training",
+        _lit("MLCommons, MLPerf Storage v1.0 results (Apache-2.0), published 2024-09-25, snapshot 2026-10-12",
+             "https://github.com/mlcommons/storage_results_v1.0",
+             "one row per submitted system x workload x emulated accelerator, aggregated over its runs; "
+             "accelerators are emulated by DLIO with a fixed per-sample compute time, not real GPUs; "
+             "io_GBps is mean training read throughput; au_check is the accelerator-utilization pass "
+             "(>= 90% for unet3d and resnet50, >= 70% for cosmoflow)"),
+        "Storage throughput sustained per MLPerf Storage training submission by emulated accelerator count.",
+        numeric=("num_accelerators", "num_hosts", "num_runs", "au_mean_pct", "io_GBps"),
+    )
