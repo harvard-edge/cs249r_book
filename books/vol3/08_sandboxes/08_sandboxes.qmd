@@ -81,6 +81,120 @@ Each of these requirements answers a question the README attack raises. Which in
 
 A rigorous threat model for the repair task identifies which inputs may be hostile, which failure modes the execution boundary must contain, and what resources the task legitimately requires from its environment. In the repair scenario, the planted line in `README.md` provides the hostile trigger, while production vulnerabilities in shipped coding assistants demonstrate that sandbox escapes and command-injection failures are active operational risks rather than theoretical curiosities.
 
+```{python}
+#| label: calc-vol3-offensive-capability-trend
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OFFENSIVE CAPABILITY OF ADMITTED CODE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-offensive-capability-trend and the paragraph after it.
+# │ Goal: Show that the code a sandbox contains is written by increasingly
+# │       capable exploit authors.
+# │ Show: Best unguided solve rate among 2024 releases vs. the latest best.
+# │ How:  Literature.CybenchSolveRate (leaderboard and lab-reported rows).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class CybenchCapability:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = Literature.CybenchSolveRate.entries
+    n_tasks = 40  # task count published by the benchmark authors
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    best_2024 = max(r["unguided_solved"] for r in rows if r["release_date"] < "2025-01-01")
+    best_latest = max(r["unguided_solved"] for r in rows)
+    latest_row = max(rows, key=lambda r: r["unguided_solved"])
+    latest_is_lab = latest_row["source"] != "Cybench leaderboard"
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(best_2024 < 0.25 and best_latest > 0.9, "Prose contrasts under a quarter in 2024 with over 90% now")
+    check(latest_is_lab, "Prose says the latest point is lab-reported")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_tasks_str = fmt_int(n_tasks)
+    best_2024_str = fmt_percent(best_2024, precision=1, style="prose")
+    best_latest_str = fmt_percent(best_latest, style="prose")
+```
+
+The threat model must also fix how capable the hostile code is, and measured capability has moved quickly. @zhang2024cybench assemble `{python} CybenchCapability.n_tasks_str` professional-level capture-the-flag tasks, each initialized in an environment where an agent runs commands and observes their output, and score whether the agent identifies the vulnerability and executes the exploit without intermediate hints. @Fig-vol3-offensive-capability-trend plots the unguided solve rate of each evaluated model against its release date.
+
+:::: {#fig-vol3-offensive-capability-trend fig-env="figure" fig-pos="htb" fig-cap="**The Code Inside the Boundary Is Getting Better at Exploits**: Fraction of `{python} CybenchCapability.n_tasks_str` professional capture-the-flag tasks an agent solves without hints, for each evaluated model at its release date. Filled points come from the benchmark's leaderboard and open points from the developing lab's own model or system card, so the most recent gains rest on self-reported runs under each lab's agent configuration. The dashed step traces the best result to date. Data from @zhang2024cybench via @epochai2026benchmarks." fig-alt="Scatter plot of tasks solved without hints, from 0 to 100 percent, against model release dates from early 2024 to early 2026. Filled blue points sit between 5 and 20 percent through early 2025 and reach about 55 percent by late 2025. Open red points appear from mid 2025, the highest at about 93 percent in 2026. A gray dashed step line rises through the highest points. Selected points carry model names."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OFFENSIVE CAPABILITY OF ADMITTED CODE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-offensive-capability-trend
+# │
+# │ Goal: Show the exploit capability a sandbox must contain rising fast.
+# │ Show: Unguided solve rate vs. release date, leaderboard vs. lab-reported,
+# │       running best.
+# │ How: Literature.CybenchSolveRate (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import matplotlib.dates as mdates
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.4))
+
+# ┌── 1. DATA ─────────────────────────────────────────────────────────────────
+rows = sorted(Literature.CybenchSolveRate.entries, key=lambda r: r["release_date"])
+date = lambda r: dt.datetime.fromisoformat(r["release_date"])
+board = [r for r in rows if r["source"] == "Cybench leaderboard"]
+lab = [r for r in rows if r["source"] != "Cybench leaderboard"]
+
+# ┌── 2. RENDER ───────────────────────────────────────────────────────────────
+ax.scatter(
+    [date(r) for r in board], [100 * r["unguided_solved"] for r in board], color=COLORS["BlueLine"], s=34, zorder=4, label="Benchmark leaderboard"
+)
+ax.scatter(
+    [date(r) for r in lab],
+    [100 * r["unguided_solved"] for r in lab],
+    facecolors="white",
+    edgecolors=COLORS["RedLine"],
+    linewidths=1.6,
+    s=40,
+    marker="o",
+    zorder=4,
+    label="Lab-reported (model or system card)",
+)
+best, run = [], 0.0
+for r in rows:
+    run = max(run, 100 * r["unguided_solved"])
+    best.append(run)
+ax.step([date(r) for r in rows], best, where="post", color=COLORS["secondary"], lw=1, ls="--", zorder=2, label="Best result to date")
+names = {
+    "claude-3-opus-20240229": "Claude 3 Opus",
+    "claude-3-5-sonnet-20240620": "Claude 3.5 Sonnet",
+    "o3-mini-2025-01-31_medium": "o3-mini",
+    "claude-opus-4-20250514": "Claude Opus 4",
+    "grok-4-0709": "Grok 4",
+    "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+    "claude-opus-4-5-20251101_unknown": "Claude Opus 4.5",
+    "claude-opus-4-6_unknown": "Claude Opus 4.6",
+}
+for r in rows:
+    if r["model"] in names:
+        ax.annotate(names[r["model"]], (date(r), 100 * r["unguided_solved"]), xytext=(-6, 5), textcoords="offset points", ha="right", fontsize=8)
+
+# ┌── 3. DECORATE ─────────────────────────────────────────────────────────────
+ax.set_ylim(0, 100)
+ax.set_ylabel("Tasks solved without hints (%)")
+ax.set_xlabel("Model release date")
+ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7]))
+ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+ax.legend(frameon=False, fontsize=8.5, loc="upper left")
+plt.show()
+plt.close()
+```
+
+::::
+
+The best unguided result among models released in 2024 was `{python} CybenchCapability.best_2024_str`; the latest reported result is `{python} CybenchCapability.best_latest_str`. That trend removes a comfortable assumption from the threat model. Admitted code cannot be treated as merely buggy, because the model proposing it is measured finding and exploiting weaknesses in exactly the kind of environment a sandbox provides. Every interface the guest can reach, from the filesystem and process table to the network stack and the host kernel, is therefore attack surface, and containment must hold against code written by a capable exploit author, even when that code arrives as an ordinary step of the repair.
+
 ### Untrusted input and execution reach {#sec-vol3-sandboxes-cohabitation}
 
 The planted README payload is an instance of indirect prompt injection\index{Indirect prompt injection}, in which attacker-controlled material encountered as task data attempts to redirect model execution [@greshake2023not]. Language models cannot reliably separate control instructions from untrusted data in their input context, and adversarial evaluation can bound the resulting attack success rate but never certify it as zero. While interface-level mechanisms such as message roles and provenance labels help structure conversational context, they do not enforce operating system protections. The sandbox runtime must maintain strict isolation boundaries even when the model faithfully obeys a hostile instruction. Unsafe proposals also arise routinely without an active adversary; an unintended command-line flag, a misspelled path, or a mistaken target directory produces identical operational damage. A production vulnerability in a commercial coding agent illustrates how quickly text-based admission checks collapse when decoupled from low-level isolation.

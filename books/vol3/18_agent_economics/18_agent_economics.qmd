@@ -71,6 +71,110 @@ A team running the repair agent (lighthouse \ref{lhs-vol3-repair-agent}) is offe
 *Horizon, state, and authority each set the closure a task must pay for.*
 :::
 
+Offers like this one recur, because the price of a fixed capability falls quickly. @epochai2025inferenceprices track the cheapest model that reaches a fixed score on each of several benchmarks, and @fig-vol3-price-at-fixed-capability plots three of those price series.
+
+```{python}
+#| label: calc-vol3-price-at-fixed-capability
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRICE TO REACH A FIXED CAPABILITY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-price-at-fixed-capability and the paragraph after it.
+# │ Goal: Quantify how fast the token price of a fixed capability falls.
+# │ Show: Range and median of per-year decline across every threshold.
+# │ How:  Log-linear fit of lowest price on release date per threshold
+# │       series in Literature.LowestPriceAtCapability.
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_multiple
+
+def _decline_per_year(points):
+    """Factor by which the lowest price falls per year, from a log10-linear fit."""
+    t = np.array([dt.date.fromisoformat(p["release_date"]).toordinal() / 365.25 for p in points])
+    return 10 ** -np.polyfit(t, np.log10([p["usd_per_mtok"] for p in points]), 1)[0]
+
+class PriceAtCapability:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = Literature.LowestPriceAtCapability.entries
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    series = {}
+    for _r in rows:
+        series.setdefault((_r["benchmark"], _r["threshold_model"]), []).append(_r)
+    rates = sorted(_decline_per_year(v) for v in series.values())
+    rate_lo, rate_med, rate_hi = rates[0], float(np.median(rates)), rates[-1]
+    last_date = max(r["release_date"] for r in rows)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(rate_lo > 5 and rate_hi > 500, "Prose says every series fell at least ~10x per year, the fastest by hundreds")
+    check(last_date < "2025-06-01", "Caption says the series end in early 2025")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_series_str = fmt_int(len(series))
+    rate_lo_mult_str = fmt_multiple(round(rate_lo), precision=0)
+    rate_med_mult_str = fmt_multiple(round(rate_med), precision=0)
+    rate_hi_mult_str = fmt_multiple(round(rate_hi, -1), precision=0)
+```
+
+:::: {#fig-vol3-price-at-fixed-capability fig-env="figure" fig-pos="htb" fig-cap="**The Price of a Fixed Capability Falls Fast**: Lowest price, in dollars per million tokens on a logarithmic axis, of any model that reaches a fixed benchmark score, plotted at each new low. Each line holds the capability constant, so its descent is price change alone, and the legend gives each series' fitted decline per year. Prices are the source's 3:1 blend of input and output rates; the series end in early 2025. Data from @epochai2025inferenceprices." fig-alt="Step chart on a logarithmic price axis from 3 cents to 100 dollars per million tokens against release dates from 2021 to 2025. A gray line starts near 60 dollars in late 2021 and steps down to about 7 cents by late 2024. A violet line starts near 37 dollars in 2023 and falls to about 12 cents by late 2024. A blue line starts at the same point and falls more slowly, reaching about 17 cents in early 2025. Model names label the first and last point of each line."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRICE TO REACH A FIXED CAPABILITY (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-price-at-fixed-capability
+# │
+# │ Goal: Show the token price of a constant capability falling.
+# │ Show: Step series of lowest price for three thresholds, fitted decline
+# │       per year in the legend.
+# │ How: Literature.LowestPriceAtCapability (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import numpy as np
+import matplotlib.dates as mdates
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.6))
+rows = Literature.LowestPriceAtCapability.entries
+chosen = [
+    ("MMLU", "GPT-3", "GPT-3-level knowledge (MMLU)", "secondary"),
+    ("MMLU", "GPT-4-0314", "GPT-4-level knowledge (MMLU)", "BlueLine"),
+    ("GPQA Diamond", "GPT-4-0314", "GPT-4-level PhD science (GPQA Diamond)", "VioletLine"),
+]
+end = dt.datetime(2025, 3, 1)
+for bench, thr, label, col in chosen:
+    g = sorted([r for r in rows if r["benchmark"] == bench and r["threshold_model"] == thr], key=lambda r: r["release_date"])
+    d = [dt.datetime.fromisoformat(r["release_date"]) for r in g]
+    p = [r["usd_per_mtok"] for r in g]
+    t = np.array([x.toordinal() / 365.25 for x in d])
+    rate = 10 ** -np.polyfit(t, np.log10(p), 1)[0]
+    ax.step(d + [end], p + [p[-1]], where="post", color=COLORS[col], lw=1.8, label=f"{label}: {rate:.0f}× cheaper per year")
+    ax.scatter(d, p, color=COLORS[col], s=22, zorder=4)
+    marks = [(0, (4, 5), "left"), (-1, (4, 5), "left")] if col != "VioletLine" else [(-1, (0, 7), "center")]
+    for idx, off, ha in marks:
+        ax.annotate(
+            g[idx]["model"].replace("-0314", ""), (d[idx], p[idx]), xytext=off, textcoords="offset points", ha=ha, fontsize=7.5, color=COLORS[col]
+        )
+ax.xaxis.set_major_locator(mdates.YearLocator())
+ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+ax.set_yscale("log")
+ax.set_ylim(0.03, 150)
+ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"${v:g}"))
+ax.set_ylabel("Cheapest price at that level\n($ per million tokens)")
+ax.set_xlabel("Model release date")
+ax.legend(loc="lower left", frameon=False, fontsize=8.5)
+plt.show()
+plt.close()
+```
+
+::::
+
+Across all `{python} PriceAtCapability.n_series_str` capability thresholds in the source, the fitted decline runs from `{python} PriceAtCapability.rate_lo_mult_str` to roughly `{python} PriceAtCapability.rate_hi_mult_str` per year, with a median of `{python} PriceAtCapability.rate_med_mult_str`. A falling token price shrinks only the inference terms of the attempt cost. Sandbox lifetime, verification, cleanup, and human review are priced per turn, per check, and per hour of attention, not per token, so each price cut moves a larger share of the bill onto terms the provider's discount never touches, and onto the acceptance probability in the denominator.
+
 The runtime built so far can already say part of what the team needs. The evaluation discipline of @sec-vol3-evaluation decides which repairs count as accepted and how two policies are compared on matched tasks, and the harness's budget ceilings stop any one task from spending without limit. @Sec-vol3-multiagent-evaluation joined the two once, deciding for one stated workload whether splitting a migration across workers repaid its coordination tax against a matched single controller. None of these says in general whether a policy is worth running. An accuracy figure reported without its cost cannot rank two designs, which is why cost-controlled evaluation reports the two jointly [@kapoor2024agents], and a ceiling that holds says nothing about how much of the spending under it bought accepted work.
 
 ::: {.column-margin .margin-pointer}
@@ -723,6 +827,118 @@ Critical-path analysis reveals where faster execution accelerates an agent workf
 [^fn-cascade-viola-jones]: **Generating Cascade**: The verifier cascade of @sec-vol3-flywheel-verification already borrowed the classifier-cascade economics of cheap early rejection. A model cascade inverts the roles: each tier generates a candidate rather than only filtering one, so a task that escalates has paid for generation at every tier it reached, and the savings come only from a high early-exit rate.
 
 Every exit from a cascade must satisfy the same declared acceptance contract. A schema check suffices for a purely syntactic transformation, but it cannot establish that a source patch preserves authentication behavior. An inexpensive tier never earns the right to dilute verification; a tier's price neither strengthens nor weakens the contract. Passing an assessment gate simply yields an accepted candidate record, while publication and tool execution remain separate runtime decisions governed by effect authorization.
+
+The price spread a router can exploit is wide, and it does not track capability closely. A long-horizon software benchmark runs each configuration five times on every task under a 20-hour budget per trial and reports the mean score, the best and worst of the five, and the average cost and duration of a trial [@frontierswe2026]. @Fig-vol3-cost-vs-score-long-horizon plots those results against cost.
+
+```{python}
+#| label: calc-vol3-cost-vs-score-long-horizon
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST VS. SCORE ON LONG-HORIZON TASKS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-cost-vs-score-long-horizon and the paragraph after it.
+# │ Goal: Show how loosely per-trial cost tracks score.
+# │ Show: Cost and duration ranges; cost ratio and score gap between the top
+# │       configuration and the runner-up; median best-to-worst spread.
+# │ How:  Literature.FrontierSweTrials.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_usd
+
+class CostVsScore:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = sorted(Literature.FrontierSweTrials.entries, key=lambda r: -r["mean5"])
+    trials, budget_h = 5, 20  # protocol published by the benchmark
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    top, second = rows[0], rows[1]
+    cost_ratio = top["usd_per_trial"] / second["usd_per_trial"]
+    score_gap = 100 * (top["mean5"] - second["mean5"])
+    usd_lo = min(r["usd_per_trial"] for r in rows)
+    usd_hi = max(r["usd_per_trial"] for r in rows)
+    h_lo = min(r["hours_per_trial"] for r in rows)
+    h_hi = max(r["hours_per_trial"] for r in rows)
+    spread = float(np.median([r["best5"] - r["worst5"] for r in rows]))
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(cost_ratio > 5 and score_gap < 5, "Prose says the top score costs many times the runner-up for a few points")
+    check(100 * spread > score_gap, "Prose says the run-to-run spread exceeds the gap between the top two")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_configs_str = fmt_int(len(rows))
+    cost_ratio_mult_str = fmt_multiple(round(cost_ratio), precision=0)
+    score_gap_str = fmt_int(round(score_gap))
+    usd_lo_str = fmt_usd(round(usd_lo))
+    usd_hi_str = fmt_usd(round(usd_hi), commas=True)
+    h_lo_str = fmt_int(round(h_lo))
+    h_hi_str = fmt_int(round(h_hi))
+    spread_str = fmt_int(round(100 * spread))
+```
+
+:::: {#fig-vol3-cost-vs-score-long-horizon fig-env="figure" fig-pos="htb" fig-cap="**Cost per Trial Barely Tracks Score**: Mean score over five trials against the average cost of one trial, on a logarithmic cost axis, for `{python} CostVsScore.n_configs_str` configurations on long-horizon software tasks. Bars run from the worst to the best of the five trials, and parentheses give average hours per trial. Points at similar cost differ by tens of points, and the highest score sits an order of magnitude to the right of nearly equal ones. Data from @frontierswe2026 via @epochai2026benchmarks." fig-alt="Scatter plot of mean score from 0 to 80 percent against average cost per trial from about 6 to 3,000 dollars on a logarithmic axis. Each blue point has a light vertical bar spanning worst to best trial. Points rise loosely from about 4 percent at 9 dollars to the low 60s near 100 dollars; one point at about 1,000 dollars sits at 66 percent. Labels give model names and hours per trial for selected points."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST VS. SCORE ON LONG-HORIZON TASKS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-cost-vs-score-long-horizon
+# │
+# │ Goal: Show the loose relation between per-trial cost and score.
+# │ Show: Mean of five trials vs. cost per trial, worst-to-best bars, hours.
+# │ How: Literature.FrontierSweTrials (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.8))
+rows = Literature.FrontierSweTrials.entries
+x = np.array([r["usd_per_trial"] for r in rows])
+y = np.array([100 * r["mean5"] for r in rows])
+lo = y - np.array([100 * r["worst5"] for r in rows])
+hi = np.array([100 * r["best5"] for r in rows]) - y
+ax.errorbar(x, y, yerr=[lo, hi], fmt="o", color=COLORS["BlueLine"], ecolor=COLORS["BlueL"], elinewidth=3, ms=6, zorder=4)
+offs = {
+    "GPT-6 Astra": (8, 0, "left"),
+    "Claude Opus 5.5": (-8, 4, "right"),
+    "Claude Sonnet 5.5": (8, 6, "left"),
+    "Gemini 4 Argon": (-8, -4, "right"),
+    "Claude Fable 5": (8, 0, "left"),
+    "Grok 4.7": (8, 0, "left"),
+    "GPT-5.6": (8, 0, "left"),
+    "GLM-5.3 Flash": (8, 0, "left"),
+    "Inkling": (8, 0, "left"),
+    "Qwen3.8-Max": (8, -4, "left"),
+}
+for r in rows:
+    if r["model"] in offs:
+        dx, dy, ha = offs[r["model"]]
+        ax.annotate(
+            f'{r["model"]} ({r["hours_per_trial"]:.0f} h)',
+            (r["usd_per_trial"], 100 * r["mean5"]),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            ha=ha,
+            va="center",
+            fontsize=7.8,
+            zorder=6,
+            bbox=dict(fc="white", ec="none", pad=0.6, alpha=0.9),
+        )
+ax.set_xscale("log")
+ax.set_xlim(6, 3000)
+ax.set_ylim(0, 80)
+ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"${v:,.0f}"))
+ax.set_xlabel("Average cost of one trial ($)")
+ax.set_ylabel("Mean score over five trials (%)")
+plt.show()
+plt.close()
+```
+
+::::
+
+Cost per trial spans `{python} CostVsScore.usd_lo_str` to `{python} CostVsScore.usd_hi_str` across the `{python} CostVsScore.n_configs_str` configurations, and a single trial runs from `{python} CostVsScore.h_lo_str` to `{python} CostVsScore.h_hi_str` hours. The highest-scoring configuration costs `{python} CostVsScore.cost_ratio_mult_str` as much per trial as the runner-up for `{python} CostVsScore.score_gap_str` points, while the median gap between a configuration's best and worst trial is `{python} CostVsScore.spread_str` points. Price is therefore a poor proxy for score, and the variation between repeated trials is larger than the difference between the top configurations. That is the opening a router or cascade exploits, and it is also why each tier's acceptance must be measured on the tasks that actually reach it rather than read from its price.
 
 ### Direct routing and conditional escalation {#sec-vol3-agent-economics-direct-routing-escalation}
 

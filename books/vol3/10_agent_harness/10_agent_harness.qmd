@@ -1093,6 +1093,189 @@ Enforcing an immutable ceiling guarantees system safety, but setting appropriate
 
 Baseline profiling under unconstrained budgets reveals the empirical completion time and token distributions of successful trajectories, highlighting candidate threshold targets. However, because early steering, throttling, and finalization alter downstream model reasoning, engineers must evaluate the complete policy empirically rather than assuming post-hoc truncation models reality. In practice, empirical cost-benefit curves rarely display a sharp knee. The operational decision rule selects the budget ceiling that minimizes cost per accepted task while keeping unresolved liabilities and manual interventions within acceptable operational bounds. When performance differences fall within empirical measurement uncertainty, simpler budget policies take precedence.
 
+```{python}
+#| label: calc-vol3-ceiling-evidence
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CEILING EVIDENCE FROM PUBLIC TRAJECTORIES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-model-calls-resolved-vs-failed,
+# │          @fig-vol3-step-ceiling-curves, and the paragraphs after them.
+# │ Goal: Ground ceiling choice in measured trajectory distributions.
+# │ Show: Share of failed and of accepted runs that a call ceiling at the
+# │       accepted runs' 90th percentile would halt; success vs. step
+# │       ceiling for the same model.
+# │ How:  Literature.SweBenchTrajectories (per-run call counts and outcome);
+# │       Literature.OSWorldStepBudget (same model at 15, 50, 100 steps).
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+def _halt_shares(runs, q):
+    """Share of failed and of accepted runs above the accepted runs' q-quantile of calls."""
+    ok = np.array([r["n_model_calls"] for r in runs if r["resolved"]])
+    bad = np.array([r["n_model_calls"] for r in runs if not r["resolved"]])
+    cap = np.quantile(ok, q)
+    return (bad > cap).mean(), (ok > cap).mean(), float(np.median(bad)), float(np.median(ok)), float(cap)
+
+class CeilingEvidence:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    runs = Literature.SweBenchTrajectories.entries
+    steps = Literature.OSWorldStepBudget.entries
+    n_tasks = 500  # SWE-bench Verified task count
+    q = 0.90  # ceiling at the accepted runs' 90th percentile of calls
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    systems = tuple(sorted({r["submission"] for r in runs}))
+    shares = []
+    for _s in systems:
+        shares.append(_halt_shares(tuple(filter(lambda r, s=_s: r["submission"] == s, runs)), q))
+    fail_halt_lo = min(x[0] for x in shares)
+    fail_halt_hi = max(x[0] for x in shares)
+    ok_halt_hi = max(x[1] for x in shares)
+    longer_when_failed = all(x[2] > x[3] for x in shares)
+    cap_lo = min(x[4] for x in shares)
+    cap_hi = max(x[4] for x in shares)
+    # Two configurations share one model; their ceilings still differ.
+    _same = [x[4] for _s, x in zip(systems, shares) if "claude-4-sonnet" in _s or "claude_4_sonnet" in _s]
+    by_model = {}
+    for r in steps:
+        by_model.setdefault(r["model"], {})[int(r["steps"])] = r["score_pct"]
+    gain_15_100 = {m: v[100] - v[15] for m, v in by_model.items()}
+    n_flat_after_50 = sum(1 for v in by_model.values() if v[100] <= v[50])
+    best_gain = max(gain_15_100.values())
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(longer_when_failed, "Prose says failed runs take more calls in every configuration")
+    check(ok_halt_hi <= 0.11 and fail_halt_lo > 0.12, "Prose contrasts ~10% of accepted runs with more failed runs")
+    check(n_flat_after_50 >= 3 and best_gain > 15, "Prose says several models stop gaining after 50 steps while one gains >15 pts")
+    check(len(_same) == 2 and abs(_same[0] - _same[1]) >= 15, "Prose says two agents on the same model need different ceilings")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_tasks_str = fmt_int(n_tasks)
+    q_str = fmt_int(round(q * 100))
+    ok_halt_str = fmt_percent(round(ok_halt_hi, 2), precision=0, style="prose")
+    fail_halt_lo_str = fmt_int(round(fail_halt_lo * 100))
+    fail_halt_hi_str = fmt_percent(round(fail_halt_hi, 2), precision=0, style="prose")
+    cap_lo_str = fmt_int(round(cap_lo))
+    cap_hi_str = fmt_int(round(cap_hi))
+    same_lo_str = fmt_int(round(min(_same)))
+    same_hi_str = fmt_int(round(max(_same)))
+    n_models_str = fmt_int(len(by_model))
+    n_flat_str = fmt_int(n_flat_after_50)
+    best_gain_str = fmt_int(round(best_gain))
+```
+
+Baseline profiling of public repair-agent runs shows what such distributions look like. @Fig-vol3-model-calls-resolved-vs-failed plots the distribution of model calls per trajectory for five published agent configurations on the same `{python} CeilingEvidence.n_tasks_str` repository-repair tasks [@jimenez2024swebench], split by whether the patch was accepted.
+
+:::: {#fig-vol3-model-calls-resolved-vs-failed fig-env="figure" fig-pos="htb" fig-cap="**Failed Runs Take More Calls**: Cumulative distribution of model calls per trajectory for five public agent configurations on the same repository-repair tasks, accepted runs solid and failed runs dashed. The vertical line marks the accepted runs' `{python} CeilingEvidence.q_str`th percentile; the label gives the share of each group a call ceiling at that line would halt. In every configuration the failed distribution sits to the right, so a ceiling drawn from successful runs stops a disproportionate share of runs that would have failed anyway. Trajectories from @jimenez2024swebench submissions; counts are as each agent recorded its calls." fig-alt="Five side-by-side panels, one per agent configuration, each plotting the cumulative fraction of runs from 0 to 1 against model calls per trajectory. In each panel a solid line for accepted runs rises earlier than a dashed line for failed runs. A vertical gray line marks a call count, with a label giving two percentages, the share of failed runs and the share of accepted runs beyond it."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MODEL CALLS: ACCEPTED VS. FAILED RUNS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-model-calls-resolved-vs-failed
+# │
+# │ Goal: Show that failed runs consume more calls than accepted ones.
+# │ Show: Per-configuration CDFs of calls, accepted vs. failed, with the
+# │       ceiling at the accepted runs' 90th percentile.
+# │ How: Literature.SweBenchTrajectories (MLSysIM); book_style.set_book_style().
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+plt = book_style.plt
+COLORS = book_style.COLORS
+runs = Literature.SweBenchTrajectories.entries
+systems = sorted({r["submission"] for r in runs})
+fig, axes = plt.subplots(1, len(systems), figsize=(10, 3.0), sharey=True)
+
+for ax, s in zip(axes, systems):
+    g = [r for r in runs if r["submission"] == s]
+    ok = np.sort([r["n_model_calls"] for r in g if r["resolved"]])
+    bad = np.sort([r["n_model_calls"] for r in g if not r["resolved"]])
+    cap = np.quantile(ok, 0.90)
+    ax.plot(ok, np.arange(1, len(ok) + 1) / len(ok), color=COLORS["BlueLine"], lw=1.6, label="Accepted")
+    ax.plot(bad, np.arange(1, len(bad) + 1) / len(bad), color=COLORS["RedLine"], lw=1.6, ls="--", label="Failed")
+    ax.axvline(cap, color=COLORS["secondary"], lw=0.9)
+    ax.text(
+        0.96,
+        0.05,
+        f"ceiling halts\n{100 * (bad > cap).mean():.0f}% of failed\n{100 * (ok > cap).mean():.0f}% of accepted",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=7.5,
+        bbox=dict(fc="white", ec="none", pad=0.6, alpha=0.9),
+    )
+    ax.set_title(f"{g[0]['scaffold']}\n{g[0]['model']}", fontsize=8.5, loc="left")
+    ax.set_xlabel("Model calls", fontsize=9)
+    ax.tick_params(labelsize=8)
+axes[0].set_ylabel("Fraction of runs", fontsize=9)
+fig.tight_layout()
+handles, labels = axes[0].get_legend_handles_labels()
+fig.legend(handles, labels, frameon=False, fontsize=8.5, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.08))
+plt.show()
+plt.close()
+```
+
+::::
+
+Two lessons follow for ceiling choice. Failed runs take more calls than accepted ones in every configuration of @fig-vol3-model-calls-resolved-vs-failed, so the tail of the call distribution is mostly spend on attempts that will not be accepted. A ceiling at the accepted runs' `{python} CeilingEvidence.q_str`th percentile halts at most `{python} CeilingEvidence.ok_halt_str` of eventual successes but `{python} CeilingEvidence.fail_halt_lo_str` to `{python} CeilingEvidence.fail_halt_hi_str` of eventual failures. The same figure also warns against reading a ceiling off another configuration, because the percentile ranges from `{python} CeilingEvidence.cap_lo_str` to `{python} CeilingEvidence.cap_hi_str` calls across the five and differs even between the two agents built on the same model (`{python} CeilingEvidence.same_lo_str` and `{python} CeilingEvidence.same_hi_str`). These are post-hoc truncations of unconstrained runs, which is exactly the post-hoc shortcut cautioned against above; a ceiling the agent can see changes how it spends the remaining calls, so the estimate locates a candidate ceiling and the policy evaluation confirms it.
+
+Re-running the same model under several enforced ceilings supplies the confirmation. A computer-use benchmark reports `{python} CeilingEvidence.n_models_str` models at step limits of 15, 50, and 100 actions [@xie2024osworld], plotted in @fig-vol3-step-ceiling-curves.
+
+:::: {#fig-vol3-step-ceiling-curves fig-env="figure" fig-pos="htb" fig-cap="**Raising the Ceiling Helps Some Models, Not Others**: Task success for the same model at three enforced step ceilings on a computer-use benchmark. Two models keep gaining from 50 to 100 steps while the other three flatten or dip, so the knee, where one exists, is a property of the model and harness rather than of the task. Data from @xie2024osworld via @epochai2026benchmarks." fig-alt="Line chart of tasks completed from 0 to 70 percent against step ceilings of 15, 50, and 100. Five colored lines with markers, each labeled at its right end with a model name. The top line rises from about 43 to 63 percent. The next three rise from 15 to 50 steps and stay level or fall slightly at 100. The bottom line rises steadily from about 9 to 23 percent."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SUCCESS VS. STEP CEILING (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-step-ceiling-curves
+# │
+# │ Goal: Show that the return on a higher ceiling depends on the model.
+# │ Show: Success at 15, 50, 100 steps for each model run at all three.
+# │ How: Literature.OSWorldStepBudget (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7, 4.0))
+by_model = {}
+for r in Literature.OSWorldStepBudget.entries:
+    by_model.setdefault(r["model"], {})[int(r["steps"])] = r["score_pct"]
+by_model = {m: v for m, v in by_model.items() if len(v) == 3}
+names = {
+    "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+    "claude-sonnet-4-20250514": "Claude Sonnet 4",
+    "claude-3-7-sonnet-20250219": "Claude 3.7 Sonnet",
+    "computer-use-preview-2025-03-11": "OpenAI computer-use-preview",
+    "o3-2025-04-16_medium": "o3",
+}
+palette = ["RedLine", "BlueLine", "VioletLine", "OrangeLine", "GreenLine"]
+markers = ["o", "s", "^", "D", "v"]
+for (m, v), col, mk in zip(sorted(by_model.items(), key=lambda kv: -max(kv[1].values())), palette, markers):
+    xs = sorted(v)
+    ax.plot(xs, [v[x] for x in xs], "-", marker=mk, color=COLORS[col], lw=1.8, ms=5)
+    ax.text(104, v[100], names.get(m, m), va="center", fontsize=8.5, color=COLORS[col])
+ax.set_xticks([15, 50, 100])
+ax.set_xlim(8, 150)
+ax.set_ylim(0, 70)
+ax.set_xlabel("Step ceiling enforced on the agent")
+ax.set_ylabel("Tasks completed (%)")
+plt.show()
+plt.close()
+```
+
+::::
+
+Among the `{python} CeilingEvidence.n_models_str` models in @fig-vol3-step-ceiling-curves, `{python} CeilingEvidence.n_flat_str` gain nothing from the last 50 steps, while the strongest gains `{python} CeilingEvidence.best_gain_str` points between the lowest and highest ceiling. A generous fixed ceiling therefore buys nothing for most configurations and costs the extra spend of every run that uses it, whereas a tight one forfeits real successes for the configurations that convert extra steps into progress.
+
 ::: {.column-margin .margin-pointer}
 ↪ Matched-budget comparison of complete policies under one fixed resource envelope is developed in @sec-vol3-evaluation-matched-budgets.
 :::

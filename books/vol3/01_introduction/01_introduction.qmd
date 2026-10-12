@@ -469,6 +469,171 @@ class HorizonCompounding:
 
 :::
 
+The horizon in @eq-vol3-horizon-compounding belongs to the delegated task, and the tasks delegated to agents have lengthened quickly. @kwa2025measuring express that length in human terms. They time people with the relevant expertise on a suite of software and research tasks, then report each model's 50 percent time horizon, the length of task, in expert time, that an agent built on the model completes in half its attempts. @Fig-vol3-measured-task-horizon plots that horizon for every model the study evaluates, at the model's release date.
+
+```{python}
+#| label: calc-vol3-intro-measured-horizon
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED TASK HORIZON (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-measured-task-horizon and the paragraph after it.
+# │ Goal: Quantify how fast the delegated task length has grown.
+# │ Show: Frontier 50% horizon at the first and latest release; doubling
+# │       time since 2019 and since 2023.
+# │ How:  Log-linear fit of log2(horizon) on release date over frontier
+# │       models, excluding estimates above 16 h (the source's own rule).
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt, fmt_int
+
+def _doubling_days(points):
+    """Days per doubling from a log2-linear fit of horizon on release date."""
+    t = np.array([dt.date.fromisoformat(r["release_date"]).toordinal() for r in points])
+    return 1 / np.polyfit(t, np.log2([r["p50_min"] for r in points]), 1)[0]
+
+class MeasuredHorizon:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = Literature.AgentTimeHorizon.entries
+    fit_cap_min = 16 * 60  # the source fits only frontier points at or below 16 h
+    published_recent_days = 128.744  # the source's own 2023-on doubling time
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    frontier = tuple(filter(lambda r: r["is_sota"], rows))
+    fit_pts = tuple(filter(lambda r, cap=fit_cap_min: r["p50_min"] <= cap, frontier))
+    recent_pts = tuple(filter(lambda r: r["release_date"] >= "2023-01-01", fit_pts))
+    all_days = _doubling_days(fit_pts)
+    recent_days = _doubling_days(recent_pts)
+    first_s = frontier[0]["p50_min"] * 60
+    last_h = frontier[-1]["p50_min"] / 60
+    growth = frontier[-1]["p50_min"] / frontier[0]["p50_min"]
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(abs(recent_days - published_recent_days) < 1, f"Refit must reproduce the source's doubling time, got {recent_days:.1f} d")
+    check(recent_days < all_days, "Prose says the recent trend is faster than the whole-period trend")
+    check(first_s < 10 and last_h > 8, "Prose spans seconds to more than a working day")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    all_months_str = fmt(all_days / 30.44, precision=1)
+    recent_months_str = fmt(recent_days / 30.44, precision=1)
+    first_s_str = fmt_int(round(first_s))
+    last_h_str = fmt_int(round(last_h))
+    growth_str = fmt_int(round(growth, -3))
+```
+
+:::: {#fig-vol3-measured-task-horizon fig-env="figure" fig-pos="htb" fig-cap="**Measured Task Horizon**: Each point is one model's 50 percent time horizon, the expert-time length of task its agent completes in half its attempts, against the model's release date. The vertical axis is logarithmic, so the straight dashed fit to frontier models released since 2023 is exponential growth, doubling about every `{python} MeasuredHorizon.recent_months_str` months. Filled points were the frontier at release, open points were not, and bars are 95 percent confidence intervals. Data from @kwa2025measuring (Time Horizon v1.1)." fig-alt="Scatter plot on a logarithmic vertical axis labeled from 1 second to 1 week against model release dates from 2019 to 2026. Filled blue points with vertical error bars rise from a few seconds in 2019 to above 8 hours in 2026, with model names labeled beside selected points. Gray open points sit near the filled ones. A gray dashed straight line runs through the points from 2023 onward."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED TASK HORIZON (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-measured-task-horizon
+# │
+# │ Goal: Show the delegated task length growing exponentially.
+# │ Show: Log-scale horizon vs. release date; frontier vs. other models;
+# │       95% CIs; the 2023-on log-linear fit.
+# │ How: Literature.AgentTimeHorizon (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import numpy as np
+import matplotlib.dates as mdates
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.8))
+
+# ┌── 1. DATA ─────────────────────────────────────────────────────────────────
+rows = Literature.AgentTimeHorizon.entries
+date = lambda r: dt.datetime.fromisoformat(r["release_date"])
+for is_frontier in (False, True):
+    pts = [r for r in rows if bool(r["is_sota"]) == is_frontier]
+    x = [date(r) for r in pts]
+    y = np.array([r["p50_min"] for r in pts])
+    err = [y - np.array([r["p50_ci_low"] for r in pts]), np.array([r["p50_ci_high"] for r in pts]) - y]
+    if is_frontier:
+        ax.errorbar(x, y, yerr=err, fmt="o", color=COLORS["BlueLine"], ms=6, elinewidth=1, alpha=0.9, zorder=5, label="Frontier at release")
+    else:
+        ax.errorbar(
+            x,
+            y,
+            yerr=err,
+            fmt="o",
+            mfc="white",
+            mec=COLORS["secondary"],
+            ecolor=COLORS["grid"],
+            ms=5,
+            elinewidth=1,
+            zorder=4,
+            label="Other evaluated models",
+        )
+
+# ┌── 2. FIT (same subset as MeasuredHorizon) ─────────────────────────────────
+fit = [r for r in rows if r["is_sota"] and r["release_date"] >= "2023-01-01" and r["p50_min"] <= 16 * 60]
+fx = mdates.date2num([date(r) for r in fit])
+slope, icpt = np.polyfit(fx, np.log2([r["p50_min"] for r in fit]), 1)
+xs = np.linspace(mdates.datestr2num("2023-01-01"), mdates.datestr2num("2026-07-01"), 50)
+ax.plot(
+    mdates.num2date(xs),
+    2 ** (icpt + slope * xs),
+    "--",
+    color=COLORS["secondary"],
+    lw=1.5,
+    zorder=3,
+    label=f"Fit since 2023: doubles every {1 / slope / 30.44:.1f} months",
+)
+
+# ┌── 3. LABELS ───────────────────────────────────────────────────────────────
+names = {
+    "gpt2": "GPT-2",
+    "davinci_002": "GPT-3",
+    "gpt_3_5_turbo_instruct": "GPT-3.5",
+    "gpt_4": "GPT-4",
+    "claude_3_5_sonnet_20240620_inspect": "Claude 3.5 Sonnet",
+    "o1_inspect": "o1",
+    "o3_inspect": "o3",
+    "gpt_5_2025_08_07_inspect": "GPT-5",
+    "claude_opus_4_6_inspect": "Claude Opus 4.6",
+    "claude_mythos_preview_early_inspect": "Claude Mythos (preview)",
+}
+leader = {"claude_mythos_preview_early_inspect": ("2025-04-01", 1900), "claude_opus_4_6_inspect": ("2025-03-01", 800)}
+for r in rows:
+    if r["model_key"] not in names:
+        continue
+    if r["model_key"] in leader:
+        d, yv = leader[r["model_key"]]
+        ax.annotate(
+            names[r["model_key"]],
+            (date(r), r["p50_min"]),
+            xytext=(dt.datetime.fromisoformat(d), yv),
+            ha="right",
+            va="center",
+            fontsize=8.5,
+            arrowprops=dict(arrowstyle="-", color=COLORS["secondary"], lw=0.7, shrinkB=4),
+        )
+    else:
+        ax.annotate(names[r["model_key"]], (date(r), r["p50_min"]), xytext=(-6, 6), textcoords="offset points", ha="right", fontsize=8.5)
+
+# ┌── 4. DECORATE ─────────────────────────────────────────────────────────────
+ax.set_yscale("log")
+ticks = {"1 s": 1 / 60, "10 s": 1 / 6, "1 min": 1, "10 min": 10, "1 hr": 60, "8 hr": 480, "1 week\n(40 hr)": 2400}
+ax.set_yticks(list(ticks.values()))
+ax.set_yticklabels(list(ticks))
+ax.minorticks_off()
+ax.set_ylim(1 / 90, 4000)
+ax.set_xlabel("Model release date")
+ax.set_ylabel("Task length completed with\n50% success (expert time)")
+ax.legend(loc="upper left", frameon=False, fontsize=9)
+plt.show()
+plt.close()
+```
+
+::::
+
+Among the frontier models in @fig-vol3-measured-task-horizon, the 50 percent horizon grew from about `{python} MeasuredHorizon.first_s_str` seconds to about `{python} MeasuredHorizon.last_h_str` hours, a factor of roughly `{python} MeasuredHorizon.growth_str`, doubling every `{python} MeasuredHorizon.all_months_str` months across the whole period and every `{python} MeasuredHorizon.recent_months_str` months since 2023. @Eq-vol3-horizon-compounding turns that trend into an engineering obligation. A task that occupies an expert for hours instead of minutes spans many more dependent steps, and at a fixed per-step error, doubling the unchecked horizon squares the probability of success. Each doubling of the delegated task therefore requires either halving the per-step error or inserting checks that halve the unchecked segment between them. Model improvement supplies the first; only the runtime can supply the second, and the measured horizon is itself a reminder that half the attempts at that length still fail.
+
 Checking converts a silent failure into an explicit, rejected attempt, and a rejected attempt still consumes real resources. Suppose each attempt at a task is accepted with probability $\AcceptanceProbability$, independently of earlier attempts, and the runtime retries until one is accepted. The number of attempts follows a geometric distribution with mean $1/\AcceptanceProbability$. Each attempt costs $\AttemptCost$ in expectation, tallying model tokens, tool execution, test sandboxes, and human review, all of which a failed attempt consumes as completely as a successful one. The expected **cost per accepted task**\index{Cost per accepted task!definition} is therefore
 
 $$\CostPerAcceptedTask = \frac{\mathbb{E}[\AttemptCost]}{\AcceptanceProbability}$$ {#eq-vol3-cost-per-accepted-task}

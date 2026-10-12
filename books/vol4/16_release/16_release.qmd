@@ -1738,6 +1738,129 @@ Each declaration becomes a standing condition of the kind @sec-release-standing-
 
 Fleet exposure can reveal recurring failures, but its interpretation requires the operating domain, intervention definition, and configuration. Pooling dissimilar routes or treating an intervention count as a collision rate breaks the warrant. The release reviewer uses fleet records to challenge the same capability and containment claims, rather than replacing them with a mileage ranking.
 
+One public fleet record shows what an interpretable version looks like. Waymo publishes its rider-only crash rates by outcome, each against a human-driven benchmark adjusted to the same locations and each with a confidence interval, and it republishes them as rider-only mileage accumulates [@waymo2026safetyimpact; @kusano2025comparison]. @Fig-16-fleet-evidence-intervals plots the latest release and the history of two of its outcomes.
+
+```{python}
+#| label: calc-release-fleet-evidence
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLEET EVIDENCE AND ITS INTERVALS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-16-fleet-evidence-intervals and the paragraph after it.
+# │ Goal: Show that exposure licenses claims outcome by outcome, and that the
+# │       rare, severe outcomes stay the least certain.
+# │ Show: Latest cumulative miles; interval width for injury vs. serious
+# │       injury; the fatal-outcome count and interval.
+# │ How:  Literature.WaymoSafetyImpact (headline rows, location-adjusted
+# │       benchmark); width = upper minus lower bound of percent reduction.
+# └─────────────────────────────────────────────────────────────────────────────
+import calendar
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_text
+
+def _latest(rows, outcome):
+    hits = [r for r in rows if r["outcome"] == outcome]
+    return max(hits, key=lambda r: r["data_cut"])
+
+class FleetEvidence:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = Literature.WaymoSafetyImpact.entries
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    inj = _latest(rows, "Any-injury-reported")
+    ssi = _latest(rows, "Suspected Serious Injury+")
+    fat = _latest(rows, "Any Fatal")
+    miles = inj["ro_miles_millions"]
+    inj_width = 100 * (inj["pct_reduction_ci_hi"] - inj["pct_reduction_ci_lo"])
+    ssi_width = 100 * (ssi["pct_reduction_ci_hi"] - ssi["pct_reduction_ci_lo"])
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(inj["data_cut"] == ssi["data_cut"] == fat["data_cut"], "All three outcomes must come from the same release")
+    check(ssi_width > 2 * inj_width, "Prose says the serious-injury interval is several times wider")
+    check(
+        fat["waymo_count"] <= 3 and fat["pct_reduction_ci_hi"] > -0.3,
+        "Prose says the fatal interval rests on a handful of events and reaches near zero",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    _y, _m = divmod(int(inj["data_cut"]), 100)
+    cut_str = fmt_text(calendar.month_name[_m], " ", str(_y))
+    miles_str = fmt_int(round(miles))
+    inj_n_str, ssi_n_str, fat_n_str = fmt_int(inj["waymo_count"]), fmt_int(ssi["waymo_count"]), fmt_int(fat["waymo_count"])
+    inj_lo_str, inj_hi_str = fmt_int(round(-100 * inj["pct_reduction_ci_hi"])), fmt_int(round(-100 * inj["pct_reduction_ci_lo"]))
+    ssi_lo_str, ssi_hi_str = fmt_int(round(-100 * ssi["pct_reduction_ci_hi"])), fmt_int(round(-100 * ssi["pct_reduction_ci_lo"]))
+    fat_lo_str, fat_hi_str = fmt_int(round(-100 * fat["pct_reduction_ci_hi"])), fmt_int(round(-100 * fat["pct_reduction_ci_lo"]))
+```
+
+:::: {#fig-16-fleet-evidence-intervals fig-env="figure" fig-pos="htb" fig-cap="**Exposure licenses claims one outcome at a time**: (a) Percent change in crash rate against a location-adjusted human benchmark for each outcome in the latest public release, with 95 percent confidence intervals and the number of fleet crashes behind each estimate; orange marks outcomes with fewer than 20 crashes. (b) The same estimate and interval for two outcomes at each release, against cumulative rider-only miles. Common outcomes converge to narrow intervals; the serious-injury and fatal estimates rest on a few events, so their intervals stay wide however favorable the point estimate. Data from @waymo2026safetyimpact." fig-alt="Two panels. Panel a is a horizontal interval plot of percent change in crash rate from minus 100 to 0 percent for six outcomes, each with a point, a horizontal 95 percent interval, and a crash count label. Police-reported, injury, and airbag outcomes have narrow intervals between about minus 70 and minus 86 percent; serious injury and fatal outcomes have wide intervals, the fatal one stretching to about minus 18 percent. Panel b plots two series of points with vertical intervals against rider-only miles from about 30 to 270 million: the injury interval narrows steadily, and the serious-injury interval, drawn in orange, stays several times wider."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLEET EVIDENCE AND ITS INTERVALS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-16-fleet-evidence-intervals
+# │
+# │ Goal: Show per-outcome claims and how their intervals tighten with miles.
+# │ Show: (a) latest-release reductions with 95% CIs and counts; (b) injury
+# │       and serious-injury intervals by cumulative rider-only miles.
+# │ How: Literature.WaymoSafetyImpact (MLSysIM); book_style.set_book_style().
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+plt = book_style.plt
+COLORS = book_style.COLORS
+rows = Literature.WaymoSafetyImpact.entries
+last = max(r["data_cut"] for r in rows)
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 3.9), gridspec_kw=dict(width_ratios=[1.05, 1]))
+
+labels = {
+    "Police-reported": "Police-reported crash",
+    "Any-injury-reported": "Any injury reported",
+    "Any Airbag Deployment": "Any airbag deployment",
+    "Ego Vehicle Airbag Deployment": "Airbag in the robotaxi",
+    "Suspected Serious Injury+": "Serious injury or worse",
+    "Any Fatal": "Fatal",
+}
+latest = [r for r in rows if r["data_cut"] == last and r["outcome"] in labels]
+latest.sort(key=lambda r: -r["waymo_count"])
+for i, r in enumerate(latest):
+    p, lo, hi = 100 * r["pct_reduction"], 100 * r["pct_reduction_ci_lo"], 100 * r["pct_reduction_ci_hi"]
+    col = COLORS["BlueLine"] if r["waymo_count"] >= 20 else COLORS["OrangeLine"]
+    a1.plot([lo, hi], [i, i], color=col, lw=2.2, solid_capstyle="butt")
+    a1.plot(p, i, "o", color=col, ms=6)
+    a1.text(4, i, f"n = {r['waymo_count']:.0f}", va="center", fontsize=8)
+a1.set_yticks(range(len(latest)))
+a1.set_yticklabels([labels[r["outcome"]] for r in latest])
+a1.invert_yaxis()
+a1.set_xlim(-100, 20)
+a1.axvline(0, color=COLORS["primary"], lw=0.8)
+a1.set_xlabel("Change in crash rate vs. human benchmark (%)")
+a1.set_title("(a) Latest release, by outcome", loc="left", fontsize=10.5)
+a1.grid(axis="y", visible=False)
+
+for outcome, col, mk, dx in (("Any-injury-reported", COLORS["BlueLine"], "o", -2.5), ("Suspected Serious Injury+", COLORS["OrangeLine"], "s", 2.5)):
+    s = sorted([r for r in rows if r["outcome"] == outcome], key=lambda r: r["data_cut"])
+    x = [r["ro_miles_millions"] + dx for r in s]
+    y = [100 * r["pct_reduction"] for r in s]
+    err = [[100 * (r["pct_reduction"] - r["pct_reduction_ci_lo"]) for r in s], [100 * (r["pct_reduction_ci_hi"] - r["pct_reduction"]) for r in s]]
+    a2.errorbar(x, y, yerr=err, fmt=mk, color=col, ms=5, capsize=2, elinewidth=1.3, label=labels[outcome])
+a2.set_ylim(-100, -50)
+a2.set_xlabel("Cumulative rider-only miles (millions)")
+a2.set_ylabel("Change vs. benchmark (%)")
+a2.set_title("(b) Intervals as miles accumulate", loc="left", fontsize=10.5)
+a2.legend(frameon=False, fontsize=8.5, loc="upper right")
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+
+::::
+
+In the `{python} FleetEvidence.cut_str` release, after `{python} FleetEvidence.miles_str` million rider-only miles, the injury estimate rests on `{python} FleetEvidence.inj_n_str` crashes and its interval spans a reduction of `{python} FleetEvidence.inj_lo_str` to `{python} FleetEvidence.inj_hi_str` percent. The serious-injury estimate rests on `{python} FleetEvidence.ssi_n_str` crashes and spans `{python} FleetEvidence.ssi_lo_str` to `{python} FleetEvidence.ssi_hi_str` percent, and the fatal estimate rests on `{python} FleetEvidence.fat_n_str` and spans `{python} FleetEvidence.fat_lo_str` to `{python} FleetEvidence.fat_hi_str` percent. The same mileage therefore licenses a tight claim about common crashes and only a loose one about the outcomes a release decision cares about most, because rare events accumulate slowly however many miles the fleet drives. That is the fourth law, evidence bounds authority (principle \ref{pri-vol4-evidence-bounds-authority}), measured on a real fleet: each outcome's claim may extend only as far as its own interval, and a reviewer reads the interval before the point estimate.
+
 The signed release manifest records the engineering decision and its accountable owner. It does not itself establish regulatory compliance or determine legal liability. Applicable requirements depend on the machine, intended use, and jurisdiction; the release manifest must preserve the evidence needed for that separate assessment.
 
 The Cruise robotaxi collision of October 2023 shows what happens when that evidence is not preserved and disclosed (war story \ref{ws-enforcement-cruise-fallback-dragging}). After a human-driven car threw a pedestrian into its path, the driverless vehicle stopped, then attempted to pull over and dragged her beneath it. The engineering failure was a post-collision classification error. The release failure came afterward. Cruise's crash reports to the National Highway Traffic Safety Administration (NHTSA) omitted the dragging, and a video shown to the agency the next morning stopped before it [@doj2024cruise]. On 24 October 2023 the California Department of Motor Vehicles suspended Cruise's deployment and driverless testing permits, citing among its grounds that the company had misrepresented information related to the safety of its autonomous technology [@cadmv2023cruise]. In September 2024 NHTSA imposed a consent order with a \$1.5 million penalty for incomplete crash reports [@nhtsa2024cruiseconsent], and in November 2024 Cruise entered a deferred prosecution agreement and paid a \$500,000 criminal fine for a false record submitted to influence the federal investigation [@doj2024cruise]. Regulators withdrew the operating authority both because of the vehicle's physical actions and because the record of its behavior was withheld from them. A release manifest that binds raw traces to the configuration that produced them, and that an assessor can open, is the engineering counterpart of that obligation.

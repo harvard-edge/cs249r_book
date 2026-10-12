@@ -219,6 +219,128 @@ Both model architecture and numerical precision dictate the per-token payload be
 
 [^fn-latent-kv-compression]: **Latent KV Compression**: Multi-head latent attention compresses keys and values into a single low-rank latent vector per token and dynamically reconstructs per-head tensors during attention, exchanging additional projection arithmetic for a substantially smaller memory footprint [@deepseek2024v2]. Although this technique modifies the calculation of $\KvCacheBytesPerToken$ in @eq-mem-token, it preserves the fundamental system dynamics: latent cache tensors must still be paged, allocated, retained across idle periods, and evicted under memory pressure. \index{Multi-head latent attention!KV footprint}
 
+How much the architecture moves the payload is easiest to see across published geometries. @Fig-vol3-kv-footprint-by-architecture evaluates @eq-mem-token, and its latent-attention counterpart, for six registered models: one with full multi-head attention, four with grouped-query attention, and one with multi-head latent attention.
+
+```{python}
+#| label: calc-vol3-kv-footprint-by-architecture
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV FOOTPRINT BY ATTENTION ARCHITECTURE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-kv-footprint-by-architecture and the paragraph after it.
+# │ Goal: Show how much attention architecture, not parameter count, sets
+# │       the per-token KV payload.
+# │ Show: Per-token bytes for MHA, GQA, and MLA geometries; one 131,072-token
+# │       session for the GQA and MLA models used in the worked estimate.
+# │ How:  Models.Language.*.get_kv_cache_size (eq-mem-token; MLA path for
+# │       kv_lora_rank models), 16-bit elements.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models, Hardware
+from mlsysim.core.units import BYTES_FP16, GB, KB
+from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_multiple
+
+class KvFootprintByArchitecture:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _L = Models.Language
+    mha, gqa, mla = _L.GPT3, _L.Llama3_70B, _L.DeepSeek_V3
+    session_tokens = 131_072  # the long regime of the worked estimate
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    per_tok = lambda m: m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16)
+    mha_tok, gqa_tok, mla_tok = per_tok(mha), per_tok(gqa), per_tok(mla)
+    mha_over_mla = round((mha_tok / mla_tok).to("").magnitude)  # whole multiple in prose
+    gqa_over_mla = (gqa_tok / mla_tok).to("").magnitude
+    gqa_session = gqa_tok * session_tokens
+    mla_session = mla_tok * session_tokens
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(gqa_tok.to("byte").magnitude == 327_680, "Must agree with KvGeometry's Llama 3 70B per-token payload")
+    check(mha_over_mla > 50 and 3 < gqa_over_mla < 6, "Prose ratios changed")
+    check(mla.parameters > mha.parameters > gqa.parameters, "Caption says the latent-attention model is the largest of the three")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mha_name_str, gqa_name_str, mla_name_str = mha.name, gqa.name, mla.name
+    mha_tok_str = fmt_memory(mha_tok, unit=KB, precision=1, commas=True)
+    mla_tok_str = fmt_memory(mla_tok, unit=KB, precision=1)
+    mha_over_mla_mult_str = fmt_multiple(mha_over_mla, precision=0)
+    gqa_over_mla_mult_str = fmt_multiple(gqa_over_mla, precision=1)
+    session_tokens_str = fmt_int(session_tokens)
+    gqa_session_str = fmt_memory(gqa_session, unit=GB, precision=1)
+    mla_session_str = fmt_memory(mla_session, unit=GB, precision=1)
+```
+
+:::: {#fig-vol3-kv-footprint-by-architecture fig-env="figure" fig-pos="htb" fig-cap="**Attention Architecture Sets the KV Payload**: (a) Bytes retained per token at 16-bit precision for six published model geometries, on a logarithmic axis, colored by attention design. (b) One session's KV payload against retained tokens for one model of each design, beside the memory of a single accelerator. Parameter count barely predicts the payload: the latent-attention model, the largest of the three in panel (b), caches the least. The dotted segment extends the multi-head model past its trained window for scale only." fig-alt="Two panels. Panel a is a horizontal bar chart on a logarithmic axis of kilobytes per token for six models: GPT-3 longest in gray, Mixtral-8x7B, Llama-2-70B, Llama-3.1-70B and Llama-3.1-405B in blue, and DeepSeek-V3 shortest in green, each bar labeled with its value. Panel b plots KV gigabytes for one session against context length from 1K to 128K tokens on log-log axes. Three straight rising lines, gray, blue and green from top to bottom, with the gray line dotted after 2K tokens. Two horizontal dotted lines mark the memory of one H100 and one B200 accelerator."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV FOOTPRINT BY ATTENTION ARCHITECTURE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-kv-footprint-by-architecture
+# │
+# │ Goal: Show attention design, not parameter count, setting KV payload.
+# │ Show: (a) per-token KiB for six registry models; (b) one session vs.
+# │       retained tokens for MHA, GQA, MLA against accelerator memory.
+# │ How: Models.Language get_kv_cache_size; Hardware.Cloud memory capacity.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from matplotlib.patches import Patch
+from mlsysim import Models, Hardware
+from mlsysim.core.units import BYTES_FP16
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+plt = book_style.plt
+COLORS = book_style.COLORS
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4.2), gridspec_kw=dict(width_ratios=[1, 1.3]))
+
+# ┌── 1. DATA ─────────────────────────────────────────────────────────────────
+L = Models.Language
+models = [L.DeepSeek_V3, L.Llama3_70B, L.Llama2_70B, L.Llama3_405B, L.Mixtral_8x7B, L.GPT3]
+design = lambda m: "MLA" if m.kv_lora_rank else ("GQA" if m.kv_heads and m.kv_heads < m.heads else "MHA")
+color = {"MHA": COLORS["secondary"], "GQA": COLORS["BlueLine"], "MLA": COLORS["GreenLine"]}
+kb = [m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("kilobyte").magnitude for m in models]
+
+# ┌── 2. PANEL A ──────────────────────────────────────────────────────────────
+a1.barh([m.name for m in models], kb, color=[color[design(m)] for m in models])
+for y, v in enumerate(kb):
+    a1.text(v * 1.08, y, f"{v:,.0f}" if v >= 100 else f"{v:.1f}", va="center", fontsize=8)
+a1.set_xscale("log")
+a1.set_xlim(30, 20000)
+a1.set_xlabel("KV cache per token (KB)")
+a1.set_title("(a) Bytes retained per token", loc="left", fontsize=10.5)
+a1.grid(axis="y", visible=False)
+a1.legend(handles=[Patch(color=c, label=k) for k, c in color.items()], frameon=False, fontsize=8, loc="lower right")
+
+# ┌── 3. PANEL B ──────────────────────────────────────────────────────────────
+n = np.logspace(np.log10(1024), np.log10(131_072), 120)
+for m, ls in ((L.GPT3, "-"), (L.Llama3_70B, "-"), (L.DeepSeek_V3, "-")):
+    per = m.get_kv_cache_size(seq_len=1, batch_size=1, precision=BYTES_FP16).to("GB").magnitude
+    trained = n <= (m.context_length or n[-1])
+    a2.plot(n[trained], per * n[trained], color=color[design(m)], lw=1.8, label=f"{m.name} ({design(m)})")
+    a2.plot(n[~trained], per * n[~trained], color=color[design(m)], lw=1.2, ls=":")
+for acc in (Hardware.Cloud.H100, Hardware.Cloud.B200):
+    cap = acc.memory.capacity.to("GB").magnitude
+    a2.axhline(cap, color=COLORS["primary"], lw=0.8, ls=":")
+    a2.text(1100, cap * 1.12, f"one {acc.name.replace('NVIDIA ', '')}: {acc.memory.capacity.to('GiB').magnitude:.0f} GiB", fontsize=8)
+a2.set_xscale("log", base=2)
+a2.set_yscale("log")
+a2.set_xticks([2**10, 2**12, 2**14, 2**15, 2**17])
+a2.set_xticklabels(["1K", "4K", "16K", "32K", "128K"])
+a2.set_ylim(0.03, 2000)
+a2.set_xlabel("Tokens retained in one session")
+a2.set_ylabel("KV cache for one session (GB)")
+a2.set_title("(b) One session vs. accelerator memory", loc="left", fontsize=10.5)
+a2.legend(frameon=False, fontsize=8, loc="lower right")
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+
+::::
+
+The spread in @fig-vol3-kv-footprint-by-architecture is fixed at pretraining; the serving engine can work within it but cannot change it. Full multi-head attention in the `{python} KvFootprintByArchitecture.mha_name_str` geometry retains `{python} KvFootprintByArchitecture.mha_tok_str` per token, `{python} KvFootprintByArchitecture.mha_over_mla_mult_str` the `{python} KvFootprintByArchitecture.mla_tok_str` of the latent-attention `{python} KvFootprintByArchitecture.mla_name_str`; even the grouped-query `{python} KvFootprintByArchitecture.gqa_name_str` of the worked estimate retains `{python} KvFootprintByArchitecture.gqa_over_mla_mult_str` as much. At the `{python} KvFootprintByArchitecture.session_tokens_str` tokens of the long regime, that is `{python} KvFootprintByArchitecture.gqa_session_str` against `{python} KvFootprintByArchitecture.mla_session_str` for one session. The choice of model therefore fixes the slope of every capacity line in this chapter, and the runtime's levers (retained tokens, sharing, precision, and eviction) act only along that slope. Whatever the slope, each retained byte stays allocated for as long as its sequence holds the prefix, which is where the lifecycle decisions begin.
+
 In the running repair agent scenario, deciding whether to keep attention state resident while waiting for an external test suite to run exemplifies this lifecycle tension. Holding the attention state in accelerator memory avoids restoration of the retained prefix when the tool returns observations, but keeping gigabytes of memory pinned for an idle agent deprives concurrent requests of accelerator resources. Before exploring eviction and caching policies, however, the serving engine must translate theoretical tensor footprints into physical memory allocations. Statically pre-allocating contiguous buffers for a sequence's maximum potential context wastes the memory pool through severe internal fragmentation long before actual tensor payloads fill device capacity.
 
 ## Memory Fragmentation {#sec-vol3-kvcache-fragmentation}

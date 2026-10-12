@@ -231,6 +231,7 @@ class KaplanScalingLaws:
 
 
 from .series import Series  # noqa: E402  (dataset series behind trend figures)
+from . import series as _series
 
 
 class Literature(Registry):
@@ -252,3 +253,23 @@ class Literature(Registry):
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
     KaplanScalingLaws = KaplanScalingLaws
     Series = Series
+    AgentTimeHorizon = _series.AgentTimeHorizon
+    LowestPriceAtCapability = _series.LowestPriceAtCapability
+    TerminalBenchHarness = _series.TerminalBenchHarness
+    LongContextComprehension = _series.LongContextComprehension
+    SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
+    CybenchSolveRate = _series.CybenchSolveRate
+    OSWorldStepBudget = _series.OSWorldStepBudget
+    FrontierSweTrials = _series.FrontierSweTrials
+    SweBenchTrajectories = _series.SweBenchTrajectories
+    RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
+    RepeatedSamplingMajority = _series.RepeatedSamplingMajority
+    InjectionDefenseResults = _series.InjectionDefenseResults
+    ModelsByDomain = _series.ModelsByDomain
+    OpenXEmbodimentComposition = _series.OpenXEmbodimentComposition
+    LeRobotHubMonthly = _series.LeRobotHubMonthly
+    LeRobotEpisodeHistogram = _series.LeRobotEpisodeHistogram
+    EdgeInferenceOrin = _series.EdgeInferenceOrin
+    KittiOdometry = _series.KittiOdometry
+    CaliforniaDisengagements = _series.CaliforniaDisengagements
+    WaymoSafetyImpact = _series.WaymoSafetyImpact

@@ -1030,6 +1030,122 @@ Operator rest requirements and fatigue rates depend heavily on interface ergonom
 
 : **Physical demonstration collection budget across a scheduled 60-minute session**: Illustrative facility clock time, yield losses, and component wear by stage for one session of the latch campaign ($\SessionAttemptCount =$ `{python} DemonstrationYieldFatigue.n_raw_str` attempts of $\AttemptDuration =$ `{python} DemonstrationYieldFatigue.t_att_str`, reset $\ResetDuration =$ `{python} DemonstrationYieldFatigue.t_rst_str`). The `{python} DemonstrationYieldFatigue.t_idle_str` of active time left after the last full cycle is idle and has no row. Less than a quarter of the hour survives as retained demonstration data. {#tbl-05-collection-budget tbl-colwidths="[16,16,18,18,16,16]"}
 
+Public collection shows what that yield arithmetic produces at community scale. The open-source LeRobot toolchain records teleoperated sessions in a common format and publishes them to the Hugging Face Hub with an auto-generated metadata card [@cadene2024lerobot]. @Fig-05-lerobot-hub plots, from the Hub's own listing, how many such datasets exist and how many episodes each holds.
+
+```{python}
+#| label: calc-data-lerobot-hub
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMMUNITY DEMONSTRATION DATASETS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-05-lerobot-hub and the paragraph after it.
+# │ Goal: Show that public demonstration data grows by number of datasets,
+# │       not by episodes per dataset.
+# │ Show: Dataset count at three dates; median-scale facts about episodes
+# │       per dataset (share under 16, share at or above 512).
+# │ How:  Literature.LeRobotHubMonthly and LeRobotEpisodeHistogram
+# │       (power-of-two bins, all creation years pooled).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class LeRobotHub:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    months = Literature.LeRobotHubMonthly.entries
+    bins = Literature.LeRobotEpisodeHistogram.entries
+    small, large = 16, 512  # episodes per dataset
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    count_at = {m["month"]: m["cumulative_datasets"] for m in months}
+    n_2024_12, n_2025_12, n_now = count_at["2024-12"], count_at["2025-12"], months[-1]["cumulative_datasets"]
+    now_month = months[-1]["month"]
+    session_yield = DemonstrationYieldFatigue.n_usable  # illustrative hour of @tbl-05-collection-budget
+    n_counted = under_small = at_large = 0.0
+    for _b in bins:
+        n_counted += _b["datasets"]
+        under_small += _b["datasets"] * (_b["bin_hi"] <= small)
+        at_large += _b["datasets"] * (_b["bin_lo"] >= large)
+
+    _pooled = {}
+    for _b in bins:
+        _pooled[_b["bin_lo"]] = _pooled.get(_b["bin_lo"], 0) + _b["datasets"]
+    _run = 0.0
+    for _lo in sorted(_pooled):
+        _run += _pooled[_lo]
+        if _run >= n_counted / 2:
+            median_lo = _lo
+            break
+    median_hi = 2 * median_lo if median_lo else 1
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(median_hi <= session_yield, "Prose says the median dataset is smaller than one illustrative session")
+    check(n_now > 50 * n_2024_12, "Prose says the count grew more than fiftyfold since the end of 2024")
+    check(under_small / n_counted > 0.5 and at_large / n_counted < 0.03, "Prose: most hold under 16 episodes, few hold 512 or more")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_2024_12_str, n_2025_12_str, n_now_str = fmt_int(n_2024_12), fmt_int(n_2025_12), fmt_int(n_now)
+    n_counted_str = fmt_int(n_counted)
+    under_small_str = fmt_percent(round(under_small / n_counted, 2), precision=0, style="prose")
+    at_large_str = fmt_percent(round(at_large / n_counted, 2), precision=0, style="prose")
+    small_str, large_str = fmt_int(small), fmt_int(large)
+    median_lo_str, median_hi_str = fmt_int(median_lo), fmt_int(median_hi - 1)
+    session_yield_str = fmt_int(round(session_yield))
+```
+
+:::: {#fig-05-lerobot-hub fig-env="figure" fig-pos="htb" fig-cap="**Many datasets, few episodes each**: (a) Cumulative count of public datasets tagged with the LeRobot format on the Hugging Face Hub, by creation month; only datasets still public at retrieval are counted, so earlier values are lower bounds. (b) Episodes per dataset for the datasets whose card records a count, in power-of-two bins on a logarithmic axis. The count of datasets has grown by orders of magnitude while the typical dataset remains a single short session. Data retrieved from the Hub API on 2026-10-12." fig-alt="Two panels. Panel a is a rising line on a logarithmic count axis from about ten datasets in early 2024 to about 80,000 in late 2026. Panel b is a histogram of datasets against episodes per dataset on a logarithmic axis from 0 to over 65,000, with most of its mass below 64 episodes and a long thin tail to the right."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMMUNITY DEMONSTRATION DATASETS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-05-lerobot-hub
+# │
+# │ Goal: Show dataset count growing while episodes per dataset stay small.
+# │ Show: (a) cumulative datasets by month; (b) episodes-per-dataset histogram.
+# │ How: Literature.LeRobotHubMonthly / LeRobotEpisodeHistogram;
+# │      book_style.set_book_style().
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import matplotlib.dates as mdates
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+plt = book_style.plt
+COLORS = book_style.COLORS
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 3.6))
+months = Literature.LeRobotHubMonthly.entries
+a1.plot([dt.datetime.strptime(m["month"], "%Y-%m") for m in months], [m["cumulative_datasets"] for m in months], color=COLORS["BlueLine"], lw=2)
+a1.set_yscale("log")
+a1.set_yticks([10, 100, 1000, 10000, 100000])
+a1.set_yticklabels(["10", "100", "1,000", "10,000", "100,000"])
+a1.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7]))
+a1.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+a1.set_ylabel("Public datasets (cumulative)")
+a1.set_title("(a) Datasets published", loc="left", fontsize=10.5)
+tot = {}
+for b in Literature.LeRobotEpisodeHistogram.entries:
+    tot[b["bin_lo"]] = tot.get(b["bin_lo"], 0) + b["datasets"]
+lo = sorted(tot)
+labels = ["0"] + [f"{int(v):,}" for v in lo[1:]]
+a2.bar(range(len(lo)), [tot[v] for v in lo], color=COLORS["BlueLine"], width=0.85)
+a2.set_xticks(range(len(lo))[::2])
+a2.set_xticklabels(labels[::2], fontsize=7.5)
+a2.set_xlabel("Episodes per dataset (bin lower edge, powers of two)")
+a2.set_ylabel("Datasets")
+a2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:,.0f}"))
+a2.set_title("(b) Episodes per dataset", loc="left", fontsize=10.5)
+a2.grid(axis="x", visible=False)
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+
+::::
+
+The Hub held `{python} LeRobotHub.n_2024_12_str` such datasets at the end of 2024, `{python} LeRobotHub.n_2025_12_str` a year later, and `{python} LeRobotHub.n_now_str` by the retrieval date. Episode counts tell a different story. Of the `{python} LeRobotHub.n_counted_str` datasets whose card records one, `{python} LeRobotHub.under_small_str` hold fewer than `{python} LeRobotHub.small_str` episodes, and only `{python} LeRobotHub.at_large_str` hold `{python} LeRobotHub.large_str` or more. The median dataset falls in the `{python} LeRobotHub.median_lo_str` to `{python} LeRobotHub.median_hi_str` episode bin, less than the roughly `{python} LeRobotHub.session_yield_str` validated demonstrations of the illustrative hour in @tbl-05-collection-budget. Community data therefore grows wide rather than deep. The archive gains embodiments, scenes, and operators far faster than it gains repeated coverage of any one machine's states, and pooling it inherits the transfer problem of @sec-data-embodiment-contracts.
+
 The three costs compound into a fourth that no bill shows. Teleoperated demonstrations are bounded by what a human operator can perceive through video displays, coordinate through mechanical input devices, and stabilize against closed-loop delays, and a campaign that pays for every attempt in cell time and cable life spends its budget where the operator is comfortable. The resulting dataset reflects the behavioral envelope of the coupled human-machine composite rather than the robot's full physical dynamics. That selection bias decides which situations the archive covers, and measuring it requires a standard outside the archive (@sec-data-policy-coverage).
 
 ## Collection Policy Coverage {#sec-data-policy-coverage}
@@ -1423,6 +1539,142 @@ where $\GeneralizedCoordinates$ denotes joint positions, $\GeneralizedInertiaMat
 :::
 
 While the embodiment contract defines the physics of a single machine, the **cross-embodiment compatibility contract**\index{Cross-embodiment compatibility contract!definition} determines whether trajectories logged under one embodiment contract can safely serve as action targets on another. This compatibility contract defines the forward kinematics mapping (translating joint angles to tool pose), control-rate transformations ($\FiniteChange \TimeInstant$), and actuator effort bounds that prevent a high-force profile or rapid spatial velocity demonstrated on a rigid industrial arm from driving a lightweight cobot beyond its structural limits. Large pooled corpora rarely provide such guarantees. Open X-Embodiment maps action fields into a coarsely aligned seven-dimensional end-effector format and normalizes each dataset independently, but it deliberately leaves coordinate frames unaligned and allows action vectors to represent either absolute or relative poses and velocities across different sub-corpora [@open_x_embodiment_collaboration2024open]. A multi-task model trained on this pool learns to interpret identical action vectors differently based on embodiment tokens. In contrast, DROID sidesteps embodiment mismatch altogether by collecting all data on a single standardized robot model [@khazatsky2024droid]. Heterogeneous data can enrich representation learning without an explicit compatibility contract, but such a contract becomes strictly mandatory the moment borrowed actions are imitated directly as supervisory labels or dispatched to a physical plant.
+
+How much work the compatibility contract has to do is visible in the largest pooled robot corpus. The Open X-Embodiment collection merges independently recorded datasets into one training mixture and publishes, for each, its episode count, robot morphology, scene type, and command rate [@open_x_embodiment_collaboration2024open]. @Fig-05-oxe-composition weights each dataset by its episodes.
+
+```{python}
+#| label: calc-data-oxe-composition
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPOSITION OF A POOLED CROSS-EMBODIMENT CORPUS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-05-oxe-composition and the paragraph after it.
+# │ Goal: Show how little of a pooled corpus matches the running machine's
+# │       embodiment contract.
+# │ Show: Single-arm and mobile-manipulator shares; table-top share; share
+# │       recorded at 10 Hz; share with no stated command rate.
+# │ How:  Literature.OpenXEmbodimentComposition, episode-weighted; chunk rate
+# │       from Embodied.MobileManipulator.WarehouseMobileManipulator.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Embodied, Literature
+from mlsysim.core.units import hertz
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
+
+class OxeComposition:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = tuple(filter(lambda r: r["episodes"], Literature.OpenXEmbodimentComposition.entries))
+    chunk_hz = Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_rate.to(hertz).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    total = sum(r["episodes"] for r in rows)
+    single_arm = mobile = table = at_10hz = no_rate = top_two_mobile = 0.0
+    _mobile = []
+    for _r in rows:
+        _e = _r["episodes"]
+        single_arm += _e * (_r["robot_morphology"] == "Single Arm")
+        table += _e * ("table" in str(_r["scene_type"]).lower())
+        at_10hz += _e * (_r["control_frequency_hz"] == 10.0)
+        no_rate += _e * (not isinstance(_r["control_frequency_hz"], float))
+        if _r["robot_morphology"] == "Mobile Manipulator":
+            mobile += _e
+            _mobile.append(_e)
+    top_two_mobile = sum(sorted(_mobile)[-2:])
+    at_or_above_chunk = 0.0
+    for _r in rows:
+        if isinstance(_r["control_frequency_hz"], float) and _r["control_frequency_hz"] >= chunk_hz:
+            at_or_above_chunk += _r["episodes"]
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(abs(total - 2_419_193) < 1, "Episode total must match the source sheet")
+    check(single_arm / total > 0.9 and mobile / total < 0.06, "Prose: over 90% single arm, about 5% mobile manipulators")
+    check(top_two_mobile / mobile > 0.9, "Prose: two datasets supply most mobile-manipulator episodes")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_datasets_str = fmt_int(len(rows))
+    total_m_str = fmt(round(total / 1e6, 1), precision=1)
+    single_arm_str = fmt_percent(round(single_arm / total, 2), precision=0, style="prose")
+    mobile_str = fmt_percent(round(mobile / total, 2), precision=0, style="prose")
+    top_two_str = fmt_percent(round(top_two_mobile / mobile, 2), precision=0, style="prose")
+    table_str = fmt_percent(round(table / total, 2), precision=0, style="prose")
+    at_10hz_str = fmt_percent(round(at_10hz / total, 2), precision=0, style="prose")
+    no_rate_str = fmt_percent(round(no_rate / total, 2), precision=0, style="prose")
+    above_chunk_str = fmt_percent(round(at_or_above_chunk / total, 2), precision=0, style="prose")
+    chunk_hz_str = fmt_int(round(chunk_hz))
+```
+
+:::: {#fig-05-oxe-composition fig-env="figure" fig-pos="htb" fig-cap="**What a pooled corpus actually contains**: Episodes of the Open X-Embodiment collection, weighted by dataset size, (a) by robot morphology on a logarithmic axis and (b) by the command rate each dataset declares. Single-arm table-top manipulation dominates, and the declared rates cluster at or below 10 Hz; a large share declares no rate at all because its actions are primitive skills or quasi-static moves. Green marks the running machine's class in (a) and its chunk renewal rate in (b). Data from the collection's published dataset overview [@open_x_embodiment_collaboration2024open]." fig-alt="Two panels. Panel a is a horizontal bar chart of episodes on a logarithmic axis by robot morphology: single arm about 2.2 million, mobile manipulator about 120 thousand, a mixed human and robot group about 60 thousand, wheeled robot about 22 thousand, human about 4 thousand, bimanual about 500, and quadruped 20. Panel b is a bar chart of episodes in millions by declared command rate from 1 to 500 hertz plus a not-stated bar; the 10 hertz bar is tallest at about 1.4 million and the not-stated bar, in gray, is second at about 0.67 million. The small 20 hertz bar is green and labeled as the running machine's chunk rate; the mobile manipulator bar in panel a is also green."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMPOSITION OF A POOLED CROSS-EMBODIMENT CORPUS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-05-oxe-composition
+# │
+# │ Goal: Show the morphology and command-rate mix of a pooled corpus.
+# │ Show: (a) episodes by morphology; (b) episodes by declared command rate,
+# │       with the running machine's chunk rate.
+# │ How: Literature.OpenXEmbodimentComposition; book_style.set_book_style().
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Embodied, Literature
+from mlsysim.core.units import hertz
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+plt = book_style.plt
+COLORS = book_style.COLORS
+rows = [r for r in Literature.OpenXEmbodimentComposition.entries if r["episodes"]]
+chunk_hz = Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_rate.to(hertz).magnitude
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 3.8), gridspec_kw=dict(width_ratios=[1, 1.15]))
+
+morph = {}
+for r in rows:
+    key = r["robot_morphology"].capitalize().replace("Bi-manual", "Bimanual") if len(r["robot_morphology"]) < 25 else "Mixed human and robot"
+    morph[key] = morph.get(key, 0) + r["episodes"]
+order = sorted(morph, key=morph.get)
+a1.barh(order, [morph[k] for k in order], color=[COLORS["GreenLine"] if k == "Mobile manipulator" else COLORS["BlueLine"] for k in order])
+for i, k in enumerate(order):
+    a1.text(morph[k] * 1.15, i, f"{morph[k]:,.0f}", va="center", fontsize=8)
+a1.set_xscale("log")
+a1.set_xlim(10, 3e7)
+a1.set_xticks([10, 1e3, 1e5, 1e7])
+a1.set_xticklabels(["10", "1,000", "100,000", "10 million"])
+a1.set_xlabel("Episodes")
+a1.set_title("(a) By robot morphology", loc="left", fontsize=10.5)
+a1.grid(axis="y", visible=False)
+
+rate = {}
+for r in rows:
+    k = r["control_frequency_hz"] if isinstance(r["control_frequency_hz"], float) else None
+    rate[k] = rate.get(k, 0) + r["episodes"]
+stated = sorted(k for k in rate if k is not None)
+labels = [f"{k:g}" for k in stated] + ["not\nstated"]
+heights = [rate[k] / 1e6 for k in stated] + [rate[None] / 1e6]
+x = list(range(len(labels)))
+k_chunk = stated.index(chunk_hz)  # the corpus has a category at the machine's chunk rate
+a2.bar(x, heights, color=[COLORS["GreenLine"] if i == k_chunk else COLORS["BlueLine"] for i in range(len(stated))] + [COLORS["secondary"]])
+a2.annotate(
+    f"running machine's\nchunk rate, {chunk_hz:.0f} Hz",
+    (k_chunk, heights[k_chunk]),
+    xytext=(k_chunk + 0.4, max(heights) * 0.55),
+    fontsize=8,
+    color=COLORS["GreenLine"],
+    arrowprops=dict(arrowstyle="-", color=COLORS["GreenLine"], lw=0.8),
+)
+a2.set_xticks(x)
+a2.set_xticklabels(labels, fontsize=7.5)
+a2.set_xlabel("Declared command rate (Hz)")
+a2.set_ylabel("Episodes (millions)")
+a2.set_title("(b) By declared command rate", loc="left", fontsize=10.5)
+a2.grid(axis="x", visible=False)
+fig.tight_layout()
+plt.show()
+plt.close()
+```
+
+::::
+
+Of the `{python} OxeComposition.total_m_str` million episodes across `{python} OxeComposition.n_datasets_str` datasets, `{python} OxeComposition.single_arm_str` come from single arms and `{python} OxeComposition.table_str` from table-top scenes. Mobile manipulators, the class of the running machine, contribute `{python} OxeComposition.mobile_str`, and two datasets supply `{python} OxeComposition.top_two_str` of those. The command rates are as uneven: `{python} OxeComposition.at_10hz_str` of episodes were logged at 10 Hz, `{python} OxeComposition.no_rate_str` declare no rate, and only `{python} OxeComposition.above_chunk_str` were recorded at or above the machine's `{python} OxeComposition.chunk_hz_str` Hz chunk rate. Corpus size therefore says little about coverage of one machine's contract. Almost every episode in the mixture needs the rate transformation and morphology mapping of the compatibility contract before it can serve as an action target here, and the rest of this section is about what those transformations can and cannot preserve.
 
 Building a robust data-reuse pipeline requires cleanly separating environmental task invariants from embodiment-specific realizations. A task invariant is a geometric or dynamical condition imposed by the physical process: for example, bringing a compliant probe into contact with a terminal pad within $5^\circ$ of the surface normal while sustaining a normal contact force between $2.0\text{ N}$ and $5.0\text{ N}$. An embodiment realization is the concrete sequence of joint encoder counts, pulse-width modulation duty cycles, perception transport latencies, and sensor pixel rasters used to achieve that condition on a particular test rig. While the contact goal exists in world coordinates, the dataset stores only the realization. When a model trains directly on raw hardware realizations, it internalizes the idiosyncratic mechanics of the source testbed, including structural flexure, drive backlash, and sensor mounting oscillations.
 
