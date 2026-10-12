@@ -40,14 +40,14 @@ or refresh the numbering map from the candidate chapter build itself.
 From the repository root or `book/` directory:
 
 ```sh
-./binder/binder layout chapter ml_workflow \
+./binder/binder layout chapter ml_lifecycle \
   --vol1 \
   --aux /absolute/path/to/Machine-Learning-Systems-Vol1.aux
 ```
 
-The chapter argument can be a unique QMD stem such as `ml_workflow` or a path
+The chapter argument can be a unique QMD stem such as `ml_lifecycle` or a path
 relative to `books/`, such as
-`vol1/ml_workflow/ml_workflow.qmd`.
+`vol1/ml_lifecycle/ml_lifecycle.qmd`.
 
 Outputs are written under:
 

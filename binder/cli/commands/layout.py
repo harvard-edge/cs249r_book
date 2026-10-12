@@ -308,7 +308,7 @@ class LayoutCommand:
             ),
             epilog=(
                 "Example:\n"
-                "  binder layout chapter ml_workflow --vol1 --aux /tmp/full/Machine-Learning-Systems-Vol1.aux\n\n"
+                "  binder layout chapter ml_lifecycle --vol1 --aux /tmp/full/Machine-Learning-Systems-Vol1.aux\n\n"
                 "Use this for iterative visual layout work. A full-volume PDF remains "
                 "the authoritative sign-off build. Do not run two mapped renders in "
                 "the same worktree; use separate worktrees for parallel builds."

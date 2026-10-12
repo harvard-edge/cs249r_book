@@ -40,7 +40,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 1 | chapter | `01_introduction/01_introduction.qmd` |
 |  | part | `parts/foundations_principles.qmd` |
 | 2 | chapter | `02_system_paradigms/02_system_paradigms.qmd` |
-| 3 | chapter | `03_ml_workflow/03_ml_workflow.qmd` |
+| 3 | chapter | `03_ml_lifecycle/03_ml_lifecycle.qmd` |
 | 4 | chapter | `04_data_engineering/04_data_engineering.qmd` |
 |  | part | `parts/build_principles.qmd` |
 | 5 | chapter | `05_nn_computation/05_nn_computation.qmd` |

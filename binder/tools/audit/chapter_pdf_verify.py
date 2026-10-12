@@ -48,7 +48,7 @@ CHAPTERS: dict[str, list[str]] = {
     "vol1": [
         "introduction/introduction",
         "02_system_paradigms/02_system_paradigms",
-        "ml_workflow/ml_workflow",
+        "ml_lifecycle/ml_lifecycle",
         "data_engineering/data_engineering",
         "nn_computation/nn_computation",
         "nn_architectures/nn_architectures",

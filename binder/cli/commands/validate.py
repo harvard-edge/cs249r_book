@@ -631,6 +631,15 @@ class ValidateCommand:
                   note="callout title attribute sentence-case compliance"),
             Scope("unclosed-html-comments", "_run_unclosed_html_comments",
                   note="unclosed <!-- HTML comment tags that silently swallow prose"),
+            # Added 2026-10-11 (vol1 streamline): `\mbox{`{python} x`}` in
+            # prose is raw LaTeX, so the HTML build drops the computed value
+            # entirely (ch2, ch4, ch16 each lost a number this way).
+            # Added 2026-10-11: \\ref{nbk-...} to a callout defined in another
+            # chapter renders as raw LaTeX in the per-chapter HTML build.
+            Scope("cross-chapter-callout-ref", "_run_cross_chapter_callout_ref",
+                  note="\\ref{} to a notebook/war-story/checkpoint defined in another file renders raw in HTML; point to its section instead"),
+            Scope("raw-tex-inline-value", "_run_raw_tex_inline_value",
+                  note="raw LaTeX box (\\mbox/\\hbox/\\makebox) around an inline {python} value hides it from HTML"),
             # default=False until vol2 narrative callouts are normalized to the
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
@@ -8819,6 +8828,80 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_cross_chapter_callout_ref(self, root: Path) -> ValidationRunResult:
+        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp) defined in a different file."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        defs = {}
+        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)")
+        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)\}")
+        texts = {f: self._read_text(f) for f in files}
+        for f, t in texts.items():
+            for m in def_pat.finditer(t):
+                defs[m.group(1)] = f
+        # 2026-10-12: enforced for vol1 only. vol2-vol4 carried 113 such refs
+        # when this check arrived; add each volume here once its refs are fixed.
+        enforced_volumes = {"vol1"}
+        for f, t in texts.items():
+            if not enforced_volumes & set(Path(f).parts):
+                continue
+            for idx, line in enumerate(t.splitlines(), 1):
+                for m in ref_pat.finditer(line):
+                    d = defs.get(m.group(1))
+                    if d is not None and d != f:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(f),
+                                line=idx,
+                                code="cross_chapter_callout_ref",
+                                message=f"\\ref{{{m.group(1)}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
+                                severity="error",
+                                context=line.strip()[:100],
+                            )
+                        )
+        return ValidationRunResult(
+            name="cross-chapter-callout-ref",
+            description="Flag cross-chapter \\ref to callout ids",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_raw_tex_inline_value(self, root: Path) -> ValidationRunResult:
+        """Flag raw LaTeX boxes wrapping inline {python} values in prose (dropped by HTML)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pat = re.compile(r"\\(?:mbox|hbox|makebox)\{[^{}]*`\{python\}")
+        for file in files:
+            in_code = False
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                if line.lstrip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                m = pat.search(line)
+                if m:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="raw_tex_inline_value",
+                            message="Raw LaTeX box around an inline {python} value; HTML drops it. Remove the box.",
+                            severity="error",
+                            context=line.strip()[:100],
+                        )
+                    )
+        return ValidationRunResult(
+            name="raw-tex-inline-value",
+            description="Flag raw LaTeX boxes around inline {python} values",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_missing_image_files(self, root: Path) -> ValidationRunResult:
         """Flag local image file references in QMD files that do not exist on disk."""
         start = time.time()
@@ -13227,6 +13310,10 @@ class ValidateCommand:
         # The verb marks the role; "is established in @sec-x" and "the bound established in @sec-x" both qualify.
         fwd = re.compile(r"\b(?:developed|measured|operationalized|enforced)\b[^.@]*\bin @")
         bwd = re.compile(r"\bestablished\b[^.@]*\bin @")
+        # 2026-10-12 author ruling (Vol I): an appendix collects material for reference and
+        # is never a concept's home, so a pointer into one may say "collected for reference
+        # in". Accepted, not required, so the other volumes' pointers are unaffected.
+        appx = re.compile(r"\bcollected for reference in @")
         homes: Dict[Path, Dict[str, object]] = {}
 
         def home_map(vol_dir: Path) -> Dict[str, object]:
@@ -13296,8 +13383,8 @@ class ValidateCommand:
                         problem = "↪ must point to a later chapter or an appendix"
                     elif body[0] == "↩" and not bwd.search(body):
                         problem = '↩ pointer wording uses "established in"'
-                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not fwd.search(body):
-                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in"'
+                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not (fwd.search(body) or (tgt == "appendix" and appx.search(body))):
+                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in" (an appendix target may use "collected for reference in")'
                     elif body[0] == "⇄" and not body.startswith("⇄ **Contrast:**"):
                         problem = "⇄ pointer must open with **Contrast:**"
                     elif re.match(r"↪ \*\*(Byte layout|Protocol):\*\*", body) and tgt != "appendix":
@@ -14501,7 +14588,7 @@ class ValidateCommand:
         approved_layout_vectors = {
             ("vol1/frontmatter/_conventions.qmd", (17, 85)),
             ("vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
-            ("vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
+            ("vol1/ml_lifecycle/ml_lifecycle.qmd", (16, 44, 50)),
         }
 
         for file in files:

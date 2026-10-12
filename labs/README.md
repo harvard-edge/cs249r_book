@@ -67,7 +67,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
     <tr>
       <td>03</td>
-      <td><code>lab_03_ml_workflow</code></td>
+      <td><code>lab_03_ml_lifecycle</code></td>
       <td>The Silent Degradation Loop</td>
     </tr>
     <tr>

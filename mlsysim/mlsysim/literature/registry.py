@@ -36,47 +36,46 @@ DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity",
 # @fig-ai-training-compute-growth. The scalar-anchor YAML schema used by the
 # other literature data files cannot express a multi-field series, so this
 # curated milestone list lives in Python (per the mlsysim taxonomy rule:
-# "composing / series -> Python"). Values are Epoch AI's training-compute
-# (FLOP) estimates for each model, not vendor disclosures.
+# "composing / series -> Python"). Values are third-party training-compute
+# (FLOP) estimates from Epoch AI's Notable AI Models database, not vendor
+# disclosures. Era: "Large Scale" marks runs above 10^22 FLOP.
 #
-# 2026-10-12: re-pinned to the Epoch AI Notable AI Models dataset. The
-# earlier rows for 2012-2019 were 2.5x to 67x off the published estimates
-# (AlphaGo Zero 3e22 vs 6.5e20, Transformer 5e20 vs 7.4e18, BERT-Large and
-# GPT-2 about 10x high), which made a hand-drawn six-month reference line
-# look like a fit. Epoch has no ResNet-50 entry, so the 2015 ResNet row is
-# ResNet-152 (ImageNet). AlphaGo Zero is Epoch's direct-training figure,
-# which excludes self-play data generation.
+# 2026-10-12: the pre-2020 rows were 1.5-67x above Epoch's estimates (e.g.
+# Transformer 5e20 vs 7.4e18, AlphaGo Zero 3e22 vs 6.5e20) and ResNet-50 had no
+# source; all rows re-pinned to the Epoch snapshot and ResNet-50 replaced by
+# ResNet-152, the Epoch-listed ResNet. Epoch's AlphaGo Zero estimate counts
+# network training only, not self-play data generation.
 # ---------------------------------------------------------------------------
 from ..core.provenance import Provenance, ProvenanceKind
 
 _COMPUTE_TREND_PROVENANCE = Provenance(
     kind=ProvenanceKind.LITERATURE,
     ref=(
-        "Epoch AI, Notable AI Models dataset (training compute column); "
-        "methodology in Sevilla et al. (2022), Compute Trends Across Three Eras "
-        "of Machine Learning"
+        "Epoch AI, Notable AI Models database (training compute, FLOP), "
+        "accessed 2026-10-12; method per Sevilla et al. (2022), Compute Trends "
+        "Across Three Eras of Machine Learning"
     ),
     url="https://epoch.ai/data/notable-ai-models",
     verified="2026-10-12",
 )
 
-# (model, calendar year, training FLOP, era)
+# (model, calendar year of publication, training FLOP, era)
 _COMPUTE_TREND_ROWS = (
     ("AlexNet", 2012, 4.7e17, "Deep Learning"),
-    ("VGG-16", 2014, 1.2e19, "Deep Learning"),
-    ("ResNet-152", 2015, 1.0e19, "Deep Learning"),
-    ("GoogLeNet", 2014, 1.5e18, "Deep Learning"),
-    ("AlphaGoZero", 2017, 6.5e20, "Deep Learning"),
-    ("Transformer", 2017, 7.4e18, "Large Scale"),
-    ("BERT-Large", 2018, 2.9e20, "Large Scale"),
-    ("GPT-2-XL", 2019, 1.9e21, "Large Scale"),
+    ("VGG-16", 2014, 1.23e19, "Deep Learning"),
+    ("GoogLeNet", 2014, 1.51e18, "Deep Learning"),
+    ("ResNet-152", 2015, 1.04e19, "Deep Learning"),
+    ("Transformer", 2017, 7.42e18, "Deep Learning"),
+    ("AlphaGoZero", 2017, 6.49e20, "Deep Learning"),
+    ("BERT-Large", 2018, 2.85e20, "Deep Learning"),
+    ("GPT-2-XL", 2019, 1.92e21, "Deep Learning"),
     ("T5-11 billion", 2019, 3.3e22, "Large Scale"),
-    ("GPT-3", 2020, 3.1e23, "Large Scale"),
-    ("Gopher", 2021, 6.3e23, "Large Scale"),
-    ("PaLM", 2022, 2.5e24, "Large Scale"),
+    ("GPT-3", 2020, 3.14e23, "Large Scale"),
+    ("Gopher", 2021, 6.31e23, "Large Scale"),
+    ("PaLM", 2022, 2.53e24, "Large Scale"),
     ("GPT-4-class", 2023, 2.1e25, "Large Scale"),
-    ("Llama-3-70 billion", 2024, 7.9e24, "Large Scale"),
-    ("Gemini-Ultra", 2024, 5.0e25, "Large Scale"),
+    ("Gemini-Ultra", 2023, 5.0e25, "Large Scale"),
+    ("Llama-3-70 billion", 2024, 7.86e24, "Large Scale"),
     ("Llama 3.1 405B", 2024, 3.8e25, "Large Scale"),
     ("Grok-3", 2025, 3.5e26, "Large Scale"),
 )
@@ -95,6 +94,60 @@ class ComputeTrend:
         for (m, y, f, e) in _COMPUTE_TREND_ROWS
     )
     list = entries  # parity with the Registry `.list` convention
+
+
+# ---------------------------------------------------------------------------
+# Algorithmic-efficiency series for @fig-algo-efficiency (added 2026-10-12).
+# Training compute each ImageNet architecture needed to reach AlexNet-level
+# accuracy (79.1% top-5), measured by Hernandez and Brown with fixed hardware
+# held out. The efficiency factor of a model is AlexNet's compute divided by
+# its own; the book computes that ratio, so only the measured compute lives here.
+# Years are first-publication dates (fractional, for plotting order).
+# ---------------------------------------------------------------------------
+_ALGO_EFFICIENCY_PROVENANCE = Provenance(
+    kind=ProvenanceKind.LITERATURE,
+    ref=(
+        "Hernandez and Brown (2020), Measuring the Algorithmic Efficiency of "
+        "Neural Networks, Appendix B, Table 3 (teraflop/s-days to AlexNet-level accuracy)"
+    ),
+    url="https://arxiv.org/abs/2005.04305",
+    verified="2026-10-12",
+)
+
+# (model, publication year, teraflop/s-days to reach AlexNet-level accuracy)
+_ALGO_EFFICIENCY_ROWS = (
+    ("AlexNet", 2012.5, 266.1),
+    ("VGG-11", 2014.7, 367.7),
+    ("GoogLeNet", 2014.75, 61.4),
+    ("ResNet-18", 2015.9, 97.9),
+    ("DenseNet-121", 2016.7, 82.9),
+    ("MobileNet-v1", 2017.3, 24.0),
+    ("ShuffleNet-v1", 2017.5, 12.9),
+    ("MobileNet-v2", 2018.1, 20.2),
+    ("ShuffleNet-v2", 2018.5, 10.8),
+    ("EfficientNet-B0", 2019.4, 6.0),
+)
+
+
+class AlgorithmicEfficiency:
+    """Training compute to AlexNet-level ImageNet accuracy, by architecture.
+
+    Source: see ``provenance``. Consumed by @fig-algo-efficiency and the
+    efficiency-versus-scale prose in the introduction. Each entry is a dict
+    ``{"model", "year", "tfs_days"}``; ``baseline_model`` names the reference.
+    """
+
+    provenance = _ALGO_EFFICIENCY_PROVENANCE
+    baseline_model = "AlexNet"
+    entries = tuple(
+        {"model": m, "year": y, "tfs_days": c} for (m, y, c) in _ALGO_EFFICIENCY_ROWS
+    )
+
+    @classmethod
+    def factor(cls, model):
+        """AlexNet compute divided by ``model``'s compute (higher is more efficient)."""
+        by_model = {e["model"]: e["tfs_days"] for e in cls.entries}
+        return by_model[cls.baseline_model] / by_model[model]
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +230,7 @@ class KaplanScalingLaws:
     list = entries  # parity with the Registry `.list` convention
 
 
+from .series import Series  # noqa: E402  (dataset series behind trend figures)
 from . import series as _series
 
 
@@ -195,8 +249,10 @@ class Literature(Registry):
     FleetOperations = FleetOperations
     DatacenterElectricity = DatacenterElectricity
     ComputeTrend = ComputeTrend
+    AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
     KaplanScalingLaws = KaplanScalingLaws
+    Series = Series
     AgentTimeHorizon = _series.AgentTimeHorizon
     LowestPriceAtCapability = _series.LowestPriceAtCapability
     TerminalBenchHarness = _series.TerminalBenchHarness
