@@ -4002,6 +4002,128 @@ Production measurements in @fig-meta-analysis show why this crossover must remai
 
 Inference workloads, like other software services, scale with demand. An always-available service consumes energy both while processing requests and while maintaining capacity for expected latency and availability. The sustainability account must include query volume, workload mix, and idle provisioned resources.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED ENERGY PER PROMPT BY BOUNDARY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the always-available-service paragraph and
+# │          @fig-prompt-energy-boundary.
+# │
+# │ Goal: Show how much of a production prompt's energy sits outside the
+# │       accelerator, and how the boundary changes the published number.
+# │ Show: Median Gemini text prompt 0.24 Wh full stack (accelerators 58%,
+# │       host 25%, idle 10%, overhead 8%) vs 0.10 Wh accelerator-only, 2.4×;
+# │       about a quarter of the worked example's 1 Wh per query.
+# │ How: Literature.Series.GeminiPromptEnergy (Elsworth et al. 2025, Table 1);
+# │      InferenceLifecycleExample.kwh_per_query for the comparison.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.core.units import Wh
+from mlsysim.fmt import check, fmt_energy, fmt_multiple, fmt_percent
+
+def _component(rows, prefix):
+    return next(r for r in rows if r["component"].startswith(prefix))
+
+def _counted_total(rows, column, flag):
+    return sum(r[column] for r in rows if r[flag] == 1)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class PromptEnergyBoundary:
+    """Per-prompt serving energy under accelerator-only and full-stack boundaries."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.GeminiPromptEnergy.entries
+    worked_example_wh = InferenceLifecycleExample.kwh_per_query.to(Wh).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    full_wh = _counted_total(rows, "comprehensive_wh", "comprehensive_counted")
+    narrow_wh = _counted_total(rows, "existing_wh", "existing_counted")
+    boundary_ratio = full_wh / narrow_wh
+    accel_share = _component(rows, "Active AI")["comprehensive_wh"] / full_wh
+    host_share = _component(rows, "Active host")["comprehensive_wh"] / full_wh
+    idle_overhead_share = (_component(rows, "Idle")["comprehensive_wh"] + _component(rows, "Data center")["comprehensive_wh"]) / full_wh
+    vs_worked_example = full_wh / worked_example_wh
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(full_wh - 0.24) < 1e-9 and abs(narrow_wh - 0.10) < 1e-9, "Table 1 totals are 0.24 and 0.10 Wh.")
+    check(2.3 <= boundary_ratio <= 2.5, f"Prose says the full boundary is 2.4x the narrow one, got {boundary_ratio:.2f}.")
+    check(0.2 <= vs_worked_example <= 0.3, "Prose says the measured prompt is about a quarter of the worked example's figure.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    full_energy_str = fmt_energy(full_wh * Wh, unit=Wh, precision=2)
+    narrow_energy_str = fmt_energy(narrow_wh * Wh, unit=Wh, precision=2)
+    boundary_ratio_mult_str = fmt_multiple(round(boundary_ratio, 1))
+    accel_share_pct_str = fmt_percent(round(accel_share, 2), precision=0, style="prose")
+    host_share_pct_str = fmt_percent(round(host_share, 2), precision=0, style="prose")
+    idle_overhead_share_pct_str = fmt_percent(round(idle_overhead_share, 2), precision=0, style="prose")
+    worked_example_energy_str = fmt_energy(round(worked_example_wh) * Wh, unit=Wh, precision=0)
+```
+
+A production measurement shows how large that account is. Google instrumented the fleet serving its Gemini assistant and attributed energy to the median text prompt in May 2025 across every component of the serving stack [@elsworth2025measuring]. @Fig-prompt-energy-boundary shows the result. The full-stack figure is `{python} PromptEnergyBoundary.full_energy_str` per prompt, of which the active accelerators account for only `{python} PromptEnergyBoundary.accel_share_pct_str`. The host processors and memory that feed them add `{python} PromptEnergyBoundary.host_share_pct_str`, and idle machines held for latency and availability together with facility overhead add another `{python} PromptEnergyBoundary.idle_overhead_share_pct_str`. Counting only active accelerators on the most efficiently used machines, the boundary most published estimates use, yields `{python} PromptEnergyBoundary.narrow_energy_str`, a `{python} PromptEnergyBoundary.boundary_ratio_mult_str` understatement of the same workload. The measured prompt also sits at about a quarter of the `{python} PromptEnergyBoundary.worked_example_energy_str` per query assumed in the worked example above, a reminder that per-query energy is a property of a specific model, serving stack, and utilization rather than a constant. The same study reports that software and utilization improvements cut the median prompt's energy 33-fold in a single year, so a per-query figure also carries a date.
+
+::: {#fig-prompt-energy-boundary fig-env="figure" fig-pos="htb" fig-cap="**Energy per Prompt Depends on the Measurement Boundary**: Energy attributed to the median Gemini text prompt in May 2025 under two boundaries. The accelerator-only boundary counts active accelerators on the most efficiently used machines; the full-stack boundary also counts host processors and memory, idle machines provisioned for latency and availability, and data-center overhead, across the whole fleet. Hatched segments are components that the accelerator-only boundary leaves out. Data from Table 1 of @elsworth2025measuring." fig-alt="Two horizontal stacked bars of energy per prompt in watt-hours. The accelerator-only bar counts 0.10 for active accelerators, with hatched uncounted segments for host CPU and memory 0.04, idle machines 0.02, and overhead 0.01. The full-stack bar counts active accelerators 0.14, host CPU and memory 0.06, idle machines 0.02, and data-center overhead 0.02, totaling 0.24, labeled 2.4 times the accelerator-only total."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED ENERGY PER PROMPT BY BOUNDARY (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-prompt-energy-boundary.
+# │
+# │ Goal: Compare per-prompt energy under two measurement boundaries.
+# │ Show: Two stacked bars by component; uncounted segments hatched.
+# │ How: PromptEnergyBoundary (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(9, 3.0))
+_C = PromptEnergyBoundary
+_cols = [COLORS["OrangeLine"], COLORS["BlueLine"], COLORS["VioletLine"], COLORS["grid"]]
+_bars = [("Accelerator-only boundary", "existing_wh", "existing_counted"), ("Full-stack boundary", "comprehensive_wh", "comprehensive_counted")]
+for _y, (_lab, _col, _flag) in zip((1, 0), _bars):
+    _left = 0.0
+    for _r, _c in zip(_C.rows, _cols):
+        _counted = _r[_flag] == 1
+        ax.barh(
+            _y,
+            _r[_col],
+            left=_left,
+            height=0.55,
+            color=_c if _counted else "white",
+            edgecolor=_c,
+            hatch=None if _counted else "///",
+            lw=1.2,
+            label=_r["component"] if _y == 0 else None,
+        )
+        if _r[_col] >= 0.04:
+            ax.text(
+                _left + _r[_col] / 2,
+                _y,
+                f"{_r[_col]:.2f}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="white" if _counted and _c != COLORS["grid"] else COLORS["primary"],
+            )
+        _left += _r[_col]
+_tot = {1: _C.narrow_wh, 0: _C.full_wh}
+for _y, _t in _tot.items():
+    _note = f"counted: {_t:.2f} Wh" + (f"\n({_C.boundary_ratio:.1f}× the accelerator-only total)" if _y == 0 else "")
+    ax.text(0.248 if _y == 0 else _C.narrow_wh + 0.075, _y, _note, va="center", fontsize=8.5, color=COLORS["primary"])
+ax.set_yticks([0, 1])
+ax.set_yticklabels([b[0] for b in reversed(_bars)])
+ax.set_xlim(0, 0.34)
+ax.set_xlabel("Energy per median text prompt (Wh)")
+ax.legend(fontsize=7.5, loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=4, frameon=False)
+plt.show()
+plt.close()
+```
+
+:::
+
 ::: {#chk-sustainable-ai-training-inference-flip .callout-checkpoint title="The training-inference flip"}
 
 Consider a vision model where training requires 2,000 GPU-hours at an average accelerator power draw of 300 W. Once deployed, the model serves 1 million requests per day for 730 days, with each request occupying an accelerator for 50 ms at an average draw of 100 W. Assume requests do not overlap on an accelerator. This active-only account excludes idle capacity, host systems, networking, and facility overhead.

@@ -394,3 +394,14 @@ class Series:
         "Apple Neural Engine peak ratings by A-series chip, with the basis of each value.",
         numeric=("year", "tops"),
     )
+    GeminiPromptEnergy = TrendSeries(
+        "gemini_prompt_energy",
+        _lit("Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, "
+             "Table 1 (median Gemini Apps text prompt, May 2025), arXiv:2508.15734", "https://arxiv.org/abs/2508.15734",
+             "Wh per median text prompt by component; the Existing Approach counts only active accelerators on "
+             "prompts in the top 10% most efficient data centers (other components shown but not counted, "
+             "total 0.10 Wh); the Comprehensive Approach counts every component across the fleet (total 0.24 "
+             "Wh); Table 2 gives 0.03 gCO2e and 0.26 mL water per prompt; transcribed exactly"),
+        "Energy per median Gemini text prompt by serving-stack component under two measurement boundaries.",
+        numeric=("existing_wh", "existing_counted", "comprehensive_wh", "comprehensive_counted"),
+    )
