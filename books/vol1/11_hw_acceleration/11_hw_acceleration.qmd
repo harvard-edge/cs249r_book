@@ -1,4 +1,5 @@
 ---
+number-offset: [10]
 quiz: hw_acceleration_quizzes.json
 concepts: hw_acceleration_concepts.yml
 engine: jupyter
@@ -43,9 +44,7 @@ notation-local: [\AffineOffset, \AffineScale, \AttentionOutputMatrix, \BatchNorm
 
 _Why does moving data cost more than computing it?_
 
-Arithmetic is inexpensive relative to data movement. In the time required to fetch a single scalar operand from off-chip DRAM, modern arithmetic units can execute dozens to hundreds of floating-point operations, and that DRAM access consumes on the order of a hundred times more energy than the computation itself. This fundamental imbalance, the memory wall, means specialized accelerators are not merely faster arithmetic engines. Rather, their microarchitectures are designed to stage, amortize, and hide data movement through wide spatial interconnects, deep on-chip memory hierarchies, and specialized execution pipelines. When general-purpose processor scaling faltered, hardware specialization enabled machine learning models to continue scaling by turning transistor budgets into high-throughput tensor datapaths.
-
-Delivered performance, however, depends on whether a model's tensor access patterns match the data paths of the underlying silicon. Hardware selection cannot be reduced to comparing peak FLOP/s: two accelerators with identical theoretical compute ratings often deliver radically different throughput on real workloads because one saturates its functional units while the other starves for data. A recommendation model dominated by sparse embedding lookups stresses memory bandwidth and interconnect latency, demanding a fundamentally different memory architecture than a dense transformer training run bounded by matrix multiply-accumulate throughput. If an operation is memory-bound, reducing theoretical operation count yields zero speedup because arithmetic is not the binding constraint. Matching workload characteristics to architectural dataflows determines whether an accelerator operates near its hardware ceiling or languishes at a fraction of its advertised peak. In D·A·M terms, the accelerator makes the machine constraint concrete, governing which algorithms and model architectures remain practical in production.
+Arithmetic is inexpensive relative to data movement. In the time required to fetch a single scalar operand from off-chip DRAM, modern arithmetic units can execute dozens to hundreds of floating-point operations, and that DRAM access consumes on the order of a hundred times more energy than the computation itself. This fundamental imbalance, the memory wall, means specialized accelerators are not merely faster arithmetic engines. Rather, their microarchitectures are designed to stage, amortize, and hide data movement through wide spatial interconnects, deep on-chip memory hierarchies, and specialized execution pipelines. When general-purpose processor scaling faltered, hardware specialization enabled machine learning models to continue scaling by turning transistor budgets into high-throughput tensor datapaths. Delivered performance, however, depends on whether a model's tensor access patterns match the data paths of the underlying silicon. Hardware selection cannot be reduced to comparing peak FLOP/s: two accelerators with identical theoretical compute ratings often deliver radically different throughput on real workloads because one saturates its functional units while the other starves for data. A recommendation model dominated by sparse embedding lookups stresses memory bandwidth and interconnect latency, demanding a fundamentally different memory architecture than a dense transformer training run bounded by matrix multiply-accumulate throughput. If an operation is memory-bound, reducing theoretical operation count yields zero speedup because arithmetic is not the binding constraint. Matching workload characteristics to architectural dataflows determines whether an accelerator operates near its hardware ceiling or languishes at a fraction of its advertised peak. In D·A·M terms, the accelerator makes the machine constraint concrete, governing which algorithms and model architectures remain practical in production.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -64,6 +63,8 @@ Delivered performance, however, depends on whether a model's tensor access patte
 - Evaluate accelerator choices across throughput, latency, power, cost, and deployment-context constraints
 
 :::
+
+## Anatomy of an Accelerator {#sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28}
 
 ```{python}
 #| echo: false
@@ -107,8 +108,6 @@ class HwAccelSetup:
     h100_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
     cpu_gap_range_mult_str = fmt_multiple_range(round(cpu_gap_min, -1), round(cpu_gap_max, -1), precision=0, commas=False)
 ```
-
-## Anatomy of an Accelerator {#sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28}
 
 ::: {.column-margin}
 ![](images/svg/hw_acceleration_dam_locator.svg){width="100%" fig-alt="D·A·M taxonomy triangle with three vertices labeled D, A, and M connected by edges. The M (Machine) vertex is filled in solid color; the D and A vertices are gray, marking the Machine axis."}
@@ -579,7 +578,7 @@ $$
 $$
 Less token-generation time receives the assumed gain, so even an infinite path gain yields at most $1/(1-\ParallelFraction)$ = `{python} AmdahlH100.amdahl_gpt2_ceiling_speedup_mult_str`.
 
-This calculation still overstates the decode path gain. Decode is bandwidth bound, so its accelerated path runs at the rate weights stream from memory rather than at the INT8 TOPS rate. The relevant ratio is the H100's memory bandwidth over the reference CPU's, `{python} AmdahlH100.bw_gain_mult_str`, and INT8 helps decode on either machine by halving the bytes each weight occupies relative to FP16, not by multiplying faster. With that gain the bound falls from `{python} AmdahlH100.amdahl_gpt2_speedup_mult_str` to `{python} AmdahlH100.amdahl_gpt2_bw_speedup_mult_str`, barely moving, because the unaccelerated fraction already dominates. Two distinct limits are at work. Bandwidth-boundedness shrinks $\AcceleratorGain$, whereas the unaccelerated fraction caps what any $\AcceleratorGain$ can deliver. Serving optimizations attack both. Batching raises the work done per weight byte fetched, and speculative decoding, developed in @sec-model-serving, lets a small draft model propose several tokens that the full model then verifies in one step, reducing the number of sequential full-model steps.
+This calculation still overstates the decode path gain. Decode is bandwidth bound, so its accelerated path runs at the rate weights stream from memory rather than at the INT8 TOPS rate. The relevant ratio is the H100's memory bandwidth over the reference CPU socket's, `{python} AmdahlH100.bw_gain_mult_str` (a different path from the host-DRAM link used below), and INT8 helps decode on either machine by halving the bytes each weight occupies relative to FP16, not by multiplying faster. With that gain the bound falls from `{python} AmdahlH100.amdahl_gpt2_speedup_mult_str` to `{python} AmdahlH100.amdahl_gpt2_bw_speedup_mult_str`, barely moving, because the unaccelerated fraction already dominates. Two distinct limits are at work. Bandwidth-boundedness shrinks $\AcceleratorGain$, whereas the unaccelerated fraction caps what any $\AcceleratorGain$ can deliver. Serving optimizations attack both. Batching raises the work done per weight byte fetched, and speculative decoding, developed in @sec-model-serving, lets a small draft model propose several tokens that the full model then verifies in one step, reducing the number of sequential full-model steps.
 
 :::
 
@@ -845,7 +844,7 @@ Data access can dominate the energy budget of a memory-intensive kernel.[^fn-von
 
 [^fn-von-neumann-bottleneck]: **Von Neumann bottleneck**\index{Von Neumann bottleneck!ML accelerator constraint}: Separating storage from compute requires instructions and data to cross interfaces rather than remain in local registers. In the representative 45 nm estimates from @horowitz2014, a DRAM access costs more than four orders of magnitude more energy than an INT8 addition, the cheapest operation charted. The exact ratio changes with technology and operation, but locality remains a first-order design concern.
 
-::: {#fig-energy-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Energy Hierarchy**: Representative 45 nm energy estimates on a logarithmic scale from @horowitz2014. An off-chip DRAM access costs about 170$\times$ an FP32 multiply and about 128$\times$ a read from an 8 KB SRAM array in this model; a small, register-adjacent L1 access (about 0.5 pJ in the registry used elsewhere in this chapter) is cheaper still. The values are not universal device specifications; they illustrate why reuse in registers and SRAM can matter more than reducing arithmetic count alone." fig-alt="Log-scale horizontal bar chart of representative 45-nanometer energy estimates. INT8 addition is 0.03 pJ, FP32 addition is 0.9 pJ, FP32 multiplication is 3.7 pJ, an 8 KB SRAM read is 5 pJ, and a DRAM read is 640 pJ. An arrow from the SRAM bar to the DRAM bar marks an approximately 128-fold difference."}
+::: {#fig-energy-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Energy Hierarchy**: Representative 45 nm energy estimates on a logarithmic scale from @horowitz2014. An off-chip DRAM access costs about 173$\times$ an FP32 multiply and about 128$\times$ a read from an 8 KB SRAM array in this model; a small, register-adjacent L1 access (about 0.5 pJ in the registry used elsewhere in this chapter) is cheaper still. The values are not universal device specifications; they illustrate why reuse in registers and SRAM can matter more than reducing arithmetic count alone." fig-alt="Log-scale horizontal bar chart of representative 45-nanometer energy estimates. INT8 addition is 0.03 pJ, FP32 addition is 0.9 pJ, FP32 multiplication is 3.7 pJ, an 8 KB SRAM read is 5 pJ, and a DRAM read is 640 pJ. An arrow from the SRAM bar to the DRAM bar marks an approximately 128-fold difference."}
 
 ```{python}
 #| echo: false
@@ -2612,104 +2611,6 @@ When a workload's arithmetic intensity falls below this threshold, data transfer
 
 The time gap and the energy ladder describe the same pressure from two sides. Each byte fetched from DRAM costs more time relative to the arithmetic it feeds with every generation, and about `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the energy of the FP32 multiply that consumes it. The TPUv1's performance-per-watt advantage (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}) came largely from minimizing that off-chip movement through systolic arrays and large on-chip SRAM [@jouppi2017]. Whether a model can exploit such a design depends on the pattern of its memory accesses, which differs sharply among parameters, activations, and optimizer state.
 
-### Memory access patterns in ML workloads {#sec-hardware-acceleration-memory-access-patterns-ml-workloads-a960}
-
-Beyond raw computational throughput, an accelerator's sustained efficiency depends on supplying operands to execution units without pipeline stalls. Deep neural networks impose three concurrent demands on this data supply. First, model parameters (weights and biases) may reach hundreds of billions of values [@brown2020language]. In dense FP16 autoregressive generation at batch size 1, streaming weights from device memory for each generated token gives roughly 1 FLOP/byte for the weight-dominated matrix-vector work. Second, intermediate activations produced at each layer must be buffered in memory for subsequent operations; during training, activations needed by backpropagation must either be retained until their backward consumers or recomputed. Third, training adds gradient and optimizer traffic: backpropagation computes gradients for every parameter, while algorithms such as Adaptive Moment Estimation (Adam) read and write multi-word momentum states, multiplying data movement volume per parameter update [@narayanan2021; @kwon2019].
-
-The physical cost of this data movement depends on where each tensor resides in the memory hierarchy. While an on-chip register access completes in a single clock cycle at sub-picojoule energy, a dependent off-chip DRAM fetch can expose hundreds of cycles of latency and expends orders of magnitude more energy. Independent requests can overlap that latency, subject to available concurrency and bandwidth. Tracing a single tensor of the chapter's ResNet-50 workload through the memory tiers during an inference pass makes this disparity concrete (lighthouse \ref{lhs-hw-acceleration-life-tensor-resnet50}).
-
-```{python}
-#| echo: false
-#| label: tensor-lifecycle-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TENSOR LIFECYCLE: A RESNET-50 ACTIVATION MAP ON THE H100
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: lighthouse \ref{lhs-hw-acceleration-life-tensor-resnet50} in
-# │          @sec-hardware-acceleration-memory-access-patterns-ml-workloads-a960.
-# │
-# │ Goal: Demonstrate the physical costs of the memory hierarchy on the
-# │       chapter's running workload.
-# │ Show: Size of one stage-2 activation map at INT8 and FP16, which H100 tiers
-# │       can hold it, and the latency and energy of each tier.
-# │ How: ResNet-50 stage-2 shape; H100 capacities and Hopper latencies from the
-# │      registry; 45 nm DRAM energy per byte.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_energy, fmt_memory, fmt_time, fmt_ops_rate
-
-class TensorLifecycleCalc:
-    """Memory-hierarchy costs for one ResNet-50 stage-2 activation map on an H100."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    map_h = 56  # ResNet-50 stage-2 spatial size
-    map_c = 64  # ResNet-50 stage-2 bottleneck channels
-    batch = 32  # scenario assumption: same batch as the roofline analysis
-    h100 = Hardware.Cloud.H100
-    dram_energy_per_byte = Hardware.Tech.Memory.DRAM.energy_per_byte
-    reg_energy_per_access = Hardware.Tech.Memory.Register.energy_per_access
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    map_int8 = map_h * map_h * map_c * BYTES_INT8
-    map_fp16 = map_h * map_h * map_c * BYTES_FP16
-    batch_map_int8 = batch * map_int8
-    smem = h100.memory.shared_memory_per_sm
-    l2 = h100.memory.l2_cache
-    stream_time = (map_int8 / h100.memory.bandwidth).to(nanosecond)
-    map_dram_energy = (map_int8 * dram_energy_per_byte).to(microjoule)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(map_int8 < smem < map_fp16, "One INT8 stage-2 map must fit one SM's shared memory; the FP16 map must not.")
-    check(batch_map_int8 < l2, "A batch-32 INT8 stage-2 map must fit in the H100 L2 cache.")
-    check(stream_time < Hardware.Tech.Memory.DRAM.latency, "Streaming one map at full bandwidth must take less than one DRAM latency.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    map_dims_math = fmt_math(rf"{map_h}{{\times}}{map_h}")
-    map_c_str = fmt_int(map_c, commas=False)
-    batch_str = fmt_int(batch, commas=False)
-    map_int8_kib_str = fmt_memory(map_int8, unit=KiB, precision=0, commas=False)
-    map_fp16_kib_str = fmt_memory(map_fp16, unit=KiB, precision=0, commas=False)
-    batch_map_mib_str = fmt_memory(batch_map_int8, unit=MiB, precision=1, commas=False)
-    smem_kib_str = fmt_memory(smem, unit=KiB, precision=0, commas=False)
-    l2_mib_str = fmt_memory(l2, unit=MiB, precision=0, commas=False)
-    latency_hbm_ns_str = fmt_time(Hardware.Tech.Memory.DRAM.latency, unit=nanosecond, precision=0, commas=False)
-    latency_l2_ns_str = fmt_time(round(Hardware.Tech.Memory.HopperL2.latency.to(nanosecond).magnitude) * nanosecond, unit=nanosecond, precision=0, commas=False)
-    latency_smem_ns_str = fmt_time(round(Hardware.Tech.Memory.HopperSharedMemory.latency.to(nanosecond).magnitude) * nanosecond, unit=nanosecond, precision=0, commas=False)
-    stream_ns_str = fmt_time(round(stream_time.magnitude) * nanosecond, unit=nanosecond, precision=0, commas=False)
-    dram_energy_pj_byte_str = fmt_energy(dram_energy_per_byte * byte, unit=pJ, precision=0, commas=False)
-    map_dram_energy_uj_str = fmt_energy(map_dram_energy, unit=microjoule, precision=1, commas=False)
-    reg_energy_pj_str = fmt_energy(reg_energy_per_access, unit=pJ, precision=1, commas=False)
-    h100_int8_tops_str = fmt_ops_rate(h100.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=True)
-```
-
-::: {#lhs-hw-acceleration-life-tensor-resnet50 .callout-lighthouse title="Life of a tensor: A ResNet-50 activation map"}
-
-Follow one activation map of the chapter's ResNet-50 workload, the output of a stage-2 convolution (`{python} TensorLifecycleCalc.map_dims_math` positions by `{python} TensorLifecycleCalc.map_c_str` channels), on its way to the next convolution's Tensor Cores on an H100:
-
-1.  **HBM**: The previous kernel wrote the map here.
-    *   **Size**: `{python} TensorLifecycleCalc.map_int8_kib_str` per image at INT8 and `{python} TensorLifecycleCalc.map_fp16_kib_str` at FP16; a batch of `{python} TensorLifecycleCalc.batch_str` holds `{python} TensorLifecycleCalc.batch_map_mib_str` at INT8.
-    *   **Latency**: A dependent off-chip request takes about `{python} TensorLifecycleCalc.latency_hbm_ns_str`, while streaming one image's map at full bandwidth would take only about `{python} TensorLifecycleCalc.stream_ns_str`, so the kernel must keep many requests in flight to approach the bandwidth ceiling.
-    *   **Energy**: About `{python} TensorLifecycleCalc.dram_energy_pj_byte_str` per byte in the 45 nm estimates used throughout the chapter, or about `{python} TensorLifecycleCalc.map_dram_energy_uj_str` to read one image's map once.
-2.  **L2 cache**: The H100 shares `{python} TensorLifecycleCalc.l2_mib_str` of L2 across its streaming multiprocessors (SMs), enough to hold the whole batch's map at INT8 if the next kernel consumes it soon after the previous one wrote it.
-    *   **Latency**: About `{python} TensorLifecycleCalc.latency_l2_ns_str` on Hopper.
-3.  **Shared memory**: One SM stages a tile of the map in its `{python} TensorLifecycleCalc.smem_kib_str` of software-managed shared memory. A whole image's map fits at INT8 but not at FP16, so the INT8 format changes which tier can hold it.
-    *   **Latency**: About `{python} TensorLifecycleCalc.latency_smem_ns_str` on Hopper.
-4.  **Registers**: The Tensor Core reads its operands here.
-    *   **Latency**: A small number of cycles, depending on the instruction.
-    *   **Energy**: About `{python} TensorLifecycleCalc.reg_energy_pj_str` per access, more than three orders of magnitude below an off-chip access.
-    *   **Device arithmetic peak**: `{python} TensorLifecycleCalc.h100_int8_tops_str` on the H100 INT8 tensor path, the rate these registers must sustain, not a register-transfer rate.
-
-**Systems insight**: Latency and energy per access rise from registers to HBM. The working set's location, access count, reuse, and dependencies determine the memory contribution to time and energy; arithmetic adds its own cost. The bandwidth term of the roofline is whichever link of this ladder the working set must cross; HBM-to-L2 is one possible limiting link, not the only one.
-
-:::
-
-The boundary between memory-bound and compute-bound execution emerges directly from the balance between data transfer time and arithmetic execution time. For a workload requiring data volume $\DataVolume$ (bytes) across available memory bandwidth $\Bandwidth$ (bytes/s), and executing $\Operations$ floating-point operations on hardware with peak throughput $\PeakRate$ (FLOP/s) at realized hardware utilization $\EfficiencyHw$, the respective execution times are the iron law's data and compute terms:
-\begin{gather*}
-\IronlawTermTimesMemory = \frac{\DataVolume}{\Bandwidth}
-\\
-\IronlawTermTimesCompute = \frac{O}{\PeakRate \cdot \EfficiencyHw}
-\end{gather*}
-
-In a strictly sequential model without overlap, $\IronLawMemoryTime > \IronLawComputeTime$ identifies memory-bound execution. When hardware overlaps memory transfers with computation, the larger term sets the theoretical lower bound on execution time. In practice, however, data dependencies, memory controller queueing, and partial pipeline overlap dictate how much arithmetic hardware remains idle while waiting for operands.
-
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -2789,9 +2690,9 @@ class MemoryWallTrend:
     model_growth_mult_str = fmt_multiple(round(model_growth, -2), precision=0, commas=True)
 ```
 
-The structural widening between model footprints and available memory bandwidth is what turns $\IronLawMemoryTime$ into the binding constraint across generations. Parameter count is a capacity quantity. In low-batch dense decoding with weights streamed from device memory, weight traffic per generated token grows with the parameter count. Sparse expert models read selected experts rather than every stored parameter, so their total parameter counts do not directly specify per-token traffic. @Fig-memory-wall plots this logarithmic divergence relative to 2014, contrasting the roughly `{python} MemoryWallTrend.model_growth_mult_str` increase in dense model parameters (filled red points) against the `{python} MemoryWallTrend.bandwidth_growth_mult_str` increase in per-device accelerator memory bandwidth (blue points) to isolate the widening shaded memory-wall gap [@krizhevsky2012imagenet; @simonyan2014very; @brown2020language; @chowdhery2022palm; @dubey2024llama]. DeepSeek-V3 appears as an open marker at its total parameter count and is left out of the trend for exactly that reason [@deepseek2025v3]. Even high-bandwidth accelerators such as NVIDIA B200 and AMD MI300X/MI325X cannot close this growth-rate gap through bandwidth scaling alone [@nvidia2024blackwell; @amd2023mi300x]. Parameter counts for proprietary systems such as GPT-4 and Gemini are not officially disclosed, so they are not plotted as factual data points.
+Hardware balance is the supply side of the memory wall; model size is the demand side. The structural widening between model footprints and available memory bandwidth is what turns the iron law's memory term into the binding constraint across generations. Parameter count is a capacity quantity. In low-batch dense decoding with weights streamed from device memory, weight traffic per generated token grows with the parameter count. Sparse expert models read selected experts rather than every stored parameter, so their total parameter counts do not directly specify per-token traffic. @Fig-memory-wall plots this logarithmic divergence relative to 2014, contrasting the roughly `{python} MemoryWallTrend.model_growth_mult_str` increase in dense model parameters (filled red points) against the `{python} MemoryWallTrend.bandwidth_growth_mult_str` increase in per-device accelerator memory bandwidth (blue points) to isolate the widening shaded memory-wall gap [@krizhevsky2012imagenet; @simonyan2014very; @brown2020language; @chowdhery2022palm; @dubey2024llama]. DeepSeek-V3 appears as an open marker at its total parameter count and is left out of the trend for exactly that reason [@deepseek2025v3]. Even high-bandwidth accelerators such as NVIDIA B200 and AMD MI300X/MI325X cannot close this growth-rate gap through bandwidth scaling alone [@nvidia2024blackwell; @amd2023mi300x]. Parameter counts for proprietary systems such as GPT-4 and Gemini are not officially disclosed, so they are not plotted as factual data points.
 
-::: {#fig-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Model Size vs. Hardware Bandwidth**: Both series are the base-10 logarithm of growth relative to 2014 (VGG-16 for parameters, one GPU of the dual-GPU K80 board for bandwidth), so each unit on the vertical axis is a tenfold increase. Over the plotted decade dense parameter counts grow roughly `{python} MemoryWallTrend.model_growth_mult_str` against per-device bandwidth's `{python} MemoryWallTrend.bandwidth_growth_mult_str`. The open marker is a sparse expert model plotted at total parameters and excluded from the fit. The shaded band is a gap between logarithms rather than a difference, so its width reads as a ratio, and the two fitted trends diverge at a constant rate. Method after @gholami2024." fig-alt="Scatter plot with two fitted trend lines from 2012 to 2026. The vertical axis is base-10 logarithm of growth relative to 2014, running from about negative one to four. Red model-size points rise to about 3.5 and blue bandwidth points to about 1.5, with one open red marker for DeepSeek-V3 above the red trend and a gray band shaded between the two trend lines from 2016 onward, labeled in bold as the AI memory wall."}
+::: {#fig-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**Model Size vs. Hardware Bandwidth**: Both series are the base-10 logarithm of growth relative to 2014 (VGG-16 for parameters, one GPU of the dual-GPU K80 board for bandwidth), so each unit on the vertical axis is a tenfold increase. Over the plotted decade dense parameter counts grow roughly `{python} MemoryWallTrend.model_growth_mult_str` against per-device bandwidth's `{python} MemoryWallTrend.bandwidth_growth_mult_str`. The open marker is a sparse expert model plotted at total parameters and excluded from the fit. The shaded band is a gap between logarithms rather than a difference, so its width reads as a ratio, and the fitted trends describe the decade's average rates; the dense frontier has been flat since 2022. Method after @gholami2024." fig-alt="Scatter plot with two fitted trend lines from 2012 to 2024. The vertical axis is base-10 logarithm of growth relative to 2014, running from about negative one to four. Red model-size points rise to about 3.5 and blue bandwidth points to about 1.5, with one open red marker for DeepSeek-V3 above the red trend and a gray band shaded between the two trend lines from 2016 onward, labeled in bold as the AI memory wall."}
 
 ```{python}
 #| echo: false
@@ -2835,7 +2736,7 @@ moe_log_index = np.log10(MemoryWallTrend.moe_index)
 
 proc_fit = np.polyfit(proc_years, proc_log_index, 1)
 model_fit = np.polyfit(model_years, model_log_index, 1)
-years_range = np.arange(2012, 2027)
+years_range = np.arange(2012, int(max(max(proc_years), max(model_years))) + 1)  # fits stop at the last data year
 proc_trend = np.polyval(proc_fit, years_range)
 model_trend = np.polyval(model_fit, years_range)
 
@@ -2951,13 +2852,111 @@ ax.text(
 
 ax.set_xlabel('Year')
 ax.set_ylabel('Log10 Relative Growth (2014 = 1.0)')
-ax.set_xlim(2011, 2027)
+ax.set_xlim(2011, 2026)
 ax.legend(loc='upper left', fontsize=8, framealpha=0.85)
 plt.show()
 plt.close()
 ```
 
 :::
+
+### Memory access patterns in ML workloads {#sec-hardware-acceleration-memory-access-patterns-ml-workloads-a960}
+
+Beyond raw computational throughput, an accelerator's sustained efficiency depends on supplying operands to execution units without pipeline stalls. Deep neural networks impose three concurrent demands on this data supply. First, model parameters (weights and biases) may reach hundreds of billions of values [@brown2020language]. In dense FP16 autoregressive generation at batch size 1, streaming weights from device memory for each generated token gives roughly 1 FLOP/byte for the weight-dominated matrix-vector work. Second, intermediate activations produced at each layer must be buffered in memory for subsequent operations; during training, activations needed by backpropagation must either be retained until their backward consumers or recomputed. Third, training adds gradient and optimizer traffic: backpropagation computes gradients for every parameter, while algorithms such as Adaptive Moment Estimation (Adam) read and write multi-word momentum states, multiplying data movement volume per parameter update [@narayanan2021; @kwon2019].
+
+The physical cost of this data movement depends on where each tensor resides in the memory hierarchy. While an on-chip register access completes in a single clock cycle at sub-picojoule energy, a dependent off-chip DRAM fetch can expose hundreds of cycles of latency and expends orders of magnitude more energy. Independent requests can overlap that latency, subject to available concurrency and bandwidth. Tracing a single tensor of the chapter's ResNet-50 workload through the memory tiers during an inference pass makes this disparity concrete (lighthouse \ref{lhs-hw-acceleration-life-tensor-resnet50}).
+
+```{python}
+#| echo: false
+#| label: tensor-lifecycle-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TENSOR LIFECYCLE: A RESNET-50 ACTIVATION MAP ON THE H100
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: lighthouse \ref{lhs-hw-acceleration-life-tensor-resnet50} in
+# │          @sec-hardware-acceleration-memory-access-patterns-ml-workloads-a960.
+# │
+# │ Goal: Demonstrate the physical costs of the memory hierarchy on the
+# │       chapter's running workload.
+# │ Show: Size of one stage-2 activation map at INT8 and FP16, which H100 tiers
+# │       can hold it, and the latency and energy of each tier.
+# │ How: ResNet-50 stage-2 shape; H100 capacities and Hopper latencies from the
+# │      registry; 45 nm DRAM energy per byte.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_energy, fmt_memory, fmt_time, fmt_ops_rate
+
+class TensorLifecycleCalc:
+    """Memory-hierarchy costs for one ResNet-50 stage-2 activation map on an H100."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    map_h = 56  # ResNet-50 stage-2 spatial size
+    map_c = 64  # ResNet-50 stage-2 bottleneck channels
+    batch = 32  # scenario assumption: same batch as the roofline analysis
+    h100 = Hardware.Cloud.H100
+    dram_energy_per_byte = Hardware.Tech.Memory.DRAM.energy_per_byte
+    reg_energy_per_access = Hardware.Tech.Memory.Register.energy_per_access
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    map_int8 = map_h * map_h * map_c * BYTES_INT8
+    map_fp16 = map_h * map_h * map_c * BYTES_FP16
+    batch_map_int8 = batch * map_int8
+    smem = h100.memory.shared_memory_per_sm
+    l2 = h100.memory.l2_cache
+    stream_time = (map_int8 / h100.memory.bandwidth).to(nanosecond)
+    map_dram_energy = (map_int8 * dram_energy_per_byte).to(microjoule)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(map_int8 < smem < map_fp16, "One INT8 stage-2 map must fit one SM's shared memory; the FP16 map must not.")
+    check(batch_map_int8 < l2, "A batch-32 INT8 stage-2 map must fit in the H100 L2 cache.")
+    check(stream_time < Hardware.Tech.Memory.DRAM.latency, "Streaming one map at full bandwidth must take less than one DRAM latency.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    map_dims_math = fmt_math(rf"{map_h}{{\times}}{map_h}")
+    map_c_str = fmt_int(map_c, commas=False)
+    batch_str = fmt_int(batch, commas=False)
+    map_int8_kib_str = fmt_memory(map_int8, unit=KiB, precision=0, commas=False)
+    map_fp16_kib_str = fmt_memory(map_fp16, unit=KiB, precision=0, commas=False)
+    batch_map_mib_str = fmt_memory(batch_map_int8, unit=MiB, precision=1, commas=False)
+    smem_kib_str = fmt_memory(smem, unit=KiB, precision=0, commas=False)
+    l2_mib_str = fmt_memory(l2, unit=MiB, precision=0, commas=False)
+    latency_hbm_ns_str = fmt_time(Hardware.Tech.Memory.DRAM.latency, unit=nanosecond, precision=0, commas=False)
+    latency_l2_ns_str = fmt_time(round(Hardware.Tech.Memory.HopperL2.latency.to(nanosecond).magnitude) * nanosecond, unit=nanosecond, precision=0, commas=False)
+    latency_smem_ns_str = fmt_time(round(Hardware.Tech.Memory.HopperSharedMemory.latency.to(nanosecond).magnitude) * nanosecond, unit=nanosecond, precision=0, commas=False)
+    stream_ns_str = fmt_time(round(stream_time.magnitude) * nanosecond, unit=nanosecond, precision=0, commas=False)
+    dram_energy_pj_byte_str = fmt_energy(dram_energy_per_byte * byte, unit=pJ, precision=0, commas=False)
+    map_dram_energy_uj_str = fmt_energy(map_dram_energy, unit=microjoule, precision=1, commas=False)
+    reg_energy_pj_str = fmt_energy(reg_energy_per_access, unit=pJ, precision=1, commas=False)
+    h100_int8_tops_str = fmt_ops_rate(h100.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=True)
+```
+
+::: {#lhs-hw-acceleration-life-tensor-resnet50 .callout-lighthouse title="Life of a tensor: A ResNet-50 activation map"}
+
+Follow one activation map of the chapter's ResNet-50 workload, the output of a stage-2 convolution (`{python} TensorLifecycleCalc.map_dims_math` positions by `{python} TensorLifecycleCalc.map_c_str` channels), on its way to the next convolution's Tensor Cores on an H100:
+
+1.  **HBM**: The previous kernel wrote the map here.
+    *   **Size**: `{python} TensorLifecycleCalc.map_int8_kib_str` per image at INT8 and `{python} TensorLifecycleCalc.map_fp16_kib_str` at FP16; a batch of `{python} TensorLifecycleCalc.batch_str` holds `{python} TensorLifecycleCalc.batch_map_mib_str` at INT8.
+    *   **Latency**: A dependent off-chip request takes about `{python} TensorLifecycleCalc.latency_hbm_ns_str`, while streaming one image's map at full bandwidth would take only about `{python} TensorLifecycleCalc.stream_ns_str`, so the kernel must keep many requests in flight to approach the bandwidth ceiling.
+    *   **Energy**: About `{python} TensorLifecycleCalc.dram_energy_pj_byte_str` per byte in the 45 nm estimates used throughout the chapter, or about `{python} TensorLifecycleCalc.map_dram_energy_uj_str` to read one image's map once.
+2.  **L2 cache**: The H100 shares `{python} TensorLifecycleCalc.l2_mib_str` of L2 across its streaming multiprocessors (SMs), enough to hold the whole batch's map at INT8 if the next kernel consumes it soon after the previous one wrote it.
+    *   **Latency**: About `{python} TensorLifecycleCalc.latency_l2_ns_str` on Hopper.
+3.  **Shared memory**: One SM stages a tile of the map in its `{python} TensorLifecycleCalc.smem_kib_str` of software-managed shared memory. A whole image's map fits at INT8 but not at FP16, so the INT8 format changes which tier can hold it.
+    *   **Latency**: About `{python} TensorLifecycleCalc.latency_smem_ns_str` on Hopper.
+4.  **Registers**: The Tensor Core reads its operands here.
+    *   **Latency**: A small number of cycles, depending on the instruction.
+    *   **Energy**: About `{python} TensorLifecycleCalc.reg_energy_pj_str` per access, more than three orders of magnitude below an off-chip access.
+    *   **Device arithmetic peak**: `{python} TensorLifecycleCalc.h100_int8_tops_str` on the H100 INT8 tensor path, the rate these registers must sustain, not a register-transfer rate.
+
+**Systems insight**: Latency and energy per access rise from registers to HBM. The working set's location, access count, reuse, and dependencies determine the memory contribution to time and energy; arithmetic adds its own cost. The bandwidth term of the roofline is whichever link of this ladder the working set must cross; HBM-to-L2 is one possible limiting link, not the only one.
+
+:::
+
+The boundary between memory-bound and compute-bound execution emerges directly from the balance between data transfer time and arithmetic execution time. For a workload requiring data volume $\DataVolume$ (bytes) across available memory bandwidth $\Bandwidth$ (bytes/s), and executing $\Operations$ floating-point operations on hardware with peak throughput $\PeakRate$ (FLOP/s) at realized hardware utilization $\EfficiencyHw$, the respective execution times are the iron law's data and compute terms:
+\begin{gather*}
+\IronlawTermTimesMemory = \frac{\DataVolume}{\Bandwidth}
+\\
+\IronlawTermTimesCompute = \frac{O}{\PeakRate \cdot \EfficiencyHw}
+\end{gather*}
+
+In a strictly sequential model without overlap, $\IronLawMemoryTime > \IronLawComputeTime$ identifies bandwidth-bound execution. When hardware overlaps memory transfers with computation, the larger term sets the theoretical lower bound on execution time. In practice, however, data dependencies, memory controller queueing, and partial pipeline overlap dictate how much arithmetic hardware remains idle while waiting for operands.
 
 #### Irregular memory access {#sec-hardware-acceleration-irregular-memory-access-c6ec}
 
@@ -3462,7 +3461,7 @@ The roofline visualization shows performance (TFLOP/s) on the vertical axis and 
 
 ### Hardware ridge points {#sec-hardware-acceleration-hardware-balance}
 
-Different devices place the compute-bandwidth boundary at different intensities. The ridge point\index{Ridge Point!hardware balance}, named alongside the iron law as the boundary between a machine's memory and compute limits, is a property of the device. Computer architects call the same ratio the **hardware balance $(\RooflineRidgePoint)$**\index{Hardware balance}, peak arithmetic throughput divided by peak memory bandwidth, the intensity at which the roofline's compute and bandwidth ceilings intersect:
+Different devices place the compute-bandwidth boundary at different intensities. The ridge point\index{Ridge Point!hardware balance}, the balance point between a machine's memory and compute limits previewed alongside the iron law, is a property of the device. Computer architects call the same ratio the **hardware balance $(\RooflineRidgePoint)$**\index{Hardware balance}, peak arithmetic throughput divided by peak memory bandwidth, the intensity at which the roofline's compute and bandwidth ceilings intersect:
 $$ \RooflineRidgePoint = \frac{\PeakRate}{\Bandwidth} $$
 
 The ratio sets a device-specific boundary. Depending on the chosen precision, the H100 requires about `{python} RooflineGap.h100_ridge_str` on its dense FP16 path to reach its arithmetic ceiling, and twice that on its INT8 path, whereas a microcontroller may have a much lower ridge point. The same kernel can therefore be bandwidth bound on a compute-dense accelerator and compute bound on an edge processor. Hardware balance does not label either device as universally efficient; it identifies how much reuse a workload needs on that device.
@@ -3473,7 +3472,7 @@ The ratio sets a device-specific boundary. Depending on the chosen precision, th
 # +-----------------------------------------------------------------------------
 # | COMPUTE VS BANDWIDTH GROWTH, V100 THROUGH B200
 # +-----------------------------------------------------------------------------
-# | Context: the lead-in prose above and @fig-compute-memory-imbalance.
+# | Context: the lead-in prose above @fig-rising-ridge.
 # |
 # | Goal: Quantify how much faster peak dense FP16 throughput grew than memory
 # |       bandwidth across five NVIDIA datacenter generations.
@@ -3518,98 +3517,10 @@ class ComputeBandwidthDivergence:
     gap_growth_mult_str = fmt_multiple(gap_growth, precision=1, commas=False)
 ```
 
-Peak computational capability has expanded faster than memory bus performance across accelerator generations, and the size of that mismatch is what sets how much data reuse a kernel needs to stay fed. @Fig-compute-memory-imbalance plots these two growth trajectories on a logarithmic scale normalized to the V100 baseline, isolating how the shaded gap between peak compute and memory bandwidth widens to a `{python} ComputeBandwidthDivergence.gap_growth_mult_str` reuse burden on B200.
+Peak computational capability has expanded faster than memory bus performance across accelerator generations, and the size of that mismatch is what sets how much data reuse a kernel needs to stay fed. Across `{python} ComputeBandwidthDivergence.span_str`, NVIDIA's datacenter generations multiplied dense FP16 compute by `{python} ComputeBandwidthDivergence.compute_growth_mult_str` and memory bandwidth by only `{python} ComputeBandwidthDivergence.bandwidth_growth_mult_str`, a `{python} ComputeBandwidthDivergence.gap_growth_mult_str` rise in the reuse a kernel needs on B200 relative to V100.
 
-::: {#fig-compute-memory-imbalance fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Bandwidth Divergence**: Peak dense FP16 throughput and memory bandwidth across five NVIDIA datacenter generations, each normalized to its V100 baseline on a log scale. Over `{python} ComputeBandwidthDivergence.span_str` compute grows `{python} ComputeBandwidthDivergence.compute_growth_mult_str` while bandwidth grows `{python} ComputeBandwidthDivergence.bandwidth_growth_mult_str`, so the shaded separation between the curves widens by `{python} ComputeBandwidthDivergence.gap_growth_mult_str`. That separation is the data reuse a kernel must supply to keep the arithmetic units busy. The H200 step is the instructive exception: bandwidth rose while peak compute held flat, narrowing the gap for one generation. Peak rates and bandwidths from NVIDIA product documentation [@nvidia2020v100datasheet; @nvidia2021a10080gb; @nvidia2023h100; @nvidia2024blackwell]." fig-alt="Line graph on a log scale comparing compute growth against memory bandwidth growth across five GPU generations from 2017 to 2024, each normalized to 1 at the V100. The compute line rises to roughly 18 and the bandwidth line to roughly 9, with the area between them shaded. At the H200 point the bandwidth line rises while the compute line stays flat, so the shaded area narrows before widening again."}
 
-```{python}
-#| echo: false
-# +-----------------------------------------------------------------------------
-# | COMPUTE-BANDWIDTH DIVERGENCE (FIGURE)
-# +-----------------------------------------------------------------------------
-# | Context: @fig-compute-memory-imbalance
-# |
-# | Goal: Plot peak compute growth against memory bandwidth growth per
-# |       accelerator generation and shade the separation between them.
-# | Show: Two curves normalized to the V100 baseline, log y axis, shaded gap,
-# |       generations annotated so the H200 bandwidth step is visible.
-# | How:  Read peak_flops and memory.bandwidth from the hardware registry, the
-# |       same source as the calc cell above; no values are hardcoded here.
-# +-----------------------------------------------------------------------------
-# +-- 1. CANVAS ----------------------------------------------------------------
-from binder.tools.figures import style as book_style
-from matplotlib.ticker import FixedLocator, FixedFormatter, NullLocator
-import numpy as np
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.2))
-
-# +-- 2. ARRAYS ----------------------------------------------------------------
-_gens = [
-    ("V100", Hardware.Cloud.V100),
-    ("A100", Hardware.Cloud.A100),
-    ("H100", Hardware.Cloud.H100),
-    ("H200", Hardware.Cloud.H200),
-    ("B200", Hardware.Cloud.B200),
-]
-_labels = [n for n, _ in _gens]
-_years = [g.release_year for _, g in _gens]
-_compute = np.asarray([g.compute.peak_flops.to(TFLOP / second).magnitude for _, g in _gens])
-_bandwidth = np.asarray([g.memory.bandwidth.to(GB / second).magnitude for _, g in _gens])
-compute_index = _compute / _compute[0]
-bandwidth_index = _bandwidth / _bandwidth[0]
-
-# +-- 3. RENDER ----------------------------------------------------------------
-# Semantic palette: compute is orange, memory is blue.
-ax.fill_between(_years, bandwidth_index, compute_index, color=COLORS['grid'], alpha=0.3)
-ax.plot(_years, compute_index, 'o-', color=COLORS['OrangeLine'], linewidth=1.5, markersize=5, label='Peak compute growth')
-ax.plot(_years, bandwidth_index, 's-', color=COLORS['BlueLine'], linewidth=1.5, markersize=5, label='Memory bandwidth growth')
-
-# +-- 4. DECORATE --------------------------------------------------------------
-for _x, _y, _n in zip(_years, compute_index, _labels):
-    ax.annotate(_n, xy=(_x, _y), xytext=(0, 8), textcoords='offset points', ha='center', fontsize=8, color=COLORS['primary'])
-
-# On a log axis the vertical distance between the curves IS their ratio, which
-# is the ridge-point rise @fig-rising-ridge plots. Label sits to the right of
-# the arrow, in clear space, so it never masks the compute stroke.
-_gap = compute_index[-1] / bandwidth_index[-1]
-ax.annotate(
-    '',
-    xy=(_years[-1], compute_index[-1]),
-    xytext=(_years[-1], bandwidth_index[-1]),
-    arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.5),
-)
-ax.annotate(
-    f'Reuse\nburden\n{_gap:.1f}$\\times$',
-    xy=(_years[-1], float(np.sqrt(compute_index[-1] * bandwidth_index[-1]))),
-    xytext=(9, 0),
-    textcoords='offset points',
-    ha='left',
-    va='center',
-    linespacing=1.25,
-    fontsize=9,
-    color=COLORS['primary'],
-    fontweight='bold',
-)
-
-ax.set_yscale('log')
-# A 1-18 range gives only 10^0 and 10^1 by default, so label the growth
-# multiples a reader actually wants to read off the axis.
-ax.yaxis.set_major_locator(FixedLocator([1, 2, 5, 10, 20]))
-ax.yaxis.set_major_formatter(FixedFormatter(['1', '2', '5', '10', '20']))
-ax.yaxis.set_minor_locator(NullLocator())
-ax.set_ylim(0.85, 26)
-ax.set_xlim(_years[0] - 0.4, _years[-1] + 1.05)
-ax.set_xlabel('Year')
-ax.set_ylabel('Relative growth (V100 = 1.0)')
-ax.set_xticks(_years)
-ax.legend(loc='upper left', fontsize=8, frameon=True, facecolor='white', framealpha=0.95, edgecolor='gray', fancybox=True, borderpad=0.6)
-plt.show()
-plt.close()
-```
-
-:::
-
-Because both curves are normalized to the V100, the separation between them measures how far the hardware ridge point, the threshold a kernel must clear to become compute bound, has risen since that generation. @Fig-rising-ridge plots that same ratio generation by generation, leaving out the H200 exception, so the doubling of the gap appears directly as the ridge point roughly doubling from V100 (`{python} RooflineGap.v100_ridge_int_str`) to H100 (`{python} RooflineGap.h100_ridge_int_str`) and then holding near that level on B200 (`{python} RooflineGap.b200_ridge_int_str`). A kernel that cleared the V100 ridge comfortably can fall below the H100 ridge without any change to its code, so newer hardware demands more operational reuse before execution reaches peak throughput.
+That ratio measures how far the hardware ridge point, the threshold a kernel must clear to become compute bound, has risen since the V100. @Fig-rising-ridge plots it generation by generation, leaving out the H200 exception, so the doubling of the gap appears directly as the ridge point roughly doubling from V100 (`{python} RooflineGap.v100_ridge_int_str`) to H100 (`{python} RooflineGap.h100_ridge_int_str`) and then holding near that level on B200 (`{python} RooflineGap.b200_ridge_int_str`). A kernel that cleared the V100 ridge comfortably can fall below the H100 ridge without any change to its code, so newer hardware demands more operational reuse before execution reaches peak throughput.
 
 ::: {#fig-rising-ridge fig-env="figure" fig-pos="htb" fig-cap="**The Rising Ridge**: Hardware arithmetic intensity (FLOP/byte) over time computed as each chip's dense FP16 tensor peak divided by its memory bandwidth. This is the arithmetic intensity a kernel must reach before compute rather than bandwidth limits it. As compute capability grows faster than memory bandwidth, the ridge point rises from V100 through H100 and remains high on B200. This trend explains why architectures with high data reuse flourish while low-reuse workloads face a growing performance penalty." fig-alt="Line plot showing dense-FP16 arithmetic intensity ridge points: about 140 FLOP/byte for V100, 153 for A100, 295 for H100, and 281 for B200. Shaded regions indicate memory-rich and compute-dense zones."}
 
@@ -3840,7 +3751,7 @@ class BandwidthEnvelope:
     best_bandwidth_str = fmt_bandwidth(best_bandwidth_tbs * TB / second, unit="TB/s", precision=0)
 ```
 
-The three generations in that table come from one vendor, but the divergence is industry-wide. @Fig-bandwidth-envelope tracks the best memory bandwidth and the best dense FP16/BF16 tensor throughput among `{python} BandwidthEnvelope.device_count_str` accelerators from every major vendor released since 2017 [@epochai2026hardware]. Measured from TPU v2, the best compute rate grew about `{python} BandwidthEnvelope.compute_growth_mult_str` while the best bandwidth grew about `{python} BandwidthEnvelope.bandwidth_growth_mult_str`, so the ridge point of the leading devices rose several-fold. Since early 2025 the best bandwidth has held near `{python} BandwidthEnvelope.best_bandwidth_str`, and the best dense FP16 rate has leveled as well, because new devices put their added arithmetic into FP8 and FP4 paths rather than 16-bit ones.
+The three generations in that table come from one vendor, but the divergence is industry-wide. @Fig-bandwidth-envelope tracks the best memory bandwidth and the best dense FP16/BF16 tensor throughput among `{python} BandwidthEnvelope.device_count_str` accelerators from every major vendor released since 2017 [@epochai2026hardware]. Measured from TPU v2, the best compute rate grew about `{python} BandwidthEnvelope.compute_growth_mult_str` while the best bandwidth grew about `{python} BandwidthEnvelope.bandwidth_growth_mult_str`, so the ridge point of the leading devices rose several-fold; the ratio is larger than the NVIDIA-only one above because TPU v2's 16-bit baseline was low. Since early 2025 the best bandwidth has held near `{python} BandwidthEnvelope.best_bandwidth_str`, and the best dense FP16 rate has leveled as well, because new devices put their added arithmetic into FP8 and FP4 paths rather than 16-bit ones.
 
 ::: {#fig-bandwidth-envelope fig-env="figure" fig-pos="htb" fig-cap="**Compute and Bandwidth Across Vendors**: Dense FP16/BF16 tensor throughput and memory bandwidth of machine learning accelerators from all major vendors with at least 16 GB of off-chip memory, each relative to TPU v2 (2017) on a logarithmic axis. Points are individual devices; step lines track the best device released to date. Compute pulls away from bandwidth, and both best-device envelopes level off in 2025 and 2026 as added arithmetic moves into lower-precision formats. Data from @epochai2026hardware." fig-alt="Scatter plot with two step lines on a logarithmic axis from 2017 to 2026, both starting at 1 for TPU v2. A red step line for best dense FP16 throughput climbs to about 55 by 2025 and stays flat. A blue step line for best memory bandwidth climbs more slowly to about 13 by early 2025 and stays flat. Faint red and blue points mark individual devices below each line."}
 
@@ -3886,11 +3797,9 @@ For a kernel whose reuse stays fixed, the rising ridge shows up as a ceiling on 
 
 **Metric**: The ridge point $\RooflineRidgePoint = \PeakRate / \Bandwidth$ (FLOP/byte), the number of operations the hardware must perform for every byte loaded to keep its compute units busy.
 
-**Evolution**: The ratios in @tbl-ridge-points climb from `{python} RooflineGap.v100_ridge_str` on the V100 through `{python} RooflineGap.a100_ridge_str` on the A100 to `{python} RooflineGap.h100_ridge_str` on the H100.
-
 **Result**: The intensity needed to reach the tensor peak has increased. Under this simple HBM roofline, a kernel with $\ArithmeticIntensity$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte lies above the A100 ridge but below the H100 ridge. If its intensity and implementation remain unchanged, its idealized gain is then closer to the `{python} RooflineGap.bandwidth_ratio_mult_str` bandwidth ratio than the `{python} RooflineGap.flops_ratio_mult_str` peak-compute ratio.
 
-**Systems insight**: A standalone ReLU under a one-read, one-write FP32 traffic model performs about 1 operation per 8 bytes, far below the H100 tensor ridge. A well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` dense multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte under its idealized traffic model. Fusion is valuable for low-intensity chains because it can remove intermediate round-trips; it is not automatically the best optimization for every kernel.
+**Systems insight**: Fusion is valuable for low-intensity chains because it can remove intermediate round-trips; it is not automatically the best optimization for every kernel.
 
 :::
 
@@ -4012,7 +3921,7 @@ $$\RequiredMemoryBandwidth = \frac{\TargetComputeRate}{\ArithmeticIntensity} \te
 When this required bandwidth exceeds the hardware's peak memory bandwidth $\Bandwidth$, memory transfers cap attainable throughput according to @eq-attainable-throughput:
 $$\AttainableComputeRate = \Bandwidth \times \ArithmeticIntensity$$ {#eq-attainable-throughput}
 
-Evaluating an operation against its execution path's ridge point identifies the lower modeled ceiling. Extensive data reuse can raise arithmetic intensity above that ridge, making compute the tighter bound; profiling must establish whether execution approaches it. A 2D convolution demonstrates this behavior.
+Evaluating an operation against its execution path's ridge point identifies the lower modeled ceiling. Extensive data reuse can raise arithmetic intensity above that ridge, making compute the tighter bound; profiling must establish whether execution approaches it. ResNet-50's stage-3 $3{\times}3$ convolution demonstrates this behavior.
 
 ```{python}
 #| echo: false
@@ -4212,7 +4121,7 @@ class ResNet50Int8Crossing:
 
 :::
 
-Not all neural network layers exhibit such extensive data reuse. Fully connected (dense) layers, such as classification heads, feed-forward networks, and linear projections in transformer attention blocks, lack spatial dimensions. When evaluated at small batch sizes, their arithmetic intensity drops substantially, shifting execution into the memory-bound regime:
+Not all neural network layers exhibit such extensive data reuse. Fully connected (dense) layers, such as ResNet-50's classification head, feed-forward networks, and linear projections in transformer attention blocks, lack spatial dimensions. When evaluated at small batch sizes, their arithmetic intensity drops substantially, shifting execution into the memory-bound regime:
 
 ```{python}
 #| echo: false
@@ -4498,7 +4407,7 @@ Example: Dense layer with $\LayerInputWidth = \LayerOutputWidth$ = `{python} Bat
 ↪ The MLPerf Inference execution scenarios that separate throughput runs from latency-constrained runs are developed in @sec-benchmarking-mlperf-execution-scenarios-89f0.
 :::
 
-The batch size analysis reveals why inference serving systems are designed around batching: it changes the arithmetic intensity regime of memory-bound workloads. However, batching introduces latency trade-offs, since requests must wait in a queue until a batch forms. This tension between throughput (favoring large batches) and latency (favoring small batches) is a central challenge in ML serving systems, explored in depth in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
+The batch size analysis reveals why inference serving systems are designed around batching: it changes the arithmetic intensity regime of bandwidth-bound workloads. However, batching introduces latency trade-offs, since requests must wait in a queue until a batch forms. This tension between throughput (favoring large batches) and latency (favoring small batches) is a central challenge in ML serving systems, explored in depth in @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d.
 
 When service latency limits batching, batch-1 or small-batch LLM decode often retains low weight reuse and low arithmetic intensity. The next worked model quantifies that particular regime rather than treating all LLM inference as identical.
 
@@ -4875,7 +4784,7 @@ While the unconstrained Cartesian product of these decisions suggests a massive 
 
 ### Dataflow optimization {#sec-hardware-acceleration-dataflow-optimization-strategies-ce52}
 
-The loop-ordering case in example \ref{exmp-hw-acceleration-loop-ordering-small-convolution} showed two mathematically identical schedules that differ 36-fold in weight reads, and every avoided read that would have reached DRAM saves an access costing about `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the energy of the FP32 multiply it feeds. While spatial and temporal mapping establish where operations execute and where operands reside, **dataflow optimization**\index{Dataflow optimization!data movement minimization} governs the exact trajectories and schedules of data moving through processing elements and the memory hierarchy to maximize operand reuse. In a systolic array or tiled vector unit, the temporal schedule and spatial routing of weights, inputs, and partial sums dictate how frequently operands must be fetched from energy-expensive DRAM rather than reused from local registers or scratchpads. By controlling off-chip traffic, the dataflow establishes the effective operational intensity of the kernel, determining whether execution achieves the compute-bound plateau or stalls in the memory-bound regime of the Roofline model. Optimizing compilers (@sec-hardware-acceleration-compiler-support-172e) and runtime systems (@sec-hardware-acceleration-runtime-support-f94f) therefore tailor dataflow patterns to match the reuse characteristics of each layer to the hardware constraints of the target accelerator.
+The loop-ordering case in example \ref{exmp-hw-acceleration-loop-ordering-small-convolution} showed two mathematically identical schedules that differ 36-fold in weight reads, and every avoided read that would have reached DRAM saves an access costing about `{python} EnergyGapAnchor.dram_vs_fp32_mult_str` the energy of the FP32 multiply it feeds. While spatial and temporal mapping establish where operations execute and where operands reside, **dataflow optimization**\index{Dataflow optimization!data movement minimization} governs the exact trajectories and schedules of data moving through processing elements and the memory hierarchy to maximize operand reuse. In a systolic array or tiled vector unit, the temporal schedule and spatial routing of weights, inputs, and partial sums dictate how frequently operands must be fetched from energy-expensive DRAM rather than reused from local registers or scratchpads. By controlling off-chip traffic, the dataflow establishes the effective operational intensity of the kernel, determining whether execution achieves the compute-bound plateau or stalls in the bandwidth-bound regime of the roofline model. Optimizing compilers (@sec-hardware-acceleration-compiler-support-172e) and runtime systems (@sec-hardware-acceleration-runtime-support-f94f) therefore tailor dataflow patterns to match the reuse characteristics of each layer to the hardware constraints of the target accelerator.
 
 Three recurring architectural decisions structure this design space:
 
@@ -5303,7 +5212,7 @@ Kernel fusion\index{Kernel Fusion!hardware data movement}[^fn-kernel-fusion-memo
 
 Neural network execution is frequently bound by memory bandwidth rather than arithmetic throughput. When operations execute as isolated kernels, each intermediate result is written to a global-memory buffer and subsequently read by the downstream operator; cache behavior determines how much of that traffic reaches DRAM or HBM. This round trip introduces memory latency, stalls compute units, and consumes bus bandwidth on data with zero reuse outside that immediate pair of operations.
 
-This hardware reality provides the physical motivation for kernel fusion. While @sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 analyzed bandwidth limits in terms of low operational intensity, chained elementwise operations aggravate the memory wall by multiplying global memory transactions [@nvidia2017gpu].
+This hardware reality provides the physical motivation for kernel fusion. While @sec-hardware-acceleration-roofline-model-42ff analyzed bandwidth limits in terms of low operational intensity, chained elementwise operations aggravate the memory wall by multiplying global memory transactions [@nvidia2017gpu].
 
 ::: {.column-margin .margin-pointer}
 ↩ The traffic count for unfused versus fused operator chains, $2\,\ChainedOperationCount \IntermediateTensorSize$ versus $2\IntermediateTensorSize$, is established in @sec-model-compression-operator-fusion-ac1d.
@@ -5581,7 +5490,7 @@ class CompilerSpeedupCalc:
     fused_kernels_str = fmt_count(profile.fused_kernels, commas=False)
 ```
 
-On the reference H100, the modeled batch-one forward pass falls from `{python} CompilerSpeedupCalc.naive_inference_ms_str` in an eager framework to `{python} CompilerSpeedupCalc.optimized_inference_ms_str` as a compiled FP16 engine, a `{python} CompilerSpeedupCalc.compiler_speedup_mult_str` improvement without altering the model's mathematical output. The arithmetic per image is unchanged. The gain comes from fusing the network's `{python} CompilerSpeedupCalc.eager_kernels_str` framework kernels into `{python} CompilerSpeedupCalc.fused_kernels_str` and launching them as one graph instead of one Python dispatch at a time, which removes the fixed cost that dominates a single image. The latencies are modeled rather than measured, and @sec-model-serving-inference-runtime-selection-5eef separates the same gap into the contribution of each runtime, but the mechanism is general. Graph rewrites, kernel selection, memory planning, and scheduling systematically apply kernel fusion (@sec-hardware-acceleration-kernel-fusion-7faf) and memory-efficient tiling (@sec-hardware-acceleration-memoryefficient-tiling-strategies-9fce) to convert theoretical hardware FLOP/s into delivered throughput [@chen2018tvm; @nvidia2024tensorrt].
+On the reference H100, the modeled batch-one forward pass falls from `{python} CompilerSpeedupCalc.naive_inference_ms_str` in an eager framework to `{python} CompilerSpeedupCalc.optimized_inference_ms_str` as a compiled FP16 engine, a `{python} CompilerSpeedupCalc.compiler_speedup_mult_str` improvement without altering the model's mathematical output. The arithmetic per image is unchanged. The gain comes from fusing the network's `{python} CompilerSpeedupCalc.eager_kernels_str` framework kernels into `{python} CompilerSpeedupCalc.fused_kernels_str` and launching them as one graph instead of one Python dispatch at a time, which removes the fixed cost that dominates a single image. That answers the question the chapter opened with. The INT8 arithmetic for one image takes about `{python} ResnetArithmeticFloor.floor_int8_us_str` on the H100 (`{python} ResnetArithmeticFloor.floor_fp16_us_str` at FP16), so even the compiled pass spends almost all of its time on launch and overhead; batch-one latency sits on the overhead floor rather than on either roofline ceiling, which is why halving the arithmetic barely moves it. The latencies are modeled rather than measured, and @sec-model-serving-inference-runtime-selection-5eef separates the same gap into the contribution of each runtime, but the mechanism is general. Graph rewrites, kernel selection, memory planning, and scheduling systematically apply kernel fusion (@sec-hardware-acceleration-kernel-fusion-7faf) and memory-efficient tiling (@sec-hardware-acceleration-memoryefficient-tiling-strategies-9fce) to convert theoretical hardware FLOP/s into delivered throughput [@chen2018tvm; @nvidia2024tensorrt].
 
 This pipeline embodies the hardware-software co-design principle introduced in @sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28. Machine learning compilers bridge high-level model specifications and low-level execution engines by restructuring computations, selecting hardware-specialized kernels, and planning tensor storage lifetimes [@chen2018tvm]. They build on classical compiler foundations while introducing tensor- and graph-level transformations.
 
@@ -6052,7 +5961,7 @@ The energy gap established in @sec-hardware-acceleration-machine-learning-hardwa
 
 Consider an engineering team choosing between deploying a larger cluster of older accelerators or a smaller cluster of newer units. Peak FLOP/s figures mislead whenever dominant kernels are memory-bandwidth or communication bound. In a large model pipeline, dense feed-forward and attention projection layers may remain compute bound, whereas embedding lookups, layer normalization, residual additions, and small-batch autoregressive decoding often have low arithmetic intensity. Their measured bottlenecks can include memory bandwidth, dependent access latency, reductions, and launch overhead; the operator name alone does not identify the limiting resource. The decisive metric is delivered workload throughput per dollar under realistic cluster utilization, memory capacity constraints, available memory bandwidth, and scale-out interconnect efficiency.
 
-These architectural and economic constraints explain the rapid industry adoption of newer accelerators despite substantial increases in nominal unit price. For memory-bound workloads, generational improvements in memory bandwidth and compiler code generation dominate end-to-end execution time. Cloud deployments introduce additional trade-offs: hourly rental rates, dynamic instance utilization, and infrastructure overhead continuously shift the economic break-even point between purchasing on-premises hardware and leasing cloud capacity.
+These architectural and economic constraints explain the rapid industry adoption of newer accelerators despite substantial increases in nominal unit price. For bandwidth-bound workloads, generational improvements in memory bandwidth and compiler code generation dominate end-to-end execution time. Cloud deployments introduce additional trade-offs: hourly rental rates, dynamic instance utilization, and infrastructure overhead continuously shift the economic break-even point between purchasing on-premises hardware and leasing cloud capacity.
 
 Price-per-peak worksheets for named products age quickly. List prices vary with vendor, region, contract terms, and procurement volume, and each product's headline peak uses a different precision, so the ratio of price to peak is meaningful for one device but not as a comparison across devices. A dated worksheet for several accelerator generations is kept with the other specifications in @sec-appdx-system-assumptions. The durable rule is the one the lighthouse table states: divide cost by the throughput the workload delivers on its binding resource, not by the advertised peak.
 
@@ -6568,7 +6477,7 @@ This checklist translates architectural principles into rigorous engineering pra
 
 ## Summary {#sec-hardware-acceleration-summary-a5f8}
 
-Hardware acceleration co-designs compute engines, memory hierarchies, numerical formats, and dataflows. For a chosen memory interface, the iron law compares compute time $\Operations/(\PeakRate\EfficiencyHw)$ with movement time $\DataVolume/\Bandwidth$; the roofline restates that competition as $\min(\PeakRate, \Bandwidth \times \ArithmeticIntensity)$. End-to-end latency also includes launch, synchronization, communication, and fixed overheads. Accelerators improve efficiency only when supported paths capture reuse locally. Hardware selection therefore begins with the workload's measured or modeled bottleneck, not a vendor peak.
+Hardware acceleration co-designs compute engines, memory hierarchies, numerical formats, and dataflows. For a chosen memory interface, the iron law compares compute time $\Operations/(\PeakRate\EfficiencyHw)$ with movement time $\DataVolume/\Bandwidth$; the roofline restates that competition as $\min(\PeakRate, \Bandwidth \times \ArithmeticIntensity)$. End-to-end latency also includes launch, synchronization, communication, and fixed overheads. Accelerators improve efficiency only when supported paths capture reuse locally. Hardware selection therefore begins with the workload's measured or modeled bottleneck, not a vendor peak. For ResNet-50, INT8 multiplies large-batch throughput because large batches sit near the arithmetic ceiling, while batch-one latency sits on the overhead floor and moves only when compilation removes launch cost.
 
 The chapter map (@tbl-hw-acceleration-chapter-spine) can now be read row by row for the INT8 ResNet-50 workload that opened the chapter. Its convolutions lower onto matrix units, its INT8 path doubles the H100's arithmetic ceiling without moving the bandwidth ceiling, its activation tiles stay on chip only when the mapping and the tile sizes allow it, and whether a given layer gains from INT8 depends on whether its activations travel at INT8, a choice the compiler and runtime make. GPT-2 XL decode, the single contrast, gains from none of the arithmetic and from every byte saved.
 
