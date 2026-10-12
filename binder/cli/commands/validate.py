@@ -13305,6 +13305,10 @@ class ValidateCommand:
         # The verb marks the role; "is established in @sec-x" and "the bound established in @sec-x" both qualify.
         fwd = re.compile(r"\b(?:developed|measured|operationalized|enforced)\b[^.@]*\bin @")
         bwd = re.compile(r"\bestablished\b[^.@]*\bin @")
+        # 2026-10-12 author ruling (Vol I): an appendix collects material for reference and
+        # is never a concept's home, so a pointer into one may say "collected for reference
+        # in". Accepted, not required, so the other volumes' pointers are unaffected.
+        appx = re.compile(r"\bcollected for reference in @")
         homes: Dict[Path, Dict[str, object]] = {}
 
         def home_map(vol_dir: Path) -> Dict[str, object]:
@@ -13374,8 +13378,8 @@ class ValidateCommand:
                         problem = "↪ must point to a later chapter or an appendix"
                     elif body[0] == "↩" and not bwd.search(body):
                         problem = '↩ pointer wording uses "established in"'
-                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not fwd.search(body):
-                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in"'
+                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not (fwd.search(body) or (tgt == "appendix" and appx.search(body))):
+                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in" (an appendix target may use "collected for reference in")'
                     elif body[0] == "⇄" and not body.startswith("⇄ **Contrast:**"):
                         problem = "⇄ pointer must open with **Contrast:**"
                     elif re.match(r"↪ \*\*(Byte layout|Protocol):\*\*", body) and tgt != "appendix":
