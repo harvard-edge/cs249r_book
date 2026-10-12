@@ -43,11 +43,7 @@ notation-local: [\BatchFormationDelay, \BatchLatencyEnvelope, \BatchNormRunningM
 
 _Why does serving change the optimization priorities that made training successful?_
 
-Training and serving pursue fundamentally opposing operating objectives. Training maximizes aggregate throughput across homogeneous, scheduled batches and extended runs, whereas serving must evaluate individual, heterogeneous requests under strict latency deadlines. Training amortizes hardware initialization and weight streaming across millions of examples; serving pays its full fixed cost on every incoming query, where microsecond-level inefficiencies accumulate into machine time that must be provisioned. A system processing one billion requests daily converts a single millisecond saved per transaction into more than eleven days of recovered machine time every twenty-four hours.
-
-This operational divergence explains why architectures that train efficiently often falter in production. An online serving system operates within a fixed end-to-end latency budget. Delays in network ingress, serialization, input preprocessing, queueing, and response postprocessing directly diminish the execution window allocated to the model itself. When non-inference stages consume the bulk of the budget, aggressive kernel optimizations yield negligible improvement to the user. Furthermore, a prediction that arrives after an interactive client has timed out possesses zero utility, regardless of its mathematical accuracy.
-
-Serving is therefore more than an isolated latency challenge; it is a systems capacity problem under stochastic, uncontrolled traffic. Request arrival rates oscillate between diurnal peaks and troughs, forcing systems to preserve operational headroom for sudden demand surges and hardware failures. Capacity provisioned solely for average load collapses under peak traffic, whereas capacity provisioned for peak demand sits idle and costly throughout off-peak hours. Evaluating an ML model ultimately moves beyond whether it computes correct outputs in isolation to whether it sustains reliable, low-latency execution under production variability. In D·A·M terms, serving is where the trained algorithm meets unpredictable live data within the machine's strict latency budget, causing all three constraints to bind simultaneously on every incoming request.
+Training and serving pursue opposing operating objectives. Training maximizes aggregate throughput across large, scheduled batches and long runs, whereas serving must answer individual, heterogeneous requests under strict latency deadlines. Training amortizes hardware initialization and weight streaming across millions of examples; serving pays its full fixed cost on every query, and small inefficiencies accumulate into machine time that must be provisioned. A system handling one billion requests a day recovers more than eleven days of machine time every day from a single millisecond saved per request. Each request also runs inside a fixed end-to-end latency budget, in which network ingress, serialization, preprocessing, queueing, and postprocessing all spend time the model cannot use. When those stages consume most of the budget, kernel optimizations barely reach the user, and a prediction that arrives after the client has timed out has no value however accurate it is. Serving is therefore a capacity problem under uncontrolled traffic as much as a latency problem. Arrival rates swing between daily peaks and troughs, so capacity provisioned for the average collapses at the peak, while capacity provisioned for the peak sits idle and costly the rest of the day. The question a serving system answers is not whether the model computes correct outputs in isolation but whether it sustains reliable, low-latency execution under production variability. In D·A·M terms, serving is where the trained algorithm meets unpredictable live data inside the machine's latency budget, and all three constraints bind on every request.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -475,7 +471,7 @@ class ServingLighthouses:
     gpt2_read_ms_str = fmt_time(gpt2_read, unit="millisecond", precision=1, commas=False)
 ```
 
-Two services carry the chapter, one per half, and each lighthouse arrives in the regime it represents. The first half follows a ResNet-50 image-classification service on one accelerator node. ResNet-50 is the book's compute-bound lighthouse. Each forward pass performs about `{python} ServingLighthouses.resnet_gflops_str` of arithmetic on `{python} ServingLighthouses.resnet_weights_mb_str` of FP32 weights, so a large training batch keeps the matrix units busy. A served request arrives alone, however, and at batch one the same forward pass spends most of its time on weight traffic and kernel launches rather than arithmetic. Recovering the efficiency that training enjoyed without breaking the deadline is the first half's problem, and the reference request profile introduced with the latency budget carries the service through queuing, batching, runtime selection, and replica startup. The second half follows a GPT-2 XL chat service, the bandwidth-bound lighthouse whose decoding step @sec-network-architectures-inference-memory-bandwidth-wall-98d1 traced. Each generated token streams all `{python} ServingLighthouses.gpt2_weights_gb_str` of its FP16 weights from memory, about `{python} ServingLighthouses.gpt2_read_ms_str` on the volume's reference H100, so memory bandwidth sets token latency and the memory each conversation holds sets concurrency. Llama 3 8B, a larger member of the same transformer family, extends that case where the per-conversation cache grows large enough to bound how many requests share the accelerator. DLRM, the capacity-bound lighthouse, appears once as a contrast in which embedding lookups rather than arithmetic dominate a request, and MobileNetV2 appears where the target device cannot hold ResNet-50 at all.
+Two services carry the chapter, one per half, and each lighthouse arrives in the regime it represents. The first half follows a ResNet-50 image-classification service on one accelerator node. ResNet-50 is the book's compute-bound lighthouse. Each forward pass performs about `{python} ServingLighthouses.resnet_gflops_str` of arithmetic on `{python} ServingLighthouses.resnet_weights_mb_str` of FP32 weights, so a large training batch keeps the matrix units busy. A served request arrives alone, however, and at batch one the same forward pass spends most of its time on weight traffic and kernel launches rather than arithmetic. Recovering the efficiency that training enjoyed without breaking the deadline is the first half's problem, and the reference request profile introduced with the latency budget carries the service through queuing, batching, runtime selection, and replica startup. The second half follows a GPT-2 XL chat service, the bandwidth-bound lighthouse whose decoding step @sec-network-architectures-inference-memory-bandwidth-wall-98d1 traced. Each generated token streams all `{python} ServingLighthouses.gpt2_weights_gb_str` of its FP16 weights from memory, about `{python} ServingLighthouses.gpt2_read_ms_str` on the book's reference H100, so memory bandwidth sets token latency and the memory each conversation holds sets concurrency. Llama 3 8B, a larger member of the same transformer family, extends that case where the per-conversation cache grows large enough to bound how many requests share the accelerator. DLRM, the capacity-bound lighthouse, appears once as a contrast in which embedding lookups rather than arithmetic dominate a request, and MobileNetV2 appears where the target device cannot hold ResNet-50 at all.
 
 The chapter follows one request and then many through a single replica before changing what that replica executes, how it starts, and what kind of output it produces, and it closes by converting the result into accelerator count and cost (@tbl-model-serving-chapter-spine).
 
@@ -1610,7 +1606,9 @@ from mlsysim.fmt import fmt_int
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import MarkdownStr, fmt, fmt_percent, fmt_time, check
+from mlsysim import Models
+from mlsysim.core.units import GB
+from mlsysim.fmt import MarkdownStr, fmt, fmt_memory, fmt_percent, fmt_time, check
 
 class DlrmLatencyCalc:
     """Models DLRM serving latency to contrast I/O-bound vs. compute-bound bottlenecks."""
@@ -1620,6 +1618,7 @@ class DlrmLatencyCalc:
     dlrm_embed_ms_value = 6.0 * ms  # scenario assumption: embedding lookup latency
     dlrm_mlp_ms_value = 1.5 * ms  # scenario assumption: MLP forward latency
     dlrm_post_ms_value = 1.0 * ms  # scenario assumption: ranking and filtering latency
+    dlrm_model_size = Models.Recommendation.DLRM.model_size  # registry reference model (embedding-dominated)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dlrm_total_ms_value = dlrm_input_ms_value + dlrm_embed_ms_value + dlrm_mlp_ms_value + dlrm_post_ms_value
@@ -1636,6 +1635,7 @@ class DlrmLatencyCalc:
     dlrm_post_ms_str = fmt_time(dlrm_post_ms_value, 'millisecond', precision=0, commas=False)
     dlrm_total_ms_str = fmt_time(dlrm_total_ms_value, 'millisecond', precision=0, commas=False)
     dlrm_mlp_pct_str = fmt_percent(round(dlrm_mlp_pct_value) / 100, precision=0, commas=False, style='prose')
+    dlrm_model_gb_str = fmt_memory(dlrm_model_size, unit=GB, precision=0, commas=False)
 ```
 
 ::: {#lhs-model-serving-lighthouse-example-dlrm-serving .callout-lighthouse title="Lighthouse example: DLRM serving"}
@@ -1664,7 +1664,7 @@ class DlrmLatencyCalc:
 \end{minipage}
 \vspace{-3ex}
 ```
-**Systems insight**: In DLRM, the "Inference" multilayer perceptron stage is only ~`{python} DlrmLatencyCalc.dlrm_mlp_pct_str` of the latency. The majority of time is spent in embedding lookups, retrieving 128-dimensional embedding vectors from terabyte-scale tables. This is a memory-bandwidth and capacity-bound workload where adding more compute does not help unless the embedding tables can be served faster.
+**Systems insight**: In DLRM, the "Inference" multilayer perceptron stage is only ~`{python} DlrmLatencyCalc.dlrm_mlp_pct_str` of the latency. The majority of time is spent in embedding lookups, retrieving 128-dimensional embedding vectors from tables that hold about `{python} DlrmLatencyCalc.dlrm_model_gb_str` in the reference model and reach terabytes in production. This is a memory-bandwidth and capacity-bound workload where adding more compute does not help unless the embedding tables can be served faster.
 
 :::
 
@@ -2186,7 +2186,7 @@ Classical queueing texts write Little's law with single letters for the in-syste
 
 :::
 
-Formulated by John D. C. Little, **Little's law**\index{Little's law!concurrency calculation}[^fn-littles-law-serving] establishes an exact relationship among three macroscopic metrics in any stable queuing system:
+Formulated by John D. C. Little [@little1961], **Little's law**\index{Little's law!concurrency calculation}[^fn-littles-law-serving] establishes an exact relationship among three macroscopic metrics in any stable queuing system:
 $$\RequestConcurrency = \ArrivalRate \cdot \RequestTimeInSystem$$ {#eq-littles-law}
 where $\RequestConcurrency$ is the average number of requests residing in the system, $\ArrivalRate$ is the arrival rate (requests per second), and $\RequestTimeInSystem$ is the average time each request spends from arrival to completion.
 
@@ -2617,7 +2617,7 @@ Eliminating all sources of latency variability is often impractical. Production 
 
 When the node is overloaded, racing requests only exacerbates queue depth by injecting duplicate work. The system must instead protect the latency of admitted requests through graceful degradation or admission control. **Graceful degradation**\index{Graceful degradation!overload handling} returns lower-fidelity results to preserve throughput: classification pipelines fall back to cached approximations, generative models truncate decoding lengths, and model ensembles evaluate only a subset of members. Dynamically reducing active ensemble members shortens the service time $\BatchServiceTime(\BatchSize)$ of each batch of $\BatchSize$ requests, which increases the effective service rate $\EffectiveServiceRate(\BatchSize) = \BatchSize/\BatchServiceTime(\BatchSize)$ and lowers utilization $\ServingUtilization = \ArrivalRate / \EffectiveServiceRate(\BatchSize)$ toward a workload-appropriate operating point with more headroom, as illustrated by @fig-tail-latency-explosion, trading a controlled accuracy reduction for SLO survival instead of an uncontrolled latency collapse. **Admission control**\index{Admission control!queue depth threshold} enforces an even stricter boundary: when the ingress queue exceeds a designated threshold, the server immediately rejects excess queries with HTTP 503 status codes rather than admitting work doomed to violate its latency deadline.
 
-Setting this rejection threshold requires accounting for the work ahead of the arriving request. Consider a warmed, isolated worker that serves requests sequentially in first-in-first-out (FIFO) order, without batching or preemption. Assume known upper bounds on each request's service time and on every remaining stage outside the worker, including the response path. Subtract time already spent since the request began from its end-to-end latency allowance, then subtract the remaining outside-worker bound and the arriving request's service bound. The result is its waiting allowance. The worker's outstanding-work bound is the sum of the current request's residual service bound and the service bounds of queued requests. Admission passes the deadline screen only when that sum fits within the waiting allowance; a negative allowance rules out admission even to an idle worker. A request-count limit approximates this comparison only when service costs are sufficiently uniform.
+Setting this rejection threshold requires accounting for the work ahead of the arriving request. Consider a warmed, isolated worker that serves requests sequentially in first-in-first-out (FIFO) order, without batching or preemption. Assume known upper bounds on each request's service time and on every remaining stage outside the worker, including the response path. Subtract time already spent since the request began from its end-to-end latency allowance, then subtract the remaining outside-worker bound and the arriving request's service bound. The result is its waiting allowance. The worker's outstanding-work bound is the sum of the current request's residual service bound and the service bounds of queued requests. Admission passes the deadline screen only when that sum fits within the waiting allowance; a negative allowance rules out admission even to an idle worker. A request-count limit approximates this comparison only when service costs are sufficiently uniform. When they are, a practical starting point bounds the ingress queue at two or three requests per worker, the backlog a worker clears within two or three further service times, and the deadline screen and measured tails then tighten or relax that bound.
 
 Suppose the outstanding work exceeds the full model's waiting allowance but fits the allowance obtained with a validated, faster model that is already resident and warmed. The server can admit the request through that fallback if its prediction quality meets the application's minimum requirement. Shortening the new request's service time frees waiting allowance, but does not remove work already queued ahead of it. If neither acceptable model fits, rejection avoids spending accelerator time on a result that would arrive too late. Rejection reduces availability, while fallback can reduce prediction fidelity; both outcomes must be counted alongside latency so that shedding difficult requests does not make the service appear successful merely by shrinking its measurement population.
 
@@ -3783,13 +3783,15 @@ class MobileServingCalc:
     m_cam_ms = 8 * ms  # scenario assumption: camera capture latency
     m_jpeg_ms = 15 * ms  # scenario assumption: JPEG decode latency
     m_resize_ms = 5 * ms  # scenario assumption: resize latency
-    m_npu_ms = 12 * ms  # scenario assumption: mobile NPU inference latency
+    m_npu_ms = ResNetServingSpectrum.mobile_inf_npu_ms * ms  # same mobile NPU stage as the serving spectrum
+    m_cpu_ms = ResNetServingSpectrum.mobile_inf_cpu_ms * ms  # CPU fallback for that stage
     m_ui_ms = 5 * ms  # scenario assumption: UI/postprocess latency
     peak_memory = 150 * MB  # scenario assumption: app-shared peak memory
     m_cam_mj = 0.08 * mJ  # scenario assumption: camera capture energy
     m_jpeg_mj = 1.5 * mJ  # scenario assumption: JPEG decode energy
     m_resize_mj = 0.4 * mJ  # scenario assumption: resize energy
-    m_npu_mj = 0.8 * mJ  # scenario assumption: mobile NPU inference energy
+    m_npu_mj = ResNetServingSpectrum.mobile_energy_npu  # same mobile NPU stage as the serving spectrum
+    m_cpu_mj = ResNetServingSpectrum.mobile_energy_cpu
     m_ui_mj = 0.2 * mJ  # scenario assumption: UI/postprocess energy
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -3799,12 +3801,15 @@ class MobileServingCalc:
     sustained_power = m_total_mj / m_total_ms
     inferences_per_battery_m = (battery_wh / m_total_mj).to(count).magnitude / MILLION
     sustained_power_display = round(sustained_power.to(mW).magnitude) * mW
+    fallback_total_ms = m_total_ms - m_npu_ms + m_cpu_ms
+    fallback_total_mj = m_total_mj - m_npu_mj + m_cpu_mj
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
         sustained_power > 50 * mW,
         "mobile pipeline sustained power should be ~60–70 mW",
     )
+    check(fallback_total_ms > m_total_ms and fallback_total_mj > 2 * m_total_mj, "CPU fallback must lengthen the pipeline and roughly double its energy")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     m_cam_ms_str = fmt_time(m_cam_ms, ms, precision=0, commas=False)
@@ -3829,6 +3834,10 @@ class MobileServingCalc:
         commas=False,
     )
     peak_memory_mb_str = fmt_memory(peak_memory, unit=MB, precision=0, commas=False)
+    m_cpu_ms_str = fmt_time(m_cpu_ms, ms, precision=0, commas=False)
+    m_cpu_mj_str = fmt_energy(m_cpu_mj, unit=mJ, precision=1, commas=False)
+    fallback_total_ms_str = fmt_time(fallback_total_ms, ms, precision=0, commas=False)
+    fallback_total_mj_str = fmt_energy(fallback_total_mj, unit=mJ, precision=1, commas=False)
 ```
 
 #### Mobile serving constraints {#sec-model-serving-mobile-serving-constraints-eb68}
@@ -3863,7 +3872,7 @@ The mobile serving node is governed by four metrics:
 
 - **Energy per inference**: `{python} MobileServingCalc.m_total_mj_str` enables ~`{python} MobileServingCalc.inferences_per_battery_m_str` inferences per `{python} MobileServingCalc.battery_wh_str` battery (typical smartphone)
 - **Modeled inference power**: `{python} MobileServingCalc.m_total_mj_str` / `{python} MobileServingCalc.m_total_ms_str` = `{python} MobileServingCalc.sustained_mw_str`, excluding the rest of the device and therefore not a guarantee of indefinite operation
-- **NPU vs. CPU trade-off**: CPU fallback replaces the 12 ms, 0.8 mJ NPU inference stage with a 45 ms, 4.2 mJ CPU stage; the full pipeline would rise from 45 ms and `{python} MobileServingCalc.m_total_mj_str` to about 78 ms and 6.4 mJ before additional system overhead.
+- **NPU vs. CPU trade-off**: CPU fallback replaces the `{python} MobileServingCalc.m_npu_ms_str`, `{python} MobileServingCalc.m_npu_mj_str` NPU inference stage with a `{python} MobileServingCalc.m_cpu_ms_str`, `{python} MobileServingCalc.m_cpu_mj_str` CPU stage; the full pipeline would rise from `{python} MobileServingCalc.m_total_ms_str` and `{python} MobileServingCalc.m_total_mj_str` to about `{python} MobileServingCalc.fallback_total_ms_str` and `{python} MobileServingCalc.fallback_total_mj_str` before additional system overhead.
 - **Memory footprint**: `{python} MobileServingCalc.peak_memory_mb_str` peak (model + activations), competing with app memory
 
 **Systems insight**: In this illustrative pipeline, the mobile NPU reaches 82 percent utilization at batch size one while the data-center example reaches 15 percent. The contrast is workload- and hardware-specific, but it shows why a mobile accelerator designed for single-stream execution can operate efficiently without the batches used to amortize a large server GPU.
