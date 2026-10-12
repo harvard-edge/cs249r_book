@@ -91,6 +91,9 @@ class Workload(BaseModel):
     training_dataset_size: Optional[Quantity] = None
     parameter_range_min: Optional[Quantity] = None
     parameter_range_max: Optional[Quantity] = None
+    # Calendar year of first publication or release (added 2026-10-12 for
+    # growth-trend figures that plot a model against time).
+    release_year: Optional[int] = None
 
     @field_validator("parameters", "embedding_entries", mode="after")
     @classmethod
