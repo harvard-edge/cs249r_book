@@ -294,3 +294,14 @@ class Series:
         "Dense FP16 tensor throughput per watt of TDP for ML accelerators by release date.",
         numeric=("fp16_tensor_flops", "tdp_w", "flops_per_w"),
     )
+    ImageNetTestbedShift = TrendSeries(
+        "imagenet_testbed_shift",
+        _lit("Taori et al. (2020), Measuring Robustness to Natural Distribution Shifts in Image "
+             "Classification, testbed results robustness_top1s.csv (MIT), snapshot 2026-10-12; ImageNet-V2 "
+             "from Recht et al. (2019)", "https://github.com/modestyachts/imagenet-testbed",
+             "top-1 accuracy (%) per model on the ImageNet validation set (val), ImageNetV2 matched-frequency, "
+             "ObjectNet, ImageNet-R, and ImageNet-Sketch; the testbed includes partially trained and low-data "
+             "models, so figures filter on val accuracy; empty cells mean not evaluated"),
+        "Top-1 accuracy of ImageNet models on the original test set and on shifted test sets.",
+        numeric=("val", "imagenet_v2", "objectnet", "imagenet_r", "imagenet_sketch"),
+    )

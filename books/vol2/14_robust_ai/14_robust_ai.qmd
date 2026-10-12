@@ -505,6 +505,112 @@ Covariate shift\index{Covariate Shift!importance weighting}\index{Covariate Drif
 ↩ A fleet drift monitor that must tell input-distribution change from input-output change is established in @sec-ml-operations-scale-drift-detection-793f; this section defines the shift types it separates.
 :::
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ A NEW TEST SET FROM THE SAME RECIPE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the covariate-shift paragraph and
+# │          @fig-imagenet-v2-shift.
+# │
+# │ Goal: Show that even a shift meant to be none at all costs every model.
+# │ Show: 212 ImageNet models (>= 55% val) all lose 7-14 points on
+# │       ImageNet-V2, median 12; the loss tracks accuracy linearly.
+# │ How: Gaps and a least-squares fit over Literature.Series.ImageNetTestbedShift.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import statistics
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt, fmt_int
+
+def _evaluated(rows, floor):
+    return [r for r in rows if r["imagenet_v2"] is not None and r["val"] >= floor]
+
+def _gaps(rows):
+    return [r["val"] - r["imagenet_v2"] for r in rows]
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ImageNetV2Shift:
+    """Accuracy on ImageNet against ImageNet-V2 across the Taori et al. testbed."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    val_floor = 55  # percent; excludes the testbed's partially trained and low-data checkpoints
+    rows = _evaluated(Literature.Series.ImageNetTestbedShift.entries, val_floor)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    gaps = _gaps(rows)
+    fit_slope, fit_intercept = np.polyfit([r["val"] for r in rows], [r["imagenet_v2"] for r in rows], 1)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(min(gaps) > 0, "Prose says every model scores lower on ImageNet-V2.")
+    check(6 <= min(gaps) and max(gaps) <= 15 and 11 <= statistics.median(gaps) <= 13, "Prose quotes 7 to 14 points, median 12.")
+    check(len(rows) >= 200, "Prose quotes about 200 models.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    model_count_str = fmt_int(len(rows))
+    val_floor_str = fmt_int(val_floor)
+    gap_min_str = fmt_int(round(min(gaps)))
+    gap_max_str = fmt_int(round(max(gaps)))
+    gap_median_str = fmt_int(round(statistics.median(gaps)))
+```
+
+Even a shift that was designed to be no shift at all costs accuracy. @recht2019imagenet rebuilt the ImageNet validation set a decade after the original by following the original collection and labeling protocol, then evaluated existing models on the new images. In the larger testbed of @taori2020measuring, every one of the `{python} ImageNetV2Shift.model_count_str` models that reach at least `{python} ImageNetV2Shift.val_floor_str` percent on the original set scores lower on the new one, by `{python} ImageNetV2Shift.gap_min_str` to `{python} ImageNetV2Shift.gap_max_str` points with a median of `{python} ImageNetV2Shift.gap_median_str` (@fig-imagenet-v2-shift). The loss follows a nearly straight line, so a model that is better on the original set is better on the new one, yet no architecture, training recipe, or amount of extra data closes the gap. Whatever separates the two sets is invisible to a person looking at the images and costly to every model. For a fleet, accuracy measured on held-out data from the training distribution is therefore an upper bound on accuracy for the next population of inputs, not an estimate of it.
+
+::: {#fig-imagenet-v2-shift fig-env="figure" fig-pos="htb" fig-cap="**Accuracy on a Fresh Test Set from the Same Recipe**: Top-1 accuracy on ImageNet-V2, a test set rebuilt by following the original ImageNet collection protocol, against accuracy on the original ImageNet validation set, for testbed models that reach at least 55 percent on the original. Every point lies below the dashed line of equal accuracy, and the red least-squares line shows that the loss tracks accuracy almost linearly. ImageNet-V2 is from @recht2019imagenet; model evaluations from the testbed of @taori2020measuring." fig-alt="Scatter plot of ImageNet-V2 top-1 accuracy from about 43 to 81 percent against original ImageNet accuracy from about 56 to 88 percent. A dashed diagonal marks equal accuracy; all points lie 7 to 14 points below it. A red fitted line runs through the points. AlexNet near 56.5 and 43, VGG-16 near 72 and 59, ResNet-50 near 76 and 63, and EfficientNet-L2 Noisy Student near 88 and 81 are labeled."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ A NEW TEST SET FROM THE SAME RECIPE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-imagenet-v2-shift.
+# │
+# │ Goal: Plot ImageNet-V2 accuracy against ImageNet accuracy per model.
+# │ Show: Scatter, y = x reference, linear fit, a few labeled models.
+# │ How: ImageNetV2Shift (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.5, 5.2))
+_C = ImageNetV2Shift
+ax.scatter([r["val"] for r in _C.rows], [r["imagenet_v2"] for r in _C.rows], s=14, color=COLORS["BlueLine"], alpha=0.8, label="Model", zorder=3)
+ax.plot([40, 92], [40, 92], "--", color=COLORS["primary"], lw=1, label="Equal accuracy", zorder=2)
+_xx = np.array([55, 90])
+ax.plot(_xx, _C.fit_slope * _xx + _C.fit_intercept, color=COLORS["RedLine"], lw=1.6, label="Least-squares fit", zorder=4)
+_lab = {
+    "alexnet": ("AlexNet", (34, -12)),
+    "vgg16": ("VGG-16", (30, -26)),
+    "resnet50": ("ResNet-50", (30, -26)),
+    "efficientnet-l2-noisystudent": ("EfficientNet-L2\n(Noisy Student)", (16, -58)),
+}
+for _r in _C.rows:
+    if _r["model"] in _lab:
+        _t, _o = _lab[_r["model"]]
+        ax.scatter([_r["val"]], [_r["imagenet_v2"]], s=70, facecolors="none", edgecolors=COLORS["primary"], linewidths=1.2, zorder=5)
+        ax.annotate(
+            _t,
+            (_r["val"], _r["imagenet_v2"]),
+            xytext=_o,
+            textcoords="offset points",
+            fontsize=8,
+            ha="center",
+            arrowprops=dict(arrowstyle="-", color=COLORS["primary"], lw=0.8),
+            bbox=dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.2),
+            zorder=6,
+        )
+ax.set_xlim(54, 92.5)
+ax.set_ylim(37, 91)
+ax.set_xlabel("ImageNet top-1 accuracy (%)")
+ax.set_ylabel("ImageNet-V2 top-1 accuracy (%)")
+ax.legend(fontsize=8, loc="upper left", frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
 Covariate shift moves the inputs while the true mapping $\ProbabilityFunction(\ExampleLabel\mid \ModelInput)$ stays fixed. A more insidious variant occurs when the mapping itself changes: the correct label for a given input today is different from what it was during training.
 
 ::: {#dfn-robust-ai-concept-drift .callout-definition title="Concept drift"}
