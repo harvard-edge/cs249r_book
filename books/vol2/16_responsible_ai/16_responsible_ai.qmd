@@ -718,6 +718,105 @@ A critical limitation of standard fairness analysis is that it often evaluates s
 
 For example, IBM's gender-classification system achieved `{python} GenderShadesIntersection.light_male_pct_str` accuracy for lighter-skinned men but only `{python} GenderShadesIntersection.dark_female_pct_str` for darker-skinned women in the Gender Shades evaluation [@buolamwini2018gender]. A single-axis audit can obscure such an intersectional disparity. This phenomenon, sometimes called fairness gerrymandering\index{Fairness!gerrymandering}, requires evaluating model performance on intersectional subgroups (for example, $\text{Race}{\times}\text{Gender}$) to detect and mitigate compounded biases.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AUDIT AND RE-AUDIT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the IBM intersectional-gap paragraph and
+# │          @fig-gender-shades-audit.
+# │
+# │ Goal: Show that a published intersectional audit moved the systems it
+# │       measured, and not the ones it did not name.
+# │ Show: Darker-female error, 2017 -> 2018: IBM 34.7 -> 17.0, Face++ 34.5 ->
+# │       4.1, Microsoft 20.8 -> 1.5; unnamed Amazon 31.4, Kairos 22.5.
+# │ How: Rows of Literature.Series.GenderShadesAudit, guarded against the
+# │      Literature.Fairness registry values.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt
+
+def _err(rows, company, subgroup, when):
+    return next(r[f"error_{when}_pct"] for r in rows if r["company"] == company and r["subgroup"] == subgroup)
+
+def _df(rows, company, when):
+    return _err(rows, company, "darker female", when)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class GenderShadesReaudit:
+    """Darker-female error rates before and after the published Gender Shades audit."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.GenderShadesAudit.entries
+    ibm_df_acc_ref = float(Literature.Fairness.GenderShadesIbmAccuracyDarkFemale)
+    facepp_df_err_ref = float(Literature.Fairness.GenderShadesErrDarkFemale)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    ibm_before, ibm_after = _df(rows, "IBM", "may2017"), _df(rows, "IBM", "aug2018")
+    facepp_before, facepp_after = _df(rows, "Face++", "may2017"), _df(rows, "Face++", "aug2018")
+    msft_before, msft_after = _df(rows, "Microsoft", "may2017"), _df(rows, "Microsoft", "aug2018")
+    amazon_after, kairos_after = _df(rows, "Amazon", "aug2018"), _df(rows, "Kairos", "aug2018")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs((100 - ibm_df_acc_ref) - ibm_before) < 0.05, "Series IBM darker-female error must match the registry accuracy.")
+    check(abs(facepp_df_err_ref - facepp_before) < 0.05, "Series Face++ darker-female error must match the registry.")
+    check(ibm_after < ibm_before and facepp_after < facepp_before and msft_after < msft_before, "Prose says every named company improved.")
+    check(min(amazon_after, kairos_after) > max(facepp_after, msft_after), "Prose says unnamed companies trailed the improved ones.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    ibm_before_str, ibm_after_str = fmt(ibm_before, precision=1), fmt(ibm_after, precision=1)
+    facepp_before_str, facepp_after_str = fmt(facepp_before, precision=1), fmt(facepp_after, precision=1)
+    msft_before_str, msft_after_str = fmt(msft_before, precision=1), fmt(msft_after, precision=1)
+    amazon_after_str, kairos_after_str = fmt(amazon_after, precision=1), fmt(kairos_after, precision=1)
+```
+
+Measuring the disparity also changed it. In August 2018, about six months after the Gender Shades results were published, @raji2019 repeated the audit on the same benchmark. Each of the three companies that had been named had reduced its error on darker-skinned women: IBM from `{python} GenderShadesReaudit.ibm_before_str` to `{python} GenderShadesReaudit.ibm_after_str` percent, Face++ from `{python} GenderShadesReaudit.facepp_before_str` to `{python} GenderShadesReaudit.facepp_after_str`, and Microsoft from `{python} GenderShadesReaudit.msft_before_str` to `{python} GenderShadesReaudit.msft_after_str` (@fig-gender-shades-audit). Two systems the original audit had not named, from Amazon and Kairos, still misclassified `{python} GenderShadesReaudit.amazon_after_str` and `{python} GenderShadesReaudit.kairos_after_str` percent of darker-skinned women. A specific, published intersectional audit therefore acts as an operational lever as well as a measurement. The disparity shrank where it was measured and named, and it persisted where no one had looked.
+
+::: {#fig-gender-shades-audit fig-env="figure" fig-pos="htb" fig-cap="**Audit and Re-Audit**: Gender-classification error by skin-type and gender subgroup on the Pilot Parliaments Benchmark, for the three systems named in the 2018 Gender Shades audit (measured in spring 2017, red) and in an August 2018 re-audit (blue), and for two systems first measured in the re-audit (blue only). Errors fell most for the darker-skinned women the audit had highlighted. Data from @buolamwini2018gender (Table 4) and @raji2019 (Table 1)." fig-alt="Dumbbell chart with five company groups of four subgroup rows each, error rate from 0 to about 35 percent. For IBM, Face++, and Microsoft, red dots mark 2017 errors and blue dots 2018 errors joined by gray bars: darker-skinned women fall from 34.7 to 17.0 percent for IBM, 34.5 to 4.1 for Face++, and 20.8 to 1.5 for Microsoft, and most other subgroups fall to near zero, although Face++ error for darker-skinned men rises from 0.7 to 1.3 percent. Amazon and Kairos show only 2018 values, with darker-skinned women at 31.4 and 22.5 percent and other subgroups below about 7 percent."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AUDIT AND RE-AUDIT (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-gender-shades-audit.
+# │
+# │ Goal: Compare subgroup error before and after the public audit.
+# │ Show: Dumbbells grouped by company; re-audit-only companies as single dots.
+# │ How: GenderShadesReaudit (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 6.2))
+_C = GenderShadesReaudit
+_companies = ["IBM", "Face++", "Microsoft", "Amazon", "Kairos"]
+_subs = ["darker female", "darker male", "lighter female", "lighter male"]
+_y, _ticks, _labels = 0, [], []
+for _co in _companies:
+    for _sg in _subs:
+        _r = next(r for r in _C.rows if r["company"] == _co and r["subgroup"] == _sg)
+        _a, _b = _r["error_may2017_pct"], _r["error_aug2018_pct"]
+        if _a is not None:
+            ax.plot([_b, _a], [_y, _y], color=COLORS["grid"], lw=2.5, zorder=1)
+            ax.scatter([_a], [_y], color=COLORS["RedLine"], s=30, zorder=3, label="2017 audit" if _y == 0 else None)
+        ax.scatter([_b], [_y], color=COLORS["BlueLine"], s=30, zorder=3, label="2018 re-audit" if _y == 0 else None)
+        _ticks.append(_y)
+        _labels.append(f"{_co}, {_sg}")
+        _y -= 1
+    _y -= 0.6
+ax.set_yticks(_ticks)
+ax.set_yticklabels(_labels, fontsize=7.5)
+ax.set_xlim(-1, 38)
+ax.set_xlabel("Gender-classification error (%)")
+ax.legend(fontsize=8, loc="lower right", frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
 An intersectional audit must specify the population slices it can identify and the evidence available within them. Work on multicalibration extends calibration checks to a specified, potentially rich family of overlapping subgroups [@hebert2018multicalibration]. This does not certify every possible subgroup or every fairness criterion. It motivates evaluation and monitoring infrastructure that can examine relevant intersections while reporting where sample support or attribute availability limits the claim.
 
 #### Quantitative fairness measurement {#sec-responsible-ai-quantitative-fairness-measurement-a8f2}

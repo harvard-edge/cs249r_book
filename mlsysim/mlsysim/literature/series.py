@@ -315,3 +315,14 @@ class Series:
         "Clean and AutoAttack accuracy of published CIFAR-10 L-infinity defenses by publication year.",
         numeric=("clean_acc", "autoattack_acc"),
     )
+    GenderShadesAudit = TrendSeries(
+        "gender_shades_audit",
+        _lit("Buolamwini and Gebru (2018), Gender Shades, PMLR 81, Table 4 (error rate, audit of "
+             "April-May 2017); Raji and Buolamwini (2019), Actionable Auditing, AIES, Table 1 (re-audit "
+             "of August 2018); Pilot Parliaments Benchmark", "https://proceedings.mlr.press/v81/buolamwini18a.html",
+             "gender-classification error rate (%) by subgroup; target = 1 for the three companies named "
+             "in the 2018 publication, 0 for companies measured only in the re-audit; the re-audit's "
+             "Table 2 differences reproduce the original darker-female values for all three targets"),
+        "Gender-classification error by skin-type and gender subgroup, before and after a public audit.",
+        numeric=("target", "error_may2017_pct", "error_aug2018_pct"),
+    )
