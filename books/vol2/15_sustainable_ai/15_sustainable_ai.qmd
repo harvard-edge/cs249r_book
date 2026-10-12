@@ -1349,6 +1349,72 @@ class WueTrainingWaterFootprint:
 
 The units are liters per kilowatt-hour\index{Water Usage Effectiveness!units and typical ranges}, with typical values ranging from `{python} WueTrainingWaterFootprint.wue_air_str` to 2.0 L/kWh depending on climate and cooling technology. A data center with WUE of `{python} WueTrainingWaterFootprint.wue_evaporative_str` L/kWh training a model requiring `{python} WueTrainingWaterFootprint.it_energy_mwh_str` of IT energy would consume `{python} WueTrainingWaterFootprint.water_million_liters_str` million liters of water, equivalent to roughly `{python} WueTrainingWaterFootprint.household_years_low_str`--`{python} WueTrainingWaterFootprint.household_years_high_str` US household-years of water use under a `{python} WueTrainingWaterFootprint.household_low_liters_str`--`{python} WueTrainingWaterFootprint.household_high_liters_str` L/year household baseline. A facility-energy estimate must first be converted to the IT boundary before applying this WUE.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED SERVING WATER AND EMISSIONS FACTORS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the WUE training example and the paragraph after
+# │          @tbl-carbon-intensity.
+# │
+# │ Goal: Give the serving-side counterpart to the training water footprint
+# │       and show how the emissions-factor choice moves a measured result.
+# │ Show: (0.24 - 0.02 Wh) × 1.15 L/kWh ≈ 0.26 mL per prompt; 2024 location
+# │       factor 345 vs market factor 94 gCO2e/kWh, 3.7×, so the same prompt
+# │       is ~0.08 or ~0.023 g of electricity emissions.
+# │ How: Literature.Series.GoogleServingFactors with
+# │      Literature.Series.GeminiPromptEnergy (Elsworth et al. 2025).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt, fmt_multiple
+
+def _factor(rows, name):
+    return next(r["value"] for r in rows if r["parameter"] == name)
+
+def _comprehensive(rows, prefix):
+    return next(r["comprehensive_wh"] for r in rows if r["component"].startswith(prefix))
+
+def _total(rows):
+    return sum(r["comprehensive_wh"] for r in rows)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ServingFootprintFactors:
+    """Per-prompt water and electricity emissions from measured serving factors."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    factors = Literature.Series.GoogleServingFactors.entries
+    energy = Literature.Series.GeminiPromptEnergy.entries
+    wue = _factor(factors, "wue_category2")
+    lb_ef = _factor(factors, "lb_emission_factor_2024")
+    mb_ef = _factor(factors, "mb_emission_factor_2024")
+    published_water_ml = _factor(factors, "prompt_water")
+    published_scope2_g = _factor(factors, "prompt_emissions_scope2_mb")
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    it_wh = _total(energy) - _comprehensive(energy, "Data center")  # water applies to energy before facility overhead
+    water_ml = it_wh / 1000 * wue * 1000
+    lb_g = _total(energy) / 1000 * lb_ef
+    mb_g = _total(energy) / 1000 * mb_ef
+    factor_ratio = lb_ef / mb_ef
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(water_ml - published_water_ml) < 0.01, f"Recomputed water must match the paper's 0.26 mL, got {water_ml:.3f}.")
+    check(abs(mb_g - published_scope2_g) < 0.002, f"Market-based electricity emissions must match Table 2, got {mb_g:.4f}.")
+    check(3.4 <= factor_ratio <= 3.9, f"Prose says the factors differ about 3.7x, got {factor_ratio:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    wue_str = fmt(wue, precision=2)
+    water_ml_str = fmt(published_water_ml, precision=2)  # the paper's value; the guard checks the recomputation agrees
+    lb_ef_str = fmt(lb_ef, precision=0)
+    mb_ef_str = fmt(mb_ef, precision=0)
+    factor_ratio_mult_str = fmt_multiple(round(factor_ratio, 1))
+    lb_g_str = fmt(round(lb_g, 2), precision=2)
+    mb_g_str = fmt(round(mb_g, 3), precision=3)
+```
+
+Serving has a water account too, and it is computed the same way. Google reports a fleet WUE of `{python} ServingFootprintFactors.wue_str` L/kWh for the data centers that serve its Gemini assistant [@elsworth2025measuring]. Applied to the IT energy of the median prompt measured in @sec-sustainable-ai-inference-energy-costs-aec9, which excludes facility overhead, that WUE gives the `{python} ServingFootprintFactors.water_ml_str` mL of water per prompt that the study reports. A single prompt's water is negligible; a service answering billions of prompts a day turns the same arithmetic into a facility-scale demand, which is why the cooling choice, and the watershed it draws on, belongs in the serving design rather than only in the training budget.
+
 Facility-level metrics identify where engineering intervention yields the greatest returns. The case study in @sec-sustainable-ai-case-study-deepmind-energy-efficiency-84fd demonstrates how ML-driven optimization of PUE translates directly into measurable energy savings.
 
 #### DeepMind energy efficiency case study {#sec-sustainable-ai-case-study-deepmind-energy-efficiency-84fd}
@@ -1370,6 +1436,8 @@ The carbon impact attributed to electricity depends on the selected emissions fa
 | **Grid marginal**        | Estimated change in emissions when demand changes                  | Evaluating a proposed shift or reduction in electricity demand                               |
 
 : **Electricity Emissions Factor Boundaries**: A technology factor is not a regional grid measurement. Record the period, location, imports, greenhouse gases, and lifecycle coverage before comparing or multiplying a factor by workload electricity. {#tbl-carbon-intensity}
+
+The choice of factor alone can change a reported result several-fold. For its 2024 data centers, Google reports a location-based grid factor of `{python} ServingFootprintFactors.lb_ef_str` g CO~2~e/kWh and a market-based factor of `{python} ServingFootprintFactors.mb_ef_str` g CO~2~e/kWh after crediting its purchases of carbon-free electricity, a `{python} ServingFootprintFactors.factor_ratio_mult_str` difference for the same electricity [@elsworth2025measuring]. The same median prompt therefore carries about `{python} ServingFootprintFactors.lb_g_str` g CO~2~e or `{python} ServingFootprintFactors.mb_g_str` g CO~2~e of electricity emissions depending on the factor, and only the second matches the figure the company publishes. Neither is wrong, but a comparison is meaningful only when both sides declare the same factor type, period, and boundary.
 
 ```{python}
 #| echo: false

@@ -405,3 +405,14 @@ class Series:
         "Energy per median Gemini text prompt by serving-stack component under two measurement boundaries.",
         numeric=("existing_wh", "existing_counted", "comprehensive_wh", "comprehensive_counted"),
     )
+    GoogleServingFactors = TrendSeries(
+        "google_serving_factors",
+        _lit("Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, "
+             "Section 3.3, Section 4.3, and Table 2, arXiv:2508.15734", "https://arxiv.org/abs/2508.15734",
+             "emission factors are Google data-center annual averages (location-based, carbon-free-energy "
+             "credit, and market-based net); the May 2025 prompt metrics apply the 2024 factors; WUE is "
+             "ISO Category 2 (consumptive) freshwater use; per-prompt values are for the median Gemini Apps "
+             "text prompt under the Comprehensive Approach; transcribed exactly"),
+        "Emission factors, WUE, PUE, and per-prompt water and emissions reported for Gemini serving.",
+        numeric=("value",),
+    )
