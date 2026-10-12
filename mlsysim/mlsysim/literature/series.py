@@ -382,3 +382,15 @@ class Series:
         "Per-direction bandwidth of Ethernet, InfiniBand, NVLink, and PCIe generations with spec and product years.",
         numeric=("line_rate_gbps", "per_direction_GBps", "spec_year", "first_product_year"),
     )
+    AppleNeuralEngine = TrendSeries(
+        "apple_neural_engine",
+        _lit("Apple Newsroom and apple.com product pages for each A-series chip (per-row quote and source_url), "
+             "checked 2026-10-12", "https://www.apple.com/newsroom/",
+             "tops is Apple's stated peak Neural Engine rating where basis = stated (A16 and A17 Pro are "
+             "'nearly'); A13 basis = derived from two Apple speedup ratios (A12 x 1.2 and A14 / 1.8); A18 Pro "
+             "basis = secondary (Apple states only 'faster than the previous generation'); A19 Pro has no "
+             "figure; Apple never states the numeric precision, and the FP16-to-INT8 change at A17 Pro is a "
+             "secondary-source inference"),
+        "Apple Neural Engine peak ratings by A-series chip, with the basis of each value.",
+        numeric=("year", "tops"),
+    )

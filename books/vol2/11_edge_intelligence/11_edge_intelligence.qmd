@@ -274,27 +274,38 @@ Keeping raw examples local reduces one source of exposure, but an update can sti
 
 A smartphone predicting user text input, a smart home device responding to household routines, and an autonomous vehicle interpreting local driving conditions can all encounter variation underrepresented in centralized training data. The smartphone encounters user-specific linguistic patterns. The smart home device observes seasonal changes and household routines. The vehicle faces road conditions, weather patterns, and traffic behaviors that differ from its training environment.
 
-Such gaps make a case for on-device learning (definition \ref{dfn-edge-intelligence-device-learning}). A gap is a case, not a verdict; whether local training is necessary, and whether a given update improves behavior, are questions the rest of this chapter answers with measurements. Machine learning then moves from centralized training to distributed learning across heterogeneous devices, each operating under local constraints. Within the fleet stack, this pushes computation toward the limits of device power, memory, and thermal capacity. Hardware capability contributes to on-device adaptation\index{On-device adaptation!hardware acceleration} feasibility alongside the algorithm and runtime: the mobile accelerator scaling tracked in @fig-edge-npu-tops shows throughput climbing from under 1 TOPS on the A11 Bionic to 35 TOPS on the A17 and A18 Pro, a step in 2023 that is partly a change in rating precision (INT8 versus earlier FP16). That growth expanded the forward inference budget, which is not yet a training budget.
+Such gaps make a case for on-device learning (definition \ref{dfn-edge-intelligence-device-learning}). A gap is a case, not a verdict; whether local training is necessary, and whether a given update improves behavior, are questions the rest of this chapter answers with measurements. Machine learning then moves from centralized training to distributed learning across heterogeneous devices, each operating under local constraints. Within the fleet stack, this pushes computation toward the limits of device power, memory, and thermal capacity. Hardware capability contributes to on-device adaptation\index{On-device adaptation!hardware acceleration} feasibility alongside the algorithm and runtime: the mobile accelerator scaling tracked in @fig-edge-npu-tops shows Apple's stated rating climbing from under 1 TOPS on the A11 Bionic to nearly 35 TOPS on the A17 Pro, a step in 2023 that is reportedly partly a change in rating precision (INT8 versus earlier FP16). That growth expanded the forward inference budget, which is not yet a training budget.
 
-::: {#fig-edge-npu-tops fig-env="figure" fig-pos="htb" fig-cap="**Mobile NPU performance scaling**: Throughput of Apple's Neural Engine by release year, rising from under one TOPS in 2017 to roughly thirty-five by 2024 with a sharp step at the 2023 generation, much of which reflects Apple's switch from FP16 to INT8 ratings. These inference-oriented peak ratings do not establish training throughput or backward-operator support." fig-alt="Line chart of mobile neural processing unit throughput in TOPS by release year from 2017 to 2024, rising from under one to about thirty-five with a sharp step at the 2023 generation. Each point is labeled with its chip, A11 through A16 for the Bionic generations and then A17 Pro and A18 Pro. A dotted vertical line between 2022 and 2023 separates FP16 ratings on the left from INT8 ratings on the right, and the INT8 side is lightly shaded."}
+::: {#fig-edge-npu-tops fig-env="figure" fig-pos="htb" fig-cap="**Mobile NPU performance scaling**: Apple's stated peak Neural Engine rating by chip, rising from 0.6 TOPS on the A11 Bionic in 2017 to nearly 35 TOPS on the A17 Pro in 2023. The hollow A13 point is derived from Apple's stated speedups rather than a stated figure. Apple does not state the rating precision; much of the 2023 step is attributed to INT8 ratings replacing FP16. These inference-oriented peak ratings do not establish training throughput or backward-operator support. Ratings from Apple's product announcements." fig-alt="Line chart of Apple Neural Engine peak rating in TOPS by release year from 2017 to 2023, rising from 0.6 for the A11 to nearly 35 for the A17 Pro with a sharp step at 2023. Each point is labeled with its chip; the 2019 A13 point is hollow because it is derived rather than stated. A dotted vertical line between 2022 and 2023 is labeled as a likely change of rating precision."}
 
 ```{python}
 #| echo: false
 import pandas as pd
 from binder.tools.figures import style as book_style
 
-data = pd.read_csv("vol2/11_edge_intelligence/data/ane_trend.csv")
+from mlsysim import Literature
+
+# Apple-stated ratings (filled) plus A13, derived from two Apple speedup ratios
+# (hollow); A18 Pro has only a secondary figure that Apple's wording contradicts.
+data = pd.DataFrame(
+    [
+        {"Year": int(r["year"]), "Chip": r["chip"], "TOPS": r["tops"], "Derived": r["basis"] == "derived"}
+        for r in Literature.Series.AppleNeuralEngine.entries
+        if r["basis"] in ("stated", "derived")
+    ]
+)
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.4, 3.3))
 
-# The two rating precisions are regimes: shade the INT8-rated span so the
-# 2023 step reads as a change of yardstick, not only of silicon.
-ax.axvspan(2022.5, 2024.6, color=COLORS['grid'], alpha=0.22, lw=0)
+# Apple never states the rating precision; secondary sources attribute much of
+# the 2023 step to INT8 ratings replacing FP16, so mark it as a likely change.
 ax.axvline(2022.5, color=COLORS["secondary"], lw=0.8, ls=":")
-ax.text(2022.35, 2.0, "FP16 rating", ha="right", va="center", fontsize=10, color=COLORS["secondary"])
-ax.text(2022.65, 2.0, "INT8 rating", ha="left", va="center", fontsize=10, color=COLORS["secondary"])
+ax.text(2022.6, 9, "likely change of\nrating precision", ha="left", va="center", fontsize=9, color=COLORS["secondary"])
 
-ax.plot(data["Year"], data["TOPS"], marker="o", linewidth=2.2, markersize=6, color=COLORS["OrangeLine"], zorder=3)
+ax.plot(data["Year"], data["TOPS"], linewidth=2.2, color=COLORS["OrangeLine"], zorder=2)
+_stated, _derived = data[~data["Derived"]], data[data["Derived"]]
+ax.scatter(_stated["Year"], _stated["TOPS"], s=36, color=COLORS["OrangeLine"], zorder=3)
+ax.scatter(_derived["Year"], _derived["TOPS"], s=36, facecolors="white", edgecolors=COLORS["OrangeLine"], linewidths=1.6, zorder=3)
 
 # Chip names beside each point, short form (the "Bionic" suffix is shared)
 offsets = {
@@ -323,7 +334,7 @@ for _, row in data.iterrows():
 ax.set_xlabel("Release year")
 ax.set_ylabel("Peak rating (TOPS)")
 ax.set_ylim(0, 43)
-ax.set_xlim(2016.4, 2024.6)
+ax.set_xlim(2016.4, 2023.7)
 ax.set_xticks(data["Year"])
 ax.grid(axis="x", visible=False)
 for side in ("top", "right"):
@@ -878,7 +889,7 @@ Microcontroller memory rules out training configurations whose live tensors exce
 
 Moving up the computational hierarchy, mobile-class hardware represents improvement but still operates under severe constraints. Platforms including the Qualcomm Snapdragon, Apple Neural Engine,[^fn-neuralengine-hardware-evolution] and the Google Tensor system-on-chip (SoC)\index{Google Tensor SoC!definition} provide significantly more compute power than microcontrollers, often featuring dedicated AI accelerators and optimized support for 8-bit or mixed-precision\index{Mixed-Precision Training!definition} matrix operations. These accelerators offer dedicated matrix multiplication units, on-chip memory hierarchies, and power management features specifically designed for neural network inference, with varying support for local training workloads. While these platforms can support more sophisticated training routines, including full backpropagation over compact models, they still fall far short of the computational throughput and memory bandwidth available in centralized data centers. For instance, training a lightweight transformer\index{Lightweight Transformers!definition} on a smartphone is technically feasible but must be tightly bounded in both time and energy consumption to avoid degrading the user experience, highlighting the persistent tension between learning capabilities and practical deployment constraints.
 
-[^fn-neuralengine-hardware-evolution]: **Apple Neural Engine**\index{Apple Neural Engine!definition}\index{Neural Engine!on-device training}: Apple's dedicated neural accelerator, first shipped in the A11 Bionic in 2017; its rating growth through the A18 Pro is tracked in @fig-edge-npu-tops. Which of an update's operators actually reach it, rather than falling back to the CPU or GPU, is the runtime question worked through in @sec-edge-intelligence-mobile-ai-accelerator-optimization-67fe.
+[^fn-neuralengine-hardware-evolution]: **Apple Neural Engine**\index{Apple Neural Engine!definition}\index{Neural Engine!on-device training}: Apple's dedicated neural accelerator, first shipped in the A11 Bionic in 2017; its rating growth through the A17 Pro is tracked in @fig-edge-npu-tops. Which of an update's operators actually reach it, rather than falling back to the CPU or GPU, is the runtime question worked through in @sec-edge-intelligence-mobile-ai-accelerator-optimization-67fe.
 
 Published benchmark results from MLPerf Tiny and vendor data illustrate the range of edge inference costs in @fig-edge-inference-landscape. The plotted tiers span roughly 100$\times$ in energy per inference. Dedicated neural processors such as the Syntiant Core 2 and STM32N6 NPU occupy the sub-millijoule MCU and application-specific integrated circuit (ASIC) band (30 to 444 $\Glyph{\mu}$J per inference across keyword spotting, visual wake words, and small-image classification, with keyword spotting finishing in under 5 ms), Google Coral appears near 4.8 mJ, and the Jetson AGX Orin appears near 15 mJ for ResNet-50. The roughly 100$\times$ gap mixes different workloads with different hardware, so it is not a matched-task efficiency comparison. Energy per inference does not determine battery lifetime on its own, because inference frequency, sleep power, sensing, radio use, and usable battery capacity also enter that budget. For a learning device the figure sets the scale against which an update must be judged. One evaluation costs microjoules to millijoules, while each second of training inside the `{python} EdgeMobilePowerEnvelope.sustained_range_str` sustained envelope spends joules, more than a thousand keyword-spotting evaluations at the plotted 30 to 160 $\Glyph{\mu}$J. An update can therefore be a substantial energy cost, but its share of the device budget depends on how often training and inference run. Both paths need measurement over the same operating period.
 
