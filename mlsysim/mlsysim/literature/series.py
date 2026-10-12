@@ -219,3 +219,13 @@ class Series:
         "Size, chip count, and power of AI supercomputers by first operational date.",
         numeric=("h100_equivalents", "total_chips", "power_mw"),
     )
+    NotableModelTrainingRuns = TrendSeries(
+        "notable_model_training_runs",
+        _lit("Epoch AI, Notable AI Models database (CC BY 4.0), snapshot 2026-10-12",
+             "https://epoch.ai/data/notable-ai-models",
+             "models published 2012 onward with a training-compute or hardware-quantity estimate; values "
+             "as published by Epoch, many of them Epoch estimates; hardware_quantity is accelerator count, "
+             "training_time_hours is wall-clock duration, mfu as reported; frontier = Epoch's frontier flag"),
+        "Training compute, accelerator count, duration, and utilization of notable training runs.",
+        numeric=("training_compute_flop", "hardware_quantity", "training_time_hours", "mfu", "frontier"),
+    )
