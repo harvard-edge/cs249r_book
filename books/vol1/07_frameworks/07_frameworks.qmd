@@ -1208,6 +1208,119 @@ The eager-vs.-compiled trade-off has a direct iron law consequence. JIT compilat
 
 Graph-capture JIT systems follow the same architectural pattern across frameworks. The first execution observes tensor operations, records a graph region guarded by assumptions about shapes, dtypes, layouts, and control flow, lowers that region into an intermediate representation, applies fusion and layout optimizations, and caches executable code for later calls that satisfy the same guards. The compiled artifact is valid only while those assumptions hold, so a failed guard forces the runtime to recompile or fall back to eager execution. When eager fallback is enabled, unsupported Python code forms a graph boundary where execution returns to the eager runtime; a configuration requiring full-graph capture can instead report an error. PyTorch 2.0's `torch.compile` [@ansel2024] is a concrete instance of this pattern, but the systems idea is broader than the API: compilation pays only when captured regions are long enough and stable enough to amortize capture, lowering, code generation, and cache-management costs.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OPERATOR SURFACE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Operator-surface paragraph after the graph-capture pattern and
+# │          @fig-operator-surface.
+# │
+# │ Goal: Contrast eager operator surfaces with compiler-facing operator sets.
+# │ Show: PyTorch ATen ~1,064 → ~2,658 schemas; TensorFlow ~594 → ~1,563 ops;
+# │       Core ATen IR ~192, XLA HLO ~123, ONNX ~203, JAX lax ~135; eager-to-core
+# │       gap ~13-14×.
+# │ How: Literature.Series operator-count snapshots mined from each project.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_multiple_range, fmt_text
+
+# ┌── LEGO ───────────────────────────────────────────────
+class OperatorSurface:
+    """Eager operator surfaces versus compiler-facing operator sets."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    pytorch = Literature.Series.PyTorchOperatorSchemas.entries
+    tensorflow = Literature.Series.TensorFlowOperators.entries
+    xla = Literature.Series.XLAHLOOpcodes.entries
+    onnx = Literature.Series.ONNXOpsetOperators.entries
+    jax = Literature.Series.JAXLaxPrimitives.entries
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    pt_first, pt_latest = pytorch[0], pytorch[-1]
+    tf_first, tf_latest = tensorflow[0], tensorflow[-1]
+    core_latest = [r for r in pytorch if r["core_aten"]][-1]["core_aten"]
+    xla_latest = xla[-1]["opcodes"]
+    onnx_latest = onnx[-1]["operators"]
+    jax_latest = jax[-1]["primitives"]
+    pt_ratio = pt_latest["aten_schemas"] / core_latest
+    tf_ratio = tf_latest["ops"] / xla_latest
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(pt_latest["aten_schemas"] > 2 * pt_first["aten_schemas"] and tf_latest["ops"] > 2 * tf_first["ops"],
+          "Both eager surfaces more than doubled.")
+    check(max(core_latest, xla_latest, onnx_latest, jax_latest) < 250, "Every compiler-facing set stays near 100-200 operators.")
+    check(10 <= min(pt_ratio, tf_ratio) and max(pt_ratio, tf_ratio) <= 20, f"Expected ~13-14x gaps, got {tf_ratio:.1f} and {pt_ratio:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    pt_first_str = fmt_int(pt_first["aten_schemas"])
+    pt_latest_str = fmt_int(pt_latest["aten_schemas"])
+    tf_first_str = fmt_int(tf_first["ops"])
+    tf_latest_str = fmt_int(tf_latest["ops"])
+    pt_first_release_str = fmt_text(pt_first["release"].lstrip("v").rsplit(".0", 1)[0])
+    pt_latest_release_str = fmt_text(pt_latest["release"].lstrip("v").rsplit(".0", 1)[0])
+    tf_first_release_str = fmt_text(tf_first["release"].lstrip("v").rsplit(".0", 1)[0])
+    tf_latest_release_str = fmt_text(tf_latest["release"].lstrip("v").rsplit(".0", 1)[0])
+    pt_first_year_str = fmt_int(int(pt_first["date"][:4]), commas=False)
+    pt_latest_year_str = fmt_int(int(pt_latest["date"][:4]), commas=False)
+    tf_first_year_str = fmt_int(int(tf_first["date"][:4]), commas=False)
+    tf_latest_year_str = fmt_int(int(tf_latest["date"][:4]), commas=False)
+    core_aten_str = fmt_int(core_latest)
+    xla_str = fmt_int(xla_latest)
+    onnx_ops_str = fmt_int(onnx_latest)
+    jax_prims_str = fmt_int(jax_latest)
+    gap_range_mult_str = fmt_multiple_range(round(min(pt_ratio, tf_ratio)), round(max(pt_ratio, tf_ratio)), precision=0)
+```
+
+Lowering into an intermediate representation is far easier when the target vocabulary is small, and the eager frameworks a compiler starts from are not small. @Fig-operator-surface counts the operators that each framework defines at successive releases. PyTorch's native-function table grew from `{python} OperatorSurface.pt_first_str` schemas, overloads included, at version `{python} OperatorSurface.pt_first_release_str` in `{python} OperatorSurface.pt_first_year_str` to `{python} OperatorSurface.pt_latest_str` by version `{python} OperatorSurface.pt_latest_release_str` in `{python} OperatorSurface.pt_latest_year_str` [@pytorch2025nativefunctions], and TensorFlow's operator registry grew from `{python} OperatorSurface.tf_first_str` at version `{python} OperatorSurface.tf_first_release_str` in `{python} OperatorSurface.tf_first_year_str` to `{python} OperatorSurface.tf_latest_str` by version `{python} OperatorSurface.tf_latest_release_str` in `{python} OperatorSurface.tf_latest_year_str` [@tensorflow2025opsregistry]. Every one of those entries is something a backend must implement or decompose.
+
+Compiler-facing representations work from far smaller sets, and those sets barely grow. The Core ATen IR, the operator set that PyTorch's compiler and export paths lower to, holds `{python} OperatorSurface.core_aten_str` operators [@ansel2024]; the XLA compiler that TensorFlow and JAX both target defines `{python} OperatorSurface.xla_str` high-level optimizer (HLO) operations [@openxla2025hloopcodes]; and the Open Neural Network Exchange (ONNX) standard, which carries models between frameworks and runtimes, defines `{python} OperatorSurface.onnx_ops_str` [@onnx2026operators]. JAX starts on the compiler's side of this divide. Its user-facing operations reduce to about `{python} OperatorSurface.jax_prims_str` `lax` primitives [@jax2025laxprimitives], a set the size of the compiler cores, so a JAX program reaches XLA with little decomposition left to do. The `{python} OperatorSurface.gap_range_mult_str` gap between an eager surface and its compiler core is the work that decomposition performs. A new accelerator backend that implements a small core set can run models written against the full eager surface, which is why operator coverage, not peak throughput, often decides whether a model runs on a new device at all.
+
+::: {#fig-operator-surface fig-env="figure" fig-pos="htb" fig-cap="**Eager Operator Surfaces versus Compiler Cores**: Operators defined by the eager frameworks (PyTorch native-function schemas with overloads, and TensorFlow's registered operators) against the compiler-facing sets they lower to (PyTorch's Core ATen IR, XLA's HLO operations, the ONNX standard, and JAX's `lax` primitives) at each release, on a logarithmic axis. The eager surfaces grew past 1,500 and 2,600 entries while every compiler-facing set stayed between about 100 and 200. Counts mined from each project's repository at its release tags [@pytorch2025nativefunctions; @tensorflow2025opsregistry; @openxla2025hloopcodes; @onnx2026operators; @jax2025laxprimitives]." fig-alt="Line chart on a logarithmic axis of operator counts against release date from 2017 to 2026. Two upper lines rise: PyTorch ATen schemas from about 1,064 in late 2018 to 2,658 in 2025, and TensorFlow operators from 594 in early 2017 to 1,563 in 2025. Four lower lines stay between about 100 and 200: XLA HLO operations from 84 to 123, ONNX operators from 95 to 203, Core ATen IR from 129 to 192, and JAX lax primitives from 111 to 135."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OPERATOR SURFACE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-operator-surface.
+# │
+# │ Goal: Plot eager operator surfaces against compiler-facing operator sets.
+# │ Show: PyTorch and TensorFlow surfaces; Core ATen, XLA HLO, ONNX, JAX lax.
+# │ How: OperatorSurface (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.6))
+def _yr(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+_O = OperatorSurface
+_core = [r for r in _O.pytorch if r["core_aten"]]
+_series = [
+    (_O.pytorch, "aten_schemas", "PyTorch ATen schemas (incl. overloads)", COLORS["RedLine"], "o", "-"),
+    (_O.tensorflow, "ops", "TensorFlow operators", COLORS["OrangeLine"], "D", "-"),
+    (_core, "core_aten", "PyTorch Core ATen IR", COLORS["RedLine"], "s", "--"),
+    (_O.xla, "opcodes", "XLA HLO operations (TensorFlow, JAX)", COLORS["OrangeLine"], "v", "--"),
+    (_O.onnx, "operators", "ONNX standard operators", COLORS["BlueLine"], "^", "--"),
+    (_O.jax, "primitives", "JAX lax primitives", COLORS["GreenLine"], "P", "--"),
+]
+for _rows, _key, _label, _color, _marker, _ls in _series:
+    ax.plot([_yr(r["date"]) for r in _rows], [r[_key] for r in _rows], _ls, marker=_marker, ms=4, color=_color, label=_label)
+for _rows, _key, _dy in ((_O.pytorch, "aten_schemas", 0), (_O.tensorflow, "ops", 0)):
+    ax.annotate(f"{int(_rows[-1][_key]):,}", (_yr(_rows[-1]["date"]), _rows[-1][_key]), xytext=(6, _dy), textcoords="offset points", va="center", fontsize=8)
+ax.set_xlabel("Release date"); ax.set_ylabel("Operators (log scale)")
+ax.set_xlim(2016.8, 2027.2); ax.set_yscale("log"); ax.set_ylim(60, 6000)
+ax.legend(loc="upper left", fontsize=7.5, frameon=True, framealpha=0.95, ncol=2)
+plt.show()
+plt.close()
+```
+
+:::
+
 Historically, PyTorch's TorchScript\index{TorchScript!tracing and scripting} exemplified both strategies [@pytorchTorchScriptDocs]. TorchScript is now deprecated in favor of capture and export paths such as `torch.export` [@pytorchTorchScriptDocs; @pytorchExportDocs], but its two modes still make the fidelity-generality trade-off concrete. Tracing\index{JIT compilation!tracing} executed a function with example inputs and recorded the tensor operations observed on that path. Scripting\index{JIT compilation!scripting} instead compiled a restricted, type-annotated subset of Python source, preserving supported branches in the graph at the cost of rejecting unsupported Python objects, library calls, and metaprogramming. Both produced an IR with static types in static single-assignment (SSA)\index{Static single assignment!compiler IR} form, where each variable is assigned exactly once, so fusion, constant folding, and dead code elimination could run without the Python interpreter.
 
 The critical limitation of tracing is that a trace records operations from an observed path rather than preserving arbitrary Python control flow. A data-dependent branch can therefore freeze into whichever side the example input took (@lst-tracing-silent-failure).
@@ -1370,9 +1483,9 @@ class PythonTaxTimeline:
     eager_idle_pct_str = fmt_percent(round(eager_idle_share * 100) / 100, precision=0, commas=False, style="prose")  # 91 percent
 ```
 
-Scaling this arithmetic to a sequence of `{python} PythonTaxTimeline.n_ops_str` small operations exposes the idle gaps on the accelerator timeline (@fig-python-tax). In eager execution, each `{python} PythonTaxTimeline.kernel_us_str` kernel waits on `{python} FusionSpeedup.python_dispatch_us_str` of Python dispatch plus its own driver launch, leaving the accelerator idle for about `{python} PythonTaxTimeline.eager_idle_pct_str` of the sequence. Compiling the sequence resolves both constraints simultaneously: the framework submits the work in a single launch of `{python} FusionSpeedup.kernel_launch_only_us_str`, eliminating all intermediate host dispatch gaps, while operator fusion keeps intermediate activations in registers or cache to complete the entire sequence in `{python} PythonTaxTimeline.fused_compute_us_str` instead of the uncompiled `{python} PythonTaxTimeline.eager_compute_us_str`.
+Scaling this arithmetic to a sequence of `{python} PythonTaxTimeline.n_ops_str` small operations exposes the idle gaps on the accelerator timeline (@fig-python-tax). In eager execution, each `{python} PythonTaxTimeline.kernel_us_str` kernel waits on `{python} FusionSpeedup.python_dispatch_us_str` of Python dispatch, leaving the accelerator idle for about `{python} PythonTaxTimeline.eager_idle_pct_str` of the sequence. Compiling the sequence resolves both constraints simultaneously: the framework submits the work in a single launch of `{python} FusionSpeedup.kernel_launch_only_us_str`, eliminating all intermediate host dispatch gaps, while operator fusion keeps intermediate activations in registers or cache to complete the entire sequence in `{python} PythonTaxTimeline.fused_compute_us_str` instead of the uncompiled `{python} PythonTaxTimeline.eager_compute_us_str`.
 
-::: {#fig-python-tax fig-env="figure" fig-pos="htb" fig-cap="**Python Dispatch Overhead**: Execution timelines illustrate how host dispatch latency ($\Latency$) starves the accelerator during fine-grained operations. Eager execution incurs per-operation host overhead for each kernel, whereas compilation and fusion collapse the sequence into a single launch (illustrated with direct device submission), eliminating intermediate dispatch gaps and intermediate global memory round-trips." fig-alt="Gantt chart of execution timeline. Eager mode shows alternating red Python dispatch and blue GPU kernel blocks. Compiled mode shows one red dispatch block followed by one fused blue compute block."}
+::: {#fig-python-tax fig-env="figure" fig-pos="htb" fig-cap="**Python Dispatch Overhead**: Execution timelines illustrate how host dispatch latency ($\Latency$) starves the accelerator during fine-grained operations. Eager execution incurs per-operation host overhead for each kernel, whereas compilation and fusion collapse the sequence into a single launch (drawn in the overhead color as one direct device submission), eliminating intermediate dispatch gaps and intermediate global memory round-trips." fig-alt="Gantt chart of execution timeline. Eager mode shows alternating red Python dispatch and blue GPU kernel blocks. Compiled mode shows one red dispatch block followed by one fused blue compute block."}
 
 ```{python}
 #| echo: false
@@ -1657,7 +1770,7 @@ class CompilationContinuumModel:
 
 The cases form a continuum of increasing reuse (@fig-compilation-continuum). Each strategy's total time starts at its one-time compilation cost and grows at its per-execution cost, so eager wins at low execution counts, JIT wins once its compilation is amortized, and AOT wins only at the largest counts, where its higher upfront cost is fully repaid. The figure's crossovers (near `{python} CompilationContinuumModel.eager_jit_cross_math` and `{python} CompilationContinuumModel.jit_aot_cross_math` executions) come from an illustrative cost model in arbitrary units, not from the ResNet-50 scenario, whose eager-to-compiled breakeven sits near `{python} CompilationBenchmark.resnet_breakeven_images_str`. What carries over is the order of the regions, not their positions.
 
-::: {#fig-compilation-continuum fig-env="figure" fig-pos="htb" fig-cap="**The Compilation Continuum**: An illustrative cost model shows how one-time compilation cost and per-execution cost create eager, JIT, and AOT crossover regions as production executions increase. The crossover locations depend on the assumed compilation costs and per-execution rates." fig-alt="Line graph with production executions on a logarithmic x-axis and total time in arbitrary units on the y-axis. Blue eager, orange JIT, and green AOT lines rise at decreasing slopes from different initial offsets. Dotted vertical lines mark the eager–JIT and JIT–AOT crossovers; labels identify the region where each strategy has the lowest total time."}
+::: {#fig-compilation-continuum fig-env="figure" fig-pos="htb" fig-cap="**The Compilation Continuum**: An illustrative cost model shows how one-time compilation cost and per-execution cost create eager, JIT, and AOT crossover regions as production executions increase. The crossover locations depend on the assumed compilation costs and per-execution rates." fig-alt="Line graph with production executions on a logarithmic x-axis and total time in arbitrary units on the y-axis. Blue eager, orange JIT, and green AOT lines start at different offsets, stay nearly flat, then curve upward, with eager rising most steeply and AOT least. Dotted vertical lines mark the eager–JIT and JIT–AOT crossovers; labels identify the region where each strategy has the lowest total time."}
 
 ```{python}
 #| echo: false
@@ -2995,7 +3108,7 @@ At the framework level, the central requirement is placement expressiveness on o
 
 For a sense of scale, @fig-3d-parallelism illustrates how these three placement relationships compose when extreme model dimensions exceed the memory capacity of any single accelerator. At GPT-3 scale, storing the `{python} GPT3MemoryFootprint.gpt3_params_b_str` parameters alone requires `{python} GPT3MemoryFootprint.gpt3_fp16_gb_str` in FP16, compelling frameworks to partition state across three orthogonal axes: across layer groups (pipeline parallelism), across replicated batches (data parallelism), and within individual weight matrices (tensor parallelism). Interpreting the resulting multi-device grid is not required for the single-machine framework reasoning developed in this chapter; @sec-model-training-scaling-training-systems-adfd investigates the formal communication cost and scheduling geometry of multi-dimensional parallelism.
 
-::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Device Placement Dimensions**: A framework whose model no longer fits one device can place work across layer groups, across replicated batches, or within large tensors, and the braces show how the three placements compose over a grid of accelerator groups." fig-alt="Grid of 8 GPU clusters in two rows and four columns. A horizontal brace labels splitting across layer groups, a vertical brace labels replicated batch groups, and a depth brace labels splitting within large tensors."}
+::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Device Placement Dimensions**: A framework whose model no longer fits one device can place work across layer groups, across replicated batches, or within large tensors, and the braces show how the three placements compose over a grid of accelerator groups." fig-alt="Three-dimensional block of GPU cubes. The front face has two rows and four columns labeled GPU 0 through GPU 28, with further layers stacked behind. A horizontal brace is labeled Across layer groups, a vertical brace Across replicas, and a depth brace Within tensors."}
 
 ```{.tikz}
 \resizebox{0.6\textwidth}{!}{
@@ -4061,7 +4174,7 @@ Each backend maps common tensor semantics to silicon-specific primitives. A sing
 |:----------------------------------------------------|:-------------------------------------------------------|:------------------------------------------------------------------|
 | **CUDA GPU**\index{GPU backend!CUDA implementation} | cuBLAS [@nvidia_cublas; @choquette2021]                | GEMM kernels and CUDA streams for async execution                 |
 | **CPU**\index{CPU backend!optimized BLAS libraries} | Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs] | Thread-level parallelism around optimized kernels                 |
-| **TPU**\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific high-level optimizer (HLO) operations |
+| **TPU**\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific HLO operations |
 | **Apple Silicon**                                   | Metal Performance Shaders                              | MPS backend                                                       |
 
 : **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[15,44,41]"}
@@ -4169,7 +4282,7 @@ Where TensorFlow's design centers the path from captured graph to deployment run
 
 PyTorch's approach fits exploratory research for the same reason: it treats deep learning as standard Python programming. Developers can use Python loops, conditionals, and debuggers (such as `pdb`) directly within a model's forward pass, with no special syntax, no separate compilation step, and no waiting to see if the code works. Eager execution enables rapid iteration and intuitive model design, which is essential when architectures and training objectives are still changing.
 
-PyTorch's answer to the differentiation problem is tape-based autograd (@sec-ml-frameworks-pytorch-autograd-internals-4fa0): flexible and debuggable, but harder to optimize globally because the tape is rebuilt each iteration. Its answer to the abstraction problem is more pragmatic than comprehensive: strong GPU support through cuBLAS and cuDNN, with deployment paths including `torch.export`, edge-targeted ExecuTorch, Open Neural Network Exchange (ONNX), and specialized runtimes.
+PyTorch's answer to the differentiation problem is tape-based autograd (@sec-ml-frameworks-pytorch-autograd-internals-4fa0): flexible and debuggable, but harder to optimize globally because the tape is rebuilt each iteration. Its answer to the abstraction problem is more pragmatic than comprehensive: strong GPU support through cuBLAS and cuDNN, with deployment paths including `torch.export`, edge-targeted ExecuTorch, ONNX, and specialized runtimes.
 
 The trade-off is therefore a more fragmented deployment path. Because the graph is dynamic, the framework cannot easily perform global optimizations before execution. A model that works perfectly in development may hit performance walls in production when dispatch overhead dominates small operations. To bridge this research-to-production gap, PyTorch added graph-capture and compilation paths (`torch.compile` and export workflows) that capture a dynamic model and turn it into an optimized representation for deployment. This evolution shows how an eager framework can move toward the production end of the compilation continuum while preserving the interactive experience that motivated the design.
 
