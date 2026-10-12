@@ -262,17 +262,47 @@ The third signal is input demand at dataset scale\index{Dataset scale!storage li
 # │ Goal: Narrate the figure with the growth factors and crossover year that
 # │       the plotted data actually contain (restores the quantitative reading
 # │       the 10-04 precision pass removed, now computed instead of hand-typed).
-# │ Show: single-GPU memory ~38x (K20 to B200); plotted training-memory demand
+# │ Show: single-GPU memory ~15x (K80 to B200); plotted training-memory demand
 # │       ~4 orders of magnitude; first model above that year's GPU in 2020.
-# │ How: max/min over the same CSV the figure plots.
+# │ How: parameters from Literature.Series.NotableModels x 16 B/param
+# │      (BYTES_TRAINING_STATE_MIXED_PRECISION); capacities from Hardware.Cloud.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 import pandas as pd
+from mlsysim import Hardware, Literature
+from mlsysim.core.units import BYTES_TRAINING_STATE_MIXED_PRECISION, GB, GiB, byte
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_multiple
+
+# Plotted models: (label on the figure, name in the Epoch notable-models series).
+_WALL_MODELS = (
+    ("AlexNet", "AlexNet"),
+    ("VGG-16", "VGG16"),
+    ("ResNet-152", "ResNet-152 (ImageNet)"),
+    ("BERT-Large", "BERT-Large"),
+    ("GPT-2", "GPT-2 (1.5B)"),
+    ("GPT-3", "GPT-3 175B (davinci)"),
+    ("PaLM", "PaLM (540B)"),
+    ("Llama 3 (405B)", "Llama 3.1-405B"),
+)
+_WALL_GPUS = ("K80", "V100", "A100", "H100", "B200")
+
+def _wall_table():
+    """Training-state demand (params x 16 B) and single-accelerator capacity, one row per point."""
+    rows = []
+    for label, name in _WALL_MODELS:
+        r = next(m for m in Literature.Series.NotableModels.entries if m["model"] == name)
+        demand_gb = (r["parameters"] * BYTES_TRAINING_STATE_MIXED_PRECISION).to(GB).magnitude
+        rows.append({"Year": int(r["date"][:4]), "Name": label, "Type": "Model", "Memory_GB": demand_gb})
+    for key in _WALL_GPUS:
+        h = getattr(Hardware.Cloud, key)
+        # Branded capacity: vendors label 80 GiB as "80 GB" (qmd-patterns branded-hardware carve-out).
+        rows.append({"Year": int(h.release_year), "Name": key, "Type": "GPU", "Memory_GB": h.memory.capacity.to(GiB).magnitude})
+    return pd.DataFrame(rows)
 
 class MemoryWallTrend:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    _data = pd.read_csv("vol2/05_distributed_training/data/memory_wall_trends.csv")
+    _data = _wall_table()
+    table = _data
     _gpus = _data[_data['Type'] == 'GPU'].sort_values('Year')
     _models = _data[_data['Type'] == 'Model'].sort_values('Year')
 
@@ -291,7 +321,7 @@ class MemoryWallTrend:
     crossover_gap = _crossover_row.Memory_GB / _gpus[_gpus['Year'] <= _crossover_row.Year]['Memory_GB'].max()
 
     # ┌── 3. GUARD ────────────────────────────────────────
-    check(30 < gpu_growth < 45, f"Single-GPU memory growth should be tens of x, got {gpu_growth:.1f}")
+    check(10 < gpu_growth < 20, f"Single-GPU memory growth K80 to B200 should be ~15x, got {gpu_growth:.1f}")
     check(3.5 < demand_orders < 5, f"Plotted demand should span about four orders of magnitude, got {demand_orders:.2f}")
     check(crossover_year == 2020 and _crossover_name == 'GPT-3', "First plotted crossover should be GPT-3 in 2020")
     check(30 < crossover_gap < 40, f"GPT-3 state should overshoot an 80 GB GPU by about 35x, got {crossover_gap:.1f}")
@@ -307,7 +337,7 @@ class MemoryWallTrend:
 
 The first signal, memory exhaustion, has a long history, traced in @fig-memory-wall-trend. Over the plotted span, single-accelerator memory grew about `{python} MemoryWallTrend.gpu_growth_mult_str` from the `{python} MemoryWallTrend.first_gpu_str` to the `{python} MemoryWallTrend.last_gpu_str`, while the memory needed to train a state-of-the-art model grew by roughly `{python} MemoryWallTrend.demand_orders_str` orders of magnitude. Among the plotted models, the curves cross in `{python} MemoryWallTrend.crossover_year_str` at GPT-3, whose training state exceeded the largest accelerator then available by about `{python} MemoryWallTrend.crossover_gap_mult_str`. The real crossing came earlier than the plot shows. By the `{python} DenseLLMReferenceFacts.bytes_per_param_str`-bytes-per-parameter convention above, any model beyond roughly `{python} DenseLLMReferenceFacts.crossover_params_str` parameters already overflows one `{python} DenseLLMReferenceFacts.h100_mem_gb_str` device, and models between the plotted points, such as the 2019 Megatron-LM model developed with tensor parallelism [@shoeybi2019megatron], were partitioned for that reason. GPT-3 marks where the gap passed an order of magnitude, and every later plotted frontier model also sits far above the capacity curve. For those models, spreading state beyond one device's memory is a precondition for training at all rather than a way to train faster.
 
-::: {#fig-memory-wall-trend fig-env="figure" fig-pos="htb" fig-cap="**The memory wall**: Accelerator memory capacity plotted against the memory a state-of-the-art model needs to train. Capacity climbs steadily while demand climbs faster, and the widening gap is why weights, gradients, and optimizer state must be split across devices rather than merely compressed." fig-alt="Log-scale line chart from 2012 to 2024. A dashed blue series of single-accelerator memory rises from 5 GB (K20) to 192 GB (B200). A red series of the memory needed to train frontier models rises far faster, crossing above accelerator memory between GPT-2 (2019) and GPT-3 (2020), and a light red band labeled split across devices shades the widening gap through Llama 3 in 2024. GPT-3 is circled and annotated as the first plotted model beyond one accelerator, about 35 times the largest of its year. Arrows at the right span the growth of each series, about 38 times in capacity and about 4 orders of magnitude in demand. The two series are labeled directly rather than with a legend."}
+::: {#fig-memory-wall-trend fig-env="figure" fig-pos="htb" fig-cap="**The memory wall**: Accelerator memory capacity plotted against the memory a state-of-the-art model needs to train. Capacity climbs steadily while demand climbs faster, and the widening gap is why weights, gradients, and optimizer state must be split across devices rather than merely compressed. Training memory assumes 16 bytes per parameter for mixed-precision Adam state; parameter counts are from @epochai2026notable and capacities are vendor specifications." fig-alt="Log-scale line chart from 2012 to 2024. A dashed blue series of single-accelerator memory rises from 12 GB (K80) to 180 GB (B200). A red series of the memory needed to train frontier models rises far faster, crossing above accelerator memory between GPT-2 (2019) and GPT-3 (2020), and a light red band labeled split across devices shades the widening gap through Llama 3 in 2024. GPT-3 is circled and annotated as the first plotted model beyond one accelerator, about 35 times the largest of its year. Arrows at the right span the growth of each series, about 15 times in capacity and about 4 orders of magnitude in demand. The two series are labeled directly rather than with a legend."}
 
 ```{python}
 #| echo: false
@@ -317,7 +347,7 @@ import numpy as np
 from mlsysim import viz
 
 # Read data
-data = pd.read_csv("vol2/05_distributed_training/data/memory_wall_trends.csv")
+data = MemoryWallTrend.table
 
 # Separate into models and GPUs
 df_gpus = data[data['Type'] == 'GPU']
@@ -390,7 +420,7 @@ ax.annotate(
     arrowprops=dict(arrowstyle='-', color=COLORS['primary'], lw=0.7, shrinkA=1, shrinkB=7, relpos=(1.0, 0.0)),
 )
 
-# Growth spans at the right edge: capacity K20 to B200, demand across the plotted models.
+# Growth spans at the right edge: capacity K80 to B200, demand across the plotted models.
 def _span(x, lo, hi, color, label):
     ax.annotate('', xy=(x, hi), xytext=(x, lo), arrowprops=dict(arrowstyle='<->', color=color, lw=1.0, shrinkA=0, shrinkB=0))
     ax.text(x + 0.25, np.sqrt(lo * hi), label, ha='left', va='center', fontsize=10, color=color, fontweight='bold')
