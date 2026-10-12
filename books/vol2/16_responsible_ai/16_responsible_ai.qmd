@@ -2987,72 +2987,134 @@ The engineering requirements for safety are shaped by regulatory frameworks that
 *At fleet scale, rare failures become expected incidents.*
 :::
 
-Safety must also be engineered as a fleet-level property\index{Fleet-level property!safety engineering} rather than a model-level attribute alone. A single model with 99.9 percent safety compliance seems robust in isolation, but when deployed across 10,000 inference nodes serving billions of requests per day, a sustained 0.1 percent per-request failure probability implies millions of expected safety failures daily. The realized count can differ, and correlated failures can concentrate harm across the fleet. Mitigating this requires distributed safety patterns borrowed from reliability engineering: circuit breakers\index{Circuit Breaker!safety mechanism} that automatically halt serving when aggregate safety metrics degrade below a threshold, canary deployments\index{Canary Deployment!safety validation} that bound exposure while collecting release evidence, with sample size and allowed risk chosen for the failure modes being tested, and centralized telemetry dashboards that aggregate per-node safety violations into a global view. The operational infrastructure must treat safety violations as critical system alerts, invoking a validated containment or fallback policy. A rollback is appropriate only if the previous version and transition are safe; active physical control may require a minimal-risk maneuver instead. Exposure is the multiplier that makes this concrete. @Fig-autonomous-miles-scaling illustrates cumulative mileage rising from 0.3 million miles in 2012 to 80 million in 2024. Because exposure grows by that ratio over twelve years, at any constant per-mile failure rate the expected cumulative incident count grows by the same factor even though no individual vehicle became less safe. That figure is an expectation, not an inevitable realized outcome, and it is cumulative; an operator sizing weekly incident-response capacity needs weekly mileage instead.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED DRIVERLESS EXPOSURE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Fleet-level safety paragraph and @fig-autonomous-miles-scaling.
+# │
+# │ Goal: Replace an illustrative exposure curve with measured exposure and
+# │       measured per-mile rates.
+# │ Show: Waymo rider-only miles 22M (Jun 2024) -> 271M (Jun 2026); any-injury
+# │       rate 0.67 vs 3.8 per million miles, yet 183 injury and 2 fatal crashes.
+# │ How: Literature.Series.WaymoRiderOnlyMiles and WaymoVsHumanBenchmark.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple
+
+def _bench(rows, benchmark):
+    return next(r for r in rows if r["benchmark"] == benchmark)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class DriverlessExposure:
+    """Measured exposure and crash rates of a driverless fleet."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    miles = Literature.Series.WaymoRiderOnlyMiles.entries
+    rates = Literature.Series.WaymoVsHumanBenchmark.entries
+    outcomes = (
+        ("Police-reported", "Police-reported crash"),
+        ("Any-injury-reported", "Any injury"),
+        ("Any Airbag Deployment", "Airbag deployment"),
+        ("Suspected Serious Injury+", "Serious injury or worse"),
+        ("Any Fatal", "Fatal"),
+    )
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    first, last = miles[0], miles[-1]
+    growth = last["cumulative_ro_miles_millions"] / first["cumulative_ro_miles_millions"]
+    injury = _bench(rates, "Any-injury-reported")
+    fatal = _bench(rates, "Any Fatal")
+    implied_injury_count = injury["waymo_ipmm"] * last["cumulative_ro_miles_millions"]
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(implied_injury_count - injury["waymo_count"]) / injury["waymo_count"] < 0.02, "Rate times final miles must reproduce the injury count.")
+    check(injury["waymo_hi"] < injury["bench_lo"], "Prose says the injury rate is below the benchmark beyond the confidence intervals.")
+    check(10 <= growth <= 14, f"Prose says about twelvefold in two years, got {growth:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    first_miles_str = fmt_int(round(first["cumulative_ro_miles_millions"]))
+    last_miles_str = fmt_int(round(last["cumulative_ro_miles_millions"]))
+    growth_mult_str = fmt_multiple(round(growth))
+    injury_rate_str = fmt(injury["waymo_ipmm"], precision=2)
+    injury_bench_str = fmt(injury["bench_ipmm"], precision=1)
+    injury_count_str = fmt_int(injury["waymo_count"])
+    fatal_count_str = fmt_int(fatal["waymo_count"])
+```
+
+Safety must also be engineered as a fleet-level property\index{Fleet-level property!safety engineering} rather than a model-level attribute alone. A single model with 99.9 percent safety compliance seems robust in isolation, but when deployed across 10,000 inference nodes serving billions of requests per day, a sustained 0.1 percent per-request failure probability implies millions of expected safety failures daily. The realized count can differ, and correlated failures can concentrate harm across the fleet. Mitigating this requires distributed safety patterns borrowed from reliability engineering: circuit breakers\index{Circuit Breaker!safety mechanism} that automatically halt serving when aggregate safety metrics degrade below a threshold, canary deployments\index{Canary Deployment!safety validation} that bound exposure while collecting release evidence, with sample size and allowed risk chosen for the failure modes being tested, and centralized telemetry dashboards that aggregate per-node safety violations into a global view. The operational infrastructure must treat safety violations as critical system alerts, invoking a validated containment or fallback policy. A rollback is appropriate only if the previous version and transition are safe; active physical control may require a minimal-risk maneuver instead. Exposure is the multiplier that makes this concrete. Waymo's driverless fleet logged about `{python} DriverlessExposure.first_miles_str` million rider-only miles by June 2024 and `{python} DriverlessExposure.last_miles_str` million by June 2026, a `{python} DriverlessExposure.growth_mult_str` increase in two years (@fig-autonomous-miles-scaling, panel a) [@waymo2026safetyimpact]. Its published crash rates sit well below a human-driver benchmark on the same roads, for example `{python} DriverlessExposure.injury_rate_str` injury crashes per million miles against `{python} DriverlessExposure.injury_bench_str` (panel b) [@kusano2024waymo]. At that exposure the lower rate still produced `{python} DriverlessExposure.injury_count_str` injury crashes and `{python} DriverlessExposure.fatal_count_str` fatal ones, so a fleet's safety case must budget for incidents in absolute numbers as well as in rates. Because exposure grows by that ratio over twelve years, at any constant per-mile failure rate the expected cumulative incident count grows by the same factor even though no individual vehicle became less safe. That figure is an expectation, not an inevitable realized outcome, and it is cumulative; an operator sizing weekly incident-response capacity needs weekly mileage instead.
 
 ::: {.column-margin .margin-pointer}
 ↩ The circuit-breaker states and backpressure contract that isolate a failing serving path are established in @sec-inference-scale-circuit-breakers-backpressure-e61c.
 :::
 
-::: {#fig-autonomous-miles-scaling fig-env="figure" fig-pos="htb" fig-cap="**Autonomous Deployment Scaling**: Cumulative autonomous miles by year for a hypothetical public-road fleet, rising from 0.3 million in 2012 to 80 million in 2024. The values are illustrative, chosen to show the shape of exposure growth; they are not reported or audited figures for any operator. Multiplying exposure by an applicable per-mile failure probability gives expected incidents over the same period. Cumulative mileage supports a cumulative expectation; weekly estimates require weekly mileage." fig-alt="Bar chart of cumulative autonomous miles by year from 2012 to 2024, with each bar labeled, rising from 0.3 million to 80 million. The 2012 and 2024 bars are dark and the others light gray, with a small dark caret below the axis marking the barely visible 2012 bar, and a note reading expected incidents scale with cumulative miles points to the 2024 bar."}
+::: {#fig-autonomous-miles-scaling fig-env="figure" fig-pos="htb" fig-cap="**Measured Driverless Exposure and Crash Rates**: (a) Cumulative rider-only miles, driven with no human driver, by Waymo's fleet in its published releases from June 2024 to June 2026. (b) Crash outcomes per million miles through June 2026 for that driving (red) and for Waymo's human-driver benchmark on the same roads (gray), with 95 percent confidence intervals on a logarithmic axis. Lower rates still produce a growing number of incidents as exposure grows. Benchmarks follow the method of @kusano2024waymo; data from @waymo2026safetyimpact." fig-alt="Two panels. Left: cumulative rider-only miles in millions rising from about 22 in June 2024 to about 271 in June 2026, steepening over time. Right: horizontal dot plot on a logarithmic axis of incidents per million miles for five outcomes, each with a red Waymo point and a gray human-benchmark point with confidence intervals. Police-reported crashes are about 1.4 against 5.6, any injury about 0.67 against 3.8, airbag deployment about 0.29 against 1.6, serious injury or worse about 0.011 against 0.21, and fatal about 0.007 against 0.027, where the Waymo interval is wide."}
 
 ```{python}
 #| echo: false
-#| warning: false
-import pandas as pd
-import matplotlib.pyplot as plt
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED DRIVERLESS EXPOSURE (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-autonomous-miles-scaling.
+# │
+# │ Goal: Show measured exposure growth and per-mile rates against a benchmark.
+# │ Show: (a) cumulative miles; (b) Waymo vs benchmark ipmm with 95% CIs.
+# │ How: DriverlessExposure (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
 from binder.tools.figures import style as book_style
 
-data = pd.read_csv("vol2/16_responsible_ai/data/autonomous_miles_scaling.csv")
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.6, 3.4))
+fig, _ax0, COLORS, plt = book_style.setup_plot(figsize=(11, 4.2))
+fig.delaxes(_ax0)
+a1, a2 = fig.subplots(1, 2, gridspec_kw=dict(width_ratios=[1, 1.25], wspace=0.55))
+_C = DriverlessExposure
+_dates = [dt.date.fromisoformat(r["data_through"] + "-15") for r in _C.miles]
+a1.plot(_dates, [r["cumulative_ro_miles_millions"] for r in _C.miles], "-o", ms=4, lw=1.8, color=COLORS["BlueLine"])
+a1.set_ylabel("Cumulative rider-only miles (millions)")
+a1.set_xlabel("Data through")
+a1.set_title("(a) Exposure", fontsize=9, loc="left")
+for _lab in a1.get_xticklabels():
+    _lab.set_rotation(30)
+    _lab.set_ha("right")
 
-years = [f"'{y % 100:02d}" for y in data["Year"]]  # two-digit labels keep adjacent years apart
-miles = data["Cumulative_Miles_Millions"]
-first_year, last_year = data["Year"].iloc[0], data["Year"].iloc[-1]
-
-# Neutral bars; the two endpoints the caption cites are the focal marks
-bar_colors = [COLORS["primary"] if y in (first_year, last_year) else COLORS["grid"] for y in data["Year"]]
-ax.bar(data["Year"], miles, color=bar_colors, edgecolor="none", width=0.66, zorder=3)
-
-for i, v in zip(data["Year"], miles):
-    if v < 1.0:
-        val_label = f"{v:.1f}M"
-    elif v < 10.0:
-        val_label = f"{v:g}M"
-    else:
-        val_label = f"{int(v)}M"
-    endpoint = i in (first_year, last_year)
-    ax.text(
-        i, v + 1.5, val_label, ha='center', va='bottom', fontsize=12, fontweight='bold' if endpoint else 'normal', color=COLORS['primary'], zorder=4
+for _i, (_b, _lab) in enumerate(_C.outcomes):
+    _r = _bench(_C.rates, _b)
+    _y = len(_C.outcomes) - 1 - _i
+    a2.errorbar(
+        _r["bench_ipmm"],
+        _y + 0.15,
+        xerr=[[_r["bench_ipmm"] - _r["bench_lo"]], [_r["bench_hi"] - _r["bench_ipmm"]]],
+        fmt="o",
+        ms=5,
+        color=COLORS["grid"],
+        ecolor=COLORS["grid"],
+        capsize=2,
+        label="Human benchmark" if _i == 0 else None,
     )
-
-# The 2012 bar is too short to see at this scale: a caret below the axis marks the cited endpoint
-ax.plot([first_year], [-2.4], marker='^', markersize=5, color=COLORS['primary'], clip_on=False, zorder=6, lw=0)
-
-# Exposure is what a per-mile failure probability multiplies: tie the note to the growth
-ax.annotate(
-    'expected incidents scale\nwith cumulative miles',
-    xy=(last_year - 0.42, 62),
-    xytext=(2016.6, 62),
-    fontsize=12,
-    color=COLORS['primary'],
-    ha='center',
-    va='center',
-    arrowprops=dict(arrowstyle='-|>', color=COLORS['primary'], lw=0.9, shrinkA=4, shrinkB=2, connectionstyle='arc3,rad=0'),
-    zorder=5,
-)
-
-ax.set_ylabel("Cumulative miles,\nillustrative (millions)", fontsize=12.5)
-ax.set_xlabel("Year (2012 to 2024)", fontsize=12.5)
-ax.set_xticks(data["Year"], years)
-ax.tick_params(axis='both', labelsize=12)
-ax.tick_params(axis='x', pad=9)
-ax.set_ylim(0, 90)
-ax.grid(axis='x', visible=False)
-ax.grid(axis='y', linestyle='--', linewidth=0.5, alpha=0.5, color=COLORS['grid'], zorder=0)
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
-
-plt.tight_layout()
+    a2.errorbar(
+        _r["waymo_ipmm"],
+        _y - 0.15,
+        xerr=[[_r["waymo_ipmm"] - _r["waymo_lo"]], [_r["waymo_hi"] - _r["waymo_ipmm"]]],
+        fmt="o",
+        ms=5,
+        color=COLORS["RedLine"],
+        ecolor=COLORS["RedLine"],
+        capsize=2,
+        label="Waymo rider-only" if _i == 0 else None,
+    )
+a2.set_yticks(range(len(_C.outcomes)))
+a2.set_yticklabels([lab for _, lab in reversed(_C.outcomes)], fontsize=8)
+a2.set_xscale("log")
+a2.set_xlabel("Incidents per million miles (log scale)")
+_xt = [0.001, 0.01, 0.1, 1, 10]
+a2.set_xticks(_xt)
+a2.set_xticklabels([f"{t:g}" for t in _xt])
+a2.minorticks_off()
+a2.set_title("(b) Crash rates through June 2026", fontsize=9, loc="left")
+a2.legend(fontsize=7.5, loc="lower right", frameon=True, framealpha=0.95)
 plt.show()
 plt.close()
 ```

@@ -338,3 +338,23 @@ class Series:
         numeric=("year", "int8_cnns", "int8_transformer", "int8_accuracy", "fp16_cnns", "fp16_transformer",
                  "fp16_accuracy", "int16_cnns", "int8_parallel", "fp16_parallel", "ai_score"),
     )
+    WaymoRiderOnlyMiles = TrendSeries(
+        "waymo_rider_only_miles",
+        _lit("Waymo Safety Impact Data Hub, rider-only mileage releases June 2024 to June 2026 "
+             "(published data cited as facts; no redistribution license stated)", "https://waymo.com/safety/impact/",
+             "cumulative rider-only (no human driver) miles in millions; early releases summed per-location "
+             "rows, later releases report an All Locations row; the 2025-09 value matches the release "
+             "note's 127 million"),
+        "Cumulative rider-only miles driven by Waymo's driverless fleet.",
+        numeric=("cumulative_ro_miles_millions",),
+    )
+    WaymoVsHumanBenchmark = TrendSeries(
+        "waymo_vs_human_benchmark",
+        _lit("Waymo Safety Impact Data Hub, crash rates versus human benchmarks through June 2026, method of "
+             "Kusano et al. (2024)", "https://waymo.com/safety/impact/",
+             "incidents per million miles (ipmm) with 95% confidence intervals for Waymo rider-only driving "
+             "and for Waymo's human-driver benchmark on the same roads; benchmark variants as published "
+             "(reported, observed, dynamic); reduction is Waymo's published relative difference"),
+        "Crash outcomes per million miles for Waymo rider-only driving and a human-driver benchmark.",
+        numeric=("waymo_count", "waymo_ipmm", "waymo_lo", "waymo_hi", "bench_ipmm", "bench_lo", "bench_hi", "reduction"),
+    )
