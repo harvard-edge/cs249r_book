@@ -202,7 +202,8 @@ class Series:
              "papers (per-row source_key and source_note); transcription verified 2026-09-29",
              "https://doi.org/10.1145/3079856.3080246",
              "ratings mix TDP, maximum board power, maximum TGP, and maximum power as each vendor states "
-             "them (power_metric column); they are design envelopes, not measured workload power; parts "
+             "them (power_metric column); where a part ships in several configurations (MI250X: 500 W and "
+             "560 W) the base configuration is listed; they are design envelopes, not measured workload power; parts "
              "without a citable published rating (MI100, Gaudi 1, TPU v4 onward, wafer-scale) are omitted; "
              "url points to the TPU v1 paper, the earliest row's architecture source"),
         "Published power rating per accelerator package by release year, 2012-2025.",
