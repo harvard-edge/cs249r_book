@@ -359,3 +359,14 @@ class Series:
         "Crash outcomes per million miles for Waymo rider-only driving and a human-driver benchmark.",
         numeric=("waymo_count", "waymo_ipmm", "waymo_lo", "waymo_hi", "bench_ipmm", "bench_lo", "bench_hi", "reduction"),
     )
+    NCCLAllReduceH100Node = TrendSeries(
+        "nccl_allreduce_h100_node",
+        _lit("NVIDIA exemplar-performance, microbenchmarks/nccl README, all_reduce_perf sample output (MIT), "
+             "file at v26.08.00, snapshot 2026-10-12",
+             "https://github.com/NVIDIA/exemplar-performance/blob/main/microbenchmarks/nccl/README.md",
+             "one node, 8x H100 80GB HBM3 over NVLink/NVSwitch; float sum, 8 B to 16 GB in factor-2 steps; "
+             "default algorithm; whether NVLink SHARP (NVLS) was enabled for this excerpt is not stated; "
+             "rows copied verbatim; times in microseconds, bandwidths in GB/s (busbw scales algbw by 2(N-1)/N)"),
+        "Measured NCCL all-reduce time and bandwidth by message size on one eight-H100 node.",
+        numeric=("size_bytes", "count", "oop_time_us", "oop_algbw_GBps", "oop_busbw_GBps", "ip_time_us", "ip_algbw_GBps", "ip_busbw_GBps"),
+    )

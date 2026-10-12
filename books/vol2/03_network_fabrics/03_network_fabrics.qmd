@@ -1161,6 +1161,111 @@ plt.close()
 
 :::
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED ALL-REDUCE CROSSOVER (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after @fig-alpha-beta-crossover and
+# │          @fig-nccl-allreduce-measured.
+# │
+# │ Goal: Test the two-parameter model against a measured collective sweep.
+# │ Show: 8x H100 all-reduce: ~17 µs floor to 512 KB, 274 GB/s asymptotic
+# │       algorithm bandwidth; model knee ~5 MB; measured time up to ~1.7×
+# │       the model between 8 and 128 MB.
+# │ How: Floor = median time for sizes <= 64 KB; bandwidth = algbw at the
+# │      largest size; model T = floor + size / bandwidth over
+# │      Literature.Series.NCCLAllReduceH100Node.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import statistics
+from mlsysim import Literature
+from mlsysim.core.units import GB, MB, second
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_multiple
+
+def _model_us(size_b, floor_us, bw_gbps):
+    return floor_us + size_b / (bw_gbps * 1e9) * 1e6
+
+def _worst_ratio(rows, floor_us, bw_gbps, lo_b, hi_b):
+    return max(r["oop_time_us"] / _model_us(r["size_bytes"], floor_us, bw_gbps) for r in rows if lo_b <= r["size_bytes"] <= hi_b)
+
+def _floor(rows, cutoff_b):
+    return statistics.median(r["oop_time_us"] for r in rows if r["size_bytes"] <= cutoff_b)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MeasuredAllReduce:
+    """Two-parameter fit to a measured eight-GPU NCCL all-reduce sweep."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.NCCLAllReduceH100Node.entries
+    floor_cutoff_b = 64 * 1024
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    floor_us = _floor(rows, floor_cutoff_b)
+    bw_gbps = rows[-1]["oop_algbw_GBps"]
+    peak_busbw_gbps = max(r["oop_busbw_GBps"] for r in rows)
+    knee_b = floor_us * 1e-6 * bw_gbps * 1e9
+    mid_ratio = _worst_ratio(rows, floor_us, bw_gbps, 8 * 2**20, 128 * 2**20)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(12 <= floor_us <= 20, f"Prose quotes the measured floor (about 17 microseconds), got {floor_us:.1f}.")
+    check(2e6 <= knee_b <= 6e6, f"Prose says the model knee sits at a few MB, got {knee_b / 1e6:.1f} MB.")
+    check(1.5 <= mid_ratio <= 2.2, f"Prose says measured time runs up to about twice the model mid-range, got {mid_ratio:.2f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    floor_us_str = fmt_int(round(floor_us))
+    bw_str = fmt_bandwidth(round(bw_gbps) * GB / second, unit=GB / second, precision=0)
+    peak_busbw_str = fmt_bandwidth(round(peak_busbw_gbps) * GB / second, unit=GB / second, precision=0)
+    knee_mb_str = fmt_int(round(knee_b / 1e6))
+    mid_ratio_mult_str = fmt_multiple(round(mid_ratio, 1))
+```
+
+A measured collective shows both regimes and where the two-parameter model needs care. NVIDIA publishes the full output of the standard NCCL all-reduce benchmark on one node of eight H100 GPUs connected by NVLink, sweeping message sizes from 8 bytes to 16 GB [@nvidia2026exemplarnccl]. @Fig-nccl-allreduce-measured plots the measured time beside the two-parameter model built from just two of those measurements, the median time of the small messages as $\MessageStartupLatency$ and the delivered rate of the largest message as $\LinkBandwidth$. The small messages sit on a floor of about `{python} MeasuredAllReduce.floor_us_str` µs regardless of size, and the largest messages approach `{python} MeasuredAllReduce.bw_str` of algorithm bandwidth (`{python} MeasuredAllReduce.peak_busbw_str` of bus bandwidth, the benchmark's hardware-normalized rate). Between the two, the model places the knee near `{python} MeasuredAllReduce.knee_mb_str` MB, but the measured time runs up to `{python} MeasuredAllReduce.mid_ratio_mult_str` the model's prediction for messages of 8 to 128 MB, because the bandwidth a collective achieves itself grows with message size. The model is therefore a lower bound on time, exact at the two ends and optimistic in the middle, and that middle range is where the gradient buckets of data-parallel training often fall.
+
+::: {#fig-nccl-allreduce-measured fig-env="figure" fig-pos="htb" fig-cap="**Measured All-Reduce Time against the Two-Parameter Model**: NCCL all-reduce time on one node of eight H100 GPUs over NVLink for message sizes from 8 bytes to 16 GB, on logarithmic axes (points), with the two-parameter model built from the measured small-message floor and the largest message's delivered bandwidth (solid line) and its two asymptotes (dotted). The model matches both ends; between roughly 1 MB and 1 GB the measurement runs above it. One early small-message point is a timing outlier. Data from @nvidia2026exemplarnccl; whether NVLink SHARP was enabled for this run is not stated." fig-alt="Log-log plot of all-reduce time in microseconds from about 10 to 60,000 against message size from 8 bytes to 16 gigabytes. Measured points lie flat near 17 microseconds up to about 512 kilobytes, then rise and become linear for large messages. A solid model line follows the flat floor, bends near 5 megabytes, and joins the linear asymptote; between about 1 megabyte and 1 gigabyte the measured points sit above the line by up to about 1.7 times. Dotted lines mark the floor and the bandwidth asymptote."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED ALL-REDUCE CROSSOVER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-nccl-allreduce-measured.
+# │
+# │ Goal: Overlay measured all-reduce time on the two-parameter model.
+# │ Show: Measured points, model line, floor and bandwidth asymptotes.
+# │ How: MeasuredAllReduce (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+_C = MeasuredAllReduce
+_x = np.array([r["size_bytes"] for r in _C.rows])
+_t = np.array([r["oop_time_us"] for r in _C.rows])
+_xx = np.logspace(np.log10(_x.min()), np.log10(_x.max()), 200)
+ax.plot(_xx, [_model_us(s, _C.floor_us, _C.bw_gbps) for s in _xx], color=COLORS["BlueLine"], lw=1.8, label="Two-parameter model", zorder=2)
+ax.plot(_xx, np.full_like(_xx, _C.floor_us), ":", color=COLORS["primary"], lw=1, zorder=1)
+ax.plot(_xx, _xx / (_C.bw_gbps * 1e9) * 1e6, ":", color=COLORS["primary"], lw=1, zorder=1)
+ax.scatter(_x, _t, s=22, color=COLORS["RedLine"], label="Measured (8× H100, NVLink)", zorder=3)
+ax.axvline(_C.knee_b, color=COLORS["grid"], lw=1, ls="--", zorder=0)
+ax.text(_C.knee_b * 1.15, 3e4, f"model knee\n≈ {_C.knee_b / 1e6:.0f} MB", fontsize=8, color=COLORS["primary"], va="top")
+ax.set_xscale("log", base=2)
+ax.set_yscale("log")
+_xt = [8, 1024, 2**20, 2**30, 16 * 2**30]
+ax.set_xticks(_xt)
+ax.set_xticklabels(["8 B", "1 KB", "1 MB", "1 GB", "16 GB"])
+ax.minorticks_off()
+ax.set_ylim(8, 1.2e5)
+ax.set_xlabel("Message size")
+ax.set_ylabel("All-reduce time (µs, log scale)")
+ax.legend(fontsize=8, loc="upper left", frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
 ::: {#chk-network-fabrics-protocol-selection .callout-checkpoint title="Protocol selection"}
 
 Consider the 175B job on the `{python} NetworkRunningExampleCluster.n_gpus_value_str`-GPU reference cluster. Its gradient exchanges move messages of hundreds of megabytes, while its pipeline stages coordinate through frequent control messages of a few kilobytes.
