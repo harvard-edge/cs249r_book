@@ -54,12 +54,12 @@ A single accelerator can run for years between hardware failures. A thousand acc
 ::: {.callout-learning-objectives}
 
 - Calculate mean time between fleet failures from component rates and estimate interruption frequency for large training clusters
-- Classify hardware, software, and silent-data-corruption failures by detectability, blast radius, and recovery path
+- Classify hardware, software, silent-data-corruption, and slow-but-alive failures by detectability, blast radius, and recovery path
 - Select checkpoint intervals that balance write overhead against acceptable lost work and recovery delay
 - Design distributed checkpointing and elastic recovery plans for multi-terabyte model state across GPU fleets
 - Design serving redundancy, failover, and state-recovery policies under latency budgets and partial failures
 - Select graceful degradation strategies that preserve useful service when models, features, regions, or capacity fail
-- Evaluate fault injection and observability evidence to validate detection, isolation, and recovery behavior
+- Evaluate detection timeouts, restart strategies, and fault-injection evidence against a per-failure recovery-time budget
 
 :::
 
@@ -142,7 +142,7 @@ class FleetReliabilityRates:
 <span id="sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b"></span>
 :::
 
-Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The communication layer has done its job, and thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the Fleet Stack of @fig-fleet-stack, fault tolerance occupies the Reliability & Control row of the Distribution band, where it protects the progress that parallelism and communication produce.
+Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The parallel training plan and the communication layer beneath it have done their job, and thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the Fleet Stack of @fig-fleet-stack, fault tolerance occupies the Reliability & Control row of the Distribution band, where it protects the progress that parallelism and communication produce.
 
 That fragility is the direct consequence of successful synchronization. Every collective in @sec-collective-communication assumed that all ranks in its process group arrive, and each dependent consumer waits for every contribution. One stalled device can therefore stop progress in its synchronous training group, even while unrelated jobs continue elsewhere in the fleet. Fault-tolerant ML systems preserve progress by detecting failure, checkpointing recoverable state, restarting or elastically reshaping jobs, and treating hardware churn as normal execution rather than an exceptional path. That reliability envelope covers both halves of the fleet's work. Training needs recovery that preserves weeks of accumulated progress, while serving needs redundancy, failover, and graceful degradation that preserve a latency contract, and both draw their spare capacity from a shared fleet pool.
 
@@ -150,7 +150,7 @@ That fragility is the direct consequence of successful synchronization. Every co
 ↪ How the scheduler holds spare capacity for failed jobs and prepositions replacement nodes while a missed heartbeat is confirmed is developed in @sec-fleet-orchestration-failure-rates.
 :::
 
-The failures to be absorbed differ first in how long they persist, from a transient bit flip that clears on its own, through an intermittent error that returns under the load that exposed it, to a permanent component failure that repeats on every retry. That persistence decides whether the fleet retries, quarantines, or replaces a component (@sec-ft-fault-persistence-response). Failures also differ in how visibly they announce themselves. A gray failure is a component that stays alive but runs slowly or erratically, so it keeps answering the liveness checks that would flag a crash while every peer that waits on it slows down. Silent data corruption (SDC) goes further, producing wrong values with no error at all. Both pair low detection rates with a high blast radius, because the system keeps running on state it should no longer trust.
+The failures to be absorbed differ first in how long they persist, from a transient bit flip that clears on its own, through an intermittent error that returns under the load that exposed it, to a permanent component failure that repeats on every retry. That persistence decides whether the fleet retries, quarantines, or replaces a component (@sec-ft-fault-persistence-response). Failures also differ in how visibly they announce themselves. A **gray failure**\index{Gray failure!definition} is a component that stays alive but runs slowly or erratically, so it keeps answering the liveness checks that would flag a crash while every peer that waits on it slows down. **Silent data corruption (SDC)**\index{Silent data corruption!definition} goes further, producing wrong values with no error at all. Both pair low detection rates with a high blast radius, because the system keeps running on state it should no longer trust.
 
 The recovery target here is trustworthy execution: preserving valid training progress and restoring a service after its infrastructure or software fails. A restored model can still make poor predictions on changed inputs even when every component executes correctly. Evaluating that behavioral robustness requires a separate contract for model quality under distribution shifts and adversarial inputs, developed in @sec-robust-ai. The distinction lets us use model-quality signals to diagnose a fault without treating every quality regression as evidence of failed hardware.
 
@@ -1990,13 +1990,9 @@ Here, $\CheckpointOverheadFraction$ is the dimensionless fraction of time lost t
 
 #### Synchronous vs. asynchronous checkpointing {#sec-fault-tolerance-reliability-reliability-synchronous-vs-asynchronous-checkpointing-ecc1}
 
-The synchronous and asynchronous checkpointing approaches differ in when training waits for durable storage. Synchronous checkpointing\index{Checkpointing!synchronous} coordinates workers at a consistent state boundary, writes their portions, and resumes training only after all writes complete. Blocking alone does not establish consistency; the protocol must ensure that every shard belongs to the same recoverable training state.
-
-Asynchronous checkpointing\index{Checkpointing!asynchronous}\index{Asynchronous checkpointing|see{Checkpointing}} separates that consistent capture from the durable flush. Workers snapshot their state to CPU memory\index{Checkpointing!in-memory staging} or staging storage and protect the captured values from later updates, then continue training while a background process writes the snapshot to persistent storage.[^fn-asyncckpt-storage-pipeline] Recovery can use the new generation only after all required shards reach the storage tier that survives the modeled failure and the coordinator publishes completion.
+The synchronous and asynchronous checkpointing approaches differ in when training waits for durable storage. Synchronous checkpointing\index{Checkpointing!synchronous} resumes training only after every worker's portion is written; asynchronous checkpointing\index{Checkpointing!asynchronous}\index{Asynchronous checkpointing|see{Checkpointing}} captures a protected snapshot in CPU memory\index{Checkpointing!in-memory staging} or local staging and lets a background process flush it while training continues.[^fn-asyncckpt-storage-pipeline] The write path behind both, from pinned snapshot buffers and tiered staging to the pause budget and the memory a retained snapshot costs, is developed in @sec-storage-distributed-checkpoint. For recovery, blocking alone does not establish consistency, so the protocol must ensure that every shard belongs to the same recoverable training state. Recovery can use an asynchronous generation only after all required shards reach the storage tier that survives the modeled failure and the coordinator publishes completion.
 
 [^fn-asyncckpt-storage-pipeline]: **Asynchronous checkpointing**\index{Checkpointing!asynchronous, pipeline overhead}: Pipelines durable writes behind training by first capturing a consistent snapshot in staging memory or storage. Training must not mutate values still being captured. After capture, background flushing can overlap independent computation, subject to staging capacity and sustained drain bandwidth. Exposed capture time and resource contention remain overhead even when the durable write finishes off the training critical path.
-
-Memory footprint introduces a second contrast. Beyond write time, checkpointing consumes memory for serialization, transfer buffers, and any copied snapshot. A synchronous writer can read stable training state while updates are paused, so it does not necessarily need a complete second copy, but the pause can leave accelerators idle even with fast storage. Independent input prefetching may continue; forward or backward work that changes the captured state must wait unless the snapshot mechanism explicitly permits overlap. Asynchronous capture instead requires retained values that later updates cannot change, so its buffering policy can increase peak memory demand.
 
 #### The "stop-the-world" cost {#sec-fault-tolerance-reliability-stoptheworld-cost-beaa}
 
@@ -2183,7 +2179,7 @@ The Archetype A row in @tbl-checkpoint-overhead-by-model uses the same `{python}
 
 : **Checkpoint Overhead by Model Type**: The Archetype A row is the 175B running example at `{python} CheckpointOverheadCalc.ckpt_bpp_str` bytes per parameter (weights, FP32 master weights, and Adam moments); the 20B, recommender, and vision transformer rows are representative scenario sizes, and the 4 TB embedding-heavy recommender is a smaller scenario than the 10 TB+ embedding tables of Archetype B (DLRM at Scale) in @tbl-failure-impact-by-model; the BERT-Large and ResNet-50 rows count FP32 weights only and omit optimizer state, so their write times understate a full resumable checkpoint. Larger models require longer save times but also benefit from longer optimal checkpoint intervals. The percentage column reports the save-side overhead $\CheckpointOverheadFraction$ of @eq-checkpoint-overhead with no extra pause, not total Young-Daly waste; at the optimum, expected rework adds a comparable term. {#tbl-checkpoint-overhead-by-model}
 
-While the theoretical overhead of checkpointing appears manageable for individual models, writing these massive state files introduces a new bottleneck. When thousands of GPUs simultaneously attempt to write gigabytes of data to a shared file system, the resulting I/O congestion threatens to bring the entire cluster to a halt. The scale of that I/O burst is easiest to see by expanding the example from one model to thousands of simultaneous writers.
+These per-model overheads assume the write path is uncontended. When thousands of workers save at the same step, their combined burst becomes the checkpoint storm that @sec-storage-checkpointing defines and sizes; for recovery, the burst matters because a stalled write delays the generation that a failure would fall back on.
 
 ::: {#exmp-fault-tolerance-checkpoint-storm .callout-example title="The checkpoint storm"}
 
@@ -2227,7 +2223,7 @@ class CheckpointStorm:
 
 **Diagnosis**: Simultaneous uncoordinated writes\index{Checkpointing!uncoordinated}\index{Uncoordinated checkpointing|see{Checkpointing}} offer `{python} CheckpointStorm.storm_payload_tb_str` to shared network and storage paths in one burst, the checkpoint storm of definition \ref{dfn-data-storage-checkpoint-storm}. When that arrival rate exceeds sustained service capacity, queues grow and writers stall; finite buffering can also lead to drops or timeouts. The total byte count alone does not establish which resource fails first.
 
-**Systems lesson**: A consistent capture need not become an uncontrolled storage burst. Staggered flushes, rate limits, and bounded host-memory or local-storage staging can keep background writes within the drain capacity. The system must still publish a generation only after it reaches the required durability tier.
+**Systems lesson**: A consistent capture need not become an uncontrolled storage burst. Staggered flushes, rate limits, and bounded staging keep the write burst within sustained service capacity, and the system still publishes a generation only after it reaches the required durability tier.
 
 :::
 
@@ -3476,6 +3472,10 @@ Partial failures turn that nondeterminism into a recovery problem. A single mach
 
 Observability supports both immediate mitigation and investigation of the cause. Suppose a recommendation service suddenly violates its latency SLO while the model replicas still report healthy GPU utilization. Metrics establish the timing and scope of the symptom, traces show which service span consumes the request budget, and logs record events inside that service. @Fig-observability-three-pillars connects these streams to operational decisions. A single signal can justify an action, such as shedding load when a queue exceeds its budget. Joining request and trace context with model versions, deployment tags, and time windows strengthens the diagnosis when several causes could explain the same symptom. Correlated evidence narrows those possibilities; it does not by itself prove the physical or software cause.
 
+::: {.column-margin .margin-pointer}
+↪ How metrics, logs, and traces become a fleet-wide observability architecture that routes evidence across many models and owners is developed in @sec-ml-operations-scale-observability-architecture-ba87.
+:::
+
 ::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The three pillars of observability**: Diagnosis of fleet failures can combine three signal types. Metrics reveal *when* and *where* a problem occurs (for example, GPU utilization drops). Logs provide the *what* through event context (for example, an out-of-memory exception). Traces expose the *request path* by linking events across the distributed lifecycle (for example, identifying the request that triggered the memory spike). A single signal can justify immediate mitigation; joining signals on shared identifiers strengthens diagnosis without proving the cause." fig-alt="Three panels draw each signal in its native form. Metrics, labeled when and where: a GPU utilization time series that runs level and then drops sharply in red. Logs, labeled what happened: a stream of gray log lines with one red monospace line reading OOM exception. Traces, labeled request path: a waterfall of nested span bars with one long span outlined in red. In each panel a dashed violet connector leaves the red anomaly, the end of the utilization drop, the end of the OOM line, and the end of the red span, and runs down as an arrow into a bar reading correlate on shared identifiers, listing request, trace, model version, feature version, and deployment, which leads to a recovery action box: shed load, restart, roll back, or degrade."}
 ![](images/svg/observability-three-pillars.svg)
 
@@ -3550,13 +3550,17 @@ During training, gradient statistics make numerical faults visible before they c
 
 Mixed-precision training[^fn-mixedprecision-fault-tolerance] can introduce numerical issues. A dynamic loss scaler reduces its scale after detecting nonfinite gradients, indicating overflow or another invalid operation rather than proving underflow. Gradient magnitudes, skipped updates, and comparison with a higher-precision replay help distinguish range problems from other causes; ordinary FP16 rounding differences are not themselves faults.
 
-[^fn-mixedprecision-fault-tolerance]: **Mixed-precision numerical issues**\index{Mixed-precision training!numerical issues}\index{Mixed-precision training!numerical fault tolerance}: FP16's positive finite range starts near $6 \times 10^{-8}$ with subnormals and ends at 65,504; FP32's positive normal range spans approximately $1.2 \times 10^{-38}$ to $3.4 \times 10^{38}$, with subnormals below it. Scaling loss before backpropagation and unscaling gradients afterward reduces underflow risk, while dynamic scaling can skip nonfinite updates and lower the scale. BF16 reduces range pressure relative to FP16 at the cost of lower significand precision, without eliminating overflow or invalid operations.
+[^fn-mixedprecision-fault-tolerance]: **Mixed-precision numerical issues**\index{Mixed-precision training!numerical issues}\index{Mixed-precision training!numerical fault tolerance}: FP16's exponent range is far narrower than FP32's or BF16's, which is why mixed-precision training scales the loss before backpropagation and dynamic scaling skips nonfinite updates. The formats and the mixed-precision recipe are recapped in @sec-appdx-dam-taxonomy-training-memory.
 
 #### Data debugging and validation {#sec-fault-tolerance-data-debugging-validation}
 
 Data bugs surface as valid-looking but wrong inputs, so debugging must verify semantic correctness at each pipeline boundary in addition to numerical validity. Validation checks expected format, shape, value ranges, required fields, and encoding before data reaches the model, catching malformed examples while the failure is still local to the input path.
 
 Once the input passes those static checks, the system needs evidence about behavior over time. Distribution monitors track feature drift, null-rate changes, and outliers as they emerge, while transformation instrumentation logs intermediate shapes and statistics so teams can compare each stage against known-good data. Together, these signals separate a corrupted input path from a numerical failure inside the model.
+
+::: {.column-margin .margin-pointer}
+↪ The validation gates and response policies that run these data checks continuously across a production fleet are developed in @sec-ml-operations-scale-data-quality-operations-e77b.
+:::
 
 #### Straggler detection and analysis {#sec-fault-tolerance-reliability-reliability-straggler-detection-analysis-6925}
 
@@ -3915,7 +3919,7 @@ The intuitive "every hour" checkpoints nearly three times more often than the ex
 
 **Fallacy**: *If each GPU is 99.99 percent reliable, a 10,000-GPU cluster is also 99.99 percent reliable.*
 
-Reliability does not compose by averaging; it compounds by multiplication. The 9s-of-availability calculation (notebook \ref{nbk-fault-tolerance-9s-reliability}) applied the independent-failure $\GpuAvailability^\RequiredComponentCount$ rule to `{python} NinesReliability.n_gpus_str` GPUs at `{python} NinesReliability.availability_str` availability and found every GPU simultaneously up only `{python} NinesReliability.cluster_pct_str` of the time, so the cluster spends most of its life with at least one device down. Individual component reliability is necessary but nowhere near sufficient at fleet scale. System-level fault tolerance (checkpointing, elastic recovery, redundancy across failure domains) must be designed explicitly, not assumed to emerge from per-component MTTF.
+Reliability does not compose by averaging; it compounds by multiplication, the reliability gap of @eq-reliability-gap. The 9s-of-availability calculation (notebook \ref{nbk-fault-tolerance-9s-reliability}) applied the independent-failure $\GpuAvailability^\RequiredComponentCount$ rule to `{python} NinesReliability.n_gpus_str` GPUs at `{python} NinesReliability.availability_str` availability and found every GPU simultaneously up only `{python} NinesReliability.cluster_pct_str` of the time, so the cluster spends most of its life with at least one device down. Individual component reliability is necessary but nowhere near sufficient at fleet scale. System-level fault tolerance (checkpointing, elastic recovery, redundancy across failure domains) must be designed explicitly, not assumed to emerge from per-component MTTF.
 
 :::
 

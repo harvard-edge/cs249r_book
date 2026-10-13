@@ -284,15 +284,13 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "LLM activation outlier problem (0.1% channels)",
-            "GPTQ layer-by-layer second-order Hessian error compensation",
-            "AWQ activation-aware salient channel protection",
-            "SmoothQuant W8A8 difficulty migration and prefill vs decode speedup",
-            "QuaRot rotation-based outlier elimination via Hadamard transforms",
-            "Hardware Tensor Core support (Hopper FP8 vs Ampere INT8)",
-            "Runtime serving contract and memory headroom"
+            "SmoothQuant W8A8 and why it helps compute-bound prefill",
+            "GPTQ versus AWQ as offline 4-bit weight-only methods and their deployment needs",
+            "Rotation-based methods for activation outliers and their runtime cost",
+            "Matching the binding serving constraint to the quantization change",
+            "Rollout risks to test for each method family"
           ],
-          "question_strategy": "Test algorithmic differences between compensation (GPTQ), protection (AWQ), migration (SmoothQuant), and rotation (QuaRot), along with hardware speedup realities.",
+          "question_strategy": "Test the serving decision model: which bottleneck each method family relaxes, what each needs at deployment, and what to test before rollout.",
           "difficulty_progression": "Advances from outlier mechanics and speedup differences to mathematical formulations, rotation transforms, and execution pipelines.",
           "integration": "Connects PTQ algorithms directly to GPU hardware paths (Tensor Cores, HBM bandwidth) and serving cost reductions.",
           "ranking_explanation": "Crucial optimization section explaining how low-precision representations alter memory, bandwidth, and compute bottlenecks."
@@ -312,33 +310,33 @@
           },
           {
             "question_type": "MCQ",
-            "question": "What is the core algorithmic distinction between Generalized Post-Training Quantization (GPTQ) and Activation-Aware Weight Quantization (AWQ)?",
+            "question": "GPTQ and AWQ both produce 4-bit weight-only artifacts offline. How do they differ, and what extra deployment step does AWQ need?",
             "choices": [
-              "GPTQ quantizes activations while leaving weights in FP16; AWQ quantizes weights while leaving activations in FP32.",
-              "GPTQ requires full model retraining for 100 epochs; AWQ is an online dynamic quantization method with no calibration.",
-              "GPTQ compensates residual quantization error across remaining unquantized columns using inverse Hessian information ($H^{-1}$); AWQ protects salient weight channels based on activation magnitudes without error feedback.",
-              "GPTQ applies only to convolutional vision models; AWQ applies exclusively to sparse recommendation embedding tables."
+              "GPTQ quantizes activations while AWQ quantizes weights; AWQ needs no calibration data.",
+              "GPTQ compensates rounding error with approximate second-order information, while AWQ scales salient channels chosen from activation statistics; AWQ's scales must be fused into the deployed graph or they cost an extra runtime operation.",
+              "GPTQ requires full retraining while AWQ is applied at runtime; AWQ needs a second GPU to hold its scales.",
+              "Both methods are identical except for bit width; AWQ needs its weights stored in FP32."
             ],
-            "answer": "The correct answer is C. GPTQ performs layer-by-layer second-order error compensation: as each weight column is rounded to discrete grid points, the residual error is propagated to unquantized columns using the inverse Hessian matrix ($H = X^T X$). In contrast, AWQ observes activation magnitudes on a calibration set, identifies the top ~1% most salient channels, and scales those specific weight channels up prior to quantization to preserve precision without requiring iterative error compensation.",
-            "learning_objective": "Compare the algorithmic formulations and error-mitigation strategies of GPTQ versus AWQ."
+            "answer": "The correct answer is B. Both are offline, weight-only methods that need representative calibration inputs and supported packing kernels. GPTQ corrects the error left by rounding using approximate second-order information; AWQ protects the channels that activation statistics mark as salient by scaling them. If AWQ's scales are not fused into the deployed graph, the serving path pays for an extra operation that eats part of the latency saving.",
+            "learning_objective": "Contrast how GPTQ and AWQ preserve quality in 4-bit weight-only quantization and what each requires at deployment."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how QuaRot uses a data-free orthogonal rotation to reduce activation outliers, why its full quantization pipeline can still require calibration, and what runtime cost the rotation introduces.",
-            "answer": "An orthogonal rotation preserves $XW=(XH)(H^TW)$ while spreading large activation coordinates across dimensions. The rotation can be chosen without calibration data, but a QuaRot pipeline using GPTQ still uses calibration activations to quantize weights. Inline Hadamard transforms add runtime work; their cost and W4A4 quality must be evaluated on the deployed model and workload.",
-            "learning_objective": "Explain the theoretical foundation of rotation-based quantization (QuaRot) and its operational trade-offs."
+            "question": "Explain what a rotation-based method such as QuaRot changes before quantization, what that makes possible for serving, and what it costs at run time.",
+            "answer": "It applies an orthogonal (Hadamard) transform that changes the coordinate basis, spreading large activation coordinates across many channels so that no single channel carries an extreme value. With the outliers spread out, a single low-precision scale fits the values better, which makes W4A4 (4-bit weights and activations) a serving candidate. The price is some rotation work performed online during inference and a narrower set of runtimes that support the transformed path, so the transform overhead must be measured before rollout.",
+            "learning_objective": "Explain how rotation-based quantization addresses activation outliers and the serving cost it introduces."
           },
           {
             "question_type": "TF",
-            "question": "True or False: Modern NVIDIA Hopper (H100) GPUs provide native Tensor Core instruction acceleration for FP8 (E4M3/E5M2) delivering a $2\\times$ compute throughput multiplier over FP16, whereas Ampere (A100) Tensor Cores do not natively support FP8 execution.",
-            "answer": "True. H100 Tensor Cores support native FP8 and advertise twice the dense arithmetic throughput of their FP16 path, while A100 lacks native FP8 Tensor Core instructions. This is a hardware ceiling, not an automatic twofold application speedup or a guarantee of preserved model quality.",
-            "learning_objective": "Identify native Tensor Core precision support across NVIDIA Ampere and Hopper accelerator architectures."
+            "question": "True or False: When decode is bandwidth-bound, quantizing activations to INT8 (W8A8) is the representation change that relaxes the binding constraint.",
+            "answer": "False. A bandwidth-bound decode step is limited by the bytes of weights read per token, so the change that relaxes it is reducing those bytes with a weight-only path such as W4A16. W8A8 targets compute-bound prefill, where native INT8 arithmetic raises throughput. The method family should follow from the bottleneck: fit, bandwidth, prefill compute, or outlier robustness.",
+            "learning_objective": "Match a serving bottleneck to the quantization change that relaxes it."
           },
           {
             "question_type": "ORDER",
-            "question": "Order the sequential steps in the GPTQ column-wise layer quantization pipeline:\n(1) Compute the Hessian matrix $H = 2 X^T X$ from calibration activations\n(2) Perform Cholesky decomposition on the inverse Hessian matrix $H^{-1}$\n(3) Round the current column weights to the nearest discrete quantized grid\n(4) Calculate the residual quantization error vector for the column\n(5) Propagate compensation updates to all remaining unquantized columns using the Cholesky inverse weights",
-            "answer": "The correct sequence is (1) -> (2) -> (3) -> (4) -> (5).\n- (1) Pass calibration data through the model to compute activation cross-products and form the Hessian matrix $H$.\n- (2) Compute the inverse Hessian and factor it via Cholesky decomposition to enable stable triangular error updates.\n- (3) Round the target column's continuous weights to the nearest low-bit quantized values.\n- (4) Compute the quantization error difference between original and rounded column weights.\n- (5) Propagate the scaled error vector to remaining unquantized columns to adjust their values before subsequent quantization steps.",
-            "learning_objective": "Structure the computational workflow of GPTQ layer-by-layer second-order quantization."
+            "question": "Order the steps for choosing and rolling out a quantization method for a serving system:\n(1) Test the method family's specific risk (calibration mismatch, kernel support, activation outliers, or transform overhead) before rollout\n(2) Identify which resource binds the serving system: memory fit, decode bandwidth, prefill compute, or outlier robustness\n(3) Choose the method family that makes that change\n(4) Choose the representation change that relaxes that resource",
+            "answer": "The correct sequence is (2) -> (4) -> (3) -> (1).\n- (2) A quantization method helps only if it relaxes the resource that actually binds, so the bottleneck comes first.\n- (4) The bottleneck determines the representation change: weights only, fewer bytes per token, weights and activations, or a change of coordinate basis.\n- (3) The method family follows from that change (for example GPTQ or AWQ for fit, SmoothQuant W8A8 for prefill compute).\n- (1) Each family carries its own rollout risk, which must be tested on the deployment before traffic moves to it.",
+            "learning_objective": "Apply the serving quantization decision model from bottleneck to rollout test."
           }
         ]
       }

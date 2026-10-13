@@ -87,15 +87,15 @@ The assumed foundation is local model execution, memory hierarchy, training and 
     </tr>
     <tr>
       <td>5</td>
-      <td><b>Distributed Training</b></td>
-      <td><code>05_distributed_training/</code></td>
-      <td>How do you partition models across thousands of accelerators?</td>
+      <td><b>Collective Communication</b></td>
+      <td><code>05_collective_communication/</code></td>
+      <td>How do machines coordinate and exchange state during distributed training?</td>
     </tr>
     <tr>
       <td>6</td>
-      <td><b>Collective Communication</b></td>
-      <td><code>06_collective_communication/</code></td>
-      <td>How do machines coordinate and exchange state during distributed training?</td>
+      <td><b>Distributed Training</b></td>
+      <td><code>06_distributed_training/</code></td>
+      <td>How do you partition models across thousands of accelerators?</td>
     </tr>
     <tr>
       <td>7</td>

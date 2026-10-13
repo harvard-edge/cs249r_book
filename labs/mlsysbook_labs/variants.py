@@ -29,8 +29,8 @@ PILOT_LAB_IDS = (
     "v2_02_compute_wall",
     "v2_03_network_fabric_design",
     "v2_04_data_pipeline_wall",
-    "v2_05_parallelism_design",
-    "v2_06_collective_communication",
+    "v2_05_collective_communication",
+    "v2_06_parallelism_design",
     "v2_07_failure_budget_engineering",
     "v2_08_fleet_orchestration",
     "v2_09_optimization_trap",
@@ -127,7 +127,7 @@ _SYSTEM_DESIGN_LAB_CONFIGS = {
         "options": ("Retain raw stream", "Summarize and cache", "Tiered retention policy"),
         "validation_tests": ("storage growth replay", "freshness audit", "upload budget check", "retention review"),
     },
-    "v2_05_parallelism_design": {
+    "v2_06_parallelism_design": {
         "title": "Parallelism Puzzle",
         "concept_label": "Training parallelism lifecycle",
         "knob_label": "parallel workload",
@@ -3683,11 +3683,11 @@ _HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
         assumptions={"fleet_profile": "Systems.Clusters.Lab_64_H100", "report_artifact": "Volume I architecture memo", "capstone_mode": "ledger replay with cloud presets"},
     ),
 
-    # V2-06: Collective Communication pilot.
+    # V2-05: Collective Communication pilot.
     _variant(
-        lab_id="v2_06_collective_communication",
+        lab_id="v2_05_collective_communication",
         track_id="iphone",
-        scenario_id="v2_06_iphone_federated_aggregation",
+        scenario_id="v2_05_iphone_federated_aggregation",
         stakeholder="Mobile federated learning engineer",
         workload_summary="Federated cohort aggregation where phone updates are small but uplink, privacy protocol overhead, and battery shape the collective analogy.",
         objective="Choose a coordination strategy for mobile cohort aggregation and explain the bandwidth, latency, privacy, and battery risks.",
@@ -3710,9 +3710,9 @@ _HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
         assumptions={"report_artifact": "communication design review", "collective_analogy": "federated aggregation"},
     ),
     _variant(
-        lab_id="v2_06_collective_communication",
+        lab_id="v2_05_collective_communication",
         track_id="oura_ring",
-        scenario_id="v2_06_oura_intermittent_sync",
+        scenario_id="v2_05_oura_intermittent_sync",
         stakeholder="Wearable systems engineer",
         workload_summary="Tiny intermittent payload aggregation where sync windows, radio wakeups, and payload size dominate the coordination decision.",
         objective="Choose an aggregation/sync strategy that preserves ring battery while keeping summaries timely enough for downstream use.",
@@ -3735,9 +3735,9 @@ _HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
         assumptions={"report_artifact": "communication design review", "collective_analogy": "intermittent wearable sync"},
     ),
     _variant(
-        lab_id="v2_06_collective_communication",
+        lab_id="v2_05_collective_communication",
         track_id="robotaxi",
-        scenario_id="v2_06_robotaxi_depot_hierarchy",
+        scenario_id="v2_05_robotaxi_depot_hierarchy",
         stakeholder="Autonomous fleet data platform lead",
         workload_summary="Fleet event/update aggregation where vehicles upload through depot/cloud hierarchy and event fidelity competes with update latency.",
         objective="Choose a depot/cloud hierarchy and compression/overlap policy for fleet learning updates.",
@@ -3760,9 +3760,9 @@ _HAND_AUTHORED_VARIANTS: tuple[LabTrackVariant, ...] = (
         assumptions={"report_artifact": "communication design review", "collective_analogy": "fleet event aggregation"},
     ),
     _variant(
-        lab_id="v2_06_collective_communication",
+        lab_id="v2_05_collective_communication",
         track_id="cloud_fleet",
-        scenario_id="v2_06_cloud_gpu_collectives",
+        scenario_id="v2_05_cloud_gpu_collectives",
         stakeholder="Distributed training performance lead",
         workload_summary="GPU collectives for model-parallel or data-parallel training where topology, alpha-beta terms, overlap, and compression determine exposed step time.",
         objective="Choose a collective algorithm/topology and optimization plan that minimizes exposed communication without hiding convergence or topology risk.",

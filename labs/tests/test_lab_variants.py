@@ -398,8 +398,8 @@ def test_v1_16_variants_define_capstone_defaults():
         assert variant.assumptions["report_artifact"] == "Volume I architecture memo"
 
 
-def test_v2_06_variants_define_collective_defaults():
-    for variant in list_lab_variants("v2_06_collective_communication"):
+def test_v2_05_variants_define_collective_defaults():
+    for variant in list_lab_variants("v2_05_collective_communication"):
         assert "operation" in variant.defaults
         assert "message_gb" in variant.defaults
         assert "participants" in variant.defaults
@@ -420,7 +420,7 @@ def test_remaining_v2_variants_define_system_design_defaults():
         "v2_02_compute_wall",
         "v2_03_network_fabric_design",
         "v2_04_data_pipeline_wall",
-        "v2_05_parallelism_design",
+        "v2_06_parallelism_design",
         "v2_07_failure_budget_engineering",
         "v2_08_fleet_orchestration",
         "v2_09_optimization_trap",

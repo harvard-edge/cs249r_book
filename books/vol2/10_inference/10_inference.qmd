@@ -54,11 +54,11 @@ Training is paid for each model version; serving continues throughout that versi
 
 ::: {.callout-learning-objectives}
 
-- Estimate lifetime serving cost from traffic volume, deployment duration, and measured per-request cost
+- Estimate lifetime serving cost from traffic volume, deployment duration, and measured cost per SLO-compliant request
 - Select batching, scheduling, and per-request compute-budget policies for vision, LLM, recommender, and streaming workloads
-- Analyze attention-cache capacity, fragmentation, and decode-time policies under workload-dependent serving constraints
+- Analyze attention-cache capacity, fragmentation, and prefill-decode interference under workload-dependent serving constraints
 - Compare sharding, disaggregation, and quantized serving designs using communication, memory, and quality constraints
-- Evaluate routing, load balancing, and isolation controls against tail latency and noisy-neighbor risks
+- Evaluate routing, overload-control, and isolation policies against tail latency, retry amplification, and noisy-neighbor risks
 - Design autoscaling and multi-region routing policies that balance cold starts, cost, and SLO compliance
 - Synthesize serving architectures that manage C³ trade-offs across request, replica, service, and platform layers
 
@@ -439,9 +439,7 @@ The contrast between training and inference\index{Training!vs. inference require
 
 A training iteration that takes 2 seconds instead of the usual 1 second delays progress; repeated slow iterations can materially extend the run. An interactive request that takes 2 seconds against a 100-millisecond target misses its contract immediately, even if later requests finish quickly. Aggregate training progress and per-request serving deadlines expose different consequences of the same delay. The serving architecture must therefore control individual waiting times as well as total completed work.
 
-State management differs fundamentally. Training maintains model state (parameters, optimizer states) that evolves gradually and can be captured in periodic checkpoints. Inference may maintain session state\index{State management!session state in inference} across requests, but authoritative conversation history and user context differ from derived key-value caches. The history must survive according to the service contract; a lost KV cache can be rebuilt from that history at the cost of repeated prefill. Retaining the cache across turns is a performance choice, developed in the architecture dimensions that follow.
-
-Failure handling follows those different contracts. Training can restore a checkpoint and repeat lost work, with recovery time charged against the run's completion target. Interactive serving has less time to recover an individual request. Redirecting work to a healthy replica requires spare capacity and recoverable request state; substituting a smaller model requires an acceptable quality fallback. SLOs\index{SLO!inference latency bounds}\index{SLA!service-level objective} define which failures and delays the service may tolerate. Recovery mechanisms reduce user-visible disruption only when their added work fits within that contract.
+Failure handling follows those different contracts. Training restores a checkpoint and repeats lost work, charging recovery time to the run. Interactive serving has far less time per request, so redirecting work needs spare capacity and recoverable request state, and substituting a smaller model needs an acceptable quality fallback. SLOs\index{SLO!inference latency bounds}\index{SLA!service-level objective} define which failures and delays the service may tolerate, and a recovery mechanism helps only when its added work fits within that contract.
 
 ## The Serving Tax of Distributed Execution {#sec-inference-scale-serving-tax-overhead-distribution-5ef3}
 
@@ -453,9 +451,7 @@ Network communication contributes setup and transfer time at each cross-machine 
 ↩ The $\MessageStartupLatency$-$\LinkBandwidth$ model, which splits each transfer into a fixed startup latency plus a bandwidth-dependent term, is established in @sec-network-fabrics-performance-model.
 :::
 
-Serialization can add host work when a service converts structured data into a wire representation and reconstructs it at the receiver. Protocol Buffers, JSON, and Python's `pickle` provide different representations and implementation paths, so their cost must be measured for the actual payload and runtime. Tensor transfers within a sharded model need not pass through the same object-serialization path as a service request. Formats such as FlatBuffers and Cap'n Proto[^fn-serialization-zerocopy-buffer] permit access to wire-format data in place, avoiding a separate unpacking step when the consumer supports that representation. They do not eliminate network transfer or every downstream copy.
-
-[^fn-serialization-zerocopy-buffer]: **Zero-copy serialization**\index{Zero-Copy!serialization}\index{Serialization!zero-copy}: Formats such as FlatBuffers and Cap'n Proto can access wire-format data in place, avoiding a separate parse-allocate-copy cycle. The benefit depends on payload size, language runtime, and whether downstream operators can consume the same buffer representation.
+Serialization can add host work when a service converts structured data into a wire representation and reconstructs it at the receiver. Protocol Buffers, JSON, and Python's `pickle` provide different representations and implementation paths, so their cost must be measured for the actual payload and runtime. Tensor transfers within a sharded model need not pass through the same object-serialization path as a service request. Formats such as FlatBuffers and Cap'n Proto\index{Zero-Copy!serialization}\index{Serialization!zero-copy} permit access to wire-format data in place, avoiding a separate unpacking step when the consumer supports that representation. They do not eliminate network transfer or every downstream copy.
 
 Load balancing adds a routing decision and sometimes another forwarding hop. Examining request metadata, consulting replica state, and forwarding to the selected backend consume time before execution begins. The measurement must separate decision time from waiting and transport so that a slow routing path is not mistaken for a slow model.
 
@@ -642,7 +638,7 @@ The same leverage can hold across application categories with different cost str
 
 : **Illustrative training and serving cost ranges**: Independent sensitivity ranges for training a model version and serving it for a year. A cost ratio requires a paired training-and-serving scenario; it cannot be inferred from matching endpoints of independent ranges. A deployment must substitute measured traffic and a consistent accounting boundary. {#tbl-cost-ratios}
 
-The cost structure motivates serving optimization: a reduction in cost per completed request yields recurring savings if workload volume and service quality remain fixed. Lower latency alone does not ensure that billed capacity or other costs fall. @Fig-serving-cost-curve uses constructed cost curves to illustrate how unit cost can change with daily request volume. Against its assumed price of \$0.05 per 1,000 tokens, the optimized curve crosses near $2 \times 10^5$ requests per day, while the unbatched single-GPU curve crosses beyond $3 \times 10^7$ requests. These crossings follow from the assumed curves, not measured profitability or guaranteed effects of INT4 and continuous batching. A deployment needs its own token mix, occupied capacity, and complete cost boundary to establish a break-even point.
+A reduction in cost per completed request yields recurring savings only if workload volume and service quality stay fixed; lower latency alone does not reduce billed capacity. @Fig-serving-cost-curve uses constructed cost curves to illustrate how unit cost can change with daily request volume. Against its assumed price of \$0.05 per 1,000 tokens, the optimized curve crosses near $2 \times 10^5$ requests per day and the unbatched single-GPU curve beyond $3 \times 10^7$ requests. These crossings follow from the assumed curves, not measured profitability, so a deployment needs its own token mix, occupied capacity, and cost boundary to locate its break-even point.
 
 ::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The serving cost curve**: Constructed unit-cost curves cross an assumed price line at different request volumes. The optimized curve crosses earlier under these assumptions; the crossings do not establish measured profitability or guaranteed savings from quantization and batching." fig-alt="Log-log plot of cost per 1000 tokens vs. daily request volume for single-GPU, multi-GPU, and optimized serving, drawn as three gray lines that grow heavier with optimization, the optimized line darkest, each labeled at its right end. A dashed horizontal price line divides a shaded region above it, where cost exceeds price, from a shaded region below it, and an open circle marks where each of the three curves crosses the line."}
 
@@ -732,7 +728,7 @@ plt.close()
 
 :::
 
-The cost ranges in @tbl-cost-ratios give a static comparison; @fig-serving-cost-crossover instead accumulates assumed monthly serving expense over a 36-month deployment. Its crossover occurs when the serving portion equals the initial training expense, not when total deployment cost first exceeds training cost. In the plotted recommendation scenario, that happens within days; in the 70B LLM scenario, it takes roughly six weeks. These timings follow from the specified expenses, not from model size or user count alone. A larger training expense, lower traffic, or shorter deployment can change which activity dominates. The comparison motivates evaluating serving efficiency early while keeping workload and quality fixed. For generative LLM services, serving-specific designs can improve throughput, cost, and power use [@patel2024].
+The cost ranges in @tbl-cost-ratios give a static comparison; @fig-serving-cost-crossover instead accumulates assumed monthly serving expense over a 36-month deployment and marks when the serving portion equals the initial training expense, within days in the plotted recommendation scenario and roughly six weeks in the 70B LLM scenario. These timings follow from the specified expenses, not from model size or user count, and a larger training expense, lower traffic, or shorter deployment can reverse which activity dominates. For generative LLM services, serving-specific designs can improve throughput, cost, and power use [@patel2024].
 
 ::: {#fig-serving-cost-crossover fig-env="figure" fig-pos="htb" fig-cap="**The serving cost crossover**: Cumulative total deployment cost (initial training plus ongoing serving) for three scenarios. Vertical markers (scenarios A and B) indicate when the serving portion equals the one-time training cost. In the two high-traffic scenarios, serving expense matches training expense within weeks or days. In the low-traffic scenario, training expense remains larger over the plotted period. These differences follow from the specified training costs, traffic, and unit serving prices." fig-alt="Line chart on a log cost axis showing cumulative total deployment cost over 36 months for three scenarios, drawn as gray lines of different weights and labeled at their right ends with each scenario's training and monthly serving cost. Dotted horizontal lines mark each scenario's training cost, open circles mark where each total reaches twice its training cost, and for scenarios A and B a short dashed vertical segment rises from the training baseline to that circle."}
 
@@ -869,7 +865,7 @@ Large language models present distinctive serving challenges, but they are only 
 
 Recommendation traffic illustrates why request volume must be derived from application behavior. A page load, scroll, or click can trigger ranking or retrieval, so one browsing session can produce many inference requests. A language-model application may likewise issue several model calls for one user action or run background tasks without an explicit query. Capacity planning therefore counts the model work triggered by each interaction rather than treating user count as request rate.
 
-Workload structure also determines which techniques can help. Embedding sharding addresses the memory demands of large recommendation models, while their sparse access patterns make lookup locality a central design concern [@naumov2019deep; @gupta2020architectural]. Feature store architectures\index{Feature store!recommendation systems} add a related requirement: the serving path must retrieve the inputs the model expects within its latency budget. Continuous batching and KV cache management instead address variable-length autoregressive work. Text-to-image systems such as DALL-E provide one multimodal model example [@ramesh2021zero], but multimodal serving volume and latency targets remain product-specific.
+Workload structure also determines which techniques can help. Embedding sharding and lookup locality address large recommendation models [@naumov2019deep; @gupta2020architectural], and feature store architectures\index{Feature store!recommendation systems} must deliver the inputs a model expects within its latency budget, while continuous batching and KV cache management address variable-length autoregressive work. Text-to-image systems such as DALL-E add multimodal serving demands [@ramesh2021zero] whose volume and latency targets remain product-specific.
 
 | **Model Type**               |        **Serving Pressure**       |  **Latency Target** |    **Key Challenge**     |
 |:-----------------------------|:---------------------------------:|:-------------------:|:------------------------:|
@@ -883,7 +879,7 @@ Workload structure also determines which techniques can help. Embedding sharding
 
 ## The Serving Hierarchy {#sec-inference-scale-serving-hierarchy-fe8c}
 
-The optimization techniques organize into a serving hierarchy\index{Serving!hierarchy} ordered by scope, from one request up to a shared multi-tenant platform. Each level owns a different bottleneck and measurement boundary, so an optimization that helps one level can leave another unchanged. The request level follows one request through preprocessing, batch-formation waiting, response caching, and model execution, where the target is the latency a user sees. The replica level looks inside one model instance, where GPU utilization, KV-cache memory management, kernel efficiency, and model optimization determine how much useful throughput that replica can deliver before it saturates. The service level then works across many replicas of the same model, using load balancing, request routing, and autoscaling to turn individual replicas into aggregate capacity. The platform level works across services and tenants, where resource allocation, multi-tenancy, scheduling, and placement decide whether a shared serving fleet remains efficient without allowing one workload to degrade another.
+The optimization techniques organize into a serving hierarchy\index{Serving!hierarchy} ordered by scope, and each level owns a different bottleneck and measurement boundary. The request level follows one request through preprocessing, batch-formation waiting, response caching, and model execution, where the target is the latency a user sees. The replica level looks inside one model instance, where utilization, KV-cache memory management, and kernel efficiency set the throughput it can deliver before it saturates. The service level turns many replicas of the same model into aggregate capacity through load balancing, request routing, and autoscaling, and the platform level decides, across services and tenants, whether a shared serving fleet stays efficient without allowing one workload to degrade another.
 
 Each level supplies a different measurement boundary. @Tbl-serving-hierarchy associates request latency, replica throughput, aggregate service capacity, and cross-tenant efficiency with the controls most directly responsible for them. Their effects still cross boundaries: batching can increase replica throughput while adding request delay, and replica placement can change both communication cost and service capacity. The hierarchy helps locate the decision without treating its metric in isolation. In C³ terms, batching and cache management improve compute reuse, sharding introduces communication, and routing, isolation, and autoscaling coordinate the resources that make those gains usable.
 
@@ -907,7 +903,7 @@ Verify your understanding of where specific optimizations sit within the serving
 
 :::
 
-The chapter climbs the hierarchy in that order, while allowing a few techniques to cross levels. A survey of the architectural dimensions along which serving systems differ comes first. Batching then sets how long each request waits to share execution, the request-level decision that also feeds replica throughput. KV-cache layout, decode-time optimizations, and the disaggregation of prefill and decode into separate pools decide how many requests a replica can hold, and adapter state, weight quantization, and model sharding change the replica's memory and compute budget. Load balancing turns replicas into a service, multi-tenancy and isolation govern the shared platform, autoscaling changes how much capacity the platform holds, and global placement extends the same decisions across regions. Precision is an input to every capacity calculation that follows: reducing weight precision frees resident memory, whereas reducing KV precision lowers the memory required per active sequence. These are separate budgets. @Sec-inference-scale-weight-quantization-serving-097b compares the serving trade-offs of these representation choices before sharding divides a replica across devices.
+The chapter climbs the hierarchy in that order. Batching sets how long each request waits to share execution; KV-cache layout, decode-time policies, and disaggregation decide how many requests a replica can hold; adapter state, weight quantization, and model sharding change the replica's memory and compute budget; routing, isolation, autoscaling, and global placement then turn replicas into a service and a platform. Precision enters every capacity calculation that follows through two separate budgets: reducing weight precision frees resident memory, whereas reducing KV precision lowers the memory required per active sequence. @Sec-inference-scale-weight-quantization-serving-097b compares the serving trade-offs of these representation choices before sharding divides a replica across devices.
 
 ::: {.column-margin .margin-pointer}
 ↩ Reduced-precision representations for weights, activations, and the KV cache, and the quantization methods that produce them, are established in @sec-performance-engineering-precision.
@@ -915,7 +911,7 @@ The chapter climbs the hierarchy in that order, while allowing a few techniques 
 
 ## Serving Architecture Dimensions {#sec-inference-scale-serving-framework-selection-45d3}
 
-A recommendation system that processes 100,000 embedding lookups per second across a sharded feature store requires a different serving architecture from a 70-billion-parameter language model generating tokens one at a time. Framework choice alone does not explain the difference. The workloads impose distinct constraints on batching, memory management, scheduling, and deployment topology. This section lays those dimensions out as a map, naming each decision and its alternatives briefly and using specific frameworks as examples rather than as the subject of study. The sections that follow develop the mechanisms behind each entry (continuous batching, paged KV memory, chunked prefill, disaggregation, session caches) together with their costs, and return to this map when they choose among them.
+A recommendation system that processes 100,000 embedding lookups per second across a sharded feature store requires a different serving architecture from a 70-billion-parameter language model generating tokens one at a time. Framework choice alone does not explain the difference. The workloads impose distinct constraints on batching, memory management, scheduling, and deployment topology. Each dimension below names a decision and its alternatives briefly, with specific frameworks as examples; the mechanisms and their costs follow in later sections.
 
 ### Throughput-latency trade-offs in batching {#sec-inference-scale-framework-categories-172a}
 
@@ -935,11 +931,9 @@ Serving systems differ fundamentally in how they manage accelerator memory, and 
 
 :::
 
-Preallocated memory management\index{Preallocated Memory Management}\index{KV Cache!preallocated memory} can reserve a fixed cache budget at admission for the prompt plus the permitted output. With a 4,096-token output allowance, a maximum-size reservation sets aside room for those additional tokens even if generation stops after 50. Prompt state consumes capacity as well. This policy makes future growth predictable, but the unused reservation cannot serve another request until it is released. Its waste depends on the gap between reserved and realized total sequence lengths.
+Preallocated memory management\index{Preallocated Memory Management}\index{KV Cache!preallocated memory} reserves a fixed cache budget at admission for the prompt plus the permitted output, so a request allowed 4,096 output tokens holds that room even if generation stops after 50. Growth is predictable, but the unused reservation cannot serve another request until it is released.
 
-Paged memory management\index{Paged Memory Management}\index{KV Cache!paged memory allocation}, inspired by operating system virtual memory, allocates memory in fixed-size blocks (pages) and maps logical sequence positions to physical memory locations through a block table\index{Block table!virtual memory mapping}. As a request generates tokens, new physical blocks are allocated on demand. When generation completes, blocks no longer referenced by another request or retained for later reuse can return to the free pool. PagedAttention is the canonical design, and @sec-inference-scale-pagedattention-3c94 develops what removing contiguous per-sequence reservations does to fragmentation.
-
-The memory management strategy changes admissible batch capacity by reclaiming space that contiguous preallocation leaves unused. Lower cost per request follows only when the recovered capacity produces more completed requests within the same latency and quality contract.
+Paged memory management\index{Paged Memory Management}\index{KV Cache!paged memory allocation}, inspired by operating system virtual memory, allocates fixed-size blocks on demand and maps logical sequence positions to physical blocks through a block table\index{Block table!virtual memory mapping}, returning unreferenced blocks to the free pool when generation completes. PagedAttention is the canonical design (@sec-inference-scale-pagedattention-3c94). Paging raises admissible batch capacity by reclaiming the space contiguous preallocation leaves unused, and lower cost per request follows only when that capacity produces more completed requests within the same latency and quality contract.
 
 ### Scheduling policies across FCFS, preemption, and priority {#sec-inference-scale-vllm-architecture-9b84}
 
@@ -953,7 +947,7 @@ Priority-aware scheduling\index{Priority-Aware Scheduling} gives eligible high-p
 
 The deployment topology maps model computation and state to physical hardware. A single-GPU deployment keeps execution local and avoids inter-device communication, provided weights, cache, and runtime state fit together. A 13B model's FP16 weights (`{python} InferenceSetup.llama13b_fp16_gb_str`) leave most of an `{python} InferenceSetup.h100_mem_gb_str` H100 for KV state, whereas a 70B model's `{python} InferenceSetup.llama70b_fp16_gb_str` cannot be resident on one device at FP16. That makes a single device a useful baseline for models of the first kind, but not necessarily the lowest-latency design. Multiple devices can shorten execution enough to repay communication, while a model that fits at a short context may exceed one device's capacity at higher concurrency. Topology selection therefore needs both a memory budget and measured execution times for the intended workload.
 
-Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceSetup.nvlink_h100_gb_per_s_str` bidirectional [`{python} InferenceSetup.nvlink_h100_per_dir_gb_per_s_str` per direction] on H100). Each GPU computes a partial result for every layer, and an AllReduce operation synchronizes the partial results before the next layer. This topology distributes an accelerator-resident model that exceeds one device's memory. Ideal compute time falls with parallelism degree, but communication, imbalance, and kernel efficiency limit realized latency reduction. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
+Multi-GPU tensor parallelism shards each layer's weights across GPUs joined by a fast interconnect (NVLink at `{python} InferenceSetup.nvlink_h100_gb_per_s_str` bidirectional [`{python} InferenceSetup.nvlink_h100_per_dir_gb_per_s_str` per direction] on H100) and synchronizes their partial results with an AllReduce in every layer. It distributes a model that exceeds one device's memory and can shorten execution, but communication, imbalance, and kernel efficiency limit the realized gain (@sec-inference-scale-model-sharding-inference-82b3).
 
 A third topology separates the two phases of a request. Prefill and decode can run on different pools of accelerators, each sized for its own token rate, with the prompt's KV cache transferred from the prefill pool to the decode pool [@zhong2024distserve]. Whether that separation pays depends on how many bytes the transfer moves, so @sec-inference-scale-prefill-decode-disaggregation develops it once KV-cache sizing is in hand. Chunked prefill\index{Chunked Prefill!prefill-decode disaggregation} (@sec-inference-chunked-prefill) is the colocated alternative, interleaving slices of a long prompt with ongoing decode steps on the same worker [@agrawal2024sarathi].
 
@@ -969,7 +963,7 @@ A serving system's statefulness determines what must be preserved when requests 
 
 An autoregressive request is stateful\index{Stateful serving!KV cache lifetime} while it is generating because its KV cache belongs to that in-flight sequence. Cross-request statefulness is optional. An API may send the full conversation history with every turn and rebuild KV state during prefill, making any replica eligible for the next request. A serving platform may instead retain a completed turn's KV state as a session cache\index{Session caching!conversation history}, reducing repeated prefill at the cost of replica affinity, cache lifetime management, and recovery complexity. Sticky routing\index{Sticky routing!session affinity} is an optimization for that retained cache, not a correctness requirement of autoregressive models.
 
-The scaling divide is therefore an interface and cache-policy decision. Every live generation needs request-scoped state, but the service decides whether state survives the request boundary. Stateless cross-turn service can rebuild state from the supplied history, paying repeated prefill rather than requiring the previous replica's cache. Session-cached service saves prefill work but must drain, migrate, or rebuild cached state during scaling and failure. Neither interface makes an interrupted generation free to recover. The architecture should choose affinity only when measured cache-reuse value exceeds the resulting imbalance and recovery costs.
+The scaling divide is therefore an interface and cache-policy decision. Every live generation needs request-scoped state, but the service decides whether state survives the request boundary. Session-cached service saves prefill work but must drain, migrate, or rebuild cached state during scaling and failure, so affinity earns its place only when measured cache-reuse value exceeds the resulting imbalance and recovery costs.
 
 ### Architectural comparison {#sec-inference-scale-framework-selection-decision-tree-734b}
 
@@ -996,7 +990,7 @@ Verify your understanding of how workload constraints drive architectural choice
 
 :::
 
-The architectural dimensions determine which serving system to select for a given workload. Rather than comparing frameworks feature by feature, an engineer identifies the workload's position along each dimension (batching pattern, memory profile, scheduling requirements, deployment topology, and statefulness) and selects the system that matches. The optimization techniques in this chapter operate within this architectural framework, each addressing a specific dimension.
+Placing a workload along these five dimensions narrows the serving design before any framework is chosen. Batch formation comes first, because how long each request waits to share execution sets the operating point that memory, scheduling, and topology decisions then have to support.
 
 ## Batching Strategies at Scale {#sec-inference-scale-batching-strategies-scale-6733}
 
@@ -1006,7 +1000,7 @@ Processing multiple requests together shares weight reads and kernel launch over
 
 At scale, batching must also account for workload structure. A policy suited to uniform vision inputs can leave slots unused during variable-length generation, while grouping sparse embedding lookups solves a different problem from batching dense execution. The unit of reusable work determines which policy is worth evaluating.
 
-Although recommendation workloads often dominate consumer inference volume (@sec-inference-scale-inference-landscape-beyond-llms-9560), batching strategies are presented in order of conceptual complexity: vision (straightforward batching), LLMs (continuous batching with KV cache), and recommendation (feature-parallel batching with distributed embedding). This ordering builds understanding progressively, even though production systems frequently encounter recommendation workloads first. The taxonomy that follows matches batching strategies to model characteristics, providing quantitative analysis of when each approach applies and what performance to expect.
+The strategies below proceed in order of mechanism rather than traffic share: vision (request batching), LLMs (iteration-level batching with KV state), and recommendation (feature-parallel batching over distributed embeddings), even though recommendation often dominates consumer inference volume (@sec-inference-scale-inference-landscape-beyond-llms-9560).
 
 ### Batching characteristics across model architectures {#sec-inference-scale-batching-differs-across-model-types-2026}
 
@@ -1295,9 +1289,9 @@ Batching efficiency depends on how computation scales with batch size relative t
 
 :::
 
-For vision models\index{Vision Models}, including convolutional neural networks (CNNs) and vision transformers (ViTs) processing fixed-size images, arithmetic work grows approximately in proportion to batch size. Requests share model weights, but activations and other per-request state still grow with the batch. Increasing batch size can therefore improve weight reuse and GPU utilization until compute capacity, memory capacity, or the latency budget becomes limiting. Static or dynamic batching exploits this reuse; the largest feasible batch is not necessarily the best operating point for an interactive service.
+For vision models\index{Vision Models} processing fixed-size images, arithmetic work grows roughly in proportion to batch size while requests share the weights, so larger batches improve weight reuse until compute, memory, or the latency budget binds; the largest feasible batch is not necessarily the best interactive operating point.
 
-For LLMs in the decode phase\index{Decode phase!memory bandwidth bound}, small batches perform little computation relative to the bytes required to load active model weights. In this regime, memory bandwidth binds. Larger batches reuse each weight load across more tokens, increasing arithmetic intensity until compute, KV-cache traffic, or the latency budget limits further throughput gains. For the same reason, small-batch decode does not inherit a new accelerator generation's headline compute improvement. Across the generations from Volta to Blackwell, peak compute climbs 18$\times$ while memory bandwidth expands by only 8.9$\times$; @fig-gpu-memory-wall shows what that hardware divergence means for serving, where generation throughput tracks the slower curve whenever weight streaming dominates at small batch sizes.
+For LLMs in the decode phase\index{Decode phase!memory bandwidth bound}, small batches perform little computation per byte of active weights loaded, so memory bandwidth binds, and larger batches raise arithmetic intensity until compute, KV-cache traffic, or the latency budget limits further gains. Small-batch decode therefore does not inherit a new accelerator generation's headline compute improvement. From Volta to Blackwell, peak compute climbs 18$\times$ while memory bandwidth expands by only 8.9$\times$, and @fig-gpu-memory-wall shows generation throughput tracking the slower curve whenever weight streaming dominates at small batch sizes.
 
 ::: {.column-margin .margin-pointer}
 ↩ The accelerator trajectory behind this divergence, with compute outpacing memory bandwidth from one generation to the next, is established in @sec-compute-infrastructure-evolution-gpu-architectures-566b.
@@ -1551,7 +1545,7 @@ class ServingFrontier:
 
 The batching model predicts a trade-off, and production serving stacks measure it. The open InferenceX benchmark serves DeepSeek-R1, a mixture-of-experts reasoning model, with 1,024-token prompts and 1,024-token responses on each accelerator across many combinations of serving framework, parallelism, and concurrency [@semianalysis2026inferencex]. For every configuration it records the output tokens per second each user receives, called interactivity (the reciprocal of TPOT), and the output tokens per second each GPU delivers across all users. @Fig-throughput-interactivity plots `{python} ServingFrontier.config_count_str` such configurations at FP8 precision and traces, for each accelerator, the frontier of configurations that no other configuration beats on both rates. Every frontier falls as interactivity rises, because a faster stream per user permits fewer concurrent sequences per decode step. The best B200 configuration delivers about `{python} ServingFrontier.b200_peak_str` output tokens per second per GPU when each user receives about `{python} ServingFrontier.b200_peak_tps_user_str` tokens per second, and about `{python} ServingFrontier.b200_at_high_str` when each user must receive at least `{python} ServingFrontier.high_tps_user_str`, a `{python} ServingFrontier.b200_span_mult_str` difference in per-GPU output paid for faster streams. The interactivity target alone moves per-GPU output by that much, so it must be fixed before any two throughput figures can be compared.
 
-The same frontiers separate hardware generations by more than their datasheets do. At `{python} ServingFrontier.target_tps_user_str` tokens per second per user, the best measured H100 configuration delivers about `{python} ServingFrontier.h100_at_target_str` output tokens per second per GPU and the best GB200 NVL72 configuration about `{python} ServingFrontier.gb200_at_target_str`, a `{python} ServingFrontier.gen_mult_str` difference, although the peak dense FP8 rate of a GB200 GPU is only about `{python} ServingFrontier.peak_mult_str` that of an H100. The benchmark does not apportion the rest of the gap among its causes, but the remaining candidates lie mostly beyond peak arithmetic, among them memory bandwidth and capacity per GPU, a 72-GPU NVLink domain that lets experts and KV state spread across the rack without crossing a slower network, and serving software tuned for each platform. A serving operating point is a property of that whole system at a stated latency target, and a throughput figure quoted without its target says little about either system.
+The same frontiers separate hardware generations by more than their datasheets do. At `{python} ServingFrontier.target_tps_user_str` tokens per second per user, the best measured H100 configuration delivers about `{python} ServingFrontier.h100_at_target_str` output tokens per second per GPU and the best GB200 NVL72 configuration about `{python} ServingFrontier.gb200_at_target_str`, a `{python} ServingFrontier.gen_mult_str` difference, although the peak dense FP8 rate of a GB200 GPU is only about `{python} ServingFrontier.peak_mult_str` that of an H100. The benchmark does not apportion the gap, but the candidates lie mostly beyond peak arithmetic, in memory bandwidth and capacity per GPU, a 72-GPU NVLink domain that keeps experts and KV state off slower networks, and platform-tuned serving software. A throughput figure quoted without its latency target therefore says little about either system.
 
 ::: {#fig-throughput-interactivity fig-env="figure" fig-pos="htb" fig-cap="**Throughput versus Interactivity in Measured LLM Serving**: Output tokens per second per GPU against output tokens per second per user for DeepSeek-R1 at FP8 with 1,024-token prompts and responses. Faint points are individual serving configurations (framework, parallelism, and concurrency); each line is the frontier of configurations that no other configuration on the same accelerator beats on both axes. The dashed line marks 50 tokens per second per user. Data from @semianalysis2026inferencex, latest published result per configuration as of October 2026." fig-alt="Scatter plot with frontier lines. The horizontal axis is interactivity in output tokens per second per user from 0 to 280; the vertical axis is output tokens per second per GPU on a logarithmic scale from 5 to 15,000. Five descending frontier lines for H100, H200, B200, GB200 NVL72, and MI355X all fall as interactivity rises. GB200 NVL72 is highest, near 8,000 at low interactivity and about 3,650 at 50 tokens per second per user; B200 starts near 6,300; MI355X and H200 lie below it; H100 is lowest, about 80 at 50 tokens per second per user. A dashed vertical line marks 50 tokens per second per user."}
 
@@ -1609,6 +1603,10 @@ plt.close()
 Translating the batch-level equations into system-wide capacity planning requires a classical result from queuing theory: Little's Law\index{Little's Law!capacity planning},[^fn-littles-law-queuing] which relates concurrency, throughput, and latency in any stable system.
 
 [^fn-littles-law-queuing]: **Little's Law**\index{Little's Law!serving concurrency}: The identity holds for any stable system regardless of the arrival or service distribution, which is why it survives the bursty, variable-length traffic of inference. Because it relates averages, it bounds neither maximum service capacity nor tail latency.
+
+::: {.column-margin .margin-pointer}
+↩ The M/G/1 waiting-time model, in which utilization and service-time variability multiply queueing delay, is established in @sec-fleet-orchestration-objectives.
+:::
 
 ```{python}
 #| echo: false
@@ -1708,9 +1706,7 @@ This stability boundary can be measured faithfully only when the load generator 
 
 ### Static and dynamic batching for vision models {#sec-inference-scale-static-dynamic-batching-vision-models-4623}
 
-Vision models represent the simplest batching case because inputs have uniform size (after preprocessing) and computation follows a predictable pattern. Single-machine batching principles apply directly, with scale introducing considerations of batch formation across multiple replicas.
-
-Static batching collects exactly $\BatchSize$ requests before processing. A full batch can improve weight reuse and kernel efficiency, but fullness alone does not establish maximum GPU utilization. Without a timeout or partial-batch dispatch policy, the first request can wait indefinitely if too few additional requests arrive.
+Vision models are the simplest batching case because preprocessed inputs share one shape and computation follows a predictable pattern, so single-machine batching applies directly and scale adds only the question of where batches form. Static batching collects exactly $\BatchSize$ requests before processing, which leaves the first request waiting indefinitely when too few others arrive.
 
 Dynamic batching collects requests for a maximum time window $\BatchingWindow$ or until reaching maximum batch size $\MaxBatchSize$, whichever occurs first. For Poisson arrivals with rate $\ArrivalRate$, @eq-dynamic-batch-latency organizes expected request latency into queueing, formation, and execution contributions:
 
@@ -2374,7 +2370,7 @@ The continuous-batching analysis relates recoverable slot capacity to the gap be
 
 $$\text{Improvement} \approx \frac{\BatchMaxOutputLength}{\BatchMeanOutputLength} = \frac{\WorkloadMeanOutputLength+ \BatchMaximumDeviationMultiple\OutputLengthStandardDeviation}{\WorkloadMeanOutputLength} = 1 + \BatchMaximumDeviationMultiple\cdot \text{CV}$$
 
-where $\BatchMaximumDeviationMultiple$ specifies how far the batch maximum lies above the mean. The expression is therefore a scenario ceiling, set jointly by the workload's CV and the assumed $\BatchMaximumDeviationMultiple$, on the opportunity from filling otherwise unused slots. Scheduler overhead, KV-cache pressure, and refill gaps reduce the recovered fraction; changes in kernel efficiency or memory policy require a broader comparison. In the table that follows, the CV and $\BatchMaximumDeviationMultiple$ columns are the inputs, and $1 + \BatchMaximumDeviationMultiple\cdot \text{CV}$ is the ceiling they set. The speedup column is an assumed realized fraction of that ceiling, chosen to sit below it, and the waste column restates that assumed speedup as the equivalent effective waste through $\text{speedup} \approx 1/(1 - \EffectiveWasteFraction)$. Neither column is a measurement or an independent result. Together they show how much of the ceiling a scheduler would have to recover to reach a given gain, which is the quantity a load test should measure.
+where $\BatchMaximumDeviationMultiple$ specifies how far the batch maximum lies above the mean, so the expression is a scenario ceiling on the opportunity from filling otherwise unused slots; scheduler overhead, KV-cache pressure, and refill gaps reduce the recovered fraction. In the table that follows, the CV and $\BatchMaximumDeviationMultiple$ columns are inputs, the speedup column is an assumed realized fraction held below the $1 + \BatchMaximumDeviationMultiple\cdot \text{CV}$ ceiling, and the waste column restates that speedup through $\text{speedup} \approx 1/(1 - \EffectiveWasteFraction)$. Neither column is a measurement. Together they show how much of the ceiling a scheduler must recover to reach a given gain, which is the quantity a load test should measure.
 
 @Tbl-continuous-batching-benefit applies this accounting across workload types, including retrieval-augmented generation (RAG) [@lewis2020retrieval]:
 
@@ -2478,7 +2474,7 @@ class ContinuousBatchingBenefit:
 
 The systems pattern is straightforward: continuous batching is most valuable when output lengths are unpredictable, mixed workload types share the same cluster, request volume is high enough to refill vacated slots, and latency SLOs make early completion valuable. It provides minimal benefit when output lengths are uniform, as in classification or embedding generation, when batch sizes are too small for slot reuse to matter, or when request volume is too low to refill vacated slots.
 
-The ceiling depends on $\BatchMaximumDeviationMultiple$, which the coefficient of variation alone does not set. The full length distribution and batch size determine how far a batch's maximum lies above its mean, while arrivals, KV-cache admission, prefill scheduling, and scheduler overhead determine how much vacated capacity can be recovered. Serving teams must therefore compare policies under the same arrival trace, latency objective, and memory budget. Example \ref{exmp-inference-continuous-batching-vllm} connects slot reuse to the memory-management choices of a published system.
+Because arrivals, KV-cache admission, prefill scheduling, and scheduler overhead decide how much vacated capacity is actually recovered, serving teams must compare policies under the same arrival trace, latency objective, and memory budget. Example \ref{exmp-inference-continuous-batching-vllm} connects slot reuse to the memory-management choices of a published system.
 
 ::: {#exmp-inference-continuous-batching-vllm .callout-example title="Continuous batching in vLLM"}
 
@@ -2492,13 +2488,9 @@ The ceiling depends on $\BatchMaximumDeviationMultiple$, which the coefficient o
 
 #### Implementation complexity trade-offs {#sec-inference-scale-implementation-complexity-tradeoffs-e055}
 
-The same variability that makes continuous batching valuable also makes it harder to operate. Its performance benefits come with implementation complexity that systems engineers must weigh.
+The same variability that makes continuous batching valuable also makes it harder to operate. Memory management must support overlapping request lifetimes. Fixed-membership batching can reserve cache regions when a batch forms and release them together, whereas continuous admission must track which request owns each region and when it becomes reusable, either through fixed-capacity slots that retain unused reservations or through paging with its block tables. Kernels must also handle variable-length sequences and changing batch membership, often by packing short sequences under shared attention masks.
 
-Memory management must support overlapping request lifetimes. A simple fixed-membership implementation can reserve cache regions when a batch forms and release them together. Continuous admission must instead track which request owns each region and when that space becomes reusable. Fixed-capacity slots can support this policy, but they retain unused reservations; paging allocates space more incrementally at the cost of block tables and allocation bookkeeping. Completed state may also remain cached for reuse, so request completion and physical deallocation need not coincide.
-
-Scheduler decisions also become more frequent. A simple fixed-membership policy checks whether a batch is full or its timeout has expired; continuous admission additionally tracks completions, available cache capacity, and eligible waiting requests at iteration boundaries. A constant-time readiness check is $\mathcal{O}(1)$, while scanning all active sequences is $\mathcal{O}(\BatchSize)$ per iteration. These describe particular operations, not the total complexity of either scheduler. Both policies must manage request metadata, and the cost of priority selection or preemption depends on the data structures and policy used. Because continuous admission repeats this work at every decode iteration, it must stay small relative to a decode step or it erodes the throughput that slot reuse recovers. Engines therefore keep the per-iteration path short and can prepare the next iteration's batch on the host while the accelerator executes the current one.
-
-Kernel design must also adapt. Batched GPU kernels traditionally assume fixed batch composition. Continuous batching requires kernels that handle variable-length sequences efficiently, often through techniques like packing multiple short sequences into shared attention masks or using specialized memory layouts that support dynamic batch membership.
+Scheduler work moves into the decode loop as well. A fixed-membership policy checks once per batch whether it is full or its timeout has expired, while continuous admission tracks completions, free cache capacity, and eligible waiting requests at every iteration boundary. That work must stay small relative to a decode step or it erodes the throughput that slot reuse recovers, so engines keep the per-iteration path short and prepare the next iteration's batch on the host while the accelerator executes the current one.
 
 @Tbl-batching-tradeoffs summarizes these trade-offs:
 
@@ -2513,9 +2505,7 @@ Kernel design must also adapt. Batched GPU kernels traditionally assume fixed ba
 
 : **Traditional vs. continuous batching trade-offs**: Continuous batching provides significant throughput gains for variable-length workloads at the cost of implementation complexity. For uniform-length workloads, the complexity overhead may not justify adoption. {#tbl-batching-tradeoffs}
 
-For new LLM serving deployments, continuous batching frameworks like vLLM, TensorRT-LLM\index{TensorRT-LLM!continuous batching}, or Text Generation Inference\index{Text Generation Inference!continuous batching} provide mature implementation paths. The decision becomes whether to adopt these frameworks or build custom serving infrastructure. For organizations with existing traditional batching systems, the migration cost must be weighed against the workload's output length variance using @tbl-continuous-batching-benefit.
-
-Even with mature serving frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. The following constructed p99 regression illustrates how to investigate infrastructure, execution, and serving layers. Its latency observations and mitigation outcome are scenario assumptions; only the transfer-time estimates are computed from payload and bandwidth.
+Even with continuous batching available, diagnosing tail latency anomalies requires systematic investigation across the system stack. The following constructed p99 regression illustrates how to investigate infrastructure, execution, and serving layers. Its latency observations and mitigation outcome are scenario assumptions; only the transfer-time estimates are computed from payload and bandwidth.
 
 ```{python}
 #| echo: false
@@ -2593,7 +2583,7 @@ class A100HardwareScenario:
 
 **Diagnosis**: The system runs across `{python} A100HardwareScenario.num_gpus_str` A100 GPUs linked via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. For a `{python} A100HardwareScenario.activation_transfer_mb_str` payload, the bandwidth-only transfer estimate is $\CommunicationTime(\DeviceCount) \approx$ `{python} A100HardwareScenario.pcie_transfer_ms_str` over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. Collective startup, topology, and contention can add time. The service still runs an older request-level batching server rather than an iteration-level engine, with max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, so a batch holds its members until its longest generation finishes. The scenario assumes that `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches experience head-of-line queuing delay $\QueueingLatency$ as short requests wait behind long generations.
 
-**Systems lesson**: The latency distribution motivates tracing both candidates. A transfer paid by every request contributes to every latency percentile, but its service-time cost can also amplify tail queueing near saturation. In this scenario, traces showing stable transfer times too small to explain the additional delay, together with short requests waiting behind long generations, identify the fixed-membership barrier as the immediate cause. Continuous admission removes that barrier; prefill scheduling, cache capacity, and other waits still require measurement. Until the server can be replaced, the following policy reduces output-length variation within request-level batches:
+**Systems lesson**: The latency distribution motivates tracing both candidates, because a transfer paid by every request also amplifies tail queueing near saturation. In this scenario, traces showing stable transfer times too small to explain the additional delay, together with short requests waiting behind long generations, identify the fixed-membership barrier as the immediate cause. Continuous admission removes that barrier; prefill scheduling, cache capacity, and other waits still require measurement. Until the server can be replaced, the following policy reduces output-length variation within request-level batches:
 
 1. **Request classification**: Classify requests by expected output length (short: under `{python} A100HardwareScenario.short_token_threshold_str` tokens, medium: `{python} A100HardwareScenario.short_token_threshold_str` to `{python} A100HardwareScenario.medium_token_threshold_str` tokens, long: over `{python} A100HardwareScenario.medium_token_threshold_str` tokens)
 2. **Differentiated batching**: Limit short batches to `{python} A100HardwareScenario.short_batch_size_str`, medium to `{python} A100HardwareScenario.medium_batch_size_str`, long to `{python} A100HardwareScenario.long_batch_size_str`
@@ -2632,9 +2622,7 @@ In contrast, the subsequent decode phase generates a single token per sequence s
 
 :::
 
-With an unchunked prefill policy, the scheduler processes an incoming prompt through the model before returning to decode work. A full prefill comprises many layer kernels; the interference arises from scheduling that whole operation without interleaving other requests' decode steps, not from assuming one indivisible kernel spans the entire prompt evaluation.
-
-This delay lands in the TBT of requests already decoding on the same worker\index{Time Between Tokens!prefill interference}. A long response can dilute an isolated stall in its average TPOT, even though the user experiences a conspicuous gap. Repeated prefills or short responses can make the average deteriorate as well. Prioritizing the incoming prompt's time to first token can therefore consume the streaming-latency budget of requests already decoding. The measured prefill duration and the endpoint's TBT target determine whether interleaving is necessary.
+With an unchunked prefill policy, the scheduler runs an incoming prompt through the whole model before returning to decode work. The interference comes from scheduling that whole operation without interleaving other requests' decode steps, and the delay lands in the TBT of requests already decoding on the same worker\index{Time Between Tokens!prefill interference}. A long response can dilute an isolated stall in its average TPOT even though the user sees a conspicuous gap, so prioritizing the new prompt's time to first token can consume the streaming-latency budget of requests already decoding. The measured prefill duration and the endpoint's TBT target determine whether interleaving is necessary.
 
 #### The chunked prefill scheduling mechanism {#sec-inference-chunked-prefill-scheduling}
 
@@ -2892,7 +2880,7 @@ Recommendation batching starts by grouping work around embedding locality rather
 
 :::
 
-Recommendation systems expose the same scheduling principle through sparse and dense computation paths. Sparse feature lookup\index{Sparse Feature Lookup}\index{Embedding table!sparse feature lookup} retrieves embeddings for user, item, and context features, while dense feature processing transforms continuous inputs. These paths can execute concurrently before feature interaction\index{Feature Interaction}\index{Feature interaction!recommendation systems} combines their representations, often through attention or factorization. A ranking head\index{Ranking Head}\index{Ranking head!recommendation systems} then produces final scores. The interaction stage must wait for its required inputs, making a slow embedding shard part of the request's critical path.
+The sparse lookup\index{Sparse Feature Lookup}\index{Embedding table!sparse feature lookup} path and the dense feature path can execute concurrently before feature interaction\index{Feature Interaction}\index{Feature interaction!recommendation systems} combines their representations and a ranking head\index{Ranking Head}\index{Ranking head!recommendation systems} produces final scores. The interaction stage must wait for its required inputs, which puts the slowest embedding shard on the request's critical path.
 
 When sparse embedding access dominates latency, feature-parallel batching groups lookups by feature type and destination across requests. This organization exposes parallel work at the embedding shards while preserving the association needed to reconstruct each request for ranking:
 
@@ -2909,7 +2897,7 @@ Context features: [process(ctx_1), process(ctx_2), process(ctx_3)]  → parallel
 Then: Combine features per request for ranking
 ```
 
-Feature-parallel batching is natural when embeddings are sharded across servers: each embedding server handles lookups for its shard across all requests in the batch. At hyperscale request volumes, this turns feature sharding into a serving strategy rather than a storage detail.
+When embeddings are sharded across servers, each embedding server handles lookups for its shard across all requests in the batch, which turns feature sharding into a serving strategy rather than a storage detail.
 
 ```{python}
 #| echo: false
@@ -3000,17 +2988,7 @@ A streaming service must sustain the arrival rate while meeting the latency budg
 
 $$\StreamingEndToEndLatency= \InputCaptureTime+ \TransferTimeForPayload+ \InferenceLatency + \ResultActionTime$$
 
-where the sum must fit the end-to-end latency budget. A pipelined implementation must also sustain the input arrival rate; its slowest stage must process frames at least as quickly as they arrive. The end-to-end budget may span several frame intervals, as the speech example illustrates.
-
-::: {#exmp-inference-streaming-speech-recognition-pipeline .callout-example title="Streaming speech recognition pipeline"}
-
-**Scenario**: A real-time streaming speech-to-text pipeline processes 20 ms audio frames under a strict 100 ms end-to-end latency budget (5 frames max delay).
-
-**Diagnosis**: Waiting for a large batch from one stream can consume its latency budget before inference begins. The pipeline processes frames incrementally ($\StreamingEndToEndLatency= \InputCaptureTime+ \TransferTimeForPayload+ \InferenceLatency + \ResultActionTime$), overlapping audio capture with acoustic model evaluation. Ready frames from independent streams can share execution if the additional waiting and service time still fit the budget.
-
-**Systems lesson**: Streaming inference requires both timely results and enough throughput to prevent accumulating backlog. Incremental pipelining supports these goals; whether batching helps depends on the available deadline slack and the number of ready streams.
-
-:::
+where the sum must fit the end-to-end latency budget. A pipelined implementation must also sustain the input arrival rate; its slowest stage must process frames at least as quickly as they arrive. The end-to-end budget may span several frame intervals. A speech pipeline with 20 ms frames and a 100 ms budget can hold at most five frames of delay, so batching ready frames from independent streams helps only while the added waiting and service time fit that slack.
 
 ### Adaptive batching strategies {#sec-inference-scale-adaptive-batching-strategies-4fc1}
 
@@ -3035,7 +3013,7 @@ elif P99_latency < 0.5 * SLO:
 
 The feedback loop is a tuning heuristic, not a guarantee of latency headroom. Reducing batch size can shorten execution while also reducing service capacity and increasing queueing under heavy load. Feedback delay and noisy percentile estimates can cause oscillation, so the controller must be evaluated with the intended arrival trace and overload policy. Request-aware batching\index{Adaptive batching!request-aware grouping} adds another dimension by considering request characteristics. For LLMs, prompt length can guide padding and prefill budgets, while estimated output length can guide grouping. Prediction errors and priority choices must be included when evaluating tail latency.
 
-Production runtimes expose controls for this trade-off. NVIDIA Triton Inference Server\index{Triton Inference Server!adaptive batching} uses `max_batch_size`\index{Batching!max batch size} to cap batches, `max_queue_delay_microseconds`\index{Batching!timeout parameter} to bound additional waiting for batch formation, and optional `preferred_batch_size`\index{Batching!preferred batch size} values for particularly efficient execution profiles. Preferred sizes do not create a separate queue for each batch size. The runtime forms a supported batch from queued requests when an instance is available; priority queues and overload policy are separate controls.
+Production runtimes expose these controls directly. NVIDIA Triton Inference Server\index{Triton Inference Server!adaptive batching}, for example, caps batches with `max_batch_size`\index{Batching!max batch size}, bounds formation waiting with `max_queue_delay_microseconds`\index{Batching!timeout parameter}, and accepts `preferred_batch_size`\index{Batching!preferred batch size} values for particularly efficient execution profiles; priority queues and overload policy remain separate controls.
 
 @Tbl-inference-triton-adaptive-batching gives an illustrative load-test pattern. Larger batches can absorb rising traffic until offered load approaches execution capacity; after that, longer queues need an admission or scaling response.
 
@@ -3058,7 +3036,7 @@ The batching strategies to this point focus on scheduling work under a chosen re
 *Reasoning through 128 serial tokens turns a 100 ms answer into 12.8 s.*
 :::
 
-Test-time scaling turns reasoning into a serving resource. The scaling laws that motivate the fleet were first measured for pretraining, where quality improves as a power law in parameters, data, and training compute. The same pattern has a third regime in which quality rises with the compute spent on each query at inference time. For a serving fleet that regime moves the scaling curve out of the training cluster and into the request path. Every increment of quality bought this way is paid on every request for the lifetime of the deployment, the recurring cost that the serving cost dominance law (principle \ref{pri-serving-cost-dominance}) already prices. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer. Whether that extra work buys quality is an empirical question. Capability studies describe abilities that appear abruptly with scale [@wei2022emergent], while later analysis cautions that some apparent jumps are artifacts of the metric chosen [@schaeffer2023mirage], so a serving budget should rest on measured quality gains for the workload rather than on the expectation of a jump.
+Test-time scaling turns reasoning into a serving resource. Quality can rise with the compute spent on each query at inference time, which moves the scaling curve out of the training cluster and into the request path. Every increment of quality bought this way is paid on every request for the lifetime of the deployment, the recurring cost that the serving cost dominance law (principle \ref{pri-serving-cost-dominance}) already prices. A request may issue more generated tokens, internal chain-of-thought (CoT) tokens, or search steps before producing the answer, and whether that work buys quality is an empirical question. Capability studies describe abilities that appear abruptly with scale [@wei2022emergent], while later analysis finds some apparent jumps to be artifacts of the metric chosen [@schaeffer2023mirage], so a serving budget should rest on measured quality gains for the workload.
 
 From a serving-systems perspective, the relevant shift is the work issued per request. Additional reasoning consumes accelerator time and can extend both latency and KV-cache residency. Increasing test-time work\index{Test-Time Compute} does not necessarily change the bottleneck of each decode step. It instead requires a policy for the number of generated tokens, candidate solutions, or search steps a request may consume. The logic wall\index{Logic Wall} is the point at which serial reasoning tokens exhaust a request's latency budget, or its share of fleet capacity, before additional reasoning stops improving the answer. A harder task may justify more work, but additional work does not guarantee a correct answer. Adaptive batching decides when requests run together; test-time compute allocation decides how much work each request is allowed to issue.
 
@@ -3143,7 +3121,7 @@ Is it autoregressive text generation?
                 `- No → Dynamic batching with adaptive parameters
 ```
 
-The strategies in @tbl-batching-parameters expose different tuning decisions: batch size for static execution, waiting time for dynamic batching, admission and iteration work for continuous batching, lookup grouping for sharded embeddings, and deadline-compatible grouping for streaming. Continuous batching responds to variable completion times; it does not make output lengths uniform. Each policy must be evaluated against both useful throughput and its latency budget.
+@Tbl-batching-parameters pairs each resulting strategy with the parameter it tunes, and each must be evaluated against both useful throughput and its latency budget.
 
 | **Strategy**         |   **Key Parameters**  | **Tuning Goal**                  |
 |:---------------------|:---------------------:|:---------------------------------|
@@ -3163,7 +3141,7 @@ As a full-attention LLM generates a 2,000-word essay, each new token attends to 
 
 Two classes of techniques meet at this boundary. KV-state capacity techniques, such as PagedAttention\index{PagedAttention!virtual memory mapping} and prefix caching, decide where attention state lives and how much fragmentation the memory manager tolerates. Decode-time latency techniques, such as speculative decoding, change how much target-model work is needed per emitted token. Speculative decoding is not KV-cache compression; it trades extra draft-model state, target-model verification, and scheduler complexity for lower TPOT under the same memory budget. Prefill-decode disaggregation treats the attention state as a payload, because separating the two phases means moving each request's cache between pools. Capacity accounting and adapter locality then determine how retained KV state and task-specific weights share the remaining memory budget.
 
-Wherever they can, the calculations that follow share one reference replica, the 70B model on one eight-GPU H100 node that performance engineering established, with FP16 weights split eight ways. A few leave it on purpose to make a single point, and each says so where it does. The attention layout matters even more, because it sets the bytes cached per token. Grouped-query attention (GQA) with eight KV heads, the layout of the Llama-family 70B models, caches one eighth the state of a 64-head multi-head attention baseline, so each calculation names its hardware and attention layout, and numbers from different calculations compare only after conversion to the same configuration.
+Wherever they can, the calculations that follow share one reference replica, the 70B model on one eight-GPU H100 node that performance engineering established, with FP16 weights split eight ways; a few leave it on purpose and say so. The attention layout matters even more, because it sets the bytes cached per token. Grouped-query attention (GQA) with eight KV heads, the layout of the Llama-family 70B models, caches one eighth the state of a 64-head multi-head attention baseline, so each calculation names its hardware and attention layout, and numbers from different calculations compare only after conversion to the same configuration.
 
 ::: {.column-margin .margin-pointer}
 ↩ The reference serving replica, a 70B model on one eight-GPU H100 node, is established in @sec-performance-engineering-memory-wall.
@@ -3171,7 +3149,7 @@ Wherever they can, the calculations that follow share one reference replica, the
 
 ### The KV cache wall and memory capacity {#sec-inference-scale-kv-cache-wall}
 
-Increasing batch size in LLM serving can encounter the KV cache wall\index{KV Cache!capacity wall} before execution resources are fully used. The capacity model in @fig-kv-cache-wall leaves the reference replica to show the wall on a single device. It combines an idealized 35 GB weight payload for a quantized 70B model with its full-attention, eight-KV-head GQA state on one H100, using a conservative decimal budget matching its nameplate label. This illustrative budget differs from the registered byte capacity used in the node estimator below. With the illustrated cache dimensions and precision, a batch of 8 reaches the memory boundary at roughly 17K tokens per sequence. Quantization metadata, runtime buffers, and other allocations reduce the capacity available in an actual deployment, so the plotted boundary is an optimistic sizing limit.
+Increasing batch size in LLM serving can encounter the KV cache wall\index{KV Cache!capacity wall} before execution resources are fully used. @Fig-kv-cache-wall leaves the reference replica to show the wall on a single H100, combining an idealized 35 GB weight payload for a quantized 70B model with its full-attention, eight-KV-head GQA state under a conservative decimal budget matching the nameplate label, unlike the registered byte capacity of the node estimator below. A batch of 8 reaches the memory boundary at roughly 17K tokens per sequence; quantization metadata, runtime buffers, and other allocations make the plotted boundary an optimistic sizing limit.
 
 ```{python}
 #| echo: false
@@ -3506,8 +3484,6 @@ Under variable sequence lengths, the two effects compound. The vLLM authors meas
 
 The fragmentation example exposes the allocator failure: enough KV-cache capacity can exist in aggregate while no contiguous block is available for the next sequence. PagedAttention fixes that serving problem by treating KV-cache storage like virtual memory rather than a single preallocated slab.
 
-The shift changes the allocation problem, because capacity no longer has to be reserved as one contiguous block before the request starts, and that change alone can multiply the number of requests that fit before any byte of state is compressed.
-
 ::: {#psp-inference-analogy-inefficient-hotel .callout-perspective title="Analogy: The inefficient hotel"}
 
 Imagine a hotel storage room with 100 lockers. Each guest may bring up to 10 suitcases, but currently every guest has only one suitcase.
@@ -3794,7 +3770,7 @@ Request B page table: [0, 1, 2, 3, 4, 5, 12, 13, 14]  <- shares prefix blocks
 Request C page table: [0, 1, 2, 3, 4, 5, 15]  <- shares prefix blocks
 ```
 
-All three requests reference the same physical blocks for the system prompt. In this block-aligned example, their distinct suffixes occupy new blocks. If a shared prefix ends partway through a block, appending a different suffix writes into a shared block, which is exactly the copy-on-write case, so that request receives a private copy or another representation that preserves the shared contents. The savings can be substantial when many concurrent requests share a compatible system prompt; notebook \ref{nbk-inference-prefix-caching-at-scale} quantifies them for a typical chatbot deployment.
+All three requests reference the same physical blocks for the system prompt, and their distinct suffixes occupy new blocks. If a shared prefix ends partway through a block, appending a different suffix writes into a shared block, which is exactly the copy-on-write case. Notebook \ref{nbk-inference-prefix-caching-at-scale} quantifies the savings for a typical chatbot deployment.
 
 ```{python}
 #| echo: false
@@ -3971,7 +3947,7 @@ A single request's KV cache alone consumes a substantial fraction of the H100's 
 
 #### KV cache quantization {#sec-inference-scale-kv-quantization}
 
-Reducing the size of cached values through lower precision provides direct memory savings. Weight-only quantization reduces weight precision while keeping activations in high precision. While effective for storage, this does not reduce the KV cache. KV cache quantization\index{KV Cache!quantization} explicitly targets the activations, storing cached keys and values in INT8\index{KV Cache!INT8 quantization}, FP8, or even INT4.
+Weight-only quantization leaves the KV cache untouched. KV cache quantization\index{KV Cache!quantization} instead stores cached keys and values in INT8\index{KV Cache!INT8 quantization}, FP8, or even INT4.
 
 Storing the cache payload in INT4 reduces it to approximately `{python} KVCacheCalc.kv_int4_gb_str` per request, a `{python} KVCacheCalc.kv_compression_mult_str` reduction before quantization metadata and any higher-precision residual state. Recovered memory can admit more sequences, but throughput depends on kernel support, conversion costs, and the latency target. Quality must also be evaluated for the intended contexts. Cached keys and values also have different distributions from the model weights and from each other. Keys tend to carry channel-wise outliers, which favors quantizing them per channel, while values lack that channel pattern and can be quantized per token.
 
@@ -4070,7 +4046,7 @@ Speculative decoding pairs a small draft model\index{Speculative Decoding!draft 
 ↩ The draft-and-verify mechanics of speculative decoding are established in @sec-performance-engineering-speculative.
 :::
 
-The latency benefit depends on accepted progress relative to drafting and verification time. When the draft model proposes $\SpeculativeDraftLength$ tokens, high acceptance rates allow the target model to verify and emit multiple tokens in a single forward pass. When acceptance drops, rejected tokens are discarded while drafting and verification still cost time; generation can become slower than ordinary decoding. With the simplified constant, independent acceptance probability at each draft position used in that analysis, the expected number of tokens emitted per round, including the correction token, is $\frac{1 - \DraftTokenAcceptanceProbability^{\SpeculativeDraftLength+1}}{1 - \DraftTokenAcceptanceProbability}$, which collapses toward 1 as acceptance falls. The following calculation assumes $\SpeculativeDraftLength= 5$ draft tokens, a draft step 20$\times$ faster than a target decode step, and a verification pass costing the same as one target decode step. Holding those costs fixed isolates sensitivity to acceptance:
+The latency benefit depends on accepted progress relative to drafting and verification time. High acceptance lets one verification pass emit several tokens; low acceptance discards drafted tokens whose drafting and verification still cost time, so generation can become slower than ordinary decoding. Under the constant, independent acceptance probability at each draft position used in that analysis, a round emits $\frac{1 - \DraftTokenAcceptanceProbability^{\SpeculativeDraftLength+1}}{1 - \DraftTokenAcceptanceProbability}$ tokens in expectation, including the correction token. The following calculation assumes $\SpeculativeDraftLength= 5$ draft tokens, a draft step 20$\times$ faster than a target decode step, and a verification pass costing one target decode step, which isolates sensitivity to acceptance:
 
 ```{python}
 #| echo: false
@@ -4181,15 +4157,15 @@ class SpeculationDraftWeights:
 
 The first concern is memory. The draft model is not free state. It requires memory for weights, and each in-flight request that uses it reserves additional draft KV state. Pairing a 7B draft model with a 70B target adds roughly `{python} SpeculationDraftWeights.draft_fp16_gb_str` of FP16 weights per replica plus per-request draft cache. When colocated with the target, this *speculation tax*\index{Speculative Decoding!speculation tax} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall: every gigabyte reserved for the draft is unavailable to target requests. Under a binding memory limit, that reservation lowers maximum concurrency. Placing the draft on separate devices preserves target memory at the cost of additional hardware and communication. The admission controller and the speculation policy therefore require a joint capacity and latency evaluation.
 
-The second concern is which service-level objective the endpoint must meet. At sufficient acceptance, speculation can reduce TPOT; draft execution and cache residency can also reduce admission capacity. Neither latency nor aggregate-throughput benefit follows from the endpoint label alone. The scheduler should compare SLO-compliant goodput with and without speculation under the intended load\index{Speculative Decoding!SLA trade-offs}. TTFT needs separate measurement because draft setup and prefill can add work before the first response token.
+The second concern is which service-level objective the endpoint must meet. At sufficient acceptance, speculation can reduce TPOT, while draft execution and cache residency reduce admission capacity, so the scheduler should compare SLO-compliant goodput with and without speculation under the intended load\index{Speculative Decoding!SLA trade-offs}. TTFT needs separate measurement because draft setup and prefill can add work before the first response token.
 
-The third concern is that acceptance and load change over time. A scheduler can enable speculation when measured TPOT or goodput improves, then disable it when verification cost outweighs accepted-token progress. Disabling draft execution alone does not free resident draft weights; recovering that capacity requires unloading them, and releasing draft KV pages requires ending or migrating the associated speculative state. Alternative draft mechanisms change this budget: self-speculative decoding\index{Self-Speculative Decoding} reuses the target model, Medusa\index{Medusa} [@cai2024medusa] adds prediction heads, and lookahead decoding\index{Lookahead Decoding} avoids a separate draft model. Each requires its own quality, acceptance, and resource evaluation.
+The third concern is that acceptance and load change over time. A scheduler can enable speculation when measured TPOT or goodput improves and disable it when verification cost outweighs accepted progress, but disabling draft execution frees neither the resident draft weights nor the draft KV pages; recovering that capacity requires unloading the weights and ending or migrating the speculative state. Self-speculative decoding\index{Self-Speculative Decoding}, Medusa\index{Medusa} prediction heads [@cai2024medusa], and lookahead decoding\index{Lookahead Decoding} change this budget, and each needs its own quality, acceptance, and resource evaluation.
 
 ### Prefill-decode disaggregation {#sec-inference-scale-prefill-decode-disaggregation}
 
 Chunked prefill keeps prefill and decode on one worker and bounds how much prompt work lands between decode steps. Disaggregation takes the other route and gives each phase its own hardware. The KV-cache sizing of @sec-inference-scale-kv-cache-wall now supplies what that choice costs, because the cache a prefill builds is exactly the payload the decode pool must receive.
 
-@Fig-disaggregated-serving partitions the serving pipeline into specialized physical tiers. In the illustrated long-prompt, small-decode-batch regime, prefill is compute bound while decode is memory-bandwidth bound. Separate pools can therefore emphasize compute throughput for prefill and memory bandwidth for decode, with a remote direct memory access (RDMA) KV-cache transfer connecting the phases [@zhong2024distserve]. Separation prevents the two phases from competing on the same accelerator and permits independent parallelism and capacity plans. The transfer and queueing at each pool still contribute to request latency, and different batch or context sizes can change which resources bind.
+@Fig-disaggregated-serving partitions the serving pipeline into specialized physical tiers. In the illustrated long-prompt, small-decode-batch regime, the compute-bound prefill pool and the bandwidth-bound decode pool are joined by a remote direct memory access (RDMA) KV-cache transfer [@zhong2024distserve], which keeps the phases from competing on one accelerator and permits independent parallelism and capacity plans. The transfer and queueing at each pool still add to request latency, and other batch or context sizes can change which resources bind.
 
 ::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**: A long-prompt, small-decode-batch regime separates compute-bound prefill instances from memory-bandwidth-bound decode instances, mediated by RDMA KV-cache transfer. Because prefill sets time to first token and decode sets time per output token, each pool is sized for its own token rate. Other batch and context sizes can change the binding resources." fig-alt="Left to right: a prompt enters a prefill pool labeled compute-bound, sets TTFT, and sized for prompt tokens per second. Each of its three workers, Prefill 0 to 2, shows its work as two wide solid blocks, each a whole-prompt pass. An amber arrow carrying four small KV-cache page tiles, labeled KV cache transfer (RDMA), crosses to a decode pool labeled bandwidth-bound, sets TPOT, and sized for output tokens per second. Each of its three workers, Decode 0 to 2, shows its work as a row of eight narrow cells, each a one-token decode step. The decode pool emits a token stream. A key below names the wide block a whole-prompt pass and the narrow cell a one-token decode step."}
 ![](images/svg/disaggregated-serving.svg)
@@ -4488,7 +4464,7 @@ $$\KvCacheHandoffTime= \MessageStartupLatency+ \frac{\KvCacheMemory}{\LinkBandwi
 
 where $\MessageStartupLatency$ includes transfer setup and queueing for the operating point being evaluated; it is not a fixed network latency once load changes. The payload term sets the scale. A 128K-token request on the GQA model of notebook \ref{nbk-inference-kv-cache-capacity-estimator} carries tens of gigabytes of KV state, so moving it over a single `{python} InferenceSetup.nvlink_h100_per_dir_gb_per_s_str` NVLink direction takes on the order of a hundred milliseconds, and an inter-node link takes longer still. Spreading the transfer across a tensor-parallel group divides that time only when each device has its own path to its counterpart in the decode pool. Because $\KvCacheMemory$ grows linearly with prompt length, the long prompts that make disaggregation attractive are also the prompts whose handoff costs most, and that cost lands on TTFT.
 
-@Eq-prefill-decode-handoff therefore makes placement part of the service contract. The prefill pool must sustain the admitted prompt-token rate, the decode pool must sustain the admitted output-token rate, and both pools need headroom for the request-length distribution. Disaggregation earns its transfer tax only when eliminating phase interference and balancing the two pools raises SLO goodput. Otherwise, colocated chunked prefill avoids the additional handoff and pool coordination.
+@Eq-prefill-decode-handoff therefore makes placement part of the service contract. The prefill pool must sustain the admitted prompt-token rate, the decode pool must sustain the admitted output-token rate, and both pools need headroom for the request-length distribution. Disaggregation justifies its KV-cache transfer cost only when eliminating phase interference and balancing the two pools raises SLO goodput. Otherwise, colocated chunked prefill avoids the additional handoff and pool coordination.
 
 ### Memory management best practices {#sec-inference-scale-memory-management-best-practices-67e2}
 
@@ -4531,11 +4507,7 @@ $$\LayerOutputVector= \LayerInputVector\WeightMatrix_0^T + \frac{\AdapterScaling
 
 where $\LayerInputVector\in \mathbb{R}^{1 \times \LayerInputWidth}$ is a row vector, $\LayerOutputVector\in \mathbb{R}^{1 \times \LayerOutputWidth}$, and $\AdapterScalingFactor_k$ is a fixed scaling factor, the hyperparameter usually written $\Glyph{\alpha}$ in LoRA papers and renamed here because $\Glyph{\alpha}$ already denotes startup latency and draft acceptance in this chapter. Each adapted projection adds $\AdapterRank_k(\LayerInputWidth + \LayerOutputWidth)$ parameters instead of a full $\LayerInputWidth\LayerOutputWidth$ weight matrix. The resident adapter budget therefore depends on which layers are adapted, their dimensions and ranks, precision, and the number of simultaneously loaded tenants.
 
-However, serving requests with heterogeneous adapters in a single continuous batch introduces a critical execution dilemma between batch efficiency and kernel dispatch overhead.
-
-Grouping requests by adapter reduces the distinct adapter state needed for a batch. For low-traffic adapters, however, waiting for a large compatible group increases formation delay, while dispatching immediately can leave a small batch. An adapter receiving dense traffic may benefit from grouping. The difficulty is retaining that locality without preventing requests for different adapters from sharing base-model execution.
-
-Packing requests with different adapters into one batch allows the base projection $\LayerInputMatrix\WeightMatrix_0^T$ to execute as a shared dense GEMM. A naive implementation then dispatches separate small kernels for each request's adapter $(\AdapterDownProjectionMatrix, \AdapterUpProjectionMatrix)$. Hundreds of such launches per layer can make host dispatch and launch latency significant; an illustrative per-kernel cost ($\sim 3\text{--}5\ \MicroUnitPrefix\text{s}$ per kernel) accumulates even when each adapter performs little arithmetic. Small kernels can also leave GPU streaming multiprocessors (SMs) underused. The following batched operation removes the need for one launch per request.
+Packing requests with different adapters into one batch lets the base projection $\LayerInputMatrix\WeightMatrix_0^T$ execute as one shared dense GEMM, but a naive implementation then launches a separate small kernel for each request's adapter $(\AdapterDownProjectionMatrix, \AdapterUpProjectionMatrix)$. Hundreds of such launches per layer make host dispatch and launch latency significant even when each adapter performs little arithmetic, and the small kernels leave GPU streaming multiprocessors (SMs) underused. The following batched operation removes the need for one launch per request.
 
 ::: {#dfn-inference-multi-lora-bgmv .callout-definition title="Batched gather-matrix-vector multiplication (BGMV)"}
 
@@ -4547,7 +4519,7 @@ Packing requests with different adapters into one batch allows the base projecti
 
 :::
 
-Systems such as Punica\index{Punica!multi-tenant LoRA} [@chen2023punica] and S-LoRA\index{S-LoRA!multi-tenant LoRA} [@lin2023slora] resolve the execution dilemma through two architectural mechanisms (definition \ref{dfn-inference-multi-lora-bgmv}):
+Systems such as Punica\index{Punica!multi-tenant LoRA} [@chen2023punica] and S-LoRA\index{S-LoRA!multi-tenant LoRA} [@lin2023slora] address launch overhead and adapter memory through two architectural mechanisms (definition \ref{dfn-inference-multi-lora-bgmv}):
 
 ##### Batched gather-matrix-vector (BGMV) kernels {#sec-inference-bgmv-kernel}
 
@@ -4568,13 +4540,7 @@ S-LoRA [@lin2023slora] jointly manages adapter weights and KV state in a unified
 
 The published design keeps adapters in host memory and uses the waiting queue to predict which weights the next batch will need. Prefetching overlaps adapter transfers with current execution when sufficient time and free GPU memory are available. A cache miss whose transfer cannot be hidden still delays the affected request.
 
-When scaling across multiple devices, S-LoRA aligns adapter inputs and outputs with the base layer while communicating low-rank intermediates [@lin2023slora]. With the weight orientation in @eq-lora-forward, Megatron's column-parallel and row-parallel conventions describe $\WeightMatrix_0^T$. Two meanings of "rank" meet here, so *device* below means a tensor-parallel GPU, and the LoRA rank stays $\AdapterRank_k$.
-
-In a column-parallel layer, $\WeightMatrix_0$ and $\AdapterUpProjectionMatrix_k$ are split across devices along their output rows, and $\AdapterDownProjectionMatrix_k$ along its $\AdapterRank_k$ rows. Each device computes its slice of the $\AdapterRank_k$-dimensional intermediate $\LayerInputVector\AdapterDownProjectionMatrix_k^T$, an AllGather assembles the full intermediate on every device, and each device multiplies it by its local slice of $\AdapterUpProjectionMatrix_k^T$ to produce its share of the output.
-
-In a row-parallel layer, $\WeightMatrix_0$ and $\AdapterDownProjectionMatrix_k$ are split along their input columns, and $\AdapterUpProjectionMatrix_k$ along its output rows. Each device computes a partial $\AdapterRank_k$-dimensional intermediate from its input slice, and an AllReduce sums those partials. Each device then computes its slice of the adapter output, adds it into the matching positions of its base-layer partial output, and joins the base layer's final AllReduce.
-
-This layout reduces adapter replication but does not eliminate communication. Its additional collectives operate on rank-dimensional intermediates; the final output assembly shares the base layer's collective. The trade-off is lower adapter memory per rank against added synchronization.
+Across a tensor-parallel group, S-LoRA aligns each adapter with the base layer's column- or row-parallel split and communicates only the $\AdapterRank_k$-dimensional intermediates. An AllGather assembles the intermediate after a column-parallel down-projection, and an AllReduce sums partial intermediates after a row-parallel one [@lin2023slora]. The layout reduces adapter replication at the price of extra synchronization on those small intermediates, while the final output assembly shares the base layer's own collective.
 
 KV pages and adapter deltas share HBM with the base weights. Even when long contexts make the cache larger than the weights, reducing the weight footprint can release capacity for those other allocations. Weight quantization addresses this part of the budget, with numerical quality and execution cost determining how much of the storage saving becomes useful serving capacity.
 
@@ -4598,7 +4564,7 @@ In serving systems, quantization is not merely a model-compression technique; it
 ↩ The trade-off between post-training quantization and quantization-aware training is established in @sec-performance-engineering-ptq-qat.
 :::
 
-Quantization reduces numerical precision of model weights and activations, decreasing their memory footprint by 2--4$\times$. Reducing weight traffic can improve bandwidth-bound decode, provided kernel support and dequantization overhead preserve the saving. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: a deployment team may need post-training quantization without the original training corpus, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Lack of the original corpus does not imply data-free calibration; the methods that follow may still require representative deployment inputs. Production inference therefore starts from a decision model rather than from the methods. @Tbl-serving-quantization-decision-model ties each method family to the serving constraint it relaxes, and the subsections that follow take the methods in that order, recording for each only what changes when it is deployed: calibration cost, kernel path, and the evaluation a serving team must run.
+Quantization reduces numerical precision of model weights and activations, decreasing their memory footprint by 2--4$\times$. Reducing weight traffic can improve bandwidth-bound decode, provided kernel support and dequantization overhead preserve the saving. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: a deployment team may need post-training quantization without the original training corpus, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Lack of the original corpus does not imply data-free calibration; the methods that follow may still require representative deployment inputs. Production inference therefore starts from a decision model rather than from the methods. @Tbl-serving-quantization-decision-model ties each method family to the serving constraint it relaxes; what changes for each when it is deployed is its calibration cost, kernel path, and the evaluation a serving team must run.
 
 | **Binding serving constraint** | **Representation change**                       | **Method family**       | **Risk to test before rollout**             |
 |:-------------------------------|:------------------------------------------------|:------------------------|:--------------------------------------------|
@@ -4613,46 +4579,11 @@ Quantization reduces numerical precision of model weights and activations, decre
 
 Large language models can exhibit activation ranges that make low-precision deployment difficult. The outlier activation problem\index{Activation outliers!quantization degradation} arises when a few hidden-dimension channels carry magnitudes far larger than typical values [@xiao2023smoothquant]. A coarse scale loses resolution for smaller values, while a narrow range clips large ones. This trade-off is not unique to language models, but its channel structure motivates the methods below. @Sec-performance-engineering-block-quant develops the outlier mechanism and the algorithms that answer it (LLM.int8(), GPTQ, AWQ, and SmoothQuant); the subsections that follow keep only what each method changes for a serving deployment.
 
-For a serving deployment the consequence is that no single INT8 scale suits both the outlier channels and the typical values, which is why the methods that follow differ, each protecting a different part of the serving contract.
+For a serving deployment the consequence is that no single INT8 scale suits both the outlier channels and the typical values, so the method families differ in which part of the serving contract they protect and what they cost to deploy. GPTQ\index{GPTQ!layer-by-layer quantization} [@frantar2023gptq] and AWQ\index{AWQ!salient weight protection} [@lin2023awq] both produce 4-bit weight-only artifacts offline, the first through approximate second-order error compensation and the second by scaling salient channels from activation statistics. Both need representative calibration inputs and supported packing kernels, and AWQ also needs its scales fused into the deployed graph or it spends part of the latency saving on an extra runtime operation. SmoothQuant\index{SmoothQuant!activation-to-weight scaling} [@xiao2023smoothquant] migrates part of the activation range into the weights so that both can run in INT8, which matters for compute-bound prefill; production activation extremes can still differ from the calibration ranges. Rotation-based methods such as QuaRot\index{Quantization!rotation-based}\index{QuaRot!rotation-based quantization} [@ashkboos2024quarot] apply orthogonal Hadamard transforms that spread large coordinates across channels, which makes W4A4 a serving candidate at the price of some online rotation work.
 
-### GPTQ layer-by-layer weight quantization {#sec-inference-scale-gptq-layerbylayer-weight-quantization-9284}
+None of these properties fixes quality. Each artifact must be compared with the FP16 baseline on the same model, evaluation data, and runtime, reporting its calibration set, group size, kernel path, and any online-transform overhead, and its serving benefit must be measured as SLO-compliant throughput on the target workload rather than inferred from nominal bit width.
 
-GPTQ\index{GPTQ!layer-by-layer quantization} [@frantar2023gptq], which uses second-order error compensation, is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. Its serving value is that the model gets smaller without a full retraining run.
-
-GPTQ rounds weight columns while compensating the remaining columns using statistics collected from calibration inputs. Calibration and error compensation are offline costs paid when producing the quantized artifact, rather than on each serving request. Their duration depends on model size, calibration workload, hardware, and implementation; a fixed sample count is not a general deployment requirement. The resulting artifact still requires suitable inference kernels, and its quality must be tested when production inputs differ from the calibration distribution.
-
-@Tbl-gptq-performance identifies the measurements needed to evaluate a GPTQ deployment:
-
-| **Measurement**         | **Comparison contract**                                             |
-|:------------------------|:--------------------------------------------------------------------|
-| **Quality change**      | Same model, task, and evaluation data before and after quantization |
-| **Memory reduction**    | Include scales, zero points, packing, and runtime buffers           |
-| **Quantization time**   | State calibration data, hardware, and implementation                |
-| **Serving performance** | Compare SLO-compliant throughput at the same workload               |
-
-: **GPTQ evaluation contract**: Nominal bit width alone does not determine quality, compression, or speed. Report the deployed representation and measured workload rather than extrapolating fixed values across model sizes. {#tbl-gptq-performance}
-
-GPTQ provides weight compression without a full retraining run, using a layer-local reconstruction objective to control error. That objective does not guarantee task quality after errors propagate through the complete model. Calibration coverage, quantization settings, and the deployed kernel path therefore belong in the evaluation alongside artifact size.
-
-### AWQ activation-aware weight quantization {#sec-inference-scale-awq-activationaware-weight-quantization-abec}
-
-Activation-aware weight quantization (AWQ)\index{AWQ!salient weight protection} [@lin2023awq] approaches weight-only compression through activation statistics. It scales selected weight channels before quantization, applying the inverse scale to their inputs, often through a preceding operation. This protects salient channels without GPTQ's sequential error-compensation procedure. Calibration cost and quality still depend on the model and data. If the scale cannot be fused into the deployed graph, an additional runtime operation spends some of the latency saving; it does not by itself erase the smaller weight footprint.
-
-@Tbl-awq-vs-gptq compares the methods' error-control mechanisms and calibration roles, then the deployment check each requires; both need the same quality evaluation on the target model and task.
-
-| **Aspect**           | **GPTQ**                                    | **AWQ**                                      |
-|:---------------------|:--------------------------------------------|:---------------------------------------------|
-| **Error control**    | Approximate second-order error compensation | Activation-guided channel scaling            |
-| **Calibration role** | Estimate layer-input statistics             | Identify salient channels and select scales  |
-| **Deployment check** | Supported packing and inference kernels     | Supported packing, fused scales, and kernels |
-
-: **AWQ vs. GPTQ**: The methods use different calibration mechanisms. Quality, calibration time, and serving speed require comparison on the same model, data, precision, and runtime; neither column implies a universal ranking. {#tbl-awq-vs-gptq}
-
-The engineering choice follows the measured quality budget and deployed kernel path, not a fixed quality or calibration-speed ordering.
-
-### SmoothQuant activation-weight migration {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
-
-SmoothQuant\index{SmoothQuant!activation-to-weight scaling} [@xiao2023smoothquant] targets W8A8 deployments where activation quantization matters, especially compute-bound prefill. Its per-channel rescaling transfers part of the activation range into the weights while preserving the full-precision layer calculation. Subsequent rounding to INT8 still introduces error. Folding scales into existing operations can avoid separate scaling kernels, but realized overhead depends on the deployed graph and kernels. Calibration must test the resulting ranges because production activation extremes can differ from those used to choose the scales.
+### W8A8 versus weight-only ceilings {#sec-inference-scale-smoothquant-migrating-quantization-difficulty-f37f}
 
 ```{python}
 #| echo: false
@@ -4690,7 +4621,7 @@ class W8A8Ceilings:
     int8_ratio_mult_str = fmt_multiple(round(int8_compute_ratio), precision=0, commas=False)
 ```
 
-In the W8A8 deployment regime, SmoothQuant enables INT8 quantization for both weights and activations. @Tbl-smoothquant-w8a8 bounds what each 8-bit path can buy relative to the FP16 baseline:
+The prefill-decode split decides which of these paths can pay, because weight-only quantization and W8A8 both shrink the weights but only W8A8 changes the arithmetic. @Tbl-smoothquant-w8a8 bounds what each 8-bit path can buy relative to the FP16 baseline:
 
 | **Configuration**        |                    **Weight bytes**                   |                      **Prefill compute ceiling**                      |          **Decode weight-traffic ceiling**          |   **Quality**    |
 |:-------------------------|:-----------------------------------------------------:|:---------------------------------------------------------------------:|:---------------------------------------------------:|:----------------:|
@@ -4702,74 +4633,15 @@ In the W8A8 deployment regime, SmoothQuant enables INT8 quantization for both we
 
 The critical distinction is which ceiling binds. Among these configurations, W8A8 enables INT8 matrix multiplication, with the illustrated `{python} W8A8Ceilings.int8_ratio_mult_str` peak ratio providing a compute ceiling rather than a measured prefill speedup. Both quantized schemes halve the weight payload. If weight reads dominate decode, activation quantization does not further reduce that traffic, although it can change other memory and compute costs. Quantization and dequantization also add work. The end-to-end benefit therefore depends on the prompt/output mix, batch sizes, and measured execution path.
 
-### Rotation-based quantization {#sec-inference-scale-rotationbased-quantization-8bee}
-
-Traditional quantization methods (GPTQ, AWQ, SmoothQuant) address quantization error through compensation or rescaling. Rotation-based quantization\index{Quantization!rotation-based} [@ashkboos2024quarot] changes the coordinate basis so large values are less concentrated in a few channels. This can make lower precision viable without retaining designated outlier channels in higher precision.
-
-The magnitude of an individual coordinate depends on the chosen basis. An appropriate rotation can redistribute a large coordinate across many components while preserving the full-precision computation through corresponding weight transformations. This redistribution does not guarantee uniform values or negligible rounding error for every input; the resulting quantized model still requires quality evaluation.
-
-#### QuaRot (quantization with rotation) {#sec-inference-quarot-rotation-quantization-7a02}
-
-QuaRot\index{QuaRot!rotation-based quantization} uses orthogonal Hadamard transforms to redistribute large coordinates before low-bit quantization.[^fn-quarot-hadamard-transform] The transform can be chosen without calibration data, but the full weight-quantization pipeline may use calibrated GPTQ. Orthogonal transformations preserve the full-precision calculation when corresponding weight and activation transforms are applied consistently; quantization still introduces approximation. Runtime rotations add work, so the serving decision compares measured quality and goodput on the target kernel path.
-
-[^fn-quarot-hadamard-transform]: **Hadamard Rotation in QuaRot (Quantized Rotation)**\index{QuaRot!Hadamard rotation}: QuaRot transforms activations as $\RotatedActivationMatrix = \LayerInputMatrix \cdot \HadamardRotationMatrix$ and weights as $\RotatedWeightMatrix= \HadamardRotationMatrix^T \cdot \WeightMatrix$, where $\HadamardRotationMatrix$ is an orthogonal Hadamard matrix, computed structurally without being stored. Orthogonality preserves $\LayerInputMatrix\WeightMatrix= \RotatedActivationMatrix\RotatedWeightMatrix$, so the layer output is unchanged. The outlier-spreading effect is concrete: a vector $[1000, 1, 1, 1]$ with one extreme value becomes roughly $[502, 500, 500, 500]$ after the transform, so no single coordinate dominates the quantization range.
-
-@Tbl-quarot-vs-smoothquant contrasts two outlier-management mechanisms. The listed precision targets are evaluated operating points, not universal limits or guarantees.
-
-| **Aspect**           | **SmoothQuant**                                 | **QuaRot**                                                       |
-|:---------------------|:------------------------------------------------|:-----------------------------------------------------------------|
-| **Calibration**      | Activation statistics for scales                | Rotation is data-free; GPTQ weight quantization uses calibration |
-| **Evaluated target** | W8A8                                            | W4A4                                                             |
-| **Runtime work**     | Scaling can be fused                            | Some rotations remain online                                     |
-| **Outlier handling** | Transfers scale between activations and weights | Redistributes coordinates                                        |
-
-: **QuaRot vs. SmoothQuant**: Calibration requirements belong to the complete quantization pipeline. Quality and speed must be measured for the selected model, bit widths, and implementation. {#tbl-quarot-vs-smoothquant}
-
-@Tbl-quarot-perplexity lists what a like-for-like quality comparison across these precision choices must report for a 70B-class model:
-
-| **Method**      | **Precision** | **Report against the FP16 baseline**                      |
-|:----------------|:-------------:|:----------------------------------------------------------|
-| **FP16**        |     W16A16    | Baseline perplexity and task accuracy on the target data  |
-| **SmoothQuant** |      W8A8     | Quality change, with the calibration set stated           |
-| **GPTQ**        |     W4A16     | Quality change, group size, and kernel path               |
-| **QuaRot**      |      W4A4     | Quality change, online-rotation overhead, and kernel path |
-
-: **Quantization quality comparison contract**: Perplexity or task-accuracy change must be measured on the same model, evaluation data, and runtime for every precision choice. The rows record what each comparison must report, not results. {#tbl-quarot-perplexity}
-
-The QuaRot authors report that rotation keeps W4A4 quality close to FP16 on the models they evaluate, which is what makes 4-bit activation quantization a serving candidate at all [@ashkboos2024quarot]. Its 4-bit weights *and* 4-bit activations cut memory for the quantized tensors by roughly 4$\times$ relative to FP16, but its quality relative to GPTQ's 4-bit weight-only path must still be measured on the deployment's own model and task. Learned-rotation variants optimize the rotation matrices themselves to reduce quantization error, adding offline optimization cost; the learned rotations are not a guarantee of globally optimal quality. Rotation methods extend low-precision choices, but the useful trade-off depends on measured quality, transform overhead, and the deployed kernel path.
-
 ### Hardware-deployment co-design {#sec-inference-scale-hardwaredeployment-codesign-617f}
 
 Hardware and software support determine which quantization savings reach the serving workload\index{Quantization!hardware-software co-design}. Native low-precision arithmetic can raise compute throughput, but a weight-only kernel can also save HBM capacity and traffic by reading packed weights and converting them on chip. The arithmetic format and the resident storage format need not be identical.
-
-@Tbl-tensor-core-precision-support summarizes NVIDIA Tensor Core precision support across Ampere and Hopper:
-
-| **Format**     |     **Ampere (A100)**     | **Hopper (H100)**                                                       | **Peak ratio vs. FP16** |
-|:---------------|:-------------------------:|:------------------------------------------------------------------------|:-----------------------:|
-| **FP16**       |            Yes            | Yes                                                                     |        1$\times$        |
-| **BF16**       |            Yes            | Yes                                                                     |        1$\times$        |
-| **INT8**       |            Yes            | Yes                                                                     |        2$\times$        |
-| **FP8 (E4M3)** |             No            | Yes                                                                     |        2$\times$        |
-| **INT4**       | Yes (native Tensor Cores) | Software/framework-dependent on H100; native FP4 is a Blackwell feature |    workload-dependent   |
-
-: **Tensor core precision support and peak ratios**: Native precision support across NVIDIA Ampere and Hopper Tensor Cores. The 2$\times$ ratio at INT8 and FP8 compares peak arithmetic throughput on those native paths, not measured serving speed. A100 provides native INT4 Tensor Core operations, although realized LLM speedup still depends on framework and kernel support; H100 INT4 deployment remains software/framework-dependent, and native FP4 first appears in Blackwell. {#tbl-tensor-core-precision-support}
 
 For batch-one decode dominated by weight reads, the following proportionality estimates throughput using the active model weights as the byte count. It omits KV-cache traffic and execution overhead and does not describe aggregate throughput at arbitrary batch size:
 
 $$\text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model size in bytes}}$$
 
 In the ideal memory-bound case, reducing FP16 weights to 4-bit values cuts weight traffic by 4$\times$, but realized decode throughput depends on kernel support, dequantization overhead, KV-cache precision, batch shape, and whether HBM bandwidth is truly the bottleneck. The value of 4-bit serving is therefore strongest when it increases model residency or batch capacity, and throughput gains should be validated on the target serving workload.
-
-The mapping in @tbl-quantization-deployment-configurations gives candidate configurations based on runtime support and the resource being constrained. W4A16 can reduce resident weight memory, W8A8 can exploit INT8 arithmetic, and FP8 can use a supported native path. Hardware capability narrows the choices but does not select the winner; the quality target and measured workload determine which representation is useful.
-
-| **Quantization**       | **Best For**                       |                 **Framework Support**                 |
-|:-----------------------|:-----------------------------------|:-----------------------------------------------------:|
-| **W4A16 (GPTQ/AWQ)**   | Consumer GPUs, memory-constrained  |             vLLM, TensorRT-LLM, llama.cpp             |
-| **W8A8 (SmoothQuant)** | INT8 accelerators, high throughput |               TensorRT-LLM, ONNX Runtime              |
-| **FP8**                | H100/H200 deployments              | TensorRT-LLM\index{TensorRT-LLM!quantization support} |
-| **W4A4**               | Research, extreme compression      |                        Limited                        |
-
-: **Quantization deployment configurations**: Mapping from quantization scheme to deployment target and supporting frameworks. W4A16 is common for consumer and memory-constrained deployments; W8A8 unlocks INT8 Tensor Core throughput; FP8 is the native low-precision path on H100/H200-class deployments; W4A4 is an aggressive compression target with more limited framework support. {#tbl-quantization-deployment-configurations}
 
 ### Runtime contract for quantized serving {#sec-inference-scale-framework-integration-945c}
 
@@ -4846,7 +4718,7 @@ This comparison uses a conservative decimal HBM budget matching the A100 namepla
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
-The final selection must satisfy memory, quality, and latency requirements together. Native support makes a precision path a candidate; it does not establish the model's quality at that precision. Nor is there a universal quality ordering between 4-bit weight-only and 8-bit weight-and-activation quantization. Evaluate both against the same task baseline, retaining the reference representation when alternatives fail the quality budget. For compute-bound prefill, W8A8 offers the illustrated `{python} W8A8Ceilings.int8_ratio_mult_str` INT8 compute ceiling. For decode dominated by weight reads, W4A16 can cut the weight payload by up to 4$\times$, provided conversion and other costs leave a useful saving. Latency-sensitive and throughput-oriented services can benefit from either path under suitable workloads.
+The final selection must satisfy memory, quality, and latency requirements together. Native support makes a precision path a candidate without establishing the model's quality at that precision, and no universal quality ordering separates 4-bit weight-only from 8-bit weight-and-activation quantization, so both are evaluated against the same task baseline. For compute-bound prefill, W8A8 offers the illustrated `{python} W8A8Ceilings.int8_ratio_mult_str` INT8 compute ceiling; for decode dominated by weight reads, W4A16 can cut the weight payload by up to 4$\times$, provided conversion and other costs leave a useful saving.
 
 These precision choices affect cost per million useful tokens. The residency calculation above is what makes fewer GPUs possible at all, because INT4 weights shrink the resident payload enough for a 70B replica to fit on fewer devices. @Tbl-quantization-serving-cost isolates the effect of GPU count by assuming equal per-GPU prices and the same completed token rate across three configurations. Under that contract, reducing the number of billed GPUs reduces cost proportionally. The calculation does not establish that the smaller replicas sustain the same rate or meet the same quality and latency targets:
 
@@ -4946,7 +4818,7 @@ class HardwareSetupSharding:
 
 ### Memory and latency triggers for model sharding {#sec-inference-scale-sharding-becomes-necessary-81d4}
 
-Model sharding for inference addresses memory capacity and execution latency through different mechanisms. @Tbl-sharding-triggers identifies the constraints that motivate each candidate strategy; the timing analysis determines whether parallel execution repays its communication cost.
+Model sharding answers the memory and latency rows of @tbl-distribution-triggers through different mechanisms, and the timing analysis below determines whether parallel execution repays its communication cost.
 
 The first driver is memory capacity. If the selected representation must remain in accelerator memory but does not fit on one device, the replica needs multiple devices. For a model with $\Parameters$ parameters at precision $\NumericBitWidth$ bits, @eq-weight-memory gives the weight payload before metadata and runtime state:
 
@@ -4964,18 +4836,9 @@ $$\DistributedStepTime(\DeviceCount) = \frac{\IronLawComputeTime}{\DeviceCount} 
 
 where $\DeviceCount$ is the number of devices in the sharding group, $\CommunicationTime(\DeviceCount)$ is the communication overhead, $\SynchronizationTime(\DeviceCount)$ is synchronization overhead, and $\OverlappedTime$ is communication hidden behind useful compute. In the common no-overlap simplification with negligible extra synchronization, this reduces to $\IronLawComputeTime/\DeviceCount+ \CommunicationTime(\DeviceCount)$. Sharding provides latency benefit only when the nonoverlapped overhead is smaller than the time saved through parallelization.
 
-| **Sharding Trigger**    | **Capacity or timing contract**                                         | **Candidate strategy**    |
-|:------------------------|:------------------------------------------------------------------------|:--------------------------|
-| **Memory (weights)**    | FP16 weight bytes plus runtime state exceed one device                  | Tensor or pipeline        |
-| **Memory (KV cache)**   | Context, concurrency, KV heads, and precision exceed cache budget       | Tensor/cache partitioning |
-| **Memory (embeddings)** | Resident table state exceeds one storage/serving shard                  | Embedding sharding        |
-| **Latency**             | Parallel compute savings exceed added communication and synchronization | Tensor parallelism        |
-
-: **Sharding triggers**: Minimum degree follows from the actual state representation, per-device capacity, and workload. A model family name alone does not determine the required number of shards. {#tbl-sharding-triggers}
-
 ### Tensor parallelism {#sec-inference-scale-tensor-parallelism-b29f}
 
-Tensor parallelism\index{Tensor Parallelism!inference} [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning\index{Tensor Parallelism!column-row partitioning} scheme introduced for training applies here: splitting the first feed-forward linear layer by columns and the second by rows requires one AllReduce for that feed-forward sublayer. The attention output requires another, giving two AllReduce operations per transformer block in the scheme analyzed here. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
+Tensor parallelism\index{Tensor Parallelism!inference} [@shoeybi2019megatron] splits each layer across devices with the column-row partitioning\index{Tensor Parallelism!column-row partitioning} developed for training, which keeps the activation between paired linear layers local and costs two AllReduce operations per transformer block, one after attention and one after the feed-forward sublayer.
 
 ::: {.column-margin .margin-pointer}
 ↩ Column-row tensor partitioning and its two AllReduce operations per transformer block are established in @sec-distributed-training-systems-systems-tensor-parallelism-d76e.
@@ -4985,11 +4848,7 @@ The multi-head attention computation naturally partitions across attention heads
 
 $$\text{Attention}_i = \text{softmax}\left(\frac{\AttentionQueryMatrix_i \AttentionKeyMatrix_i^T}{\sqrt{\AttentionHeadDimension}}\right) \AttentionValuesMatrix_i \text{ for heads } \AttentionHeadIndex\in \{1, \dots, \AttentionHeadCount/\TensorParallelDegree\}$$
 
-Each device applies its shard of the attention output projection to its local heads. An AllReduce operation\index{AllReduce!tensor parallelism synchronization} then sums those projected partial outputs across devices. The reduction combines contributions to the same output coordinates, rather than summing unrelated head outputs directly. Its latency includes collective startup and coordination as well as payload transfer over the interconnect.
-
-The feed-forward layer (typically two linear transformations with activation) partitions along the hidden dimension, with the first linear layer split by columns and the second by rows, so the activation between them never leaves its device.
-
-The communication pattern for tensor-parallel inference follows a two-phase synchronization per layer. @Fig-tensor-parallel-flow diagrams this execution flow across two GPU ranks, isolating how column-row GEMM decompositions confine cross-device synchronization to two AllReduce barriers over NVLink, one after the multi-head attention projection and one after the feed-forward layer.
+Each device applies its shard of the attention output projection to its local heads, and an AllReduce\index{AllReduce!tensor parallelism synchronization} sums the projected partial outputs; its latency includes collective startup and coordination as well as payload transfer. @Fig-tensor-parallel-flow traces the resulting two synchronization points per layer across two GPU ranks.
 
 ::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism for inference**: Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This partition can reduce latency when saved compute exceeds communication cost. The illustrated two-collective layer uses a fast local interconnect; its NVLink label is aggregate bidirectional bandwidth, not the per-direction transfer rate." fig-alt="Two columns labeled GPU 0 and GPU 1, separated by a dashed divider. In the attention stage, each GPU shows eight head tiles: GPU 0 holds the first four as solid tiles and draws the other four dashed, and GPU 1 holds the second four. From the bottom of each GPU's solid head tiles, labeled first or second half of heads, an amber arrow carries a partial output down into an AllReduce over NVLink bar. In the feed-forward stage, each GPU draws the matrix W1 split down the middle into columns, with its own column slice solid and the other dashed, labeled column slice of W1 plus activation. The matrix W2 is split across the middle into rows, with GPU 0 holding the top rows and GPU 1 the bottom rows, labeled row slice of W2 partial sum; on each GPU a blue arrow marked no communication runs from its column slice of W1 to the row slice of W2 it holds, GPU 1's arrow routing around the dashed top rows to enter its bottom rows from the side. Both partial sums feed a second AllReduce bar that leads to the next layer. A key reads held on this GPU for solid tiles and held on the other GPU for dashed tiles."}
 
@@ -5001,7 +4860,7 @@ The inference time with tensor parallelism follows @eq-tensor-parallel-time:
 
 $$\TensorParallelLayerTime= \frac{\IronLawComputeTime}{\TensorParallelDegree} + 2 \times \AllReduceCompletionTime(\CollectivePayloadSize)$$ {#eq-tensor-parallel-time}
 
-@Eq-tensor-parallel-time is the per-layer instance of @eq-parallel-time. Here $\IronLawComputeTime$ is the sequential compute time of one layer rather than of the whole request, $\TensorParallelDegree$ is the tensor-parallel degree, and $\CollectivePayloadSize$ is the full activation payload contributed by each rank to each AllReduce (the message size $\CollectivePayloadSize$ of the ring AllReduce cost model derived in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce and recalled with the other collective costs in @sec-inference-scale-communication-overhead-analysis-c1cf). Compute is ideally divided across ranks; the partial activation output still has the full reduced shape, (tokens in the step) $\times$ (hidden width) $\times$ (bytes per element). The factor of 2 accounts for the two AllReduce operations per transformer layer (attention and feed-forward).
+@Eq-tensor-parallel-time is the per-layer instance of @eq-parallel-time, with $\IronLawComputeTime$ now the sequential compute time of one layer and $\CollectivePayloadSize$ the full activation payload each rank contributes to each AllReduce, priced by the ring cost model of @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce. Compute divides ideally across ranks, but the reduced activation keeps its full shape, (tokens in the step) $\times$ (hidden width) $\times$ (bytes per element), and the factor of 2 counts the attention and feed-forward collectives.
 
 ::: {.column-margin .margin-pointer}
 ↩ Hiding tensor-parallel collectives behind compute on one node, and what that overlap can and cannot recover, is established in @sec-performance-engineering-overlap.
@@ -5336,7 +5195,7 @@ For a single request, pipeline staging does not parallelize the dependent layers
 
 Pipeline parallelism instead scales throughput\index{Pipeline Parallelism!throughput scaling} by sustaining multiple concurrent requests across execution stages, as tracked in the steady-state schedule of @fig-pipeline-bubbles(b). Once the pipeline reaches saturation, throughput is limited by the slowest stage. For $\PipelineParallelDegree$ balanced stages with negligible transfer overhead, this is $\PipelineParallelDegree$ times the throughput of executing the whole model sequentially on one device, not $\PipelineParallelDegree$ times a single stage's throughput. An individual request still traverses every stage, so its execution latency remains approximately the sum of the stage times.
 
-Pipeline parallelism is particularly appropriate for inference when memory constraints require sharding across devices but latency targets are relaxed, when aggregate throughput matters more than individual request latency, or when inter-device network bandwidth is limited to point-to-point communication rather than high-speed AllReduce fabrics.
+Pipeline parallelism therefore suits inference when memory forces sharding but latency targets are relaxed, when aggregate throughput matters more than individual request latency, or when the interconnect handles point-to-point transfers better than fast AllReduce.
 
 @Tbl-pipeline-tensor-comparison captures the trade-offs between these two sharding approaches:
 
@@ -5350,13 +5209,11 @@ Pipeline parallelism is particularly appropriate for inference when memory const
 
 : **Pipeline vs. tensor parallelism**: Key trade-offs between layer-internal tensor splitting (can reduce single-request latency when compute savings exceed collective cost) and inter-layer pipeline staging (overlaps concurrent requests but introduces pipeline bubbles). Throughput is relative to sequential execution of the whole model on one device; per-layer AllReduces keep tensor parallelism below the $\TensorParallelDegree\times$ ideal, and balanced, full pipelines approach $\PipelineParallelDegree\times$. {#tbl-pipeline-tensor-comparison}
 
-The decision starts with capacity feasibility, then compares latency and throughput on the available topology. Tensor parallelism can shorten layer execution when that saving exceeds its collective cost. Pipeline parallelism distributes resident layers with transfers between stages, but needs concurrent work and balanced stage times for high throughput. Neither a fast interconnect nor a relaxed deadline alone establishes the best choice; the request mix and measured execution costs determine the useful partition.
+The decision starts with capacity feasibility and then compares latency and throughput on the available topology. Neither a fast interconnect nor a relaxed deadline alone establishes the best choice; the request mix and measured execution costs determine the useful partition.
 
 ### Expert parallelism for MoE models {#sec-inference-scale-expert-parallelism-moe-models-55f6}
 
-Mixture-of-experts (MoE)\index{MoE!mixture-of-experts architecture} models, such as DeepSeek-V3 or Mixtral, introduce unique serving challenges beyond those of dense models. In an MoE transformer layer, the feed-forward network is replaced by multiple parallel "expert" sub-networks and a lightweight router that selects a subset of experts for each token.
-
-With fixed expert dimensions and a fixed number selected per token, adding experts grows total parameter capacity without proportionally increasing expert arithmetic per token. Routing, shared layers, and communication still contribute work. Expert parallelism\index{Expert Parallelism} places different experts on different GPUs to distribute their storage and execution. It is a placement choice when the model and workload require multiple devices, rather than an intrinsic requirement of every MoE model.
+Mixture-of-experts (MoE)\index{MoE!mixture-of-experts architecture} models such as DeepSeek-V3 and Mixtral replace each feed-forward network with parallel expert sub-networks and a lightweight router that selects a few experts per token, so adding experts grows parameter capacity without proportionally growing expert arithmetic per token. Routing, shared layers, and communication still add work. Expert parallelism\index{Expert Parallelism} places different experts on different GPUs to distribute their storage and execution, a placement choice when the model and workload require multiple devices rather than an intrinsic requirement of every MoE model.
 
 #### MoE economics and capacity planning {#sec-inference-scale-moe-economics}
 
@@ -5520,15 +5377,17 @@ An even expert placement assigns each device $\ExpertCount/\DeviceCount$ experts
 
 :::
 
-The communication pattern differs from tensor parallelism. AllReduce delivers a combined reduction result (*same data to all devices*) and maps onto ring or tree schedules whose per-link traffic is fixed by the message size. Expert parallelism instead uses AllToAll\index{All-to-All!expert parallelism} to deliver routed token representations (*different data to different devices* based on routing), so the bytes each link and receiver carries depend on which experts the router selects; the host of a popular expert can become an incast point for many senders. If some experts receive more work, their hosts can determine completion time while less-loaded hosts wait. Balancing the number of stored experts does not guarantee balanced token traffic.
+The communication pattern differs from tensor parallelism. AllReduce delivers one combined result to every device, so per-link traffic is fixed by the message size. Expert parallelism uses AllToAll\index{All-to-All!expert parallelism} to deliver different routed tokens to different devices, so link and receiver load depend on the router's choices, and the host of a popular expert becomes an incast point whose completion time the other hosts wait on. Balancing the number of stored experts does not balance token traffic.
 
-Training and serving offer different controls over this imbalance. An auxiliary loss\index{Auxiliary Loss} can encourage more balanced expert use during training without guaranteeing balance on future traffic. An expert capacity factor\index{Capacity Factor} limits accepted tokens relative to an even allocation; 1.25$\times$ is an illustrative setting, not a universal requirement. Dropping excess work or rerouting it to another expert changes the model computation and requires quality validation. Expert buffering\index{Expert Buffering} instead retains excess work for later execution, spending latency and queue capacity. These controls trade quality, waiting, and utilization rather than guaranteeing that routing remains balanced.
+Serving inherits training's balance controls without their guarantees. The auxiliary balancing loss\index{Auxiliary Loss} shapes routing on training data, not on future traffic. The expert capacity factor\index{Capacity Factor} caps accepted tokens per expert (1.25$\times$ is an illustrative setting), leaving the server to decide what happens to the excess. Dropping or rerouting it changes the model computation and needs quality validation, while expert buffering\index{Expert Buffering} retains it at the cost of latency and queue capacity.
+
+::: {.column-margin .margin-pointer}
+↩ The capacity factor, the auxiliary load-balancing loss, and the hot-expert skew they bound during training are established in @sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45.
+:::
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
-Router behavior affects both system performance and model quality. Expert collapse\index{Expert collapse!routing failure} concentrates training traffic on a small subset of experts, leaving other experts undertrained despite their storage cost. Unstable assignments can also hinder specialization. At serving time, a changed input distribution can alter expert popularity and create hotspots without any change to the stored model. Token dropping\index{Token dropping!capacity factor overflow} skips selected expert work when a capacity limit is exceeded; in implementations that retain only the residual path for dropped assignments, the resulting computation differs from the uncapped model. Its quality impact must be evaluated along with any throughput improvement.
-
-These failure modes follow from the basic MoE serving trade-off:[^fn-moe-expert-serving] computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
+Router behavior affects both system performance and model quality. Expert collapse\index{Expert collapse!routing failure} during training concentrates traffic on a few experts, and at serving time a shifted input distribution can create hotspots without any change to the stored model. Token dropping\index{Token dropping!capacity factor overflow} under a capacity limit makes the computation differ from the uncapped model, so its quality impact must be evaluated together with any throughput gain. Because routing selects experts dynamically,[^fn-moe-expert-serving] the routing pattern becomes a systems workload rather than only a model-internal choice.
 
 [^fn-moe-expert-serving]: **MoE (Mixture-of-Experts) Serving Trade-Off**\index{MoE!serving}: Only a subset of experts activates per token (`{python} MoEEconomics.mixtral_active_experts_str` of `{python} MoEEconomics.mixtral_experts_str` in Mixtral, `{python} MoEEconomics.deepseek_active_experts_str` of `{python} MoEEconomics.deepseek_experts_str` routed experts in DeepSeek-V3). Keeping all weights accelerator-resident gives a total-to-active weight ratio of roughly `{python} MoEEconomics.mixtral_resident_mult_str` (Mixtral) to `{python} MoEEconomics.deepseek_resident_mult_str` (DeepSeek-V3). Expert parallelism distributes that storage while adding token-routing communication; offloading is an alternative that trades resident capacity for weight transfers.
 
@@ -5692,7 +5551,7 @@ The tier percentages below describe the admitted resident population, not the fu
 - **Warm embeddings** (next `{python} MetaEmbeddingScaleCheck.warm_pct_str`): Column-sharded with `{python} MetaEmbeddingScaleCheck.tp_parallelism_str`-way parallelism
 - **Cold embeddings** (remaining `{python} MetaEmbeddingScaleCheck.cold_pct_str`): Row-sharded with consistent hashing
 
-Each inference request requires approximately `{python} MetaEmbeddingScaleCheck.lookups_per_request_str` embedding lookups. A deliberately naive sequential implementation would issue one RPC per lookup; the batched design instead applies several optimizations. Batch accumulation collects lookups for 1 ms. Lookup deduplication removes duplicate entities across requests. Shard-aware batching groups lookups by destination shard. Parallel dispatch sends batched requests to all shards simultaneously. Streaming assembly reconstructs embeddings as responses arrive.
+Each inference request requires approximately `{python} MetaEmbeddingScaleCheck.lookups_per_request_str` embedding lookups. Instead of one RPC per lookup, the batched design accumulates lookups for 1 ms, deduplicates entities across requests, groups lookups by destination shard, dispatches to all shards in parallel, and assembles embeddings as responses arrive.
 
 Illustrative before-and-after assumptions for sequential dispatch versus parallel shard batching appear in @tbl-inference-meta-embedding-perf:
 
@@ -5753,7 +5612,7 @@ The practical speedup from sharding depends critically on communication efficien
 
 $$\AllReduceCompletionTime\approx 2(\DeviceCount-1)\MessageStartupLatency+ \frac{2(\DeviceCount-1)}{\DeviceCount} \times \frac{\CollectivePayloadSize}{\LinkBandwidth}$$ {#eq-allreduce-time}
 
-where $\DeviceCount$ is the number of devices, $\CollectivePayloadSize$ is the collective payload size, $\MessageStartupLatency$ is startup latency, and $\LinkBandwidth$ is the interconnect bandwidth. The factor of 2 accounts for the ReduceScatter and AllGather phases. @Sec-communication-collective-operations-collective-operations-ring-allreduce-ffce derives this ring-AllReduce cost from its two-phase schedule and shows its bandwidth-optimal $2(\DeviceCount-1)/\DeviceCount$ scaling, showing that the per-rank bandwidth volume approaches a constant multiple of the payload while the ring startup term still grows with device count.
+where $\DeviceCount$ is the number of devices, $\CollectivePayloadSize$ the collective payload, $\MessageStartupLatency$ startup latency, and $\LinkBandwidth$ interconnect bandwidth. The factor of 2 covers the ReduceScatter and AllGather phases derived in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, whose per-rank volume approaches a constant multiple of the payload while the startup term still grows with device count.
 
 @Eq-p2p-time expresses the simpler point-to-point communication for pipeline parallelism, where data flows from one device to the next.
 
@@ -5891,10 +5750,6 @@ Communication overhead depends heavily on the interconnect technology. @Tbl-infe
 
 The table isolates bandwidth cost, and against a 30 ms prefill layer even commodity Ethernet looks affordable. Two omissions reverse that impression. First, the startup and synchronization terms are absent. The `{python} TpSpeedupCalc.allreduce_tp_ms_str` per collective assumed in example \ref{exmp-inference-tensor-parallelism-llama-70b} is an order of magnitude above the bandwidth-only NVLink time here, so if that assumption holds, nearly all of it comes from startup, synchronization, and launch costs rather than transfer. Second, decode divides a much smaller per-layer compute time across the group while still paying two collectives per layer for every generated token. In that regime the fixed per-collective latency in @tbl-inference-interconnect-specs, not bandwidth, sets the overhead share, and that decode regime is why tensor-parallel groups are normally kept inside one NVLink domain.
 
-Each NVLink generation[^fn-nvlink-bandwidth-inf] has raised this intra-node ceiling.
-
-[^fn-nvlink-bandwidth-inf]: **NVLink and tensor-parallel overhead**\index{NVLink!tensor-parallel overhead}: A faster NVLink generation raises the local communication ceiling, but the realized tensor-parallel overhead still depends on message size, collective implementation, topology, and how much computation can overlap the transfer.
-
 ### Sharding strategy selection {#sec-inference-scale-sharding-strategy-selection-f69c}
 
 The choice of sharding strategy depends on model architecture and deployment priorities. @Tbl-sharding-selection evaluates each approach across four critical factors:
@@ -5963,15 +5818,17 @@ Archetype B (DLRM at Scale) uses `{python} ArchetypeBTailAtScale.p99_slo_math` a
 
 :::
 
+::: {.column-margin .margin-pointer}
+↩ Fan-out amplification, in which one slow server among many makes most request sets slow, and the hedged requests that cut it are established in @sec-storage-tier3-pfs.
+:::
+
 ### Load balancing principles {#sec-inference-scale-load-balancing-principles-63ec}
 
-Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
-
-Evaluation therefore requires complementary signals for latency and fleet balance. Queue lengths reveal accumulated requests, but service times and scheduling order determine how long those requests wait. Estimated work per replica and its variance are more informative when request costs differ. Utilization spread reveals idle and saturated replicas, while decision overhead measures the cost of computing the routing choice. These signals must be evaluated alongside completed-request tail latency and admission outcomes; balanced counts alone do not establish a healthy service.
+Load balancing serves two goals that can conflict: sending each request to the replica that can serve it fastest, and spreading load so that no replica idles or saturates. Latency-optimal routing can concentrate load on fast replicas until they slow down. Evaluation therefore needs signals for both goals, queue length and estimated remaining work per replica for latency and utilization spread for balance, together with the decision overhead of the routing choice, all judged against completed-request tail latency and admission outcomes rather than balanced request counts.
 
 ### Round-robin and random assignment {#sec-inference-scale-roundrobin-random-assignment-f374}
 
-The simplest load-balancing strategies assign requests without considering server state. Round-robin\index{Round-robin load balancing} sends request 1 to server 1, request 2 to server 2, and so on, which gives perfect distribution only when servers are homogeneous and request processing times are identical. Random assignment\index{Random assignment!load balancing} selects a server uniformly at random for each request; with many requests it converges to an even mean distribution, but its variance is higher than round-robin. Both strategies are reasonable baselines for identical servers, yet production serving rarely satisfies that assumption. Heterogeneous GPU generations, different memory configurations, variable request sizes, warmup behavior, and replicas nearing memory limits all make the state of the server fleet matter.
+The simplest load-balancing strategies assign requests without considering server state. Round-robin\index{Round-robin load balancing} cycles through the servers in order, which distributes work perfectly only when servers are homogeneous and processing times identical, and random assignment\index{Random assignment!load balancing} picks a server uniformly, converging to an even mean with higher variance. Both are reasonable baselines for identical servers, but heterogeneous GPU generations, variable request sizes, warmup behavior, and replicas nearing memory limits make the state of the server fleet matter in production.
 
 A static placement model isolates the imbalance caused by random choice: place $\ReplicaCount$ equal-size jobs sequentially into $\ReplicaCount$ initially empty bins, without departures. With uniform independent choices, the expected maximum bin occupancy follows the classical balls-into-bins\index{Balls-into-bins!queue length bound} result [@mitzenmacher2001] in @eq-random-max-queue:
 
@@ -6159,16 +6016,6 @@ where $\HashRingServerSet$ is the set of servers mapped onto the ring, and each 
 
 For fixed ring membership, consistent hashing sends the same key to the same server. Membership changes affect only part of the ring. With balanced equal-capacity assignments and uniformly distributed keys, adding a server moves an expected $1/(\HashRingServerCount+1)$ fraction of keys, while removing one affects its expected $1/\HashRingServerCount$ share. Virtual nodes help smooth uneven ranges, but popular keys can still concentrate traffic even when key counts are balanced. For session-cached LLM serving, affinity increases the chance of reaching reusable state. That benefit must outweigh additional waiting; overload routing, failure, eviction, and remapping can still require repeated prefill.
 
-::: {#exmp-inference-consistent-hashing-kv-cache-affinity .callout-example title="Consistent hashing for KV cache affinity"}
-
-**Scenario**: A multi-turn LLM chat service routes user queries across a cluster of inference replicas without session affinity.
-
-**Diagnosis**: A subsequent turn sent to a replica without compatible cached history must repeat prefill for the uncached prefix. Routing without affinity increases that risk but does not force a miss on every turn. With fixed membership, consistent hashing maps a user ID to the same replica and preserves unaffected mappings when membership changes. Retaining valid cached state on that replica is a separate requirement.
-
-**Systems lesson**: Consistent hashing improves KV-cache locality across multi-turn sessions without requiring a full key remap during scaling. It reduces redundant prefill when the preferred replica remains healthy and timely, but overload routing, eviction, failure, and the remapped fraction still require cache transfer or reconstruction.
-
-:::
-
 The same stateful routing machinery becomes a correctness boundary when cached state is user-specific.
 
 ::: {#ws-inference-openai-redis-client-bug .callout-war-story title="When cache state crossed users (2023)"}
@@ -6185,11 +6032,15 @@ The same stateful routing machinery becomes a correctness boundary when cached s
 
 :::
 
+::: {.column-margin .margin-pointer}
+↪ Shared prefix caches as a cross-tenant leakage channel, and the tenant-scoped caches that close it, are developed in @sec-security-privacy-shared-accelerators.
+:::
+
 ### Request routing for sharded models {#sec-inference-scale-request-routing-sharded-models-6432}
 
-A sharded replica is one routing destination even though several devices execute the request. The external router selects the shard group; the group's execution plan determines the internal communication established in @sec-inference-scale-model-sharding-inference-82b3. A tensor-parallel group runs every layer on all of its devices and joins their partial results with AllReduce (@fig-tensor-parallel-flow), presenting one destination whose latency already includes those collectives. Pipeline groups instead admit requests at the first stage and forward activations along the fixed stage sequence diagrammed in @fig-pipeline-bubbles; the router must account for the group's service capacity rather than treat each stage as an independent replica. In expert-parallel architectures, the gating network in @fig-moe-routing routes tokens dynamically across internal expert destinations after the external router has selected the replica, so expert imbalance and replica imbalance require different controls.
+A sharded replica is one routing destination even though several devices execute the request. A tensor-parallel group presents one destination whose latency already includes its per-layer collectives (@fig-tensor-parallel-flow). A pipeline group admits requests at its first stage (@fig-pipeline-bubbles), so the router must account for the group's service capacity rather than treat each stage as a replica. In expert-parallel architectures, the gating network of @fig-moe-routing routes tokens across internal expert destinations after the external router has chosen the replica, so expert imbalance and replica imbalance require different controls.
 
-@Fig-shard-group-scaling diagrams this two-tier scaling topology: an external load balancer distributes incoming queries across independent multi-GPU shard groups using round-robin, two-choice, or session-affinity policies, while intra-node NVLink AllReduce synchronization remains strictly encapsulated within each replica node.
+@Fig-shard-group-scaling shows the resulting two-tier topology, in which the external load balancer sees each shard group as one destination and the group's NVLink collectives stay inside it.
 
 ::: {#fig-shard-group-scaling fig-env="figure" fig-pos="htb" fig-cap="**Horizontal scaling with shard groups**: The load balancer treats each shard group as a single logical inference server and chooses among groups by round-robin, two-choice, or session-affinity routing. Within a group, eight GPUs hold the tensor-parallel weight shards and join partial results with an NVLink AllReduce inside every layer, which the router never sees. Adding ready groups raises aggregate capacity; the group's internal parallelism affects per-request latency." fig-alt="Requests 1, 2, through N feed a violet Load balancer box listing round-robin, two-choice, or session affinity. One arrow per group fans out to Shard group 0, drawn in full detail, and to lighter dashed outlines for Shard groups 1 through N. Shard group 0, labeled one replica, TP = 8, one node, shows eight numbered GPU tiles, each attached by a short link to an amber ring labeled NVLink AllReduce every layer; the other groups repeat the same ring in miniature. Beneath group 0 a note reads TP inside the group sets latency, and an arrow beneath the other groups reads add groups: more aggregate throughput."}
 ![](images/svg/shard-group-scaling.svg)
@@ -6463,15 +6314,7 @@ The shard group boundary also defines readiness. A group can accept work only wh
 
 ### Health checking and failover {#sec-inference-scale-health-checking-failover-070e}
 
-Load balancers can route around failure only if the health signal\index{Health checking!failover detection} matches the failure mode. Health checks separate liveness, readiness, and inference correctness. On an accelerator replica, each tier must test a different part of the serving state, because a process that is alive may still be unusable when its weights are not loaded, its memory pool is exhausted, or its first request will trigger a long warmup. The probes therefore escalate from cheapest to most realistic:
-
-```
-GET  /health/live       -> 200 (process alive) or timeout (process dead)
-GET  /health/ready      -> 200 (weights loaded, device initialized) or 503
-POST /health/inference  -> 200 with valid output for a fixed test prompt, or error
-```
-
-Readiness checks can detect unloaded weights, incomplete warmup, or insufficient admission capacity even while the process remains alive. An inference probe additionally exercises the execution path and can compare a fixed prompt's output or logits against expected bounds. Passing that probe does not establish correctness or capacity for every request shape, so production errors and latency remain necessary health signals. Failover then depends on the detected failure, available replacement capacity, and whether affected KV state can be transferred or must be reconstructed.
+Load balancers can route around failure only if the health signal\index{Health checking!failover detection} matches the failure mode. The three probe tiers (liveness, readiness, and inference correctness) escalate from cheapest to most realistic. On an accelerator replica, each tier must test a different part of the serving state, because a process that is alive may still be unusable when its weights are not loaded, its memory pool is exhausted, or its first request will trigger a long warmup. Readiness on a serving replica therefore includes admission capacity as well as loaded weights and completed warmup, and an inference probe can compare a fixed prompt's output or logits against expected bounds. Passing that probe does not establish correctness or capacity for every request shape, so production errors and latency remain necessary health signals. Failover then depends on the detected failure, available replacement capacity, and whether affected KV state can be transferred or must be reconstructed.
 
 ::: {.column-margin .margin-pointer}
 ↩ Liveness, readiness, and inference-correctness probes, the failover time their settings bound, and stateful failover are established in @sec-fault-tolerance-reliability-reliability-failover-mechanisms-5ddd.
@@ -6663,9 +6506,7 @@ The priority-aware scheduling listed among the serving dimensions (@sec-inferenc
 
 : **Priority scheduling classes**: Three-tier priority hierarchy for multi-tenant inference. Critical traffic gets 100 percent reserved capacity and can preempt any lower class; standard traffic shares capacity proportionally and can preempt best-effort; best-effort runs on leftover capacity with no guarantees. {#tbl-priority-scheduling-classes}
 
-The scheduler sorts incoming requests by priority class, then by arrival time within each class. When a new critical request arrives, it jumps ahead of all standard and best-effort requests in the queue, so revenue-generating traffic does not queue behind background batch jobs, although work already running on the accelerator can still delay it.
-
-Preemption extends this principle to requests already in flight, but priority does not make state movement free. The retain, swap, recompute, or reject choice of @sec-inference-scale-vllm-architecture-9b84 still decides how a displaced request's KV state is handled; priority adds an input to that choice rather than replacing it. A priority class determines who may be displaced, while remaining service time, state size, and deadline slack determine which victim is cheapest. Ignoring those costs lets aggressive preemption consume more capacity than it releases.
+Preemption extends priority to requests already in flight, but priority does not make state movement free. The retain, swap, recompute, or reject choice of @sec-inference-scale-vllm-architecture-9b84 still decides how a displaced request's KV state is handled; priority adds an input to that choice rather than replacing it. A priority class determines who may be displaced, while remaining service time, state size, and deadline slack determine which victim is cheapest. Ignoring those costs lets aggressive preemption consume more capacity than it releases.
 
 ### Bulkhead pattern {#sec-inference-scale-bulkhead-pattern-1c3a}
 
@@ -6681,11 +6522,7 @@ Dedicated replicas separate more resources than request limits inside one proces
 
 :::
 
-Deployment-level bulkheads isolate the named compute and memory resources for premium tenants. They do not remove shared network, storage, power, or control-plane failure domains. The trade-off is lower pooling efficiency and additional operational overhead from dedicated infrastructure.
-
-Request-level bulkheads limit work admitted within a shared process. Example caps of 8,000 input tokens, 2,000 output tokens, and 30 seconds of execution constrain request size and duration when the scheduler enforces them. They still need concurrency limits, resource reservations, and cancellation handling; a token cap alone does not bound interference or isolate a process crash.
-
-Crash containment follows the process or hardware boundary, not the request quota. A malformed request that crashes a shared worker can interrupt every tenant using that worker. Service tiers requiring stronger fault isolation therefore need placement boundaries that match that requirement.
+Deployment-level bulkheads cost pooling efficiency and the operational overhead of dedicated infrastructure. Request-level bulkheads are cheaper but weaker. Caps such as 8,000 input tokens, 2,000 output tokens, and 30 seconds of execution bound request size and duration when the scheduler enforces them, but they still need concurrency limits, reservations, and cancellation handling, and they cannot contain a crash. A malformed request that crashes a shared worker interrupts every tenant on that worker, so service tiers that require stronger fault isolation need placement boundaries to match.
 
 ::: {#exmp-inference-bulkhead-configuration-api-tiers .callout-example title="Bulkhead configuration for API tiers"}
 
@@ -6711,7 +6548,7 @@ For a conventional fixed-cost model, queueing delay and request rate per ready r
 
 Scale-up and scale-down require asymmetric evidence. Scale-up acts on sustained queue growth, forecast demand, or declining deadline slack because cold-start delay makes late reactions expensive. Scale-down requires low demand over a longer window, enough spare capacity to survive one replica failure, and a drain plan for in-flight requests and any optional session cache. This hysteresis\index{Autoscaling!hysteresis} prevents oscillation in which replicas repeatedly load large weights, accept work, and terminate before amortizing startup cost.
 
-The controller also needs observability that distinguishes demand from impaired supply. Request rate, input and output tokens, queue age, TTFT, TPOT, deadline misses, admission rejections, ready replicas, model-load failures, and per-phase service rate form the minimum feedback set. Without replica readiness and service-rate measurements, an autoscaler can respond to a sick replica by adding cold replicas indefinitely while the original failure remains hidden.
+The controller also needs observability that distinguishes demand from impaired supply: the per-request serving trace of @sec-inference-scale-circuit-breakers-backpressure-e61c, plus ready replicas, model-load failures, and per-phase service rate. Without readiness and service-rate measurements, an autoscaler can respond to a sick replica by adding cold replicas indefinitely while the original failure remains hidden.
 
 ```{python}
 #| echo: false
@@ -6943,7 +6780,7 @@ async def handle_spot_termination():
 
 :::
 
-The gateway in @fig-spot-aware-routing separates traffic by its tolerance for capacity revocation. SLO-critical work uses the non-spot pool, while eligible best-effort work can use interruptible capacity. Routing still depends on readiness and available headroom. An eviction notice triggers draining when time permits; requests that cannot finish need a permitted retry, reconstruction, or rejection path.
+The gateway in @fig-spot-aware-routing separates traffic by its tolerance for capacity revocation, and an eviction notice triggers draining when time permits; requests that cannot finish need a permitted retry, reconstruction, or rejection path.
 
 ::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-aware traffic distribution**: The gateway classifies requests by SLO and routes 70 percent of traffic, the SLO-critical share, to on-demand replicas that face no spot reclamation, and 30 percent, the best-effort share, to discounted spot replicas that can be preempted. When a spot worker receives an eviction notice, the gateway stops routing to it while it drains, and best-effort requests tolerate occasional retries. The traffic split is illustrative; cost savings depend on provisioned capacity, discounts, retries, and idle headroom." fig-alt="A Requests box, tagged with an SLO class, feeds a violet Spot-aware gateway box that classifies SLO, watches preemption, and drains. Below it, traffic leaves the gateway as pale gray lanes, each from its own exit point along the gateway's lower edge and ending in an arrowhead at a worker, with combined width proportional to each share. Three wider lanes labeled SLO-critical (70%) fan out to the three reserved workers, 0 to 2, of an On-demand pool with no spot reclamation. Two thinner lanes labeled best-effort (30%) reach spot workers 3 and 4 of a dashed Spot pool, discounted and preemptible; Worker 5, drawn red and dashed and marked draining, receives no lane. A red dashed arrow labeled eviction notice runs from Worker 5 back to the gateway."}
 ![](images/svg/spot-aware-routing.svg)
@@ -7790,7 +7627,7 @@ In @fig-global-inference-multiregion, a global load balancer\index{Global load b
 
 :::
 
-The illustrative RTT comparison shows why nearby replicas can reduce network delay, but actual savings depend on the measured user-to-region paths. Replication also creates a version-management obligation. Push-based synchronization sends artifacts to each region, while pull-based synchronization lets regions fetch them after notification or polling. Neither mechanism alone guarantees consistent serving versions. Artifact verification, readiness gates, and coordinated activation determine when a region may serve the new version; hybrid synchronization combines push notification with pull verification.
+Replication also creates a version-management obligation. Push-based synchronization sends artifacts to each region, while pull-based synchronization lets regions fetch them after notification or polling. Neither mechanism alone guarantees consistent serving versions. Artifact verification, readiness gates, and coordinated activation determine when a region may serve the new version; hybrid synchronization combines push notification with pull verification.
 
 During a rollout, regions may serve different versions. The application must decide whether that is acceptable and whether a request or session needs version pinning. A region-by-region canary deployment\index{Canary deployment!global rollout} limits initial exposure to a small traffic share, such as 1 percent. Its observation window follows the required sample count, traffic diversity, and release criteria, not a fixed number of hours. At a 1 percent share, a region must route enough requests through the canary to detect the regressions its gates test for. Each expansion needs its own error-rate, latency, and quality gate, with compatible prior artifacts retained for rollback.
 
@@ -8084,9 +7921,7 @@ These four design cases are illustrative composites rather than descriptions of 
 
 ### Embedding-heavy recommendation serving {#sec-inference-scale-meta-recommendation-serving-bede}
 
-An embedding-heavy recommendation service\index{Recommendation system!embedding-heavy serving case} binds on sparse lookup rather than dense forward-pass compute. This scenario models feeds, advertising, and content ranking with a large distributed embedding store.
-
-The operational scale explains why embedding locality dominates the architecture: the service processes billions of requests per day under a p99 budget below $10\text{ ms}$ for the ranking service, nested inside the roughly `{python} ArchetypeBTailAtScale.p99_slo_ms_str` end-to-end tail target of Archetype B (DLRM at Scale), spanning hundreds of distinct model variants over an entity catalog comprising trillions of unique sparse features.
+An embedding-heavy recommendation service\index{Recommendation system!embedding-heavy serving case} binds on sparse lookup rather than dense forward-pass compute. Modeled on feeds, advertising, and content ranking, it processes billions of requests per day under a p99 budget below $10\text{ ms}$ for the ranking service, nested inside the roughly `{python} ArchetypeBTailAtScale.p99_slo_ms_str` end-to-end tail target of Archetype B (DLRM at Scale), across hundreds of model variants and trillions of unique sparse features.
 
 The serving stack separates sparse lookup from dense ranking:
 
@@ -8113,9 +7948,7 @@ The serving lesson is that recommendation latency is often dominated by embeddin
 
 ### A multi-model generation API {#sec-inference-scale-openai-api-infrastructure-a65e}
 
-A multi-model generation API\index{Generation API!serving case} binds on request variance: short prompts, long-context requests, and different model sizes share capacity while users expect predictable TTFT. The infrastructure serves GPT-class models to large developer and application workloads while maintaining quality of service across diverse workloads.
-
-The operating scale explains why continuous batching and admission control dominate the infrastructure: the platform serves millions of requests per hour under a time-to-first-token target below $2\text{ s}$, hosting models that range from billions to hundreds of billions of parameters with context lengths reaching up to 128K tokens.
+A multi-model generation API\index{Generation API!serving case} binds on request variance: short prompts, long-context requests, and different model sizes share capacity while users expect predictable TTFT. The platform serves millions of requests per hour under a time-to-first-token target below $2\text{ s}$, with models from billions to hundreds of billions of parameters and contexts up to 128K tokens.
 
 The serving stack separates routing, scheduling, cache management, and shard groups:
 
@@ -8165,9 +7998,7 @@ LLM APIs are governed by variance control. Continuous batching reuses execution 
 
 ### Search ranking under a deadline {#sec-inference-scale-google-search-ranking-aab2}
 
-The search-ranking scenario\index{Search ranking!illustrative cascade} binds on cascade cost: each query coordinates many smaller models under one end-to-end latency budget rather than serving one large model. The ensemble combines specialized models for query understanding, document relevance, and result ranking.
-
-The operational scale motivates a cascade architecture: the system must process billions of searches per day under a strict end-to-end latency target of less than $200\text{ ms}$, evaluating thousands of candidate documents per query across dozens of specialized models. Screening candidates with cheaper models reserves the expensive ranking budget for a smaller set.
+The search-ranking scenario\index{Search ranking!illustrative cascade} binds on cascade cost: each query coordinates many smaller models for query understanding, document relevance, and result ranking under one end-to-end budget rather than serving one large model. The system processes billions of searches per day under a target below $200\text{ ms}$ while evaluating thousands of candidate documents per query, so screening candidates with cheaper models reserves the expensive ranking budget for a smaller set.
 
 To meet this latency budget while evaluating thousands of documents, the ranking cascade diagrammed in @fig-ranking-cascade screens candidate pools across four progressively expressive tiers: early lexical and approximate-nearest-neighbor (ANN) embedding retrievers discard 99 percent of candidates within a 10 ms budget, reserving compute-intensive cross-attention transformers for the final top 100 items. This saving creates a recall constraint. A relevant document discarded upstream cannot be recovered by a more accurate downstream ranker, so each stage's candidate budget must be evaluated for retained relevant items as well as latency.
 
@@ -8256,10 +8087,6 @@ async_q3 = async model3(query, predicted_q1, predicted_q2)
 # Use actual results if they arrive in time, otherwise use speculative
 ```
 
-Search ranking deployments can run ranking models on Tensor Processing Units (TPUs).[^fn-tpu-serving-accelerator] Their matrix execution, memory bandwidth, and supported numerical formats must match the ranking workload. Pod interconnect topology varies by generation and configuration; a distributed ranker must account for its actual collective communication costs rather than assume one topology or a guaranteed serving benefit.
-
-[^fn-tpu-serving-accelerator]: [offset=-10mm] **TPUs for inference**\index{TPU!inference}: Systolic-array execution can provide a regular timing profile for fixed-shape ranking workloads. Tail latency still depends on batching, input preparation, communication, and queueing around the accelerator.
-
 ::: {.content-visible when-format="pdf"}
 \newpage
 :::
@@ -8274,13 +8101,11 @@ If deadline will be missed:
   Return cached/default result rather than timing out
 ```
 
-The serving lesson is that ranking cascades reduce cost by spending expensive models only on a shrinking candidate set, at the risk of losing relevant items upstream. Deadline propagation and priority scheduling expose the remaining time budget; meeting it also requires sufficient capacity and a validated fallback when work cannot finish. Custom hardware can improve predictability when the workload matches the accelerator, but the next case adds a freshness constraint that hardware alone cannot solve.
+The serving lesson is that ranking cascades reduce cost by spending expensive models only on a shrinking candidate set, at the risk of losing relevant items upstream. Deadline propagation and priority scheduling expose the remaining time budget; meeting it also requires sufficient capacity and a validated fallback when work cannot finish. The next case adds a freshness constraint that deadline scheduling alone cannot solve.
 
 ### Multimodal recommendation and freshness {#sec-inference-scale-tiktok-multimodal-recommendation-91e9}
 
-The multimodal recommendation scenario\index{Recommendation system!multimodal serving case} binds on freshness under a tight ranking SLO: video understanding is expensive, new content arrives continuously, and user modeling remains online. It combines video understanding (vision) with user modeling (recommendation) for personalized content ranking, creating a multimodal inference challenge where different model types must coordinate.
-
-The operating scale explains why clear online/offline separation matters: the system handles millions of video rankings per second under a tight p99 latency target below $50\text{ ms}$, ingesting millions of new videos daily across video, audio, text, and user interaction signals.
+The multimodal recommendation scenario\index{Recommendation system!multimodal serving case} binds on freshness under a tight ranking SLO: video understanding is expensive, new content arrives continuously, and user modeling remains online. The system ranks millions of videos per second under a p99 target below $50\text{ ms}$ while ingesting millions of new videos daily across video, audio, text, and interaction signals, which is why online and offline work must separate.
 
 The serving stack separates content and user paths:
 
@@ -8342,7 +8167,7 @@ The serving lesson is that freshness requires separating online and offline work
 
 ### Cross-cutting observations {#sec-inference-scale-crosscutting-observations-742e}
 
-Across these cases, the common pattern is specialization instead of a universal serving stack. Systems separate embedding and retrieval from ranking and generation, use hybrid CPU-GPU architectures to match hardware to workload characteristics, cache at multiple levels while accepting staleness, progressively refine candidate sets to avoid expensive work on unlikely items, and propagate deadlines so quality/latency trade-offs stay explicit under pressure. @Tbl-case-studies-summary identifies the primary technique and key innovation from each system. The four differ precisely because each is specialized to its own workload; that specialization is the shared pattern, not a contradiction of it.
+Across these cases, the common pattern is specialization rather than a universal serving stack: embedding and retrieval separate from ranking and generation, hardware matched to each stage, caches that accept bounded staleness, candidate sets that shrink before expensive work, and deadlines that propagate so quality-latency trade-offs stay explicit under pressure. @Tbl-case-studies-summary lists the primary technique and key innovation of each scenario.
 
 | **System**         | **Primary Technique** | **Key Innovation**        |
 |:-------------------|:----------------------|:--------------------------|
@@ -8363,7 +8188,7 @@ A DevOps team applies their standard web-server load balancing rules to a new fl
 
 **Fallacy**: *Inference at scale is synonymous with LLM serving.*
 
-The misconception, reinforced by LLM-centric discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. Published characterizations of large consumer platforms show recommendation and ranking models consuming most AI inference cycles, while vision, fraud detection, and classification models account for much of the rest [@gupta2020architectural; @hazelwood2018]. A practitioner who only understands continuous batching and KV cache management is unprepared for the feature-parallel batching and embedding sharding that dominate high-volume recommendation inference. Technique selection must match the actual workload.
+The misconception leads to over-focus on LLM-specific techniques. As @sec-inference-scale-inference-landscape-beyond-llms-9560 showed, recommendation and ranking models can consume most AI inference cycles on large consumer platforms [@gupta2020architectural; @hazelwood2018], and a practitioner who knows only continuous batching and KV cache management is unprepared for the feature-parallel batching and embedding sharding that dominate that traffic. Technique selection must match the actual workload.
 
 :::
 
@@ -8371,7 +8196,7 @@ The misconception, reinforced by LLM-centric discourse, leads to over-focus on L
 
 **Pitfall**: *Using training infrastructure for production serving.*
 
-Training and serving have different requirements\index{Training!vs. serving infrastructure}. Training balances aggregate throughput with convergence and time to solution; interactive serving must also satisfy per-request latency targets under external arrivals. Its batch size therefore depends on the workload and waiting budget. Interactive streaming may admit little batching, while bandwidth-bound LLM decode can benefit from many concurrent sequences. Training can resume from checkpoints after an interruption; serving needs a recovery policy that accounts for in-flight requests, retries, and the availability target. Hardware can be shared or repurposed, but a training configuration does not establish serving readiness. Batching, routing, and capacity management must be evaluated against the serving contract.
+Training and serving have different requirements\index{Training!vs. serving infrastructure}, as @tbl-training-inference-inversion summarized. Interactive serving must satisfy per-request latency targets under external arrivals, so its batch size depends on the workload and waiting budget, and its recovery policy must account for in-flight requests, retries, and the availability target rather than a checkpoint. Hardware can be shared or repurposed, but a training configuration does not establish serving readiness.
 
 :::
 
@@ -8468,7 +8293,7 @@ Serving performance depends on the balance between compute and memory bandwidth.
 
 To maximize throughput under memory-bandwidth constraints, modern serving architectures co-design the memory hierarchy and the iteration scheduler. Continuous batching recovers idle slots by inserting new requests at token boundaries; PagedAttention reduces physical memory fragmentation through fixed-block allocation while retaining partial-page waste; and prefill/decode disaggregation assigns prompt processing and token generation to separate hardware pools sized around their measured compute, memory, and communication costs.
 
-When model state exceeds device memory, sharding spreads a replica across accelerators; when demand exceeds a replica's service capacity, additional replicas supply aggregate throughput. In Fleet Law terms, sharding divides the compute term $\IronLawComputeTime/\DeviceCount$ of @eq-parallel-time but adds communication and synchronization $(\CommunicationTime(\DeviceCount), \SynchronizationTime(\DeviceCount))$ governed by interconnect latency floors ($\MessageStartupLatency$) and transfer bandwidth ($\LinkBandwidth$). Replication, routing, isolation, and autoscaling add coordination costs through probes, admission decisions, and capacity changes, and multi-region placement adds wide-area round trips and cross-region failover to the same budget; transferring model or session state also consumes communication bandwidth. Their aggregate capacity and tail control require headroom and sometimes idle replicas. Across the serving hierarchy, the engineering objective is to increase useful completed work while preserving the latency and reliability contract under load.
+When model state exceeds device memory, sharding spreads a replica across accelerators; when demand exceeds a replica's service capacity, additional replicas supply aggregate throughput. In Fleet Law terms, sharding divides the compute term $\IronLawComputeTime/\DeviceCount$ of @eq-parallel-time but adds communication and synchronization $(\CommunicationTime(\DeviceCount), \SynchronizationTime(\DeviceCount))$ governed by interconnect latency floors ($\MessageStartupLatency$) and transfer bandwidth ($\LinkBandwidth$). Replication, routing, isolation, autoscaling, and multi-region placement add coordination costs and wide-area round trips to the same budget, and their tail control requires headroom. Across the serving hierarchy, the engineering objective is to increase useful completed work while preserving the latency and reliability contract under load.
 
 ::: {.callout-takeaways title="Serving capacity is constrained by its contract"}
 

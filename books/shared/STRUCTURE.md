@@ -83,8 +83,8 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 3 | chapter | `03_network_fabrics/03_network_fabrics.qmd` |
 | 4 | chapter | `04_data_storage/04_data_storage.qmd` |
 |  | part | `parts/distributed_ml_principles.qmd` |
-| 5 | chapter | `05_distributed_training/05_distributed_training.qmd` |
-| 6 | chapter | `06_collective_communication/06_collective_communication.qmd` |
+| 5 | chapter | `05_collective_communication/05_collective_communication.qmd` |
+| 6 | chapter | `06_distributed_training/06_distributed_training.qmd` |
 | 7 | chapter | `07_fault_tolerance/07_fault_tolerance.qmd` |
 | 8 | chapter | `08_fleet_orchestration/08_fleet_orchestration.qmd` |
 |  | part | `parts/deployment_principles.qmd` |

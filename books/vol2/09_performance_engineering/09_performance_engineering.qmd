@@ -54,9 +54,9 @@ Expensive accelerators can spend much of a request waiting for data, software di
 
 ::: {.callout-learning-objectives}
 
-- Apply roofline analysis and execution traces to distinguish compute, memory, and launch limits
+- Apply roofline analysis and execution traces to locate the exposed limit and the Fleet Law term a fix shortens
 - Analyze prefill, decode, and batch-size regimes to predict latency-throughput behavior in LLM serving
-- Diagnose serving bottlenecks using reproducible measurements at kernel, replica, and fleet boundaries
+- Diagnose serving bottlenecks using MFU, MBU, and reproducible measurements at kernel, replica, and fleet boundaries
 - Evaluate fusion, tiling, and graph replay against memory traffic, launch overhead, and resource limits
 - Select precision, compilation, and runtime optimizations from bandwidth, quality, and deployment constraints
 - Evaluate speculative decoding and sparse expert routing against acceptance, communication, and load-imbalance costs
@@ -145,7 +145,7 @@ $$
 \Time\approx \max\left( \frac{\Operations}{\PeakRate \cdot \EfficiencyHw}, \; \frac{\DataVolume}{\Bandwidth} \right) + \Latency
 $$
 
-Here, $\DataVolume$ is the data volume crossing the chosen memory boundary, $\Bandwidth$ is its bandwidth, $\Operations$ is the operation count, and $\PeakRate \cdot \EfficiencyHw$ is the realized compute rate after accounting for hardware execution efficiency. The overhead term $\Latency$ collects the exposed latency outside those compute and memory terms, and it has two parts. Host dispatch, meaning kernel launches and other software costs, belongs to each device's own execution. Exposed communication and synchronization arise only because the replica spans several devices. Local execution on each device and exposed inter-device delays together supply the service time of a replica; request queueing and routing add time outside that boundary. The roofline approximation asks which exposed term dominates at a given operating point. Increasing compute throughput for a memory-bound workload does not materially improve performance until the memory term is reduced. Eager framework execution can expose a large slice of the overhead term when the host submits many short kernels one at a time, a cost that @sec-performance-engineering-kernel-launch quantifies and that graph compilation and replay later attack.
+Here, $\DataVolume$ is the data volume crossing the chosen memory boundary, $\Bandwidth$ is its bandwidth, $\Operations$ is the operation count, and $\PeakRate \cdot \EfficiencyHw$ is the realized compute rate after accounting for hardware execution efficiency. The overhead term $\Latency$ collects the exposed latency outside those compute and memory terms, and it has two parts. Host dispatch, meaning kernel launches and other software costs, belongs to each device's own execution. Exposed communication and synchronization arise only because the replica spans several devices. Local execution on each device and exposed inter-device delays together supply the service time of a replica; request queueing and routing add time outside that boundary. Eager framework execution can expose a large slice of the overhead term when the host submits many short kernels one at a time, a cost that @sec-performance-engineering-kernel-launch quantifies and that graph compilation and replay later attack. @Sec-appdx-dam-taxonomy-iron-law-mapping recaps these terms and the overlapped form.
 
 ::: {.column-margin}
 ![](images/svg/performance_engineering_iron_law_bars.svg){width="100%" fig-alt="Iron-law bar split into three segments for data, compute, and latency. The D segment fills most of the bar in dark blue; the C and L segments are thin light-gray slivers at the right end, labeled just above the bar."}
@@ -528,7 +528,7 @@ Two consequences follow for kernel design. Register pressure becomes a first-cla
 
 ### The roofline model {#sec-performance-engineering-roofline}
 
-The memory wall becomes a diagnostic instrument once each kernel is placed on the roofline model[^fn-roofline-williams-origin] [@williams2009]. A kernel with arithmetic intensity $\ArithmeticIntensity$ attains at most $\min(\PeakRate, \ArithmeticIntensity\times \Bandwidth)$, and the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$\index{Roofline Model!ridge point} separates the memory-bound\index{Memory-Bound} side of this ideal envelope from its compute-bound\index{Compute-Bound} side. The tighter ceiling bounds performance; a measurement below that ceiling still requires investigation of latency, dependencies, and implementation limits.
+The memory wall becomes a diagnostic instrument once each kernel is placed on the roofline model[^fn-roofline-williams-origin] [@williams2009]. A kernel with arithmetic intensity $\ArithmeticIntensity$ attains at most $\min(\PeakRate, \ArithmeticIntensity\times \Bandwidth)$, and the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$\index{Roofline Model!ridge point} separates the memory-bound\index{Memory-Bound} side of this ideal envelope from its compute-bound\index{Compute-Bound} side. The tighter ceiling bounds performance; a measurement below that ceiling still requires investigation of latency, dependencies, and implementation limits. Performance engineering supplies the measured position of each kernel against that bound.
 
 ::: {.column-margin .margin-pointer}
 ↩ The roofline model and the H100 ridge point are established in @sec-compute-roofline.
@@ -1607,7 +1607,7 @@ Hardware utilization reports how often GPUs are busy, but it does not distinguis
 
 ::: {#dfn-performance-engineering-model-flops-utilization-mfu .callout-definition title="MFU"}
 
-***MFU***\index{Model FLOPs Utilization!fleet-scale behavior} is the fraction of the hardware's theoretical peak throughput ($\PeakRate$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization.
+***MFU***\index{Model FLOPs Utilization!definition} is the fraction of the hardware's theoretical peak throughput ($\PeakRate$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization.
 
 1.  **Significance**: At fleet scale, MFU aggregates across all nodes. Communication overhead, load imbalance, and pipeline bubbles tend to lower it relative to a comparable local run, although changes in batch size or memory feasibility can alter that comparison. A one-percentage-point MFU increase across 10,000 identical GPUs adds useful throughput equivalent to 100 GPUs at peak. Realized cost savings depend on whether the recovered capacity displaces hardware or shortens paid runtime.\index{MFU!economic impact}
 2.  **Distinction**: Unlike hardware utilization\index{Hardware Utilization}\index{Hardware Utilization!vs. MFU} (which reports how often the accelerator is "busy"), MFU relates the model's reference FLOP rate to hardware peak. It excludes recomputation and padding from useful work even when they support a feasible or faster implementation; quality and convergence require separate checks.
@@ -1713,6 +1713,10 @@ Local resource costs can become exposed delays at scale. A small increase in mem
 : **Scaling regression test tiers**: Fleet performance testing moves from small canaries to production baselines and gray-failure detection so that local changes are checked against distributed behavior. {#tbl-performance-engineering-scaling-regression-tests tbl-colwidths="[24,38,38]"}
 
 The gray-failure row of @tbl-performance-engineering-scaling-regression-tests applies the same straggler arithmetic, since a synchronous data-parallel step runs at the pace of its slowest node. The same measurements also explain why benchmark numbers cannot be copied directly into production capacity plans.
+
+::: {.column-margin .margin-pointer}
+↩ Gray failures, the silent degradations that surface as stragglers rather than crashes, are established in @sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d.
+:::
 
 ::: {#psp-performance-engineering-hero-run-tax .callout-perspective title="Benchmark vs. reality: The hero run tax"}
 
@@ -2611,6 +2615,10 @@ Activation-Aware Weight Quantization (AWQ) [@lin2023awq]\index{AWQ}\index{AWQ!ac
 SmoothQuant\index{SmoothQuant}\index{SmoothQuant!activation-weight migration} [@xiao2023smoothquant] redistributes quantization difficulty between activations and weights before inference. Its calibration exploits activation outliers that concentrate in particular channels. A per-channel scaling transformation\index{SmoothQuant!per-channel scaling} divides activations by a smoothing factor and multiplies the corresponding weights by that factor, preserving the matrix product before rounding. Reducing activation range can make the weights harder to quantize, so the smoothing choice balances the two errors. This enables W8A8 (weight-8-bit, activation-8-bit) execution with compatible INT8 kernels; quality and speed still depend on calibration and the target implementation.
 
 These techniques place the outlier-handling cost in different stages: runtime decomposition, weight calibration, or a preprocessing transformation. The choice must satisfy both the quality budget and the execution path available on the target hardware. An INT4 weight representation can save HBM traffic even when a GPU kernel dequantizes it for FP16 arithmetic; an INT8 representation\index{Quantization!INT8 representation} can also use integer arithmetic when a compatible kernel and device support it. The later weight-only and weight-activation comparison separates these bandwidth and compute benefits.
+
+::: {.column-margin .margin-pointer}
+↪ What each of these methods changes for a serving deployment, and how a serving stack selects among them, is developed in @sec-inference-scale-weight-quantization-serving-097b.
+:::
 
 Each of these methods trades some calibration or runtime cost for bandwidth, and at the extreme end of the deployment spectrum quantization moves from an optimization to a physical necessity. A mobile or federated deployment provides that limiting case. When the device has only a few gigabytes of memory shared with the rest of the phone, or far less below that, precision is no longer a tuning knob after the model is chosen; it is part of the feasibility test.
 
@@ -3703,7 +3711,7 @@ The duration comparison gives an upper bound on the overlap opportunity. A consu
 
 ### Quantifying the overlap opportunity {#sec-performance-engineering-overlap-quantify}
 
-The potential benefit of communication-computation overlap depends on the relative magnitudes of communication and computation time, which vary dramatically across system configurations.
+The potential benefit of communication-computation overlap depends on the relative magnitudes of communication and computation time, which vary dramatically across system configurations. For data-parallel training, the bucketed gradient schedule and the communication it leaves exposed are budgeted for a 7B transformer in @sec-communication-overlap-limits. The calculation below recalls that budget on a single NVLink node only to show how a slower link or a larger device count closes the overlap window.
 
 ```{python}
 #| echo: false
