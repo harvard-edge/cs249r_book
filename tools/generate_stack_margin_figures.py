@@ -2,319 +2,229 @@
 """
 generate_stack_margin_figures.py
 
-Generates standalone SVG stack margin figures for every chapter across all 4 volumes,
-and injects the HTML column-margin block next to ## Purpose in each chapter's .qmd file.
+Writes the HTML margin stack figure (images/svg/margin_stack.svg) for every
+chapter in all four volumes.
+
+The PDF draws the stack with a TikZ macro inside the chapter's Purpose
+marginfigure (\\mlsysstack, \\mlfleetstack, \\mlagentstack,
+\\mlphysicalstackfull). That macro call stays the single source of truth: this
+script reads its weights from the .qmd and draws a compact native SVG sized for
+the HTML margin column, with real text and a transparent background. Dark mode
+inverts it in CSS (`_dark-mode-base.scss`), so only the light palette is drawn
+here.
+
+The chapter .qmd files are read, never written. The HTML block that displays
+the SVG already sits next to each Purpose marginfigure.
+
+Usage:
+    python3 tools/generate_stack_margin_figures.py            # all volumes
+    python3 tools/generate_stack_margin_figures.py vol1 vol3  # some volumes
 """
 
-import os
-import re
 import glob
-import subprocess
-import tempfile
-from concurrent.futures import ProcessPoolExecutor
+import re
+import sys
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BOOKS_DIR = REPO_ROOT / "books"
 
-VOL1_PREAMBLE = r"""\documentclass{standalone}
-\usepackage[svgnames]{xcolor}
-\usepackage{tikz}
-\usetikzlibrary{calc,arrows.meta}
-\providecolor{crimson}{HTML}{A51C30}
+FONT = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+WIDTH = 220
+ROW_H = 22
+GAP = 3
+INK_MUTED = "#6B7280"
 
-\tikzset{
-    icon_hardware/.pic={
-        \draw[thick] (-0.25,-0.25) rectangle (0.25,0.25);
-        \foreach \x in {-0.15, 0, 0.15} \foreach \y in {-0.15, 0, 0.15}
-            \fill (\x,\y) circle (0.03);
-        \foreach \i in {-0.15, 0.15} {
-            \draw (-0.25, \i) -- (-0.35, \i); \draw (0.25, \i) -- (0.35, \i);
-            \draw (\i, -0.25) -- (\i, -0.35); \draw (\i, 0.25) -- (\i, 0.35);
-        }
+# Layer order is top to bottom, as drawn. `args` maps each layer to its
+# position in the PDF macro's argument list (0-based).
+VOLUMES = {
+    "vol1": {
+        "macro": "mlsysstack",
+        "accent": "#A51C30",
+        "alt": "Machine Learning Systems Architecture Stack",
+        "layers": ["Applications", "Operations", "Serving", "Training",
+                   "Models", "Frameworks", "Hardware"],
+        "args": [6, 5, 4, 3, 2, 1, 0],
+        "rail": {"label": "DATA", "arg": 7},
     },
-    icon_frameworks/.pic={
-        \draw[thick] (-0.25,-0.2) rectangle (0.25,-0.08);
-        \draw[thick] (-0.2,-0.08) rectangle (0.2,0.04);
-        \draw[thick] (-0.15,0.04) rectangle (0.15,0.16);
+    "vol2": {
+        "macro": "mlfleetstack",
+        "accent": "#1F407A",
+        "alt": "Fleet Machine Learning Systems Stack",
+        "layers": ["Governance", "Assurance", "Operations", "Serving",
+                   "Control", "Execution", "Fabric", "Facility"],
+        "args": [7, 6, 5, 4, 3, 2, 1, 0],
+        "parts": ["IV", "IV", "III", "III", "II", "II", "I", "I"],
     },
-    icon_models/.pic={
-        \node[circle,fill,inner sep=0.8pt] (i1) at (-0.25,-0.15) {};
-        \node[circle,fill,inner sep=0.8pt] (i2) at (-0.25,0.15) {};
-        \node[circle,fill,inner sep=0.8pt] (h1) at (0,-0.15) {};
-        \node[circle,fill,inner sep=0.8pt] (h2) at (0,0.15) {};
-        \node[circle,fill,inner sep=0.8pt] (o1) at (0.25,0) {};
-        \draw (i1)--(h1); \draw (i1)--(h2);
-        \draw (i2)--(h1); \draw (i2)--(h2);
-        \draw (h1)--(o1); \draw (h2)--(o1);
+    "vol3": {
+        "macro": "mlagentstack",
+        "accent": "#581C87",
+        "alt": "Agentic Machine Learning Systems Stack",
+        "layers": ["Distributed Fleet", "Trajectory Learning", "Agent Runtime",
+                   "Tool Actuation", "Context Memory", "Foundation Model"],
+        "tags": ["Network", "Compiler", "OS", "I/O", "Memory", "Processor"],
+        "args": [0, 1, 2, 3, 4, 5],
+        "rail": {"label": "TRAJECTORY", "arg": None},
     },
-    icon_training/.pic={
-        \draw[thick, ->] (0,0.15) arc (90:360:0.15);
-        \draw[thick, ->] (0,-0.15) arc (-90:180:0.15);
-        \node[scale=0.6] at (0,0) {$\nabla$};
+    "vol4": {
+        "macro": "mlphysicalstackfull",
+        "accent": "#065F46",
+        "alt": "Physical AI Systems Stack",
+        "layers": ["Brain", "Nervous System", "Body", "Boundary",
+                   "Physical World"],
+        "tags": ["1–50 Hz", "1 kHz", "10–25 kHz", "event", "continuous"],
+        "args": [0, 1, 2, 3, 4],
+        # Dashed rule after the first layer: above proposes, below commands.
+        "divider_after": 0,
     },
-    icon_serving/.pic={
-        \draw[thick] (-0.3,-0.2) rectangle (0.3,0.2);
-        \foreach \y in {-0.08, 0.08}
-            \draw (-0.2,\y) -- (0.2,\y);
-        \fill (0.15, 0.14) circle (0.03);
-        \fill (0.15, -0.02) circle (0.03);
-        \fill (0.15, -0.14) circle (0.03);
-    },
-    icon_operations/.pic={
-        \draw[thick] (0.1,0) circle (0.13);
-        \draw[thick] (-0.1,0.05) circle (0.1);
-        \foreach \a in {0,60,...,300} {
-            \draw[thick] (0.1,0) ++(\a:0.13) -- ++(\a:0.05);
-        }
-        \foreach \a in {0,72,...,288} {
-            \draw[thick] (-0.1,0.05) ++(\a:0.1) -- ++(\a:0.04);
-        }
-    },
-    icon_applications/.pic={
-        \draw[thick] (-0.3,-0.2) rectangle (0.3,0.2);
-        \draw (-0.3,0.1) -- (0.3,0.1);
-        \node[scale=0.5, anchor=center] at (0,-0.05) {$>\_$};
-    }
-}
-
-\newcommand{\stacklayer}[4]{
-    \ifnum#3=0
-        \def\fillcol{black!5}
-        \def\textcol{black!30}
-    \else
-        \def\fillcol{crimson!#3}
-        \ifnum#3>50
-            \def\textcol{white}
-        \else
-            \def\textcol{crimson}
-        \fi
-    \fi
-
-    \node[
-        draw=white,
-        line width=0.5pt,
-        fill=\fillcol,
-        minimum width=2.6cm,
-        minimum height=1.0cm,
-        anchor=south west,
-        rounded corners=0pt,
-        inner sep=0pt
-    ] (box) at (0,#1) {};
-    
-    \node[anchor=west, text=\textcol, font=\usefont{T1}{phv}{b}{n}\fontsize{7.5}{8.5}\selectfont] at ($(box.west)+(0.12,0)$) {#2};
-    \path (box.east) +(-0.50,0) pic[scale=0.78, draw=\textcol, fill=\textcol, text=\textcol] {#4};
-}
-
-\newcommand{\mlsysstack}[8]{
-    \begin{tikzpicture}
-        \stacklayer{6.0}{Applications}{#7}{icon_applications}
-        \stacklayer{5.0}{Operations}{#6}{icon_operations}
-        \stacklayer{4.0}{Serving}{#5}{icon_serving}
-        \stacklayer{3.0}{Training}{#4}{icon_training}
-        \stacklayer{2.0}{Models}{#3}{icon_models}
-        \stacklayer{1.0}{Frameworks}{#2}{icon_frameworks}
-        \stacklayer{0.0}{Hardware}{#1}{icon_hardware}
-        
-        \pgfmathtruncatemacro{\ddata}{#8}
-        \ifnum\ddata=0
-            \def\databarcol{black!5}
-        \else
-            \def\databarcol{crimson!\ddata}
-        \fi
-        
-        \fill[\databarcol, rounded corners=1.5pt]
-            (2.85, -0.1) rectangle (3.15, 7.10);
-        
-        \foreach \y/\val in {0.5/#1, 1.5/#2, 2.5/#3, 3.5/#4, 4.5/#5, 5.5/#6, 6.5/#7} {
-            \ifnum\val=0
-                \def\wirecol{black!20}
-            \else
-                \def\wirecol{crimson!\val}
-            \fi
-            \draw[\wirecol, line width=1.5pt] (2.6, \y) -- (2.85, \y);
-            \fill[\wirecol] (2.85, \y) circle (0.04);
-        }
-        
-        \node[text=white, rotate=90, font=\usefont{T1}{phv}{b}{n}\fontsize{8}{9}\selectfont]
-            at (3.0, 3.5) {DATA};
-    \end{tikzpicture}
-}
-"""
-
-with open(BOOKS_DIR / "shared" / "tex" / "header-includes.tex") as _f:
-    _lines = _f.readlines()
-_FLEET_TIKZ = "".join(_lines[2465:2646])
-
-VOL2_PREAMBLE = rf"""\documentclass{{standalone}}
-\usepackage[svgnames]{{xcolor}}
-\usepackage{{tikz}}
-\usetikzlibrary{{calc,arrows.meta}}
-\definecolor{{accentcolor}}{{HTML}}{{1F407A}}
-\definecolor{{fleetinfra}}{{HTML}}{{1F407A}}
-\definecolor{{fleetdist}}{{HTML}}{{1F407A}}
-\definecolor{{fleetserve}}{{HTML}}{{1F407A}}
-\definecolor{{fleetassure}}{{HTML}}{{1F407A}}
-\definecolor{{fleetgov}}{{HTML}}{{1F407A}}
-
-{_FLEET_TIKZ}
-"""
-
-VOL3_PREAMBLE = rf"""\documentclass{{standalone}}
-\usepackage{{tikz}}
-\usetikzlibrary{{calc,arrows.meta}}
-\input{{{BOOKS_DIR / "vol3" / "tex" / "agent-stack.tex"}}}
-"""
-
-VOL4_PREAMBLE = rf"""\documentclass{{standalone}}
-\usepackage{{tikz}}
-\usetikzlibrary{{calc,arrows.meta}}
-\usepackage{{xcolor}}
-\usepackage{{fontawesome5}}
-\input{{{BOOKS_DIR / "vol4" / "tex" / "physical-stack.tex"}}}
-"""
-
-PREAMBLES = {
-    "vol1": (VOL1_PREAMBLE, "Machine Learning Systems Architecture Stack"),
-    "vol2": (VOL2_PREAMBLE, "Fleet Machine Learning Systems Stack"),
-    "vol3": (VOL3_PREAMBLE, "Agentic Machine Learning Systems Stack"),
-    "vol4": (VOL4_PREAMBLE, "Physical AI Systems Stack"),
 }
 
 
-def compile_single_svg(args):
-    vol, qmd_path, macro_call, output_svg = args
-    preamble, alt_text = PREAMBLES[vol]
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tex_path = os.path.join(tmpdir, "stack.tex")
-        pdf_path = os.path.join(tmpdir, "stack.pdf")
-        with open(tex_path, "w") as f:
-            f.write(f"{preamble}\n\\begin{{document}}\n{macro_call}\n\\end{{document}}\n")
-        
-        res = subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", "stack.tex"],
-            cwd=tmpdir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if res.returncode != 0:
-            return False, f"LaTeX error for {qmd_path}: {res.stdout.decode()[-300:]}"
-            
-        os.makedirs(os.path.dirname(output_svg), exist_ok=True)
-        res2 = subprocess.run(
-            ["pdftocairo", "-svg", "stack.pdf", output_svg],
-            cwd=tmpdir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if res2.returncode != 0:
-            return False, f"pdftocairo error for {qmd_path}: {res2.stderr.decode()}"
-            
-    return True, output_svg
+def hex_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def main():
-    tasks = []
-    qmd_updates = []
+def tint(w):
+    """Fill opacity for weight w in [0, 100].
 
-    for vol in ["vol1", "vol2", "vol3", "vol4"]:
-        files = sorted(glob.glob(str(BOOKS_DIR / vol / "*" / "*.qmd")))
-        for f in files:
+    Tiles are the accent at partial opacity over a transparent background, so
+    the dark-mode invert turns them into light-on-dark tints instead of tiles
+    darker than the page.
+    """
+    return 0.10 + 0.90 * (max(0, min(100, w)) / 100.0)
+
+
+def text(x, y, s, size, fill, weight=600, anchor="start", extra=""):
+    return (f'<text x="{x:.1f}" y="{y:.1f}" font-family="{FONT}" '
+            f'font-size="{size}" font-weight="{weight}" fill="{fill}" '
+            f'text-anchor="{anchor}" dominant-baseline="central"{extra}>'
+            f'{escape(s)}</text>')
+
+
+def render(vol, weights):
+    spec = VOLUMES[vol]
+    accent = spec["accent"]
+    layers = spec["layers"]
+    n = len(layers)
+    vals = [weights[i] for i in spec["args"]]
+    # A chapter that weights every layer equally has no focus; show it flat.
+    flat = len(set(vals)) == 1
+    rail_arg = spec.get("rail", {}).get("arg")
+    top = max(vals + ([weights[rail_arg]] if rail_arg is not None else []))
+
+    left = 26 if "parts" in spec else 0
+    rail_w = 18 if "rail" in spec else 0
+    right = WIDTH - (rail_w + 6 if rail_w else 0)
+    height = n * ROW_H + (n - 1) * GAP
+    if "divider_after" in spec:
+        height += 8
+
+    out = []
+    y = 0.0
+    rows = []
+    for i, (name, w) in enumerate(zip(layers, vals)):
+        focus = (not flat) and w == top and w >= 50
+        level = 22 if flat else w
+        alpha = 1.0 if focus else tint(level * 0.55)
+        ink = "#FFFFFF" if focus else accent
+        out.append(f'<rect x="{left}" y="{y:.1f}" width="{right - left}" '
+                   f'height="{ROW_H}" rx="4" fill="{accent}" '
+                   f'fill-opacity="{alpha:.2f}"/>')
+        out.append(text(left + 9, y + ROW_H / 2, name, 11.5, ink,
+                        700 if focus else 600))
+        if "tags" in spec:
+            out.append(text(right - 8, y + ROW_H / 2, spec["tags"][i], 9.5,
+                            "#FFFFFF" if focus else INK_MUTED, 500, "end",
+                            ' opacity="0.9"' if focus else ""))
+        rows.append((y, y + ROW_H))
+        y += ROW_H + GAP
+        if spec.get("divider_after") == i:
+            out.append(f'<line x1="{left}" x2="{right}" y1="{y + 2:.1f}" '
+                       f'y2="{y + 2:.1f}" stroke="{INK_MUTED}" '
+                       f'stroke-width="1" stroke-dasharray="3 2.5"/>')
+            y += 8
+
+    if "parts" in spec:
+        parts = spec["parts"]
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and parts[j + 1] == parts[i]:
+                j += 1
+            y0, y1 = rows[i][0], rows[j][1]
+            out.append(f'<line x1="{left - 7}" x2="{left - 7}" y1="{y0 + 2:.1f}" '
+                       f'y2="{y1 - 2:.1f}" stroke="{accent}" stroke-width="1.5" '
+                       f'stroke-linecap="round" opacity="0.55"/>')
+            cy = (y0 + y1) / 2
+            out.append(text(left - 12, cy, parts[i], 8, accent, 700, "end",
+                            ' opacity="0.8"'))
+            i = j + 1
+
+    if "rail" in spec:
+        rail = spec["rail"]
+        x0 = WIDTH - rail_w
+        w = weights[rail["arg"]] if rail["arg"] is not None else 100
+        focus = (not flat) and rail["arg"] is not None and w == top and w >= 50
+        if rail["arg"] is None:
+            alpha, ink = tint(30), accent
+        else:
+            alpha = 1.0 if focus else tint((22 if flat else w) * 0.55)
+            ink = "#FFFFFF" if focus else accent
+        out.append(f'<rect x="{x0}" y="0" width="{rail_w}" height="{height:.1f}" '
+                   f'rx="4" fill="{accent}" fill-opacity="{alpha:.2f}"/>')
+        cx, cy = x0 + rail_w / 2, height / 2
+        out.append(text(cx, cy, rail["label"], 9, ink, 700, "middle",
+                        f' letter-spacing="1.2" transform="rotate(-90 {cx:.1f} {cy:.1f})"'))
+        if rail["arg"] is None:
+            # Trajectory runs upward through the stack.
+            out.append(f'<path d="M{cx:.1f} 3 l-4 6 h8 z" fill="{accent}" opacity="0.7"/>')
+
+    body = "\n".join(out)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" '
+            f'height="{height:.0f}" viewBox="0 0 {WIDTH} {height:.1f}" '
+            f'role="img" aria-label="{escape(spec["alt"])}">\n'
+            f'<title>{escape(spec["alt"])}</title>\n{body}\n</svg>\n')
+
+
+MACRO_RE = re.compile(r"\\(ml[a-z]+)((?:\{[^}]*\})+)")
+
+
+def chapter_weights(qmd_text, macro):
+    m = re.search(r"## Purpose.*?\\begin\{marginfigure\}(.*?)\\end\{marginfigure\}",
+                  qmd_text, re.DOTALL)
+    if not m:
+        return None
+    for name, args in MACRO_RE.findall(m.group(1)):
+        if name == macro:
+            return [int(float(a)) for a in re.findall(r"\{([^}]*)\}", args)]
+    return None
+
+
+def main(vols):
+    written, skipped = 0, []
+    for vol in vols:
+        spec = VOLUMES[vol]
+        for f in sorted(glob.glob(str(BOOKS_DIR / vol / "*" / "*.qmd"))):
             if not re.search(r"/\d\d_", f):
                 continue
-            with open(f, "r", encoding="utf-8") as qmd_file:
-                content = qmd_file.read()
-            
-            # Find the Purpose section and marginfigure
-            # Pattern matches ## Purpose followed by marginfigure or content-visible
-            pattern = re.compile(
-                r"""(## Purpose[^\n]*\n+)"""
-                r"""((?:::: \{\.content-visible when-format="pdf"\}\s*)?"""
-                r"""\\begin\{marginfigure\}"""
-                r"""(.*?)"""
-                r"""\\end\{marginfigure\}"""
-                r"""(?:\s*:::\s*)?"""
-                r"""(?:\s*::: \{\.content-visible unless-format="pdf"\}\s*::: \{\.column-margin\}\s*!\[\]\([^\)]+\)\{[^\}]*\}\s*:::\s*:::\s*)?)""",
-                re.DOTALL
-            )
-            
-            match = pattern.search(content)
-            if not match:
-                print(f"⚠️  No Purpose marginfigure match in {f}")
+            svg_path = Path(f).parent / "images" / "svg" / "margin_stack.svg"
+            content = Path(f).read_text(encoding="utf-8")
+            if "images/svg/margin_stack.svg" not in content:
                 continue
-                
-            header = match.group(1)
-            full_margin_block = match.group(2)
-            inside_marginfigure = match.group(3).strip()
-            
-            # Extract the actual macro call to render
-            # It could be bare \mlsysstack{...} or \resizebox{...}{\mlphysicalstackfull{...}}
-            macro_match = re.search(r"(\\ml[a-z]+(?:full)?(?:\{[^}]*\})+)", inside_marginfigure)
-            if not macro_match:
-                print(f"⚠️  No macro found inside marginfigure in {f}")
+            weights = chapter_weights(content, spec["macro"])
+            if weights is None:
+                skipped.append(f)
                 continue
-                
-            macro_call = macro_match.group(1)
-            ch_dir = Path(f).parent
-            output_svg = ch_dir / "images" / "svg" / "margin_stack.svg"
-            
-            tasks.append((vol, f, macro_call, str(output_svg)))
-            
-            # Prepare new markdown block
-            alt_text = PREAMBLES[vol][1]
-            captions = {
-                "vol1": "*Architecture stack focus for this chapter.*",
-                "vol2": "*Fleet stack focus for this chapter.*",
-                "vol3": "*Agent stack focus for this chapter.*",
-                "vol4": "*Physical AI stack focus for this chapter.*",
-            }
-            caption = captions[vol]
-            new_block = (
-                f"{header}"
-                f"::: {{.content-visible when-format=\"pdf\"}}\n"
-                f"\\begin{{marginfigure}}\n"
-                f"{inside_marginfigure}\n"
-                f"\\end{{marginfigure}}\n"
-                f":::\n\n"
-                f"::: {{.content-visible unless-format=\"pdf\"}}\n"
-                f"::: {{.column-margin}}\n"
-                f"![]({output_svg.name if False else 'images/svg/margin_stack.svg'}){{width=\"100%\" fig-alt=\"{alt_text}\"}}\n\n"
-                f"{caption}\n"
-                f":::\n"
-                f":::\n\n"
-            )
-            
-            qmd_updates.append((f, match.start(), match.end(), new_block, content))
-
-    print(f"Compiling {len(tasks)} SVG stack figures in parallel...")
-    with ProcessPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(compile_single_svg, tasks))
-
-    success_count = sum(1 for ok, _ in results if ok)
-    print(f"✅ Generated {success_count}/{len(tasks)} stack SVGs successfully.")
-    for ok, msg in results:
-        if not ok:
-            print(f"❌ {msg}")
-
-    print("Updating .qmd files...")
-    for qmd_path, start, end, new_block, original_content in qmd_updates:
-        # Re-read in case of parallel edits
-        with open(qmd_path, "r", encoding="utf-8") as f:
-            c = f.read()
-        
-        # Replace the matched block
-        # Use exact string replacement of the matched portion
-        target_str = original_content[start:end]
-        if target_str in c:
-            new_c = c.replace(target_str, new_block, 1)
-            with open(qmd_path, "w", encoding="utf-8") as f:
-                f.write(new_c)
-        else:
-            print(f"⚠️ Could not replace in {qmd_path} (content changed)")
-
-    print("🎉 All chapters updated with HTML margin stack figures!")
+            svg_path.parent.mkdir(parents=True, exist_ok=True)
+            svg_path.write_text(render(vol, weights), encoding="utf-8")
+            written += 1
+    print(f"Wrote {written} margin stack SVGs.")
+    for f in skipped:
+        print(f"⚠️  No {VOLUMES[Path(f).parts[-3]]['macro']} call in Purpose: {f}")
+    return 1 if skipped else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:] or list(VOLUMES)))

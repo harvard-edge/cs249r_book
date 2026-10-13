@@ -1,4 +1,5 @@
 ---
+number-offset: [2]
 notation-local: [\AdmittedWorkUnitCount, \BeamWidth, \BreadthCriticalPathLatency, \BreadthPeakKvCacheMemory, \CalibratedAcceptanceEstimate, \CandidateIndex, \CandidateScoringError, \CandidateUtilityMean, \CandidateUtilityStandardDeviation, \ChildBatchSize, \CumulativeWorkCost, \DepthCriticalPathLatency, \EffectiveBranchingFactor, \EstimatedCandidateUtility, \EstimatedUtilityStandardDeviation, \ExpectedNormalMaximum, \ExploitCandidateFraction, \ExtendedDepthLength, \FeedbackCheckDuration, \FeedbackCriticalPathLatency, \InvalidatedArtifactNode, \MarginalStoppingThreshold, \ReachableArtifactNode, \RepairPatchArtifact, \RevisionPassProbability, \ScoredPrefixLength, \ScoredStepCount, \ScoredStepIndex, \ScoringErrorStandardDeviation, \SearchDepthIndex, \SiblingPolicyAction, \TreeSearchExplorationWeight, \TreeSearchLeafScore, \TreeSearchMeanReturn, \TreeSearchPriorDistribution, \TreeSearchVisitCount, \VerifierPassProbability]
 ---
 
@@ -467,6 +468,108 @@ with the numerator taken as zero when $\GeneratedSampleCount-\PassingSampleCount
 The relationship to deployed selection follows from the event being measured. If the selector must return an unchanged member of the same pool, it cannot return a test-passing candidate when the pool contains none. Its probability of returning a test-passing candidate is therefore at most pass@$\IndependentAttemptCount$, counting abstention as no returned pass. A selector that always finds a passing member whenever one exists reaches this ceiling; whether the deployed selector does, within the deployment's checking budget, is a separate measurement.
 
 The predicate is passing these tests, which is narrower than satisfying the complete task requirements, and the ceiling covers only selectors that return an unchanged pool member; a selector that repairs candidates or synthesizes a new one generates additional artifacts. Report candidate availability alongside selected-output performance under the relevant criterion.
+
+The gap between the two can be large. @Fig-vol3-coverage-vs-selection recomputes the plateau described in @sec-vol3-test-time-compute-breadth-axis from the released per-sample correctness labels of @brown2024monkeys, plotting coverage (the task-averaged pass@$\IndependentAttemptCount$ estimate) against the accuracy of majority voting over the same pools.
+
+```{python}
+#| label: calc-vol3-coverage-vs-selection
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COVERAGE VS. SELECTED ACCURACY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-coverage-vs-selection and the paragraph after it.
+# │ Goal: Quantify the gap between pool availability and what a voting
+# │       selector returns.
+# │ Show: Coverage and majority-vote accuracy at the largest pool; the
+# │       vote's gain after 256 samples; repository-repair coverage growth.
+# │ How:  Literature.RepeatedSamplingMajority / RepeatedSamplingCoverage,
+# │       recomputed from per-sample labels with the unbiased estimator.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+def _at(rows, model, dataset, k, field):
+    return next(r[field] for r in rows if r["model"] == model and r["dataset"] == dataset and r["k"] == k)
+
+class CoverageVsSelection:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    maj = Literature.RepeatedSamplingMajority.entries
+    cov = Literature.RepeatedSamplingCoverage.entries
+    small, large = "Llama-3-8B-Instruct", "Llama-3-70B-Instruct"
+    k_max, k_knee = 10_000, 256
+    repair = "DeepSeek-Coder-V2-Instruct + Moatless Tools"
+    repair_set, repair_k = "SWE-bench Lite (all 300)", 250
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    cov_small = _at(maj, small, "MATH", k_max, "coverage")
+    vote_small = _at(maj, small, "MATH", k_max, "majority_vote_accuracy")
+    vote_large = _at(maj, large, "MATH", k_max, "majority_vote_accuracy")
+    vote_gain_after_knee = 0.0
+    for _m in (small, large):
+        vote_gain_after_knee = max(
+            vote_gain_after_knee, _at(maj, _m, "MATH", k_max, "majority_vote_accuracy") - _at(maj, _m, "MATH", k_knee, "majority_vote_accuracy")
+        )
+    cov_gain_after_knee = cov_small - _at(maj, small, "MATH", k_knee, "coverage")
+    repair_1 = _at(cov, repair, repair_set, 1, "coverage")
+    repair_k_cov = _at(cov, repair, repair_set, repair_k, "coverage")
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(cov_small > 0.95 and vote_small < 0.5 and vote_large < 0.65, "Prose contrasts near-complete coverage with sub-60% voting")
+    check(vote_gain_after_knee < 0.01 < 0.05 < cov_gain_after_knee, "Prose says voting stalls after 256 samples while coverage keeps rising")
+    check(repair_k_cov > 3 * repair_1, "Prose says repository-repair coverage more than triples")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_max_str, k_knee_str, repair_k_str = fmt_int(k_max), fmt_int(k_knee), fmt_int(repair_k)
+    cov_small_str = fmt_percent(round(cov_small, 2), precision=0, style="prose")
+    vote_small_str = fmt_percent(round(vote_small, 2), precision=0, style="prose")
+    vote_large_str = fmt_percent(round(vote_large, 2), precision=0, style="prose")
+    cov_gain_str = fmt_int(round(100 * cov_gain_after_knee))
+    repair_1_str = fmt_percent(round(repair_1, 2), precision=0, style="prose")
+    repair_cov_str = fmt_percent(round(repair_k_cov, 2), precision=0, style="prose")
+```
+
+:::: {#fig-vol3-coverage-vs-selection fig-env="figure" fig-pos="htb" fig-cap="**Availability Outruns Selection**: Coverage (solid), the share of problems whose pool holds a correct candidate, and majority-vote accuracy (dashed) on competition mathematics for two model sizes, against pool size on a logarithmic axis; the dotted line is coverage for a repository-repair agent whose candidates are checked by tests. Coverage keeps climbing for four orders of magnitude while voting flattens after a few hundred samples, so most of the candidates a large pool adds are correct answers the voting selector never returns. Recomputed from the per-sample labels released by @brown2024monkeys." fig-alt="Line chart of percent of problems from 0 to 100 against samples per problem from 1 to 10,000 on a logarithmic axis. Two solid lines, blue and violet, rise from about 27 and 48 percent to about 98 percent. Two dashed lines in the same colors rise briefly and flatten near 43 and 60 percent. A dotted green line rises from about 16 percent to 56 percent at 250 samples and stops."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COVERAGE VS. SELECTED ACCURACY (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-coverage-vs-selection
+# │
+# │ Goal: Show pool availability rising while a voting selector stalls.
+# │ Show: MATH coverage and majority vote for two models; repair coverage.
+# │ How: Literature.RepeatedSamplingMajority / RepeatedSamplingCoverage
+# │      (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.6))
+maj = Literature.RepeatedSamplingMajority.entries
+cov = Literature.RepeatedSamplingCoverage.entries
+for model, label, col in (("Llama-3-8B-Instruct", "8B model", "BlueLine"), ("Llama-3-70B-Instruct", "70B model", "VioletLine")):
+    r = sorted([e for e in maj if e["model"] == model and e["dataset"] == "MATH"], key=lambda e: e["k"])
+    k = [e["k"] for e in r]
+    ax.plot(k, [100 * e["coverage"] for e in r], "-", color=COLORS[col], lw=2, label=f"Math, {label}: coverage")
+    ax.plot(k, [100 * e["majority_vote_accuracy"] for e in r], "--", color=COLORS[col], lw=2, label=f"Math, {label}: majority vote")
+s = sorted([e for e in cov if e["dataset"] == "SWE-bench Lite (all 300)"], key=lambda e: e["k"])
+ax.plot([e["k"] for e in s], [100 * e["coverage"] for e in s], ":", color=COLORS["GreenLine"], lw=2.2, label="Repository repair: coverage")
+ax.set_xscale("log")
+ax.set_xlim(1, 12_000)
+ax.set_ylim(0, 102)
+ax.set_xlabel("Samples per problem")
+ax.set_ylabel("Problems (%)")
+ax.set_xticks([1, 10, 100, 1000, 10000])
+ax.set_xticklabels(["1", "10", "100", "1,000", "10,000"])
+ax.legend(frameon=False, fontsize=8.3, loc="lower right")
+plt.show()
+plt.close()
+```
+
+::::
+
+At `{python} CoverageVsSelection.k_max_str` samples, the smaller model's pools hold a correct answer for `{python} CoverageVsSelection.cov_small_str` of the problems, yet majority voting returns one for `{python} CoverageVsSelection.vote_small_str`, and `{python} CoverageVsSelection.vote_large_str` for the larger model. Beyond `{python} CoverageVsSelection.k_knee_str` samples the vote gains less than a point while coverage gains another `{python} CoverageVsSelection.cov_gain_str`. The repair agent's coverage rises from `{python} CoverageVsSelection.repair_1_str` with one sample to `{python} CoverageVsSelection.repair_cov_str` at `{python} CoverageVsSelection.repair_k_str`, but that growth is usable only because tests can identify which candidate passes. Spending on breadth is therefore justified by the selector, not by the pool: without a check that recognizes the correct candidate, the added samples raise the pass@$\IndependentAttemptCount$ ceiling without raising what the runtime returns.
 
 ::: {.column-margin .margin-pointer}
 ↪ The distinction between pass@$\IndependentAttemptCount$ over a candidate pool and consistency over repeated system runs is developed in @sec-vol3-evaluation-pass-k.

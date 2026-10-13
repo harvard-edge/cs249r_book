@@ -1,4 +1,5 @@
 ---
+number-offset: [2]
 format:
   html:
     title: "The Cognitive Brain"
@@ -508,6 +509,139 @@ These stages, and the ingestion before them, all run on the application processo
 :::
 
 On an edge robotics system-on-chip (SoC) with unified memory, model weights, sensor transfers, and host computation share memory bandwidth. A policy cannot budget the full bus for itself while assuming that new camera frames arrive without interference. The transfer bound below is therefore a lower bound on evaluation time; the worked comparison later uses an assumed sustained fraction of peak bandwidth. @Sec-placement-resource-contention models how weight fetches, camera transfers, and telemetry writes queue for the shared memory controller.
+
+Published measurements on the machine's own module show how far apart those costs sit before any of that arithmetic. The MLPerf Inference edge suite times one query at a time, its single-stream scenario, for a fixed set of reference models [@reddi2020mlperf]. @Fig-03-measured-orin-latency plots the vendor's results for the 64 GB Jetson AGX Orin against the three cadences of the running machine.
+
+```{python}
+#| label: calc-brain-measured-orin-latency
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED SINGLE-QUERY LATENCY ON THE APPLICATION PROCESSOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-03-measured-orin-latency and the paragraph after it.
+# │ Goal: Place published single-stream latencies on the machine's own module
+# │       against the machine's chunk and intent periods.
+# │ Show: Which reference models fit one chunk period; how far the language
+# │       and image-generation models overrun the intent period.
+# │ How:  Literature.EdgeInferenceOrin, NVIDIA's own 64 GB developer-kit
+# │       submission, latest round per benchmark, p90 single-stream latency;
+# │       periods from Embodied.MobileManipulator.WarehouseMobileManipulator.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Embodied, Hardware, Literature
+from mlsysim.core.units import millisecond, second
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_time
+
+def _latest_p90(rows, system, bench):
+    """Latest-round p90 single-stream latency (ms) for one system and benchmark."""
+    hits = [
+        r for r in rows if r["system"] == system and r["benchmark"] == bench and r["scenario"] == "SingleStream" and r["metric"].startswith("p90")
+    ]
+    return max(hits, key=lambda r: r["round"])["value"], max(hits, key=lambda r: r["round"])["round"]
+
+class MeasuredOrinLatency:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+    rows = Literature.EdgeInferenceOrin.entries
+    system = "NVIDIA Jetson AGX Orin Developer Kit 64G (TensorRT)"
+    benches = ("resnet50", "bert-99", "retinanet", "rnnt", "3d-unet-99", "gptj-99", "stable-diffusion-xl")
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    t_chunk = (1 / RM.chunk_rate).to(millisecond).magnitude
+    t_intent = (1 / RM.intent_rate).to(millisecond).magnitude
+    lat = {}
+    for _b in benches:
+        lat[_b] = _latest_p90(rows, system, _b)[0]
+    n_fit_chunk = 0
+    for _v in lat.values():
+        n_fit_chunk += _v <= t_chunk
+    gptj_over_intent = lat["gptj-99"] / t_intent
+    span = lat["stable-diffusion-xl"] / lat["resnet50"]
+    for _r in rows:
+        if _r["system"] == system and _r["benchmark"] == "gptj-99" and _r["round"] == "v4.0" and _r["metric"].startswith("p90"):
+            gptj_earlier = _r["value"]
+    gptj_sw_gain = gptj_earlier / lat["gptj-99"]
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(RM.brain_soc.name == Hardware.Edge.JetsonAGXOrin.name, "Prose says the measurements are on the machine's own module")
+    check(n_fit_chunk == 3, "Prose says three reference models fit one chunk period")
+    check(gptj_over_intent > 5 and span > 1e4, "Prose says the language model overruns the intent period several-fold")
+    check(gptj_sw_gain > 2, "Prose says software alone more than halved the language-model latency")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_chunk_str = fmt_int(round(t_chunk))
+    t_intent_str = fmt_int(round(t_intent))
+    resnet_str = fmt(lat["resnet50"], precision=2)
+    retinanet_str = fmt(round(lat["retinanet"], 1), precision=1)
+    gptj_time_str = fmt_time(round(lat["gptj-99"] / 1000, 1) * second, unit=second, precision=1)
+    gptj_earlier_time_str = fmt_time(round(gptj_earlier / 1000, 1) * second, unit=second, precision=1)
+    gptj_over_intent_mult_str = fmt_multiple(round(gptj_over_intent), precision=0)
+    span_mult_str = fmt_multiple(round(span, -3), precision=0, commas=True)
+```
+
+:::: {#fig-03-measured-orin-latency fig-env="figure" fig-pos="htb" fig-cap="**Measured single-query latency on the application processor**: The 90th-percentile time to answer one query, on a logarithmic axis, for each MLPerf Inference edge reference model on the 64 GB Jetson AGX Orin, the module in the running machine. Dashed lines mark the machine's chunk renewal period and intent revision period; blue bars finish within one chunk period, the orange bar within the intent period, and gray bars within neither. The reference models span four orders of magnitude on the same silicon, so which proposer a design can afford is fixed by the model class before any tuning. Vendor submissions, latest round per model (v3.1, or v4.1 for the two generative models); data from the MLCommons inference results repositories [@reddi2020mlperf]." fig-alt="Horizontal bar chart on a logarithmic time axis from 0.1 milliseconds to 100 seconds with seven bars, each labeled with a task and its latency. From shortest: image classification under 1 millisecond, question answering about 6 milliseconds, object detection about 12 milliseconds, speech recognition about 94 milliseconds, 3D medical segmentation about 4 seconds, text summarization about 4 seconds, and text-to-image generation about 10 seconds. The three shortest bars are blue, the speech bar orange, and the three longest gray. A dashed vertical line at 50 milliseconds is labeled chunk period and another at 500 milliseconds is labeled intent period."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED SINGLE-QUERY LATENCY ON THE APPLICATION PROCESSOR (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-03-measured-orin-latency
+# │
+# │ Goal: Show measured latencies on the machine's module against its cadences.
+# │ Show: p90 single-stream latency per reference model; chunk and intent
+# │       periods as reference lines.
+# │ How: Literature.EdgeInferenceOrin; Embodied.MobileManipulator rates;
+# │      book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Embodied, Literature
+from mlsysim.core.units import millisecond
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.8))
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+rows = Literature.EdgeInferenceOrin.entries
+system = "NVIDIA Jetson AGX Orin Developer Kit 64G (TensorRT)"
+tasks = [
+    ("resnet50", "Image classification (ResNet-50)"),
+    ("bert-99", "Question answering (BERT)"),
+    ("retinanet", "Object detection (RetinaNet)"),
+    ("rnnt", "Speech recognition (RNN-T)"),
+    ("3d-unet-99", "3D segmentation (3D U-Net)"),
+    ("gptj-99", "Text summarization (GPT-J 6B)"),
+    ("stable-diffusion-xl", "Text to image (SDXL)"),
+]
+vals = []
+for bench, _ in tasks:
+    hits = [
+        r for r in rows if r["system"] == system and r["benchmark"] == bench and r["scenario"] == "SingleStream" and r["metric"].startswith("p90")
+    ]
+    vals.append(max(hits, key=lambda r: r["round"])["value"])
+t_chunk = (1 / RM.chunk_rate).to(millisecond).magnitude
+t_intent = (1 / RM.intent_rate).to(millisecond).magnitude
+colors = [COLORS["BlueLine"] if v <= t_chunk else (COLORS["OrangeLine"] if v <= t_intent else COLORS["secondary"]) for v in vals]
+y = range(len(tasks))
+ax.barh(list(y), vals, color=colors, height=0.6)
+for i, v in enumerate(vals):
+    ax.text(v * 1.15, i, f"{v:,.2f} ms" if v < 10 else (f"{v:,.0f} ms" if v < 1000 else f"{v / 1000:.1f} s"), va="center", fontsize=8.5)
+for t, label, side in ((t_chunk, "chunk period", "right"), (t_intent, "intent period", "left")):
+    ax.axvline(t, color=COLORS["primary"], ls="--", lw=1)
+    ax.text(t / 1.08 if side == "right" else t * 1.08, -0.75, f"{label}: {t:.0f} ms", fontsize=8, va="center", ha=side)
+ax.set_yticks(list(y))
+ax.set_yticklabels([t for _, t in tasks])
+ax.set_xscale("log")
+ax.set_xlim(0.1, 2e5)
+ax.set_ylim(len(tasks) - 0.5, -1.1)
+ax.set_xticks([0.1, 1, 10, 100, 1000, 10000, 100000])
+ax.set_xticklabels(["0.1", "1", "10", "100", "1,000", "10,000", "100,000"])
+ax.set_xlabel("90th-percentile latency for one query (ms)")
+ax.grid(axis="y", visible=False)
+plt.show()
+plt.close()
+```
+
+::::
+
+Only three of the seven reference models answer inside the `{python} MeasuredOrinLatency.t_chunk_str` ms chunk period: classification in `{python} MeasuredOrinLatency.resnet_str` ms, question answering, and detection in `{python} MeasuredOrinLatency.retinanet_str` ms. A six-billion-parameter language model takes `{python} MeasuredOrinLatency.gptj_time_str` to produce one summary, `{python} MeasuredOrinLatency.gptj_over_intent_mult_str` the `{python} MeasuredOrinLatency.t_intent_str` ms intent period, and the span from fastest to slowest is about `{python} MeasuredOrinLatency.span_mult_str`. The figure is a measured version of the two-speed argument: a language-model proposer on this module can revise intent only at a fraction of the rate the arm consumes setpoints. The same submission also shows that the cost is not fixed by the silicon alone. The language model's latency was `{python} MeasuredOrinLatency.gptj_earlier_time_str` one round earlier on identical hardware, so the software stack sets the cost as much as the silicon does. Which bytes that software moves per evaluation is what the memory-wall analysis below quantifies.
 
 ### The memory wall {#sec-brain-memory-wall}
 

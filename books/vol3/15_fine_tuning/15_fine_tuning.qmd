@@ -1,4 +1,5 @@
 ---
+number-offset: [14]
 notation-local: [\ActionTokenPrefix, \ActiveSchemaSet, \BatchExampleIndex, \CommonPositionShift, \ComparisonContext, \DispreferredReferenceRelativeScore, \DispreferredTrajectory, \DpoLoss, \EligibleTargetPositionSet, \ExampleAveragedBatchLoss, \FirstComparedItem, \KeyBufferPosition, \LabelingRoundIndex, \PackedExampleIndex, \PackedExampleLength, \PackedExampleOffset, \PositionLossMask, \PreferenceMargin, \PreferencePairDataset, \PreferenceScale, \PreferenceScoredPositionSet, \PreferredReferenceRelativeScore, \PreferredTrajectory, \QueryBufferPosition, \RationaleTokens, \ReferenceLogProbabilitySum, \ReferenceMixingProbability, \ReferenceRelativeScore, \ResponseActionTokens, \RotaryRotationMatrix, \ScoredToolCall, \ScoredToolCallCount, \SecondComparedItem, \SerializedTrainingExample, \SigmoidFunction, \TokenAveragedBatchLoss, \ToolArgumentKey, \TrainingSchemaKeySet, \VocabularyTokenLogit]
 ---
 
@@ -411,6 +412,103 @@ class SelectedTargetAccounting:
 **Systems insight**: Because the dilution factor scales inversely with the selected fraction of predicted positions, it expands rapidly as environment interactions accumulate. Doubling the observation volume while holding response lengths constant escalates dilution from `{python} SelectedTargetAccounting.dilution_without_mult_str` to `{python} SelectedTargetAccounting.dilution_double_obs_mult_str`. Consequently, observation masking becomes increasingly essential as agents tackle deep, tool-intensive reasoning traces. Notice, however, that masking yields negligible reductions in FLOPs: every masked token must still pass through causal attention layers to form context for subsequent predictions. Only the final language model head projection and cross-entropy loss computation can be bypassed at masked positions.
 
 :::
+
+Recorded repair trajectories show that the hypothetical inventory's proportions are realistic. @Fig-vol3-trajectory-composition splits the transcripts of five published agent configurations on the same repository-repair tasks [@jimenez2024swebench] by the role that produced each message.
+
+```{python}
+#| label: calc-vol3-trajectory-composition
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED TRAJECTORY COMPOSITION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-trajectory-composition and the paragraph after it.
+# │ Goal: Ground the hypothetical mask inventory in recorded trajectories.
+# │ Show: Range of observation and model-output shares across configurations.
+# │ How:  Literature.SweBenchTrajectories; characters pooled per
+# │       configuration, each message counted once.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class TrajectoryComposition:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    runs = Literature.SweBenchTrajectories.entries
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    totals = {}
+    for _r in runs:
+        _t = totals.setdefault((_r["scaffold"], _r["model"]), [0.0, 0.0, 0.0, 0.0])
+        _t[0] += _r["model_chars"]
+        _t[1] += _r["obs_chars"]
+        _t[2] += _r["prompt_chars"]
+        _t[3] += _r["total_chars"]
+    obs_shares = sorted(v[1] / v[3] for v in totals.values())
+    model_shares = sorted(v[0] / v[3] for v in totals.values())
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(obs_shares[0] > 0.5, "Prose says observations are the majority in every configuration")
+    check(model_shares[-1] < 1 / 3, "Prose says model output is under a third everywhere")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_configs_str = fmt_int(len(totals))
+    n_runs_str = fmt_int(len(runs))
+    obs_lo_str = fmt_int(round(100 * obs_shares[0]))
+    obs_hi_str = fmt_percent(round(obs_shares[-1], 2), precision=0, style="prose")
+    model_lo_str = fmt_int(round(100 * model_shares[0]))
+    model_hi_str = fmt_percent(round(model_shares[-1], 2), precision=0, style="prose")
+```
+
+:::: {#fig-vol3-trajectory-composition fig-env="figure" fig-pos="htb" fig-cap="**Observations Dominate Recorded Trajectories**: Share of transcript characters by the role that produced them, pooled over every run of each configuration and counting each message once. Prompt covers the system message, demonstrations, and task statement; observations are tool and environment output; model output is everything the model generated, the only region from which training targets can be selected. Characters stand in for tokens because the configurations use different tokenizers. Trajectories from @jimenez2024swebench submissions." fig-alt="Five horizontal stacked bars, one per agent configuration, each spanning 0 to 100 percent of transcript characters. Each bar has a gray prompt segment, a long green observation segment between about 56 and 72 percent, and a dark model-output segment between about 12 and 31 percent, with the percentage printed inside each wide segment."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED TRAJECTORY COMPOSITION (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-trajectory-composition
+# │
+# │ Goal: Show how much of a recorded trajectory is observation.
+# │ Show: Stacked prompt / observation / model-output shares per configuration.
+# │ How: Literature.SweBenchTrajectories (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.2))
+totals = {}
+for r in Literature.SweBenchTrajectories.entries:
+    t = totals.setdefault((r["scaffold"], r["model"]), [0.0, 0.0, 0.0, 0.0])
+    t[0] += r["prompt_chars"]
+    t[1] += r["obs_chars"]
+    t[2] += r["model_chars"]
+    t[3] += r["total_chars"]
+labels = [f"{s}, {m}" for s, m in totals]
+segments = [
+    ("Prompt", COLORS["grid"], COLORS["primary"]),
+    ("Observations", COLORS["GreenLine"], "white"),
+    ("Model output", COLORS["primary"], "white"),
+]
+left = [0.0] * len(totals)
+for j, (name, color, text_color) in enumerate(segments):
+    share = [100 * v[j] / v[3] for v in totals.values()]
+    ax.barh(labels, share, left=left, color=color, label=name, edgecolor="white", lw=0.8)
+    for i, (x0, w) in enumerate(zip(left, share)):
+        if w >= 9:
+            ax.text(x0 + w / 2, i, f"{w:.0f}%", ha="center", va="center", fontsize=8, color=text_color)
+    left = [a + b for a, b in zip(left, share)]
+ax.set_xlim(0, 100)
+ax.set_xlabel("Share of transcript characters (%)")
+ax.invert_yaxis()
+ax.set_axisbelow(True)
+ax.grid(axis="y", visible=False)
+ax.legend(frameon=False, fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=3)
+plt.show()
+plt.close()
+```
+
+::::
+
+Across the `{python} TrajectoryComposition.n_configs_str` configurations and `{python} TrajectoryComposition.n_runs_str` runs, observations make up `{python} TrajectoryComposition.obs_lo_str` to `{python} TrajectoryComposition.obs_hi_str` of the transcript, and model output only `{python} TrajectoryComposition.model_lo_str` to `{python} TrajectoryComposition.model_hi_str`. These shares count each message once. Serializing one example per invocation repeats the growing prefix in every example, so the observation share of the stored training input is larger still, approaching the inventory's proportion. The mask is therefore not a refinement applied to a few verbose tool calls; in recorded repair work it decides the fate of most of the sequence.
 
 ### Optional rationale as target or context {#sec-vol3-fine-tuning-optional-rationale}
 

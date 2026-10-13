@@ -1,4 +1,5 @@
 ---
+number-offset: [8]
 notation-local: [\AttackedTrialCount, \DerivedRecord, \DocumentPayloadFraction, \EffectiveConfidentialityLabel, \EffectiveIntegrityProvenance, \ObjectHandle, \OperationRecipient, \ScreeningMissRate, \TaskReadCount, \TransformationInputCount, \TurnPayloadProbability, \TurnReadCount]
 ---
 
@@ -875,6 +876,129 @@ Unresolved episodes demand rigorous accounting rather than silent omission. When
 When comparing a defended system against an undefended baseline under identical conditions, engineers frequently compute the relative attack reduction: one minus the defended rate divided by the baseline rate. While relative metrics convey overall progress, they can easily mislead if reported in isolation. For instance, if the baseline attack-success rate is zero, the ratio becomes undefined; if a defense performs worse, it yields a negative reduction. Furthermore, a high relative reduction over a tiny sample size can conceal large absolute vulnerabilities. Engineering reports should therefore always publish the raw trial counts and absolute attack-success rates alongside any relative percentage gains.
 
 Security metrics are meaningless without measuring useful task completion. A policy that trivially disables all tool dispatch will achieve a perfect zero percent attack-success rate while delivering zero utility. Evaluators must therefore maintain separate, parallel metrics for useful work: accepted legitimate tasks over all eligible benign trials, and accepted legitimate tasks over all eligible attacked trials. A security filter might successfully prevent a private data leak, yet leave the original software repair incomplete or broken. To isolate policy errors from general model limitations, systems engineers track the **false-block rate**\index{False-block rate!definition}, defined as the fraction of legitimate, benign tasks that fail solely because a defensive policy erroneously refused a valid operation under a rule fixed in advance. Benchmarking harnesses must categorize task failures precisely, distinguishing policy-induced false blocks from unrelated failures such as syntax errors, environment timeouts, or exhausted search budgets.
+
+The published results of @debenedetti2024agentdojo show why the two must be read together. @Fig-vol3-utility-vs-attack-success places each evaluated configuration by its benign utility and its targeted attack-success rate under the same injection attack, and traces one model through the four defenses the authors ran on it.
+
+```{python}
+#| label: calc-vol3-utility-vs-attack-success
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ UTILITY VS. ATTACK SUCCESS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-utility-vs-attack-success and the paragraph after it.
+# │ Goal: Show that capability does not predict injection resistance, and
+# │       that defenses trade utility against attack success unevenly.
+# │ Show: Attack-success range across undefended models; two versions of
+# │       one model at equal utility; each defense's effect on one model.
+# │ How:  Literature.InjectionDefenseResults (published results table).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+def _row(rows, model, defense="none", attack="important_instructions"):
+    return next(r for r in rows if r["model"] == model and r["defense"] == defense and r["attack"] == attack)
+
+class UtilityVsAttack:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    rows = Literature.InjectionDefenseResults.entries
+    ablated = "gpt-4o-2024-05-13"
+    early, late = "claude-3-5-sonnet-20240620", "claude-3-5-sonnet-20241022"
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    plain = tuple(filter(lambda r: r["defense"] == "none" and r["attack"] == "important_instructions", rows))
+    asr_lo = min(r["targeted_asr_pct"] for r in plain)
+    asr_hi = max(r["targeted_asr_pct"] for r in plain)
+    e, l = _row(rows, early), _row(rows, late)
+    base = _row(rows, ablated)
+    det = _row(rows, ablated, "transformers_pi_detector")
+    filt = _row(rows, ablated, "tool_filter")
+    spot = _row(rows, ablated, "spotlighting_with_delimiting")
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(e["utility_pct"] == l["utility_pct"] and e["targeted_asr_pct"] > 20 * l["targeted_asr_pct"], "Prose: same utility, >20x attack-success gap")
+    check(det["targeted_asr_pct"] < 10 and det["utility_pct"] < base["utility_pct"] - 20, "Prose: detector cuts attacks but costs utility")
+    check(filt["targeted_asr_pct"] < 10 and filt["utility_pct"] >= base["utility_pct"], "Prose: tool filter cuts attacks without losing utility")
+    check(spot["targeted_asr_pct"] > 0.8 * base["targeted_asr_pct"], "Prose: delimiting barely moves attack success")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    # Source values are percentages with two decimals; prose shows whole percents.
+    asr_lo_str = fmt_percent(round(asr_lo) / 100, precision=0, style="prose")
+    asr_hi_str = fmt_percent(round(asr_hi) / 100, precision=0, style="prose")
+    same_util_str = fmt_percent(round(e["utility_pct"]) / 100, precision=0, style="prose")
+    early_asr_str = fmt_percent(round(e["targeted_asr_pct"]) / 100, precision=0, style="prose")
+    late_asr_str = fmt_percent(round(l["targeted_asr_pct"]) / 100, precision=0, style="prose")
+    base_asr_str = fmt_percent(round(base["targeted_asr_pct"]) / 100, precision=0, style="prose")
+    base_util_str = fmt_percent(round(base["utility_pct"]) / 100, precision=0, style="prose")
+    det_asr_str = fmt_percent(round(det["targeted_asr_pct"]) / 100, precision=0, style="prose")
+    det_util_str = fmt_percent(round(det["utility_pct"]) / 100, precision=0, style="prose")
+    filt_asr_str = fmt_percent(round(filt["targeted_asr_pct"]) / 100, precision=0, style="prose")
+    filt_util_str = fmt_percent(round(filt["utility_pct"]) / 100, precision=0, style="prose")
+    spot_asr_str = fmt_percent(round(spot["targeted_asr_pct"]) / 100, precision=0, style="prose")
+```
+
+:::: {#fig-vol3-utility-vs-attack-success fig-env="figure" fig-pos="htb" fig-cap="**Utility Does Not Buy Resistance**: Benign task utility against targeted attack success for each evaluated model under the same injection attack with no defense (dots), and for one model under four defenses (arrows from its undefended point). The safe corner is the lower right. Undefended models of similar utility spread across most of the attack-success range, and the defenses move the same model in very different directions. The source notes that only one model was run with every defense, so the table is a set of measurements rather than a ranking. Data from @debenedetti2024agentdojo." fig-alt="Scatter plot of targeted attack success from 0 to 60 percent against benign utility from 20 to 90 percent. About twenty gray dots spread widely with no clear trend. A black point for one model at about 69 percent utility and 48 percent attack success has four colored arrows leading from it: one far left and down to about 41 percent utility and 8 percent attack success, one slightly right and far down to about 72 percent utility and 7 percent, one slightly right with little drop to about 42 percent, and one right and down to about 85 percent utility and 28 percent. Each arrow tip is labeled with the defense name."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ UTILITY VS. ATTACK SUCCESS (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-utility-vs-attack-success
+# │
+# │ Goal: Show the utility and attack-success plane for real configurations.
+# │ Show: Undefended models as dots; one model's four defenses as arrows.
+# │ How: Literature.InjectionDefenseResults (MLSysIM); book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.8))
+rows = Literature.InjectionDefenseResults.entries
+plain = [r for r in rows if r["defense"] == "none" and r["attack"] == "important_instructions"]
+ablated = "gpt-4o-2024-05-13"
+others = [r for r in plain if r["model"] != ablated]
+ax.scatter(
+    [r["utility_pct"] for r in others],
+    [r["targeted_asr_pct"] for r in others],
+    s=34,
+    color=COLORS["secondary"],
+    alpha=0.8,
+    zorder=3,
+    label="Undefended model",
+)
+base = next(r for r in plain if r["model"] == ablated)
+ax.scatter([base["utility_pct"]], [base["targeted_asr_pct"]], s=60, color=COLORS["primary"], zorder=5, label="GPT-4o, undefended")
+defs = [
+    ("transformers_pi_detector", "Injection detector", "OrangeLine", (-6, -10), "right"),
+    ("tool_filter", "Tool filter", "GreenLine", (6, -8), "left"),
+    ("spotlighting_with_delimiting", "Delimiting", "VioletLine", (6, 2), "left"),
+    ("repeat_user_prompt", "Repeat user prompt", "BlueLine", (4, -12), "center"),
+]
+for key, label, col, off, ha in defs:
+    d = next(r for r in rows if r["model"] == ablated and r["defense"] == key)
+    ax.annotate(
+        "",
+        (d["utility_pct"], d["targeted_asr_pct"]),
+        (base["utility_pct"], base["targeted_asr_pct"]),
+        arrowprops=dict(arrowstyle="-|>", color=COLORS[col], lw=1.6, shrinkA=5, shrinkB=2),
+        zorder=4,
+    )
+    ax.annotate(label, (d["utility_pct"], d["targeted_asr_pct"]), xytext=off, textcoords="offset points", ha=ha, fontsize=8.5, color=COLORS[col])
+for name, label in (("claude-3-5-sonnet-20240620", "Claude 3.5 Sonnet (Jun 2024)"), ("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet (Oct 2024)")):
+    r = next(x for x in plain if x["model"] == name)
+    ax.annotate(label, (r["utility_pct"], r["targeted_asr_pct"]), xytext=(6, 3), textcoords="offset points", fontsize=8)
+ax.set_xlim(20, 92)
+ax.set_ylim(0, 60)
+ax.set_xlabel("Benign utility (%)")
+ax.set_ylabel("Targeted attack success (%)")
+ax.legend(frameon=False, fontsize=8.5, loc="upper left")
+plt.show()
+plt.close()
+```
+
+::::
+
+Without a defense, attack success across the evaluated models runs from `{python} UtilityVsAttack.asr_lo_str` to `{python} UtilityVsAttack.asr_hi_str`, and two versions of one model family with the same benign utility, `{python} UtilityVsAttack.same_util_str`, succumb at `{python} UtilityVsAttack.early_asr_str` and `{python} UtilityVsAttack.late_asr_str`. Capability is therefore no proxy for resistance, and a model update can move resistance by more than an order of magnitude without changing utility. The defenses on the single ablated model sort along the same line as this chapter's argument. Delimiting untrusted text, an instruction to the model, leaves attack success at `{python} UtilityVsAttack.spot_asr_str` against an undefended `{python} UtilityVsAttack.base_asr_str`. An injection detector cuts it to `{python} UtilityVsAttack.det_asr_str` but drops utility from `{python} UtilityVsAttack.base_util_str` to `{python} UtilityVsAttack.det_util_str`, the false-block cost defined above. Narrowing the tool set to those relevant to the user's request, before any tool output is read, cuts attack success to `{python} UtilityVsAttack.filt_asr_str` while utility reaches `{python} UtilityVsAttack.filt_util_str`. Of the four, only the defense that constrains what can be done, rather than what the model is told, holds both metrics.
 
 Comprehensive evaluation also tallies operational latency and financial cost across the full trial boundary, including reader model calls, policy broker checks, provenance tracing, retry loops, and uncompleted attempts. When an overly restrictive defense rejects valid actions, it forces unnecessary retries or leaves tasks uncompleted, directly driving up the effective cost per accepted task (@eq-vol3-cost-per-accepted-task). Because the effective unit cost scales inversely with the acceptance probability ($\CostPerAcceptedTask \propto 1/\AcceptanceProbability$), an aggressive defense that suppresses attacks at the expense of high false blocks imposes a steep monetary and operational penalty on ordinary workloads. Framing security and utility through this shared economic lens allows systems designers to evaluate defense trade-offs objectively.
 

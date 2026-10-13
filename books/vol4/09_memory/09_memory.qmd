@@ -1,4 +1,5 @@
 ---
+number-offset: [8]
 format:
   html:
     title: "Spatial Memory"
@@ -1115,6 +1116,119 @@ plt.show()
 ```
 
 :::
+
+The laboratory rates above isolate the systematic part of wheel-odometry error on a slow square path. Camera and lidar odometry are measured differently, by total error at road speed over long runs, on a public driving benchmark that scores each submitted method by its translation error averaged over every subsequence of 100 to 800 m in held-out sequences, in percent of distance traveled [@geiger2012are]. @Fig-09-kitti-drift places every ranked method against the distance at which its drift rate would spend the machine's localization bound.
+
+```{python}
+#| label: calc-memory-kitti-drift
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VISUAL AND LIDAR ODOMETRY DRIFT AGAINST THE LOCALIZATION BOUND (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-09-kitti-drift and the paragraph after it.
+# │ Goal: Show that even the best published odometry spends the bound
+# │       within one aisle.
+# │ Show: Best and median translation error for stereo and lidar methods;
+# │       distance to exhaust delta_loc at each; the aisle length.
+# │ How:  Literature.KittiOdometry; delta_loc and aisle length from
+# │       Embodied.Scenario.WarehouseAisle; d = delta_loc / eps.
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Embodied, Literature
+from mlsysim.core.units import meter
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
+
+class KittiDrift:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    AISLE = Embodied.Scenario.WarehouseAisle
+    rows = Literature.KittiOdometry.entries
+    delta_loc_m = AISLE.delta_loc.to(meter).magnitude
+    aisle_m = AISLE.aisle_length.to(meter).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    stereo = np.array([r["translation_err_pct"] for r in rows if r["sensor_group"] == "stereo"])
+    laser = np.array([r["translation_err_pct"] for r in rows if r["sensor_group"] == "laser"])
+    best = min(stereo.min(), laser.min())
+    d_best = delta_loc_m / (best / 100)
+    d_stereo_med = delta_loc_m / (np.median(stereo) / 100)
+    d_laser_med = delta_loc_m / (np.median(laser) / 100)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(d_best < aisle_m, "Prose says even the best method spends the bound within one aisle")
+    check(d_stereo_med < d_laser_med < d_best, "Prose orders the median stereo, median lidar, and best distances")
+    check(d_best < aisle_m / 3, "Prose says the best method spends the bound within a third of one aisle")
+    check(best / 100 > OdometryDrift.eps_cal, "Prose says the total-error rates sit above the calibrated UMBmark rate")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_ranked_str = fmt_int(len(rows))
+    best_pct_str = fmt(best, precision=2)
+    stereo_med_str = fmt(round(float(np.median(stereo)), 2), precision=2)
+    laser_med_str = fmt(round(float(np.median(laser)), 2), precision=2)
+    d_best_str = fmt_int(round(d_best))
+    d_stereo_med_str = fmt_int(round(d_stereo_med))
+    d_laser_med_str = fmt_int(round(d_laser_med))
+    aisle_str = fmt_int(round(aisle_m))
+    delta_loc_mm_str = fmt_int(round(delta_loc_m * 1000))
+```
+
+:::: {#fig-09-kitti-drift fig-env="figure" fig-pos="htb" fig-cap="**Even the best odometry needs a correction within one aisle**: Each dot is one ranked method on a public odometry benchmark, placed by its translation error (percent of distance, averaged over 100 to 800 m subsequences) and grouped by sensor; methods without a stereo or lidar tag mix monocular, inertial, and event-camera inputs. The top axis converts error into the distance at which a constant drift rate spends the running machine's `{python} KittiDrift.delta_loc_mm_str` mm localization bound, and the shaded region is shorter than one `{python} KittiDrift.aisle_str` m aisle. The benchmark is road driving, so it bounds what these methods achieve rather than predicting warehouse drift. Data from the benchmark leaderboard [@geiger2012are]." fig-alt="Strip plot with three rows labeled stereo, lidar, and other against translation error from 0.4 to about 20 percent on a logarithmic axis. Stereo and lidar rows cluster between 0.5 and 2 percent; the other row spreads more widely to the right. A secondary top axis converts error to meters of travel before a 50 millimeter bound is spent, decreasing to the right. A shaded band covers all distances shorter than one 30 meter aisle and contains every dot."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VISUAL AND LIDAR ODOMETRY DRIFT AGAINST THE LOCALIZATION BOUND (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-09-kitti-drift
+# │
+# │ Goal: Place published odometry drift against the localization bound.
+# │ Show: Translation error per method by sensor group; top axis in meters
+# │       to exhaust delta_loc; one-aisle region.
+# │ How: Literature.KittiOdometry; Embodied.Scenario.WarehouseAisle;
+# │      book_style.setup_plot().
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from mlsysim import Embodied, Literature
+from mlsysim.core.units import meter
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.4))
+AISLE = Embodied.Scenario.WarehouseAisle
+dl = AISLE.delta_loc.to(meter).magnitude
+aisle = AISLE.aisle_length.to(meter).magnitude
+rows = Literature.KittiOdometry.entries
+groups = [
+    ("stereo", "Stereo camera", COLORS["BlueLine"]),
+    ("laser", "Lidar", COLORS["GreenLine"]),
+    ("other", "Other or untagged", COLORS["secondary"]),
+]
+group_of = lambda r: r["sensor_group"] if r["sensor_group"] in ("stereo", "laser") else "other"
+rng = np.random.default_rng(0)  # vertical jitter only, for legibility
+for i, (key, label, col) in enumerate(groups):
+    v = np.array([r["translation_err_pct"] for r in rows if group_of(r) == key])
+    ax.scatter(v, i + rng.uniform(-0.18, 0.18, len(v)), s=16, color=col, alpha=0.8, zorder=3)
+x_aisle = 100 * dl / aisle  # error at which the bound lasts exactly one aisle
+ax.axvspan(x_aisle, 100, color=COLORS["RedL"], alpha=0.35, lw=0, zorder=1)
+ax.text(0.45, 2.55, f"bound spent in less than one {aisle:.0f} m aisle", fontsize=8, color=COLORS["primary"])
+ax.set_xscale("log")
+ax.set_xlim(0.1, 30)
+ax.set_ylim(-0.6, 2.9)
+ax.set_yticks(range(len(groups)))
+ax.set_yticklabels([g[1] for g in groups])
+ax.set_xticks([0.1, 0.3, 1, 3, 10, 30])
+ax.set_xticklabels(["0.1", "0.3", "1", "3", "10", "30"])
+ax.set_xlabel("Translation error (% of distance)")
+ax.grid(axis="y", visible=False)
+top = ax.secondary_xaxis("top", functions=(lambda e: 100 * dl / np.maximum(e, 1e-9), lambda d: 100 * dl / np.maximum(d, 1e-9)))
+top.set_xticks([50, 15, 5, 1.5, 0.5])
+top.set_xticklabels(["50", "15", "5", "1.5", "0.5"])
+top.set_xlabel(f"Travel before the {dl * 1000:.0f} mm bound is spent (m)")
+plt.show()
+plt.close()
+```
+
+::::
+
+The best of the `{python} KittiDrift.n_ranked_str` ranked methods drifts `{python} KittiDrift.best_pct_str` percent of distance, and the median stereo and lidar methods drift `{python} KittiDrift.stereo_med_str` and `{python} KittiDrift.laser_med_str` percent. At those rates the `{python} KittiDrift.delta_loc_mm_str` mm bound lasts about `{python} KittiDrift.d_best_str` m for the best method, `{python} KittiDrift.d_laser_med_str` m for the median lidar method, and `{python} KittiDrift.d_stereo_med_str` m for the median stereo method, all shorter than one `{python} KittiDrift.aisle_str` m aisle. These total-error rates sit above the calibrated laboratory figure of `{python} OdometryDrift.eps_cal_pct_str`, because they include the slip, vibration, and scene-dependent errors that UMBmark's calibration deliberately excludes. Read together, the two benchmarks bracket the problem rather than resolve it: the optimistic systematic rate stretches the bound just past one aisle, and the measured total rates of the best published methods spend it within a third of one. Every odometry source on the base is a bridge between external corrections, and the bound remains a requirement on how often those corrections arrive.
 
 Loop closure introduces a consistency challenge that timestamp-based age tracking alone cannot resolve. An occupancy cell anchored in the global map frame retains its original capture epoch (the photons reflected from that obstacle are no newer), yet its spatial coordinates shift whenever the SLAM backend re-optimizes the underlying pose graph. Although the sensor evidence has not been refreshed, its spatial position changes discontinuously. Any local memory snapshot constructed prior to the loop closure now misplaces the obstacle by the magnitude of the graph correction, even while every timestamp within the snapshot passes validation. Robust spatial memory architectures must therefore tag spatial beliefs with the generation or revision identifier of the pose graph alongside individual cell epochs. When a loop closure shifts supporting trajectory poses, the system must either re-anchor dependent snapshots or invalidate them immediately.
 
