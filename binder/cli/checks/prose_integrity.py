@@ -319,3 +319,44 @@ def find_standalone_prose(text: str) -> List[Hit]:
                 last_end = end
     return hits
 
+
+
+# ── E. coined artifact nouns ────────────────────────────────────────────────
+
+# Added 2026-10-13. A concept-map pass had spread "ledger" across all four
+# books (about 850 uses: "scenario ledger", "test ledger", "audit ledger"),
+# and the author judged it LLM-sounding jargon. Each use was replaced with the
+# plain word for what the record is (list, log, table, record, account). The
+# plain word depends on the context, so this detector flags and never fixes.
+# Unlike _scan_prose, it also scans headings, list items, tables, and
+# captions, because the word renders there too.
+_COINED_NOUN = re.compile(r"\bledgers?\b", re.IGNORECASE)
+_HTML_COMMENT_SPAN = re.compile(r"<!--.*?-->")
+
+
+def find_coined_nouns(text: str) -> List[Hit]:
+    """Flag banned coined nouns ("ledger") in any rendered line of a chapter."""
+    hits: List[Hit] = []
+    in_fence = False
+    in_yaml = False
+    for i, raw in enumerate(text.splitlines(), 1):
+        stripped = raw.strip()
+        if i == 1 and stripped == "---":
+            in_yaml = True
+            continue
+        if in_yaml:
+            if stripped == "---":
+                in_yaml = False
+            continue
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        masked = raw
+        for pat in (_INLINE_CODE, _URL, _HTML_COMMENT_SPAN):
+            masked = pat.sub(lambda m: " " * len(m.group(0)), masked)
+        for m in _COINED_NOUN.finditer(masked):
+            hits.append(Hit(line=i, match=m.group(0),
+                            context=raw.strip()[:140], detail=m.group(0)))
+    return hits

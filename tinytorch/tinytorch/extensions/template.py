@@ -1,37 +1,108 @@
-"""TinyTorch Extension Starter Template.
+'''TinyTorch Extension Template.
 
-Use this file as a canonical starting point when authoring a new extension for TinyTorch.
-
-Extensions live in `tinytorch/extensions/` alongside the 20 core modules. An extension
-can introduce new autograd functions, custom neural network layers, training hooks,
-or hardware acceleration kernels (via C++ / Triton / MPS).
+Here is the shape every extension in this folder follows. To write one:
+copy this file, fill in the skeleton below, delete the code sections you do
+not need, and read the example that matches your kind of extension first.
 
 =============================================================================
-HOW TO BUILD YOUR OWN EXTENSION IN 5 STEPS:
+READ AN EXAMPLE FIRST
 =============================================================================
-1. IDENTIFY THE BOUNDARY:
-   - Need custom autograd math or activation recomputation? -> Subclass `Function` (Section 1)
-   - Need new layer architectures, adapters, or parameter freezing? -> Subclass `Layer` (Section 2)
-   - Need custom gradient scaling, clipping, or optimizer rules? -> Wrap `Optimizer` (Section 3)
-   - Need bare-metal C++, CUDA, Triton, or Apple MPS speed? -> Use C-ABI FFI (Section 4)
+Pick the boundary your idea lives at; each has a finished example to copy:
+
+  Autograd (a new op, or what the tape keeps)  -> checkpoint.py   (Section 1)
+  Layer (new parameters or architecture)        -> lora.py         (Section 2)
+  Around the optimizer (gradient handling)      -> loss_scaler.py  (Section 3)
+  Compiler (capturing a computation)            -> compile.py
+  Silicon (C++, CUDA, Triton, Metal)            -> simd_ops.py + cpp_simd_gemm.cpp,
+                                                   then triton_gelu.py, mps_ops.py
+                                                   (Section 4)
+
+=============================================================================
+FILL THIS OUT
+=============================================================================
+Replace this whole docstring in your copy with the skeleton below, and replace
+every <...>. Keep the sections and their order; readers rely on finding
+"How it is triggered" in the same place in every file.
+
+    # Hand-maintained extension, NOT generated. This file is not produced by
+    # `tito dev export` or `tito module complete`; it is tracked in git and
+    # edited directly here. It is <the role it plays in the course>; no src/
+    # module or student notebook exports to it.
+    """<Name> for TinyTorch: an example extension.
+
+    What it is: <one or two sentences: what it does, and which boundary it
+    extends (autograd, layer, optimizer, compiler, or silicon)>.
+
+    Why it exists: <the bottleneck it addresses, as a number a reader could
+    recompute: bytes moved, FLOP/byte, parameters trained, the smallest
+    float16 value>.
+
+    How it is triggered: <who calls it and when. Nothing in TinyTorch calls an
+    extension for you, so say exactly what the reader writes, and where:
+    a direct call, a layer placed in a model, a wrapper inside forward(), or
+    a call from the training loop>.
+
+        <3 to 8 lines: the real call site, run and checked before you commit>
+
+        On import:     <what runs when the module is imported; ideally
+                       nothing expensive>
+        On first call: <one-time work, such as compiling a kernel; omit if
+                       none>
+        On every call: <what each call does, including the fallback path>
+        On backward:   <for anything that takes part in training; omit if not>
+
+    How it works:
+
+    1. <numbered steps a reader can follow through the code, from the call to
+       the result>
+
+    What it leaves out: <the simplification you made on purpose, and what a
+    production version does instead. If the result has no gradient history,
+    say so here>.
+
+    Where to go next: <the natural follow-on project>.
+    """
+
+=============================================================================
+HOW TO BUILD YOUR OWN EXTENSION IN 5 STEPS
+=============================================================================
+1. IDENTIFY THE BOUNDARY, and read its example (the table above).
 
 2. COPY THIS TEMPLATE:
    cp tinytorch/extensions/template.py tinytorch/extensions/my_extension.py
+   Fill in the skeleton, keep the code section for your boundary, delete the
+   rest.
 
 3. IMPLEMENT THE EXTENSION CONTRACT:
-   - Systems Framing: Document the concrete hardware bottleneck (bandwidth, underflow, FLOPS).
-   - Tensor Interoperability: If given `Tensor`, return `Tensor`. If given `ndarray`, return `ndarray`.
-   - Autograd Transparency: Differentiable ops must provide forward & backward passes.
-   - Defensive Fallback: If custom compilers or GPUs are missing, fall back cleanly to NumPy.
+   - Systems Framing: State the concrete hardware bottleneck (bandwidth,
+     underflow, FLOPS) as a number a reader could recompute, not an adjective.
+   - Tensor Interoperability: If given `Tensor`, return `Tensor`. If given
+     `ndarray`, return `ndarray`.
+   - Autograd Transparency: Differentiable ops must provide forward & backward
+     passes. Say which kind yours is. A hardware kernel that returns a plain
+     Tensor(out) cuts the graph: that is fine for a benchmark path
+     (simd_matmul, mps_matmul), but say so in "What it leaves out" rather than
+     letting a reader find out in training.
+   - Defensive Fallback: If custom compilers or GPUs are missing, fall back
+     cleanly to NumPy, and make it possible to tell which path ran: a has_*()
+     check, a *_build_info() that says what was built and why not, and a
+     warning (not silence) if a native call fails at run time. A NumPy timing
+     mistaken for a GPU one teaches the wrong lesson.
 
 4. CREATE UNIT TESTS:
    cp tests/extensions/test_template.py tests/extensions/test_my_extension.py
    pytest tinytorch/tests/extensions/test_my_extension.py
+   Tests must pass on a machine without your hardware: cover the fallback
+   path, and check the native path against NumPy whenever it is available.
 
 5. EXPORT PUBLIC SYMBOLS:
    Add your classes/functions to `tinytorch/extensions/__init__.py`.
+
+Beyond the docstring, put short comments at the lines where the systems idea
+lives (the atomic file replace, the coalesced load, the no_grad block),
+saying why, not what.
 =============================================================================
-"""
+'''
 
 from typing import Optional, Tuple, Union, List
 import numpy as np
@@ -123,6 +194,11 @@ class CustomGradientTransform:
 # =====================================================================
 # 4. Hardware / Kernel Hook with Automated Fallback (Silicon Boundary)
 # =====================================================================
+# This section shows the shape of the dispatch with a stand-in kernel. For the
+# real mechanics, build on simd_ops.py: compile on first use, write the library
+# with an atomic os.replace, load it with ctypes and declare argtypes, pass raw
+# pointers to contiguous float32 buffers, and report what was built through a
+# *_build_info() function so a reader can tell which path actually ran.
 
 def has_custom_hardware() -> bool:
     """Detect whether custom hardware runtime or compiled C++/CUDA kernel is available."""

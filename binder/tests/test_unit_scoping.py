@@ -75,7 +75,7 @@ def test_binary_units_still_flags_every_binary_prefix(tmp_path):
 
 def test_currency_ignores_markup_comments_but_flags_visible_labels(tmp_path):
     books = tmp_path / "books"
-    svg_dir = books / "vol3/17_agent_economics/images/svg"
+    svg_dir = books / "vol3/19_agent_economics/images/svg"
     svg_dir.mkdir(parents=True)
 
     (svg_dir / "commented.svg").write_text(
@@ -91,7 +91,7 @@ def test_currency_ignores_markup_comments_but_flags_visible_labels(tmp_path):
 
 def test_currency_ignores_multiline_markup_comment(tmp_path):
     books = tmp_path / "books"
-    svg_dir = books / "vol3/17_agent_economics/images/svg"
+    svg_dir = books / "vol3/19_agent_economics/images/svg"
     svg_dir.mkdir(parents=True)
     (svg_dir / "block.svg").write_text(
         "<svg>\n<!-- generated\n     cost in USD\n-->\n<rect/>\n</svg>\n",

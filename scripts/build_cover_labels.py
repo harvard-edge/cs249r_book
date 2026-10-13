@@ -463,12 +463,10 @@ VOL3_CHAPTERS = [
         'prefix': 'introduction',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'stochastic processor socket', 'pill': (680, 80), 'targ': (695, 200), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'isolated actuation interface', 'pill': (240, 220), 'targ': (490, 360), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'l2 paged block cache', 'pill': (240, 440), 'targ': (680, 440), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'l1 sram buffer ring', 'pill': (240, 620), 'targ': (560, 550), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'hbm3e memory stacks', 'pill': (1160, 320), 'targ': (820, 380), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'pcie tool expansion bus', 'pill': (1160, 620), 'targ': (880, 550), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'foundation model', 'pill': (330, 150), 'targ': (688, 185), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'tools', 'pill': (290, 320), 'targ': (468, 345), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'memory', 'pill': (290, 430), 'targ': (652, 352), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'runtime', 'pill': (1150, 540), 'targ': (880, 520), 'border': '#0090B0', 'color': '#0090B0'},
         ]
     },
     {
@@ -476,12 +474,10 @@ VOL3_CHAPTERS = [
         'prefix': 'processor',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'draft model execution core', 'pill': (250, 280), 'targ': (560, 420), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'token proposal stream', 'pill': (240, 560), 'targ': (700, 530), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'memory streaming bus', 'pill': (660, 80), 'targ': (680, 220), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'target verification engine', 'pill': (1140, 180), 'targ': (720, 300), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'rollback diversion gate', 'pill': (1150, 400), 'targ': (890, 400), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'token acceptance pool', 'pill': (1140, 600), 'targ': (825, 440), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'proposals', 'pill': (250, 250), 'targ': (390, 345), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'accepted', 'pill': (480, 160), 'targ': (545, 262), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'checks', 'pill': (1080, 150), 'targ': (800, 250), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'rejected', 'pill': (1150, 470), 'targ': (880, 445), 'border': '#9B2226', 'color': '#9B2226'},
         ]
     },
     {
@@ -489,12 +485,10 @@ VOL3_CHAPTERS = [
         'prefix': 'deliberation',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'deliberation search agent', 'pill': (660, 80), 'targ': (580, 240), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'active exploratory branch', 'pill': (240, 320), 'targ': (580, 380), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'root decision state', 'pill': (240, 540), 'targ': (595, 425), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'optimal trajectory', 'pill': (1140, 220), 'targ': (740, 330), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'pruned dead-end branch', 'pill': (1150, 440), 'targ': (840, 430), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'speculative rollout branch', 'pill': (1140, 640), 'targ': (780, 470), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'deliberation', 'pill': (300, 170), 'targ': (540, 222), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'candidates', 'pill': (1150, 220), 'targ': (890, 342), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'pruning', 'pill': (1150, 520), 'targ': (970, 402), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'selected path', 'pill': (330, 580), 'targ': (660, 468), 'border': '#2EC4B6', 'color': '#2EC4B6'},
         ]
     },
     {
@@ -502,12 +496,9 @@ VOL3_CHAPTERS = [
         'prefix': 'working_sets',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'attention sink tokens', 'pill': (240, 200), 'targ': (480, 405), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'context carousel', 'pill': (240, 420), 'targ': (530, 440), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'budget boundary', 'pill': (240, 620), 'targ': (480, 540), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'attention envelope', 'pill': (1140, 200), 'targ': (800, 300), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'sliding window tokens', 'pill': (1140, 420), 'targ': (880, 320), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'eviction chute', 'pill': (1140, 640), 'targ': (870, 470), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'working set', 'pill': (240, 170), 'targ': (488, 215), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'context budget', 'pill': (220, 570), 'targ': (430, 432), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'compaction', 'pill': (1200, 560), 'targ': (905, 500), 'border': '#D97706', 'color': '#D97706'},
         ]
     },
     {
@@ -515,12 +506,10 @@ VOL3_CHAPTERS = [
         'prefix': 'virtual_memory',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'logical virtual blocks', 'pill': (240, 200), 'targ': (360, 220), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'shared prefix block pool', 'pill': (240, 400), 'targ': (490, 280), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'radix block table mmu', 'pill': (240, 600), 'targ': (581, 310), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'pagedattention manager', 'pill': (680, 80), 'targ': (680, 240), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'physical hbm page frames', 'pill': (1140, 200), 'targ': (1040, 280), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'zero-fragmentation allocator', 'pill': (1140, 420), 'targ': (1014, 350), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'logical blocks', 'pill': (190, 180), 'targ': (370, 235), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'shared prefix', 'pill': (250, 450), 'targ': (430, 272), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'block table', 'pill': (560, 530), 'targ': (580, 308), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'paged memory', 'pill': (1230, 150), 'targ': (1060, 185), 'border': '#2EC4B6', 'color': '#2EC4B6'},
         ]
     },
     {
@@ -537,7 +526,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '07_checkpointing',
+        'slug': '11_durable_execution',
         'prefix': 'checkpointing',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -550,7 +539,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '08_actuation',
+        'slug': '07_tool_calling',
         'prefix': 'actuation',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -563,7 +552,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '09_virtualization',
+        'slug': '08_sandboxes',
         'prefix': 'virtualization',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -576,7 +565,19 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '10_durable_execution',
+        'slug': '09_security',
+        'prefix': 'security',
+        'font': FONT_ARIAL_BOLD,
+        'labels': [
+            {'text': 'quarantined reader', 'pill': (210, 200), 'targ': (380, 268), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'untrusted input', 'pill': (200, 470), 'targ': (450, 330), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'reference monitor', 'pill': (700, 60), 'targ': (760, 200), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'capabilities', 'pill': (1180, 200), 'targ': (940, 320), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'taint tracking', 'pill': (1170, 600), 'targ': (962, 482), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+        ]
+    },
+    {
+        'slug': '10_agent_harness',
         'prefix': 'interrupts',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -589,7 +590,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '11_failure_recovery',
+        'slug': '12_failure_recovery',
         'prefix': 'scheduling',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -602,7 +603,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '13_trajectory_curation',
+        'slug': '15_trajectory_curation',
         'prefix': 'data_flywheel',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -615,7 +616,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '14_fine_tuning',
+        'slug': '16_fine_tuning',
         'prefix': 'sft',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -628,7 +629,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '15_rlvr',
+        'slug': '17_rlvr',
         'prefix': 'rlvr',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -641,7 +642,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '16_multi_agent',
+        'slug': '18_multi_agent',
         'prefix': 'multi_agent',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -654,7 +655,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '12_evaluation',
+        'slug': '14_agent_operations',
         'prefix': 'observability',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -667,7 +668,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '17_agent_economics',
+        'slug': '19_agent_economics',
         'prefix': 'tokenomics',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -680,7 +681,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '18_conclusion',
+        'slug': '20_conclusion',
         'prefix': 'conclusion',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -690,6 +691,18 @@ VOL3_CHAPTERS = [
             {'text': 'monumental torus portal', 'pill': (1140, 220), 'targ': (780, 340), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'frontier metropolis', 'pill': (1140, 440), 'targ': (840, 410), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'invariant closure gateway', 'pill': (1140, 640), 'targ': (800, 490), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+        ]
+    },
+    {
+        'slug': '13_evaluation',
+        'prefix': 'evaluation',
+        'font': FONT_ARIAL_BOLD,
+        'labels': [
+            {'text': 'task contract', 'pill': (200, 250), 'targ': (440, 350), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'repeated trials', 'pill': (1000, 110), 'targ': (790, 300), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'grader isolation', 'pill': (740, 710), 'targ': (900, 470), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'verdicts', 'pill': (1090, 690), 'targ': (1095, 470), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'confidence interval', 'pill': (1180, 160), 'targ': (1160, 258), 'border': '#D97706', 'color': '#D97706'},
         ]
     },
 ]
@@ -922,6 +935,18 @@ VOL4_CHAPTERS = [
             {'text': 'unobserved reality chasm', 'pill': (1160, 680), 'targ': (1088, 524), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
+    {
+        'slug': '17_responsibility',
+        'prefix': 'responsibility',
+        'font': FONT_HELVETICA,
+        'labels': [
+            {'text': 'oversight', 'pill': (190, 150), 'targ': (385, 225), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'approval', 'pill': (520, 100), 'targ': (598, 262), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'staged permission', 'pill': (220, 650), 'targ': (370, 520), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'stopping envelope', 'pill': (560, 730), 'targ': (680, 495), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'bystanders', 'pill': (1240, 520), 'targ': (1045, 410), 'border': '#0090B0', 'color': '#0090B0'},
+        ]
+    },
 ]
 
 # =============================================================================
@@ -1102,7 +1127,7 @@ def main():
         # Auto-detect existing volume directories
         run_vol1 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol1', '01_introduction'))
         run_vol2 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol2', '01_introduction'))
-        run_vol3 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol3', '07_checkpointing'))
+        run_vol3 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol3', '01_introduction'))
         run_vol4 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol4', '01_boundary'))
 
     print("=" * 70)
