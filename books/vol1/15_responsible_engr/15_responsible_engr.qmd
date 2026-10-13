@@ -54,10 +54,10 @@ Latency, availability, and accuracy targets do not say whether they describe the
 
 ::: {.callout-learning-objectives}
 
-- Explain how optimized ML systems can amplify harm through proxies, feedback loops, and distribution shift
+- Explain how a model that meets its training objective can still cause harm when that objective is a proxy that drifts from the goal
 - Apply data-algorithm-machine diagnosis to localize responsibility failures in data, algorithm objectives, or monitoring infrastructure
 - Calculate fairness metrics from confusion matrices and compare trade-offs on the fairness-accuracy Pareto frontier
-- Design disaggregated evaluation, stress testing, and monitoring to expose subgroup-specific failures before deployment
+- Design disaggregated release gates and per-group monitoring, fitting the bias feedback model to project when a passed gate will fail
 - Analyze total cost, inference dominance, and carbon impact as measurable responsibility constraints
 - Construct model cards, datasheets, lineage records, and audit trails for accountability
 - Evaluate privacy, access-control, and compliance designs against regulatory and human-review requirements
@@ -1881,7 +1881,7 @@ plt.close()
 
 [^fn-green-ai-efficiency]: **Green AI**\index{Green AI!compute reporting}: @schwartz2020 contrasted "Red AI\index{Red AI!performance at any cost}" (performance at any cost) with "Green AI" (efficiency as primary metric). The compute-growth anchor comes from AI and Compute's 2012--2018 trend analysis (the fit that gives a 3.4-month doubling time), which reported a 300,000$\times$ increase in compute used in the largest AI training runs over that six-year window [@amodei2018aicompute]; comparisons that extend to later frontier models span a longer window and report larger factors. The Green AI proposal (reporting FLOPs alongside accuracy for every published result) reframes efficiency from an engineering preference into a scientific reporting obligation, making the resource cost of marginal accuracy gains visible and comparable across research groups.
 
-At the hardware level, environmental impact scales with total electrical energy draw across the machine lifecycle, mediated by accelerator utilization, data-center cooling overhead (power usage effectiveness), and local electrical grid carbon intensity. Within the accelerator package, data movement can dominate energy dissipation. In the 45 nm reference behind the energy-movement principle (\ref{pri-energy-movement}), a single off-chip DRAM access costs two to three orders of magnitude more energy than a 32-bit floating-point operation, although total energy also depends on access width, event counts, reuse, and the device. Algorithmic and runtime optimizations reduce environmental burden only when they reduce measured watt-hours for a verified quality target under production load, curbing this physical dissipation at the silicon level.
+At the hardware level, environmental impact scales with total electrical energy draw across the machine lifecycle, mediated by accelerator utilization, data-center cooling overhead (power usage effectiveness), and the **carbon intensity**\index{Carbon intensity!definition} of the local electrical grid, the mass of CO~2~eq emitted per kilowatt-hour it delivers. Within the accelerator package, data movement can dominate energy dissipation. In the 45 nm reference behind the energy-movement principle (\ref{pri-energy-movement}), a single off-chip DRAM access costs two to three orders of magnitude more energy than a 32-bit floating-point operation, although total energy also depends on access width, event counts, reuse, and the device. Algorithmic and runtime optimizations reduce environmental burden only when they reduce measured watt-hours for a verified quality target under production load, curbing this physical dissipation at the silicon level.
 
 ::: {.column-margin .margin-pointer}
 ↩ The physical energy disparity between off-chip memory access and arithmetic execution is established in @sec-hardware-acceleration-machine-learning-hardware-specialization-09c5.
@@ -2031,12 +2031,16 @@ class InferenceCostCalc:
     gpu_inf_rate_str = fmt_usd(gpu_inf_rate.to(USD / hour).magnitude, precision=2, commas=False, per="GPU-hour")
 ```
 
-A team spends `{python} InferenceCostCalc.total_train_usd_str` training the DLRM ranking model and celebrates the modest cost. Six months later, they discover they are spending about `{python} InferenceCostCalc.annual_inf_usd_round_str` per year serving it. The surprise shows how total cost of ownership\index{Total cost of ownership!definition}[^fn-tco-inference-dominance] can be dominated by recurring inference at high traffic. Other systems may be dominated by training, data, staffing, or idle capacity, so measurement determines where optimization should focus.
+A team spends `{python} InferenceCostCalc.total_train_usd_str` training the DLRM ranking model and celebrates the modest cost. Six months later, they discover they are spending about `{python} InferenceCostCalc.annual_inf_usd_round_str` per year serving it. The surprise shows how total cost of ownership\index{Total cost of ownership!lifecycle split},[^fn-tco-inference-dominance] the upfront and recurring expense of a system over its lifetime, can be dominated by recurring inference at high traffic. Where the cloud-versus-edge comparison used that total to choose a deployment, the lifecycle view splits one deployment's total into training cycles, recurring inference, and operations to find which term dominates. Other systems may be dominated by training, data, staffing, or idle capacity, so measurement determines where optimization should focus.
 
 ::: {.column-margin}
 ![](images/svg/responsible_engr_tco_bar.svg){width="100%" fig-alt="Horizontal stacked bar of three-year total cost of ownership: a thin gray training sliver on the left, a wide orange inference segment dominating the middle, and a gray operations segment on the right. Training is a sliver; inference is most of the total."}
 
 *At production scale, recurring inference can dominate lifetime cost.*
+:::
+
+::: {.column-margin .margin-pointer}
+↩ Total cost of ownership as a comparison of cloud and edge deployments, weighing capital against operating expense, is established in @sec-ml-systems-cloud-ml-tradeoffs-constraints-96ed.
 :::
 
 [^fn-tco-inference-dominance]: [offset=-20mm] **TCO (total cost of ownership)**\index{Total cost of ownership!inference dominance}: ML TCO includes labeling, monitoring, retraining, remediation, energy, audits, and compliance. At sufficient traffic, recurring inference can dominate a one-time training cost; utilization and update cadence determine the balance.
@@ -2410,7 +2414,7 @@ class CarbonScaleCalc:
 **Math**:
 
 1.  **Energy consumption**: `{python} CarbonScaleCalc.train_energy_mwh_str` = `{python} CarbonScaleCalc.train_energy_kwh_str`.
-2.  **Carbon intensity**\index{Carbon intensity!definition}: This scenario uses $\approx$ `{python} CarbonScaleCalc.carbon_intensity_g_kwh_str` CO~2~ (`{python} CarbonScaleCalc.carbon_intensity_str`) [@patterson2021carbon], a US grid-average figure slightly above the rounded `{python} CarbonFactor.carbon_intensity_str` baseline of the cost accounting. Each calculation states its own grid assumption, and the difference changes the result by less than a tenth.
+2.  **Carbon intensity**\index{Carbon intensity!US grid average}: This scenario uses $\approx$ `{python} CarbonScaleCalc.carbon_intensity_g_kwh_str` CO~2~ (`{python} CarbonScaleCalc.carbon_intensity_str`) [@patterson2021carbon], a US grid-average figure slightly above the rounded `{python} CarbonFactor.carbon_intensity_str` baseline of the cost accounting. Each calculation states its own grid assumption, and the difference changes the result by less than a tenth.
 3.  **Total emissions**: `{python} CarbonScaleCalc.train_energy_kwh_str` $\times$ `{python} CarbonScaleCalc.carbon_intensity_str` = `{python} CarbonScaleCalc.total_emissions_kg_str` CO~2~ (`{python} CarbonScaleCalc.total_emissions_tons_str`).
 4.  **Comparison**: The scenario assumes `{python} CarbonScaleCalc.car_annual_tons_str` CO~2~ per passenger-car year. This per-year basis differs from the lifetime-car basis of the 2019 five-car estimate, so the two car comparisons are not directly comparable.
 
