@@ -3117,42 +3117,47 @@ The three architectural tiers in @fig-power-diagram (Tiny Example, Inference Exa
 # │
 # │ Goal: Show that the boundary alone moves a measured per-request energy.
 # │ Show: 0.10 Wh accelerator-only vs 0.24 Wh full stack (2.4×); shares
-# │       58 / 25 / 10 / 8 percent.
-# │ How: Literature.ServingEnergy (Elsworth et al. 2025, median Gemini prompt).
+# │       58 / 25 / 17 percent (accelerators / host / idle plus overhead).
+# │ How: Literature.Series.GeminiPromptEnergy (Elsworth et al. 2025, Table 1).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Literature
 from mlsysim.core.units import Wh
 from mlsysim.fmt import check, fmt_energy, fmt_multiple, fmt_percent
 
+def _full_stack_wh(rows, prefix):
+    return next(r["comprehensive_wh"] for r in rows if r["component"].startswith(prefix))
+
 class ServingEnergyBoundary:
-    """Same median prompt, two measurement boundaries (Elsworth et al. 2025)."""
+    """Same median prompt, two measurement boundaries (Elsworth et al. 2025, Table 1)."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    _se = Literature.ServingEnergy
-    full = float(_se.GeminiMedianPromptFullWh) * Wh
-    accel_only = float(_se.GeminiMedianPromptAcceleratorOnlyWh) * Wh
-    ratio = float(_se.GeminiFullOverAcceleratorOnlyRatio)
-    accel_share = float(_se.GeminiActiveAcceleratorShare)
-    host_share = float(_se.GeminiHostCpuDramShare)
-    idle_share = float(_se.GeminiIdleMachineShare)
-    overhead_share = float(_se.GeminiOverheadShare)
+    _rows = Literature.Series.GeminiPromptEnergy.entries
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    _full = sum(r["comprehensive_wh"] for r in _rows if r["comprehensive_counted"] == 1)
+    _narrow = sum(r["existing_wh"] for r in _rows if r["existing_counted"] == 1)
+    full = _full * Wh
+    accel_only = _narrow * Wh
+    ratio = _full / _narrow
+    accel_share = _full_stack_wh(_rows, "Active AI") / _full
+    host_share = _full_stack_wh(_rows, "Active host") / _full
+    idle_overhead_share = (_full_stack_wh(_rows, "Idle") + _full_stack_wh(_rows, "Data center")) / _full
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(full > accel_only, "The full boundary must report more energy than the accelerator-only one.")
-    check(accel_share > host_share > idle_share >= overhead_share, "Prose lists the shares from largest to smallest.")
+    check(abs(_full - 0.24) < 1e-9 and abs(_narrow - 0.10) < 1e-9, "Table 1 totals are 0.24 and 0.10 Wh.")
+    check(accel_share > host_share > idle_overhead_share, "Prose lists the shares from largest to smallest.")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     full_wh_str = fmt_energy(full, unit=Wh, precision=2, commas=False)
     accel_only_wh_str = fmt_energy(accel_only, unit=Wh, precision=2, commas=False)
-    ratio_mult_str = fmt_multiple(ratio, precision=1, commas=False)
-    accel_share_str = fmt_percent(accel_share, precision=0, commas=False, style="prose")
-    host_share_str = fmt_percent(host_share, precision=0, commas=False, style="prose")
-    idle_share_str = fmt_percent(idle_share, precision=0, commas=False, style="prose")
-    overhead_share_str = fmt_percent(overhead_share, precision=0, commas=False, style="prose")
+    ratio_mult_str = fmt_multiple(round(ratio, 1), precision=1, commas=False)
+    accel_share_str = fmt_percent(round(accel_share, 2), precision=0, commas=False, style="prose")
+    host_share_str = fmt_percent(round(host_share, 2), precision=0, commas=False, style="prose")
+    idle_overhead_share_str = fmt_percent(round(idle_overhead_share, 2), precision=0, commas=False, style="prose")
 ```
 
-For the same workload, the boundary alone can change the reported energy by more than a factor of two. Google measured the energy of the median text prompt served by its Gemini assistant under two boundaries [@elsworth2025measuring]\index{Measurement boundary!production serving energy}. Counting only the active accelerators, sampled from its most efficient data centers, gave `{python} ServingEnergyBoundary.accel_only_wh_str`. Counting everything the service draws to answer that prompt gave `{python} ServingEnergyBoundary.full_wh_str`, about `{python} ServingEnergyBoundary.ratio_mult_str` more. Of that total, the active accelerators drew `{python} ServingEnergyBoundary.accel_share_str`, the host CPUs and DRAM that feed them `{python} ServingEnergyBoundary.host_share_str`, machines held idle in reserve for traffic spikes `{python} ServingEnergyBoundary.idle_share_str`, and facility overhead such as cooling and power conversion `{python} ServingEnergyBoundary.overhead_share_str`. An accelerator-only figure therefore understates what a deployed service consumes, and two figures measured under different boundaries are not comparable. Open benchmark suites such as ML.ENERGY measure energy under realistic serving conditions for this reason [@chung2025energy].
+For the same workload, the boundary alone can change the reported energy by more than a factor of two. Google measured the energy of the median text prompt served by its Gemini assistant under two boundaries [@elsworth2025measuring]\index{Measurement boundary!production serving energy}. Counting only the active accelerators, sampled from its most efficient data centers, gave `{python} ServingEnergyBoundary.accel_only_wh_str`. Counting everything the service draws to answer that prompt gave `{python} ServingEnergyBoundary.full_wh_str`, about `{python} ServingEnergyBoundary.ratio_mult_str` more. Of that total, the active accelerators drew `{python} ServingEnergyBoundary.accel_share_str`, the host CPUs and DRAM that feed them `{python} ServingEnergyBoundary.host_share_str`, and machines held idle in reserve for traffic spikes together with facility overhead such as cooling and power conversion the remaining `{python} ServingEnergyBoundary.idle_overhead_share_str`. An accelerator-only figure therefore understates what a deployed service consumes, and two figures measured under different boundaries are not comparable. Open benchmark suites such as ML.ENERGY measure energy under realistic serving conditions for this reason [@chung2025energy].
 
 The measurement boundary determines which components are counted; workload composition determines where their energy is spent. On mobile devices running TensorFlow Mobile, data movement accounts for 57.3 percent of total inference energy [@boroumand2018], exposing why operation counts alone fail to predict power consumption; under the energy-movement principle (\ref{pri-energy-movement}), total energy depends on how many events of each kind occur and what each one costs, not on arithmetic alone. The worked example in Notebook \ref{nbk-benchmarking-why-int8-saves-energy} decomposes MobileNetV2 inference energy to demonstrate how moving from FP32 to INT8 attacks both the memory-movement bottleneck and arithmetic switching costs.
 
