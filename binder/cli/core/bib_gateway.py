@@ -28,6 +28,9 @@ FALLBACK_SSL_CTX.check_hostname = False
 FALLBACK_SSL_CTX.verify_mode = ssl.CERT_NONE
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# 2026-10-13: some record sites (OSTI) reset connections that present a browser
+# user agent from a script; fetch_url retries with this plain tool identifier.
+TOOL_UA = "mlsysbook-binder/1.0 (+https://mlsysbook.ai)"
 ACADEMIC_UA = "MLSysBook-Academic-Gateway/1.0 (mailto:vj@eecs.harvard.edu)"
 
 DOI_REGEX = re.compile(r"\b(10\.[0-9]{4,9}/[^\s\"<>{}]+)", re.I)
@@ -447,12 +450,13 @@ def fetch_url(
     domain = parsed.netloc.lower()
     is_trusted = any(td in domain for td in TRUSTED_DOMAINS)
 
-    req = urllib.request.Request(clean_url, headers={"User-Agent": UA})
     status_code = None
     page_title = ""
     citation_meta: dict[str, Any] = {}
 
-    for ctx in (SSL_CTX, FALLBACK_SSL_CTX):
+    attempts = [(ua, ctx) for ua in (UA, TOOL_UA) for ctx in (SSL_CTX, FALLBACK_SSL_CTX)]
+    for ua, ctx in attempts:
+        req = urllib.request.Request(clean_url, headers={"User-Agent": ua})
         try:
             with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
                 status_code = resp.status
