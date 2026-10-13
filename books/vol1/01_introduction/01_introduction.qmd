@@ -60,10 +60,11 @@ Machine learning systems have a physics. Data moves through memory hierarchies g
 
 ::: {.callout-learning-objectives}
 
-- Explain why predictive quality can decline while model code and execution remain unchanged
+- Explain why data-defined behavior lets predictive quality decline while model code and execution remain unchanged
 - Apply a data-algorithm-machine lens to diagnose a system bottleneck and reassess it after an intervention
 - Calculate execution time with the iron law and assess how a component improvement changes end-to-end time
 - Analyze when scalable search and learning can benefit from additional computation within data and machine constraints
+- Compare algorithmic, compute, and data-selection efficiency by the iron-law term each changes and the accuracy gained per added cost
 - Evaluate whether predictive quality and resource use meet deployment requirements using evaluation and lifecycle monitoring
 
 :::
@@ -1592,10 +1593,14 @@ $$ \AccuracyAfterDeployment(\DeploymentAge) \approx \InitialAccuracy - \FittedSe
 This approximation describes a local trend fitted from observed inputs and labeled outcomes; it is not a universal law of accuracy loss. The chapters on deployment return to it as a statistical drift diagnostic. **Data drift**\index{Data drift!definition} occurs when $\CurrentDistribution$ differs from $\TrainingDistribution$. Such a shift can reduce inference quality even when the model and execution environment remain unchanged, but the shift alone does not establish a quality loss. Large changes may fall outside the range where the fitted relationship holds. The divergence measure $\DivergenceMeasure(\cdot \lVert \cdot)$ is left general here.
 
 ::: {.column-margin .margin-pointer}
-↪ Concrete measures of distribution shift and their use in monitoring are developed in @sec-ml-operations-model-infrastructure-monitoring-3988.
+↪ The statistics that measure distribution shift and detect drift in production data are developed in @sec-data-engineering-detecting-responding-data-drift-509a.
 :::
 
 The equation separates baseline quality from sensitivity to shift. Better data, objectives, and architectures can change both quantities, so an improved baseline does not by itself establish robustness to drift. For the driving example, training on representative winter images may reduce sensitivity to seasonal conditions; evaluating pedestrian recall under those conditions establishes whether it does. Monitoring $\StatisticalDivergence$ provides a warning that prompts engineers to seek outcome evidence. That evidence determines whether retraining\index{Retraining} or another intervention is needed. *Knowing when to reevaluate is as important as knowing how to train.*
+
+::: {.column-margin .margin-pointer}
+↪ How drift signals and labeled outcomes become an operational decision to retrain, made only when the expected benefit exceeds the cost, is developed in @sec-ml-operations-retraining-decision-framework-e33d.
+:::
 
 Silent degradation can also originate inside the system through **training-serving skew**\index{Training-serving skew!first use}. Training and serving may use separate implementations to transform raw inputs into model features. If those transformations differ, for example by resizing images with a different interpolation method or applying different missing-value defaults, the model receives inputs unlike those used in training. The model can execute cleanly and return predictions on time while accuracy falls. This is a software consistency defect whose consequence is degraded learned behavior.
 
@@ -1672,11 +1677,11 @@ The additive form assumes sequential execution. When movement and computation ov
 $$\PipelinedExecutionTime\ge \max\left(\frac{\DataVolume}{\Bandwidth}, \frac{\Operations}{\PeakRate \cdot \EfficiencyHw}\right) + \Latency$$ {#eq-intro-iron-law-pipelined}
 This max-based formulation reflects hardware that transfers the next block of data while computing on the current one, so the slower of the two stages hides the faster. Equality requires ideal overlap and assumes that $\Latency$ remains outside the overlapped phases.
 
-Even as a sum, the iron law identifies which physical constraint dominates before any optimization begins. Amdahl's law\index{Amdahl's law!diagnostic analogy} [@amdahl1967] plays the same role for speedups. Accelerating only part of a task leaves the untouched remainder in place, and that remainder caps the whole task's speedup however fast the accelerated part becomes; @sec-benchmarking-benchmarking-granularity-3855 develops the law quantitatively. @Sec-appdx-dam-taxonomy-dam-coordination-sum-max-92bb presents the refined treatment, including pipelining and overlap techniques that transform the additive model into the max-based formulation used in practice.
+Even as a sum, the iron law identifies which physical constraint dominates before any optimization begins. Amdahl's law\index{Amdahl's law!diagnostic analogy} [@amdahl1967] plays the same role for speedups. Accelerating only part of a task leaves the untouched remainder in place, and that remainder caps the whole task's speedup however fast the accelerated part becomes; @eq-amdahl states that cap quantitatively as a bound on overall speedup. @Sec-appdx-dam-taxonomy-dam-coordination-sum-max-92bb presents the refined treatment, including pipelining and overlap techniques that transform the additive model into the max-based formulation used in practice.
 
 :::
 
-Diagnosing the limiting term requires comparing the workload with the machine. Arithmetic intensity\index{Arithmetic intensity!definition} $(\ArithmeticIntensity = \Operations/\DataVolume)$ counts the operations performed per byte moved. Each machine has an intensity at which its memory and compute terms balance, set by its peak compute rate divided by its memory bandwidth. A workload below that balance point waits on memory; one above it waits on arithmetic. Improving the smaller of the two terms yields a limited end-to-end gain. Actual performance also depends on realized utilization, and overhead $(\Latency)$ sits outside this comparison and can dominate small requests. A single-accelerator estimate applies these ideas below.
+Diagnosing the limiting term requires comparing the workload with the machine. Arithmetic intensity\index{Arithmetic intensity!first use} $(\ArithmeticIntensity = \Operations/\DataVolume)$ counts the operations performed per byte moved. Each machine has an intensity at which its memory and compute terms balance, set by its peak compute rate divided by its memory bandwidth. A workload below that balance point waits on memory; one above it waits on arithmetic. Improving the smaller of the two terms yields a limited end-to-end gain. Actual performance also depends on realized utilization, and overhead $(\Latency)$ sits outside this comparison and can dominate small requests. A single-accelerator estimate applies these ideas below.
 
 ::: {.column-margin .margin-pointer}
 ↪ The roofline model, which bounds attainable throughput by arithmetic intensity and locates the ridge point, is developed in @sec-hardware-acceleration-roofline-model-42ff.
@@ -1753,7 +1758,11 @@ class LocalExecution:
 
 :::
 
-A larger training estimate isolates the compute term under an explicit arithmetic-dominated assumption. Its efficiency factor also accounts for the losses involved in coordinating many accelerators, beyond the local execution just calculated.
+A larger training estimate isolates the compute term under an explicit arithmetic-dominated assumption. Its efficiency factor also accounts for the losses involved in coordinating many accelerators, beyond the local execution just calculated. A multi-machine cluster of that kind lies outside this book's single-machine scope; the estimate appears here only to show the scale the compute term can reach.
+
+::: {.column-margin .margin-pointer}
+↪ The training-time form of the iron law, which converts an operation count into days of training at a realized utilization, is developed in @sec-model-training-iron-law-training-performance-a53f.
+:::
 
 ```{python}
 #| echo: false
@@ -1920,6 +1929,10 @@ class EnergyMovementRatios:
 ```
 
 The energy comparison depends on the transfer size and arithmetic operation being counted. Under the energy constants used in this text, moving one byte from off-chip DRAM consumes roughly `{python} EnergyMovementRatios.fp16_ratio_mult_str` the energy of a 16-bit floating-point (FP16) multiply and `{python} EnergyMovementRatios.int8_ratio_mult_str` that of an INT8 (8-bit integer) multiply [@horowitz2014]. Whether movement dominates a complete workload also depends on the number and width of transfers relative to its operation count. The physical reason for the per-access gap is that data movement requires charging and discharging wires over longer distances, while arithmetic occurs locally within a processing unit's circuits. Minimizing avoidable data movement $(\DataVolume)$ can therefore improve both speed and energy efficiency.
+
+::: {.column-margin .margin-pointer}
+↪ The energy ladder from on-chip arithmetic to off-chip memory, and why its gap makes data movement a primary target for accelerator design, are developed in @sec-hardware-acceleration-machine-learning-hardware-specialization-09c5.
+:::
 
 ::: {#chk-introduction-iron-law .callout-checkpoint title="The iron law"}
 
@@ -2484,7 +2497,7 @@ The structural difference shows up first in tooling\index{ML development lifecyc
 ↪ The workflow controls that learned behavior adds to established software practice are developed in @sec-ml-workflow-ml-vs-traditional-software-development-c5f5.
 :::
 
-Feedback must therefore assess learned behavior as well as software execution. @Fig-ml-lifecycle-overview formalizes this operational cycle across six staged components, distinguishing forward deployment from two critical feedback pathways: an inner validation loop that routes failed evaluations ("Needs Improvement") back to data preparation, and an outer operational loop that routes production telemetry ("Performance Degrades") back to data collection. When monitoring flags real-world performance degradation, engineers diagnose whether the evidence calls for pipeline repair, new data, or a model update. When an update is warranted, the cycle returns through preparation, training, and evaluation before redeployment. Feedback therefore determines which work must be repeated; it does not make every alert a retraining instruction.
+Feedback must therefore assess learned behavior as well as software execution. In @fig-ml-lifecycle-overview, a failed evaluation sends work back to data preparation, while degraded production performance sends it back to data collection. Feedback therefore determines which work must be repeated; it does not make every alert a retraining instruction. The six stages and the feedback paths that join them into a loop are developed in @sec-ml-workflow-understanding-ml-lifecycle-ca87.
 
 ::: {#fig-ml-lifecycle-overview fig-env="figure" fig-pos="htb" fig-cap="**ML System Lifecycle**: Forward arrows carry work from data collection to monitoring, and the two labeled return arrows mark where evidence sends it back. The return arrows end at different stages, so a failed evaluation and a confirmed production problem trigger different amounts of rework." fig-alt="Flowchart showing cyclical ML lifecycle. Six boxes: data collection, preparation, model training, evaluation, deployment, monitoring. Two loops: evaluation returns to preparation; monitoring returns to collection."}
 
@@ -2994,7 +3007,7 @@ class AmdahlsPitfall:
 
 **Pitfall**: *Optimizing individual components without considering system interactions.*
 
-Amdahl's law explains why improving inference alone may produce a small end-to-end gain: the untouched share of a request caps the speedup of the whole. Consider a team that reduces model inference from `{python} AmdahlsPitfall.t_inference_ms_str` to `{python} AmdahlsPitfall.t_inf_new_ms_str`, expecting proportional improvement. Preprocessing still consumes `{python} AmdahlsPitfall.t_pre_ms_str` and postprocessing adds `{python} AmdahlsPitfall.t_post_ms_str`, so total latency drops only from `{python} AmdahlsPitfall.total_ms_str` to `{python} AmdahlsPitfall.new_total_ms_str`. That is a `{python} AmdahlsPitfall.improv_pct_str` improvement in total latency rather than the `{python} AmdahlsPitfall.naive_p_str` improvement of the inference stage alone. Most of the request path was untouched. Measuring the whole request prevents a component speedup from being mistaken for a system speedup; @sec-benchmarking-benchmarking-granularity-3855 quantifies the same dilution on a vision pipeline.
+Amdahl's law explains why improving inference alone may produce a small end-to-end gain: the untouched share of a request caps the speedup of the whole. Consider a team that reduces model inference from `{python} AmdahlsPitfall.t_inference_ms_str` to `{python} AmdahlsPitfall.t_inf_new_ms_str`, expecting proportional improvement. Preprocessing still consumes `{python} AmdahlsPitfall.t_pre_ms_str` and postprocessing adds `{python} AmdahlsPitfall.t_post_ms_str`, so total latency drops only from `{python} AmdahlsPitfall.total_ms_str` to `{python} AmdahlsPitfall.new_total_ms_str`. That is a `{python} AmdahlsPitfall.improv_pct_str` improvement in total latency rather than the `{python} AmdahlsPitfall.naive_p_str` improvement of the inference stage alone. Most of the request path was untouched. Measuring the whole request prevents a component speedup from being mistaken for a system speedup; the bound in @eq-amdahl computes the overall speedup from the share of time a component occupies and its local gain.
 
 :::
 
