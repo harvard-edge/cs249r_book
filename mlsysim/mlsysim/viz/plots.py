@@ -16,6 +16,7 @@ from .style import (
     setup_plot,
     plt,
 )
+from .style import BODY_FIGSIZE, MIN_FONT_PT
 
 
 def plot_roofline(hardware_node, workloads=None, title=None):
@@ -43,7 +44,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
     y_roof = np.minimum(y_mem, y_compute)
 
     # 4. PLOT
-    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+    fig, ax, colors, _ = setup_plot(figsize=(BODY_FIGSIZE[0], 4.6))
 
     # Shaded regions
     mem_mask = x <= ridge_point
@@ -89,7 +90,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         slope_y * 1.6,
         f"BW ceiling: {peak_bw:.0f} GB/s",
         color=colors["BlueLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         rotation=38,
         ha="center",
@@ -98,13 +99,13 @@ def plot_roofline(hardware_node, workloads=None, title=None):
 
     # Compute ceiling label (on the flat)
     ax.text(
-        ridge_point * 8,
+        x_max * 0.8,
         peak_flops * 1.12,
         f"Compute ceiling: {peak_flops:.0f} TFLOP/s",
         color=colors["OrangeLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        ha="center",
+        ha="right",
         va="bottom",
     )
 
@@ -121,7 +122,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         f"Ridge Point\n{ridge_point:.1f} FLOP/Byte",
         xy=(ridge_point, peak_flops),
         xytext=(ridge_point * 2.6, peak_flops * 0.26),
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         color=colors["crimson"],
         ha="center",
@@ -186,7 +187,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
                 f"{model.name}\n({bound}-bound)",
                 xy=(ai, perf),
                 xytext=(ai * 0.3, perf * 0.4),
-                fontsize=8,
+                fontsize=MIN_FONT_PT,
                 fontweight="bold",
                 color=c,
                 ha="center",
@@ -201,7 +202,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         ax.set_title(title)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
-    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    ax.legend(loc="lower right", fontsize=MIN_FONT_PT, framealpha=0.9)
     return _finalize_web_figure(fig), ax
 
 def plot_distributed_roofline(fleet_system, workloads=None):
@@ -228,7 +229,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     y_roof = np.minimum(y_net, y_compute)
 
     # 4. PLOT
-    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+    fig, ax, colors, _ = setup_plot(figsize=(BODY_FIGSIZE[0], 4.6))
 
     # Shaded regions
     net_mask = x <= ridge_point
@@ -267,7 +268,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
         slope_y * 1.6,
         f"Bisection BW: {peak_network_bw:.0f} GB/s",
         color=colors["RedLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         rotation=38,
         ha="center",
@@ -276,13 +277,13 @@ def plot_distributed_roofline(fleet_system, workloads=None):
 
     # Fleet Compute ceiling label
     ax.text(
-        ridge_point * 8,
+        x_max * 0.8,
         peak_flops * 1.12,
         f"Fleet Compute: {peak_flops:.0f} TFLOP/s",
         color=colors["BlueLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        ha="center",
+        ha="right",
         va="bottom",
     )
 
@@ -299,7 +300,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
         f"Network Ridge\n{ridge_point:.1f} FLOP/Byte",
         xy=(ridge_point, peak_flops),
         xytext=(ridge_point * 2, peak_flops * 0.25),
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         color=colors["crimson"],
         ha="center",
@@ -335,7 +336,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     ax.set_title(f"Distributed Roofline: {fleet_system.count}x {fleet_system.node.accelerator.name}")
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
-    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    ax.legend(loc="lower right", fontsize=MIN_FONT_PT, framealpha=0.9)
     return _finalize_web_figure(fig), ax
 
 def _metric_as_float(value, unit=None):
@@ -385,7 +386,7 @@ def plot_evaluation_scorecard(evaluation):
     ratios = [l1_ratio, l2_ratio]
     
     # 3. OUTPUT (Visualization)
-    fig, ax, colors, plt = setup_plot(figsize=(8, 4))
+    fig, ax, colors, plt = setup_plot(figsize=(BODY_FIGSIZE[0], 3.6))
     bar_colors = [colors['RedLine'] if r > 1.0 else colors['GreenLine'] for r in ratios]
     bars = ax.barh(levels, ratios, color=bar_colors, alpha=0.7, edgecolor='black')
     
