@@ -609,7 +609,10 @@ class ValidateCommand:
             # Added 2026-10-13: matplotlib figures are scaled to the text block,
             # so printed text = font size x (text width / cropped image width).
             # vol2 canvases drifted from 0.62x to 1.04x with no check failing.
-            # Default=False: it executes every chapter's python cells (minutes).
+            # Default=False because it executes every chapter's python cells.
+            # Enforced instead by two pre-commit hooks (2026-10-13, all four
+            # volumes at 0): book-check-figure-print-scale on changed chapters,
+            # and book-check-figure-print-scale-all when the style changes.
             Scope("print-scale", "_run_figure_print_scale", default=False,
                   note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
         ],
@@ -1247,6 +1250,8 @@ class ValidateCommand:
             elif method_name == "_run_check_references":
                 results.append(method(root, ns))
             elif method_name == "_run_sources":
+                results.append(method(root, ns))
+            elif method_name == "_run_figure_print_scale":
                 results.append(method(root, ns))
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
@@ -13602,11 +13607,14 @@ class ValidateCommand:
             "alt-text-style", "alt-text style compliance (§10.12)",
         )
 
-    def _run_figure_print_scale(self, root: Path) -> ValidationRunResult:
+    def _run_figure_print_scale(
+        self, root: Path, ns: Optional[argparse.Namespace] = None
+    ) -> ValidationRunResult:
         """figures --scope print-scale: printed size of matplotlib body figures.
 
         Executes each chapter's python cells in a subprocess and measures every
         figure inside a ``#fig-`` div; see ``cli/checks/figure_print_scale.py``.
+        Positional files (pre-commit) narrow the run to those chapters.
         """
         try:
             from cli.checks import figure_print_scale as fps
@@ -13615,7 +13623,12 @@ class ValidateCommand:
 
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
-        qmds = [q for q in self._qmd_files(root) if "```{python}" in q.read_text(encoding="utf-8")]
+        if ns is not None and getattr(ns, "files", None):
+            candidates = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
+            candidates = [q.resolve() for q in candidates if q.suffix == ".qmd" and q.is_file()]
+        else:
+            candidates = self._qmd_files(root)
+        qmds = [q for q in candidates if "```{python}" in q.read_text(encoding="utf-8")]
         issues = [ValidationIssue(**f) for f in fps.check_chapters(qmds, repo_root)]
         return ValidationRunResult(
             name="figure-print-scale",
