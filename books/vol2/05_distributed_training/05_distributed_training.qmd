@@ -2442,7 +2442,7 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ The compute window that caps how much of a collective can hide, and the exposed communication left on the step's critical path, are developed in @sec-communication-overlap-limits.
+↪ The compute window that bounds how much of a collective can hide is measured in @sec-communication-overlap-limits.
 :::
 
 #### Parallelism-infrastructure interaction {#sec-distributed-training-parallelism-infrastructure}
@@ -2541,7 +2541,7 @@ class AmdahlObservedShare:
     n_str = fmt_count(n, commas=False, label="GPU")
 ```
 
-As perspective \ref{psp-introduction-amdahls-distributed-pitfall} cautioned, that baseline fraction is not the synchronization share a profiler reports for a distributed step, because the compute share has been divided by $\DeviceCount$ while the residual has not. A residual of `{python} AmdahlObservedShare.r_pct_str` of the single-device step occupies about `{python} AmdahlObservedShare.share_pct_str` of each step on `{python} AmdahlObservedShare.n_str`. Reading the observed share as $\SerialFraction$ would therefore overstate the residual many times over and predict a far lower speedup ceiling than the model implies.
+That baseline fraction is not the synchronization share a profiler reports for a distributed step (perspective \ref{psp-introduction-amdahls-distributed-pitfall}), because the compute share has been divided by $\DeviceCount$ while the residual has not. A residual of `{python} AmdahlObservedShare.r_pct_str` of the single-device step occupies about `{python} AmdahlObservedShare.share_pct_str` of each step on `{python} AmdahlObservedShare.n_str`. Reading the observed share as $\SerialFraction$ would therefore overstate the residual many times over and predict a far lower speedup ceiling than the model implies.
 
 @Fig-scaling-tax illustrates this scaling tax\index{Scaling tax!communication overhead} up to 512 GPUs on log-log axes, complementing the scaling efficiency bound (principle \ref{pri-scaling-efficiency}). In this illustrative fixed-residual model, a small baseline fraction ($\SerialFraction= 0.1\%$) stays closer to ideal scaling than a larger fraction ($\SerialFraction= 1\%$). A residual equal to a tenth of baseline time ($\SerialFraction= 0.10$) limits asymptotic speedup to $1/\SerialFraction= 10\times$. Actual collective and coordination costs can change with worker count, so predicting a training run requires the more explicit Fleet Law below.
 
@@ -3279,7 +3279,7 @@ class ScalingWorkers:
 \tcbbreak
 ```
 
-The `{python} ScalingWorkers.n_workers_64_str`-GPU BSP configuration achieves `{python} ScalingWorkers.speedup_64_round_mult_str` speedup despite only `{python} ScalingWorkers.sample_eff_64_str` sample efficiency because the communication overhead (`{python} ScalingWorkers.comm_64bsp_pct_str`) is offset by the massive parallelism. SSP provides comparable wall-clock time with lower communication overhead but requires more total samples.
+The `{python} ScalingWorkers.n_workers_64_str`-GPU BSP configuration achieves `{python} ScalingWorkers.speedup_64_round_mult_str` speedup despite only `{python} ScalingWorkers.sample_eff_64_str` sample efficiency because the communication overhead (`{python} ScalingWorkers.comm_64bsp_pct_str`) is offset by the massive parallelism. SSP at `{python} ScalingWorkers.n_workers_64_str` workers comes close in wall-clock time with lower per-iteration communication (`{python} ScalingWorkers.comm_ssp_pct_str`), but the extra iterations its stale updates require hold it to `{python} ScalingWorkers.speedup_ssp_mult_str` against BSP's `{python} ScalingWorkers.speedup_64_mult_str`. In this scenario it therefore finishes slightly later and costs slightly more than `{python} ScalingWorkers.n_workers_64_str`-worker BSP.
 
 **Cost Analysis** (assuming `{python} ScalingWorkers.gpu_hour_rate_str`):
 
@@ -3404,7 +3404,7 @@ FP8 matters to distributed training only after four dtypes are distinguished: th
 The two FP8 formats trade precision against range. E4M3 keeps an extra mantissa bit for scaled *weights and activations*, which cluster within a predictable range, while E5M2 keeps an extra exponent bit for scaled *gradients*, which can span many orders of magnitude during backpropagation. Neither format guarantees that every value survives conversion. Tensor distributions, scaling granularity, and numerical validation determine suitability. @Tbl-precision-formats summarizes the available range and typical roles without making those roles mandatory.
 
 ::: {.column-margin .margin-pointer}
-↪ The single-machine number formats, their byte widths, and the mixed-precision training state they produce are collected for reference in @sec-appdx-dam-taxonomy-training-memory.
+↪ Per-parameter training memory under each of these formats is collected for reference in @sec-appdx-dam-taxonomy-training-memory.
 :::
 
 | **Format** | **Exponent** | **Mantissa** |        **Range**         | **Precision** |               **Typical numerical role**               |
@@ -3417,7 +3417,7 @@ The two FP8 formats trade precision against range. E4M3 keeps an extra mantissa 
 
 : **Training Precision Formats**: Each row represents a floating-point format that can occupy one role in a mixed-precision training contract. E4M3 and E5M2 narrow selected operands; accumulator, optimizer-state, storage, and wire formats remain independent engineering decisions. {#tbl-precision-formats}
 
-FP8's limited range also requires *dynamic scaling*\index{Dynamic scaling!FP8 dynamic range}, which multiplies each tensor by a scale, commonly derived from its recent maximum absolute value, before conversion and compensates for that scale when interpreting the result. Scaling policy and granularity must balance overflow, underflow, and precision; changing the scale does not remove the need to validate training quality.
+FP8's limited range also requires *dynamic scaling*\index{Dynamic scaling!FP8 dynamic range}, because tensor magnitudes change during training. Each tensor is multiplied before conversion by a scale, commonly derived from its recent maximum absolute value, and the result is interpreted with that scale removed. Scaling policy and granularity must balance overflow, underflow, and precision; changing the scale does not remove the need to validate training quality.
 
 An FP8 training contract\index{FP8!mixed-precision training} combines FP32 master or optimizer state and FP8 GEMM operands with higher-precision accumulation and output. The exact accumulator and output formats are properties of the operation and hardware implementation rather than universal FP16/BF16 choices. This approach can achieve near-FP16 training quality while improving effective throughput on FP8-capable hardware for suitable workloads [@micikevicius2022fp8]. The systems implication is concrete but scoped: FP8 halves bytes only for tensors actually stored or transmitted in FP8, while operation throughput and energy gains depend on the accelerator implementation. A collective that reduces FP16 gradients receives no wire-volume reduction merely because the preceding GEMMs used FP8.
 
@@ -5881,7 +5881,7 @@ class RLHFKVCache:
 The PPO rollout phase introduces autoregressive dependencies absent from the teacher-forced pretraining baseline. The policy generates responses before sequence-level rewards guide its updates. At small active batches, decoding is often memory bandwidth bound because each new token requires another model pass. For a Llama-2-70B-style grouped-query attention policy, KV storage grows by approximately $\KvCacheBytesPerToken = 2 \LayerCount \KvHeadCount \AttentionHeadDimension \ElementStorageSize$ per cached token per sequence. With `{python} RLHFKVCache.layers_str` layers, `{python} RLHFKVCache.kv_heads_str` KV heads, `{python} RLHFKVCache.head_dim_str`-dimensional heads, `{python} RLHFKVCache.seq_len_str` generated tokens, and `{python} RLHFKVCache.batch_size_str` active sequences, the generated-token portion occupies `{python} RLHFKVCache.kv_total_gb_str`, or `{python} RLHFKVCache.kv_formula_math` bytes. Dense multi-head attention using the full `{python} RLHFKVCache.hidden_dim_str` hidden width for K and V would require `{python} RLHFKVCache.dense_total_gb_str` for that portion. Even with grouped-query attention, that portion alone already exceeds the `{python} DistTrainH100Capacity.h100_mem_gb_str` of HBM on one H100, and prompt tokens add KV state as well. This temporary cache\index{KV cache!generation phase} must fit alongside the state live during rollout; its lifetime differs from training activations and optimizer state.
 
 ::: {.column-margin .margin-pointer}
-↪ KV-cache sizing, and the capacity wall it imposes on autoregressive generation, are developed in @sec-inference-scale-kv-cache-wall.
+↪ The capacity wall this cache imposes on serving systems is developed in @sec-inference-scale-kv-cache-wall.
 :::
 
 RLHF systems address this asymmetry through temporal multiplexing\index{Temporal multiplexing!RLHF phases}. During the generation phase, the cluster behaves like an inference system: the policy model generates sequences while the reference model computes log-probabilities, and the dominant resource is HBM reserved for token-by-token attention state. During the training phase, the same fleet switches back to training mode: gradients are computed through the policy and value models using the 3D parallelism configuration developed in @sec-distributed-training-systems-systems-hybrid-parallelism-12a0. During generation, batching active sequences and placing their KV state determine how much useful work shares each weight read. During the update phase, activation residency and gradient synchronization again govern the schedule. RLHF is not one steady training loop, but an alternation between inference-shaped work and training-shaped work, and standard training frameworks rarely manage that transition by themselves.
@@ -6294,7 +6294,7 @@ Production frameworks expose these same strategies under different names, which 
 The training design therefore determines message size, readiness order, and frequency, while collective algorithms determine how those messages move. *No framework abstraction changes the underlying physics*: distributed-training efficiency ultimately depends on interconnect bandwidth, memory capacity, synchronization latency, and the useful overlap admitted by the computation graph.
 
 ::: {.column-margin .margin-pointer}
-↪ How layer-by-layer scheduling and gradient buckets overlap communication with backpropagation, and how much exchange that overlap removes from a step's critical path, are developed in @sec-communication-overlap.
+↪ Overlap of gradient exchange with backpropagation, the lever that takes communication off a step's critical path, is developed in @sec-communication-overlap.
 :::
 
 ## Fallacies and Pitfalls {#sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc}
