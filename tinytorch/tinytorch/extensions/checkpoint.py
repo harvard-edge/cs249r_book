@@ -1,3 +1,37 @@
+# Hand-maintained extension, NOT generated. This file is not produced by
+# `tito dev export` or `tito module complete`; it is tracked in git and
+# edited directly here. It is the activation-checkpointing example of
+# the autograd extension point; no src/ module or student notebook
+# exports to it.
+"""Activation Checkpointing for TinyTorch: an example extension.
+
+This is an optional, hand-written extension: it is tracked in git as-is and is
+not generated from src/. Read it as the example of extending autograd itself:
+a custom Function that decides what the tape keeps.
+
+Why it exists: during training, the tape keeps every intermediate activation
+of the forward pass alive until backward has used it, so activation memory
+grows with depth and batch size and is often what runs out first.
+Checkpointing a segment keeps only its inputs and throws its intermediates
+away; during backward it runs the segment's forward again to rebuild them.
+The trade is memory for compute: one extra forward pass of the segment.
+Applied to about sqrt(n) segments of an n-layer network, it cuts activation
+memory from O(n) to O(sqrt(n)) for roughly one extra forward pass overall.
+
+How it works:
+
+1. checkpoint(function, *args) wraps the segment in a Function, so autograd
+   records one node for the whole segment instead of one per operation.
+2. forward() runs the segment under no_grad(), so none of its intermediates
+   are recorded or kept; only the output's values come back.
+3. backward() detaches the saved inputs into fresh graph leaves, runs the
+   segment again with gradients on, and calls backward on that recomputed
+   output. The leaves' gradients are the gradients of the segment's inputs.
+
+Where to go next: measure it. Count the bytes the tape holds for a deep stack
+of layers with and without checkpointing, and time the extra forward pass.
+"""
+
 from tinytorch.core.tensor import Tensor, Function
 from tinytorch.core.autograd import no_grad
 
