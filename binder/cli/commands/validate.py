@@ -8914,9 +8914,9 @@ class ValidateCommand:
         for f, t in texts.items():
             for m in def_pat.finditer(t):
                 defs[m.group(1)] = f
-        # 2026-10-12: enforced for vol1 only. vol2-vol4 carried 113 such refs
-        # when this check arrived; add each volume here once its refs are fixed.
-        enforced_volumes = {"vol1"}
+        # 2026-10-12: enforced for vol1 only. 2026-10-13: vol2-vol4 refs fixed
+        # (117 at the time), so every volume is enforced.
+        enforced_volumes = {"vol1", "vol2", "vol3", "vol4"}
         for f, t in texts.items():
             if not enforced_volumes & set(Path(f).parts):
                 continue
