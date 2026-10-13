@@ -3218,7 +3218,11 @@ def fmt_acceleration(quantity, *, unit=None, precision=None, commas=False):
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+    # 2026-10-13: multiples of standard gravity print as "g", not pint's "g_0"
+    # (replaces hand-typed suffix=" g" after dividing by ureg.standard_gravity).
+    unit_label = "g" if display_unit == ureg.standard_gravity else None
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=unit_label,
+                   trim_trailing_zeros=auto_precision)
 
 
 def fmt_torque(quantity, *, unit=None, precision=None, commas=False):
@@ -3453,6 +3457,32 @@ def fmt_angular_velocity(
         unit_label=unit_label,
         trim_trailing_zeros=auto_precision,
     )
+def fmt_angular_acceleration(quantity, *, unit=None, precision=None, commas=False):
+    """Format angular acceleration quantities for prose (rad/s², deg/s²).
+
+    Added 2026-10-13: joint-acceleration limits were rendered with a
+    hand-typed ``suffix=" rad/s²"``; this keeps the unit on the Quantity.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_angular_acceleration() requires a Pint Quantity.")
+    ang_acc_dim = (1 * (ureg.radian / ureg.second**2)).dimensionality
+    if (1 * quantity).dimensionality != ang_acc_dim:
+        raise ValueError(
+            f"fmt_angular_acceleration unit must have angular acceleration dimensionality (angle/time²), got {quantity}."
+        )
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.radian / ureg.second**2)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = None
+    if abs((1 * display_unit).to(ureg.radian / ureg.second**2).magnitude - 1) < 1e-12:
+        unit_label = "rad/s²"
+    elif abs((1 * display_unit).to(ureg.degree / ureg.second**2).magnitude - 1) < 1e-12:
+        unit_label = "deg/s²"
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=unit_label,
+                   trim_trailing_zeros=auto_precision)
+
+
 def fmt_velocity(quantity, *, unit=None, precision=None, commas=False):
     """Format velocity/speed quantities for prose (m/s, km/h, mph)."""
     if not isinstance(quantity, ureg.Quantity):

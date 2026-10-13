@@ -59,7 +59,7 @@ CANONICAL_STR_CALL = re.compile(
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
-    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
+    r"|fmt_frequency|fmt_acceleration|fmt_angular_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
     r"|fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate"
     r"|fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate"
@@ -139,7 +139,7 @@ FMT_FAMILY_USE = re.compile(
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
-    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
+    r"|fmt_frequency|fmt_acceleration|fmt_angular_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
     r"|fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate"
     r"|fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate"
@@ -172,7 +172,7 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 # runs in a bare environment); it lists the names verified as really exported.
 _MLSYSIM_STAR_FALLBACK = frozenset({
     "MarkdownStr", "assert_qty_close", "check", "fmt", "fmt_acceleration", "fmt_angle",
-    "fmt_angular_velocity", "fmt_area", "fmt_arithmetic_intensity", "fmt_bandwidth",
+    "fmt_angular_velocity", "fmt_angular_acceleration", "fmt_area", "fmt_arithmetic_intensity", "fmt_bandwidth",
     "fmt_battery_capacity", "fmt_capacitance", "fmt_carbon_intensity", "fmt_charge",
     "fmt_compute_efficiency", "fmt_count", "fmt_count_range", "fmt_current", "fmt_decibel",
     "fmt_density", "fmt_display_math", "fmt_emissions", "fmt_energy", "fmt_energy_per_bit",
