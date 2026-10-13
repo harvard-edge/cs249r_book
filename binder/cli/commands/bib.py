@@ -8,6 +8,9 @@ Subcommands:
     update   — Run betterbib sync-preserve on .bib files (fetch metadata, keep citekeys stable)
     sync     — Clean then update (full pipeline)
     normalize — Full-tree: same 3 steps as pre-commit (mechanical → tidy → binder bib check)
+    add      — Authenticate, format, and seal a new entry (the reference gateway)
+    ingest   — Verify and promote candidate entries from bibs/inbox.bib
+    reseal   — Re-verify a house-style-edited entry against its source and re-record it
 """
 
 import argparse
@@ -60,7 +63,7 @@ class BibCommand:
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=["list", "mechanical", "clean", "update", "sync", "normalize", "add", "ingest"],
+            choices=["list", "mechanical", "clean", "update", "sync", "normalize", "add", "ingest", "reseal"],
             help="Subcommand to run",
         )
         parser.add_argument("files", nargs="*", help=".bib file(s) for mechanical fixes")
@@ -81,7 +84,8 @@ class BibCommand:
         parser.add_argument("--arxiv", default=None, help="Add reference by arXiv ID")
         parser.add_argument("--isbn", default=None, help="Add reference by ISBN (OpenLibrary)")
         parser.add_argument("--url", default=None, help="Add reference by official URL")
-        parser.add_argument("--key", default=None, help="Custom citation key for --add")
+        parser.add_argument("--key", default=None, help="Custom citation key for add; the entry to re-seal for reseal")
+        parser.add_argument("--note", default=None, help="reseal: what was edited after the gateway seal (required)")
         parser.add_argument("--title", default=None, help="Custom title override for --url")
         parser.add_argument("--author", default=None, help="Custom author override for --url")
         parser.add_argument("--year", default=None, help="Custom year override for --url")
@@ -120,6 +124,16 @@ class BibCommand:
                 author=ns.author,
                 year=ns.year,
                 venue=ns.venue,
+                dry_run=ns.dry_run,
+            )
+
+        if ns.subcommand == "reseal":
+            return self._run_reseal(
+                key=ns.key,
+                note=ns.note,
+                doi=ns.doi,
+                arxiv=ns.arxiv,
+                url=ns.url,
                 dry_run=ns.dry_run,
             )
 
@@ -164,6 +178,7 @@ class BibCommand:
         table.add_column("Description", style="white", width=50)
         table.add_row("add", "Authenticate, format, and seal new citation into ledger")
         table.add_row("ingest", "Verify and promote candidate citations from inbox")
+        table.add_row("reseal", "Re-verify an edited entry against its source; re-record its manifest hash")
         table.add_row("list", "Show all .bib files with entry counts")
         table.add_row("mechanical", "Apply safe §5 field-level fixes")
         table.add_row("clean", "Remove unused entries from .bib files")
@@ -183,6 +198,7 @@ class BibCommand:
         console.print("  [cyan]./binder/binder bib add --url https://github.com/huggingface/lerobot --key cadene2024lerobot[/cyan]")
         console.print("  [cyan]./binder/binder bib add --isbn 9780136566953[/cyan]")
         console.print("  [cyan]./binder/binder bib ingest --inbox bibs/inbox.bib[/cyan]")
+        console.print('  [cyan]./binder/binder bib reseal --key vaswani2017attention --note "title case" --dry-run[/cyan]')
         console.print("  [cyan]./binder/binder bib list --path bibs/references.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib mechanical refs.bib[/cyan]")
         console.print("  [cyan]./binder/binder bib clean --dry-run[/cyan]")
@@ -672,6 +688,82 @@ class BibCommand:
         if record:
             console.print(f"[dim]Cryptographic SHA-256: {record['entry_hash'][:16]}...[/dim]")
         return True
+
+    # ------------------------------------------------------------------
+    # Reseal (house-style edit to a sealed entry)
+    # ------------------------------------------------------------------
+
+    def _run_reseal(
+        self,
+        key: Optional[str],
+        note: Optional[str],
+        doi: Optional[str] = None,
+        arxiv: Optional[str] = None,
+        url: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> bool:
+        """Re-resolve an edited entry's source, check its identity fields, and re-record it.
+
+        The source is the identifier passed on the command line, else the one the
+        manifest record was sealed from (DOI, arXiv ID, or verified URL), else the
+        entry's own ``doi``/``url`` field. Refuses when any checked field disagrees.
+        """
+        import json as _json
+
+        from cli.core import bib_gateway
+
+        if not key or not note:
+            console.print("[red]Error:[/red] reseal needs --key and --note (what was edited after the seal).")
+            return False
+
+        repo = self.config_manager.root_dir
+        record = {}
+        manifest_path = repo / "bibs" / "manifest.json"
+        if manifest_path.is_file():
+            record = _json.loads(manifest_path.read_text(encoding="utf-8")).get(key) or {}
+        details = record.get("details") or {}
+
+        entry_fields: Dict[str, str] = {}
+        bib_text = (repo / "bibs" / "references.bib").read_text(encoding="utf-8")
+        for entry in bib_gateway.bib_lint.parse_bib(bib_text)[0]:
+            if entry.key == key:
+                entry_fields = {n: (entry.get(n).value if entry.get(n) else "") for n in ("doi", "url")}
+                break
+        if not entry_fields:
+            console.print(f"[red]Error:[/red] @{{{key}}} not found in bibs/references.bib.")
+            return False
+
+        if not (doi or arxiv or url):
+            doi = details.get("doi") if details.get("source") in ("crossref", "datacite") else None
+            arxiv = details.get("arxiv_id")
+            if not (doi or arxiv) and details.get("source") == "verified_web":
+                url = details.get("url")
+        if not (doi or arxiv or url):
+            m_arx = bib_gateway.ARXIV_REGEX.search(entry_fields.get("url", "")) if "arxiv" in entry_fields.get("url", "") else None
+            if entry_fields.get("doi"):
+                doi = entry_fields["doi"]
+            elif m_arx:
+                arxiv = m_arx.group(1)
+            elif entry_fields.get("url"):
+                url = entry_fields["url"]
+        if not (doi or arxiv or url):
+            console.print("[red]Error:[/red] no source identifier found; pass --doi, --arxiv, or --url.")
+            return False
+
+        if doi:
+            source_desc, resolved = f"DOI {doi}", bib_gateway.fetch_doi(doi)
+        elif arxiv:
+            source_desc, resolved = f"arXiv {arxiv}", bib_gateway.fetch_arxiv(arxiv)
+        else:
+            source_desc, resolved = f"URL {url}", bib_gateway.fetch_url(url)
+        if not resolved:
+            console.print(f"[red]Could not resolve {source_desc}.[/red]")
+            return False
+
+        ok, msg, _ = bib_gateway.reseal_entry(repo, key, resolved, note, dry_run=dry_run)
+        style = "green" if ok else "red"
+        console.print(f"[{style}]{source_desc}: {msg}[/{style}]")
+        return ok
 
     # ------------------------------------------------------------------
     # Ingest (staging inbox)

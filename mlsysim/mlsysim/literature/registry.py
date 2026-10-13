@@ -29,6 +29,7 @@ ResponsibleAIOverhead = _load("rai_overhead", "ResponsibleAIOverhead", "Responsi
 TrainingRuns = _load("training_runs", "TrainingRuns", "Cited training-run field figures (GPU counts, durations, MFU, interruptions).")
 FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-operations results (job MTTF, utilization, cluster scale).")
 DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
+ServingEnergy = _load("serving_energy", "ServingEnergy", "Measured serving energy, emission factors, and accelerator life-cycle trends (Elsworth 2025, Schneider 2025).")
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +249,7 @@ class Literature(Registry):
     TrainingRuns = TrainingRuns
     FleetOperations = FleetOperations
     DatacenterElectricity = DatacenterElectricity
+    ServingEnergy = ServingEnergy
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
