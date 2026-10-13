@@ -646,7 +646,7 @@ class EnvelopeAmortization:
     overhead_cap = 0.10  # decision threshold: setup at most this share of a fresh call
     work_for_cap = setup * (1 - overhead_cap) / overhead_cap  # W >= T_setup(1-phi)/phi
 
-    # 3. GUARD: equal-work ledger and independently checked totals.
+    # 3. GUARD: equal-work tally and independently checked totals.
     check(useful_work == Q_(300, "ms"), "Same useful work in both designs")
     check(per_call_total == Q_(1800, "ms"), "Per-call setup plus useful work")
     check(per_trajectory_total == Q_(315, "ms"), "One setup plus useful work")
@@ -942,9 +942,9 @@ Snapshotting removes repetitive, high-latency initialization from the sandbox ad
 
 The scope of a snapshot depends heavily on the underlying virtualization mechanism. Ephemeral storage, virtual device queues, network socket connections, message broker states, system clocks, and hardware entropy sources often require dedicated reset procedures outside memory restoration. When cloning a running guest image, the supervisor must never duplicate a live tenant identity or assume that restored pseudorandom number generator (PRNG) states will generate cryptographically independent secrets. Before granting a lease to an incoming agent, the supervisor binds a fresh tenant identity, mounts private workspaces, configures isolated network namespaces, and programs hardware resource limits. These initialization steps constitute the prerequisites of readiness and cannot be postponed until after untrusted agent code begins executing.
 
-A standard optimization maps the snapshot's memory file into each new virtual machine using private copy-on-write semantics (`mmap` with `MAP_PRIVATE`). The host kernel points the new virtual memory mappings directly at the snapshot's cached physical pages without duplicating them in RAM. Pages that remain unwritten, such as guest kernel text, shared libraries, and precompiled bytecode, exist as a single physical copy in host memory shared across the entire pool. Only when an instance writes to a page does the CPU trigger a write fault, prompting the host kernel to allocate and populate a private copy of that specific page.[^fn-ksm-sidechannel-risks] This mechanism drastically reduces host memory consumption compared to provisioning fully private guest images. However, memory ledgers must account for both shared and private allocations: hypervisor control blocks, extended page tables, writable workspace pages, and virtual device states still consume private host RAM. The size of a snapshot image on disk is not an accurate indicator of the active pool's resident memory footprint.
+A standard optimization maps the snapshot's memory file into each new virtual machine using private copy-on-write semantics (`mmap` with `MAP_PRIVATE`). The host kernel points the new virtual memory mappings directly at the snapshot's cached physical pages without duplicating them in RAM. Pages that remain unwritten, such as guest kernel text, shared libraries, and precompiled bytecode, exist as a single physical copy in host memory shared across the entire pool. Only when an instance writes to a page does the CPU trigger a write fault, prompting the host kernel to allocate and populate a private copy of that specific page.[^fn-ksm-sidechannel-risks] This mechanism drastically reduces host memory consumption compared to provisioning fully private guest images. However, a memory budget must count both shared and private allocations: hypervisor control blocks, extended page tables, writable workspace pages, and virtual device states still consume private host RAM. The size of a snapshot image on disk is not an accurate indicator of the active pool's resident memory footprint.
 
-[^fn-ksm-sidechannel-risks]: **Content-Dependent Memory Sharing**\index{Memory deduplication!cross-tenant timing}: Sharing a selected read-only baseline differs from dynamically merging private pages because their contents happen to match, the content-based page sharing introduced for hypervisor memory management [@waldspurger2002memory]. With cross-tenant merging, the copy-on-write delay on a write can reveal that a matching page exists in another guest, a timing channel that was shown to detect which applications and files a neighboring virtual machine had loaded [@suzaki2011memory]. A pool's memory ledger must therefore state which pages may be shared; baseline sharing is not a general guarantee against timing channels.
+[^fn-ksm-sidechannel-risks]: **Content-Dependent Memory Sharing**\index{Memory deduplication!cross-tenant timing}: Sharing a selected read-only baseline differs from dynamically merging private pages because their contents happen to match, the content-based page sharing introduced for hypervisor memory management [@waldspurger2002memory]. With cross-tenant merging, the copy-on-write delay on a write can reveal that a matching page exists in another guest, a timing channel that was shown to detect which applications and files a neighboring virtual machine had loaded [@suzaki2011memory]. A pool's memory budget must therefore state which pages may be shared; baseline sharing is not a general guarantee against timing channels.
 
 Lazy restoration techniques defer paging memory into RAM until the guest explicitly accesses it.[^fn-lazy-restore-faults] While lazy paging minimizes reported sandbox creation times, it shifts significant paging overhead into the initial tool call, especially when multiple newly admitted instances simultaneously access disk or network backing stores. Systems architects must evaluate both the time required to return an active lease handle and the end-to-end latency to first productive tool execution. Fleet readiness, copy-on-write sharing efficiency, and restoration latency represent distinct engineering trade-offs that must be profiled independently.
 
@@ -976,7 +976,7 @@ $$
 \StandbyReserveCount \ge \ArrivalRate \InstanceReplenishTime + \StockoutNormalQuantile\sqrt{\ArrivalRate \InstanceReplenishTime}
 $$ {#eq-vol3-pool-reserve}
 
-where $\StockoutNormalQuantile$ denotes the standard normal quantile.[^fn-square-root-staffing] Round this screening estimate upward, then check the discrete Poisson tail at or above the chosen reserve; the quantile expression is not an exact guarantee. At small means the normal approximation is unsuitable. A guest-page memory ledger follows from copy-on-write page sharing across one golden template, private dirty pages accumulated by active leases, and base overheads for standby instances:
+where $\StockoutNormalQuantile$ denotes the standard normal quantile.[^fn-square-root-staffing] Round this screening estimate upward, then check the discrete Poisson tail at or above the chosen reserve; the quantile expression is not an exact guarantee. At small means the normal approximation is unsuitable. A guest-page memory budget follows from copy-on-write page sharing across one golden template, private dirty pages accumulated by active leases, and base overheads for standby instances:
 
 $$
 \PoolResidentMemory = \TemplateSharedMemory + \ActiveLeaseCount \, \LeaseDirtyMemory + \StandbyReserveCount \, \StandbyInstanceMemory
@@ -1027,7 +1027,7 @@ class SandboxPoolReserve:
     target_miss = 1e-3  # design target for finding standby empty
     slow_factor = 10  # scenario: a cold boot an order of magnitude slower than restore
 
-    # 2. EXECUTE: mean active leases, request-level miss tail, memory ledger.
+    # 2. EXECUTE: mean active leases, request-level miss tail, memory budget.
     n_active = (arrival_rate * t_hold).to("dimensionless").magnitude
     mu_init = (arrival_rate * t_init).to("dimensionless").magnitude
     p_one = poisson_tail(mu_init, initial_reserve)  # a request waits if one prior order is outstanding
@@ -1105,7 +1105,7 @@ While steady Poisson arrivals provide a baseline for continuous operations, agen
 #| label: calc-vol3-sandbox-pool-sizing
 #| echo: false
 # What: Drain a specified burst, then restore the clean reserve.
-# How: Fixed parallel restore rounds and a scoped resident-memory ledger.
+# How: Fixed parallel restore rounds and a scoped resident-memory budget.
 import math
 from mlsysim import *
 
@@ -1174,7 +1174,7 @@ class SandboxPoolSizing:
 
 **Math**: Initial admission consumes the reserve, leaving `{python} SandboxPoolSizing.burst_str` − `{python} SandboxPoolSizing.reserve_str` = `{python} SandboxPoolSizing.queued_str` tasks waiting. The workers serve those tasks in `{python} SandboxPoolSizing.rounds_str` rounds of `{python} SandboxPoolSizing.restore_str`, so the last admission occurs at `{python} SandboxPoolSizing.last_admission_str`. Rebuilding the original reserve takes another `{python} SandboxPoolSizing.reserve_rounds_str` rounds. The pool has its full reserve again at `{python} SandboxPoolSizing.reserve_ready_str`, while all `{python} SandboxPoolSizing.burst_str` admitted leases remain active. Admitting the burst finishes allocating the environments, but the trajectories themselves continue executing.
 
-For an illustrative memory allowance at that final state, suppose immutable resident pages consume `{python} SandboxPoolSizing.shared_str` shared across the pool. Each active instance has `{python} SandboxPoolSizing.active_private_str` of additional private resident state, and each standby has `{python} SandboxPoolSizing.standby_private_str`. The resulting `{python} SandboxPoolSizing.instances_str` instances each require `{python} SandboxPoolSizing.control_each_str` for monitor, page-table, and control state. Reserve another `{python} SandboxPoolSizing.headroom_str` of headroom. The ledger is in decimal megabytes and sums the exact byte quantities.
+For an illustrative memory allowance at that final state, suppose immutable resident pages consume `{python} SandboxPoolSizing.shared_str` shared across the pool. Each active instance has `{python} SandboxPoolSizing.active_private_str` of additional private resident state, and each standby has `{python} SandboxPoolSizing.standby_private_str`. The resulting `{python} SandboxPoolSizing.instances_str` instances each require `{python} SandboxPoolSizing.control_each_str` for monitor, page-table, and control state. Reserve another `{python} SandboxPoolSizing.headroom_str` of headroom. The budget is in decimal megabytes and sums the exact byte quantities.
 
 `{python} SandboxPoolSizing.shared_str` shared + `{python} SandboxPoolSizing.active_total_str` active-private + `{python} SandboxPoolSizing.standby_total_str` standby-private + `{python} SandboxPoolSizing.control_total_str` control + `{python} SandboxPoolSizing.headroom_str` headroom = `{python} SandboxPoolSizing.resident_budget_str`.
 
