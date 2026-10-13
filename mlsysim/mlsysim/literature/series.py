@@ -458,8 +458,8 @@ class Series:
             notes=("Input (prompt) token list price in USD per million tokens at each model version's "
                    "announcement or effective date. The check column records, row by row, what was "
                    "re-checked on 2026-10-13: five rows against the cited page, two against the Epoch AI "
-                   "lowest-price series; openai.com refuses automated fetches, so two rows rest on the "
-                   "cited announcement alone. Prices are snapshots, not current rates."),
+                   "lowest-price series, and two against OpenAI's API pricing page (openai.com refuses "
+                   "automated fetches of the announcements). Prices are snapshots, not current rates."),
         ),
         "Public API input-token list prices for named model versions, 2022-2025.",
         numeric=("usd_per_mtok_input",),
