@@ -54,11 +54,11 @@ Training is paid for each model version; serving continues throughout that versi
 
 ::: {.callout-learning-objectives}
 
-- Estimate lifetime serving cost from traffic volume, deployment duration, and measured per-request cost
+- Estimate lifetime serving cost from traffic volume, deployment duration, and measured cost per SLO-compliant request
 - Select batching, scheduling, and per-request compute-budget policies for vision, LLM, recommender, and streaming workloads
-- Analyze attention-cache capacity, fragmentation, and decode-time policies under workload-dependent serving constraints
+- Analyze attention-cache capacity, fragmentation, and prefill-decode interference under workload-dependent serving constraints
 - Compare sharding, disaggregation, and quantized serving designs using communication, memory, and quality constraints
-- Evaluate routing, load balancing, and isolation controls against tail latency and noisy-neighbor risks
+- Evaluate routing, overload-control, and isolation policies against tail latency, retry amplification, and noisy-neighbor risks
 - Design autoscaling and multi-region routing policies that balance cold starts, cost, and SLO compliance
 - Synthesize serving architectures that manage C³ trade-offs across request, replica, service, and platform layers
 
@@ -1609,6 +1609,10 @@ plt.close()
 Translating the batch-level equations into system-wide capacity planning requires a classical result from queuing theory: Little's Law\index{Little's Law!capacity planning},[^fn-littles-law-queuing] which relates concurrency, throughput, and latency in any stable system.
 
 [^fn-littles-law-queuing]: **Little's Law**\index{Little's Law!serving concurrency}: The identity holds for any stable system regardless of the arrival or service distribution, which is why it survives the bursty, variable-length traffic of inference. Because it relates averages, it bounds neither maximum service capacity nor tail latency.
+
+::: {.column-margin .margin-pointer}
+↩ The M/G/1 waiting-time model, in which utilization and service-time variability multiply queueing delay, is established in @sec-fleet-orchestration-objectives.
+:::
 
 ```{python}
 #| echo: false
@@ -4619,7 +4623,7 @@ For a serving deployment the consequence is that no single INT8 scale suits both
 
 GPTQ\index{GPTQ!layer-by-layer quantization} [@frantar2023gptq], which uses second-order error compensation, is the weight-only choice when deployment needs 4-bit compression after training and can afford calibration data. Its serving value is that the model gets smaller without a full retraining run.
 
-GPTQ rounds weight columns while compensating the remaining columns using statistics collected from calibration inputs. Calibration and error compensation are offline costs paid when producing the quantized artifact, rather than on each serving request. Their duration depends on model size, calibration workload, hardware, and implementation; a fixed sample count is not a general deployment requirement. The resulting artifact still requires suitable inference kernels, and its quality must be tested when production inputs differ from the calibration distribution.
+Calibration and error compensation are offline costs paid when producing the quantized artifact, rather than on each serving request. Their duration depends on model size, calibration workload, hardware, and implementation; a fixed sample count is not a general deployment requirement. The resulting artifact still requires suitable inference kernels, and its quality must be tested when production inputs differ from the calibration distribution.
 
 @Tbl-gptq-performance identifies the measurements needed to evaluate a GPTQ deployment:
 
@@ -4632,11 +4636,11 @@ GPTQ rounds weight columns while compensating the remaining columns using statis
 
 : **GPTQ evaluation contract**: Nominal bit width alone does not determine quality, compression, or speed. Report the deployed representation and measured workload rather than extrapolating fixed values across model sizes. {#tbl-gptq-performance}
 
-GPTQ provides weight compression without a full retraining run, using a layer-local reconstruction objective to control error. That objective does not guarantee task quality after errors propagate through the complete model. Calibration coverage, quantization settings, and the deployed kernel path therefore belong in the evaluation alongside artifact size.
+GPTQ's layer-local reconstruction objective does not guarantee task quality after errors propagate through the complete model. Calibration coverage, quantization settings, and the deployed kernel path therefore belong in the evaluation alongside artifact size.
 
 ### AWQ activation-aware weight quantization {#sec-inference-scale-awq-activationaware-weight-quantization-abec}
 
-Activation-aware weight quantization (AWQ)\index{AWQ!salient weight protection} [@lin2023awq] approaches weight-only compression through activation statistics. It scales selected weight channels before quantization, applying the inverse scale to their inputs, often through a preceding operation. This protects salient channels without GPTQ's sequential error-compensation procedure. Calibration cost and quality still depend on the model and data. If the scale cannot be fused into the deployed graph, an additional runtime operation spends some of the latency saving; it does not by itself erase the smaller weight footprint.
+Activation-aware weight quantization (AWQ)\index{AWQ!salient weight protection} [@lin2023awq] protects salient weight channels by scaling them from activation statistics, with the inverse scale applied to their inputs, rather than through GPTQ's sequential error compensation. Calibration cost and quality still depend on the model and data. If the scale cannot be fused into the deployed graph, an additional runtime operation spends some of the latency saving; it does not by itself erase the smaller weight footprint.
 
 @Tbl-awq-vs-gptq compares the methods' error-control mechanisms and calibration roles, then the deployment check each requires; both need the same quality evaluation on the target model and task.
 
@@ -4975,7 +4979,7 @@ where $\DeviceCount$ is the number of devices in the sharding group, $\Communica
 
 ### Tensor parallelism {#sec-inference-scale-tensor-parallelism-b29f}
 
-Tensor parallelism\index{Tensor Parallelism!inference} [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning\index{Tensor Parallelism!column-row partitioning} scheme introduced for training applies here: splitting the first feed-forward linear layer by columns and the second by rows requires one AllReduce for that feed-forward sublayer. The attention output requires another, giving two AllReduce operations per transformer block in the scheme analyzed here. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
+Tensor parallelism\index{Tensor Parallelism!inference} [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning\index{Tensor Parallelism!column-row partitioning} scheme introduced for training applies here: splitting the first feed-forward linear layer by columns and the second by rows keeps the activation between them on its device and requires one AllReduce for that feed-forward sublayer. The attention output requires another, giving two AllReduce operations per transformer block in the scheme analyzed here. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
 
 ::: {.column-margin .margin-pointer}
 ↩ Column-row tensor partitioning and its two AllReduce operations per transformer block are established in @sec-distributed-training-systems-systems-tensor-parallelism-d76e.
@@ -4985,9 +4989,7 @@ The multi-head attention computation naturally partitions across attention heads
 
 $$\text{Attention}_i = \text{softmax}\left(\frac{\AttentionQueryMatrix_i \AttentionKeyMatrix_i^T}{\sqrt{\AttentionHeadDimension}}\right) \AttentionValuesMatrix_i \text{ for heads } \AttentionHeadIndex\in \{1, \dots, \AttentionHeadCount/\TensorParallelDegree\}$$
 
-Each device applies its shard of the attention output projection to its local heads. An AllReduce operation\index{AllReduce!tensor parallelism synchronization} then sums those projected partial outputs across devices. The reduction combines contributions to the same output coordinates, rather than summing unrelated head outputs directly. Its latency includes collective startup and coordination as well as payload transfer over the interconnect.
-
-The feed-forward layer (typically two linear transformations with activation) partitions along the hidden dimension, with the first linear layer split by columns and the second by rows, so the activation between them never leaves its device.
+Each device applies its shard of the attention output projection to its local heads. An AllReduce operation\index{AllReduce!tensor parallelism synchronization} then sums those projected partial outputs across devices. Its latency includes collective startup and coordination as well as payload transfer over the interconnect.
 
 The communication pattern for tensor-parallel inference follows a two-phase synchronization per layer. @Fig-tensor-parallel-flow diagrams this execution flow across two GPU ranks, isolating how column-row GEMM decompositions confine cross-device synchronization to two AllReduce barriers over NVLink, one after the multi-head attention projection and one after the feed-forward layer.
 
@@ -5522,11 +5524,15 @@ An even expert placement assigns each device $\ExpertCount/\DeviceCount$ experts
 
 The communication pattern differs from tensor parallelism. AllReduce delivers a combined reduction result (*same data to all devices*) and maps onto ring or tree schedules whose per-link traffic is fixed by the message size. Expert parallelism instead uses AllToAll\index{All-to-All!expert parallelism} to deliver routed token representations (*different data to different devices* based on routing), so the bytes each link and receiver carries depend on which experts the router selects; the host of a popular expert can become an incast point for many senders. If some experts receive more work, their hosts can determine completion time while less-loaded hosts wait. Balancing the number of stored experts does not guarantee balanced token traffic.
 
-Training and serving offer different controls over this imbalance. An auxiliary loss\index{Auxiliary Loss} can encourage more balanced expert use during training without guaranteeing balance on future traffic. An expert capacity factor\index{Capacity Factor} limits accepted tokens relative to an even allocation; 1.25$\times$ is an illustrative setting, not a universal requirement. Dropping excess work or rerouting it to another expert changes the model computation and requires quality validation. Expert buffering\index{Expert Buffering} instead retains excess work for later execution, spending latency and queue capacity. These controls trade quality, waiting, and utilization rather than guaranteeing that routing remains balanced.
+Training and serving offer different controls over this imbalance. The auxiliary balancing loss\index{Auxiliary Loss} and the expert capacity factor\index{Capacity Factor} come from training, and each carries a serving consequence. The loss shapes routing on training data without guaranteeing balance on future traffic. The capacity factor caps accepted tokens relative to an even allocation (1.25$\times$ is an illustrative setting, not a universal requirement), so the serving system must decide what happens to the excess. Dropping excess work or rerouting it to another expert changes the model computation and requires quality validation. Expert buffering\index{Expert Buffering} instead retains excess work for later execution, spending latency and queue capacity. These controls trade quality, waiting, and utilization rather than guaranteeing that routing remains balanced.
+
+::: {.column-margin .margin-pointer}
+↩ The capacity factor, the auxiliary load-balancing loss, and the hot-expert skew they bound during training are established in @sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45.
+:::
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
-Router behavior affects both system performance and model quality. Expert collapse\index{Expert collapse!routing failure} concentrates training traffic on a small subset of experts, leaving other experts undertrained despite their storage cost. Unstable assignments can also hinder specialization. At serving time, a changed input distribution can alter expert popularity and create hotspots without any change to the stored model. Token dropping\index{Token dropping!capacity factor overflow} skips selected expert work when a capacity limit is exceeded; in implementations that retain only the residual path for dropped assignments, the resulting computation differs from the uncapped model. Its quality impact must be evaluated along with any throughput improvement.
+Router behavior affects both system performance and model quality. During training, expert collapse\index{Expert collapse!routing failure} concentrates traffic on a small subset of experts, leaving the others undertrained despite their storage cost. At serving time, a changed input distribution can alter expert popularity and create hotspots without any change to the stored model. Token dropping\index{Token dropping!capacity factor overflow} skips selected expert work when a capacity limit is exceeded; in implementations that retain only the residual path for dropped assignments, the resulting computation differs from the uncapped model. Its quality impact must be evaluated along with any throughput improvement.
 
 These failure modes follow from the basic MoE serving trade-off:[^fn-moe-expert-serving] computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
 
@@ -5963,6 +5969,10 @@ Archetype B (DLRM at Scale) uses `{python} ArchetypeBTailAtScale.p99_slo_math` a
 
 :::
 
+::: {.column-margin .margin-pointer}
+↩ Fan-out amplification, in which one slow server among many makes most request sets slow, and the hedged requests that cut it are established in @sec-storage-tier3-pfs.
+:::
+
 ### Load balancing principles {#sec-inference-scale-load-balancing-principles-63ec}
 
 Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
@@ -6183,6 +6193,10 @@ The same stateful routing machinery becomes a correctness boundary when cached s
 
 **Systems lesson**: Stateful inference infrastructure needs isolation guarantees around caches, connection pools, and routing keys. A cache is part of the serving correctness boundary, not merely an optimization.
 
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Shared prefix caches as a cross-tenant leakage channel, and the tenant-scoped caches that close it, are developed in @sec-security-privacy-shared-accelerators.
 :::
 
 ### Request routing for sharded models {#sec-inference-scale-request-routing-sharded-models-6432}
@@ -6463,15 +6477,7 @@ The shard group boundary also defines readiness. A group can accept work only wh
 
 ### Health checking and failover {#sec-inference-scale-health-checking-failover-070e}
 
-Load balancers can route around failure only if the health signal\index{Health checking!failover detection} matches the failure mode. Health checks separate liveness, readiness, and inference correctness. On an accelerator replica, each tier must test a different part of the serving state, because a process that is alive may still be unusable when its weights are not loaded, its memory pool is exhausted, or its first request will trigger a long warmup. The probes therefore escalate from cheapest to most realistic:
-
-```
-GET  /health/live       -> 200 (process alive) or timeout (process dead)
-GET  /health/ready      -> 200 (weights loaded, device initialized) or 503
-POST /health/inference  -> 200 with valid output for a fixed test prompt, or error
-```
-
-Readiness checks can detect unloaded weights, incomplete warmup, or insufficient admission capacity even while the process remains alive. An inference probe additionally exercises the execution path and can compare a fixed prompt's output or logits against expected bounds. Passing that probe does not establish correctness or capacity for every request shape, so production errors and latency remain necessary health signals. Failover then depends on the detected failure, available replacement capacity, and whether affected KV state can be transferred or must be reconstructed.
+Load balancers can route around failure only if the health signal\index{Health checking!failover detection} matches the failure mode. The three probe tiers (liveness, readiness, and inference correctness) escalate from cheapest to most realistic. On an accelerator replica, each tier must test a different part of the serving state, because a process that is alive may still be unusable when its weights are not loaded, its memory pool is exhausted, or its first request will trigger a long warmup. Readiness on a serving replica therefore includes admission capacity as well as loaded weights and completed warmup, and an inference probe can compare a fixed prompt's output or logits against expected bounds. Passing that probe does not establish correctness or capacity for every request shape, so production errors and latency remain necessary health signals. Failover then depends on the detected failure, available replacement capacity, and whether affected KV state can be transferred or must be reconstructed.
 
 ::: {.column-margin .margin-pointer}
 ↩ Liveness, readiness, and inference-correctness probes, the failover time their settings bound, and stateful failover are established in @sec-fault-tolerance-reliability-reliability-failover-mechanisms-5ddd.
