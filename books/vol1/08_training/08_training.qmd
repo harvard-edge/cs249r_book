@@ -1666,7 +1666,7 @@ class LlamaFinetuneMemory:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     params_b_str = fmt_count(model.parameters.to(param).magnitude, scale="B", precision=1, commas=False)
     capacity_str = fmt_memory_capacity(capacity, unit=GiB, precision=0, commas=False)
-    capacity_gb_str = fmt_memory(round((capacity).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
+    capacity_gb_str = fmt_memory(capacity, unit=GB, precision=1, commas=False)
     weights_gb_str = fmt_memory(round((weights).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     gradients_gb_str = fmt_memory(round((gradients).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     master_gb_str = fmt_memory(round((master_weights).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
@@ -1686,7 +1686,7 @@ class LlamaFinetuneMemory:
 
 ::: {#nbk-training-estimating-vram-requirements .callout-notebook title="Fine-tuning Llama 3 8B on one H100"}
 
-**Problem**: Can a `{python} LlamaFinetuneMemory.params_b_str`-parameter Llama 3 model be fine-tuned on one H100 with `{python} LlamaFinetuneMemory.capacity_str` (about `{python} LlamaFinetuneMemory.capacity_gb_str`) of HBM, first with every parameter trained and then with low-rank adapters?
+**Problem**: Can a `{python} LlamaFinetuneMemory.params_b_str`-parameter Llama 3 model be fine-tuned on one H100 with `{python} LlamaFinetuneMemory.capacity_str` (`{python} LlamaFinetuneMemory.capacity_gb_str` in decimal units) of HBM, first with every parameter trained and then with low-rank adapters?
 
 **Given**: The mixed-precision Adam recipe of @sec-model-training-optimization-algorithms-c6a9, a batch of `{python} LlamaFinetuneMemory.batch_str` sequences of `{python} LlamaFinetuneMemory.seq_str` tokens, and attention that never stores the quadratic score matrix.
 
@@ -2722,7 +2722,7 @@ $$\text{Accelerator Utilization} = \min\left(1, \frac{\InputPipelineRate}{\Accel
 # │ Show:    H100 arithmetic ceiling and sustained demand in images/s, workers
 # │          needed, host cores per accelerator, supplied rate, busy fraction.
 # │ How:     Demand = peak / training FLOPs per image x the sustained fraction
-# │          implied by the data engineering chapter's 3,000 img/s on an A100;
+# │          implied by the registry's A100 ResNet-50 training rate (3,200 img/s);
 # │          supply = host cores per accelerator x per-worker decode rate.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
@@ -2739,7 +2739,7 @@ class ResNetFeedH100:
     h100 = Hardware.Cloud.H100
     a100 = Hardware.Cloud.A100
     node = Systems.Nodes.DGX_H100
-    a100_sustained_img_s = 3000  # scenario anchor shared with the data engineering chapter
+    a100_sustained_img_s = float(Literature.Benchmarks.ResNet50A100TrainThroughput)  # registry anchor shared with the data engineering chapter
     worker_img_s = 375  # scenario assumption: JPEG decode + augment per host worker
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -4781,10 +4781,11 @@ class GPT2FlashAttentionMemory:
     act_flash_gb_str = fmt_memory(act_flash, unit=GB, precision=1, commas=False)
     total_flash_gb_str = fmt_memory(total_flash, unit=GB, precision=1, commas=False)
     capacity_gb_str = fmt_memory(capacity, unit=GB, precision=1, commas=False)
+    capacity_label_str = fmt_memory_capacity(capacity, unit=GiB, precision=0, commas=False)
     excess_gb_str = fmt_memory(round((excess).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
 ```
 
-The same quadratic term dominates GPT-2 XL's memory. At batch 32 and 1,024 tokens, the stored score, probability, and dropout matrices account for about `{python} GPT2FlashAttentionMemory.score_term_gb_str` of the `{python} GPT2FlashAttentionMemory.act_stored_gb_str` of mixed-precision activations, about `{python} GPT2FlashAttentionMemory.score_share_pct_str`. An attention kernel that never stores them leaves `{python} GPT2FlashAttentionMemory.act_flash_gb_str` of activations; with the static state the step needs `{python} GPT2FlashAttentionMemory.total_flash_gb_str`, still about `{python} GPT2FlashAttentionMemory.excess_gb_str` more than the H100's 80 GB (`{python} GPT2FlashAttentionMemory.capacity_gb_str` in decimal units), so removing attention's traffic is necessary but not sufficient.
+The same quadratic term dominates GPT-2 XL's memory. At batch 32 and 1,024 tokens, the stored score, probability, and dropout matrices account for about `{python} GPT2FlashAttentionMemory.score_term_gb_str` of the `{python} GPT2FlashAttentionMemory.act_stored_gb_str` of mixed-precision activations, about `{python} GPT2FlashAttentionMemory.score_share_pct_str`. An attention kernel that never stores them leaves `{python} GPT2FlashAttentionMemory.act_flash_gb_str` of activations; with the static state the step needs `{python} GPT2FlashAttentionMemory.total_flash_gb_str`, still about `{python} GPT2FlashAttentionMemory.excess_gb_str` more than the H100's `{python} GPT2FlashAttentionMemory.capacity_label_str` (`{python} GPT2FlashAttentionMemory.capacity_gb_str` in decimal units), so removing attention's traffic is necessary but not sufficient.
 
 FlashAttention\index{FlashAttention!I/O-aware algorithm}\index{FlashAttention!memory bandwidth optimization}\index{Out-of-memory error!training constraint}[^fn-flashattention-dao-origin] [@dao2022] addresses this bandwidth bottleneck by optimizing how data flows between memory hierarchies. Processing attention in SRAM-sized tiles avoids materializing the full $\SequenceLength{\times}\SequenceLength$ matrix in HBM and reduces traffic without changing the mathematical output, which is how the roofline preview moved attention rightward toward, and for favorable shapes past, the ridge.
 
@@ -5604,9 +5605,22 @@ Training GPT-2 XL at batch 32 on a single H100 exposes the physical boundaries t
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import Hardware, Models, Infrastructure, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
-from mlsysim.core.units import GB, USD, kWh, kilogram, metric_ton, second, day
+from mlsysim.core.units import GB, GiB, USD, kWh, kilogram, metric_ton, second, day
 from mlsysim.physics import calc_activation_memory
-from mlsysim.fmt import check, fmt, fmt_count, fmt_emissions, fmt_energy, fmt_memory, fmt_multiple, fmt_percent, fmt_rate, fmt_time, fmt_usd
+from mlsysim.fmt import (
+    check,
+    fmt,
+    fmt_count,
+    fmt_emissions,
+    fmt_energy,
+    fmt_memory,
+    fmt_memory_capacity,
+    fmt_multiple,
+    fmt_percent,
+    fmt_rate,
+    fmt_time,
+    fmt_usd,
+)
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2WalkthroughCalc:
@@ -5659,6 +5673,7 @@ class GPT2WalkthroughCalc:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     capacity_gb_str = fmt_memory(capacity, unit=GB, precision=1, commas=False)
+    capacity_label_str = fmt_memory_capacity(capacity, unit=GiB, precision=0, commas=False)
     static_gb_str = fmt_memory(round((static_amp).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     p32_gb_str = fmt_memory(round((p32).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     adam_gb_str = fmt_memory(round((gpt2.size_in_bytes(BYTES_ADAM_STATE)).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
@@ -5689,7 +5704,7 @@ class GPT2WalkthroughCalc:
 
 **Step 1**: Establish the baseline memory footprint.
 
-The trace starts with GPT-2 XL at batch 32 and sequence length 1,024, FP32 tensors throughout, standard attention, and a single-threaded synchronous data loader. Weights, gradients, and Adam moments take `{python} GPT2WalkthroughCalc.static_gb_str`, and FP32 activations take `{python} GPT2WalkthroughCalc.act_fp32_gb_str`, so the step needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, about `{python} GPT2WalkthroughCalc.fp32_over_mult_str` the H100's 80 GB (`{python} GPT2WalkthroughCalc.capacity_gb_str` in decimal units). The run fails the machine constraint before throughput matters.
+The trace starts with GPT-2 XL at batch 32 and sequence length 1,024, FP32 tensors throughout, standard attention, and a single-threaded synchronous data loader. Weights, gradients, and Adam moments take `{python} GPT2WalkthroughCalc.static_gb_str`, and FP32 activations take `{python} GPT2WalkthroughCalc.act_fp32_gb_str`, so the step needs `{python} GPT2WalkthroughCalc.total_fp32_gb_str`, about `{python} GPT2WalkthroughCalc.fp32_over_mult_str` the H100's `{python} GPT2WalkthroughCalc.capacity_label_str` (`{python} GPT2WalkthroughCalc.capacity_gb_str` in decimal units). The run fails the machine constraint before throughput matters.
 
 **Step 2**: Apply mixed precision.
 
@@ -5718,18 +5733,18 @@ Eight worker processes, page-locked (pinned) host memory for asynchronous DMA tr
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Metric**                |                  **FP32 baseline**                   |                     **Optimized**                      | **Technique applied**                                                 |
-|:--------------------------|:----------------------------------------------------:|:------------------------------------------------------:|:----------------------------------------------------------------------|
-| **Static training state** |     `{python} GPT2WalkthroughCalc.static_gb_str`     |      `{python} GPT2WalkthroughCalc.static_gb_str`      | Unchanged at 16 bytes per parameter                                   |
-| **Activations per step**  |    `{python} GPT2WalkthroughCalc.act_fp32_gb_str`    |    `{python} GPT2WalkthroughCalc.act_accum_gb_str`     | FP16, FlashAttention, two micro-batches of 16                         |
-| **Total memory**          | **`{python} GPT2WalkthroughCalc.total_fp32_gb_str`** | **`{python} GPT2WalkthroughCalc.total_accum_gb_str`**  | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` smaller      |
-| **Fits one H100**         |                          No                          |                          Yes                           | Capacity `{python} GPT2WalkthroughCalc.capacity_gb_str`               |
-| **Accelerator busy time** |                         N/A                          |                   Whole step (ideal)                   | Prefetching, eight workers                                            |
-| **Throughput**            |                         N/A                          |    `{python} GPT2WalkthroughCalc.tokens_per_s_str`     | At the assumed utilization                                            |
-| **Run time**              |                         N/A                          |      `{python} GPT2WalkthroughCalc.run_days_str`       | One accelerator                                                       |
-| **Facility energy**       |                         N/A                          | `{python} GPT2WalkthroughCalc.facility_energy_kwh_str` | Accelerator power $\times$ PUE `{python} GPT2WalkthroughCalc.pue_str` |
-| **Electricity cost**      |                         N/A                          |  `{python} GPT2WalkthroughCalc.electricity_cost_str`   | At `{python} GPT2WalkthroughCalc.electricity_rate_str`                |
-| **Carbon**                |                         N/A                          |      `{python} GPT2WalkthroughCalc.carbon_t_str`       | Average grid intensity                                                |
+| **Metric**                |                  **FP32 baseline**                   |                     **Optimized**                      | **Technique applied**                                                                                       |
+|:--------------------------|:----------------------------------------------------:|:------------------------------------------------------:|:------------------------------------------------------------------------------------------------------------|
+| **Static training state** |     `{python} GPT2WalkthroughCalc.static_gb_str`     |      `{python} GPT2WalkthroughCalc.static_gb_str`      | Unchanged at 16 bytes per parameter                                                                         |
+| **Activations per step**  |    `{python} GPT2WalkthroughCalc.act_fp32_gb_str`    |    `{python} GPT2WalkthroughCalc.act_accum_gb_str`     | FP16, FlashAttention, two micro-batches of 16                                                               |
+| **Total memory**          | **`{python} GPT2WalkthroughCalc.total_fp32_gb_str`** | **`{python} GPT2WalkthroughCalc.total_accum_gb_str`**  | `{python} GPT2WalkthroughCalc.memory_reduction_mult_str` smaller                                            |
+| **Fits one H100**         |                          No                          |                          Yes                           | Capacity `{python} GPT2WalkthroughCalc.capacity_label_str` (`{python} GPT2WalkthroughCalc.capacity_gb_str`) |
+| **Accelerator busy time** |                         N/A                          |                   Whole step (ideal)                   | Prefetching, eight workers                                                                                  |
+| **Throughput**            |                         N/A                          |    `{python} GPT2WalkthroughCalc.tokens_per_s_str`     | At the assumed utilization                                                                                  |
+| **Run time**              |                         N/A                          |      `{python} GPT2WalkthroughCalc.run_days_str`       | One accelerator                                                                                             |
+| **Facility energy**       |                         N/A                          | `{python} GPT2WalkthroughCalc.facility_energy_kwh_str` | Accelerator power $\times$ PUE `{python} GPT2WalkthroughCalc.pue_str`                                       |
+| **Electricity cost**      |                         N/A                          |  `{python} GPT2WalkthroughCalc.electricity_cost_str`   | At `{python} GPT2WalkthroughCalc.electricity_rate_str`                                                      |
+| **Carbon**                |                         N/A                          |      `{python} GPT2WalkthroughCalc.carbon_t_str`       | Average grid intensity                                                                                      |
 
 : **GPT-2 XL on One H100**: Memory figures are calculated from the model shape; the busy-time result follows from the tokenization and step-time scenario; run time, energy, cost, and carbon follow from the assumed utilization, the accelerator's thermal design power, and registry values for facility overhead, electricity price, and grid carbon intensity. The FP32 baseline does not fit, so it has no run to measure. {#tbl-training-gpt2-final-profile tbl-colwidths="[24,20,22,34]"}
 

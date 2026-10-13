@@ -959,7 +959,7 @@ plt.close()
 
 :::
 
-The hypothetical frontier in @fig-fairness-frontier illustrates possible operating choices from A toward C; the deployment's measured candidate configurations, rather than that illustrative curve, determine its actual trade-offs. Quantifying this trade-off requires evaluating economic costs for the specific application. An automated hiring pipeline makes the resulting penalty concrete because each outcome carries an explicit value, a successful hire on one side and a bad hire on the other. The hiring model that follows is a separate scenario with its own rates, not the credit service of @sec-responsible-engineering-worked-example-fairness-analysis-loan-approval-2c72.
+The hypothetical frontier in @fig-fairness-frontier illustrates possible operating choices from A toward C; the deployment's measured candidate configurations, rather than that illustrative curve, determine its actual trade-offs. Quantifying this trade-off requires evaluating economic costs for the specific application. The credit service of @sec-responsible-engineering-worked-example-fairness-analysis-loan-approval-2c72 makes the resulting penalty concrete because each lending outcome carries an explicit value, the margin on a repaid loan on one side and the loss on a default on the other.
 
 ```{python}
 #| label: fairness-price-calc
@@ -967,13 +967,15 @@ The hypothetical frontier in @fig-fairness-frontier illustrates possible operati
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THE PRICE OF FAIRNESS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Price of Fairness" callout (Pareto Frontier section)
+# │ Context: "The price of fairness" callout (Pareto frontier discussion)
 # │
-# │ Goal: Quantify the economic cost of achieving mathematical fairness.
-# │ Show: The NET utility loss (value of extra qualified hires MINUS cost of
-# │       extra bad hires) when equalizing TPR via threshold adjustment.
-# │ How: Two-sided accounting against a baseline near the utility-optimal
-# │      threshold; a tax exists only when the marginal admits skew unqualified.
+# │ Goal: Quantify the economic cost of closing the credit service's TPR gap.
+# │ Show: The NET utility change for Group B (margin on the extra repaid loans
+# │       MINUS losses on the extra defaults) when its TPR is raised to Group
+# │       A's by threshold adjustment.
+# │ How: Rates from LoanFairness (the credit service worked example); loan
+# │      margin, default loss, and the FPR response are scenario assumptions.
+# │      A cost exists only when the marginal approvals skew toward default.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -981,72 +983,68 @@ from mlsysim.fmt import fmt, fmt_usd, check, fmt_math, fmt_percent, fmt_pp
 from mlsysim.core.units import USD
 
 class FairnessPrice:
-    """Utility cost of closing a TPR gap via threshold adjustment in a hiring model."""
+    """Utility cost of closing the credit service's TPR gap via threshold adjustment."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    hire_value = 100_000 * USD  # scenario assumption: value of a successful hire
-    bad_hire_cost = 50_000 * USD  # scenario assumption: cost of a bad hire
-    fp_increase_pp = 15  # scenario assumption: FPR increase to close the TPR gap (pp)
-    group_a_tpr = 0.90  # scenario baseline
-    group_b_tpr = 0.70  # scenario baseline
-    group_b_fpr = 0.10  # scenario baseline FPR for the disadvantaged group
-    minority_group_share = 0.30  # Disadvantaged group as fraction of applicant pool
-    positive_base_rate = 0.20  # Fraction of applicants who would be successful hires
+    repay_margin = 1_500 * USD  # scenario assumption: lifetime margin on a repaid loan
+    default_loss = 3_000 * USD  # scenario assumption: loss on a loan that defaults
+    fp_increase_pp = 20  # scenario assumption: Group B FPR increase to close the TPR gap (pp)
+    group_a_tpr = LoanFairness.a_tpr_pct / 100  # credit service worked example
+    group_b_tpr = LoanFairness.b_tpr_pct / 100
+    group_b_fpr = LoanFairness.b_fpr_pct / 100
+    positive_base_rate = LoanFairness.b_qualified / LoanFairness.b_total  # Group B applicants who would repay
+    minority_group_share = LoanFairness.b_total / (LoanFairness.a_total + LoanFairness.b_total)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Two-sided accounting (2026-06-07: the earlier version counted only the
-    # extra bad-hire cost and ignored the value of the additional qualified
-    # hires; under those parameters the intervention was net-POSITIVE, so the
-    # claimed "utility tax" did not follow). The intervention raises TPR by
-    # tpr_gap_pp among qualified applicants (+value) and FPR by
-    # fp_increase_pp among unqualified applicants (-cost), for the
-    # disadvantaged group only:
+    # Two-sided accounting: raising Group B's TPR adds repaid loans among
+    # applicants who would repay (+margin), and the matching FPR rise adds
+    # defaults among those who would not (-loss).
     tpr_gap_pp = (group_a_tpr - group_b_tpr) * 100
-    extra_tp_value = (tpr_gap_pp / 100.0) * positive_base_rate * hire_value
-    extra_fp_cost = (fp_increase_pp / 100.0) * (1 - positive_base_rate) * bad_hire_cost
+    extra_tp_value = (tpr_gap_pp / 100.0) * positive_base_rate * repay_margin
+    extra_fp_cost = (fp_increase_pp / 100.0) * (1 - positive_base_rate) * default_loss
     net_change_per_applicant = extra_tp_value - extra_fp_cost
-    baseline_utility_per_applicant = group_b_tpr * positive_base_rate * hire_value - group_b_fpr * (1 - positive_base_rate) * bad_hire_cost
+    baseline_utility_per_applicant = group_b_tpr * positive_base_rate * repay_margin - group_b_fpr * (1 - positive_base_rate) * default_loss
     loss_fraction_within_group = (-net_change_per_applicant / baseline_utility_per_applicant).to("").magnitude
     population_average_loss = -net_change_per_applicant * minority_group_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(net_change_per_applicant < 0 * USD, "The fairness tax only exists when extra bad-hire cost exceeds extra hire value")
-    check(abs(loss_fraction_within_group - 0.20) < 1e-9, "Within-group utility loss should be 20% under the stated assumptions.")
+    check(baseline_utility_per_applicant > 0 * USD, "Lending to Group B must be profitable before the intervention.")
+    check(net_change_per_applicant < 0 * USD, "The cost of fairness exists only when extra default losses exceed extra margin.")
+    check(abs(loss_fraction_within_group - 0.50) < 1e-9, "Within-group utility loss should be 50 percent under the stated assumptions.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    # Typed formatters own currency, percent, and percentage-point display.
-    hire_value_k_str = fmt_usd(hire_value, precision=0)  # e.g. "$100,000"
-    bad_hire_cost_k_str = fmt_usd(bad_hire_cost, precision=0)  # e.g. "$50,000"
+    repay_margin_str = fmt_usd(repay_margin, precision=0, commas=True)
+    default_loss_str = fmt_usd(default_loss, precision=0, commas=True)
     fp_increase_pp_str = fmt_pp(fp_increase_pp, precision=0, attributive=True)  # absolute FPR change
     tpr_gap_pp_str = fmt_pp(tpr_gap_pp, precision=0, attributive=True)
-    group_a_tpr_pct_str = fmt_percent(group_a_tpr, precision=0, commas=False, style='prose')
-    group_b_tpr_pct_str = fmt_percent(group_b_tpr, precision=0, commas=False, style='prose')
+    group_a_tpr_pct_str = fmt_percent(round(group_a_tpr, 2), precision=0, commas=False, style='prose')
+    group_b_tpr_pct_str = fmt_percent(round(group_b_tpr, 2), precision=0, commas=False, style='prose')
     extra_tp_value_str = fmt_usd(extra_tp_value, precision=0, commas=True)
     extra_fp_cost_str = fmt_usd(extra_fp_cost, precision=0, commas=True)
     net_loss_str = fmt_usd(round(-net_change_per_applicant), precision=0, commas=True)
     within_group_loss_str = fmt_percent(loss_fraction_within_group, precision=0, commas=False, style='prose')
-    population_average_loss_str = fmt_usd(population_average_loss, precision=0, commas=True)
-    group_b_fpr_pct_str = fmt_percent(group_b_fpr, precision=0, commas=False, style='prose')
+    population_average_loss_str = fmt_usd(population_average_loss, precision=2, commas=True)
+    group_b_fpr_pct_str = fmt_percent(round(group_b_fpr, 2), precision=0, commas=False, style='prose')
     baseline_utility_str = fmt_usd(baseline_utility_per_applicant, precision=0, commas=True)
     _grp = lambda v: format(int(round(v.to(USD).magnitude)), ',').replace(',', '{,}')
     baseline_utility_math = fmt_math(
-        f"{group_b_tpr:.2f} \\times {positive_base_rate:.2f} \\times \\${_grp(hire_value)}"
-        f" - {group_b_fpr:.2f} \\times {1 - positive_base_rate:.2f} \\times \\${_grp(bad_hire_cost)}"
+        f"{group_b_tpr:.2f} \\times {positive_base_rate:.2f} \\times \\${_grp(repay_margin)}"
+        f" - {group_b_fpr:.2f} \\times {1 - positive_base_rate:.2f} \\times \\${_grp(default_loss)}"
         f" = \\${_grp(baseline_utility_per_applicant)}"
     )
-    minority_share_str = fmt_percent(minority_group_share, precision=0, commas=False, style='prose')
+    minority_share_str = fmt_percent(round(minority_group_share, 2), precision=0, commas=False, style='prose')
     positive_base_rate_str = fmt_percent(positive_base_rate, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-responsible-engr-price-fairness .callout-notebook title="The price of fairness"}
 
-**Problem**: Stakeholders demand elimination of a `{python} FairnessPrice.tpr_gap_pp_str` true positive rate (TPR) disparity in a hiring model, a second illustrative scenario outside the credit service. What is the "Price of Fairness" in terms of hiring quality?
+**Problem**: Stakeholders demand elimination of the credit service's `{python} FairnessPrice.tpr_gap_pp_str` true positive rate (TPR) disparity. What is the "Price of Fairness" in lending outcomes?
 
 **Physics**: TPRs can be equalized by adjusting the classification threshold $(\ClassificationThreshold)$ for the disadvantaged group.
 
 *   **Original state**: Group A ($\text{TPR} =$ `{python} FairnessPrice.group_a_tpr_pct_str`), Group B ($\text{TPR} =$ `{python} FairnessPrice.group_b_tpr_pct_str`, $\text{FPR} =$ `{python} FairnessPrice.group_b_fpr_pct_str`).
-*   **Intervention**: Lower $\DisadvantagedGroupClassificationThreshold$ until $\text{TPR}_{\SubgroupIndex=\text{B}} =$ `{python} FairnessPrice.group_a_tpr_pct_str`. (In US hiring, race- or sex-specific cutoffs are prohibited, so the calculation quantifies the trade-off rather than a deployable intervention.)
-*   **The cost**: Lowering the threshold increases false positives (hiring candidates who do not meet the bar).
+*   **Intervention**: Lower $\DisadvantagedGroupClassificationThreshold$ until $\text{TPR}_{\SubgroupIndex=\text{B}} =$ `{python} FairnessPrice.group_a_tpr_pct_str`. (US credit law restricts group-specific cutoffs, as the mitigation discussion noted, so the calculation quantifies the trade-off rather than a deployable intervention.)
+*   **The cost**: Lowering the threshold increases false positives (approving applicants who later default).
 
 ```{=latex}
 \vspace*{-1ex}
@@ -1054,16 +1052,16 @@ class FairnessPrice:
 **Math**:
 
 1.  Under the scenario's assumed threshold response, closing the `{python} FairnessPrice.tpr_gap_pp_str` TPR gap produces a `{python} FairnessPrice.fp_increase_pp_str` increase in false positives for the disadvantaged group.
-2.  If the positive base rate is `{python} FairnessPrice.positive_base_rate_str`, the value of a successful hire is `{python} FairnessPrice.hire_value_k_str`, and the cost of a bad hire is `{python} FairnessPrice.bad_hire_cost_k_str`, both sides of the intervention must be counted:
+2.  If `{python} FairnessPrice.positive_base_rate_str` of Group B applicants would repay, a repaid loan earns a margin of `{python} FairnessPrice.repay_margin_str`, and a default loses `{python} FairnessPrice.default_loss_str`, both sides of the intervention must be counted:
     - Group B baseline utility evaluates the original expected payoff: `{python} FairnessPrice.baseline_utility_math` per applicant.
-    - Evaluating the intervention requires counting both marginal terms: $\FiniteChange\text{Utility} = \FiniteChange\text{TPR} \times \text{Base Rate} \times \text{Hire Value} - \FiniteChange\text{FPR} \times (1 - \text{Base Rate}) \times \text{Bad Hire Cost}$.
+    - Evaluating the intervention requires counting both marginal terms: $\FiniteChange\text{Utility} = \FiniteChange\text{TPR} \times \text{Base Rate} \times \text{Loan Margin} - \FiniteChange\text{FPR} \times (1 - \text{Base Rate}) \times \text{Default Loss}$.
     - The added true-positive value is `{python} FairnessPrice.extra_tp_value_str` per Group B applicant, while the added false-positive cost is `{python} FairnessPrice.extra_fp_cost_str`, producing a net loss of `{python} FairnessPrice.net_loss_str`.
     - Dividing this `{python} FairnessPrice.net_loss_str` net loss by the `{python} FairnessPrice.baseline_utility_str` baseline yields a `{python} FairnessPrice.within_group_loss_str` within-group utility loss. With Group B at `{python} FairnessPrice.minority_share_str` of applicants, the population-average loss is `{python} FairnessPrice.population_average_loss_str` per applicant; calculating an aggregate percentage also requires the other group's baseline utility.
 
 ```{=latex}
 \vspace*{-1.5ex}
 ```
-**Systems insight**: The "Price of Fairness"\index{Price of fairness!utility trade-off}, the fairness literature's name for the utility a system gives up to satisfy a fairness constraint, in this scenario is a `{python} FairnessPrice.within_group_loss_str` within-group utility loss, not a derivable aggregate percentage. The loss is not automatic: when a TPR gap reflects a miscalibrated threshold, closing it can raise net utility. It appears when the baseline threshold is near the utility optimum and marginal admissions skew unqualified. Engineering teams owe stakeholders both the Pareto frontier and the operational assumptions that produced it.
+**Systems insight**: The "Price of Fairness"\index{Price of fairness!utility trade-off}, the fairness literature's name for the utility a system gives up to satisfy a fairness constraint, in this scenario is a `{python} FairnessPrice.within_group_loss_str` within-group utility loss, not a derivable aggregate percentage. The loss is not automatic: when a TPR gap reflects a miscalibrated threshold, closing it can raise net utility. It appears when the baseline threshold is near the utility optimum and the marginal approvals skew toward default. Engineering teams owe stakeholders both the Pareto frontier and the operational assumptions that produced it.
 
 :::
 
@@ -2048,7 +2046,7 @@ A team spends `{python} InferenceCostCalc.total_train_usd_str` training the DLRM
 
 Consider the DLRM ranking service serving `{python} InferenceCostCalc.users_daily_m_str` users daily. Training costs appear considerable: data preparation consumes `{python} InferenceCostCalc.data_prep_hrs_str` at approximately `{python} InferenceCostCalc.gpu_rate_input_str` (`{python} InferenceCostCalc.data_prep_usd_str`), hyperparameter search across multiple configurations requires `{python} InferenceCostCalc.hyperparam_hrs_str` (`{python} InferenceCostCalc.hyperparam_usd_str`), and the final training run uses `{python} InferenceCostCalc.train_hrs_str` (`{python} InferenceCostCalc.train_cost_str`). Total training cost reaches approximately `{python} InferenceCostCalc.total_train_usd_str`.
 
-Inference costs dominate in this scenario. With `{python} InferenceCostCalc.users_daily_m_str` users each receiving `{python} InferenceCostCalc.recs_per_user_str` recommendations per day, the service runs `{python} InferenceCostCalc.inferences_m_str` inferences daily. Treating `{python} InferenceCostCalc.inference_ms_str` per inference as unbatched, non-overlapped dedicated GPU service demand yields approximately `{python} InferenceCostCalc.gpus_str` running continuously. At `{python} InferenceCostCalc.gpu_inf_rate_str`, the scenario's annual GPU cost reaches `{python} InferenceCostCalc.annual_inf_usd_str`.
+Inference costs dominate in this scenario. With `{python} InferenceCostCalc.users_daily_m_str` users each receiving `{python} InferenceCostCalc.recs_per_user_str` recommendations per day, the service runs `{python} InferenceCostCalc.inferences_m_str` inferences daily. Treating `{python} InferenceCostCalc.inference_ms_str` per inference as unbatched, non-overlapped dedicated GPU service demand yields approximately `{python} InferenceCostCalc.gpus_str` running continuously. At `{python} InferenceCostCalc.gpu_inf_rate_str`, the scenario's annual GPU cost reaches `{python} InferenceCostCalc.annual_inf_usd_str`. That rate sits below the `{python} InferenceCostCalc.gpu_rate_input_str` the training runs pay because an always-on fleet is bought as continuously reserved capacity rather than on demand.
 
 Over a three-year operational period, twelve total quarterly training cycles, including the initial cycle, produce training costs of approximately `{python} InferenceCostCalc.lifecycle_train_usd_str`, while inference costs over the same period total `{python} InferenceCostCalc.lifecycle_inf_usd_str`. The resulting `{python} InferenceCostCalc.ratio_str`:1 ratio is specific to these assumptions, but it dictates where optimization effort yields the highest return: inference latency and serving efficiency.
 

@@ -92,7 +92,7 @@ class ResNetTrainingScenario:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Scenario assumption: sustained training rate one accelerator reaches once
     # input keeps up, about a quarter of its compute ceiling (FeedingProblem).
-    sustained_img_per_sec = 3000
+    sustained_img_per_sec = float(Literature.Benchmarks.ResNet50A100TrainThroughput)  # registry: MLPerf ResNet-50 A100 anchor
     # Scenario assumption: the standard 90-epoch ResNet-50 schedule.
     epochs = 90
     train_images = Datasets.ImageNet.training_examples.to(count).magnitude
@@ -3385,10 +3385,7 @@ Single-machine processing\index{Single-Machine Processing!scalability} suffices 
 
 [^fn-parquet-columnar-io]: **Parquet**\index{Parquet!I/O reduction}: A columnar storage format that organizes data by column, not by row. For the single-machine optimizations described, this is critical; instead of wastefully reading an entire CSV row to access a few columns, a Parquet reader loads only the specific columns needed for a computation. The resulting I/O reduction depends on the selected columns, encoding, compression, and workload.
 
-Within a single machine, parallelizing data ingestion across host CPU workers yields diminishing throughput returns whenever unpartitionable stages, such as sequential decompression or central database lock acquisition, limit concurrency. Amdahl's law caps how much speeding up one part of a pipeline can improve the whole; applied to host worker count, it reads as @eq-amdahl-data:
-
-$$\text{Speedup} \leq \frac{1}{(1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount}}$$ {#eq-amdahl-data}
-where $\ParallelFraction$ represents the parallelizable fraction of execution, $1-\ParallelFraction$ is the fraction spent in inherently sequential stages, and $\WorkerCount$ denotes active worker threads or processes on the host machine. The serial stages keep their full duration however many workers share the rest, so eliminating serial I/O and single-threaded stages takes precedence over launching more worker processes.
+Within a single machine, parallelizing data ingestion across host CPU workers yields diminishing throughput returns whenever unpartitionable stages, such as sequential decompression or central database lock acquisition, limit concurrency. Amdahl's law caps how much speeding up one part of a pipeline can improve the whole. Applied to host worker count, it means that even when 90 percent of a feature extraction pipeline parallelizes across workers, the speedup cannot exceed 10$\times$. The serial stages keep their full duration however many workers share the rest, so eliminating serial I/O and single-threaded stages takes precedence over launching more worker processes.
 
 ::: {.column-margin .margin-pointer}
 ↪ Amdahl's law, the ceiling that untouched work places on any speedup, is developed in @sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28.
@@ -3717,7 +3714,7 @@ The numerator is not a universal physical quantity. A team estimates marginal le
 # │
 # │ Goal: Define the chapter's single ResNet-50 training-feed scenario and price
 # │       the gap between accelerator demand and baseline disk bandwidth.
-# │ Show: Compute ceiling (~12.7K img/s), sustained rate (3,000 img/s), 450 MB/s
+# │ Show: Compute ceiling (~12.7K img/s), sustained rate (3,200 img/s), 480 MB/s
 # │       of compressed JPEG demand vs. 1.8 GB/s of decoded FP32 tensors, and the
 # │       ~44% (compressed) vs. ~86% (pre-decoded) feeding tax on a 250 MB/s disk.
 # │ How: Ceiling = peak FLOP/s / (3 x forward FLOPs); demand = rate x bytes/image;
@@ -3779,7 +3776,7 @@ class FeedingProblem:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(12000 < ceiling_img_per_sec < 13500, f"ResNet-50 training ceiling drifted: {ceiling_img_per_sec}.")
     check(0.2 < sustained_fraction < 0.3, f"Sustained rate should be about a quarter of the ceiling, got {sustained_fraction:.2f}.")
-    check(abs(compressed_bw.to(MB / second).magnitude - 450) < 1, "3,000 img/s at 150 KB should be 450 MB/s.")
+    check(abs(compressed_bw.to(MB / second).magnitude - 480) < 1, "3,200 img/s at 150 KB should be 480 MB/s.")
     check(3.5 < decode_expansion < 4.5, f"Decode expansion should be about 4x, got {decode_expansion:.1f}.")
     check(40 < feeding_tax_pct < 50, f"Compressed-read feeding tax should be about 44%, got {feeding_tax_pct:.1f}.")
     check(tensor_tax_pct > 80, f"Pre-decoded feeding tax should exceed 80%, got {tensor_tax_pct:.1f}.")
@@ -3945,8 +3942,8 @@ During initial development, iteration velocity and schema flexibility dominate r
 # │
 # │ Goal: Contrast training throughput, feature-vector compression, and serving
 # │       random-access requirements across the data lifecycle.
-# │ Show: Eight accelerators at the chapter's 3,000 img/s need 3.6 GB/s of
-# │       compressed JPEGs (about 14.5 GB/s if FP32 tensors are staged); precomputed
+# │ Show: Eight accelerators at the chapter's 3,200 img/s need 3.84 GB/s of
+# │       compressed JPEGs (about 15.4 GB/s if FP32 tensors are staged); precomputed
 # │       features cut 150 KB images to 5 KB vectors (30x); serving 10K RPS
 # │       demands 100K random reads/s.
 # │ How: Combine image throughput with image size for training bandwidth; ratio
@@ -3977,8 +3974,8 @@ class LifecycleStorageRequirements:
     random_reads_per_sec = serving_rps * feature_reads_per_request
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(training_bw_value - 3.6) < 0.05, f"24K img/s at 150 KB should be 3.6 GB/s, got {training_bw_value:.2f}.")
-    check(14 < decoded_bw.to(GB / second).magnitude < 15, "Decoded FP32 staging should be about 14.5 GB/s.")
+    check(abs(training_bw_value - 3.84) < 0.05, f"25.6K img/s at 150 KB should be 3.84 GB/s, got {training_bw_value:.2f}.")
+    check(15 < decoded_bw.to(GB / second).magnitude < 16, "Decoded FP32 staging should be about 15.4 GB/s.")
     check(storage_reduction == 30, f"150 KB to 5 KB should be 30x, got {storage_reduction:.0f}x.")
     check(random_reads_per_sec == 100_000, f"Serving read fanout should be 100K/s, got {random_reads_per_sec}.")
 
@@ -4311,7 +4308,7 @@ Each storage tier sets its own ceiling on the feeding problem of @sec-data-engin
 # │ Context: Callout "Storage Bandwidth Budget"
 # │
 # │ Goal: Derive the storage bandwidth required to saturate a training GPU.
-# │ Show: SATA covers the 3,000 img/s sustained rate but only 26% of the
+# │ Show: SATA covers the 3,200 img/s sustained rate but only 26% of the
 # │       12.7K img/s ceiling; NVMe covers the ceiling.
 # │ How: Calculate required MB/s from image consumption rate and file size.
 # │
@@ -4443,7 +4440,7 @@ Between storage and the accelerator sits the host processor, which reads each st
 # │ Context: Dataloader Choke Point prose and figure
 # │
 # │ Goal: Keep the illustrative worker/throughput constants next to their use.
-# │ Show: That 8 CPU workers at 375 img/s each reach the 3,000 img/s accelerator rate.
+# │ Show: That 9 CPU workers at 375 img/s each reach the 3,200 img/s accelerator rate.
 # │ How: Calculate the minimum worker count and reuse constants in the plot.
 # │
 # │ Note: The accelerator rate comes from FeedingProblem (chapter scenario anchor).
@@ -4467,7 +4464,7 @@ class DataloaderStats:
     resnet_worker_count = math.ceil(gpu_limit_img_sec / worker_img_sec)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(resnet_worker_count == 8, f"Expected 8 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
+    check(resnet_worker_count == 9, f"Expected 9 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     resnet_worker_count_str = fmt(resnet_worker_count, precision=0, commas=False)
