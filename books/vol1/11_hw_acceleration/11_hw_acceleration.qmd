@@ -363,7 +363,7 @@ Hardware acceleration targets specific terms in the iron law of ML systems\index
 
 This dynamic explains why hardware upgrades frequently fail to produce proportional end-to-end speedups. @Fig-iron-law-heatmap maps system speedup across accelerator gain ($\AcceleratorGain$) and accelerated fraction ($\ParallelFraction$), charting where those returns diminish\index{Amdahl's law!diminishing returns}. Where the unaccelerated fraction $1-\ParallelFraction$ remains substantial, the white contour curves flatten horizontally into the unaccelerated-bound regime, bounding total speedup at the $1/(1-\ParallelFraction)$ asymptote regardless of how far $\AcceleratorGain$ scales along the horizontal axis.
 
-::: {#fig-iron-law-heatmap fig-env="figure" fig-pos="htb" fig-cap="**The Iron Law Heatmap**: Total system speedup as a function of accelerator gain ($\AcceleratorGain$) and accelerated fraction ($\ParallelFraction$). High speedup appears only near the top-right corner, where both accelerator gain and accelerated fraction are high. At $\ParallelFraction=0.9$, for example, even an infinite gain on the accelerated path cannot exceed 10$\times$ end-to-end speedup. Contours span roughly 1$\times$–200$\times$ speedup." fig-alt="Heatmap of speedup vs. accelerator gain and accelerated fraction. High speedup in red and orange appears near the top-right corner where the accelerated fraction is near 1.0 and accelerator gain is high; lower-fraction regions remain blue. White contour lines are labeled from 1x to 200x, and text labels mark a High Accelerated Fraction region above and an Unaccelerated Bound region below."}
+::: {#fig-iron-law-heatmap fig-env="figure" fig-pos="htb" fig-cap="**The Iron Law Heatmap**: Total system speedup as a function of accelerator gain ($\AcceleratorGain$) and accelerated fraction ($\ParallelFraction$). High speedup appears only near the top-right corner, where both accelerator gain and accelerated fraction are high. At $\ParallelFraction=0.9$, for example, even an infinite gain on the accelerated path cannot exceed 10$\times$ end-to-end speedup. Contours span roughly 1$\times$–200$\times$ speedup." fig-alt="Heatmap of speedup vs. accelerator gain and accelerated fraction. High speedup in red and orange appears near the top-right corner where the accelerated fraction is near 1.0 and accelerator gain is high; lower-fraction regions remain blue. White contour lines labeled 2x to 50x follow the lower bands, a colorbar at the right labels every band from 1x to 500x, and text labels mark a High Accelerated Fraction region above and an Unaccelerated Bound region below."}
 
 ```{python}
 #| echo: false
@@ -390,7 +390,7 @@ sys.path.insert(0, ".")
 from binder.tools.figures import style as book_style
 from mlsysim.physics import calc_amdahls_speedup
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.2))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.8, 4.2))
 
 # =============================================================================
 # PLOT: The Iron Law Heatmap
@@ -406,15 +406,20 @@ norm = mcolors.LogNorm(vmin=1, vmax=500)
 
 cf = ax.contourf(g_accel_grid, p_grid, overall_speedup, levels=levels, cmap='RdYlBu_r', norm=norm, alpha=0.8)
 cs = ax.contour(g_accel_grid, p_grid, overall_speedup, levels=levels, colors='white', linewidths=0.8, alpha=0.6)
+# Inline labels only where contours have room; the 100x and 200x contours crowd
+# into the top sliver of the linear f axis, so the colorbar labels every band.
 ax.clabel(
     cs,
-    levels=levels[1:],
+    levels=levels[1:6],
     inline=1,
     fontsize=9,
     fmt='%gx',
     colors='black',
-    manual=[(2.43, 0.85), (9, 0.9), (31, 0.93), (700, 0.951), (150, 0.9866), (300, 0.9933), (700, 0.9964)],
+    manual=[(2.43, 0.85), (9, 0.9), (31, 0.93), (700, 0.951), (150, 0.9866)],
 )
+cbar = fig.colorbar(cf, ax=ax, ticks=levels, pad=0.02, fraction=0.05)
+cbar.ax.set_yticklabels([f"{v:g}×" for v in levels])
+cbar.set_label("Overall speedup")
 
 ax.set_xscale('log')
 ax.set_xlabel(r'Accelerator gain ($G_{\mathrm{accel}}$)')
@@ -864,7 +869,7 @@ Data access can dominate the energy budget of a memory-intensive kernel.[^fn-von
 # │ Goal: Visualize energy cost per operation (INT8 add to DRAM read); show
 # │       ~128× gap between an 8 KB SRAM read and DRAM that drives locality optimization.
 # │ Show: Horizontal bar chart; log scale; "~128× Cost" annotation.
-# │ How: Hardcoded ENERGY_DATA; barh; book_style.setup_plot().
+# │ How: Hardware.Tech.Op / Hardware.Tech.Memory (Horowitz 2014, 45 nm); barh.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -875,19 +880,24 @@ from binder.tools.figures import style as book_style
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.5))
 
 # =============================================================================
-# DATA: Horowitz Numbers
+# DATA: Horowitz Numbers (Hardware.Tech, 45 nm)
 # =============================================================================
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
+from mlsysim import Hardware
+from mlsysim.core.units import pJ, flop
+
+_op, _mem = Hardware.Tech.Op, Hardware.Tech.Memory
 ENERGY_DATA = [
-    {'Operation': 'INT8 Add', 'Energy_pJ': 0.03},
-    {'Operation': 'FP32 Add', 'Energy_pJ': 0.9},
-    {'Operation': 'FP32 Mult', 'Energy_pJ': 3.7},
-    {'Operation': 'SRAM Read (8 KB)', 'Energy_pJ': 5.0},
-    {'Operation': 'DRAM Read', 'Energy_pJ': 640.0},
+    ('INT8 Add', _op.AddInt8.energy.to(pJ / flop).magnitude),
+    ('FP32 Add', _op.AddFp32.energy.to(pJ / flop).magnitude),
+    ('FP32 Mult', _op.FlopFp32.energy.to(pJ / flop).magnitude),
+    ('SRAM Read (8 KB)', _mem.SRAM_8KB.energy_per_access.to(pJ).magnitude),
+    ('DRAM Read', _mem.DRAM.energy_per_access.to(pJ).magnitude),
 ]
-ops = [d['Operation'] for d in ENERGY_DATA]
-energy = [d['Energy_pJ'] for d in ENERGY_DATA]
+ops = [name for name, _ in ENERGY_DATA]
+energy = [e for _, e in ENERGY_DATA]
+sram_pj, dram_pj = energy[3], energy[4]
 
 # =============================================================================
 # PLOT: The Energy Hierarchy
@@ -907,7 +917,7 @@ for i, v in enumerate(energy):
     ax.text(
         v * 1.1,
         i,
-        f"{v} pJ",
+        f"{v:g} pJ",
         va='center',
         fontsize=9,
         fontweight='bold',
@@ -916,11 +926,11 @@ for i, v in enumerate(energy):
     )
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.annotate("", xy=(640, 3), xytext=(20, 3), arrowprops=dict(arrowstyle="->", color=COLORS['RedLine'], lw=1.5))
+ax.annotate("", xy=(dram_pj, 3), xytext=(20, 3), arrowprops=dict(arrowstyle="->", color=COLORS['RedLine'], lw=1.5))
 ax.text(
     115,
     3.12,
-    "~128× Cost (The Memory Wall)",
+    f"~{dram_pj / sram_pj:.0f}× Cost (The Memory Wall)",
     color=COLORS['RedLine'],
     ha='center',
     va='bottom',
