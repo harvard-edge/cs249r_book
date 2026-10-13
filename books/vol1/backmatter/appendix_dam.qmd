@@ -447,7 +447,7 @@ The three cases below run the four-step workflow on an H100, the book's referenc
 # │          scenario decode rate per loader worker and worker count.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Literature, Models
 from mlsysim.core.units import flop, second
 from mlsysim.fmt import check, fmt_count, fmt_percent, fmt_rate
 
@@ -458,9 +458,11 @@ class DamStarvingAccelerator:
     resnet = Models.Vision.ResNet50
     h100 = Hardware.Cloud.H100
     a100 = Hardware.Cloud.A100
-    a100_demand = 3000  # scenario anchor shared with the training chapter: well-tuned A100 sustained images/s
+    a100_demand = float(
+        Literature.Benchmarks.ResNet50A100TrainThroughput
+    )  # registry anchor shared with the training chapter: A100 ResNet-50 training images/s
     per_worker = 375  # scenario assumption shared with the training chapter: JPEG decode + augment per worker, images/s
-    workers = 8  # scenario assumption: loader workers configured
+    workers = math.ceil(a100_demand / per_worker)  # loader workers sized to keep the A100 fed
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     train_flops = (resnet.inference_flops * 3).to(flop).magnitude
@@ -473,10 +475,10 @@ class DamStarvingAccelerator:
     workers_needed = math.ceil(h100_demand / per_worker)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(supply == 3000, f"Prose says the pipeline delivers 3,000 images/s, got {supply}.")
-    check(9_000 < h100_demand < 10_000, f"Prose says the H100 needs about 9,500 images/s, got {h100_demand:.0f}.")
-    check(a100_util == 1.0, "The configured pipeline must exactly feed the A100.")
-    check(0.30 < h100_util < 0.34, f"Prose says the H100 is busy about a third of the time, got {h100_util:.3f}.")
+    check(supply >= a100_demand, f"Prose says the configured pipeline keeps the A100 fully busy, got {supply} vs {a100_demand}.")
+    check(9_800 < h100_demand < 10_400, f"Prose says the H100 needs about 10,100 images/s, got {h100_demand:.0f}.")
+    check(a100_util == 1.0, "The configured pipeline must fully feed the A100.")
+    check(0.30 < h100_util < 0.36, f"Prose says the H100 is busy about a third of the time, got {h100_util:.3f}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     h100_demand_str = fmt_rate(round(h100_demand, -2), "images/s", precision=0, commas=True)

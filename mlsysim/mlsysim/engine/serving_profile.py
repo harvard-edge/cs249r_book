@@ -13,8 +13,9 @@ Model (per forward pass of ``batch`` images):
          + batch x per-image device time
 
 Per-image FP16/TF32 device time uses the sustained fraction of peak implied by
-3,000 images/s of ResNet-50 training on an A100 (the anchor the data engineering
-and training chapters share). Per-image INT8 time is the MLPerf Inference v5.0
+the registry's ResNet-50 training rate on an A100
+(``Benchmarks.ResNet50A100TrainThroughput``, the anchor the data engineering and
+training chapters share). Per-image INT8 time is the MLPerf Inference v5.0
 measured Offline rate per H100. Kernel counts and the per-kernel floor are
 stated scenario assumptions.
 """
@@ -31,8 +32,11 @@ millisecond = ureg.millisecond
 microsecond = ureg.microsecond
 flop = ureg.flop
 
+# Shared anchor (2026-10-13: was a hand-typed 3000 that disagreed with the
+# registry's MLPerf-based 3,200; the chapters now all read the registry).
+A100_SUSTAINED_TRAIN_IMG_S = float(Benchmarks.ResNet50A100TrainThroughput)
+
 # Scenario assumptions (stated, not measured)
-A100_SUSTAINED_TRAIN_IMG_S = 3000      # shared anchor: ResNet-50 training on an A100
 EAGER_KERNELS = 53 + 53 + 49 + 16 + 2 + 1   # conv, batch norm, ReLU, residual add, 2 pools, FC
 FUSED_KERNELS = 53 + 2 + 1                  # BN, ReLU, add folded into each conv; 2 pools; FC
 KERNEL_FLOOR = 5 * microsecond              # least device time one kernel takes at batch one
