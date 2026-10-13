@@ -1187,12 +1187,12 @@ def ch11_dls_knee():
 
 
 @margin("11_planning", "margin_replacement_latency_envelope", "budget-envelope",
-        sources=("PlanningReplacementLedger.t_age", ".t_sum", "PlanningLeaseRule.t_renew", ".t_lease"))
+        sources=("PlanningReplacementBudget.t_age", ".t_sum", "PlanningLeaseRule.t_renew", ".t_lease"))
 def ch11_replacement_latency_envelope():
     # Capture-to-dispatch age and capture-to-admission L against the renewal
     # period (slate limit) and the lease (mark). Not a hazard, so no red:
     # overlap of requests, not a stop, answers L > renewal.
-    R = lego("11_planning", "PlanningReplacementLedger")
+    R = lego("11_planning", "PlanningReplacementBudget")
     LR = lego("11_planning", "PlanningLeaseRule")
     age, L = mag(R.t_age, "millisecond"), mag(R.t_sum, "millisecond")
     renew, lease = mag(LR.t_renew, "millisecond"), mag(LR.t_lease, "millisecond")

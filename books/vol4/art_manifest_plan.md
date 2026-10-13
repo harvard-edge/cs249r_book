@@ -134,7 +134,7 @@ Volume IV: Physical AI Systems
 *Focus: Multi-stream logging, teleoperation, calibration, demonstration budgets.*
 - [x] **`fig05_four_stream_action_taps.svg`** (Type A): 4-stream tap dataflow ($a_{\text{req}}$ model proposal, $a_{\text{cmd}}$ planner smoothed, $a_{\text{enf}}$ safety clamped, $a_{\text{meas}}$ joint encoder actual).
 - [x] **`fig05_real_gello_teleop.png`** (Type B): Authentic 3D-printed GELLO passive arm teleoperation interface (Wu et al., 2023).
-- [x] **`fig05_collector_coverage_ledger.svg`** (Type A): Teleoperation dataset distribution ledger across operators and failure recoveries.
+- [x] **`fig05_collector_coverage_table.svg`** (Type A): Teleoperation dataset distribution table across operators and failure recoveries.
 - [x] **`fig05_compounding_error_flywheel.svg`** (Type A): Demonstrator error propagation flywheel vs intervention-corrected data collection.
 - [x] **`fig05_real_camera_calibration.jpg`** (Type B): Authentic Zhang checkerboard / ChArUco multi-camera extrinsic calibration fixture.
 - [x] **`fig05_cruise_pedestrian_blindspot_drag.svg`** (Type A): Forensic reconstruction of sensor blind-spot tracking failure.

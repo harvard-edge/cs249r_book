@@ -787,7 +787,7 @@ VOL4_CHAPTERS = [
             {'text': 'retroreflective constellation', 'pill': (480, 80), 'targ': (618, 290), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'dynamometer baseplate', 'pill': (260, 640), 'targ': (620, 480), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'safety perimeter rail', 'pill': (190, 480), 'targ': (380, 480), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'confidence ledger cylinder', 'pill': (1160, 680), 'targ': (885, 545), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'confidence record cylinder', 'pill': (1160, 680), 'targ': (885, 545), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'tracking ray cone', 'pill': (1160, 240), 'targ': (850, 310), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
@@ -813,7 +813,7 @@ VOL4_CHAPTERS = [
             {'text': 'octree voxel grid', 'pill': (180, 320), 'targ': (341, 438), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'occlusion barrier', 'pill': (560, 70), 'targ': (568, 224), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'spatial belief decay', 'pill': (1000, 55), 'targ': (752, 240), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'temporal lease ledger', 'pill': (1140, 160), 'targ': (1079, 278), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'temporal lease store', 'pill': (1140, 160), 'targ': (1079, 278), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'stale token eviction', 'pill': (1160, 710), 'targ': (958, 567), 'border': '#9B2226', 'color': '#9B2226'},
         ]
     },
