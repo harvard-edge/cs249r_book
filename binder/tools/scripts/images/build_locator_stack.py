@@ -36,7 +36,8 @@ CHAPTERS = {
     "14_intervention": (14, "SHARED AUTONOMY",         (4,),   "g1"),
     "15_verification": (15, "VERIFICATION",            (4,),   "g2"),
     "16_release":      (16, "SAFETY CASES",            (4,),   "g3"),
-    "18_frontier":     (17, "FRONTIER LIMITS",         (4,),   "g4"),
+    "17_responsibility": (17, "RESPONSIBILITY",        (4,),   "g4"),
+    "18_frontier":     (18, "FRONTIER LIMITS",         (4,),   "g5"),
 }
 
 # Subcard metadata definitions
@@ -45,7 +46,8 @@ L4_CARDS = [
     ("g1", "Ch 14 Shared Autonomy", "Policy Blending · Takeover", "Arbitration &amp; Liveness"),
     ("g2", "Ch 15 Verification", "Sim → PIL → HIL → In-Situ", "Formal Invariants"),
     ("g3", "Ch 16 Safety Cases", "Goal Structuring · UL 4600", "Assurance Arguments"),
-    ("g4", "Ch 17 Frontier Limits", "Observational Limits", "Open-World Grounding"),
+    ("g4", "Ch 17 Responsibility", "Decision Owners · Oversight", "Who Bears the Risk"),
+    ("g5", "Ch 18 Frontier Limits", "Observational Limits", "Open-World Grounding"),
 ]
 
 L3_CARDS = [
@@ -116,7 +118,7 @@ def build_svg(slug):
     # Dynamic subtitle texts based on chapter focus
     l4_sub = "Policy Supervision &amp; Safety Cases"
     if is_l4_active:
-        l4_sub = "ACTIVE TIER (Ch 14–17 Governance)"
+        l4_sub = "ACTIVE TIER (Ch 14–18 Governance)"
 
     l3_sub = "High-Capacity Foundation Deliberation (Ch 03)"
     if slug == "03_brain":
@@ -159,7 +161,8 @@ def build_svg(slug):
 
     # Layer 4 subcards
     l4_cards_svg = []
-    card_w4 = 207
+    # Five governance cards share the 876-unit row the original four filled.
+    card_w4 = (876 - 16 * (len(L4_CARDS) - 1)) / len(L4_CARDS)
     gap4 = 16
     for i, (cid, title, l1, l2) in enumerate(L4_CARDS):
         x = i * (card_w4 + gap4)

@@ -772,7 +772,7 @@ def annotate_hil_testbed():
 
 
 # ==============================================================================
-# PLATE 10: Chapter 17 - Humanoid Locomotion Across Unstable Disaster Rubble
+# PLATE 10: Chapter 18 (Frontier) - Humanoid Locomotion Across Unstable Disaster Rubble
 # ==============================================================================
 def annotate_disaster_rubble():
     src = 'books/vol4/18_frontier/images/jpg/fig17_real_humanoid_disaster_rubble.jpg'

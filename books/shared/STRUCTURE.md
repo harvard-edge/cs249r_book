@@ -156,7 +156,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 
 ## Volume IV: Physical AI Systems (`vol4`)
 
-17 chapters. Reading order:
+18 chapters. Reading order:
 
 | # | Kind | Path |
 |---:|---|---|
@@ -187,7 +187,8 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 14 | chapter | `14_intervention/14_intervention.qmd` |
 | 15 | chapter | `15_verification/15_verification.qmd` |
 | 16 | chapter | `16_release/16_release.qmd` |
-| 17 | chapter | `18_frontier/18_frontier.qmd` |
+| 17 | chapter | `17_responsibility/17_responsibility.qmd` |
+| 18 | chapter | `18_frontier/18_frontier.qmd` |
 |  | backmatter | `backmatter/references.qmd` |
 |  | backmatter | `backmatter/appendix_ml.qmd` |
 |  | backmatter | `backmatter/appendix_control.qmd` |

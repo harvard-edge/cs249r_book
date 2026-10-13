@@ -1729,7 +1729,7 @@ def ch16_silent_proposer_strip():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chapter 17: Engineering Physical AI
+# Chapter 18: Engineering Physical AI (renumbered from 17 on 2026-10-13)
 # (2026-09-29 margins pass: replaces the dropped battery knee and the
 #  indistinguishability chain; the packaging-cell stop envelope was not added
 #  because @fig-18-packaging-cell panel (c) already draws both stops.)

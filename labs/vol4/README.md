@@ -27,7 +27,7 @@ The four logged actions (`a_req`, `a_map`, `a_enf`, `a_meas`) and the bench wiri
 | Board | Arm | Software | Textbook |
 | :---: | :---: | :---: | :---: |
 | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" width="130" /> | <img src="assets/images/so101-follower.png" alt="Seeed SO-101 follower arm" width="130" /> | <img src="assets/images/lerobot-logo.png" alt="Hugging Face LeRobot" width="150" /> | <img src="assets/images/vol4-textbook-cover.png" alt="MLSysBook Volume IV: Physical AI" width="110" /> |
-| **Arduino UNO Q**<br>Linux MPU + STM32 MCU | **Seeed SO-101**<br>6 smart serial servos | **Hugging Face LeRobot**<br>SmolVLA and ACT | **MLSysBook Volume IV**<br>17 chapters, 4 parts |
+| **Arduino UNO Q**<br>Linux MPU + STM32 MCU | **Seeed SO-101**<br>6 smart serial servos | **Hugging Face LeRobot**<br>SmolVLA and ACT | **MLSysBook Volume IV**<br>18 chapters, 4 parts |
 
 Specifications, wiring, and the three bench rules are on the [Station Reference Card](labs/station-reference.md).
 
@@ -56,8 +56,8 @@ Read the chapter early in the week, discuss it in seminar, then put it to work i
     <tr><td align="center">10</td><td rowspan="2">Lab 6<br><a href="labs/lab-06-safety-governor.md"><strong>Safety Governor: Build It, Then Break It</strong></a></td><td>Part III · Ch 12 <em>Safety Enforcement</em>, Ch 13 <em>Silicon Placement</em></td><td><strong>6A</strong> Replace the staff governor with your own.</td><td><strong>Capstone task frozen</strong></td></tr>
     <tr><td align="center">11</td><td>Part IV · Ch 14 <em>Supervisory Intervention</em>, Ch 15 <em>Adversarial Verification</em></td><td><strong>6B</strong> Attack it: freeze the brain, corrupt packets, cut power.</td><td><strong>Lab 6</strong></td></tr>
     <tr><td align="center">12</td><td rowspan="3"><a href="labs/lab-capstone-studio.md"><strong>Capstone: Physical Release Defense</strong></a></td><td>Part IV · Ch 16 <em>Safe Release</em></td><td><strong>C1</strong> Build your own task on the full pipeline.</td><td></td></tr>
-    <tr><td align="center">13</td><td>Part IV · Ch 16, continued</td><td><strong>C2</strong> Survive a peer team's attacks and harden the system.</td><td></td></tr>
-    <tr><td align="center">14</td><td>Part IV · Ch 17 <em>The Epistemic Frontier</em></td><td><strong>C3</strong> Final trials and oral defense of your release decision.</td><td><strong>Capstone</strong></td></tr>
+    <tr><td align="center">13</td><td>Part IV · Ch 17 <em>Responsible Physical AI</em></td><td><strong>C2</strong> Survive a peer team's attacks and harden the system.</td><td></td></tr>
+    <tr><td align="center">14</td><td>Conclusion · Ch 18 <em>The Epistemic Frontier</em></td><td><strong>C3</strong> Final trials and oral defense of your release decision.</td><td><strong>Capstone</strong></td></tr>
   </tbody>
 </table>
 

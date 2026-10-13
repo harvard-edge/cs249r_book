@@ -2,7 +2,7 @@
 
 **Status:** `skeleton`\
 **Weeks:** 12–14 (Parts C1, C2, C3), with the proposal due Week 8 and the task frozen Week 10\
-**Reading:** [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd), [Chapter 18: The Epistemic Frontier](../../../books/vol4/18_frontier/18_frontier.qmd)\
+**Reading:** [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd), [Chapter 17: Responsible Physical AI](../../../books/vol4/17_responsibility/17_responsibility.qmd), [Chapter 18: The Epistemic Frontier](../../../books/vol4/18_frontier/18_frontier.qmd)\
 **Competencies:** `D3` (and the full card)\
 **Due:** end of Week 14 (proposal at the end of Week 8; task frozen at the end of Week 10)
 

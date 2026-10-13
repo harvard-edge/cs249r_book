@@ -76,7 +76,7 @@ Read the week's chapter before the seminar: the chapter gives the principles, th
 | 10 | [Ch 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd), [Ch 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd) | [**6A** Build the governor](../labs/lab-06-safety-governor.md) | Capstone task frozen |
 | 11 | [Ch 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd), [Ch 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd) | [**6B** Break the governor](../labs/lab-06-safety-governor.md) | **Lab 6** |
 | 12 | [Ch 16: Safe Release](../../../books/vol4/16_release/16_release.qmd) | [**C1** Capstone task build](../labs/lab-capstone-studio.md) |  |
-| 13 | Ch 16, continued | [**C2** Peer fault exchange](../labs/lab-capstone-studio.md) |  |
+| 13 | [Ch 17: Responsible Physical AI](../../../books/vol4/17_responsibility/17_responsibility.qmd) | [**C2** Peer fault exchange](../labs/lab-capstone-studio.md) |  |
 | 14 | [Ch 18: The Epistemic Frontier](../../../books/vol4/18_frontier/18_frontier.qmd) | [**C3** Final trials and defense](../labs/lab-capstone-studio.md) | **Capstone** |
 
 ---
