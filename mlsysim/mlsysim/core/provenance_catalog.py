@@ -2064,6 +2064,12 @@ LBNL_US_DATACENTER_ENERGY_2024 = _report(
     "https://eta.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
     notes="US data centers: ~58 TWh (2014), ~176 TWh (2023, 4.4% of US electricity), 325-580 TWh projected for 2028 (6.7-12%). LBNL-2001637, doi:10.71468/P1WC7Q.",
 )
+LBNL_US_DATACENTER_ENERGY_2025 = _report(
+    "prov:lbnl-us-datacenter-energy-2025",
+    "Smith et al. (2026), United States Data Center Energy Usage Report: 2025 Update (LBNL)",
+    "https://doi.org/10.71468/P1RP4F",
+    notes="US data centers: 192 TWh in 2024 (4.7% of US electricity); 2030 Reference Case 649 TWh (11.8%), Compounded Uncertainty range 521-843 TWh (9.5-15.3%). Revises 2023-2024 slightly below the 2024 Report; prints no pre-2024 values. LBNL-2001758, OSTI 3374245.",
+)
 IEA_ENERGY_AND_AI_2025 = _report(
     "prov:iea-energy-and-ai-2025",
     "IEA (2025), Energy and AI",

@@ -285,3 +285,34 @@ def test_parse_bibtex_export_publisher_record():
     assert meta["doi"] == "10.71468/P1WC7Q"
     assert meta["venue"] == "Lawrence Berkeley National Laboratory"
     assert bib_gateway.parse_bibtex_export("not bibtex") == {}
+
+
+def test_fetch_url_retries_with_tool_user_agent():
+    # 2026-10-13: OSTI resets connections that present a browser user agent
+    # from a script; the fetch must retry with the plain tool identifier.
+    page = (
+        '<html><head><title>Report</title>'
+        '<meta name="citation_title" content="A Report">'
+        '<meta name="citation_author" content="Smith, Sarah J.">'
+        '<meta name="citation_publication_date" content="2026/06/18">'
+        "</head></html>"
+    ).encode()
+    seen = []
+
+    def fake_urlopen(req, timeout=10, context=None):
+        ua = req.get_header("User-agent")
+        seen.append(ua)
+        if ua == bib_gateway.UA:
+            raise ConnectionResetError(54, "Connection reset by peer")
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = page
+        resp.__enter__.return_value = resp
+        return resp
+
+    with patch.object(bib_gateway.urllib.request, "urlopen", side_effect=fake_urlopen):
+        result = bib_gateway.fetch_url("https://www.osti.gov/biblio/1")
+
+    assert result is not None
+    assert seen[-1] == bib_gateway.TOOL_UA
+    assert bib_gateway.UA in seen
