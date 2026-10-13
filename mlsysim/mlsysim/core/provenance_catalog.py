@@ -2306,3 +2306,28 @@ SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
     ),
     verified="2026-09-29",
 )
+
+# --- Serving energy (2026-10-13) ---
+ELSWORTH_GOOGLE_SERVING_ENERGY_2025 = _lit(
+    "prov:elsworth-google-serving-energy-2025",
+    "Elsworth et al. (2025), Measuring the Environmental Impact of Delivering AI at Google Scale",
+    url="https://arxiv.org/abs/2508.15734",
+    verified="2026-10-13",
+    notes=(
+        "Median Gemini Apps text prompt, May 2025 (Table 1): 0.24 Wh comprehensive boundary "
+        "(active accelerators 0.14, host CPU and DRAM 0.06, idle machines 0.02, overhead 0.02; "
+        "58/25/10/8 percent) vs 0.10 Wh existing approach (active accelerators only, top-10% "
+        "most efficient data centers); 2.4x. Section 3.3: 2024 Google location-based emission "
+        "factor 345 gCO2e/kWh, market-based 94 gCO2e/kWh."
+    ),
+)
+SCHNEIDER_TPU_LIFECYCLE_2025 = _lit(
+    "prov:schneider-tpu-lifecycle-2025",
+    "Schneider et al. (2025), Life-Cycle Emissions of AI Hardware: A Cradle-to-Grave Approach and Generational Trends",
+    url="https://arxiv.org/abs/2502.01671",
+    verified="2026-10-13",
+    notes=(
+        "First published AI-accelerator LCA (five TPU generations, extraction through disposal). "
+        "Abstract: compute carbon intensity (CCI) improves 3x from TPU v4i to TPU v6e."
+    ),
+)
