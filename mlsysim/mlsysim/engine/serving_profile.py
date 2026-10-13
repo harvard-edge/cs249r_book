@@ -33,7 +33,7 @@ microsecond = ureg.microsecond
 flop = ureg.flop
 
 # Shared anchor (2026-10-13: was a hand-typed 3000 that disagreed with the
-# registry's MLPerf-based 3,200; the chapters now all read the registry).
+# registry's 3,200 (NVIDIA-measured); the chapters now all read the registry).
 A100_SUSTAINED_TRAIN_IMG_S = float(Benchmarks.ResNet50A100TrainThroughput)
 
 # Scenario assumptions (stated, not measured)

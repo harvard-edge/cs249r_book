@@ -950,13 +950,18 @@ MLPERF_TINY_KWS = _lit(
     notes="Parameter and FLOP counts aligned to TinyMLPerf KWS reference model scale.",
 )
 
-MLPERF_TRAINING_V30_RESNET50_A100 = Provenance(
-    id="prov:mlperf-training-v30-resnet50-a100",
+NVIDIA_DLE_RESNET50_A100_TRAINING = Provenance(
+    id="prov:nvidia-dle-resnet50-a100-training",
     kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="MLPerf Training v3.0 ResNet-50 results, A100 class systems",
-    url="https://mlcommons.org/benchmarks/training/",
-    verified="2026-05-31",
-    notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/A100 teaching examples.",
+    ref="NVIDIA DeepLearningExamples, ResNet-50 v1.5 training performance on DGX A100 (8x A100 80GB), mixed precision",
+    url="https://github.com/NVIDIA/DeepLearningExamples/tree/master/MxNet/Classification/RN50v1.5",
+    verified="2026-10-13",
+    notes=(
+        "Measured per-GPU training throughput: MXNet (mxnet-22.10 container) 3,411 img/s on 1 GPU and "
+        "26,674 img/s on 8 (3,334 per GPU); PyTorch 2,470 and 16,621 (2,078 per GPU); TensorFlow (A100 "
+        "40GB) 2,375 and 17,400 (2,175 per GPU). 3,200 img/s is the well-tuned anchor, just below the "
+        "fastest framework's 8-GPU rate. Replaces an unverified 'MLPerf Training v3.0' attribution."
+    ),
 )
 
 MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
