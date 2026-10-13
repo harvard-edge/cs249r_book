@@ -46,7 +46,7 @@ CLOSED_DOMAIN_FMT = re.compile(
     r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_throughput|"
     r"fmt_water|fmt_water_rate|fmt_water_intensity|fmt_token_rate|"
     r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|"
-    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|"
+    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_angular_acceleration|"
     r"fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|fmt_velocity|fmt_acceleration|"
     r"fmt_voltage|fmt_current|fmt_resistance|fmt_jerk|fmt_inertia|fmt_frequency|"
     r"fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate|"
@@ -142,6 +142,7 @@ _FMT_UNITS: dict[str, frozenset[str]] = {
     "fmt_force": frozenset({"n", "newton", "newtons", "kn", "kilonewton", "kilonewtons"}),
     "fmt_force_rate": frozenset({"n/s", "n/ms", "kn/s"}),
     "fmt_angular_velocity": frozenset({"rad/s", "deg/s", "rpm"}),
+    "fmt_angular_acceleration": frozenset({"rad/s²", "rad/s^2", "deg/s²", "deg/s^2"}),
     "fmt_torque": frozenset({"n·m", "n*m", "nm", "newton-meter", "newton-meters"}),
     "fmt_torque_rate": frozenset({"n·m/s", "n*m/s", "nm/s"}),
     "fmt_velocity": frozenset({"m/s", "km/h", "mm/s"}),
