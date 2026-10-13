@@ -349,6 +349,7 @@ For optical fiber, $\FiberPropagationSpeed\approx 200{,}000$ km/s, roughly two-t
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_network_latency_ms
 from mlsysim.fmt import fmt, check, fmt_time, fmt_length, fmt_text
+from mlsysim.core.units import km
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LightLatency:
@@ -358,7 +359,7 @@ class LightLatency:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    distance_km = 3600 * ureg.km  # California to Virginia (straight-line)
+    distance_km = 3600 * km  # California to Virginia (straight-line)
     safety_budget_ms = 10
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -2246,7 +2247,7 @@ plt.close()
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine, ReferenceStats
 from mlsysim.fmt import check, fmt_charge, fmt_count, fmt_latency, fmt_power, fmt_voltage
-from mlsysim.core.units import joule, kJ, mJ, uJ, ureg
+from mlsysim.core.units import joule, kJ, mJ, uJ, ureg, kW, mAh, ms, volt, watt
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EnergyInference:
@@ -2259,7 +2260,7 @@ class EnergyInference:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     batt_energy_j = ReferenceStats.PhoneBattery.EnergyJ
-    full_server_draw = 1 * ureg.kW  # scenario assumption: whole 8-accelerator server at load
+    full_server_draw = 1 * kW  # scenario assumption: whole 8-accelerator server at load
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     e_gpt4_j = EnergyAnchors.e_llm_query_j
@@ -2267,8 +2268,8 @@ class EnergyInference:
     e_kws_j = EnergyAnchors.e_kws_j
 
     # Accelerator-only accounting behind the cloud ResNet-50 row
-    a100_latency = EnergyAnchors.p_resnet_cloud.latency.to(ureg.ms)
-    a100_avg_power = (e_resnet_cloud_j / a100_latency).to(ureg.W)
+    a100_latency = EnergyAnchors.p_resnet_cloud.latency.to(ms)
+    a100_avg_power = (e_resnet_cloud_j / a100_latency).to(watt)
 
     # Inferences per full battery charge at the two endpoints
     q_gpt4 = (batt_energy_j / e_gpt4_j).to("").magnitude
@@ -2276,17 +2277,17 @@ class EnergyInference:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(a100_avg_power < Hardware.Cloud.A100.tdp, f"Batch-1 A100 average power should sit below TDP; got {a100_avg_power:.0f}.")
-    check(a100_latency < 1 * ureg.ms, f"Prose states a sub-millisecond A100 batch-1 window; got {a100_latency:.2f}.")
+    check(a100_latency < 1 * ms, f"Prose states a sub-millisecond A100 batch-1 window; got {a100_latency:.2f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     q_gpt4_str = fmt_count(round(q_gpt4), commas=True, label="query")
     q_kws_str = fmt_count(round(q_kws / BILLION) * BILLION, scale="billion", precision=0, commas=False, label="inference")
 
-    a100_latency_ms_str = fmt_latency(a100_latency, unit=ureg.ms, precision=2, commas=False)
-    a100_avg_power_w_str = fmt_power(round(a100_avg_power.magnitude, -1) * ureg.W, unit=ureg.W, precision=0, commas=False, approx=True)
-    full_server_draw_kw_str = fmt_power(full_server_draw, unit=ureg.kW, precision=0, commas=False, approx=True)
-    batt_cap_mah_str = fmt_charge(ReferenceStats.PhoneBattery.CapacityMah, unit=ureg.mAh, precision=0, commas=False)
-    batt_volt_str = fmt_voltage(ReferenceStats.PhoneBattery.VoltageV, unit=ureg.V, precision=1, commas=False)
+    a100_latency_ms_str = fmt_latency(a100_latency, unit=ms, precision=2, commas=False)
+    a100_avg_power_w_str = fmt_power(round(a100_avg_power.magnitude, -1) * watt, unit=watt, precision=0, commas=False, approx=True)
+    full_server_draw_kw_str = fmt_power(full_server_draw, unit=kW, precision=0, commas=False, approx=True)
+    batt_cap_mah_str = fmt_charge(ReferenceStats.PhoneBattery.CapacityMah, unit=mAh, precision=0, commas=False)
+    batt_volt_str = fmt_voltage(ReferenceStats.PhoneBattery.VoltageV, unit=volt, precision=1, commas=False)
 ```
 
 ::: {#psp-ml-systems-energy-per-inference .callout-perspective title="Reading the energy-per-inference numbers"}
@@ -2912,7 +2913,7 @@ The distinction matters for engineering decisions. The battery tax is a budget p
 
 from mlsysim import ReferenceStats
 from mlsysim.fmt import fmt_percent, fmt, check, fmt_fps, fmt_multiple, fmt_time, fmt_temperature, fmt_temperature_rate, fmt_power
-from mlsysim.core.units import watt, second, ureg
+from mlsysim.core.units import watt, second, ureg, degC, delta_degC
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ThermalQuantCalc:
@@ -2922,9 +2923,9 @@ class ThermalQuantCalc:
     baseline_power = 12 * watt  # scenario assumption: W, unoptimized vision model power
     quant_reduction_factor = 4  # scenario assumption: active-power reduction after FP32→INT8 redesign
     mobile_tdp = ReferenceStats.MobilePower.MobileNpuTypical
-    temp_rise = 1 * ureg.delta_degC / second
+    temp_rise = 1 * delta_degC / second
     trip_time = 60 * second  # scenario assumption: time to thermal trip
-    trip_temp = ureg.Quantity(80, ureg.degC)
+    trip_temp = ureg.Quantity(80, degC)
     fps_before = 100  # dimensionless display rate for prose
     fps_after = 30  # dimensionless display rate for prose
 
@@ -4279,7 +4280,7 @@ A related misconception assumes that moving computation closer to the user alway
 
 from mlsysim import Hardware, ReferenceStats
 from mlsysim.fmt import check, fmt, fmt_energy, fmt_frac, fmt_multiple, fmt_percent, fmt_power, fmt_time
-from mlsysim.core.units import Wh, watt, hour, ureg
+from mlsysim.core.units import Wh, watt, hour
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MobilePowerFallacyCalc:
@@ -4355,7 +4356,7 @@ The boundary between TinyML and mobile deployment changes the execution environm
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt_percent, fmt, fmt_usd, check, fmt_multiple
-from mlsysim.core.units import USD, ureg
+from mlsysim.core.units import USD, month
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TcoPitfallCalc:
@@ -4363,13 +4364,13 @@ class TcoPitfallCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Cloud costs (monthly)
-    cloud_compute = 2000 * USD / ureg.month  # scenario assumption: inference compute
+    cloud_compute = 2000 * USD / month  # scenario assumption: inference compute
 
     # Edge costs (monthly)
-    edge_hardware = 500 * USD / ureg.month  # scenario assumption: amortized hardware
-    edge_network = 3000 * USD / ureg.month  # scenario assumption: network engineering
-    edge_maintenance = 500 * USD / ureg.month  # scenario assumption: hardware maintenance
-    edge_reliability = 2000 * USD / ureg.month  # scenario assumption: reliability engineering
+    edge_hardware = 500 * USD / month  # scenario assumption: amortized hardware
+    edge_network = 3000 * USD / month  # scenario assumption: network engineering
+    edge_maintenance = 500 * USD / month  # scenario assumption: hardware maintenance
+    edge_reliability = 2000 * USD / month  # scenario assumption: reliability engineering
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     edge_total = edge_hardware + edge_network + edge_maintenance + edge_reliability
