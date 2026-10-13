@@ -3,47 +3,57 @@
 # edited directly here. It is the Apple Metal/MPS matmul bridge for Milestone 07,
 # a bundled reference point students time their own Module 17 kernels
 # against; no src/ module or student notebook exports to it.
-"""Apple Silicon Metal / MPS Acceleration Bridge for TinyTorch.
+"""Apple Silicon Metal / MPS Matrix Multiply for TinyTorch: an example extension.
 
-Runs a matrix multiply on the GPU of an Apple M-series chip through PyTorch's
-MPS (Metal Performance Shaders) backend. This is an optional, hand-written
-extension: it is tracked in git as-is and is not generated from src/.
+What it is: a matrix multiply on the GPU of an Apple M-series chip, through
+PyTorch's MPS (Metal Performance Shaders) backend. It is the contrast case
+among the examples: simd_ops.py and triton_gelu.py run a kernel you can read,
+while this one calls a vendor library, so it teaches where offloading pays,
+not how a GPU kernel works. Hand-written and tracked in git as-is, not
+generated from src/.
 
-It needs PyTorch, which TinyTorch itself never imports; install it separately
-(pip install torch) to try this path. Without it, or on a machine without an
-Apple GPU, mps_matmul falls back to np.matmul.
+Why it exists: a product of two n x n float32 matrices does 2n^3 FLOPs and
+moves 3n^2 floats (12n^2 bytes), so it does n/6 FLOPs per byte moved. At
+n = 256 that is about 43 FLOP/byte and the copies to and from the GPU
+dominate, so the GPU loses to the CPU; at n = 4096 it is about 683 and the GPU
+wins even with both copies. The extensions chapter measures both ends.
 
-Apple silicon shares one memory between CPU and GPU, so there is no PCIe copy,
-but .to("mps") and .cpu() still copy the data into and out of GPU-owned
-buffers. Those copies are part of what you measure when you time this.
+How it is triggered: only when you call it. Nothing in TinyTorch calls this
+file for you; Tensor.matmul never routes here.
 
-Read it as the contrast case among the examples: the other hardware
-extensions hand raw pointers to a kernel you can read (simd_ops.py through
-ctypes, triton_gelu.py as a Triton program), while this one calls a vendor
-library, torch.matmul on the MPS backend. You learn where offloading pays, not
-how the GPU kernel works.
+    from tinytorch.extensions import mps_matmul, has_mps_support
+    C = mps_matmul(A, B)          # A, B: NumPy arrays or Tensors
+    print(has_mps_support())      # True if that ran on the GPU
 
-How it works, end to end:
+    `tito milestone run 07` makes the same call for you and times it
+    against your own Module 17 kernels.
 
-1. Detect at import. If PyTorch is installed and reports an MPS device,
-   _HAS_MPS is True; otherwise every call takes the NumPy path.
+    On import:     tries `import torch` and asks whether an MPS device
+                   exists. tinytorch/extensions/__init__.py imports this
+                   file, so this happens as soon as you import
+                   tinytorch.extensions, and PyTorch is a large import.
+    On every call: copy in, multiply on the GPU, copy out; or np.matmul when
+                   PyTorch or an Apple GPU is missing.
+
+How it works:
+
+1. Detect. _HAS_MPS is set once, at import.
 2. Copy in. torch.from_numpy wraps the array without copying, and .to("mps")
-   copies it into a GPU-owned buffer.
+   copies it into a GPU-owned buffer. Apple silicon shares one memory between
+   CPU and GPU, so there is no PCIe transfer, but this is still a copy.
 3. Run. torch.matmul queues the product on the Apple GPU.
-4. Copy out. .cpu() waits for the GPU and copies C back, and .numpy() hands it
-   to TinyTorch.
+4. Copy out. .cpu() waits for the GPU and copies C back, and .numpy() hands
+   it to TinyTorch. Both copies are part of what you measure when you time it.
 
-Why size decides everything: a product of two n x n float32 matrices does 2n^3
-FLOPs and moves 3n^2 floats (12n^2 bytes), so it does n/6 FLOPs per byte
-moved. At n = 256 that is about 43 FLOP/byte and the copies dominate, so the
-GPU loses to the CPU; at n = 4096 it is about 683 and the GPU wins even with
-both copies. The extensions chapter measures both ends.
+What it leaves out: the kernel itself, which is PyTorch's, and gradients:
+the result is a new Tensor with no gradient history, so this is a benchmark
+path, not a drop-in replacement for Tensor.matmul in training. It needs
+PyTorch, which TinyTorch itself never imports; install it separately to try
+this path.
 
-Forward only: the result is a new Tensor with no gradient history, so this is
-a benchmark path, not a drop-in replacement for Tensor.matmul in training.
-
-Try it: `tito milestone run 07` times mps_matmul against your own Module 17
-kernels; time it yourself at n = 256 and n = 4096 to see the crossover.
+Where to go next: time it yourself at n = 256 and n = 4096 to find the
+crossover, then write the kernel yourself in Metal and call it through the
+same kind of C bridge as simd_ops.py.
 """
 
 import numpy as np

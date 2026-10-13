@@ -5,9 +5,11 @@
 # exports to it.
 """Activation Checkpointing for TinyTorch: an example extension.
 
-This is an optional, hand-written extension: it is tracked in git as-is and is
-not generated from src/. Read it as the example of extending autograd itself:
-a custom Function that decides what the tape keeps.
+What it is: a wrapper that runs part of a model without keeping its
+intermediate activations, and recomputes them when backward needs them. It is
+the example of extending autograd itself: a custom Function that decides what
+the tape keeps. Hand-written and tracked in git as-is, not generated from
+src/.
 
 Why it exists: during training, the tape keeps every intermediate activation
 of the forward pass alive until backward has used it, so activation memory
@@ -18,15 +20,36 @@ The trade is memory for compute: one extra forward pass of the segment.
 Applied to about sqrt(n) segments of an n-layer network, it cuts activation
 memory from O(n) to O(sqrt(n)) for roughly one extra forward pass overall.
 
+How it is triggered: you wrap a call to part of your model, usually inside a
+model's forward(). It then runs at two moments: once when you call it, and
+again, automatically, when loss.backward() reaches it.
+
+    from tinytorch.extensions import checkpoint
+    def block(x):                    # any function of Tensors that
+        return layer2(layer1(x))     # returns a Tensor
+    h = checkpoint(block, x)         # instead of h = block(x)
+    ...
+    loss.backward()                  # autograd reaches the checkpoint node
+                                     # and calls its backward(), which
+                                     # runs block again with gradients on
+
+    On the call:     block runs once under no_grad(); only its output is kept.
+    On backward:     block runs a second time, this time recording, and the
+                     gradients of its inputs flow on to earlier layers.
+
 How it works:
 
 1. checkpoint(function, *args) wraps the segment in a Function, so autograd
    records one node for the whole segment instead of one per operation.
 2. forward() runs the segment under no_grad(), so none of its intermediates
-   are recorded or kept; only the output's values come back.
+   are recorded or kept.
 3. backward() detaches the saved inputs into fresh graph leaves, runs the
    segment again with gradients on, and calls backward on that recomputed
    output. The leaves' gradients are the gradients of the segment's inputs.
+
+What it leaves out: randomness. A segment that uses dropout would draw
+different random numbers the second time; production versions save and
+restore the random state. It also does not choose the segments for you.
 
 Where to go next: measure it. Count the bytes the tape holds for a deep stack
 of layers with and without checkpointing, and time the extra forward pass.
