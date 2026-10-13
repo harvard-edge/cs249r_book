@@ -187,7 +187,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 14 | chapter | `14_intervention/14_intervention.qmd` |
 | 15 | chapter | `15_verification/15_verification.qmd` |
 | 16 | chapter | `16_release/16_release.qmd` |
-| 17 | chapter | `17_frontier/17_frontier.qmd` |
+| 17 | chapter | `18_frontier/18_frontier.qmd` |
 |  | backmatter | `backmatter/references.qmd` |
 |  | backmatter | `backmatter/appendix_ml.qmd` |
 |  | backmatter | `backmatter/appendix_control.qmd` |

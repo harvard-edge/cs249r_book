@@ -592,7 +592,7 @@ def generate_ch17_plot():
     plt.savefig(out_path, dpi=200)
 
     repo_root = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-    book_path = os.path.join(repo_root, "books/vol4/17_frontier/images/png/fig17_state_space_formal_verification_frontier.png")
+    book_path = os.path.join(repo_root, "books/vol4/18_frontier/images/png/fig17_state_space_formal_verification_frontier.png")
     if os.path.exists(os.path.dirname(book_path)):
         plt.savefig(book_path, dpi=200)
         print(f"Saved copy to {book_path}")

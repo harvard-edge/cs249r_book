@@ -42,7 +42,7 @@ CHAPTER_REGISTRY: Dict[int, Dict[str, str]] = {
     14: {"title": "Intervention", "file": "books/vol4/14_intervention/14_intervention.qmd", "part": "Part IV: Governing"},
     15: {"title": "Verification", "file": "books/vol4/15_verification/15_verification.qmd", "part": "Part IV: Governing"},
     16: {"title": "Release", "file": "books/vol4/16_release/16_release.qmd", "part": "Part IV: Governing"},
-    17: {"title": "The Frontier", "file": "books/vol4/17_frontier/17_frontier.qmd", "part": "Conclusion"},
+    17: {"title": "The Frontier", "file": "books/vol4/18_frontier/18_frontier.qmd", "part": "Conclusion"},
 }
 
 

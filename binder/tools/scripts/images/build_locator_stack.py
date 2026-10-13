@@ -36,7 +36,7 @@ CHAPTERS = {
     "14_intervention": (14, "SHARED AUTONOMY",         (4,),   "g1"),
     "15_verification": (15, "VERIFICATION",            (4,),   "g2"),
     "16_release":      (16, "SAFETY CASES",            (4,),   "g3"),
-    "17_frontier":     (17, "FRONTIER LIMITS",         (4,),   "g4"),
+    "18_frontier":     (17, "FRONTIER LIMITS",         (4,),   "g4"),
 }
 
 # Subcard metadata definitions

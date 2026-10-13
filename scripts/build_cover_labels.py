@@ -911,7 +911,7 @@ VOL4_CHAPTERS = [
         ]
     },
     {
-        'slug': '17_frontier',
+        'slug': '18_frontier',
         'prefix': 'frontier',
         'font': FONT_HELVETICA,
         'labels': [

@@ -232,8 +232,8 @@ Volume IV: Physical AI Systems
 
 #### Chapter 17: The Epistemic Frontier
 *Focus: Astronomical exposure walls, observational indistinguishability, curriculum synthesis.*
-- [x] **`fig17_epistemic_limits.svg`** (Type A): Constructed distinction between identical pre-deadline telemetry and the zero-event Poisson exposure wall; speed and barrier insets are conditional on their physical premises.
-- [x] **`fig17_closed_loop_synthesis.svg`** (Type A): Proposal–permission loop with the causal boundary at admitted actuation; the 1 kHz MCU is illustrative, not a certified device specification.
+- [x] **`fig18_epistemic_limits.svg`** (Type A): Constructed distinction between identical pre-deadline telemetry and the zero-event Poisson exposure wall; speed and barrier insets are conditional on their physical premises.
+- [x] **`fig18_closed_loop_synthesis.svg`** (Type A): Proposal–permission loop with the causal boundary at admitted actuation; the 1 kHz MCU is illustrative, not a certified device specification.
 - [x] **`fig17_real_perseverance_mars_drill.jpg`** (Type B): NASA/JPL-Caltech/MSSS rover image showing the contact setting; protective response claims come from separate JPL documentation, not visible telemetry.
 - [x] **`fig17_real_humanoid_disaster_rubble.jpg`** (Type B): Unannotated U.S. Navy public-domain image of a DARPA Robotics Challenge humanoid on a cinderblock course; no timing, torque, or foot-support guarantee inferred from pixels.
 
