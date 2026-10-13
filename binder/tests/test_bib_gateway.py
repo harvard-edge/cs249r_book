@@ -268,3 +268,20 @@ def test_parse_citation_meta_highwire_tags():
     assert meta["pages"] == "49523--49544"
     assert meta["venue"] == "International Conference on Machine Learning"
     assert bib_gateway.parse_citation_meta("<html><title>x</title></html>") == {}
+
+
+def test_parse_bibtex_export_publisher_record():
+    export = """@techreport{bibcite_36455,
+  author = {Arman Shehabi and Sarah Josephine Smith and Md AbuBakar Siddik},
+  title = {2024 United States Data Center Energy Usage Report},
+  year = {2024},
+  institution = {Lawrence Berkeley National Laboratory},
+  doi = {10.71468/P1WC7Q},
+}"""
+    meta = bib_gateway.parse_bibtex_export(export)
+    assert meta["title"] == "2024 United States Data Center Energy Usage Report"
+    assert meta["authors"] == ["Shehabi, Arman", "Smith, Sarah Josephine", "Siddik, Md AbuBakar"]
+    assert meta["year"] == 2024
+    assert meta["doi"] == "10.71468/P1WC7Q"
+    assert meta["venue"] == "Lawrence Berkeley National Laboratory"
+    assert bib_gateway.parse_bibtex_export("not bibtex") == {}
