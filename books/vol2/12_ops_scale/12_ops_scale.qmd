@@ -350,7 +350,7 @@ Different deployment contexts impose different operational contracts. The archet
 
 : **Illustrative release policies**: Example cadences and rollback targets for several deployment contexts. These are planning assumptions, not requirements implied by architecture. Rollback means routing to a validated version; the observation period needed to approve a new version can be much longer. {#tbl-ops-scale-model-types}
 
-The table mixes two lighthouse archetypes with ordinary model families because release policy follows the workload, not the label. Archetype C (Federated MobileNet) enters with the edge fleet in @sec-ml-operations-scale-managing-edge-fleet-c591. The deployment patterns name release controls developed later in the chapter. Shadow deployment runs the candidate on copied traffic without returning its outputs to users, and interleaving merges two rankers' results into one list so each user compares them directly (@sec-ml-operations-scale-production-experiment-validation). The table separates release cadence from containment speed. Large-model evaluation can require extended shadow deployment, human review, and staged exposure because a quality regression may be subtle. Keeping the previous model warm can nevertheless permit fast traffic rollback. The cost of that standby capacity belongs in the release policy rather than being hidden behind an hours-long rollback assumption.
+The table mixes two lighthouse archetypes with ordinary model families because release policy follows the workload, not the label. Archetype C (Federated MobileNet) is absent because its edge fleet follows release controls of its own (@sec-edge-intelligence-fleet-release-controls-5e1a). The deployment patterns name release controls developed later in the chapter. Shadow deployment runs the candidate on copied traffic without returning its outputs to users, and interleaving merges two rankers' results into one list so each user compares them directly (@sec-ml-operations-scale-production-experiment-validation). The table separates release cadence from containment speed. Large-model evaluation can require extended shadow deployment, human review, and staged exposure because a quality regression may be subtle. Keeping the previous model warm can nevertheless permit fast traffic rollback. The cost of that standby capacity belongs in the release policy rather than being hidden behind an hours-long rollback assumption.
 
 The cost of regression becomes concrete when one model must preserve every capability at once.
 
@@ -2499,45 +2499,7 @@ Recommendation pipelines balance freshness with statistically defensible compari
 
 Fraud models add adversarial urgency, but confirmed outcomes can arrive after the decision window. Historical labeled cases and shadow scoring provide evidence before exposure; neither makes fresh precision and recall immediately observable. The release policy must state what evidence supports an urgent change, what uncertainty remains, and who accepts its bounded exposure. Rapid routing to a validated fallback can contain harm while additional labels accumulate, provided that fallback remains suitable for the current threat.
 
-### Edge fleet lifecycle management {#sec-ml-operations-scale-managing-edge-fleet-c591}
-
-```{python}
-#| echo: false
-#| label: archetype-c-power
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Edge-fleet operations intro (Archetype C reference workload).
-# │ Goal: Pin the Archetype C sustained-to-burst power envelope.
-from mlsysim import ReferenceStats, Scenarios
-from mlsysim.core.units import watt
-from mlsysim.fmt import check, fmt_power, fmt_qty_range
-
-class ArchetypeCPower:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    scenario = Scenarios.FederatedMobileVision
-    sustained_low = ReferenceStats.MobilePower.MobileMlSustainedLow
-    burst_high = ReferenceStats.MobilePower.MobileMlBurstHigh
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(sustained_low < scenario.power_budget < burst_high, "Archetype C sustained budget should sit inside the envelope")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    envelope_range_str = fmt_qty_range(sustained_low, burst_high, watt, precision=0, commas=False)
-    burst_high_str = fmt_power(burst_high, unit=watt, precision=0, commas=False)
-```
-
-The operational challenges examined thus far assume a controlled data center environment. @Sec-edge-intelligence extended the machine learning fleet to millions of heterogeneous edge devices with constrained connectivity, power, and compute, and examined what production integration demands of each adaptive device. Archetype C (Federated MobileNet), running on smartphone-class devices with power budgets of roughly `{python} ArchetypeCPower.envelope_range_str`, a few watts sustained with brief bursts toward `{python} ArchetypeCPower.burst_high_str`, is the reference workload here. Operating that population as one fleet adds three interacting constraints beyond those of any single device, so they form one operational design problem. @Tbl-ops-scale-edge-fleet-controls maps each constraint to the platform control it requires, including hardware-in-the-loop validation\index{Hardware-in-the-loop!edge fleet} and federated analytics\index{Federated analytics!edge fleet}.
-
-| **Edge fleet constraint** | **Why it appears**                                                                                                                                                                                                              | **Platform control**                                                                                                                                                                    |
-|:--------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Extreme version skew      | Rollouts can take weeks or months because devices are offline, on low battery, or on restricted networks. At any time, 50 model versions may remain active.                                                                     | Maintain backward-compatible data pipelines and serving contracts for models deployed months earlier.                                                                                   |
-| Device-aware validation   | Accuracy gates do not reveal whether a model exceeds a phone's memory budget or triggers thermal throttling on its system-on-chip (SoC); microcontroller-class targets below Archetype C tighten the budget to about 1&nbsp;MB. | Add hardware-in-the-loop validation on physical or emulated target devices before promotion.                                                                                            |
-| Privacy-limited telemetry | Raw predictions cannot stream back continuously because privacy rules and bandwidth costs constrain observability.                                                                                                              | Use federated analytics: devices compute local statistics such as error rates or drift, then transmit permitted aggregate health signals under explicit privacy and retention controls. |
-
-: **Edge fleet controls**: Edge operations couple rollout latency, device heterogeneity, and privacy-limited observability. The operations platform must reconstruct global fleet health from partial signals while preserving compatibility with many active model versions. {#tbl-ops-scale-edge-fleet-controls}
-
-Federated health signals inherit the bias that @sec-edge-intelligence warned about for federated training. A device reports its local error rate or drift statistic only when its admission policy allows the work and its connectivity allows the upload, so the devices that report most are the well-charged, well-connected, newer ones. The fleet's health dashboard then describes the admitted population rather than the deployed one, the same skew the participation selection principle (\ref{pri-participation-selects-population}) names for training. A staged edge rollout can look healthy because the devices most likely to fail, older hardware and thermally constrained phones, are also the least likely to report. The platform therefore tracks reporting coverage per device class and cohort alongside the health signals themselves, and holds promotion when a cohort's coverage falls too low for its signal to count as evidence.
-
-::: {.column-margin .margin-pointer}
-↩ Admission-selected participation and the skew it creates across device cohorts are established in @sec-edge-intelligence-client-scheduling-f675.
-:::
+Edge fleets, absent from the table, apply the same contract to weeks-long rollouts that leave many model versions active at once, to devices whose memory and thermal limits require hardware-in-the-loop validation, and to telemetry that privacy rules limit to federated aggregates. @Sec-edge-intelligence-fleet-release-controls-5e1a develops these release controls, including why the devices that report health do not represent the deployed fleet.
 
 Whether a model runs in a data center or on a phone, a CI/CD pipeline promotes candidates supported by evidence within a specified operating envelope. Production can move outside that envelope as data, traffic, and dependencies change. Monitoring must therefore preserve the release contract after promotion, detect when its evidence no longer applies, and return the affected model to evaluation or recovery.
 
@@ -4090,69 +4052,13 @@ class InfraFrontierTcoDeprecRecap:
 
 Isolating hardware cost shows how much depreciation alone charges each run of the `{python} InfraFrontierTcoDeprecRecap.frontier_params_b_str` model. Under the `{python} InfraFrontierTcoDeprecRecap.node_price_str`-per-8-GPU-node assumption, the `{python} InfraFrontierTcoDeprecRecap.cluster_gpus_str`-GPU (`{python} InfraFrontierTcoDeprecRecap.cluster_nodes_str`-node) fleet costs `{python} InfraFrontierTcoDeprecRecap.hardware_capex_str` before network and facility costs. Assume a resale value of `{python} InfraFrontierTcoDeprecRecap.resale_range_str` after three years in a market where newer accelerators offer 3--4$\times$ the performance per watt. That performance assumption does not determine resale value by itself. The assumed residual value yields net hardware depreciation of `{python} InfraFrontierTcoDeprecRecap.depreciation_range_str`. Allocated to only two large training runs, it contributes `{python} InfraFrontierTcoDeprecRecap.per_model_range_str` per run before electricity, staffing, or facility costs. At `{python} InfraFrontierTcoDeprecRecap.utilization_pct_str` useful utilization over three years, it instead contributes approximately `{python} InfraFrontierTcoDeprecRecap.per_gpu_hour_range_str` per used GPU-hour. This is the hardware component of owned cost, not a complete rate directly comparable with cloud rental. Utilization spreads that commitment across output; the full cost accounting determines economic viability.
 
-```{python}
-#| echo: false
-from mlsysim.fmt import check, fmt_compute_efficiency, fmt_flop_rate, fmt_multiple, fmt_power
+### Power efficiency and refresh screening {#sec-ml-operations-scale-power-efficiency}
 
-# ┌── LEGO ───────────────────────────────────────────────
-class GpuEfficiencyTableRecap:
-
-    # ┌── 2. EXECUTE (relative efficiency vs. V100 baseline) ──────────────────
-    _v100_eff = Hardware.Cloud.V100.compute.peak_flops / Hardware.Cloud.V100.tdp
-    _a100_eff = Hardware.Cloud.A100.compute.peak_flops / Hardware.Cloud.A100.tdp
-    _h100_eff = Hardware.Cloud.H100.compute.peak_flops / Hardware.Cloud.H100.tdp
-    _b200_eff = Hardware.Cloud.B200.compute.peak_flops / Hardware.Cloud.B200.tdp
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(_v100_eff < _a100_eff < _h100_eff < _b200_eff, "Power efficiency must increase monotonically across generations")
-    check(5.0 < (_b200_eff / _v100_eff).magnitude < 6.0, f"B200 vs V100 expected ~5.4x, got {(_b200_eff / _v100_eff).magnitude}")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    v100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_v100_eff, unit=TFLOP / second / watt, precision=2, commas=False)
-    a100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_a100_eff, unit=TFLOP / second / watt, precision=2, commas=False)
-    h100_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_h100_eff, unit=TFLOP / second / watt, precision=2, commas=False)
-    b200_efficiency_tflop_per_s_per_w_str = fmt_compute_efficiency(_b200_eff, unit=TFLOP / second / watt, precision=2, commas=False)
-    b200_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.B200.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    b200_tdp_w_str = fmt_power(Hardware.Cloud.B200.tdp, unit=watt, precision=0, commas=False)
-    v100_relative_mult_str = fmt_multiple((_v100_eff / _v100_eff).magnitude, precision=0, commas=False)
-    a100_relative_mult_str = fmt_multiple((_a100_eff / _v100_eff).magnitude, precision=1, commas=False)
-    h100_relative_mult_str = fmt_multiple((_h100_eff / _v100_eff).magnitude, precision=1, commas=False)
-    b200_relative_mult_str = fmt_multiple((_b200_eff / _v100_eff).magnitude, precision=1, commas=False)
-```
-
-### Power efficiency trajectory {#sec-ml-operations-scale-power-efficiency}
-
-The trajectory of power efficiency\index{Efficiency!power} across accelerator generations helps screen cluster refresh choices. The table uses a common dense FP16 arithmetic basis and thermal design power (TDP); the purchase decision still requires energy per completed workload at the same quality target.
+Peak arithmetic per watt\index{Efficiency!power} has improved with each accelerator generation, though more slowly than raw throughput, because device power rose as well. @Tbl-power-efficiency compares four generations on a common basis of dense FP16 peak divided by thermal design power (TDP), and @fig-flops-per-watt-trend places them on the slower cross-vendor trend. These peak ratios screen cluster refresh choices; the purchase decision still requires energy per completed workload at the same quality target.
 
 ::: {.column-margin .margin-pointer}
-↩ Accelerator generations, their peak rates, and the power each draws are established in @sec-compute-infrastructure-evolution-gpu-architectures-566b.
+↩ Accelerator generations, their peak rates, the power each draws, and their peak arithmetic per watt are established in @sec-compute-infrastructure-evolution-gpu-architectures-566b.
 :::
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_flop_rate, fmt_power
-
-# ┌── LEGO ───────────────────────────────────────────────
-class V100EfficiencyRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    flops_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.V100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    tdp_w_str = fmt_power(Hardware.Cloud.V100.tdp, unit=watt, precision=0, commas=False)
-```
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_flop_rate, fmt_power
-
-# ┌── LEGO ───────────────────────────────────────────────
-class A100EfficiencyRowRecap:
-    flops_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.A100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    flops_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.A100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
-    tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
-```
 
 ```{python}
 #| echo: false
@@ -4165,162 +4071,7 @@ class H100TdpEfficiencyRecap:
     tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
 ```
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class TensorCoreEfficiencyRecap:
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=True)
-```
-
-| **Generation**  |                       **Dense FP16 peak TFLOP/s**                        |                    **TDP (W)**                    |                           **TFLOP/s per watt**                           |                  **Relative Efficiency**                  |
-|:----------------|:------------------------------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------------------:|:---------------------------------------------------------:|
-| **V100 (2017)** |     `{python} V100EfficiencyRecap.flops_fp16_tflop_per_s_str` (FP16)     |      `{python} V100EfficiencyRecap.tdp_w_str`     | `{python} GpuEfficiencyTableRecap.v100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.v100_relative_mult_str` |
-| **A100 (2020)** |   `{python} A100EfficiencyRowRecap.flops_fp16_tflop_per_s_str` (FP16)    |    `{python} A100EfficiencyRowRecap.tdp_w_str`    | `{python} GpuEfficiencyTableRecap.a100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.a100_relative_mult_str` |
-| **H100 (2022)** | `{python} TensorCoreEfficiencyRecap.h100_fp16_tc_tflop_per_s_str` (FP16) |    `{python} H100TdpEfficiencyRecap.tdp_w_str`    | `{python} GpuEfficiencyTableRecap.h100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.h100_relative_mult_str` |
-| **B200 (2024)** |   `{python} GpuEfficiencyTableRecap.b200_fp16_tflop_per_s_str` (FP16)    | `{python} GpuEfficiencyTableRecap.b200_tdp_w_str` | `{python} GpuEfficiencyTableRecap.b200_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.b200_relative_mult_str` |
-
-: **Power efficiency across GPU generations**: Dense FP16 tensor arithmetic peak divided by accelerator TDP, with no sparsity multiplier. These ratios compare arithmetic ceilings, not measured training throughput or facility energy. Matched workload measurements must also include achieved utilization, memory and communication stalls, and non-accelerator power. {#tbl-power-efficiency}
-
 Hardware refresh cycles are ultimately about useful work per lifecycle dollar (@tbl-power-efficiency). A higher arithmetic ceiling can lower energy per completed run only when the workload realizes enough of that ceiling to compensate for power and replacement costs. Memory-bound serving and communication-bound training can therefore justify different refresh choices for the same fleet.
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PEAK ARITHMETIC PER WATT OVER TIME (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Paragraph after the refresh-cycle paragraph and
-# │          @fig-flops-per-watt-trend.
-# │
-# │ Goal: Place @tbl-power-efficiency on the cross-vendor efficiency trend
-# │       that sets the economic clock for refresh.
-# │ Show: ~1.2× per year across 64 accelerators (doubling ~every 4 years);
-# │       V100 -> B200 frontier 5.4× in seven years.
-# │ How: Log-linear fit of flops_per_w on release date over
-# │      Literature.Series.AcceleratorFlopsPerWatt; table GPUs from
-# │      Hardware.Cloud guard the series values.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-import datetime as dt
-import math
-import numpy as np
-from mlsysim import Hardware, Literature
-from mlsysim.core.units import TFLOPs, second, watt
-from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple
-
-def _decimal_year(s):
-    d = dt.date.fromisoformat(s)
-    return d.year + (d.timetuple().tm_yday - 1) / 365.25
-
-def _registry_ratio(h):
-    """Dense FP16 TFLOP/s per watt from a registry device (peak_flops is the dense FP16 rate, as in @tbl-power-efficiency)."""
-    return (h.compute.peak_flops / h.tdp).to(TFLOPs / second / watt).magnitude
-
-def _series_ratio(rows, name):
-    return next(r["flops_per_w"] for r in rows if r["device"] == name) / 1e12
-
-# ┌── LEGO ───────────────────────────────────────────────
-class FlopsPerWattTrend:
-    """Cross-vendor trend in dense FP16 FLOP/s per watt of TDP."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.AcceleratorFlopsPerWatt.entries
-    table = (
-        ("V100", Hardware.Cloud.V100, "NVIDIA Tesla V100 SXM2"),
-        ("A100", Hardware.Cloud.A100, "NVIDIA A100 SXM4 40 GB"),
-        ("H100", Hardware.Cloud.H100, "NVIDIA H100 SXM5 80GB"),
-        ("B200", Hardware.Cloud.B200, "NVIDIA B200"),
-    )
-    refresh_years = 4  # scenario assumption: a four-year depreciation and refresh cycle
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    annual = 10 ** np.polyfit([_decimal_year(r["release_date"]) for r in rows], np.log10([r["flops_per_w"] for r in rows]), 1)[0]
-    doubling_years = math.log(2) / math.log(annual)
-    per_refresh = annual**refresh_years
-    v100_to_b200 = _registry_ratio(Hardware.Cloud.B200) / _registry_ratio(Hardware.Cloud.V100)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    for _lab, _h, _name in table:
-        check(abs(_series_ratio(rows, _name) / _registry_ratio(_h) - 1) < 0.01, f"{_lab}: Epoch row and registry disagree.")
-    check(1.1 <= annual <= 1.3, f"Prose says about 1.2x per year, got {annual:.2f}.")
-    check(3.5 <= doubling_years <= 4.5, f"Prose says doubling about every four years, got {doubling_years:.1f}.")
-    check(5 <= v100_to_b200 <= 6, f"Prose says V100 to B200 is about 5.4x, got {v100_to_b200:.1f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    device_count_str = fmt_int(len(rows))
-    annual_mult_str = fmt_multiple(round(annual, 1))
-    doubling_years_str = fmt_int(round(doubling_years))
-    refresh_years_str = fmt_int(refresh_years)
-    per_refresh_mult_str = fmt_multiple(round(per_refresh))
-    v100_to_b200_mult_str = fmt_multiple(round(v100_to_b200, 1))
-```
-
-The four generations in @tbl-power-efficiency sit on a broader and slower trend. Across the `{python} FlopsPerWattTrend.device_count_str` accelerator models released since 2017 for which Epoch AI records both a dense FP16 tensor rate and a TDP, from every major vendor, peak arithmetic per watt improved about `{python} FlopsPerWattTrend.annual_mult_str` per year, doubling roughly every `{python} FlopsPerWattTrend.doubling_years_str` years (@fig-flops-per-watt-trend) [@epochai2026hardware]. The leading NVIDIA parts improved faster, `{python} FlopsPerWattTrend.v100_to_b200_mult_str` from the V100 to the B200 in seven years, because frontier devices adopt new process nodes and tensor formats first. A fleet on a `{python} FlopsPerWattTrend.refresh_years_str`-year refresh cycle therefore gains about `{python} FlopsPerWattTrend.per_refresh_mult_str` in peak arithmetic per watt each cycle on the broad trend. Peak ratios bound what a refresh can deliver, and only measurements at the workload level decide how much of it a given fleet realizes.
-
-::: {#fig-flops-per-watt-trend fig-env="figure" fig-pos="htb" fig-cap="**Peak Arithmetic per Watt over Time**: Dense FP16 tensor throughput divided by TDP for ML accelerators released since 2017, on a logarithmic axis, colored by vendor. The dashed line is a least-squares fit across all devices; the four GPUs of @tbl-power-efficiency are circled and labeled. The ratio compares arithmetic ceilings, not measured energy per workload. Data from @epochai2026hardware." fig-alt="Log-scale scatter of TFLOP/s per watt from about 0.1 to 3 against release dates from 2017 to 2026, with NVIDIA points in green and other vendors in other colors. A dashed fitted line rises about 1.2 times per year. Circled, labeled points mark the V100 near 0.42, A100 near 0.78, H100 near 1.4, and B200 near 2.25 TFLOP/s per watt."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PEAK ARITHMETIC PER WATT OVER TIME (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-flops-per-watt-trend.
-# │
-# │ Goal: Plot FP16 FLOP/s per watt by release date with a fitted trend.
-# │ Show: Vendor-colored points, fit line, labeled table GPUs.
-# │ How: FlopsPerWattTrend (above); book_style.setup_plot().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.2, 3.8))
-_C = FlopsPerWattTrend
-_vcol = {"NVIDIA": COLORS["GreenLine"], "Google": COLORS["BlueLine"], "AMD": COLORS["RedLine"]}
-for _v in ("Other", "AMD", "Google", "NVIDIA"):
-    _p = [r for r in _C.rows if (r["manufacturer"] == _v) or (_v == "Other" and r["manufacturer"] not in _vcol)]
-    ax.scatter(
-        [_decimal_year(r["release_date"]) for r in _p],
-        [r["flops_per_w"] / 1e12 for r in _p],
-        s=22,
-        color=_vcol.get(_v, COLORS["grid"]),
-        label=_v if _v != "Other" else "Other vendors",
-        zorder=3,
-    )
-_xx = np.linspace(2017, 2026.3, 50)
-_k, _b = np.polyfit([_decimal_year(r["release_date"]) for r in _C.rows], np.log10([r["flops_per_w"] / 1e12 for r in _C.rows]), 1)
-ax.plot(_xx, 10 ** (_k * _xx + _b), "--", color=COLORS["primary"], lw=1.2, label=f"Fit ({_C.annual:.1f}× per year)", zorder=2)
-_off = {"V100": (-28, 22), "A100": (-30, 22), "H100": (-36, 26), "B200": (-40, 18)}
-for _lab, _h, _name in _C.table:
-    _r = next(r for r in _C.rows if r["device"] == _name)
-    _pt = (_decimal_year(_r["release_date"]), _r["flops_per_w"] / 1e12)
-    ax.scatter([_pt[0]], [_pt[1]], s=90, facecolors="none", edgecolors=COLORS["primary"], linewidths=1.3, zorder=4)
-    ax.annotate(
-        _lab,
-        _pt,
-        xytext=_off[_lab],
-        textcoords="offset points",
-        fontsize=9,
-        ha="center",
-        arrowprops=dict(arrowstyle="-", color=COLORS["primary"], lw=0.8),
-        bbox=dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.2),
-        zorder=5,
-    )
-ax.set_yscale("log")
-ax.set_xlim(2016.6, 2026.6)
-ax.set_ylim(0.15, 3.6)
-_yt = [0.2, 0.5, 1, 2]
-ax.set_yticks(_yt)
-ax.set_yticklabels([f"{t:g}" for t in _yt])
-ax.minorticks_off()
-ax.set_xlabel("Release date")
-ax.set_ylabel("Dense FP16 TFLOP/s per watt (log scale)")
-ax.legend(fontsize=9, loc="upper left", frameon=True, framealpha=0.95)
-plt.show()
-plt.close()
-```
-
-:::
 
 ```{python}
 #| echo: false
@@ -4537,15 +4288,7 @@ class InfraFrontierTcoNodeRecap:
     rack_power_kw_str = fmt_power(Systems.Racks.DGX_H100_4Node.total_power, unit=kilowatt, precision=1, commas=False)
 ```
 
-Node sizing decides how many accelerators share a host and which memory tier carries optimizer state, activations, and data staging. For the `{python} InfraFrontierTcoNodeRecap.frontier_params_b_str` model, eight GPUs per node with tensor parallelism is a candidate configuration. Roughly 2 TB of host DRAM is an illustrative offload provision, not a requirement implied by parameter count; the state allocation and transfer bandwidth must justify it. Cluster sizing divides the compute budget by the deadline and sustained per-node throughput after model FLOPs utilization (MFU) losses. A maintenance pool and spares add capacity beyond that working allocation; the 5--10 percent allowance used here is a planning assumption to validate against the recovery policy.
-
-Network design follows the primary collective, validating expected scaling against @sec-distributed-training-scaling-math and pricing the actual topology and redundancy from the fat-tree capacity basis of @sec-network-fabrics-fat-tree. A remote direct memory access over Converged Ethernet (RoCE) fabric requires correctly configured congestion control under synchronized traffic. Packet loss and retransmissions can extend the slowest rank's completion time, but their effect depends on the transport, load, and collective schedule, so the comparison uses measured end-to-end collective performance and operating cost rather than assuming either fabric is universally cheaper or faster.
-
-::: {.column-margin .margin-pointer}
-↩ End-to-end congestion control for lossless RoCE fabrics under synchronized traffic is established in @sec-network-fabrics-congestion-control.
-:::
-
-Power and cooling translate IT load through PUE, then check rack density against the power and thermal envelope derived in @sec-compute-power-wall: a four-node DGX H100 rack is roughly a `{python} InfraFrontierTcoNodeRecap.rack_power_kw_str` design point once GPUs, host systems, networking, power conversion, and cooling overhead are included. Higher density alters the cooling architecture in addition to increasing power consumption. TCO and schedule remain design variables because the cluster must arrive in time to matter, and GPU supply or electrical work often dominates lead time.
+Each layer of physical sizing then applies a method taught in an earlier chapter. Per-device training state sets node memory and the sharding or offload policy (@sec-compute-node-memory, @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69). The primary collective sets the fabric topology and its congestion-control requirements (@sec-network-fabrics-fat-tree, @sec-network-fabrics-congestion-control). Node power sets rack density and cooling (@sec-compute-power-wall). The four-node DGX H100 rack assumed for the `{python} InfraFrontierTcoNodeRecap.frontier_params_b_str` plan is roughly a `{python} InfraFrontierTcoNodeRecap.rack_power_kw_str` design point once host, network, conversion, and cooling overhead are included. TCO and schedule remain design variables because the cluster must arrive in time to matter, and GPU supply or electrical work often dominates lead time.
 
 ```{python}
 #| echo: false
@@ -4595,7 +4338,6 @@ class PlanningThroughputScenario:
     gpus_str = fmt_count(gpus, label="GPU")
     cluster_sustained_pflop_per_s_str = fmt_flop_rate(cluster_sustained_flops, unit=PFLOPs / second, precision=1, commas=False)
     ideal_days_str = fmt_int(round(ideal_days), commas=False)
-    training_state_bytes_str = fmt(training_state_bytes_per_param.to(byte / param).magnitude, precision=0, commas=False)
     flops_per_param_token_str = fmt(training_flops_per_token_param, precision=0, commas=False)
     params_words_str = fmt_count(params, scale="B", scale_style="word", precision=0)
     tokens_words_str = fmt_count(tokens, scale="B", scale_style="word", precision=0)
@@ -4638,7 +4380,6 @@ class RackPowerPlanningRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     rack_power_kw_str = fmt_power(rack.total_power, unit=kilowatt, precision=1, commas=False)
-    plan_nodes_str = fmt(plan_cluster.count, precision=0, commas=False)
     plan_racks_str = fmt(plan_racks, precision=0, commas=False)
     plan_power_mw_str = fmt_power(plan_power, unit=MW, precision=1, commas=False)
     pod_gpus_str = fmt(pod_cluster.total_accelerators, precision=0, commas=True)
@@ -4647,11 +4388,9 @@ class RackPowerPlanningRecap:
     )
 ```
 
-The same chain becomes concrete for the `{python} InfraFrontierTcoPlanningRecap.frontier_params_b_str` training plan. A mixed-precision adaptive moment estimation (Adam) state policy with BF16 parameters and gradients, FP32 master parameters, and two FP32 optimizer moments uses `{python} PlanningThroughputScenario.training_state_bytes_str` bytes per parameter before activations and temporary buffers. Tensor, pipeline, and optimizer-state sharding can distribute that state. Offload is an additional option when the resulting device budget still does not fit; model size alone does not force every technique simultaneously.
+For the `{python} InfraFrontierTcoPlanningRecap.frontier_params_b_str` training plan, cluster size follows from the compute budget by the pod-sizing method of @sec-compute-pod. At `{python} PlanningThroughputScenario.flops_per_param_token_str` FLOPs per parameter-token over `{python} PlanningThroughputScenario.params_words_str` parameters and `{python} PlanningThroughputScenario.tokens_words_str` tokens, the run requires `{python} PlanningThroughputScenario.total_flops_str`. Using a BF16/FP16 planning basis rather than the FP8 headline peak, each H100 has `{python} PlanningThroughputScenario.h100_peak_tflop_per_s_str` peak and an assumed `{python} PlanningThroughputScenario.per_gpu_sustained_tflop_per_s_str` sustained at `{python} PlanningThroughputScenario.mfu_pct_str` model FLOPs utilization (MFU). With `{python} PlanningThroughputScenario.gpus_str`, the cluster reaches roughly `{python} PlanningThroughputScenario.cluster_sustained_pflop_per_s_str` sustained under that assumption, yielding about `{python} PlanningThroughputScenario.ideal_days_str` days. A maintenance pool and spares add capacity beyond this working allocation; the 5--10 percent spares allowance is a planning assumption to validate against the recovery policy. That token budget is the GPT-3 operating point, which is undertrained relative to compute-optimal allocation (@sec-vol2-intro-practical-applications-system-design-5c97). A plan that followed the compute-optimal ratio of tokens to parameters at the same model size would multiply the token count, and with it the cluster-days, so the scaling-law choice moves the capacity plan before any hardware question arises. The 2--4-week calendar allowance is a separate planning range for delays outside the MFU measurement window; communication or stalls already reflected in MFU must not be added again. The TP-8, PP-4, DP-32 configuration also creates tensor, pipeline, and data-parallel traffic whose placement must be validated on the proposed rail-optimized fabric.
 
-Cluster size then follows from the compute budget. At `{python} PlanningThroughputScenario.flops_per_param_token_str` FLOPs per parameter-token over `{python} PlanningThroughputScenario.params_words_str` parameters and `{python} PlanningThroughputScenario.tokens_words_str` tokens, the run requires `{python} PlanningThroughputScenario.total_flops_str`. Using a BF16/FP16 planning basis rather than the FP8 headline peak, each H100 has `{python} PlanningThroughputScenario.h100_peak_tflop_per_s_str` peak and an assumed `{python} PlanningThroughputScenario.per_gpu_sustained_tflop_per_s_str` sustained at `{python} PlanningThroughputScenario.mfu_pct_str` MFU. With `{python} PlanningThroughputScenario.gpus_str`, the cluster reaches roughly `{python} PlanningThroughputScenario.cluster_sustained_pflop_per_s_str` sustained under that assumption, yielding about `{python} PlanningThroughputScenario.ideal_days_str` days. That token budget is the GPT-3 operating point, which is undertrained relative to compute-optimal allocation (@sec-vol2-intro-practical-applications-system-design-5c97). A plan that followed the compute-optimal ratio of tokens to parameters at the same model size would multiply the token count, and with it the cluster-days, so the scaling-law choice moves the capacity plan before any hardware question arises. The 2--4-week calendar allowance is a separate planning range for delays outside the MFU measurement window; communication or stalls already reflected in MFU must not be added again. The TP-8, PP-4, DP-32 configuration also creates tensor, pipeline, and data-parallel traffic whose placement must be validated on the proposed rail-optimized fabric.
-
-The `{python} RackPowerPlanningRecap.plan_nodes_str` nodes draw `{python} RackPowerPlanningRecap.rack_power_kw_str` per 4-node rack across `{python} RackPowerPlanningRecap.plan_racks_str` racks at approximately `{python} RackPowerPlanningRecap.plan_power_mw_str` under the stated rack accounting boundary. Cooling feasibility depends on airflow, heat rejection, and rack geometry; this power alone does not require liquid cooling. The 3-year TCO comes to approximately `{python} InfraFrontierTcoClusterRecap.lifecycle_total_str` on-premises; renting the six-runs-per-year workload in the cloud is roughly `{python} InfraFrontierTcoClusterRecap.cloud_lifecycle_range_str` depending on whether each run lasts 2 or 4 weeks, while continuous cloud use is more expensive. The break-even depends on sustained utilization beyond the initial training run. Procurement and facility schedules must be confirmed against available capacity. A three-month initial deployment is feasible only if its hardware and facility resources are already available within that window; it cannot be inferred from a longer procurement lead time.
+The plan's `{python} RackPowerPlanningRecap.plan_racks_str` racks draw approximately `{python} RackPowerPlanningRecap.plan_power_mw_str` under the rack accounting boundary of @sec-compute-power-wall, and the 3-year TCO comes to approximately `{python} InfraFrontierTcoClusterRecap.lifecycle_total_str` on-premises; renting the six-runs-per-year workload in the cloud is roughly `{python} InfraFrontierTcoClusterRecap.cloud_lifecycle_range_str` depending on whether each run lasts 2 or 4 weeks, while continuous cloud use is more expensive. The break-even depends on sustained utilization beyond the initial training run. Procurement and facility schedules must be confirmed against available capacity. A three-month initial deployment is feasible only if its hardware and facility resources are already available within that window; it cannot be inferred from a longer procurement lead time.
 
 ```{python}
 #| echo: false
