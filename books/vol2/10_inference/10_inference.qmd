@@ -5602,27 +5602,9 @@ Hybrid sharding buys fit or latency by adding new communication patterns at ever
 
 ### Communication overhead analysis {#sec-inference-scale-communication-overhead-analysis-c1cf}
 
-The practical speedup from sharding depends critically on communication efficiency\index{Communication overhead!interconnect bandwidth}. Each sharding strategy has characteristic communication patterns with different bandwidth and latency requirements.
+The practical speedup from sharding depends critically on communication efficiency\index{Communication overhead!interconnect bandwidth}. Each sharding strategy has a characteristic communication pattern, and each pattern carries a cost model developed in the earlier communication chapters. Pipeline parallelism passes activations point to point between stages and pays one startup latency plus a bandwidth term per transfer (@sec-network-fabrics-performance-model). Tensor parallelism pays a ring AllReduce per collective, whose startup term grows linearly with the number of devices while its bandwidth term approaches twice the payload divided by link bandwidth (@sec-communication-collective-operations-collective-operations-ring-allreduce-ffce). Expert parallelism pays an AllToAll, whose completion time is set by the largest of per-message startup, endpoint injection or reception, and traffic across the fabric bisection (@sec-communication-alltoall).
 
-@Eq-allreduce-time quantifies AllReduce communication time for tensor parallelism, where data is combined from all devices with the result available on all devices.
-
-$$\AllReduceCompletionTime\approx 2(\DeviceCount-1)\MessageStartupLatency+ \frac{2(\DeviceCount-1)}{\DeviceCount} \times \frac{\CollectivePayloadSize}{\LinkBandwidth}$$ {#eq-allreduce-time}
-
-where $\DeviceCount$ is the number of devices, $\CollectivePayloadSize$ the collective payload, $\MessageStartupLatency$ startup latency, and $\LinkBandwidth$ interconnect bandwidth. The factor of 2 covers the ReduceScatter and AllGather phases derived in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, whose per-rank volume approaches a constant multiple of the payload while the startup term still grows with device count.
-
-@Eq-p2p-time expresses the simpler point-to-point communication for pipeline parallelism, where data flows from one device to the next.
-
-$$\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \frac{\PointToPointMessageSize}{\LinkBandwidth}$$ {#eq-p2p-time}
-
-where $\PointToPointMessageSize$ is the point-to-point payload size, $\MessageStartupLatency$ is the network latency, and $\PointToPointMessageSize/\LinkBandwidth$ is the transfer time. @Eq-alltoall-time captures the more complex AllToAll communication for expert parallelism, where each device exchanges distinct data with every other device.
-
-$$\AllToAllCompletionTime= (\DeviceCount-1) \times \left(\MessageStartupLatency+ \frac{\CollectivePayloadSize/\DeviceCount}{\LinkBandwidth}\right)$$ {#eq-alltoall-time}
-
-::: {.column-margin .margin-pointer}
-↩ AllToAll schedules, and why skewed destination traffic makes them harder to bound than AllReduce, are established in @sec-communication-alltoall.
-:::
-
-The AllToAll expression assumes equal-size peer exchanges scheduled in pairwise rounds. Skewed expert traffic, network contention, or a different collective algorithm can change its timing. Across all three models, usable bandwidth $\LinkBandwidth$ and startup latency $\MessageStartupLatency$ provide an initial communication budget, not a complete prediction of request latency. The chosen topology and collective implementation must sustain that budget under the intended concurrent load.
+These models give an initial communication budget, not a complete prediction of request latency. Skewed expert traffic, network contention, or a different collective algorithm can change the realized timing, so the chosen topology and collective implementation must sustain that budget under the intended concurrent load.
 
 ```{python}
 #| echo: false
@@ -6746,6 +6728,10 @@ Provisioning can dominate the illustrated budget, making already allocated capac
 ### Spot and preemptible instances {#sec-inference-scale-spot-preemptible-instances-c969}
 
 Discounted interruptible capacity\index{Spot Instances!inference}\index{Spot Instance Economics} enters serving through the same purchasing tiers that fleet capacity planning uses (@tbl-cloud-capacity-reservation-tiers): reserved capacity for the steady baseline, on-demand capacity for bursts, and spot capacity for work that tolerates revocation. @Eq-fleet-orchestration-spot-cost derives the effective cost of preemptible capacity from its productive fraction. Serving adds a loss that training checkpoints do not cover. Revocation can destroy in-flight requests and the KV-cache state they hold, so the productive fraction must also be charged for draining, rerouting, and rebuilding that state. The question for each replica is whether it can do so within the provider's warning window without violating the affected requests' SLO. @Lst-spot-termination orders the shutdown path so new work stops first, in-flight work drains while time remains, recoverable state is persisted, and the load balancer stops sending traffic before the instance disappears.
+
+::: {.column-margin .margin-pointer}
+↩ Capacity purchasing tiers and the effective cost of interruptible capacity are established in @sec-fleet-orchestration-cost-optimization.
+:::
 
 ::: {#lst-spot-termination lst-cap="**Spot Termination Handling**: Graceful shutdown sequence that stops admission, deregisters from the load balancer, drains in-flight requests, and persists recoverable state."}
 
