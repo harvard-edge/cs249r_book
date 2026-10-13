@@ -201,7 +201,7 @@ The consequence is a gap between failure cadence and job length. At `{python} Fl
 
 Scale and reliability diverge sharply across training generations. By pairing accelerator counts (left axis, log scale) with modeled system MTBF (opposing right axis), @fig-cluster-scaling-trend tracks how training fleets expanded by four orders of magnitude from 2012 (AlexNet on two GPUs) to 2024 (Llama 3 on over 16,000 GPUs), driven by the compute budgets that scaling laws reward (@sec-vol2-intro-ai-scaling-laws-a043). Applying the same per-device planning rate across those sizes compresses system MTBF from tens of thousands of hours to under ten hours. The opposing axis illustrates the scaling model rather than a history of measured failure rates, showing why recovery becomes an active scheduling constraint.
 
-::: {#fig-cluster-scaling-trend fig-env="figure" fig-pos="htb" fig-cap="**The rise of fleet-scale training**: Accelerator count for state-of-the-art training runs from 2012 to 2024, with system mean time between failures on the opposing axis. Cluster size rises about four orders of magnitude and system MTBF falls correspondingly, which is what turns fault tolerance from a reliability feature into a scheduling constraint." fig-alt="Log-scale scatter of training cluster accelerator count from 2012 (AlexNet, 2 GPUs) to 2024 (Llama 3, 16,384 GPUs) with a second axis for system mean time between failures. A red-shaded band with a dashed boundary marks the region where system MTBF falls under 10 hours; PaLM, GPT-4, and Llama 3 sit inside it. A double-headed arrow at the right spans AlexNet to Llama 3 and is labeled about 10 to the 4th times."}
+::: {#fig-cluster-scaling-trend fig-env="figure" fig-pos="htb" fig-cap="**The rise of fleet-scale training**: Accelerator count for state-of-the-art training runs from 2012 to 2024, with system mean time between failures on the opposing axis. Cluster size rises about four orders of magnitude and system MTBF falls correspondingly, which is what turns fault tolerance from a reliability feature into a scheduling constraint. Counts are published values except the hollow marker, an estimate of the 2020 Microsoft/OpenAI machine size; MTBF applies one per-device planning rate." fig-alt="Log-scale scatter of training cluster accelerator count from 2012 (AlexNet, 2 GPUs) through Megatron-LM, an estimated GPT-3-era machine (hollow marker), PaLM, LLaMA, and DeepSeek-V3 to 2024 (Llama 3, 16,384 GPUs), with a second axis for system mean time between failures. A red-shaded band with a dashed boundary marks the region where system MTBF falls under 10 hours; PaLM, the GPT-3-era machine, and Llama 3 sit inside it. A double-headed arrow at the right spans AlexNet to Llama 3 and is labeled about 10 to the 4th times."}
 
 ```{python}
 #| echo: false
@@ -211,28 +211,48 @@ from matplotlib.ticker import FuncFormatter
 
 from binder.tools.figures import style as book_style
 
-fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
+fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(6.1, 4.1))
 color_accel = COLORS['BlueLine']
 color_mtbf = COLORS['RedLine']
 
-df = pd.read_csv("vol2/07_fault_tolerance/data/cluster_size_trend.csv")
-df_sorted = df.sort_values('year')
+from mlsysim import Literature, Models
 
-# Plot Accelerator count
-ax1.scatter(df['year'], df['accelerators'], s=60, color=color_accel, edgecolor='white', linewidth=0.8, zorder=3)
+# Same registry-backed landmark runs as the cluster-size figure in the
+# introduction; the GPT-3-era count is the 2020 Microsoft/OpenAI machine size.
+_runs = Literature.TrainingRuns
+df = pd.DataFrame(
+    [
+        ("AlexNet", 2012, float(_runs.AlexNetGpus), False),
+        ("Megatron-LM", 2019, float(_runs.MegatronLm2019Gpus), False),
+        ("GPT-3 machine (est.)", 2020, float(_runs.MicrosoftOpenAI2020Gpus), True),
+        ("PaLM", 2022, Models.Language.PaLM_540B.training_accelerators_ref.magnitude, False),
+        ("LLaMA", 2023, float(_runs.Llama1_65B_Gpus), False),
+        ("DeepSeek-V3", 2024, float(_runs.DeepSeekV3Gpus), False),
+        ("Llama 3", 2024, Models.Language.Llama3_405B.training_accelerators_ref.magnitude, False),
+    ],
+    columns=["model", "year", "accelerators", "estimated"],
+)
+df_sorted = df.sort_values(['year', 'accelerators'])
+
+# Plot Accelerator count (hollow marker = estimate, not a published count)
+_known, _est = df[~df['estimated']], df[df['estimated']]
+ax1.scatter(_known['year'], _known['accelerators'], s=60, color=color_accel, edgecolor='white', linewidth=0.8, zorder=3)
+ax1.scatter(_est['year'], _est['accelerators'], s=60, facecolors='white', edgecolors=color_accel, linewidth=1.6, zorder=3)
 
 # Annotate models
-for idx, row in df.iterrows():
-    y_offset = 10 if idx % 2 == 0 else -15
-    x_offset, ha = 0, 'center'
-    if row['model'].startswith('GPT-3'):
-        # Longer "(est)" label: place right of the point to clear GPT-2.
-        x_offset, y_offset, ha = 8, -12, 'left'
-    elif row['model'] == 'GPT-2':
-        # Upper-left keeps the label off the rising GPT-2 -> GPT-3 segment.
-        x_offset, y_offset, ha = -6, 6, 'right'
+_off = {
+    "AlexNet": (0, 10, 'center'),
+    "Megatron-LM": (0, 10, 'center'),
+    "GPT-3 machine (est.)": (-8, 6, 'right'),
+    "PaLM": (0, 10, 'center'),
+    "LLaMA": (-8, -4, 'right'),
+    "DeepSeek-V3": (-16, -16, 'center'),
+    "Llama 3": (-8, 4, 'right'),
+}
+for _, row in df.iterrows():
+    x_offset, y_offset, ha = _off[row['model']]
     ax1.annotate(
-        row['model'], (row['year'], row['accelerators']), xytext=(x_offset, y_offset), textcoords='offset points', ha=ha, fontsize=10, alpha=0.9
+        row['model'], (row['year'], row['accelerators']), xytext=(x_offset, y_offset), textcoords='offset points', ha=ha, fontsize=9, alpha=0.9
     )
 
 ax1.set_yscale('log')
@@ -274,7 +294,7 @@ n_10h = gpu_mttf_h / 10
 ytop = ax1.get_ylim()[1]
 ax1.axhspan(n_10h, ytop, color=COLORS['RedL'], alpha=0.45, zorder=0, lw=0)
 ax1.axhline(n_10h, color=color_mtbf, lw=0.8, ls='--', zorder=1)
-ax1.text(2010.75, n_10h * 1.25, 'system MTBF under 10 h', color=color_mtbf, fontsize=10, fontweight='bold', ha='left', va='bottom')
+ax1.text(2010.75, n_10h * 1.25, 'system MTBF under 10 h', color=color_mtbf, fontsize=9, fontweight='bold', ha='left', va='bottom')
 ax1.set_ylim(top=ytop)
 
 # Span of the trend: AlexNet (2012) to Llama 3 (2024), about four orders of magnitude.
@@ -289,7 +309,7 @@ ax1.text(
     r"$\sim\!10^{4}\times$",
     ha='right',
     va='center',
-    fontsize=13.5,
+    fontsize=10,
     color=COLORS['primary'],
 )
 
@@ -691,7 +711,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5.5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 5.1))
 
 # Theoretical curve: cluster MTBF = GPU_MTTF/N
 
@@ -849,6 +869,118 @@ The MTBF calculations in the reliability analysis quantify how often failures oc
 
 No single label captures all of these differences. Reliability decisions require three orthogonal axes: persistence (transient, intermittent, or permanent), manifestation (fail-stop, degraded, or value-corrupting), and failure scope (one device, one node, a rack or power domain, or the whole job). A transient fault can therefore manifest as either a detected crash or silent corruption, while a permanent switch failure can remain confined to one rack or partition an entire job. The four subsections that follow are therefore not four parallel classes or mutually exclusive buckets [@constantinescu2008; @lamport1982byzantine]. Each takes the value of one axis that most changes recovery. Transient failures come from the persistence axis, because they show why a fault that clears can still leave state to repair. Fail-stop and Byzantine (value-corrupting) failures come from the manifestation axis, and correlated failures come from the scope axis. Two parts of the space are developed where they drive decisions. The intermittent and permanent persistence classes return with hardware faults (@sec-ft-fault-persistence-response), where persistence selects retry, quarantine, or replacement. The degraded manifestation, a gray failure that slows a worker without stopping it, returns with stragglers (@sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d).
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED INTERRUPTION ROOT CAUSES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph opening the failure taxonomy and
+# │          @fig-llama3-interruptions.
+# │
+# │ Goal: Show which failures a large training run actually meets.
+# │ Show: GPU components 268 of 419 (~64%), software bugs 54, network 35,
+# │       host components 21; six detected silent data corruptions.
+# │ How: Counts from Literature.Series.Llama3Interruptions, cross-checked
+# │      against Literature.TrainingRuns totals.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, Models
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
+
+def _by_category(rows):
+    out = {}
+    for r in rows:
+        out[r["category"]] = out.get(r["category"], 0) + r["interruption_count"]
+    return out
+
+def _component(rows, name):
+    return next(r["interruption_count"] for r in rows if r["component"] == name)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class InterruptionCauses:
+    """Root causes of unexpected interruptions in Llama 3 405B pretraining."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.Llama3Interruptions.entries
+    total_ref = float(Literature.TrainingRuns.Llama3_405B_UnexpectedInterruptions)
+    days = float(Literature.TrainingRuns.Llama3_405B_SnapshotDays)
+    gpus = Models.Language.Llama3_405B.training_accelerators_ref.magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    total = sum(r["interruption_count"] for r in rows)
+    cats = _by_category(rows)
+    gpu_share = cats["GPU"] / total
+    faulty_gpu = _component(rows, "Faulty GPU")
+    hbm = _component(rows, "GPU HBM3 Memory")
+    software = _component(rows, "Software Bug")
+    sdc = _component(rows, "Silent Data Corruption")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(total == total_ref, f"Table 5 counts must sum to the registry total {total_ref}, got {total}.")
+    check(0.6 <= gpu_share <= 0.7, f"Prose says GPU components caused about two-thirds, got {gpu_share:.2f}.")
+    check(cats["GPU"] > cats["Dependency"] > cats["Network"] > cats["Host"], "Prose orders GPU > software > network > host.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    total_str = fmt_int(total)
+    days_str = fmt(days, precision=0)
+    gpus_str = fmt(gpus, precision=0)
+    gpu_count_str = fmt_int(cats["GPU"])
+    gpu_share_pct_str = fmt_percent(round(gpu_share, 2), precision=0, style="prose")
+    faulty_gpu_str = fmt_int(faulty_gpu)
+    hbm_str = fmt_int(hbm)
+    software_str = fmt_int(software)
+    network_str = fmt_int(cats["Network"])
+    host_str = fmt_int(cats["Host"])
+    sdc_str = fmt_int(sdc)
+```
+
+Production logs show which of these failures a large run actually meets. During a `{python} InterruptionCauses.days_str`-day period of Llama 3 405B pretraining on `{python} InterruptionCauses.gpus_str` H100 GPUs, Meta traced each of `{python} InterruptionCauses.total_str` unexpected interruptions to a root cause [@dubey2024llama]. Grouped by cause in @fig-llama3-interruptions, GPU components account for `{python} InterruptionCauses.gpu_count_str` of them, about `{python} InterruptionCauses.gpu_share_pct_str`, led by `{python} InterruptionCauses.faulty_gpu_str` faulty GPUs and `{python} InterruptionCauses.hbm_str` HBM memory failures. Software bugs caused `{python} InterruptionCauses.software_str`, network switches and cables `{python} InterruptionCauses.network_str`, and the remaining host hardware, from NICs to power supplies, `{python} InterruptionCauses.host_str` between them. Only `{python} InterruptionCauses.sdc_str` interruptions were attributed to silent data corruption, and that count includes only corruption that was caught. Most fault-tolerance effort therefore goes to frequent, detectable accelerator failures, while the rare silent ones demand a different kind of defense.
+
+::: {#fig-llama3-interruptions fig-env="figure" fig-pos="htb" fig-cap="**Root Causes of Training Interruptions**: The 419 unexpected interruptions recorded over 54 days of Llama 3 405B pretraining on 16,384 H100 GPUs, by root-cause component and colored by category. GPU components dominate; silent data corruption appears only where it was detected. Counts are from Table 5 of @dubey2024llama; one percentage in that table (Faulty GPU) disagrees with its count, so shares here are computed from the counts." fig-alt="Horizontal bar chart of 18 root-cause components sorted by count, colored by category. Faulty GPU leads with 148 interruptions, then GPU HBM3 memory 72, software bug 54, network switch or cable 35, host maintenance 32, GPU SRAM memory 19, and GPU system processor 17. The remaining components each caused 7 or fewer, including NIC 7, NCCL watchdog timeouts 7, silent data corruption 6, and GPU thermal interface and sensor 6."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED INTERRUPTION ROOT CAUSES (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-llama3-interruptions.
+# │
+# │ Goal: Show interruption counts by component, colored by category.
+# │ Show: Sorted horizontal bars with counts; category legend.
+# │ How: InterruptionCauses (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from matplotlib.patches import Patch
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(5.9, 4.3))
+_C = InterruptionCauses
+_ccol = {
+    "GPU": COLORS["RedLine"],
+    "Dependency": COLORS["VioletLine"],
+    "Network": COLORS["BlueLine"],
+    "Unplanned Maintenance": COLORS["OrangeLine"],
+    "Host": COLORS["GreenLine"],
+    "Unknown": COLORS["grid"],
+}
+_label = {"Dependency": "Software", "Unplanned Maintenance": "Unplanned maintenance"}
+_rows = sorted(_C.rows, key=lambda r: r["interruption_count"])
+ax.barh(range(len(_rows)), [r["interruption_count"] for r in _rows], color=[_ccol[r["category"]] for r in _rows], height=0.7)
+for _i, _r in enumerate(_rows):
+    ax.text(_r["interruption_count"] + 1.5, _i, f"{_r['interruption_count']:.0f}", va="center", fontsize=9)
+ax.set_yticks(range(len(_rows)))
+ax.set_yticklabels([r["component"] for r in _rows], fontsize=9)
+ax.set_xlim(0, 165)
+ax.set_xlabel("Unexpected interruptions in 54 days")
+ax.legend(
+    handles=[Patch(color=c, label=_label.get(k, k)) for k, c in _ccol.items()], fontsize=9, loc="lower right", title="Category", title_fontsize=9
+)
+plt.show()
+plt.close()
+```
+
+:::
+
 ### Transient failures {#sec-fault-tolerance-reliability-reliability-transient-failures-57b4}
 
 A transient fault clears without physical repair, but the state it corrupts can persist after the disturbance ends. Recovery must therefore retry or validate affected work before relying on that state. Large-scale training systems encounter several forms of temporary disruption. Network packet loss\index{Transient fault!network packet loss} momentarily drops data while transport retransmission succeeds. Memory bit flips\index{Memory!bit flip} can result from cosmic-ray-induced single-event upsets.[^fn-seu-soft-error] Under temperature spikes, thermal throttling\index{Thermal throttling!performance degradation} temporarily reduces compute throughput without halting execution, while software timeouts\index{Software timeout!resource contention} emerge when transient contention delays communication beyond its allotted time.
@@ -994,7 +1126,7 @@ The practical implication for ML systems is that fleet-wide failure rates can de
 from binder.tools.figures import style as book_style
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.0, 4.0))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.7))
 
 # Zones: x in [0, 12]
 ax.axvspan(0, 3.5, color=COLORS['RedL'], alpha=0.35, zorder=1, lw=0)
@@ -3456,7 +3588,7 @@ Combining these observability streams helps detect recurring optimization pathol
 
 A training-loss signature is useful because it narrows the hypotheses that recovery must test. The trajectories in @fig-training-failure-signatures illustrate symptoms, including nonfinite values that need not crash the process. @Tbl-training-failure-response-map pairs spike, plateau, and divergence patterns, plus the silent hang a loss curve cannot show, with a candidate cause and a first response. That pairing guides investigation without treating the curve as a unique diagnosis.
 
-::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Four loss-versus-steps panels in a two-by-two grid on a shared loss axis. (A) Normal training: a green curve descending smoothly. Panels B to D repeat that healthy curve as a faint green reference line behind each pathology. (B) Gradient explosion: a descending curve with a red spike segment midway that then rejoins the healthy reference, labeled healthy. (C) Loss plateau: a curve that flattens early, with the gap between it and the healthy reference shaded red and labeled gap to healthy. (D) NaN divergence: a curve that pulls away above the healthy reference, oscillating with growing amplitude, then climbs steeply to a red X labeled NaN check halts run."}
+::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines. The curves are synthetic illustrations of each pattern, not logs from a training run." fig-alt="Four loss-versus-steps panels in a two-by-two grid on a shared loss axis. (A) Normal training: a green curve descending smoothly. Panels B to D repeat that healthy curve as a faint green reference line behind each pathology. (B) Gradient explosion: a descending curve with a red spike segment midway that then rejoins the healthy reference, labeled healthy. (C) Loss plateau: a curve that flattens early, with the gap between it and the healthy reference shaded red and labeled gap to healthy. (D) NaN divergence: a curve that pulls away above the healthy reference, oscillating with growing amplitude, then climbs steeply to a red X labeled NaN check halts run."}
 ```{python}
 #| echo: false
 from binder.tools.figures import style as book_style
@@ -3468,7 +3600,7 @@ COLORS = book_style.COLORS
 # Four small multiples on one shared loss axis; the healthy curve is green, the
 # pathological curves are neutral with only the failure itself marked in red.
 # Laid out 2x2 at book width so every label prints at or above the floor.
-fig, axes2d = plt.subplots(2, 2, figsize=(8, 4.9), sharey=True, sharex=True)
+fig, axes2d = plt.subplots(2, 2, figsize=(6.2, 4.5), sharey=True, sharex=True)
 axes = axes2d.ravel()
 
 steps = np.linspace(0, 100, 200)
@@ -3529,7 +3661,9 @@ ax_c.text(70, 0.98, 'gap to healthy', fontsize=10.5, color=COLORS['RedLine'], ha
 
 ax_d.plot(nan_steps, loss_d, color=COLORS['primary'], linewidth=lw)
 ax_d.scatter([nan_steps[-1]], [loss_d[-1]], marker='X', color=COLORS['RedLine'], edgecolor='white', linewidth=0.8, s=70, zorder=6)
-ax_d.text(nan_steps[-1] + 4, loss_d[-1], 'NaN check\nhalts run', fontsize=10.5, linespacing=1.1, color=COLORS['RedLine'], ha='left', va='center')
+ax_d.text(
+    nan_steps[-1] - 5, loss_d[-1] - 0.4, 'NaN check\nhalts run', fontsize=10.5, linespacing=1.1, color=COLORS['RedLine'], ha='right', va='center'
+)
 
 titles = ['(A) Normal training', '(B) Gradient explosion', '(C) Loss plateau', '(D) NaN divergence']
 for ax, title in zip(axes, titles):

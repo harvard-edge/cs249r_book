@@ -606,6 +606,12 @@ class ValidateCommand:
             Scope("files", "_run_images"),
             Scope("alt-text-style", "_run_mitpress_alt_text_style",
                   note="alt-text follows body-prose rules (§10.12)"),
+            # Added 2026-10-13: matplotlib figures are scaled to the text block,
+            # so printed text = font size x (text width / cropped image width).
+            # vol2 canvases drifted from 0.62x to 1.04x with no check failing.
+            # Default=False: it executes every chapter's python cells (minutes).
+            Scope("print-scale", "_run_figure_print_scale", default=False,
+                  note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -13582,6 +13588,28 @@ class ValidateCommand:
         return self._run_audit_check(
             root, "audit.checks.alt_text_style",
             "alt-text-style", "alt-text style compliance (§10.12)",
+        )
+
+    def _run_figure_print_scale(self, root: Path) -> ValidationRunResult:
+        """figures --scope print-scale: printed size of matplotlib body figures.
+
+        Executes each chapter's python cells in a subprocess and measures every
+        figure inside a ``#fig-`` div; see ``cli/checks/figure_print_scale.py``.
+        """
+        try:
+            from cli.checks import figure_print_scale as fps
+        except ImportError:
+            from binder.cli.checks import figure_print_scale as fps
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        qmds = [q for q in self._qmd_files(root) if "```{python}" in q.read_text(encoding="utf-8")]
+        issues = [ValidationIssue(**f) for f in fps.check_chapters(qmds, repo_root)]
+        return ValidationRunResult(
+            name="figure-print-scale",
+            description="Matplotlib print scale and font floor (limits from mlsysim.viz.style)",
+            files_checked=len(qmds), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
