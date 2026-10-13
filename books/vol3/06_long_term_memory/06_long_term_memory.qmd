@@ -55,7 +55,7 @@ A context window holds the working state of one model call, and retained attenti
 - Specify a retrieval contract that bounds access, returned content, resource use, and required freshness
 - Choose among pre-staged evidence, a direct read, and model-directed search from how much of the need the task names
 - Select retrieval methods for an information need, use a bandwidth floor to screen exact vector scans against a latency budget, and estimate multi-hop evidence against a serialized-token budget
-- Design a memory write policy for admission, correction, supersession, expiry, and deletion
+- Design a memory write policy for admission, correction, supersession, expiry, and deletion that keeps derived summaries from perpetuating a withdrawn claim
 - Explain version-aware exclusion and fallback without mistaking removal of stale candidates for complete fresh retrieval
 - Evaluate cross-session memory policies by task outcomes, update behavior, and total resource cost
 
@@ -214,11 +214,15 @@ items:
 
 In the connection-pool repair task, the staged payload might pair a slice of `src/pool.py` from revision `r18` with an error trace recorded under revision `r17`, as in @lst-vol3-result-envelope, where the fields outside the two `content` bodies count against the payload budget just as the bodies do. The r17 trace explains why the repair was initiated, but it provides zero evidence regarding the behavior of the r18 candidate. By packaging each record in an explicit envelope, the retrieval subsystem preserves these applicability distinctions across the boundary between persistent storage and the working context. Envelope labels, however, record provenance without certifying veracity. A cryptographic content hash verifies only that the byte sequence matches a specific snapshot; it does not validate the factual correctness of the text. Similarly, categorizing a record as user input or agent-written memory confers no administrative authority on any instructions embedded within that content.
 
+::: {.column-margin .margin-pointer}
+↩ The scope rule, under which an observation is evidence only for the versions and conditions that produced it, and the untrusted span whose provenance a label records but cannot vouch for, are established in @sec-vol3-context-engineering-source-scope.
+:::
+
 ### Evidence staging {#sec-vol3-persistent-quarantine}
 
 The agent runtime, never the retrieval backend or an uncalibrated ranking score, determines which records enter the downstream prompt. The runtime curates evidence tailored to the immediate decision, preserves the source and version tags necessary for correct interpretation, and measures the token footprint of the serialized payload. Staging is where invariant closure (principle \ref{pri-invariant-closure}) reaches the durable read boundary. The bound below the model is mechanical, because a runtime rule rather than the model or the ranker decides what is admitted, and the version labels it preserves are the evidence a later acceptance check needs to tell an `r17` observation from an `r18` one.
 
-Returned text remains untrusted data, even when fetched from a local repository. While defensive serialization formats cleanly separate retrieved payloads from system instructions, language models can still be misled by adversarial or malformed text embedded inside document bodies. This hazard, prompt injection, occurs when retrieved text hijacks the agent's control flow, attempting to redirect execution away from the authorized task.
+Retrieved records remain untrusted spans even when fetched from a local repository, because serialization that separates them from system instructions cannot stop the model from following text embedded in a record body, the hazard known as prompt injection.
 
 ::: {.column-margin .margin-pointer}
 ↪ Indirect prompt injection, delivered through retrieved documents and other observations an agent reads, is developed in @sec-vol3-security-injection-entry-points.
@@ -1023,7 +1027,7 @@ When generating consolidated records, the write pipeline must preserve provenanc
 
 ### Self-reinforcing errors {#sec-vol3-memory-self-poisoning}
 
-When an unverified hypothesis enters durable memory, subsequent summarization cycles risk treating the stored conjecture as an established premise, echoing and amplifying the error across successive generations of context. Under formal evidentiary rules, repeated retrieval and re-summarization provide zero independent validation. A faulty diagnostic guess that is copied into an episode summary, absorbed into a weekly milestone report, and ultimately consolidated into a cross-project heuristic still rests entirely on the original faulty inference. To prevent memory poisoning, the storage engine must maintain rigorous dependency provenance across all derived artifacts. When an operator or verification pass invalidates a poisoned record, the invalidation must cascade through the entire dependency graph, retracting or marking as suspect every downstream summary and derived lesson. Merely down-ranking or tombstoning the root record is insufficient if derivative summaries continue circulating through retrieval indexes. Finally, even a fully validated, un-poisoned lesson functions merely as a candidate action suggestion; the execution engine must still enforce strict runtime authorization policies and environmental preconditions whenever an agent attempts to act on retrieved memories.
+When an unverified hypothesis enters durable memory, subsequent summarization cycles risk treating the stored conjecture as an established premise, echoing and amplifying the error across successive generations of context. Under formal evidentiary rules, repeated retrieval and re-summarization provide zero independent validation. A faulty diagnostic guess that is copied into an episode summary, absorbed into a weekly milestone report, and ultimately consolidated into a cross-project heuristic still rests entirely on the original faulty inference. To prevent memory poisoning\index{Memory poisoning}, the persistence of an unverified or withdrawn claim through the records derived from it, the storage engine must maintain rigorous dependency provenance across all derived artifacts. When an operator or verification pass invalidates a poisoned record, the invalidation must cascade through the entire dependency graph, retracting or marking as suspect every downstream summary and derived lesson. Merely down-ranking or tombstoning the root record is insufficient if derivative summaries continue circulating through retrieval indexes. Finally, even a fully validated, un-poisoned lesson functions merely as a candidate action suggestion; the execution engine must still enforce strict runtime authorization policies and environmental preconditions whenever an agent attempts to act on retrieved memories.
 
 ::: {#chk-06-memory-write-lifecycle .callout-checkpoint title="Following a preference through its lifecycle"}
 
@@ -1214,6 +1218,10 @@ The appropriate unit of comparison is the *memory policy*. A memory policy encom
 
 A controlled cross-session trial begins with a fixed source snapshot and an identical initial memory store. Evaluators provision each policy with an isolated environment, identical task sequences, and identical constraints on model inference, tool execution, and compute budgets. Records generated during one trial session may influence subsequent sessions within that same trial, since that cross-session behavior is what the trial measures, but they must never contaminate a parallel trial. Ground-truth reference answers, test fixtures, and evaluator annotations must remain strictly outside both writable and retrievable stores. If an agent can access evaluation artifacts, a policy can easily appear to learn when it is merely caching the answers to the test suite.
 
+::: {.column-margin .margin-pointer}
+↪ Evaluation leakage in general, before a trial begins and during it, including solutions that persistent memory carries from one run into the next, is developed in @sec-vol3-evaluation-gyms-leakage.
+:::
+
 The comparison in @tbl-vol3-memory-policy-comparison isolates the baseline benefit of raw persistence from the operational benefit of governing what persists. Across all experimental conditions, the system enforces identical access controls and action permissions. The "unchecked" condition isolates content admission alone, while all conditions experience external source modifications and user updates on the same synchronized fixture schedule.
 
 | **Policy condition**                        | **Question the comparison tests**                                                                                             |
@@ -1375,6 +1383,10 @@ Ultimately, memory evaluation yields a multidimensional trade-off space rather t
 A complete evaluation suite must subject the memory system to adversarial boundary tests. In an isolated evaluation sandbox, test harnesses inject synthetic credentials, probe unauthorized namespace boundaries, and retrieve documents embedded with indirect prompt injections [@greshake2023not]. The test suite evaluates two critical enforcement layers: whether the runtime intercepts and suppresses unauthorized reads and writes, and whether an adversarial payload survives in downstream consolidated summaries after the primary source document has been withdrawn.
 
 Evaluators must capture both the model's proposed actions and the runtime's actual execution disposition. Logging both stages ensures that the evaluation distinguishes an attempted security breach from an executed vulnerability. The memory policy is accountable for the records it admits, indexes, and stages; the tool and runtime authorization subsystems are accountable for governing what the agent is permitted to execute against the external environment.
+
+::: {.column-margin .margin-pointer}
+↪ The general method for adversarial evaluation, from trial specification and attacker capabilities to attack success measured beside useful completion, is developed in @sec-vol3-security-evaluation.
+:::
 
 ::: {#chk-vol3-memory-policy-evaluation .callout-checkpoint title="Evidence across sessions"}
 
