@@ -93,7 +93,7 @@ from mlsysim.fmt import MarkdownStr, check, fmt
 <span id="sec-fleet-orchestration-introduction"></span>
 :::
 
-Consider two research teams sharing a 1,000-GPU cluster: Team A submits a 512-GPU job that will run for a month, while Team B submits hundreds of 8-GPU experiments that each run for an hour. If the scheduler continually admits whichever jobs fit, Team B's small experiments can indefinitely block Team A's large training run. The scheduling problem is the challenge of navigating this multi-dimensional conflict between throughput, fairness, and cluster utilization.
+Consider two research teams sharing a 1,000-GPU cluster: Team A submits a 512-GPU job that will run for a month, while Team B submits hundreds of 8-GPU experiments that each run for an hour. If the scheduler continually admits whichever jobs fit, Team B's small experiments can indefinitely block Team A's large training run. The scheduling problem is to resolve this conflict among throughput, fairness, and cluster utilization.
 
 ```{python}
 #| echo: false
@@ -279,7 +279,7 @@ class ClusterEconomicsContext:
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
 ```
 
-The same conflict grows with the fleet. Consider a research organization operating a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster. A single pretraining run of a GPT-3-class 175B-parameter model [@brown2020language], the running instance of Archetype A (GPT-4/Llama-3) throughout this book, can hold a `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU allocation for weeks. Because the scaling laws of @sec-vol2-intro-ai-scaling-laws-a043 reward larger models trained on more tokens, each new generation of such runs asks for a larger gang held for longer, so the scheduler's hardest requests keep growing. Suppose enough jobs of that class are queued that together they ask for more GPUs than the cluster holds, alongside thousands of smaller experiments and inference workloads all competing for the same resources. The system must decide which jobs run, when they run, and where they run. A first-come-first-served policy without backfilling or preemption can let large jobs occupy the cluster for weeks, delaying smaller experiments that researchers need to iterate quickly. A fair-share policy that divides capacity without respecting each job's minimum resource bundle can leave many partial allocations and no runnable large job. The scheduler must navigate a multi-dimensional trade-off space where every decision affects throughput, fairness, cost, and researcher productivity simultaneously.
+The same conflict grows with the fleet. Consider a research organization operating a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster. A single pretraining run of a GPT-3-class 175B-parameter model [@brown2020language], the running instance of Archetype A (GPT-4/Llama-3) throughout this book, can hold a `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU allocation for weeks. Because the scaling laws of @sec-vol2-intro-ai-scaling-laws-a043 reward larger models trained on more tokens, each new generation of such runs asks for a larger gang held for longer, so the scheduler's hardest requests keep growing. Suppose enough jobs of that class are queued that together they ask for more GPUs than the cluster holds, alongside thousands of smaller experiments and inference workloads all competing for the same resources. The system must decide which jobs run, when they run, and where they run. A first-come-first-served policy without backfilling or preemption can let large jobs occupy the cluster for weeks, delaying smaller experiments that researchers need to iterate quickly. A fair-share policy that divides capacity without respecting each job's minimum resource bundle can leave many partial allocations and no runnable large job.
 
 ::: {.column-margin .margin-pointer}
 ↩ Archetype A and its 175B-parameter running instance are established in @sec-introduction-archetype-gpt4llama3-b02f.
@@ -305,7 +305,7 @@ Job duration unpredictability compounds these challenges further. A training run
 
 The interaction between these challenges creates combinatorial complexity. A scheduler must simultaneously handle gang scheduling constraints (atomic allocation), heterogeneous resources (capability matching), topology requirements (NVLink locality for tensor parallelism), priority and fairness policies (organizational equity), preemption decisions (which running jobs to interrupt), and cost optimization (spot vs. on-demand placement). Each dimension constrains the others: a topology-optimal placement may violate fairness policies, a cost-optimal spot placement may violate reliability requirements, and a fairness-driven allocation may fragment resources in ways that prevent gang scheduling.
 
-These constraints define the central problem of orchestration: the scheduler is not merely packing jobs onto GPUs, but maintaining a consistent, economically useful view of a failing, heterogeneous fleet. The first step is to see why cluster scheduling is fundamentally harder than single-machine process scheduling. At fleet scale, placement stops being only an optimization challenge and becomes a distributed systems problem of keeping state coherent across thousands of machines.
+The scheduler therefore does more than pack jobs onto GPUs. It must maintain a consistent, economically useful view of a failing, heterogeneous fleet, and at that scale placement stops being only an optimization problem and becomes a distributed systems problem of keeping state coherent across thousands of machines.
 
 ## Distributed Scheduling Complexity {#sec-fleet-orchestration-distributed-scheduling}
 
@@ -335,70 +335,7 @@ Feasibility also extends beyond free accelerator count. Power-aware admission re
 
 ## Failure Rates at Scale {#sec-fleet-orchestration-failure-rates}
 
-```{python}
-#| echo: false
-#| label: lego-fleet-failure-rates
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FLEET FAILURE RATES (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fleet-orchestration-failure-rates prose immediately below.
-# │
-# │ Goal: Show that ordinary per-GPU reliability makes fleet failures routine.
-# │ Show: ~0.5 GPU failures/day per 1,000 GPUs; ~49 h between failures on the
-# │       1,024-GPU reference cluster; ~4.8 failures/day at 10,000 GPUs; the
-# │       Llama 3 interruption cadence (~3.1 h) as published corroboration.
-# │ How: failures/day = N × 24 / MTBF_GPU (independent GPU-only failures).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models
-from mlsysim.fmt import check, fmt, fmt_int
-
-class FleetFailureRates:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    gpu_mtbf_h = float(Systems.Reliability.Gpu.mttf_hours)
-    n_per_thousand = 1000
-    n_reference = Systems.Clusters.Training_1K.total_accelerators
-    n_large = Systems.Clusters.Training_10K.total_accelerators
-    # Published observation (Llama 3 report, arXiv:2407.21783): unexpected
-    # interruptions over a pretraining snapshot on the 405B run's H100 fleet.
-    llama3_gpus = Models.Language.Llama3_405B.training_accelerators_ref.magnitude
-    llama3_interruptions = float(Literature.TrainingRuns.Llama3_405B_UnexpectedInterruptions)
-    llama3_days = float(Literature.TrainingRuns.Llama3_405B_SnapshotDays)
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    per_thousand_per_day = n_per_thousand * HOURS_PER_DAY / gpu_mtbf_h
-    reference_mtbf_h = gpu_mtbf_h / n_reference
-    large_per_day = n_large * HOURS_PER_DAY / gpu_mtbf_h
-    llama3_hours_between = llama3_days * HOURS_PER_DAY / llama3_interruptions
-    llama3_scale_up = llama3_gpus / n_reference
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(per_thousand_per_day - 0.48) < 0.01, f"Expected ~0.48 failures/day per 1,000 GPUs, got {per_thousand_per_day}")
-    check(abs(large_per_day - 4.8) < 0.01, f"Expected 4.8 failures/day at 10K GPUs, got {large_per_day}")
-    check(abs(llama3_hours_between - 3.1) < 0.05, f"Expected ~3.1 h between Llama 3 interruptions, got {llama3_hours_between}")
-    check(llama3_scale_up == 16, "prose says 'sixteen times the reference cluster'")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    gpu_mtbf_str = fmt_int(round(gpu_mtbf_h))
-    per_thousand_per_day_str = fmt(round(per_thousand_per_day, 1), precision=1, commas=False)
-    reference_gpus_str = fmt_int(n_reference)
-    reference_mtbf_h_str = fmt_int(round(reference_mtbf_h), commas=False)
-    large_gpus_str = fmt_int(n_large)
-    large_per_day_str = fmt(large_per_day, precision=1, commas=False)
-    llama3_gpus_str = fmt_int(round(llama3_gpus))
-    llama3_interruptions_str = fmt_int(round(llama3_interruptions))
-    llama3_days_str = fmt_int(round(llama3_days))
-    llama3_hours_between_str = fmt(round(llama3_hours_between, 1), precision=1, commas=False)
-```
-
-At scale, failure is normal operation, not exceptional. Fault tolerance turned that principle into checkpoints, detection, and elastic recovery for a running job; for the scheduler, it means planning for failure in every allocation decision rather than merely tolerating it. The failure arithmetic is the one @sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b established, in which the fleet rate is the per-device rate multiplied by the population. For an operating population maintained at $\FleetAcceleratorCount$ GPUs with independent, constant failure hazards, each with mean time to failure $\GpuMttf$ in hours:
-
-::: {.column-margin}
-![](images/svg/vol2_fleet_orchestration_margin_001.svg){width="100%" fig-alt="Two 48-hour timelines with red marks for GPU failures. The 1,024-GPU cluster shows a single mark, and the 10,000-GPU fleet shows a mark about every 5 hours."}
-
-*Failures become a cadence, one every `{python} FleetFailureRates.reference_mtbf_h_str` hours at `{python} FleetFailureRates.reference_gpus_str` GPUs but `{python} FleetFailureRates.large_per_day_str` a day at `{python} FleetFailureRates.large_gpus_str`.*
-:::
-
-$$ \text{Expected GPU failures per day} = \FleetAcceleratorCount\times \frac{24}{\GpuMttf} $$
-
-With the per-GPU planning value of `{python} FleetFailureRates.gpu_mtbf_str` hours used throughout this book, that is about `{python} FleetFailureRates.per_thousand_per_day_str` failures per day for every thousand GPUs, the GPU-only baseline that @tbl-cluster-mtbf-scaling tabulates across cluster sizes; in production, the Llama 3 pretraining run on `{python} FleetFailureRates.llama3_gpus_str` H100 GPUs recorded `{python} FleetFailureRates.llama3_interruptions_str` unexpected interruptions in `{python} FleetFailureRates.llama3_days_str` days, about one every `{python} FleetFailureRates.llama3_hours_between_str` hours [@dubey2024llama]. The full-system cascade of @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255 adds PCIe and network failure domains and therefore yields a shorter interval than the GPU-only count. The two figures answer different questions for the scheduler. It sizes spare capacity and replacement paths from the GPU-only count of devices it must replace, while job interruptions follow the full-system rate and depend on how each failure affects an allocation.
+At scale, failure is normal operation, not exceptional. Fault tolerance turned that principle into checkpoints, detection, and elastic recovery for a running job; for the scheduler, it means planning for failure in every allocation decision. As @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef established, the fleet failure rate is the per-device rate multiplied by the population (@eq-system-mtbf), so a cluster of ten thousand GPUs loses a device every few hours (@tbl-cluster-mtbf-scaling). The scheduler uses two such rates. It sizes spare capacity and replacement paths from the GPU-only count of devices it must replace, while job interruptions follow the shorter full-system interval of @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255, which adds PCIe and network failure domains.
 
 The scheduler cannot treat the cluster as a static resource pool where resources, once allocated, remain available until voluntarily released. It must anticipate loss of allocated resources during execution and provide replacement capacity or rescheduling paths. The response depends on the fault and the validity of the surviving state. A transient disruption may permit recovery in place if the execution state remains usable; a persistent hardware failure requires replacement resources. Even a short disruption can force checkpoint recovery if the framework cannot safely continue [@tiwari2015].
 
@@ -706,21 +643,13 @@ Partial allocation of rigid multi-GPU jobs creates a distributed scheduling fail
 
 :::
 
-The partial-allocation pattern is a hold-and-wait deadlock\index{Deadlock!hold-and-wait}[^fn-deadlock-scheduling-cycle] in which two jobs each hold half the cluster and neither can proceed. Its price is the whole allocation for as long as the cycle persists. At the scale of the chapter's reference workload, two `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU gangs that have each acquired `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs from a pool too small to complete either one burn about `{python} ClusterEconomicsContext.gang_idle_burn_str` per hour apiece. The limiting case is two jobs that each request the entire cluster, the example OpenAI used to motivate group admission (war story \ref{ws-fleet-orchestration-openai-gang-scheduling}). On the `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster, a deadlock that strands every device wastes `{python} ClusterEconomicsContext.cluster_hourly_cost_str` per hour at the chapter's rate while producing no progress for either job. Measured against the stake computed at the start of the chapter, raising utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` recovers about `{python} ClusterEconomicsContext.daily_gain_str` per day in equivalent capacity value, so about `{python} ClusterEconomicsContext.deadlock_hours_str` hours of such a deadlock erase a full day of that gain. Gang scheduling does not create the gain, but it protects it. For a rigid job $\RigidGangJob$ requiring $\DeviceCount$ GPUs, the scheduler must grant all $\DeviceCount$ GPUs atomically or leave the job queued without a partial allocation. This removes hold-and-wait for the resources covered by that allocation; it does not prevent later deadlocks in application code or auxiliary resources. Implementing atomic admission efficiently remains a central challenge in cluster scheduling algorithm design.
+The partial-allocation pattern is a hold-and-wait deadlock\index{Deadlock!hold-and-wait}[^fn-deadlock-scheduling-cycle] in which two jobs each hold half the cluster and neither can proceed. Its price is the whole allocation for as long as the cycle persists. At the scale of the chapter's reference workload, two `{python} ClusterEconomicsContext.gang_job_gpus_str`-GPU gangs that have each acquired `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs from a pool too small to complete either one burn about `{python} ClusterEconomicsContext.gang_idle_burn_str` per hour apiece. The limiting case is two jobs that each request the entire cluster, the example OpenAI used to motivate group admission (war story \ref{ws-fleet-orchestration-openai-gang-scheduling}). On the `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster, a deadlock that strands every device wastes `{python} ClusterEconomicsContext.cluster_hourly_cost_str` per hour at the chapter's rate while producing no progress for either job. Measured against the stake computed at the start of the chapter, raising utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` recovers about `{python} ClusterEconomicsContext.daily_gain_str` per day in equivalent capacity value, so about `{python} ClusterEconomicsContext.deadlock_hours_str` hours of such a deadlock erase a full day of that gain. Gang scheduling does not create the gain, but it protects it. For a rigid job $\RigidGangJob$ requiring $\DeviceCount$ GPUs, the scheduler must grant all $\DeviceCount$ GPUs atomically or leave the job queued without a partial allocation. This removes hold-and-wait for the resources covered by that allocation; it does not prevent later deadlocks in application code or auxiliary resources.
 
 [^fn-deadlock-scheduling-cycle]: **Hold-and-wait**\index{Deadlock!Coffman conditions}: One of the four Coffman conditions (mutual exclusion, hold-and-wait, no preemption, and circular wait), all of which must hold for deadlock to occur [@coffman1971]. Gang scheduling removes hold-and-wait through atomic allocation, which is why it prevents this deadlock by construction; the price is reduced packing flexibility.
 
 Naive gang scheduling is wasteful in predictable ways. Atomic allocation means the waiting job holds nothing, yet a large gang will never assemble if every freed GPU goes to a smaller job. The scheduler therefore places a **reservation**\index{Backfill Scheduling!reservation} for the job at the head of the queue, draining capacity toward it by declining to start new work on GPUs that the gang will need. If the cluster has `{python} ClusterEconomicsContext.gang_held_gpus_str` free GPUs and that job requests `{python} ClusterEconomicsContext.gang_job_gpus_str`, the reservation keeps the `{python} ClusterEconomicsContext.gang_held_gpus_str` GPUs idle until `{python} ClusterEconomicsContext.gang_missing_gpus_str` more become available, potentially wasting thousands of GPU-hours. Backfill scheduling\index{Backfill Scheduling!conservative backfilling}\index{Gang Scheduling!backfilling} addresses this by identifying jobs in the queue that can fit within the `{python} ClusterEconomicsContext.gang_held_gpus_str` available GPUs without delaying the large job's expected start time, an idea popularized in the ANL/IBM SP scheduling system [@lifka1995anlibm]. A 128-GPU job with an estimated runtime of 2 hours is a backfill candidate if the `{python} ClusterEconomicsContext.gang_missing_gpus_str` additional GPUs needed by the large job will remain unavailable for at least 2 hours. Protecting the reservation requires an enforced runtime bound or a preemption contract that releases the backfill allocation in time, including any checkpoint and cleanup delay. The estimate identifies an opportunity; the release contract makes the reservation enforceable.
 
 The accuracy of runtime estimates determines backfill effectiveness, and this creates a game-theoretic challenge. If users overestimate runtimes, fewer jobs appear to fit a backfill window. If they underestimate, the scheduler may need to preempt a backfilled job to honor the reservation, paying recovery costs and losing unsaved progress. A policy that kills jobs at their declared limit encourages conservative estimates. Tiresias [@gu2019tiresias], discussed in @sec-fleet-orchestration-tiresias, avoids duration estimates when setting priority by using observed resource consumption. That choice addresses ordering under uncertainty, while reservation protection still needs an enforced runtime bound or release contract that says when a backfilled job will give its capacity back.
-
-Gang scheduling removes the hold-and-wait deadlock, but another waiting pattern remains. Priority inversion can still strand reserved GPUs behind jobs that cannot finish their own exit path.
-
-::: {.column-margin}
-![](images/svg/fleet_orchestration_dependency_cascade.svg){width="100%" fig-alt="Priority inversion wait-for sketch: a high-priority job waits on a low-priority job holding GPUs, while medium-priority jobs starve the low-priority job's checkpoint exit path."}
-
-*Priority inversion is a wait-for chain, not a root-failure tree.*
-:::
 
 ### Deadlock prevention and detection {#sec-fleet-orchestration-deadlock}
 
@@ -1006,7 +935,7 @@ class ReferenceCheckpoint:
 
 Checkpoint bandwidth is the third constraint, because storage integration must account for the checkpoint storm of definition \ref{dfn-data-storage-checkpoint-storm}, in which many workers write large amounts of state together. Kubernetes PersistentVolumeClaims (PVCs) request capacity on a configured storage system but do not reserve checkpoint throughput. A `{python} ReferenceCheckpoint.job_gpus_str`-GPU training job writing the `{python} ReferenceCheckpoint.ckpt_tb_str` resumable checkpoint of the 175B model needs a measured write budget shared with other workloads. Backend bandwidth controls, client throttling, or staggered writes can limit interference; the platform must verify which controls the storage implementation enforces.
 
-Visibility into progress is the fourth. The **observability stack**\index{Observability Stack!definition} for training clusters combines general-purpose cluster monitoring with specialized hardware telemetry. Prometheus and Grafana provide the collection and visualization layer, while the Data Center GPU Manager (DCGM) exporter exposes granular GPU metrics: utilization, memory bandwidth, temperature, and ECC errors. These observations locate symptoms; correlating them with step progress, input waits, and communication traces distinguishes useful computation from stalls. Identifying which dependency limits a training job takes that correlation, not a utilization dashboard.
+Visibility into progress is the fourth. The **observability stack**\index{Observability Stack!definition} for training clusters combines general-purpose cluster monitoring (commonly Prometheus and Grafana) with accelerator telemetry such as the Data Center GPU Manager (DCGM) exporter, which reports utilization, memory bandwidth, temperature, and ECC errors. These observations locate symptoms. Correlating them with step progress, input waits, and communication traces is what distinguishes useful computation from stalls and identifies which dependency limits a training job.
 
 ::: {.column-margin .margin-pointer}
 ↪ Fleet telemetry across device, network, and facility levels, and the correlation that narrows a failure domain, is developed in @sec-ops-scale-fleet-telemetry.
@@ -1016,9 +945,7 @@ The `{python} ReferenceCheckpoint.job_gpus_str`-GPU pretraining run for our 175B
 
 ### Paradigm trade-offs and selection criteria {#sec-fleet-orchestration-paradigm-choice}
 
-Selecting a control plane requires matching its allocation and recovery contract to the workload mix. Rigid training groups need reliable atomic placement and checkpoint-aware interruption; serving replicas need readiness checks and continuous recovery. Existing operational expertise and the cost of running a second control plane also shape the choice. A fleet dedicated to long, homogeneous training runs that use bare-metal collectives, operated by a team fluent in batch scheduling, gains most from Slurm's authoritative allocation and mature fair-share. A fleet that mixes training with always-on serving, and already runs cloud-native deployment and observability tooling, gains more from Kubernetes with a gang-admission layer added for its rigid jobs. The comparison that follows separates those requirements before the hybrid designs show how to divide ownership between systems.
-
-The Slurm vs. Kubernetes trade-off\index{Slurm!vs. Kubernetes} organizes around the dimensions most relevant to ML workloads (@tbl-fleet-orchestration-paradigm-comparison).
+Selecting a control plane requires matching its allocation and recovery contract to the workload mix. Rigid training groups need reliable atomic placement and checkpoint-aware interruption; serving replicas need readiness checks and continuous recovery. Existing operational expertise and the cost of running a second control plane also shape the choice. A fleet dedicated to long, homogeneous training runs that use bare-metal collectives, operated by a team fluent in batch scheduling, gains most from Slurm's authoritative allocation and mature fair-share. A fleet that mixes training with always-on serving, and already runs cloud-native deployment and observability tooling, gains more from Kubernetes with a gang-admission layer added for its rigid jobs. The Slurm vs. Kubernetes trade-off\index{Slurm!vs. Kubernetes} organizes around the dimensions most relevant to ML workloads (@tbl-fleet-orchestration-paradigm-comparison).
 
 | **Dimension**                    | **Slurm**                                                                                                   | **Kubernetes**                                                                                                                  |
 |:---------------------------------|:------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------|
@@ -1143,7 +1070,7 @@ class FleetTopologyInterconnect:
     xfer_slowdown_mult_str = fmt_multiple(xfer_slowdown, precision=0, commas=False)
 ```
 
-Modern GPU clusters exhibit a multi-level communication hierarchy, with different bandwidth and latency budgets across placement domains. This hierarchy is not an implementation detail that the scheduler can ignore; it is a physical constraint that affects training throughput for communication-intensive workloads. Understanding the hierarchy is essential for making placement decisions that translate allocated resources into useful work.
+Modern GPU clusters exhibit a multi-level communication hierarchy, with different bandwidth and latency budgets across placement domains. The hierarchy is a physical constraint on the training throughput of communication-intensive workloads, so placement decisions must account for it to turn allocated resources into useful work.
 
 Within a single node, GPUs communicate via NVLink\index{NVLink!topology-aware scheduling}, providing `{python} FleetTopologyInterconnect.nvlink_a100_gb_per_s_str` aggregate bidirectional bandwidth (`{python} FleetTopologyInterconnect.nvlink_a100_perdir_gb_per_s_str` per direction) per GPU on A100 systems and `{python} FleetTopologyInterconnect.nvlink_h100_gb_per_s_str` (`{python} FleetTopologyInterconnect.nvlink_h100_perdir_gb_per_s_str` per direction) on H100 systems. This high-bandwidth, low-latency interconnect enables efficient tensor parallelism, where matrix operations are split across GPUs that must exchange intermediate results (activations and gradients) at every transformer layer. Whether these exchanges overlap computation depends on the tensor sizes and execution schedule; high local bandwidth improves the budget but does not guarantee near-ideal scaling.
 
@@ -2306,7 +2233,7 @@ Consider training a `{python} SpotTrainingEconomics.model_params_b_str` paramete
 
 **Savings**: `{python} SpotTrainingEconomics.savings_str` (`{python} SpotTrainingEconomics.savings_pct_str`), at the cost of approximately `{python} SpotTrainingEconomics.longer_pct_str` longer wall-clock time.
 
-The economics are compelling when fault tolerance infrastructure is already in place. Without checkpointing, a single interruption forces restart from scratch, potentially wasting days of compute and negating all savings.
+These savings assume fault tolerance infrastructure is already in place. Without checkpointing, a single interruption forces restart from scratch, potentially wasting days of compute and negating all savings.
 
 :::
 
@@ -2318,15 +2245,11 @@ These decisions require the scheduler to model both the time-value of computatio
 
 Production systems can define **cost policies**\index{Cost Policy!definition} per workload class that encode these trade-offs as configuration rather than requiring per-decision human judgment. One policy places steady inference demand on reserved capacity and maintains ready replicas to meet its latency target; the reservation alone does not guarantee application availability or latency. Large training runs can combine a reserved minimum viable allocation with interruptible elastic expansion, requesting on-demand replacements when a deadline justifies the cost and capacity is available. Exploratory workloads with flexible deadlines can use spot capacity while accepting interruptions and variable completion times. These assignments express the organization's priorities rather than a universal mapping from workload type to purchasing tier.
 
-The scheduler does not implement the organization's financial accounting system. It consumes the resulting price and policy signals: the marginal price of each capacity tier, the reservation a project may claim, the interruption risk it may accept, and the deadline it must meet. Showback, chargeback, and attribution belong to that accounting system; the scheduler uses their outputs only to rank feasible scheduling actions.
+The scheduler does not implement the organization's financial accounting system. It consumes the resulting price and policy signals: the marginal price of each capacity tier, the reservation a project may claim, the interruption risk it may accept, and the deadline it must meet. Showback, chargeback, and attribution belong to that accounting system; the scheduler uses their outputs only to rank feasible scheduling actions. Lifecycle total cost of ownership (TCO) reaches the scheduler the same way, as per-resource opportunity costs and constraints that record whether capacity is owned, reserved, on demand, or interruptible, rather than as a scheduling mechanism.
 
 ::: {.column-margin .margin-pointer}
 ↪ Tag-based cost attribution, shared-cost allocation, and chargeback are developed in @sec-ml-operations-scale-cost-visibility-attribution-3f3a.
 :::
-
-### Total cost of ownership integration {#sec-fleet-orchestration-tco}
-
-Total cost of ownership (TCO) determines the price signals exposed to the scheduler, but it is not itself a scheduling mechanism. The orchestrator needs only the resulting per-resource opportunity costs and policy constraints, including whether capacity is owned, reserved, on demand, or interruptible.
 
 ::: {.column-margin .margin-pointer}
 ↪ The lifecycle TCO framework, which combines training, inference, data, and iteration costs, is developed in @sec-ml-operations-scale-ml-systems-tco-framework-b980.
@@ -2422,13 +2345,7 @@ The comparison in @tbl-fleet-orchestration-scheduler-comparison links each polic
 
 : **Custom ML Scheduler Comparison**: A taxonomy of research schedulers based on the specific workload characteristic they exploit. Tiresias uses attained-service accounting, Gandiva profiles iterations, Themis estimates relative finish times and placement effects, and Pollux models goodput under allocation and batch-size changes. {#tbl-fleet-orchestration-scheduler-comparison}
 
-The table separates policies by what the platform must observe and control. Attained-service scheduling can work from accounting records, while iteration-aware sharing needs reliable timing profiles. Adaptive goodput policies require the training loop to accept allocation and batch-size changes. Additional control creates additional failure modes: inaccurate profiles can increase interference, and inaccurate learning-progress models can choose allocations that fail to improve convergence.
-
-For our 175B parameter model, the practical distinction is whether the runtime supports those interventions at an acceptable transition cost. A policy that only changes queue priority needs less training-loop integration than one that resizes the execution group. The production discussion that follows evaluates that integration against the fleet's topology and recovery requirements.
-
-The common lesson is to match the policy signal to the scheduling objective. Attained service addresses runtime uncertainty, iteration boundaries expose cheaper opportunities to interrupt work, normalized finish time measures unequal delay, and goodput couples resource allocation to learning progress. Only the goodput-based policy models convergence, and only the iteration-aware one lowers the cost of interrupting work. A platform should test the chosen policy against queue delay, starvation risk, and measured recovery cost before adopting it.
-
-The challenge for production systems is incorporating these insights while maintaining the operational reliability, policy flexibility, and organizational governance that production environments require. Production platforms usually adopt scheduler ideas selectively because reliability, governance, heterogeneous hardware, and user policy constrain pure research designs.
+The common lesson is to match the policy signal to the scheduling objective. Attained service addresses runtime uncertainty and can work from accounting records. Iteration boundaries lower the cost of interrupting work but need reliable timing profiles. Normalized finish time measures unequal delay, and goodput couples resource allocation to learning progress, which requires the training loop to accept allocation and batch-size changes. Each added control creates a failure mode of its own: inaccurate profiles can increase interference, and an inaccurate learning-progress model can choose allocations that fail to improve convergence. A platform should therefore test the chosen policy against queue delay, starvation risk, and measured recovery cost before adopting it.
 
 ### From research to production {#sec-fleet-orchestration-research-to-production}
 
@@ -2584,7 +2501,7 @@ Using the same conservative admission budget, consider an A100 GPU with a `{pyth
 
 This density introduces interference\index{Interference!GPU sharing}. When two workloads share execution and memory resources through MPS, their demands can overlap on SMs and memory bandwidth. A compute-bound model paired with a memory-bound model is a candidate for complementary placement because, in isolation, each saturates a different resource, but the bottleneck labels describe isolated behavior, not a guarantee of compatibility. Both workloads still use multiple resources, and concurrent demand can change the limiting resource. The scheduler must measure the pair's throughput and tail latency across its expected load range before treating memory density as usable capacity.
 
-For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B parameter model requires about `{python} GpuSharingDensity.large_weights_gb_str` just for FP16 weights; with the `{python} GpuSharingDensity.a100_mem_gb_str` per-device admission budget that means at least `{python} GpuSharingDensity.min_gpus_large_str` GPUs before KV cache, activation buffers, runtime workspace, and tensor-parallel granularity are included. In practice, an 8-GPU tensor-parallel replica is the cleaner scheduling unit and is a candidate for exclusive access. Conversely, the dozens of 1B to 7B parameter support models, such as toxicity classifiers, query embedding encoders, and auxiliary generation models, are prime candidates for sharing. Packing these smaller models onto shared "utility nodes" liberates high-performance clusters for the heavy lifting of foundation model inference.
+For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B parameter model requires about `{python} GpuSharingDensity.large_weights_gb_str` just for FP16 weights; with the `{python} GpuSharingDensity.a100_mem_gb_str` per-device admission budget that means at least `{python} GpuSharingDensity.min_gpus_large_str` GPUs before KV cache, activation buffers, runtime workspace, and tensor-parallel granularity are included. In practice, an 8-GPU tensor-parallel replica is the cleaner scheduling unit and is a candidate for exclusive access. Conversely, the dozens of 1B to 7B parameter support models, such as toxicity classifiers, query embedding encoders, and auxiliary generation models, are candidates for sharing. Packing these smaller models onto shared utility nodes frees the high-performance nodes for foundation-model replicas.
 
 ```{python}
 #| echo: false
@@ -2992,7 +2909,7 @@ The resulting `{python} PreemptionTax.recovery_duration_min_attr_str` tax combin
 
 ### Resource accounting and observability {#sec-fleet-orchestration-resource-accounting}
 
-The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible: the lights are on, but the fans are quiet. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
+The 64 GPUs that sat idle for a weekend because a researcher forgot to cancel a reservation represent invisible waste in a multi-tenant cloud fleet. In a dedicated cluster, such waste is at least visible to the team that owns the hardware. In a shared environment, the cost is hidden and compounds across thousands of jobs. Effective governance requires moving beyond simple "allocation" metrics to a tiered accounting model that distinguishes between what was requested, what was used, and what was useful.
 
 Three tiers of measurement expose this gap between requested hardware and actual progress. Allocated capacity counts resources reserved for a job. Compute utilization measures hardware activity under a stated counter definition, which can include communication kernels or work later replayed. Productive utilization requires a workload-level measure of retained training progress or serving work that meets its objective, normalized to a declared reference rate. For example, a team allocated 500 GPUs might average 350 active-device equivalents (70 percent activity) while delivering 280 device-equivalents of useful work at the reference rate (56 percent of its allocation). These are time-averaged equivalents, not necessarily distinct sets of active and productive devices. The gap motivates profiling; it does not identify its cause or imply that necessary communication and recovery can all be eliminated.
 
@@ -3016,7 +2933,7 @@ Each tier narrows the investigation. Low allocated utilization\index{Utilization
 
 ### Security and namespace isolation {#sec-fleet-orchestration-security-isolation}
 
-Multi-tenancy requires both fair resource allocation and security isolation to prevent teams from interfering with or observing each other's workloads. The stakes are real: ML models represent significant intellectual property, training data may contain sensitive information subject to privacy regulations, and the models themselves may encode proprietary business logic. Without proper isolation, a compromised or misconfigured workload in one team's namespace could access another team's model weights, training data, or inference traffic.
+Multi-tenancy requires both fair resource allocation and security isolation to prevent teams from interfering with or observing each other's workloads. ML models represent significant intellectual property, training data may contain sensitive information subject to privacy regulations, and the models themselves may encode proprietary business logic. Without proper isolation, a compromised or misconfigured workload in one team's namespace could access another team's model weights, training data, or inference traffic.
 
 In Kubernetes environments, namespace separation provides an administrative boundary that must be reinforced by host, device, network, and storage controls. Role-based access control can restrict a team's Kubernetes API operations, including job submission and access to pod logs, within its namespaces. Model artifacts in external storage require their own authorization policies, and cluster-wide scheduling controls require appropriately scoped permissions. Each boundary needs its own enforcement beyond namespace ownership.
 
@@ -3026,7 +2943,7 @@ Network policies restrict permitted traffic when the installed network plugin en
 ↩ Fabric-level isolation, through virtual lanes and traffic classes that keep one job's bursts from stretching another job's collectives, is established in @sec-network-fabrics-qos.
 :::
 
-Across teams, the isolation spectrum of @tbl-gpu-virtualization-isolation-spectrum becomes a trust-boundary choice, because colocated workloads now belong to owners with different exposure to one another. Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In sensitive environments, MIG or dedicated devices can strengthen device-resource isolation, but neither creates a complete external-tenant security boundary by itself. A multi-tenant platform combines device partitioning with VM or container isolation, IOMMU configuration, driver and runtime hardening, authentication and authorization, and network and storage controls. Single-organization workloads with a narrower trust boundary can use MPS or time-slicing when weaker fault and performance isolation is acceptable.
+Across teams, the isolation spectrum of @tbl-gpu-virtualization-isolation-spectrum becomes a trust-boundary choice, because colocated workloads now belong to owners with different exposure to one another. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In sensitive environments, MIG or dedicated devices can strengthen device-resource isolation, but neither creates a complete external-tenant security boundary by itself. A multi-tenant platform combines device partitioning with VM or container isolation, IOMMU configuration, driver and runtime hardening, authentication and authorization, and network and storage controls. Single-organization workloads with a narrower trust boundary can use MPS or time-slicing when weaker fault and performance isolation is acceptable.
 
 ::: {.column-margin .margin-pointer}
 ↪ The attack surface of shared accelerators, and which sharing mechanisms leave co-resident tenants observable to one another, is developed in @sec-security-privacy-shared-accelerators.
@@ -3072,8 +2989,6 @@ class QuotaHoardingCost:
     hoarding_weeks_str = fmt_time(weeks, "week", precision=0, commas=False, style="word")
 ```
 
-A concrete quota scenario shows how quickly idle reservations become expensive.
-
 ::: {#exmp-fleet-orchestration-quota-hoarding .callout-example title="Quota hoarding"}
 
 **Scenario**: A research team reserves a static block of `{python} QuotaHoardingCost.hoarding_gpus_str` GPUs for an upcoming model refresh.
@@ -3084,7 +2999,7 @@ A concrete quota scenario shows how quickly idle reservations become expensive.
 
 :::
 
-The "use it or lose it" reclamation policy addresses the most visible symptom of quota hoarding, but it raises a second-order question: when idle capacity is lent to another team, the system must distinguish borrowed capacity (preemptible on short notice) from guaranteed reservations (protected by SLOs). Defining borrowing, preemption, and guaranteed tiers as first-class policy primitives is the core multi-tenancy design decision.
+The "use it or lose it" reclamation policy addresses the most visible symptom of quota hoarding, but lending idle capacity to another team requires the system to distinguish borrowed capacity (preemptible on short notice) from guaranteed reservations (protected by SLOs). Defining borrowing, preemption, and guaranteed tiers as first-class policy primitives is the core multi-tenancy design decision.
 
 ::: {#chk-fleet-orchestration-multi-tenancy-design-decisions .callout-checkpoint title="Multi-tenancy design decisions"}
 
@@ -3096,11 +3011,11 @@ Consider a 2,000-GPU cluster shared between a research team (60 percent allocati
 
 :::
 
-Even with isolation, quotas, and dynamic sharing in place, the cluster can still fall victim to systemic bottlenecks that defy simple monitoring. When utilization drops inexplicably despite full queues, operators must move from dashboards to systematic utilization debugging.
+Even with isolation, quotas, and dynamic sharing in place, a cluster can report low utilization beside a full queue, and its dashboards rarely explain why. Locating that loss requires systematic utilization debugging.
 
 ## Debugging Cluster Utilization {#sec-fleet-orchestration-debugging}
 
-A cluster dashboard shows average GPU utilization stuck at 60 percent, yet developers complain about three-day queue times for small debugging jobs. Hundreds of GPUs sit idle, but no jobs are starting. Bridging this gap between theoretical capacity and production reality requires methodical forensic analysis to untangle the interactions between hardware topology, scheduler policies, and user behavior. Part of the paradox is the queueing arithmetic of notebook \ref{nbk-fleet-orchestration-queuing-theory-gpu-clusters}. The $\ServingUtilization/(1-\ServingUtilization)$ factor grows without bound as offered load approaches service capacity, so mean wait rises gently through moderate load and then steeply above 80 percent for small, mixed, and large workloads alike (@fig-utilization-paradox, plotted on a logarithmic scale). The curves use the notebook's exponential reference case ($\ServiceTimeVariationCoefficient= 1$), so they are the gentlest version of the effect. A mixed ML queue with the notebook's representative $\ServiceTimeVariationCoefficient= 3$ multiplies every curve by the larger variability factor, shifting each one upward without changing where it bends. The curves also describe offered service load rather than allocated or kernel-active GPU percentages, and their 75 percent headroom marker is an illustrative choice rather than a universal cluster threshold. Queueing explains why a busy fleet waits. A fleet whose queue is full while devices sit idle is waiting for a different reason, and finding it requires looking past the dashboard.
+A cluster dashboard shows average GPU utilization stuck at 60 percent, yet developers complain about three-day queue times for small debugging jobs. Hundreds of GPUs sit idle, but no jobs are starting. Explaining the gap requires tracing the interactions among hardware topology, scheduler policies, and user behavior. Part of the paradox is the queueing arithmetic of notebook \ref{nbk-fleet-orchestration-queuing-theory-gpu-clusters}. The $\ServingUtilization/(1-\ServingUtilization)$ factor grows without bound as offered load approaches service capacity, so mean wait rises gently through moderate load and then steeply above 80 percent for small, mixed, and large workloads alike (@fig-utilization-paradox, plotted on a logarithmic scale). The curves use the notebook's exponential reference case ($\ServiceTimeVariationCoefficient= 1$), so they are the gentlest version of the effect. A mixed ML queue with the notebook's representative $\ServiceTimeVariationCoefficient= 3$ multiplies every curve by the larger variability factor, shifting each one upward without changing where it bends. The curves also describe offered service load rather than allocated or kernel-active GPU percentages, and their 75 percent headroom marker is an illustrative choice rather than a universal cluster threshold. Queueing explains why a busy fleet waits. A fleet whose queue is full while devices sit idle is waiting for a different reason, and finding it requires looking past the dashboard.
 
 ::: {#fig-utilization-paradox fig-env="figure" fig-pos="htb" fig-cap="**The utilization paradox**: As cluster utilization approaches saturation (100 percent), job wait times increase hyperbolically and diverge near saturation, not linearly. The shaded region above 80 percent and the dashed 75 percent target illustrate headroom choices in this toy queue model, not measured GPU-utilization thresholds. Real queue delay also depends on job sizes, gang constraints, and arrival variability." fig-alt="Semi-log plot of toy-queue wait time vs. offered service load relative to capacity. Three directly labeled curves for small, mixed, and large jobs. Wait times explode near 100 percent. An illustrative high-load region is shaded above 80 percent. A dashed line shows an assumed headroom target at 75 percent."}
 
@@ -3368,7 +3283,7 @@ This principle connects scheduling mechanics to fleet governance. Technical poli
 
 ## Fallacies and Pitfalls {#sec-fleet-orchestration-fallacies}
 
-Those policy-infrastructure mismatches recur as a small set of misconceptions that can make an apparently healthy scheduler waste expensive fleet capacity. It is tempting to look at a cluster running at 98 percent utilization and declare victory, only to discover that researchers have stopped submitting jobs entirely because wait times have stretched into weeks. Each misconception below follows the same pattern, in which optimizing one visible metric degrades the outcome the fleet exists to deliver.
+Those policy-infrastructure mismatches recur as a small set of misconceptions that can make an apparently healthy scheduler waste expensive fleet capacity. A cluster running at 98 percent utilization can look healthy while researchers have stopped submitting jobs because wait times have stretched into weeks. Each misconception below follows the same pattern, in which optimizing one visible metric degrades the outcome the fleet exists to deliver.
 
 ::: {.fallacy-pitfall}
 
@@ -3482,11 +3397,11 @@ A high allocated-GPU percentage does not establish that the cluster has enough h
 
 :::
 
-Recognizing these fallacies prevents platform teams from chasing false optimizations that look good on dashboards but degrade developer velocity. The core orchestration principles that successfully navigate these trade-offs share a common thread: they treat scheduling as an engineering discipline, not an administrative function.
+Recognizing these fallacies keeps platform teams from optimizations that improve a dashboard metric while delaying the work the fleet exists to complete.
 
 ## Summary {#sec-fleet-orchestration-summary}
 
-Fleet orchestration transforms raw data center capacity into productive ML infrastructure by governing how silicon, bandwidth, and state interact across time and space. Orchestration spends Coordination, the third axis of C³, so that Compute and Communication capacity turn into useful progress. In Fleet Law terms (@eq-fleet-law), placement sets the communication term $\CommunicationTime(\DeviceCount)$ of every step, and preemption and recovery, amortized over the run, enter the coordination term $\SynchronizationTime(\DeviceCount)$. Queue wait and gang admission are coordination costs too, but they delay the first step rather than lengthening any step, so they appear in end-to-end completion time rather than in the per-step law. Multi-tenancy and quota policy decide how much of that time allocated compute spends doing useful work. Hardware capability sets the feasible choices; the scheduler turns those choices into useful allocations by preserving ownership, coordinating recovery, and matching placement to workload demand.
+Fleet orchestration turns data center capacity into useful ML work by deciding which jobs hold which accelerators, where, and for how long. Orchestration spends Coordination, the third axis of C³, so that Compute and Communication capacity turn into useful progress. In Fleet Law terms (@eq-fleet-law), placement sets the communication term $\CommunicationTime(\DeviceCount)$ of every step, and preemption and recovery, amortized over the run, enter the coordination term $\SynchronizationTime(\DeviceCount)$. Queue wait and gang admission are coordination costs too, but they delay the first step rather than lengthening any step, so they appear in end-to-end completion time rather than in the per-step law. Multi-tenancy and quota policy decide how much of that time allocated compute spends doing useful work. Hardware capability sets the feasible choices; the scheduler turns those choices into useful allocations by preserving ownership, coordinating recovery, and matching placement to workload demand.
 
 Feasibility is the first filter. Gang size, topology locality, multi-dimensional fit, and accelerator compatibility decide which allocations a job can actually run, and only then can a fairness policy choose among them (principle \ref{pri-feasibility-before-fairness}). Quota borrowing extends the same reasoning across teams, since a guarantee is worth what the platform can reclaim within its response-time objective rather than the number printed on the quota.
 
