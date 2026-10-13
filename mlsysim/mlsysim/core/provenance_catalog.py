@@ -2306,3 +2306,15 @@ SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
     ),
     verified="2026-09-29",
 )
+
+# --- Accelerator life cycle (2026-10-13) ---
+SCHNEIDER_TPU_LIFECYCLE_2025 = _lit(
+    "prov:schneider-tpu-lifecycle-2025",
+    "Schneider et al. (2025), Life-Cycle Emissions of AI Hardware: A Cradle-to-Grave Approach and Generational Trends",
+    url="https://arxiv.org/abs/2502.01671",
+    verified="2026-10-13",
+    notes=(
+        "First published AI-accelerator LCA (five TPU generations, extraction through disposal). "
+        "Abstract: compute carbon intensity (CCI) improves 3x from TPU v4i to TPU v6e."
+    ),
+)

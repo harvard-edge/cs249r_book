@@ -172,3 +172,99 @@ def test_ingest_inbox(tmp_path: Path):
     # Fabricated entry remains in inbox, references.bib remains untouched
     assert "@misc{fakeentry" in inbox_file.read_text(encoding="utf-8")
     assert bib_file.read_text(encoding="utf-8") == ""
+
+
+# --- bib reseal (2026-10-13) -------------------------------------------------
+
+_RESEAL_BIB = """@inproceedings{doe2024paper,
+  title = {Position: A study of {LLM} things},
+  author = {Doe, Jane and M\\k{a}dry, Aleksander and Alves da Costa, Theo},
+  year = {2024},
+  booktitle = {Proceedings of the 41st International Conference on Machine Learning (ICML)},
+  pages = {10--20},
+}
+"""
+
+
+def _reseal_repo(tmp_path: Path) -> Path:
+    (tmp_path / "bibs").mkdir()
+    (tmp_path / "bibs" / "references.bib").write_text(_RESEAL_BIB, encoding="utf-8")
+    old = {"doe2024paper": {"key": "doe2024paper", "entry_hash": "stale", "status": "verified",
+                            "details": {"source": "verified_web", "supersedes": "arXiv:0000.00000"}}}
+    (tmp_path / "bibs" / "manifest.json").write_text(json.dumps(old), encoding="utf-8")
+    return tmp_path
+
+
+def _resolved(**overrides):
+    evidence = {
+        "source": "verified_web",
+        "url": "https://proceedings.mlr.press/v235/doe24a.html",
+        "canonical_title": "Position: A study of LLM things",
+        "canonical_authors": ["Doe, Jane", "Madry, Aleksander", "Costa, Theo Alves da"],
+        "canonical_year": 2024,
+        "canonical_pages": "10--20",
+    }
+    evidence.update(overrides)
+    return {"key": "doe2024paper", "entry_type": "misc", "fields": {}, "evidence": evidence}
+
+
+def test_reseal_rerecords_hash_when_source_agrees(tmp_path: Path):
+    repo = _reseal_repo(tmp_path)
+    ok, msg, record = bib_gateway.reseal_entry(repo, "doe2024paper", _resolved(), "house style")
+    assert ok, msg
+    manifest = json.loads((repo / "bibs" / "manifest.json").read_text(encoding="utf-8"))
+    rec = manifest["doe2024paper"]
+    entry = bib_gateway.bib_lint.parse_bib(_RESEAL_BIB)[0][0]
+    assert rec["entry_hash"] == bib_gateway.compute_entry_hash(entry.raw)
+    assert rec["entry_type"] == "inproceedings"
+    assert rec["year"] == "2024"
+    assert rec["details"]["checked_fields"] == ["title", "author", "year", "pages"]
+    assert rec["details"]["supersedes"] == "arXiv:0000.00000"
+    assert rec["details"]["style_edit"] == "house style"
+
+
+def test_reseal_refuses_year_author_and_page_mismatch(tmp_path: Path):
+    repo = _reseal_repo(tmp_path)
+    before = (repo / "bibs" / "manifest.json").read_text(encoding="utf-8")
+    for bad in (
+        {"canonical_year": 2022},
+        {"canonical_authors": ["Doe, Jane", "Smith, Ann", "Costa, Theo"]},
+        {"canonical_pages": "11--20"},
+        {"canonical_title": "An entirely different paper about databases"},
+    ):
+        ok, msg, _ = bib_gateway.reseal_entry(repo, "doe2024paper", _resolved(**bad), "x")
+        assert not ok, bad
+    assert (repo / "bibs" / "manifest.json").read_text(encoding="utf-8") == before
+
+
+def test_reseal_dry_run_writes_nothing(tmp_path: Path):
+    repo = _reseal_repo(tmp_path)
+    before = (repo / "bibs" / "manifest.json").read_text(encoding="utf-8")
+    ok, _, record = bib_gateway.reseal_entry(repo, "doe2024paper", _resolved(), "x", dry_run=True)
+    assert ok and record["status"] == "verified"
+    assert (repo / "bibs" / "manifest.json").read_text(encoding="utf-8") == before
+
+
+def test_reseal_rejects_unknown_key(tmp_path: Path):
+    repo = _reseal_repo(tmp_path)
+    ok, msg, _ = bib_gateway.reseal_entry(repo, "missing2020key", _resolved(), "x")
+    assert not ok and "found 0" in msg
+
+
+def test_parse_citation_meta_highwire_tags():
+    page = (
+        '<meta name="citation_title" content="Position: Will we run out of data?">'
+        '<meta name="citation_author" content="Pablo Villalobos">'
+        '<meta content="Anson Ho" name="citation_author">'
+        '<meta name="citation_publication_date" content="2024/07/08">'
+        '<meta name="citation_firstpage" content="49523">'
+        '<meta name="citation_lastpage" content="49544">'
+        '<meta name="citation_conference_title" content="International Conference on Machine Learning">'
+    )
+    meta = bib_gateway.parse_citation_meta(page)
+    assert meta["title"] == "Position: Will we run out of data?"
+    assert meta["authors"] == ["Villalobos, Pablo", "Ho, Anson"]
+    assert meta["year"] == 2024
+    assert meta["pages"] == "49523--49544"
+    assert meta["venue"] == "International Conference on Machine Learning"
+    assert bib_gateway.parse_citation_meta("<html><title>x</title></html>") == {}

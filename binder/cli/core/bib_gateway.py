@@ -450,16 +450,20 @@ def fetch_url(
     req = urllib.request.Request(clean_url, headers={"User-Agent": UA})
     status_code = None
     page_title = ""
+    citation_meta: dict[str, Any] = {}
 
     for ctx in (SSL_CTX, FALLBACK_SSL_CTX):
         try:
             with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
                 status_code = resp.status
                 if status_code in (200, 301, 302, 307, 308):
-                    peek = resp.read(4096).decode("utf-8", errors="ignore")
+                    # 2026-10-13: read the whole <head> (not 4 KB) so the
+                    # citation_* meta tags publishers embed can be checked.
+                    peek = resp.read(262144).decode("utf-8", errors="ignore")
                     m = re.search(r"<title>(.*?)</title>", peek, re.I | re.S)
                     if m:
                         page_title = re.sub(r"\s+", " ", m.group(1)).strip()
+                    citation_meta = parse_citation_meta(peek)
                     break
         except urllib.error.HTTPError as e:
             status_code = e.code
@@ -486,18 +490,83 @@ def fetch_url(
     fields["note"] = f"Accessed: {time.strftime('%Y-%m-%d')}"
 
     key = custom_key or derive_citekey(final_author, final_year, final_title)
+    evidence: dict[str, Any] = {
+        "source": "verified_web",
+        "url": clean_url,
+        "domain": domain,
+        "page_title": page_title[:100],
+        "status_code": status_code,
+    }
+    # Publisher pages (PMLR, NeurIPS, ACM, IEEE, ...) carry Highwire citation_*
+    # meta tags; record them so `bib reseal` can check an edited entry's
+    # authors, year, and pages against the page instead of trusting overrides.
+    if citation_meta.get("title"):
+        evidence["canonical_title"] = citation_meta["title"]
+    if citation_meta.get("authors"):
+        evidence["canonical_authors"] = citation_meta["authors"]
+    if citation_meta.get("year"):
+        evidence["canonical_year"] = citation_meta["year"]
+    if citation_meta.get("pages"):
+        evidence["canonical_pages"] = citation_meta["pages"]
+    if citation_meta.get("venue"):
+        evidence["canonical_venue"] = citation_meta["venue"]
+    if citation_meta.get("doi"):
+        evidence["doi"] = citation_meta["doi"]
     return {
         "key": key,
         "entry_type": "misc",
         "fields": fields,
-        "evidence": {
-            "source": "verified_web",
-            "url": clean_url,
-            "domain": domain,
-            "page_title": page_title[:100],
-            "status_code": status_code,
-        },
+        "evidence": evidence,
     }
+
+
+def parse_citation_meta(html_text: str) -> dict[str, Any]:
+    """Extract Highwire ``citation_*`` meta tags (title, authors, year, pages, venue, DOI).
+
+    Authors come back as ``"Last, First"`` strings in page order. Returns ``{}``
+    when the page carries no citation metadata.
+    """
+    import html as _html
+
+    tags: dict[str, list[str]] = {}
+    for m in re.finditer(r"<meta\b[^>]*>", html_text, re.I):
+        tag = m.group(0)
+        name = re.search(r"""\bname\s*=\s*["']([^"']+)["']""", tag, re.I)
+        content = re.search(r"""\bcontent\s*=\s*["']([^"']*)["']""", tag, re.I)
+        if name and content and name.group(1).lower().startswith("citation_"):
+            value = re.sub(r"\s+", " ", _html.unescape(content.group(1))).strip()
+            tags.setdefault(name.group(1).lower(), []).append(value)
+    if not tags:
+        return {}
+
+    meta: dict[str, Any] = {}
+    if tags.get("citation_title"):
+        meta["title"] = tags["citation_title"][0]
+    authors = []
+    for name in tags.get("citation_author", []):
+        if "," in name:
+            authors.append(name)
+        else:
+            parts = name.split()
+            authors.append(f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) > 1 else name)
+    if authors:
+        meta["authors"] = authors
+    for date_tag in ("citation_publication_date", "citation_date", "citation_online_date"):
+        m_year = re.search(r"(19|20)\d\d", (tags.get(date_tag) or [""])[0])
+        if m_year:
+            meta["year"] = int(m_year.group(0))
+            break
+    first = (tags.get("citation_firstpage") or [""])[0]
+    last = (tags.get("citation_lastpage") or [""])[0]
+    if first and last:
+        meta["pages"] = f"{first}--{last}"
+    for venue_tag in ("citation_conference_title", "citation_journal_title", "citation_inbook_title"):
+        if tags.get(venue_tag):
+            meta["venue"] = tags[venue_tag][0]
+            break
+    if tags.get("citation_doi"):
+        meta["doi"] = tags["citation_doi"][0]
+    return meta
 
 
 # ----------------------------------------------------------------------
@@ -579,6 +648,151 @@ def add_entry(
         f.write("\n")
 
     return True, f"Successfully authenticated, added, and sealed @{metadata['entry_type']}{{{key}}}", manifest_record
+
+
+# ----------------------------------------------------------------------
+# Re-seal after a house-style edit
+# ----------------------------------------------------------------------
+
+def _surname_token(name: str) -> str:
+    """Last token of an author's family name, casefolded and diacritics-folded."""
+    import unicodedata
+
+    # The bibliography writes accents as LaTeX escapes (M\k{a}dry, J\"{u}rgen,
+    # {\i}); reduce each to its base letter before comparing with source names.
+    name = re.sub(r"\\([a-zA-Z]{1,2})\s*\{\s*([a-zA-Z])\s*\}", r"\2", name)
+    name = re.sub(r"\\[`'^\"~=.]\s*\{?\s*([a-zA-Z])\s*\}?", r"\1", name)
+    name = re.sub(r"\\(ss|ae|oe|aa|o|l|i|j)\b", r"\1", name, flags=re.I)
+    name = clean_str(name)
+    family = name.split(",")[0] if "," in name else (name.split()[-1] if name.split() else "")
+    tokens = family.split()
+    token = tokens[-1] if tokens else ""
+    folded = unicodedata.normalize("NFKD", token).encode("ascii", "ignore").decode("ascii")
+    return folded.casefold()
+
+
+def _entry_field(entry: Any, name: str) -> str:
+    field = entry.get(name)
+    return re.sub(r"\s+", " ", field.value).strip() if field else ""
+
+
+def compare_entry_to_source(entry: Any, resolved: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Check an edited bib entry's identity fields against freshly resolved source metadata.
+
+    Returns ``(checked, mismatches)``. A field is checked only when the source
+    reports it; the title must always be available. Authors must match the
+    source's list in order by surname (diacritics and particles folded), the
+    year and DOI must match exactly, and pages must match when both sides
+    report them.
+    """
+    evidence = resolved.get("evidence", {})
+    fields = resolved.get("fields", {})
+    checked: list[str] = []
+    mismatches: list[str] = []
+
+    src_title = evidence.get("canonical_title") or evidence.get("page_title") or fields.get("title", "")
+    entry_title = _entry_field(entry, "title")
+    if not src_title:
+        mismatches.append("title: the source reported no title to check against")
+    else:
+        checked.append("title")
+        sim = string_similarity(entry_title, src_title)
+        if sim < 0.9:
+            mismatches.append(f"title: similarity {sim:.2f} < 0.90 ({entry_title!r} vs {src_title!r})")
+
+    src_authors = evidence.get("canonical_authors") or []
+    if src_authors:
+        checked.append("author")
+        entry_authors = [a for a in re.split(r"\s+and\s+", _entry_field(entry, "author")) if a.strip()]
+        ours = [_surname_token(a) for a in entry_authors]
+        theirs = [_surname_token(a) for a in src_authors]
+        if ours != theirs:
+            mismatches.append(f"author: surnames {ours} vs source {theirs}")
+
+    src_year = evidence.get("canonical_year")
+    if src_year:
+        checked.append("year")
+        if _entry_field(entry, "year") != str(src_year):
+            mismatches.append(f"year: {_entry_field(entry, 'year')} vs source {src_year}")
+
+    src_doi = (evidence.get("doi") or fields.get("doi") or "").lower()
+    entry_doi = _entry_field(entry, "doi").lower()
+    if entry_doi and src_doi:
+        checked.append("doi")
+        if entry_doi != src_doi:
+            mismatches.append(f"doi: {entry_doi} vs source {src_doi}")
+    elif entry_doi:
+        mismatches.append("doi: the entry carries a DOI the source did not report")
+
+    src_pages = evidence.get("canonical_pages") or fields.get("pages") or ""
+    entry_pages = _entry_field(entry, "pages")
+    if src_pages and entry_pages:
+        checked.append("pages")
+        norm = lambda p: re.sub(r"\s*[-–]+\s*", "-", p)
+        if norm(entry_pages) != norm(src_pages):
+            mismatches.append(f"pages: {entry_pages} vs source {src_pages}")
+
+    return checked, mismatches
+
+
+def reseal_entry(
+    repo_root: Path,
+    key: str,
+    resolved: dict[str, Any],
+    note: str,
+    dry_run: bool = False,
+) -> tuple[bool, str, dict[str, Any] | None]:
+    """Re-verify an edited entry against its source and re-record it in the manifest.
+
+    This is the gateway path for a house-style edit to a sealed entry
+    (bib-check §8, *Editing a sealed entry*): ``bib add`` refuses existing keys,
+    so the edited entry is compared field by field with freshly resolved source
+    metadata, and the manifest record is rewritten only if every checked field
+    agrees. The entry text in ``references.bib`` is never modified here.
+    """
+    bib_path = repo_root / "bibs" / "references.bib"
+    manifest_path = repo_root / "bibs" / "manifest.json"
+    if not bib_path.is_file() or not manifest_path.is_file():
+        return False, "bibs/references.bib or bibs/manifest.json not found", None
+
+    entries, _ = bib_lint.parse_bib(bib_path.read_text(encoding="utf-8"))
+    matches = [e for e in entries if e.key == key]
+    if len(matches) != 1:
+        return False, f"expected exactly one @{{{key}}} in references.bib, found {len(matches)}", None
+    entry = matches[0]
+
+    checked, mismatches = compare_entry_to_source(entry, resolved)
+    if mismatches:
+        return False, "source disagrees with the entry: " + "; ".join(mismatches), None
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    previous = manifest.get(key) or {}
+    details = dict(resolved["evidence"])
+    for carried in ("supersedes", "discovered_doi"):
+        if carried in (previous.get("details") or {}) and carried not in details:
+            details[carried] = previous["details"][carried]
+    details["checked_fields"] = checked
+    details["style_edit"] = note
+
+    record = {
+        "key": key,
+        "file": "bibs/references.bib",
+        "entry_type": entry.entry_type,
+        "title": clean_str(_entry_field(entry, "title")),
+        "year": _entry_field(entry, "year"),
+        "entry_hash": compute_entry_hash(entry.raw),
+        "status": "verified",
+        "verified_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "details": details,
+    }
+    if dry_run:
+        return True, f"would re-seal @{entry.entry_type}{{{key}}} (checked: {', '.join(checked)})", record
+
+    manifest[key] = record
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return True, f"re-sealed @{entry.entry_type}{{{key}}} (checked: {', '.join(checked)})", record
 
 
 def ingest_inbox(
