@@ -46,9 +46,12 @@ class Workloads(Registry):
     GmailEmailsPerDay = sourced(
         121e9, pc.REFERENCE_WORKLOAD_SCALE,
         name="Gmail emails per day", description="Approximate daily Gmail volume.")
+    # 2026-10-13: was 8.5e9, a third-party web-counter estimate; now Google's own
+    # disclosure of more than 5 trillion searches a year, divided by 365.
     GoogleSearchesPerDay = sourced(
-        8.5e9, pc.REFERENCE_WORKLOAD_SCALE,
-        name="Google searches per day", description="Approximate daily Google search volume.")
+        13.7e9, pc.GOOGLE_SEARCH_VOLUME_2025,  # 5e12 / 365, rounded
+        name="Google searches per day",
+        description="Lower bound from Google's disclosure of more than 5 trillion searches a year (2025).")
     WaymoDataPerHourLow = sourced_qty(
         1 * TB / _hour, pc.REFERENCE_WORKLOAD_SCALE,
         name="Waymo sensor data rate (low)", description="Lower-bound AV sensor data generation rate.")

@@ -2318,3 +2318,10 @@ SCHNEIDER_TPU_LIFECYCLE_2025 = _lit(
         "Abstract: compute carbon intensity (CCI) improves 3x from TPU v4i to TPU v6e."
     ),
 )
+GOOGLE_SEARCH_VOLUME_2025 = _lit(
+    "prov:google-search-volume-2025",
+    "Srinivasan (2025), AI, personalization and the future of shopping (Google, The Keyword, 3 March 2025)",
+    url="https://blog.google/products/ads-commerce/ai-personalization-and-the-future-of-shopping/",
+    verified="2026-10-13",
+    notes="'We already see more than 5 trillion searches on Google annually.' Daily figure = 5e12 / 365, a lower bound.",
+)
