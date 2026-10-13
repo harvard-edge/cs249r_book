@@ -52,14 +52,13 @@ When an agent runs a shell command or a test script, what that code can touch is
 
 ::: {.callout-learning-objectives}
 
-- Apply the capability admission check and attenuation rule to bound what agent-run code can reach under a task grant
-- Select an execution envelope, including when an in-process check suffices, from reachable objects, worst-case cost, and system-call cost
-- Evaluate whether a fresh envelope per call or one per trajectory fits a workload from setup cost and useful work per call
+- Explain why containment must be enforced beneath the executing process, not inside the supervisor's interpreter
+- Apply the capability admission check, attenuation rule, and credential brokering to bound what agent-run code can reach under a task grant
+- Select an execution envelope and its per-call or per-trajectory lifetime from reachable objects, system-call cost, and setup cost
 - Calculate copy-on-write provisioning and first-modification cost for task-local workspaces
 - Diagnose disclosure channels that remain open under an egress policy, including name resolution
 - Specify a reset contract over execution, storage, network, and device state before an instance is reused
-- Calculate sandbox pool size, resident memory, standby reserve, and burst drain time from arrival rate, lease duration, and restore latency
-- Select a provisioning path and reserve for an agent workload by identifying whether residency or restore latency binds
+- Select a sandbox pool's standby reserve and provisioning path by calculating whether memory residency or restore latency binds
 
 :::
 ## The Reach of Admitted Code {#sec-vol3-sandboxes-admitted-reach}
@@ -222,7 +221,7 @@ The planted README payload is an instance of indirect prompt injection\index{Ind
 
 :::
 
-Both the Gemini CLI incident and the repository repair scenario exhibit three interlocking conditions: untrusted content steers the model's proposal, executing code can read sensitive local state, and an available communication channel can exfiltrate that data. Willison named this conjunction of private data, untrusted content, and external communication the *lethal trifecta* for agents [@willison2025lethal]. Severing any single leg breaks the exfiltration path, but a sandbox cannot sever the untrusted-content leg, because reading untrusted material such as a vendored README is often the task itself. It works on the other two. Denying read access and keeping credentials entirely outside the guest shrink the private data leg to what the task needs, and blocking egress removes the external communication leg. Exfiltration, however, is not the only failure mode. Local source code may itself be proprietary, and destructive workspace corruption or runaway compute loops require no network connectivity at all.
+Both the Gemini CLI incident and the repository repair scenario combine untrusted content that steers the proposal, sensitive local state the executing code can read, and a channel that can carry that state out. Willison named this conjunction the *lethal trifecta* for agents [@willison2025lethal], and @sec-vol3-security-lethal-trifecta develops it. A sandbox cannot remove the untrusted content, because reading a vendored README is often the task itself, but it can shrink what the code can read and block the routes out. Exfiltration, however, is not the only failure mode. Local source code may itself be proprietary, and destructive workspace corruption or runaway compute loops require no network connectivity at all.
 
 Sandbox design therefore begins by cataloging protected assets alongside legitimate execution requirements. For the code repair task, the runtime must provide a task-local source tree, necessary toolchains, and writable scratch space to execute test suites, while rigorously excluding the developer's home directory, SSH keys, unrelated repositories, and neighboring tenant files. Permitted external communication, such as package downloads or artifact publishing, requires explicit, scoped endpoints rather than open internet access. These constraints belong in enforced system configuration, not in natural language instructions asking the model to remain within bounds.
 
@@ -347,7 +346,11 @@ A ***capability***\index{Capability!definition} is an unforgeable reference that
 
 :::
 
-The two models differ in where authority comes from, how resources are named, and how authority is passed on and revoked (@tbl-vol3-ambient-vs-capability). For the README attack the decisive row is default reach: under ambient authority the injected command starts with everything the developer's identity can touch, including `~/.aws/credentials`; under capabilities it starts with nothing and holds only the references the task grant handed it.
+The goal both models serve is **least privilege**\index{Least privilege!definition}, the rule that each process holds only the authority its current task needs, so that a fault or an injected instruction can misuse no more than that task's grant. Ambient authority grants more than the task needs by default, and capabilities make the rule enforceable. The two models differ in where authority comes from, how resources are named, and how authority is passed on and revoked (@tbl-vol3-ambient-vs-capability). For the README attack the decisive row is default reach: under ambient authority the injected command starts with everything the developer's identity can touch, including `~/.aws/credentials`; under capabilities it starts with nothing and holds only the references the task grant handed it.
+
+::: {.column-margin .margin-pointer}
+↩ Least privilege applied to the separate operations on a job handle is established in @sec-vol3-tool-calling-async-escrow.
+:::
 
 | Dimension               | Ambient authority (identity and access control lists)         | Capability-based authority                                   |
 |:------------------------|:--------------------------------------------------------------|:-------------------------------------------------------------|
@@ -892,9 +895,9 @@ Furthermore, DNS resolution functions as an outbound signaling channel in its ow
 
 ### Disclosure through permitted channels {#sec-vol3-sandboxes-permitted-disclosure}
 
-Even when network filters, TLS proxies, destination allowlists, and operation grants function exactly as designed, sensitive data can still escape through permitted payload channels. Suppose an agent repair task is authorized to transmit automated diagnostic summaries to an internal issue tracker. The runtime enforces transport isolation, contacts only the approved tracking endpoint, and invokes the permitted `submit_report` operation. However, an adversarial instruction embedded in the input repository causes the agent model to append proprietary source files or environment variables into the diagnostic report. In this scenario, every structural containment boundary operates correctly, yet the payload discloses sensitive information beyond the task's intended scope.
+Even when network filters, TLS proxies, destination allowlists, and operation grants function exactly as designed, sensitive data can still escape through permitted payload channels. The `submit_report` request of @fig-vol3-threat-model reaches only the approved endpoint and invokes only the permitted operation, yet the injected instruction has placed proprietary source in the report, so every containment boundary holds while the payload discloses information beyond the task's intended scope.
 
-Mitigating disclosure through legitimate channels requires layered payload validation. The mediation layer should enforce strict schema constraints on outbound requests, limiting payloads to structured key-value pairs and restricting free-form text fields. Applying tight payload size limits prevents bulk exfiltration attempts. In addition, secret scanners and content inspectors embedded in the egress path can analyze outbound buffers for high-entropy strings, cryptographic keys, and recognized token formats before releasing requests upstream. Nevertheless, automated content scanning remains inherently heuristic; transformed source code, obfuscated strings, and subtle data encodings can bypass signature-based filters. A comprehensive defense requires combining structural payload restrictions with prompt-injection defenses and semantic policy enforcement.
+The containment side of the remedy is layered payload validation at the mediator. The mediation layer should enforce strict schema constraints on outbound requests, limiting payloads to structured key-value pairs and restricting free-form text fields. Applying tight payload size limits prevents bulk exfiltration attempts. In addition, secret scanners and content inspectors embedded in the egress path can analyze outbound buffers for high-entropy strings, cryptographic keys, and recognized token formats before releasing requests upstream. Nevertheless, automated content scanning remains inherently heuristic; transformed source code, obfuscated strings, and subtle data encodings can bypass signature-based filters. Deciding whether data derived from a private file may reach a permitted recipient at all is an information-flow question, which @sec-vol3-security-exfiltration takes up for permitted tools.
 
 Finally, outbound communication channels must adhere to strict temporal lifecycles. When a task execution lease expires, its corresponding network identity and authorization tokens must be revoked immediately. The sandbox runtime must terminate active TCP connections, reset virtual network interfaces, drop lingering keep-alive sockets, and abort pending brokered requests. Because network egress creates permanent external side effects that cannot be undone by rolling back local disk state, restoring an execution environment for subsequent tasks requires comprehensive network teardown alongside workspace sanitization.
 

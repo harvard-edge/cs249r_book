@@ -92,6 +92,10 @@ Observing that an agent failed reveals nothing about which subsystem broke. The 
 
 @Tbl-vol3-failure-taxonomy connects diagnostic findings to candidate system interventions and their corresponding learning objectives. Because multiple failure modes frequently overlap in production traces, engineers must evaluate each candidate intervention under realistic operating conditions. The sequence in which teams investigate and apply these remedies follows directly from their computational cost and operational reversibility.
 
+::: {.column-margin .margin-pointer}
+↩ Failure attribution, and the limit of what each finding shows, is established in @sec-vol3-postmortem-attribution.
+:::
+
 | Diagnostic finding                                                    | Direct system intervention to investigate                                | Possible learning use and its limit                                                                                                                 |
 |:----------------------------------------------------------------------|:-------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------|
 | A required fact was absent from the delivered context                 | Repair retrieval or assembly and preserve source and omission status     | Teach the model to recognize insufficient evidence and request it; weights cannot supply a reliable current fact that was never observed            |
@@ -398,7 +402,11 @@ During evaluation, an agent naturally receives problem descriptions and the runt
 
 Whenever new candidate fixtures enter the curation pipeline, automated ingestion checks compare them against reserved task groups using task identifiers, git commit histories, patch hashes, and structural syntax trees. Any fixture with ambiguous lineage routes directly to a quarantine queue for manual review rather than receiving a fresh, unvetted identifier. Applying redaction, variable renaming, or schema transformations does not break provenance; derived records always inherit their parent fixture's group assignment. If a post-hoc audit reveals that training data inadvertently leaked information about a final-test task, simply deleting the offending record from the data lake is insufficient. Because the leaked data is already baked into the model weights, the team must invalidate the current checkpoint, reassess all affected evaluation claims, and retrain from a clean corpus snapshot.
 
-Even when local split boundaries are airtight, pipelines remain vulnerable to **contamination**\index{Contamination!definition}\index{Benchmark contamination|see{Contamination}}: the prior appearance of evaluation tasks or solutions within the foundational model's pretraining web crawl.[^fn-contamination-benchmark-curation] Public benchmarks such as standard competitive programming suites or popular open-source repositories often suffer from pretraining contamination, rendering local zero-shot or few-shot claims suspect. To establish defensible evaluation claims, engineering organizations must develop private evaluation fixtures authored behind internal firewalls, audit repository commit timestamps against model training cutoffs, and explicitly document known data provenance.
+Even when local split boundaries are airtight, pipelines remain vulnerable to contamination\index{Contamination!private fixtures}\index{Benchmark contamination|see{Contamination}}: the prior appearance of evaluation tasks or solutions within the foundational model's pretraining web crawl.[^fn-contamination-benchmark-curation] Public benchmarks such as standard competitive programming suites or popular open-source repositories often suffer from pretraining contamination, rendering local zero-shot or few-shot claims suspect. To establish defensible evaluation claims, engineering organizations must develop private evaluation fixtures authored behind internal firewalls, audit repository commit timestamps against model training cutoffs, and explicitly document known data provenance.
+
+::: {.column-margin .margin-pointer}
+↩ Contamination is one form of the pre-trial leakage established in @sec-vol3-evaluation-gyms-leakage.
+:::
 
 [^fn-contamination-benchmark-curation]: **Benchmark Contamination**: Measurement validity degraded significantly when web-scale pretraining corpora grew to encompass public benchmarks, leading to models inadvertently trained directly on the test splits used to grade them [@sainz2023nlp]. Because foundational model providers rarely publish exhaustive token-level manifests of their pretraining data, downstream practitioners must rely on n-gram overlap probes and verbatim memorization heuristics to detect contamination. For an agent trajectory curation pipeline, the only robust defense is structural: maintain proprietary, internal fixtures whose code and solutions have never been published to the open internet, and clearly delineate which benchmark results rely on these private evaluations. \index{Contamination!benchmark}
 
@@ -559,15 +567,7 @@ The grading boundary established for evaluation applies with equal force during 
 
 Replacing the assertion generates a zero exit code from the test runner while leaving the concurrency bug untouched. In a robust cascade, this patch fails on two separate counts: the candidate diff violates the task's allowed-path policy (failing process condition $\text{chk}_{\text{proc}}$), and running the code against clean, unedited test harnesses reproduces the deadlock (failing outcome condition $\text{chk}_{\text{out}}$). An agent's self-reported success or passing local exit code must never override authoritative verifiers.
 
-::: {#dfn-test-tampering-defense .callout-definition title="Test-tampering defense"}
-
-***Test-tampering defense***\index{Test-tampering defense!definition} encompasses the architectural controls, permission boundaries, and isolation mechanisms that protect evaluation harnesses, test inputs, and verification results from modification or subversion by the candidate solution or the acting agent.
-
-1. **Significance**: It preserves the validity of the outcome predicate $\text{chk}_{\text{out}}$. Because downstream fine-tuning trains subsequent policy checkpoints on admitted trajectories, an undetected test bypass is actively reinforced across training iterations rather than isolated as an anomalous benchmark trial.
-2. **Distinction**: Tamper defense protects the integrity of the measurement, not its semantic breadth. A tamper-proof test suite still evaluates only what its assertions cover; verifying whether a passing solution generalizes appropriately remains the responsibility of the target suitability predicate $\text{chk}_{\text{target}}$.
-3. **Common pitfall**: Relying solely on in-tree file permissions or clean interpreter processes. If candidate code executes in the same operating-system container or environment as the test runner, it can manipulate runtime assertion hooks, spoof return codes, or inspect privileged test fixtures in memory.
-
-:::
+**Test-tampering defense**\index{Test-tampering defense!definition} is grader isolation applied to admission, the controls that keep test harnesses, test inputs, and verification results beyond the reach of the candidate and the acting agent, so that a pass recorded by $\text{chk}_{\text{out}}$ is a measurement rather than the candidate's own report. Because later checkpoints train on admitted trajectories, an undetected bypass is reinforced across training iterations rather than isolated as one anomalous benchmark trial. The defense protects the integrity of the measurement, not its breadth; a tamper-proof suite still evaluates only what its assertions cover, and whether a passing solution generalizes remains a question for the target suitability predicate $\text{chk}_{\text{target}}$.
 
 The failure modes that tamper defense addresses are not hypothetical; they have been documented in production frontier models during agentic training.
 
@@ -585,13 +585,7 @@ The failure modes that tamper defense addresses are not hypothetical; they have 
 
 :::
 
-Three defense-in-depth mechanisms place verifier execution beyond the reach of candidate code, extending containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) into the evaluation harness itself:
-
-1. *Out-of-tree test fixtures*: Authoritative evaluation tests reside strictly outside the candidate's writable workspace, mounted into the container as read-only volumes or injected by the supervisory harness only after the candidate repository snapshot is cryptographically hashed and frozen.
-2. *Protected-path manifests*: The supervisory pipeline computes the repository diff against the base commit and checks all modified files against a protected-path manifest. Any unauthorized modification to test suites, continuous integration configurations, or build dependencies immediately fails process predicate $\text{chk}_{\text{proc}}$, irrespective of the test runner's exit code.
-3. *Isolated runner supervision*: The test harness executes within a fresh container or sandboxed sub-process orchestrated by a supervisory daemon. Candidate code running in the application runtime cannot monkey-patch assertion libraries, overwrite runtime exception hooks, or capture testing tokens.
-
-Each mechanism is necessary, yet none alone is sufficient. Even with read-only file systems, untrusted code executed during evaluation could exhaust file descriptors, consume excessive memory, or exploit timing side channels to alter execution outcomes. Full execution isolation of the grading harness is therefore mandatory.
+The defense reuses the mechanisms of grader isolation, which extends containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) into the harness. Three of those mechanisms carry the admission decision. Out-of-tree test fixtures keep authoritative tests outside the candidate's writable workspace until its snapshot is hashed and frozen. Isolated runner supervision executes the harness in a fresh sandbox, where candidate code cannot patch assertion libraries or forge exit codes; a read-only mount alone is not enough, because code that runs beside the tests can still read them or interfere with the process that reports their result. A protected-path manifest binds the diff against the base commit to the process predicate, so any unauthorized change to test suites, continuous integration configuration, or build dependencies fails $\text{chk}_{\text{proc}}$ irrespective of the test runner's exit code.
 
 A task's patch-admission policy explicitly defines permitted edits, accommodating legitimate development workflows where tasks require adding regression tests or updating package manifests. Post-hoc audit logs record all execution telemetry but cannot substitute for preventative sandbox boundaries. Containment and authorization checks must always precede the execution of untrusted code, regardless of how other admission predicates are scheduled.
 
