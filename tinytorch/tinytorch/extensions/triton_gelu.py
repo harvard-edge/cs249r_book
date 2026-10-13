@@ -12,6 +12,38 @@ is tracked in git as-is and is not generated from src/.
 
 It needs PyTorch, Triton, and an NVIDIA GPU; TinyTorch itself never imports
 PyTorch. Without them, triton_fused_gelu computes the same formula in NumPy.
+
+Why fuse: computed as two operations, x + bias is written to GPU memory as a
+full intermediate tensor and then read back for the GELU, so each element
+crosses the memory bus four times (read x, write t, read t, write y) plus
+the small bias reads. Fused, it crosses twice (read x, write y): about half
+the traffic for an operation that is purely memory-bound, since a GELU does
+only a handful of FLOPs per element.
+
+How it works, end to end:
+
+1. Detect at import. If PyTorch and Triton import and a CUDA device is
+   present, _HAS_TRITON is True and the kernel is defined; otherwise every
+   call takes the NumPy path.
+2. Copy in. The inputs are moved to the GPU as torch tensors, and an output
+   buffer of the same shape is allocated there.
+3. Launch. Triton runs one program per block of BLOCK_SIZE = 1024 elements.
+   Each program loads its block of x (adjacent programs read adjacent
+   addresses, so the loads coalesce), loads the matching bias entries, keeps
+   x + bias and the whole GELU formula in registers, and stores only y.
+   Triton compiles the kernel for this GPU on the first launch.
+4. Copy out. .cpu() waits for the kernel and copies y back.
+
+The kernel computes tanh as 2 * sigmoid(2z) - 1, an exact identity, because
+tl.sigmoid is stable across Triton releases and the tanh import path is not.
+
+Forward only: the result is a new Tensor with no gradient history, so this is
+a benchmark path, not a drop-in activation for training.
+
+Try it: `tito milestone run 07` times triton_fused_gelu against your own
+Module 17 fused_gelu. Where to go next: fuse more of the layer, such as the
+matmul that feeds this activation, which is the idea behind FlashAttention's
+tiling.
 """
 
 import numpy as np

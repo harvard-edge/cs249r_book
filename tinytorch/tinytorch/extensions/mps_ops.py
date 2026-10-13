@@ -16,6 +16,34 @@ Apple GPU, mps_matmul falls back to np.matmul.
 Apple silicon shares one memory between CPU and GPU, so there is no PCIe copy,
 but .to("mps") and .cpu() still copy the data into and out of GPU-owned
 buffers. Those copies are part of what you measure when you time this.
+
+Read it as the contrast case among the examples: the other hardware
+extensions hand raw pointers to a kernel you can read (simd_ops.py through
+ctypes, triton_gelu.py as a Triton program), while this one calls a vendor
+library, torch.matmul on the MPS backend. You learn where offloading pays, not
+how the GPU kernel works.
+
+How it works, end to end:
+
+1. Detect at import. If PyTorch is installed and reports an MPS device,
+   _HAS_MPS is True; otherwise every call takes the NumPy path.
+2. Copy in. torch.from_numpy wraps the array without copying, and .to("mps")
+   copies it into a GPU-owned buffer.
+3. Run. torch.matmul queues the product on the Apple GPU.
+4. Copy out. .cpu() waits for the GPU and copies C back, and .numpy() hands it
+   to TinyTorch.
+
+Why size decides everything: a product of two n x n float32 matrices does 2n^3
+FLOPs and moves 3n^2 floats (12n^2 bytes), so it does n/6 FLOPs per byte
+moved. At n = 256 that is about 43 FLOP/byte and the copies dominate, so the
+GPU loses to the CPU; at n = 4096 it is about 683 and the GPU wins even with
+both copies. The extensions chapter measures both ends.
+
+Forward only: the result is a new Tensor with no gradient history, so this is
+a benchmark path, not a drop-in replacement for Tensor.matmul in training.
+
+Try it: `tito milestone run 07` times mps_matmul against your own Module 17
+kernels; time it yourself at n = 256 and n = 4096 to see the crossover.
 """
 
 import numpy as np

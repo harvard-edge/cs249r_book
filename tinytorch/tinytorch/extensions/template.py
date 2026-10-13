@@ -19,10 +19,17 @@ HOW TO BUILD YOUR OWN EXTENSION IN 5 STEPS:
    cp tinytorch/extensions/template.py tinytorch/extensions/my_extension.py
 
 3. IMPLEMENT THE EXTENSION CONTRACT:
-   - Systems Framing: Document the concrete hardware bottleneck (bandwidth, underflow, FLOPS).
+   - Systems Framing: Document the concrete hardware bottleneck (bandwidth, underflow, FLOPS),
+     as a number a reader could recompute, not an adjective.
    - Tensor Interoperability: If given `Tensor`, return `Tensor`. If given `ndarray`, return `ndarray`.
    - Autograd Transparency: Differentiable ops must provide forward & backward passes.
-   - Defensive Fallback: If custom compilers or GPUs are missing, fall back cleanly to NumPy.
+     Say which kind yours is. A hardware kernel that returns a plain Tensor(out)
+     cuts the graph: that is fine for a benchmark path (simd_matmul, mps_matmul),
+     but say so in its docstring rather than letting a reader find out in training.
+   - Defensive Fallback: If custom compilers or GPUs are missing, fall back cleanly to NumPy,
+     and make it possible to tell which path ran: a has_*() check, a *_build_info()
+     that says what was built and why not, and a warning (not silence) if a native
+     call fails at run time. A NumPy timing mistaken for a GPU one teaches the wrong lesson.
 
 4. CREATE UNIT TESTS:
    cp tests/extensions/test_template.py tests/extensions/test_my_extension.py
@@ -30,6 +37,29 @@ HOW TO BUILD YOUR OWN EXTENSION IN 5 STEPS:
 
 5. EXPORT PUBLIC SYMBOLS:
    Add your classes/functions to `tinytorch/extensions/__init__.py`.
+
+=============================================================================
+WRITE IT AS AN EXAMPLE, NOT JUST AS A FEATURE
+=============================================================================
+The extensions in this folder are read more often than they are called, so
+each one should teach. Model yours on simd_ops.py or lora.py:
+
+- A header comment saying it is hand-maintained (not exported from src/) and
+  what role it plays in the course.
+- A module docstring that answers, in order:
+    Why it exists: the bottleneck, with the number (bytes moved, FLOP/byte,
+      parameters trained, the smallest float16 value).
+    How it works, end to end: numbered steps a reader can follow through the
+      code, from the first call to the result.
+    What it leaves out: the simplification you made on purpose, and what the
+      production version does instead.
+    Where to go next: the natural follow-on project.
+    Try it: how a reader runs it and sees the effect (a milestone, a helper
+      that times it, or a snippet).
+- Comments at the lines where the systems idea lives (the atomic file
+  replace, the coalesced load, the no_grad block), saying why, not what.
+- Tests that pass on a machine without the hardware: cover the fallback path,
+  and check the native path against NumPy whenever it is available.
 =============================================================================
 """
 
@@ -123,6 +153,11 @@ class CustomGradientTransform:
 # =====================================================================
 # 4. Hardware / Kernel Hook with Automated Fallback (Silicon Boundary)
 # =====================================================================
+# This section shows the shape of the dispatch with a stand-in kernel. For the
+# real mechanics, build on simd_ops.py: compile on first use, write the library
+# with an atomic os.replace, load it with ctypes and declare argtypes, pass raw
+# pointers to contiguous float32 buffers, and report what was built through a
+# *_build_info() function so a reader can tell which path actually ran.
 
 def has_custom_hardware() -> bool:
     """Detect whether custom hardware runtime or compiled C++/CUDA kernel is available."""
