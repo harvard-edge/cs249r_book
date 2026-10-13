@@ -2,8 +2,11 @@
 """
 scripts/embed_all_72_micro_svgs.py
 
-Embeds all 72 standardized micro-SVGs into Volume III chapters (01 through 18)
-following the canonical Volume 1 / Volume 2 / Volume 4 margin figure standard.
+Embeds all 72 standardized micro-SVGs into Volume III chapters. Keys are the
+figure set's original chapter numbers; values are the folders that hold that
+content after the 2026-10 restructure (Security and Agent Evaluation have no
+entries in this set). It follows the canonical Volume 1 / Volume 2 / Volume 4
+margin figure standard.
 """
 
 from pathlib import Path
@@ -21,16 +24,16 @@ CHAPTER_FILES = {
     6: ("06_long_term_memory", "06_long_term_memory.qmd"),
     7: ("07_tool_calling", "07_tool_calling.qmd"),
     8: ("08_sandboxes", "08_sandboxes.qmd"),
-    9: ("09_agent_harness", "09_agent_harness.qmd"),
-    10: ("10_durable_execution", "10_durable_execution.qmd"),
-    11: ("11_failure_recovery", "11_failure_recovery.qmd"),
-    12: ("13_trajectory_curation", "13_trajectory_curation.qmd"),
-    13: ("14_fine_tuning", "14_fine_tuning.qmd"),
-    14: ("15_rlvr", "15_rlvr.qmd"),
-    15: ("16_multi_agent", "16_multi_agent.qmd"),
-    16: ("12_evaluation", "12_evaluation.qmd"),
-    17: ("17_agent_economics", "17_agent_economics.qmd"),
-    18: ("18_conclusion", "18_conclusion.qmd"),
+    9: ("10_agent_harness", "10_agent_harness.qmd"),
+    10: ("11_durable_execution", "11_durable_execution.qmd"),
+    11: ("12_failure_recovery", "12_failure_recovery.qmd"),
+    12: ("15_trajectory_curation", "15_trajectory_curation.qmd"),
+    13: ("16_fine_tuning", "16_fine_tuning.qmd"),
+    14: ("17_rlvr", "17_rlvr.qmd"),
+    15: ("18_multi_agent", "18_multi_agent.qmd"),
+    16: ("14_agent_operations", "14_agent_operations.qmd"),
+    17: ("19_agent_economics", "19_agent_economics.qmd"),
+    18: ("20_conclusion", "20_conclusion.qmd"),
 }
 
 # The 72 canonical micro-SVG specifications

@@ -3,16 +3,61 @@
 # edited directly here. It is the C++ SIMD matmul bridge for Milestone 07 (see cpp_simd_gemm.cpp),
 # a bundled reference point students time their own Module 17 kernels
 # against; no src/ module or student notebook exports to it.
-"""C++ SIMD Matrix Multiplication Bridge for TinyTorch.
+"""C++ SIMD Matrix Multiplication for TinyTorch: an example extension.
 
-Compiles the C++ kernels in cpp_simd_gemm.cpp on first use and calls them
-through ctypes. This is an optional, hand-written extension: it is tracked in
-git as-is and is not generated from src/.
+What it is: a matrix multiply and a fused bias + GELU written in C++
+(cpp_simd_gemm.cpp), compiled on your machine, and called from Python through
+ctypes with no binding framework in between. It is the reference example of
+the silicon boundary. Like every file in this folder, it is hand-written and
+tracked in git as-is, not generated from src/.
 
-The build is honest about what it produced. It tries OpenMP first, and if the
-compiler has no OpenMP runtime (Apple clang without Homebrew's libomp, for
-example) it builds the same kernel single-threaded. simd_build_info() says
-which one you got.
+Why it exists: a matrix multiply written as Python loops pays the interpreter
+on every multiply-add and runs at about 0.1 GFLOP/s. The same loops compiled
+and vectorized run two orders of magnitude faster. The extensions chapter
+measures each step.
+
+How it is triggered: only when you call it. Nothing in TinyTorch calls this
+file for you; Tensor.matmul never routes here.
+
+    from tinytorch.extensions import simd_matmul, simd_build_info
+    C = simd_matmul(A, B)         # A, B: NumPy arrays or Tensors
+    print(simd_build_info())      # what was built: OpenMP or not, threads
+
+    `tito milestone run 07` makes the same calls for you and times them
+    against your own Module 17 kernels.
+
+    On import:     nothing runs; no compiler is invoked.
+    On first call: _compile() runs the system C++ compiler and writes
+                   libtinytorch_simd.so next to the source. Later calls, in
+                   this process or a new one, reuse it until
+                   cpp_simd_gemm.cpp is edited.
+    On every call: one ctypes call into the library. If there is no compiler
+                   or the build fails, the same result comes from NumPy and
+                   simd_build_info()["error"] says why.
+
+How it works:
+
+1. Build. The flags let the compiler vectorize for this CPU (AVX2/FMA on x86;
+   NEON is always on for arm64). It tries OpenMP first, and if the compiler
+   has no OpenMP runtime (Apple clang without Homebrew's libomp, for example)
+   it builds the same kernel single-threaded.
+2. Load. ctypes.CDLL opens the library, and the argtypes lines declare each C
+   function's signature, so Python passes float pointers and ints exactly as
+   the C code expects them.
+3. Hand over the memory. simd_matmul makes A and B contiguous float32 arrays
+   (a no-op when they already are) and passes their raw pointers, plus a
+   NumPy buffer for C to be written into. Nothing is copied into C++.
+4. Run. The kernel tiles the product in 64 x 64 blocks, so the three tiles in
+   use (48 KB) stay in the L1 data cache, and orders its loops i, k, j so the
+   innermost loop walks contiguous rows the compiler can vectorize.
+
+What it leaves out: gradients. The result is a new Tensor with no gradient
+history, so this is a benchmark path, not a drop-in replacement for
+Tensor.matmul in a model you are training.
+
+Where to go next: make it differentiable (a Function whose backward is two
+more simd_matmul calls), or add register micro-tiling, which keeps a small
+block of C in vector registers across the K loop.
 """
 
 import ctypes
