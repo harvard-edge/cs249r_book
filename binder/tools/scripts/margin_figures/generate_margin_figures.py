@@ -1187,12 +1187,12 @@ def ch11_dls_knee():
 
 
 @margin("11_planning", "margin_replacement_latency_envelope", "budget-envelope",
-        sources=("PlanningReplacementLedger.t_age", ".t_sum", "PlanningLeaseRule.t_renew", ".t_lease"))
+        sources=("PlanningReplacementBudget.t_age", ".t_sum", "PlanningLeaseRule.t_renew", ".t_lease"))
 def ch11_replacement_latency_envelope():
     # Capture-to-dispatch age and capture-to-admission L against the renewal
     # period (slate limit) and the lease (mark). Not a hazard, so no red:
     # overlap of requests, not a stop, answers L > renewal.
-    R = lego("11_planning", "PlanningReplacementLedger")
+    R = lego("11_planning", "PlanningReplacementBudget")
     LR = lego("11_planning", "PlanningLeaseRule")
     age, L = mag(R.t_age, "millisecond"), mag(R.t_sum, "millisecond")
     renew, lease = mag(LR.t_renew, "millisecond"), mag(LR.t_lease, "millisecond")
@@ -1729,13 +1729,13 @@ def ch16_silent_proposer_strip():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chapter 17: Engineering Physical AI
+# Chapter 18: Engineering Physical AI (renumbered from 17 on 2026-10-13)
 # (2026-09-29 margins pass: replaces the dropped battery knee and the
 #  indistinguishability chain; the packaging-cell stop envelope was not added
-#  because @fig-17-packaging-cell panel (c) already draws both stops.)
+#  because @fig-18-packaging-cell panel (c) already draws both stops.)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@margin("17_frontier", "margin_friction_floor_deceleration_knee", "scale-anchor",
+@margin("18_frontier", "margin_friction_floor_deceleration_knee", "scale-anchor",
         sources=("OilFilm.a_brake", ".g", ".mu_min", ".mu_dry", ".mu_insp", ".mu_oil",
                  ".a_dry", ".a_insp", ".a_oil"))
 def ch17_friction_floor_knee():
@@ -1743,7 +1743,7 @@ def ch17_friction_floor_knee():
     # flat where the brake binds, a straight line through the origin where the
     # floor binds. Dots at the three floors the chapter names; the film is the
     # hazard (red), the dry floor sits on the flat part.
-    O = lego("17_frontier", "OilFilm")
+    O = lego("18_frontier", "OilFilm")
     acc = lambda q: mag(q, "meter / second ** 2")
     a_b, g = acc(O.a_brake), acc(O.g)
     mu_min, mu_dry, mu_insp, mu_oil = float(O.mu_min), float(O.mu_dry), float(O.mu_insp), float(O.mu_oil)
@@ -1775,14 +1775,14 @@ def ch17_friction_floor_knee():
                  f"{mu_insp:.2f}", f"{a_insp:.2f}", f"{mu_oil:.2f}", f"{a_oil:.2f}"]
 
 
-@margin("17_frontier", "margin_stop_time_overreserve_envelope", "budget-envelope",
+@margin("18_frontier", "margin_stop_time_overreserve_envelope", "budget-envelope",
         sources=("OilFilm.t_brake_aisle", ".t_brake_equiv", ".t_overreserve", ".t_latest"))
 def ch17_stop_time_overreserve():
     # The jerk-limited stop from the aisle speed: how long it lasts against the
     # time at unchanged speed its distance represents. The difference, what a
     # time-form deadline over-reserves (red), set beside the whole timing
     # allowance the spare distance buys (neutral).
-    O = lego("17_frontier", "OilFilm")
+    O = lego("18_frontier", "OilFilm")
     ms = lambda q: mag(q, "millisecond")
     t_b, t_eq, t_over, t_sp = ms(O.t_brake_aisle), ms(O.t_brake_equiv), ms(O.t_overreserve), ms(O.t_latest)
     fig, ax = new_fig("budget-envelope")
@@ -1809,7 +1809,7 @@ def ch17_stop_time_overreserve():
                  f"{t_sp:.1f} milliseconds"]
 
 
-@margin("17_frontier", "margin_latch_coasting_peak_envelope", "budget-envelope",
+@margin("18_frontier", "margin_latch_coasting_peak_envelope", "budget-envelope",
         sources=("LatchCompliance.f_coast_rigid_guarded", ".f_coast_rigid_fast",
                  ".f_coast_compliant_fast", ".f_floor", ".v_guarded", ".v_fast"))
 def ch17_latch_coasting_envelope():
@@ -1817,7 +1817,7 @@ def ch17_latch_coasting_envelope():
     # plate at the guarded and the fast approach, and the series element at the
     # fast approach, against the declared force floor (red: the floor is the
     # limit a weakened latch may not see exceeded).
-    L = lego("17_frontier", "LatchCompliance")
+    L = lego("18_frontier", "LatchCompliance")
     N = lambda q: mag(q, "newton")
     g_r, f_r, f_c, floor = N(L.f_coast_rigid_guarded), N(L.f_coast_rigid_fast), N(L.f_coast_compliant_fast), N(L.f_floor)
     vg, vf = mag(L.v_guarded, "meter / second"), mag(L.v_fast, "meter / second")

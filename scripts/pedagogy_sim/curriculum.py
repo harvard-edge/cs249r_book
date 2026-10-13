@@ -136,19 +136,19 @@ CURRICULUM_SCHEDULE: Dict[int, WeeklyAssignment] = {
     ),
     13: WeeklyAssignment(
         week_number=13,
-        title="The Physical Intelligence Frontier",
-        chapter_dirs=["17_frontier"],
-        core_qmd_files=["books/vol4/17_frontier/17_frontier.qmd"],
+        title="Responsible Physical AI",
+        chapter_dirs=["17_responsibility"],
+        core_qmd_files=["books/vol4/17_responsibility/17_responsibility.qmd"],
         focus_concepts=[
-            "Epistemic uncertainty in the physical world", "Long-tail generalization",
-            "Unsolved challenges in physical AI systems"
+            "Who approved each decision behind an admitted action",
+            "Human roles a person can actually perform", "Who bears the risk and the recording"
         ]
     ),
     14: WeeklyAssignment(
         week_number=14,
         title="Capstone Defense & Fault Defense Jury",
-        chapter_dirs=["17_frontier"],
-        core_qmd_files=["books/vol4/17_frontier/17_frontier.qmd"],
+        chapter_dirs=["18_frontier"],
+        core_qmd_files=["books/vol4/18_frontier/18_frontier.qmd"],
         focus_concepts=[
             "Live fault injection defense", "Safe holding state transition",
             "Full-stack physical AI verification"

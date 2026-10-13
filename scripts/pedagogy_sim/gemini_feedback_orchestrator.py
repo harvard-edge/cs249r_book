@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import threading
 
-from scripts.pedagogy_sim.book_orchestrator import CHAPTER_REGISTRY
+from scripts.pedagogy_sim.book_orchestrator import CHAPTER_NUMBERS, CHAPTER_REGISTRY
 from scripts.pedagogy_sim.chapter_signoff import ChapterSignOffEngine
 from scripts.pedagogy_sim.curriculum import (
     TextSection,
@@ -177,7 +177,7 @@ class GeminiFeedbackOrchestrator:
                 f.write(json.dumps(res) + "\n")
 
     def run_all(self, max_workers: int = 4, apply_live: bool = True):
-        """Run Gemini 3.1 Pro verification across all 17 chapters."""
+        """Run Gemini 3.1 Pro verification across every chapter in CHAPTER_REGISTRY."""
         print("=" * 80)
         print("🌟 INITIATING PASS 2: GEMINI 3.1 PRO PREVIEW WHOLE-BOOK AUDIT")
         print(f"Concurreny: {max_workers} chapter workers | Model: {self.model}")
@@ -186,7 +186,7 @@ class GeminiFeedbackOrchestrator:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_ch = {
                 executor.submit(self.audit_chapter, ch_num, apply_live): ch_num
-                for ch_num in range(1, 18)
+                for ch_num in CHAPTER_NUMBERS
             }
             for fut in as_completed(future_to_ch):
                 ch_num = future_to_ch[fut]
@@ -202,7 +202,7 @@ class GeminiFeedbackOrchestrator:
 def main():
     parser = argparse.ArgumentParser(description="Gemini 3.1 Pro Pedagogical Audit")
     parser.add_argument("--chapter", type=int, default=None, help="Specific chapter to audit")
-    parser.add_argument("--all", action="store_true", help="Audit all 17 chapters")
+    parser.add_argument("--all", action="store_true", help="Audit every chapter in the inventory")
     parser.add_argument("--parallel", type=int, default=4, help="Parallel worker count")
     parser.add_argument("--dry-run", action="store_true", help="Dry run mode")
     parser.add_argument("--model", type=str, default="gemini-3.1-pro-high")

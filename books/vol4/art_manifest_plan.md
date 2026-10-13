@@ -36,7 +36,7 @@ Volume IV of Machine Learning Systems (*Physical AI Systems*) teaches how neural
 
 ## 2. Four-Part Division of Labor
 
-To maintain cross-chapter narrative flow and prevent visual fragmentation, the 17 chapters are organized under **Four Part Art Directors**:
+To maintain cross-chapter narrative flow and prevent visual fragmentation, the 18 chapters are organized under **Four Part Art Directors**:
 
 ```
 Volume IV: Physical AI Systems
@@ -60,11 +60,14 @@ Volume IV: Physical AI Systems
 │   ├── Ch 12: Enforcement (Control Barrier Functions, QP projection, safety envelopes, STO)
 │   └── Ch 13: Placement (Heterogeneous SoC mapping, RTOS-Linux lockless boundaries, DRAM contention)
 │
-└── PART IV: Governing the Machine (Ch 14–17)
-    ├── Ch 14: Intervention (Authority handovers, bumpless transfer, Mode 2 reaction drift, NTSB logs)
-    ├── Ch 15: Verification (Qualification ladder: MIL/SIL/HIL, fault injection, envelope falsification)
-    ├── Ch 16: Release (CAE/GSN safety assurance cases, ODD boundaries, cryptographic manifests)
-    └── Ch 17: The Epistemic Frontier (Astronomical exposure walls, containment, curriculum synthesis)
+├── PART IV: Governing the Machine (Ch 14–17)
+│   ├── Ch 14: Intervention (Authority handovers, bumpless transfer, Mode 2 reaction drift, NTSB logs)
+│   ├── Ch 15: Verification (Qualification ladder: MIL/SIL/HIL, fault injection, envelope falsification)
+│   ├── Ch 16: Release (CAE/GSN safety assurance cases, ODD boundaries, cryptographic manifests)
+│   └── Ch 17: Responsible Physical AI (Decision owners, oversight a person can perform, staged permits, who bears the risk)
+│
+└── CONCLUSION (Ch 18)
+    └── Ch 18: The Epistemic Frontier (Astronomical exposure walls, containment, curriculum synthesis)
 ```
 
 ---
@@ -131,7 +134,7 @@ Volume IV: Physical AI Systems
 *Focus: Multi-stream logging, teleoperation, calibration, demonstration budgets.*
 - [x] **`fig05_four_stream_action_taps.svg`** (Type A): 4-stream tap dataflow ($a_{\text{req}}$ model proposal, $a_{\text{cmd}}$ planner smoothed, $a_{\text{enf}}$ safety clamped, $a_{\text{meas}}$ joint encoder actual).
 - [x] **`fig05_real_gello_teleop.png`** (Type B): Authentic 3D-printed GELLO passive arm teleoperation interface (Wu et al., 2023).
-- [x] **`fig05_collector_coverage_ledger.svg`** (Type A): Teleoperation dataset distribution ledger across operators and failure recoveries.
+- [x] **`fig05_collector_coverage_table.svg`** (Type A): Teleoperation dataset distribution table across operators and failure recoveries.
 - [x] **`fig05_compounding_error_flywheel.svg`** (Type A): Demonstrator error propagation flywheel vs intervention-corrected data collection.
 - [x] **`fig05_real_camera_calibration.jpg`** (Type B): Authentic Zhang checkerboard / ChArUco multi-camera extrinsic calibration fixture.
 - [x] **`fig05_cruise_pedestrian_blindspot_drag.svg`** (Type A): Forensic reconstruction of sensor blind-spot tracking failure.
@@ -230,10 +233,14 @@ Volume IV: Physical AI Systems
 - [x] **`fig16_real_autonomous_haul_truck.jpg`** (Type B): Roy Luck's loaded Caterpillar 785C at Kosse Mine illustrates vehicle scale and clearance, not autonomous operation or sensor/brake function. [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Caterpillar_haul_truck,_Luminant_Energy_Kosse_lignite_mine_(5556779421).jpg) records the [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/) license and links the [original Flickr photograph](https://www.flickr.com/photos/royluck/5556779421/).
 - [x] **`fig16_real_robot_safety_cell.jpg`** (Type B): Industrial arm behind yellow mesh fencing; interlock rating and stopping behavior are not visible.
 
-#### Chapter 17: The Epistemic Frontier
+#### Chapter 17: Responsible Physical AI
+*Focus: Who approved each decision behind an admitted action, oversight a person can perform, staged operating permits, per-group detection, recorded people, shifted labor.*
+- [ ] **`cover_responsibility_blueprint_labeled_print.png` / `cover_responsibility_blueprint_labeled.webp`** (Cover): NEEDS ART. The files in the chapter folder are copies of the Release cover, placed as a build placeholder only. Brief: the running machine in an aisle, with the decisions behind one admitted motion (envelope sign-off, staffing, permit, data use) drawn as labeled tags tied to named roles, and the people around it (operator, coworker at a crossing, bystander in a camera frame) set apart; no blame imagery.
+
+#### Chapter 18: The Epistemic Frontier
 *Focus: Astronomical exposure walls, observational indistinguishability, curriculum synthesis.*
-- [x] **`fig17_epistemic_limits.svg`** (Type A): Constructed distinction between identical pre-deadline telemetry and the zero-event Poisson exposure wall; speed and barrier insets are conditional on their physical premises.
-- [x] **`fig17_closed_loop_synthesis.svg`** (Type A): Proposal–permission loop with the causal boundary at admitted actuation; the 1 kHz MCU is illustrative, not a certified device specification.
+- [x] **`fig18_epistemic_limits.svg`** (Type A): Constructed distinction between identical pre-deadline telemetry and the zero-event Poisson exposure wall; speed and barrier insets are conditional on their physical premises.
+- [x] **`fig18_closed_loop_synthesis.svg`** (Type A): Proposal–permission loop with the causal boundary at admitted actuation; the 1 kHz MCU is illustrative, not a certified device specification.
 - [x] **`fig17_real_perseverance_mars_drill.jpg`** (Type B): NASA/JPL-Caltech/MSSS rover image showing the contact setting; protective response claims come from separate JPL documentation, not visible telemetry.
 - [x] **`fig17_real_humanoid_disaster_rubble.jpg`** (Type B): Unannotated U.S. Navy public-domain image of a DARPA Robotics Challenge humanoid on a cinderblock course; no timing, torque, or foot-support guarantee inferred from pixels.
 

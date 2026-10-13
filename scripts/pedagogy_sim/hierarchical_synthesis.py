@@ -1,6 +1,6 @@
 """Hierarchical Multi-Level Pedagogical Audit & Synthesis Framework for Volume IV.
 
-Level 1: Micro  - 17 parallel agents (one per .qmd chapter file) for deep student critique & micro-optimizations.
+Level 1: Micro  - one parallel agent per .qmd chapter file in CHAPTER_REGISTRY, for deep student critique & micro-optimizations.
 Level 2: Meso   - 5 parallel agents (one per Part) for narrative arc synthesis & cross-chapter handoffs.
 Level 3: Macro  - 1 global synthesizer agent for whole-book coherence, grand narrative threading, & macro polish.
 """
@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from scripts.pedagogy_sim.book_orchestrator import CHAPTER_REGISTRY
+from scripts.pedagogy_sim.book_orchestrator import CHAPTER_NUMBERS, CHAPTER_REGISTRY, LAST_CHAPTER
 from scripts.pedagogy_sim.curriculum import (
     TextSection,
     mask_code_blocks,
@@ -43,12 +43,12 @@ PARTS_REGISTRY = {
     "Part_IV": {
         "title": "Part IV: Governing",
         "description": "System Safety, Human Intervention, Verification under Uncertainty, and Production Release Assurance",
-        "chapters": [14, 15, 16],
+        "chapters": [14, 15, 16, 17],
     },
     "Conclusion": {
         "title": "Conclusion & Horizon",
         "description": "The Physical Intelligence Frontier: Long-Tail Generalization, Epistemic Limits, and Open Challenges",
-        "chapters": [17],
+        "chapters": [LAST_CHAPTER],
     },
 }
 
@@ -72,7 +72,7 @@ class HierarchicalAuditEngine:
         os.makedirs(self.level3_dir, exist_ok=True)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # LEVEL 1: MICRO CHAPTER AGENTS (17 parallel)
+    # LEVEL 1: MICRO CHAPTER AGENTS (one per chapter, in parallel)
     # ──────────────────────────────────────────────────────────────────────────
     def run_level1_chapter(self, chapter_num: int, apply_edits: bool = True) -> Dict[str, Any]:
         """Run Level 1 Micro audit on a single .qmd file."""
@@ -219,17 +219,17 @@ class HierarchicalAuditEngine:
             for t in d.get("open_thematic_threads_for_part", []):
                 f.write(f"- 🧵 {t}\n")
 
-    def run_level1_all(self, max_workers: int = 17, apply_edits: bool = True) -> Dict[int, Dict[str, Any]]:
-        """Run all 17 Level 1 chapter agents in parallel."""
+    def run_level1_all(self, max_workers: int = len(CHAPTER_NUMBERS), apply_edits: bool = True) -> Dict[int, Dict[str, Any]]:
+        """Run every Level 1 chapter agent in parallel."""
         print("\n" + "=" * 80)
-        print(f"🚀 LEVEL 1: LAUNCHING 17 PARALLEL CHAPTER AGENTS (Model: {self.model})")
+        print(f"🚀 LEVEL 1: LAUNCHING {len(CHAPTER_NUMBERS)} PARALLEL CHAPTER AGENTS (Model: {self.model})")
         print("=" * 80)
 
         results = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_ch = {
                 executor.submit(self.run_level1_chapter, ch, apply_edits): ch
-                for ch in range(1, 18)
+                for ch in CHAPTER_NUMBERS
             }
             for fut in concurrent.futures.as_completed(future_to_ch):
                 ch = future_to_ch[fut]
@@ -239,7 +239,7 @@ class HierarchicalAuditEngine:
                 except Exception as e:
                     print(f"❌ Error in Level 1 Agent for Chapter {ch}: {e}")
 
-        print("\n✨ LEVEL 1 AUDIT COMPLETE: All 17 Chapter Dossiers generated.")
+        print(f"\n✨ LEVEL 1 AUDIT COMPLETE: All {len(CHAPTER_NUMBERS)} Chapter Dossiers generated.")
         return results
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -391,7 +391,7 @@ class HierarchicalAuditEngine:
         system_prompt = (
             "You are the Lead Technical Synthesizer and Chief Pedagogical Officer for Harvard / MIT Press "
             "'Physical AI: Machine Learning Systems That Sense and Act' (Volume IV). "
-            "You are reviewing the complete volume synthesis from Chapter 01 (The Causal Boundary) to Chapter 17 (The Frontier). "
+            f"You are reviewing the complete volume synthesis from Chapter 01 (The Causal Boundary) to Chapter {LAST_CHAPTER} (The Frontier). "
             "Your mission:\n"
             "1. Synthesize the Grand Narrative of Physical AI: Why is Physical AI fundamentally distinct from digital ML?\n"
             "2. Trace the Golden Thread across the four parts: Anatomy -> Teaching -> Running -> Governing -> Frontier.\n"
@@ -409,9 +409,9 @@ class HierarchicalAuditEngine:
             '  "author": "Prof. Vijay Janapa Reddi",\n'
             '  "grand_narrative": "<3-4 paragraph master synthesis of the entire volume>",\n'
             '  "golden_threads": [\n'
-            '    {"thread_name": "<e.g. Causal Latency & Stopping Distance>", "progression": "<how it evolves from Ch 1 through Ch 17>"},\n'
-            '    {"thread_name": "<e.g. Proposal-Permission Privilege Boundary>", "progression": "<how it evolves from Ch 1 through Ch 17>"},\n'
-            '    {"thread_name": "<e.g. Irreversible Thermodynamic Work>", "progression": "<how it evolves from Ch 1 through Ch 17>"}\n'
+            '    {"thread_name": "<e.g. Causal Latency & Stopping Distance>", "progression": "<how it evolves from Ch 1 through the last chapter>"},\n'
+            '    {"thread_name": "<e.g. Proposal-Permission Privilege Boundary>", "progression": "<how it evolves from Ch 1 through the last chapter>"},\n'
+            '    {"thread_name": "<e.g. Irreversible Thermodynamic Work>", "progression": "<how it evolves from Ch 1 through the last chapter>"}\n'
             '  ],\n'
             '  "cross_part_synergies": [\n'
             '    {"from_part": "Part I: Anatomy", "to_part": "Part II: Teaching", "bridge": "<how physical bodies dictate data & training>"},\n'
@@ -448,7 +448,7 @@ class HierarchicalAuditEngine:
                     },
                     {
                         "thread_name": "Thermal & Energy Conservation",
-                        "progression": "Derived in Ch 2, monitored in Ch 13, and enforced as hard shutdown invariants in Ch 16/17.",
+                        "progression": "Derived in Ch 2, monitored in Ch 13, and enforced as hard shutdown invariants in Ch 16.",
                     },
                 ],
                 "cross_part_synergies": [
@@ -526,11 +526,11 @@ class HierarchicalAuditEngine:
         with open(path, "w", encoding="utf-8") as f:
             f.write("# Volume IV: Hierarchical Synthesis & Cross-Level Flow Dashboard\n\n")
             f.write(f"**Book**: *Physical AI: Machine Learning Systems That Sense and Act*\n")
-            f.write(f"**Architecture**: 3-Level Multi-Scale Synthesis (17 Chapters $\\to$ 5 Parts $\\to$ 1 Whole Book)\n")
+            f.write(f"**Architecture**: 3-Level Multi-Scale Synthesis ({len(CHAPTER_NUMBERS)} Chapters $\\to$ 5 Parts $\\to$ 1 Whole Book)\n")
             f.write(f"**Generated**: `{d.get('timestamp', '')}`\n\n")
             f.write("---\n\n")
             f.write("## Executive Status\n\n")
-            f.write("- 🟢 **Level 1 (Micro Chapters)**: 17 / 17 Chapters Audited & Optimized\n")
+            f.write(f"- 🟢 **Level 1 (Micro Chapters)**: {len(CHAPTER_NUMBERS)} / {len(CHAPTER_NUMBERS)} Chapters Audited & Optimized\n")
             f.write("- 🟢 **Level 2 (Meso Parts)**: 5 / 5 Parts Synthesized & Cross-Bridged\n")
             f.write("- 🟢 **Level 3 (Macro Whole Book)**: 1 / 1 Master Synthesis Complete\n")
             f.write(f"- 🎓 **Global Verdict**: **{d.get('pedagogical_verdict', 'OFFICIALLY_SIGNED_OFF')}**\n\n")
@@ -541,8 +541,8 @@ class HierarchicalAuditEngine:
             f.write(" ├── Part I: Anatomy (Ch 01, Ch 02, Ch 03, Ch 04)\n")
             f.write(" ├── Part II: Teaching (Ch 05, Ch 06, Ch 07)\n")
             f.write(" ├── Part III: Running (Ch 08, Ch 09, Ch 10, Ch 11, Ch 12, Ch 13)\n")
-            f.write(" ├── Part IV: Governing (Ch 14, Ch 15, Ch 16)\n")
-            f.write(" └── Conclusion: Frontier (Ch 17)\n")
+            f.write(" ├── Part IV: Governing (Ch 14, Ch 15, Ch 16, Ch 17)\n")
+            f.write(f" └── Conclusion: Frontier (Ch {LAST_CHAPTER})\n")
             f.write("```\n\n")
             f.write("---\n\n")
             f.write("## Grand Narrative Summary\n\n")
