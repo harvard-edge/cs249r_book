@@ -537,7 +537,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '07_checkpointing',
+        'slug': '11_durable_execution',
         'prefix': 'checkpointing',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -550,7 +550,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '08_actuation',
+        'slug': '07_tool_calling',
         'prefix': 'actuation',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -563,7 +563,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '09_virtualization',
+        'slug': '08_sandboxes',
         'prefix': 'virtualization',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -576,7 +576,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '10_durable_execution',
+        'slug': '10_agent_harness',
         'prefix': 'interrupts',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -589,7 +589,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '11_failure_recovery',
+        'slug': '12_failure_recovery',
         'prefix': 'scheduling',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -602,7 +602,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '13_trajectory_curation',
+        'slug': '15_trajectory_curation',
         'prefix': 'data_flywheel',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -615,7 +615,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '14_fine_tuning',
+        'slug': '16_fine_tuning',
         'prefix': 'sft',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -628,7 +628,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '15_rlvr',
+        'slug': '17_rlvr',
         'prefix': 'rlvr',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -641,7 +641,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '16_multi_agent',
+        'slug': '18_multi_agent',
         'prefix': 'multi_agent',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -654,7 +654,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '12_evaluation',
+        'slug': '14_agent_operations',
         'prefix': 'observability',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -667,7 +667,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '17_agent_economics',
+        'slug': '19_agent_economics',
         'prefix': 'tokenomics',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -680,7 +680,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '18_conclusion',
+        'slug': '20_conclusion',
         'prefix': 'conclusion',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -690,6 +690,18 @@ VOL3_CHAPTERS = [
             {'text': 'monumental torus portal', 'pill': (1140, 220), 'targ': (780, 340), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'frontier metropolis', 'pill': (1140, 440), 'targ': (840, 410), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'invariant closure gateway', 'pill': (1140, 640), 'targ': (800, 490), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+        ]
+    },
+    {
+        'slug': '13_evaluation',
+        'prefix': 'evaluation',
+        'font': FONT_ARIAL_BOLD,
+        'labels': [
+            {'text': 'task contract', 'pill': (200, 250), 'targ': (440, 350), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'repeated trials', 'pill': (1000, 110), 'targ': (790, 300), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'grader isolation', 'pill': (740, 710), 'targ': (900, 470), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'verdicts', 'pill': (1090, 690), 'targ': (1095, 470), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'confidence interval', 'pill': (1180, 160), 'targ': (1160, 258), 'border': '#D97706', 'color': '#D97706'},
         ]
     },
 ]
@@ -922,6 +934,18 @@ VOL4_CHAPTERS = [
             {'text': 'unobserved reality chasm', 'pill': (1160, 680), 'targ': (1088, 524), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
+    {
+        'slug': '17_responsibility',
+        'prefix': 'responsibility',
+        'font': FONT_HELVETICA,
+        'labels': [
+            {'text': 'oversight', 'pill': (190, 150), 'targ': (385, 225), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'approval', 'pill': (520, 100), 'targ': (598, 262), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'staged permission', 'pill': (220, 650), 'targ': (370, 520), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'stopping envelope', 'pill': (560, 730), 'targ': (680, 495), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'bystanders', 'pill': (1240, 560), 'targ': (1045, 418), 'border': '#0090B0', 'color': '#0090B0'},
+        ]
+    },
 ]
 
 # =============================================================================
@@ -1102,7 +1126,7 @@ def main():
         # Auto-detect existing volume directories
         run_vol1 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol1', '01_introduction'))
         run_vol2 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol2', '01_introduction'))
-        run_vol3 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol3', '07_checkpointing'))
+        run_vol3 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol3', '01_introduction'))
         run_vol4 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol4', '01_boundary'))
 
     print("=" * 70)
