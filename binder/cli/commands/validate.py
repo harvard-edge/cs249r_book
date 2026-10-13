@@ -767,6 +767,10 @@ class ValidateCommand:
         "structure": [
             Scope("concept-maps", "_run_concept_maps",
                   note="validate concept-map YAML files and frontmatter wiring"),
+            # 2026-10-12: forward touches (a concept used before its owning
+            # chapter) are a sculpting worklist, so they stay out of the gate.
+            Scope("concept-order", "_run_concept_order", default=False,
+                  note="concepts used before their owning chapter (schema v2 maps)"),
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
             Scope("h2-landings", "_run_h2_landings",
@@ -5484,7 +5488,15 @@ class ValidateCommand:
     # Concept Maps Validation
     # ------------------------------------------------------------------
 
-    def _run_concept_maps(self, root: Path) -> ValidationRunResult:
+    def _run_concept_order(self, root: Path) -> ValidationRunResult:
+        """Report schema-v2 concepts touched before their owning chapter teaches them."""
+        result = self._run_concept_maps(root, include_order=True)
+        result.issues = [i for i in result.issues if "used before it is taught" in i.message]
+        result.name = "concept-order"
+        result.description = "Concepts used before their owning chapter"
+        return result
+
+    def _run_concept_maps(self, root: Path, include_order: bool = False) -> ValidationRunResult:
         """Validate concept-map YAML files and QMD frontmatter wiring."""
         start = time.time()
         issues: List[ValidationIssue] = []
@@ -5495,7 +5507,7 @@ class ValidateCommand:
 
         repo_root = self.config_manager.root_dir
         contents_dir = root if "contents" in str(root) else repo_root  / "books"
-        findings = check_concept_maps(contents_dir, repo_root)
+        findings = check_concept_maps(contents_dir, repo_root, include_order=include_order)
         for finding in findings:
             issues.append(
                 ValidationIssue(
