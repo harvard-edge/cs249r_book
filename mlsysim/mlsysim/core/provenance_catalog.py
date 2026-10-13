@@ -2057,13 +2057,13 @@ LBNL_US_DATACENTER_ENERGY_2024 = _report(
     "prov:lbnl-us-datacenter-energy-2024",
     "Shehabi et al. (2024), 2024 United States Data Center Energy Usage Report (LBNL)",
     "https://eta.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
-    notes="US data centers: ~58 TWh (2014), ~176 TWh (2023), 325-580 TWh projected for 2028.",
+    notes="US data centers: ~58 TWh (2014), ~176 TWh (2023, 4.4% of US electricity), 325-580 TWh projected for 2028 (6.7-12%). LBNL-2001637, doi:10.71468/P1WC7Q.",
 )
 IEA_ENERGY_AND_AI_2025 = _report(
     "prov:iea-energy-and-ai-2025",
     "IEA (2025), Energy and AI",
     "https://www.iea.org/reports/energy-and-ai",
-    notes="Global data-center electricity projected to ~945 TWh by 2030, just under 3% of global electricity.",
+    notes="Global data-center electricity ~415 TWh in 2024 (~1.5%), projected ~945 TWh by 2030 (just under 3%); emissions from data-center electricity 180 Mt today, 300 Mt by 2035 (Base Case), below 1.5% of energy-sector emissions.",
 )
 
 # --- Hardware additions ---
@@ -2305,4 +2305,16 @@ SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
         "is 0.90 from 256 to 1,024 and 0.93 from 3,072 to 12,288 GPUs."
     ),
     verified="2026-09-29",
+)
+
+# --- Accelerator life cycle (2026-10-13) ---
+SCHNEIDER_TPU_LIFECYCLE_2025 = _lit(
+    "prov:schneider-tpu-lifecycle-2025",
+    "Schneider et al. (2025), Life-Cycle Emissions of AI Hardware: A Cradle-to-Grave Approach and Generational Trends",
+    url="https://arxiv.org/abs/2502.01671",
+    verified="2026-10-13",
+    notes=(
+        "First published AI-accelerator LCA (five TPU generations, extraction through disposal). "
+        "Abstract: compute carbon intensity (CCI) improves 3x from TPU v4i to TPU v6e."
+    ),
 )

@@ -2077,6 +2077,145 @@ A small development dataset may hide the contention and accumulated state of a p
 
 Different ML workloads have dramatically different bandwidth profiles, even when using the same cluster. Image classification with ResNet-50\index{ResNet-50!image classification bandwidth} on ImageNet produces a high bandwidth demand because each batch contains hundreds of large images (`{python} PipelineCalcs.img_size_kb_str` each on average) and iteration times are short (100 to 200 ms). Language model pretraining produces a lower per-batch bandwidth demand because tokenized text is compact (each token is a 4-byte integer, so a packed sequence of 4,096 tokens occupies only 16 KB), but the total data volume over the training run is enormous (trillions of tokens). Recommendation model training, the Archetype B (DLRM at Scale) workload, produces a mixed bandwidth demand: embedding lookups require high-IOPS random access to the embedding table, while the dense layers consume standard sequential training data. Each workload's bandwidth profile determines which storage tier is the bottleneck and where optimization effort should focus. Archetype C (Federated MobileNet) falls outside this shared-storage analysis, because its raw training data stays on the devices that produce it; there is no central corpus to stage, and its storage constraints become per-device capacity and upload limits.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED STORAGE DEMAND PER ACCELERATOR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the workload bandwidth-profile paragraph and
+# │          @fig-mlperf-storage-demand.
+# │
+# │ Goal: Show the N and T_compute terms of @eq-pipeline-throughput in
+# │       measured storage submissions.
+# │ Show: Throughput scales with emulated accelerators; per-accelerator
+# │       medians differ ~15× across workloads; H100 emulation raises demand
+# │       ~1.6-2× over A100.
+# │ How: Closed-division passing rows of Literature.Series.MLPerfStorageV1Training;
+# │      medians of io_GBps / num_accelerators per workload and accelerator.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import statistics
+from mlsysim import Literature
+from mlsysim.core.units import GB, second
+from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_multiple, fmt_multiple_range
+
+def _per_accel(rows, workload, accel):
+    """Median sustained storage throughput per emulated accelerator, GB/s."""
+    return statistics.median(r["io_GBps"] / r["num_accelerators"] for r in rows if r["workload"] == workload and r["accelerator"] == accel)
+
+def _passing(rows):
+    return [r for r in rows if r["division"] == "Closed" and r["au_check"] == "pass"]
+
+def _medians(rows, workloads, accels):
+    return {(w, a): _per_accel(rows, w, a) for w in workloads for a in accels}
+
+def _gen_ratios(medians, workloads):
+    """H100-to-A100 ratio of median per-accelerator demand, per workload."""
+    return [medians[(w, "H100")] / medians[(w, "A100")] for w in workloads]
+
+# ┌── LEGO ───────────────────────────────────────────────
+class StorageDemandMeasured:
+    """Per-accelerator storage demand measured in MLPerf Storage v1.0."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = _passing(Literature.Series.MLPerfStorageV1Training.entries)
+    workloads = (("unet3d", "3D U-Net"), ("cosmoflow", "CosmoFlow"), ("resnet50", "ResNet-50"))
+    accels = ("A100", "H100")
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    medians = _medians(rows, [w for w, _ in workloads], accels)
+    workload_spread = medians[("unet3d", "H100")] / medians[("resnet50", "H100")]
+    gen_ratios = _gen_ratios(medians, [w for w, _ in workloads])
+    result_count = len(rows)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(10 <= workload_spread <= 20, f"Prose says per-accelerator demand differs ~15x across workloads, got {workload_spread:.1f}.")
+    check(1.4 <= min(gen_ratios) and max(gen_ratios) <= 2.2, f"Prose says H100 emulation raises demand 1.6-2x, got {gen_ratios}.")
+    check(
+        medians[("unet3d", "H100")] > medians[("cosmoflow", "H100")] > medians[("resnet50", "H100")],
+        "Prose orders the workloads U-Net > CosmoFlow > ResNet-50.",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    result_count_str = fmt_int(result_count)
+    unet_h100_str = fmt_bandwidth(round(medians[("unet3d", "H100")], 1) * GB / second, unit=GB / second, precision=1)
+    cosmo_h100_str = fmt_bandwidth(round(medians[("cosmoflow", "H100")], 2) * GB / second, unit=GB / second, precision=2)
+    resnet_h100_str = fmt_bandwidth(round(medians[("resnet50", "H100")], 2) * GB / second, unit=GB / second, precision=2)
+    workload_spread_mult_str = fmt_multiple(round(workload_spread))
+    gen_ratio_mult_range_str = fmt_multiple_range(round(min(gen_ratios), 1), round(max(gen_ratios), 1), precision=(1, 0))
+```
+
+MLPerf Storage measures these profiles on production storage systems. Each submission emulates a set of accelerators that consume samples with a fixed per-sample compute time, so the storage system, not a real GPU, sets the pace, and reports the read throughput the system sustained while keeping the emulated accelerators at least 90 percent busy (70 percent for CosmoFlow) [@mlcommons2024storage; @devarajan2021dlio]. Across the `{python} StorageDemandMeasured.result_count_str` passing results of the closed division in the 2024 round, sustained throughput grows in proportion to the number of emulated accelerators, as the $\InputConsumerAcceleratorCount$ term of @eq-pipeline-throughput predicts (@fig-mlperf-storage-demand, panel a). Per accelerator, the median demand differs about `{python} StorageDemandMeasured.workload_spread_mult_str` across workloads, and ResNet-50, demanding among image-classification jobs, is the lightest of the three because its samples are small 2D images while 3D U-Net reads whole medical volumes. An emulated H100 needs about `{python} StorageDemandMeasured.unet_h100_str` for 3D U-Net on medical volumes, `{python} StorageDemandMeasured.cosmo_h100_str` for CosmoFlow, and `{python} StorageDemandMeasured.resnet_h100_str` for ResNet-50 (@fig-mlperf-storage-demand, panel b). Emulating H100s instead of A100s raises every workload's demand by `{python} StorageDemandMeasured.gen_ratio_mult_range_str`, because the faster accelerator shortens $\IronLawComputeTime$ while the bytes per batch stay the same. A storage tier sized for one accelerator generation is therefore undersized for the next, even when the dataset and the model do not change.
+
+::: {#fig-mlperf-storage-demand fig-env="figure" fig-pos="htb" fig-cap="**Measured Storage Demand per Accelerator**: (a) Read throughput sustained by each passing closed-division MLPerf Storage v1.0 submission against its number of emulated accelerators, on logarithmic axes, by workload (color) and emulated accelerator (marker); throughput grows in proportion to the accelerator count. (b) Median throughput per emulated accelerator for each workload and accelerator, on a logarithmic axis. Accelerators are emulated with a fixed per-sample compute time and must stay at least 90 percent busy (70 percent for CosmoFlow); the values measure storage systems under that load, not real GPUs. Data from @mlcommons2024storage." fig-alt="Two stacked panels. Top: log-log scatter of storage throughput from about 0.2 to 700 gigabytes per second against 1 to about 2,000 emulated accelerators, for 3D U-Net in blue, CosmoFlow in orange, and ResNet-50 in green, with circles for A100 and triangles for H100; each workload forms a band rising in proportion to accelerator count, U-Net highest and ResNet-50 lowest. Bottom: grouped bars on a logarithmic axis of median gigabytes per second per accelerator, A100 and H100 side by side for each workload: 3D U-Net about 1.4 and 2.8, CosmoFlow about 0.35 and 0.55, ResNet-50 about 0.09 and 0.18."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED STORAGE DEMAND PER ACCELERATOR (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-mlperf-storage-demand.
+# │
+# │ Goal: Show throughput scaling with accelerators and per-accelerator demand.
+# │ Show: (a) log-log scatter by workload and accelerator; (b) median bars.
+# │ How: StorageDemandMeasured (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
+from matplotlib.patches import Patch
+from binder.tools.figures import style as book_style
+
+fig, _ax0, COLORS, plt = book_style.setup_plot(figsize=(6.2, 6.4))
+fig.delaxes(_ax0)
+a1, a2 = fig.subplots(2, 1, gridspec_kw=dict(height_ratios=[1.2, 1], hspace=0.4))
+_C = StorageDemandMeasured
+_wcol = {"unet3d": COLORS["BlueLine"], "cosmoflow": COLORS["OrangeLine"], "resnet50": COLORS["GreenLine"]}
+_mk = {"A100": "o", "H100": "^"}
+for _w, _wl in _C.workloads:
+    for _a in _C.accels:
+        _p = [r for r in _C.rows if r["workload"] == _w and r["accelerator"] == _a]
+        a1.scatter(
+            [r["num_accelerators"] for r in _p], [r["io_GBps"] for r in _p], marker=_mk[_a], s=24, color=_wcol[_w], label=f"{_wl}, {_a}", zorder=3
+        )
+a1.set_xscale("log")
+a1.set_yscale("log")
+a1.set_xlabel("Emulated accelerators")
+a1.set_ylabel("Sustained read throughput (GB/s)")
+a1.set_title("(a) Throughput scales with accelerators", fontsize=10, loc="left")
+a1.legend(fontsize=9, ncol=2, loc="lower right")
+
+_x = np.arange(len(_C.workloads))
+_wd = 0.36
+for _j, _a in enumerate(_C.accels):
+    _v = [_C.medians[(w, _a)] for w, _ in _C.workloads]
+    a2.bar(
+        _x + (_j - 0.5) * _wd,
+        _v,
+        _wd,
+        color=[_wcol[w] for w, _ in _C.workloads],
+        alpha=0.55 if _a == "A100" else 1.0,
+        edgecolor="white",
+        label=f"Emulated {_a}",
+    )
+    for _xi, _vi in zip(_x + (_j - 0.5) * _wd, _v):
+        a2.text(_xi, _vi * 1.12, f"{_vi:.2g}", ha="center", fontsize=9)
+a2.set_yscale("log")
+a2.set_ylim(0.05, 6)
+a2.set_xticks(_x)
+a2.set_xticklabels([l for _, l in _C.workloads])
+a2.set_ylabel("Median GB/s per accelerator")
+a2.set_title("(b) Demand per accelerator", fontsize=10, loc="left")
+a2.legend(
+    handles=[Patch(color=COLORS["grid"], alpha=0.55, label="Emulated A100 (lighter)"), Patch(color=COLORS["primary"], label="Emulated H100 (solid)")],
+    fontsize=9,
+    loc="upper right",
+)
+plt.show()
+plt.close()
+```
+
+:::
+
 ::: {.column-margin .margin-pointer}
 ↪ On-device training data and federated updates are developed in @sec-edge-intelligence.
 :::

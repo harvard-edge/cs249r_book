@@ -3751,6 +3751,181 @@ The end of constant-power-density scaling makes the facility envelope part of ac
 
 The applicable sustained power envelope is not merely a specification on a data sheet; it propagates through every level of the infrastructure stack. The power-delivery chain, cooling system, rack design, and facility electrical infrastructure must accommodate deployed accelerators, their documented transients, and the plausible envelope of future refresh cycles.
 
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHIP POWER VERSUS SYSTEM POWER (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the power-envelope propagation paragraph and
+# │          @fig-chip-vs-cluster-power.
+# │
+# │ Goal: Separate per-package power growth from whole-system power growth.
+# │ Show: The largest system held near 20-30 MW through 2021, then rose ~9×
+# │       from Frontier (2022, 40 MW) to xAI Colossus (2025, ~350 MW) while one
+# │       package's rating only doubled (H100 700 W to B300 1,400 W).
+# │ How: Endpoints of Literature.Series.AcceleratorPowerRatings; running
+# │      maximum of power_mw over Literature.Series.AISupercomputers; registry
+# │      TDPs guard the series rows the registry also carries.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Literature
+from mlsysim.core.units import megawatt, watt
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_power, fmt_text
+
+def _largest_by(rows, date_limit):
+    """Most powerful system operating on or before date_limit (ISO string)."""
+    live = [r for r in rows if r["power_mw"] and r["first_operational_date"] <= date_limit]
+    return max(live, key=lambda r: r["power_mw"])
+
+def _named(rows, fragment):
+    return next(r for r in rows if fragment in r["name"])
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ChipVersusSystemPower:
+    """Power rating of one accelerator package against power of the largest AI supercomputer."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    chips = Literature.Series.AcceleratorPowerRatings.entries
+    systems = Literature.Series.AISupercomputers.entries
+    break_year, end_year = 2022, 2025
+    h100_tdp = Hardware.Cloud.H100.tdp
+    registry_tdp_w = {
+        "V100": Hardware.Cloud.V100.tdp,
+        "A100": Hardware.Cloud.A100.tdp,
+        "H100": h100_tdp,
+        "B200": Hardware.Cloud.B200.tdp,
+        "MI250X": Hardware.Cloud.MI250X.tdp,
+        "MI300X": Hardware.Cloud.MI300X.tdp,
+        "TPU v2": Hardware.Cloud.TPUv2.tdp,
+        "TPU v3": Hardware.Cloud.TPUv3.tdp,
+        "Gaudi 2": Hardware.Cloud.Gaudi2.tdp,
+        "Gaudi 3": Hardware.Cloud.Gaudi3.tdp,
+    }
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    chip_last = max(chips, key=lambda r: r["power_w"])
+    chip_growth = chip_last["power_w"] / h100_tdp.to(watt).magnitude
+    plateau_low_sys = _largest_by(systems, "2013-12-31")
+    plateau_sys = _largest_by(systems, f"{break_year - 1}-12-31")
+    frontier_sys = _named(systems, "Frontier")
+    sys_last = _largest_by(systems, f"{end_year}-12-31")
+    sys_growth = sys_last["power_mw"] / frontier_sys["power_mw"]
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    for _r in chips:
+        if _r["label"] in registry_tdp_w:
+            check(
+                abs(_r["power_w"] - registry_tdp_w[_r["label"]].to(watt).magnitude) < 1,
+                f"{_r['label']} series rating disagrees with the registry TDP.",
+            )
+    check(plateau_low_sys["first_operational_date"][:4] == "2013", "Prose starts the plateau in 2013.")
+    check(15 <= plateau_low_sys["power_mw"] <= plateau_sys["power_mw"] <= 35, "Prose says the record sat between 20 and 30 MW before 2022.")
+    check(frontier_sys["first_operational_date"][:4] == str(break_year), "Prose dates Frontier to 2022.")
+    check(int(chip_last["release_year"]) == end_year and sys_last["first_operational_date"][:4] == str(end_year), "Prose ends both series in 2025.")
+    check(1.5 <= chip_growth <= 2.5, f"Prose says the package rating doubled, got {chip_growth:.1f}.")
+    check(6 <= sys_growth <= 12, f"Prose says the largest system grew ~9x, got {sys_growth:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    chip_count_str = fmt_int(len(chips))
+    h100_tdp_str = fmt_power(h100_tdp, unit=watt, precision=0)
+    chip_last_label_str = fmt_text(chip_last["label"])
+    chip_last_power_str = fmt_power(chip_last["power_w"] * watt, unit=watt, precision=0, commas=True)
+    chip_growth_mult_str = fmt_multiple(round(chip_growth), precision=0)
+    plateau_low_power_str = fmt_power(round(plateau_low_sys["power_mw"]) * megawatt, unit=megawatt, precision=0)
+    plateau_power_str = fmt_power(round(plateau_sys["power_mw"]) * megawatt, unit=megawatt, precision=0)
+    frontier_power_str = fmt_power(round(frontier_sys["power_mw"]) * megawatt, unit=megawatt, precision=0)
+    sys_last_power_str = fmt_power(round(sys_last["power_mw"], -1) * megawatt, unit=megawatt, precision=0)
+    sys_growth_mult_str = fmt_multiple(round(sys_growth), precision=0)
+    break_year_str, end_year_str = str(break_year), str(end_year)
+```
+
+The propagation is visible at both ends of the stack in published data. @Fig-chip-vs-cluster-power (a) collects the power rating that vendors publish for a single accelerator package across `{python} ChipVersusSystemPower.chip_count_str` NVIDIA, Google, AMD, and Intel parts. The ratings follow each vendor's own convention (TDP, maximum board power, or maximum TGP), so they bound design envelopes rather than measure consumption, but they climb steadily from one generation to the next. Panel (b) plots the facility power of supercomputers that Epoch AI tracks for AI work, together with the largest one operating at each date [@epochai2026supercomputers; @pilz2025supercomputers]. From 2013 through 2021 that record stayed between `{python} ChipVersusSystemPower.plateau_low_power_str` and `{python} ChipVersusSystemPower.plateau_power_str`, a level set by national high-performance computing systems. The Frontier supercomputer raised it to `{python} ChipVersusSystemPower.frontier_power_str` in `{python} ChipVersusSystemPower.break_year_str`, and AI training clusters then lifted it to about `{python} ChipVersusSystemPower.sys_last_power_str` by `{python} ChipVersusSystemPower.end_year_str`, a `{python} ChipVersusSystemPower.sys_growth_mult_str` increase in three years. Over the same three years the rating of one package rose from the H100's `{python} ChipVersusSystemPower.h100_tdp_str` TDP to the `{python} ChipVersusSystemPower.chip_last_label_str`'s `{python} ChipVersusSystemPower.chip_last_power_str` maximum TGP, roughly a `{python} ChipVersusSystemPower.chip_growth_mult_str` increase across the two rating conventions. Hotter packages explain only a small part of the jump. The rest comes from the number of accelerators a single system joins together and the facility built to feed them, which is why the power wall at fleet scale is a provisioning problem for the building as much as a thermal problem for the chip.
+
+::: {#fig-chip-vs-cluster-power fig-env="figure" fig-pos="htb" fig-cap="**Package Power versus System Power**: (a) Published power rating of one accelerator package by release year. Ratings follow each vendor's convention (TDP, maximum board power, or maximum TGP) and describe design envelopes, not measured workload power. (b) Facility power of AI supercomputers by first operational date on a logarithmic axis; the red line tracks the largest system operating at each date. The record held near 20 to 30 MW for most of a decade before AI training clusters raised it roughly ninefold between 2022 and 2025. Sources: (a) @nvidia2013k20x, @foley2017pascal, @choquette2018volta, @choquette2021, @choquette2023, @nvidia2024hgxb200, @nvidia2025blackwellultra, @jouppi2021, @amd2021cdna2, @amd2023mi300x, @intel2023gaudi2, @intel2024gaudi3; (b) @epochai2026supercomputers." fig-alt="Two stacked panels. Top: scatter of accelerator power ratings from 2012 to 2025 on a linear axis from 0 to 1,500 watts, colored by vendor. Ratings rise from 75 watts for TPU v1 and 235 watts for the K20X to 700 watts for the H100, 1,000 watts for the B200, and 1,400 watts for the B300. Bottom: gray points for supercomputers from 2012 to 2025 on a logarithmic power axis from 0.1 to several hundred megawatts, with a red staircase marking the largest system to date. The staircase sits near 20 to 30 megawatts from 2013 through 2021, steps to 40 megawatts at Frontier in 2022, and climbs to about 350 megawatts at xAI Colossus in 2025."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHIP POWER VERSUS SYSTEM POWER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-chip-vs-cluster-power.
+# │
+# │ Goal: Contrast package power ratings with AI supercomputer facility power.
+# │ Show: (a) vendor-colored package ratings; (b) system power with the
+# │       largest-to-date staircase.
+# │ How: ChipVersusSystemPower (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+from binder.tools.figures import style as book_style
+
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
+fig, _ax0, COLORS, plt = book_style.setup_plot(figsize=(6.2, 6.4))
+fig.delaxes(_ax0)
+a1, a2 = fig.subplots(2, 1, gridspec_kw=dict(height_ratios=[1, 1], hspace=0.4))
+_C = ChipVersusSystemPower
+_vcol = {"NVIDIA": COLORS["GreenLine"], "Google": COLORS["BlueLine"], "AMD": COLORS["RedLine"], "Intel": COLORS["VioletLine"]}
+for _v, _c in _vcol.items():
+    _p = [r for r in _C.chips if r["vendor"] == _v]
+    a1.scatter([r["release_year"] for r in _p], [r["power_w"] for r in _p], s=34, color=_c, label=_v, zorder=3)
+_off = {"P100": (-6, -3, "right"), "H100": (-6, -3, "right")}
+for _r in _C.chips:
+    if _r["label"] in ("K20X", "P100", "H100", "B200", "B300", "TPU v1", "MI300X", "Gaudi 3"):
+        _dx, _dy, _ha = _off.get(_r["label"], (6, -3, "left"))
+        a1.annotate(_r["label"], (_r["release_year"], _r["power_w"]), xytext=(_dx, _dy), textcoords="offset points", fontsize=9, ha=_ha)
+a1.set_ylim(0, 1550)
+a1.set_xlim(2011.5, 2026.5)
+a1.set_xticks(range(2012, 2027, 2))
+a1.set_xlabel("Release year")
+a1.set_ylabel("Published power rating per package (W)")
+a1.set_title("(a) One accelerator", fontsize=10, loc="left")
+a1.legend(fontsize=9, loc="upper left")
+
+_sys = sorted([r for r in _C.systems if r["power_mw"]], key=lambda r: r["first_operational_date"])
+a2.scatter(
+    [_decimal_year(r["first_operational_date"]) for r in _sys],
+    [r["power_mw"] for r in _sys],
+    s=9,
+    color=COLORS["grid"],
+    label="AI supercomputer",
+    zorder=2,
+)
+_best, _fx, _fy = 0.0, [], []
+for _r in _sys:
+    if _r["power_mw"] > _best:
+        _best = _r["power_mw"]
+        _fx.append(_decimal_year(_r["first_operational_date"]))
+        _fy.append(_best)
+_fx.append(2026.0)
+_fy.append(_fy[-1])
+a2.step(_fx, _fy, where="post", color=COLORS["RedLine"], lw=1.8, label="Largest to date", zorder=3)
+for _r, _txt, _xy in [(_C.sys_last, "xAI Colossus", (-8, -14)), (_C.frontier_sys, "Frontier", (-6, 6))]:
+    a2.annotate(
+        f"{_txt}, {_r['first_operational_date'][:4]} ({_r['power_mw']:.0f} MW)",
+        (_decimal_year(_r["first_operational_date"]), _r["power_mw"]),
+        xytext=_xy,
+        textcoords="offset points",
+        fontsize=9,
+        ha="right",
+        bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", pad=0.3),
+        zorder=5,
+    )
+a2.set_yscale("log")
+a2.set_xlim(2012, 2026)
+a2.set_xticks(range(2012, 2027, 2))
+a2.set_xlabel("First operational")
+a2.set_ylabel("Facility power (MW, log scale)")
+a2.set_title("(b) One AI supercomputer", fontsize=10, loc="left")
+a2.legend(fontsize=9, loc="upper left")
+plt.show()
+plt.close()
+```
+
+:::
+
 Accelerators implement sophisticated power management to operate within their TDP envelope. When the workload does not fully use all SMs (for example, during the communication phase of a training step when the GPUs are waiting for AllReduce to complete), the GPU firmware can disable the clock signal to idle circuitry through **clock gating**\index{Clock gating!definition}, eliminating dynamic switching power and freeing thermal headroom for the active SMs. A separate mechanism, dynamic voltage and frequency scaling (DVFS)\index{DVFS!accelerator power management}, adjusts the chip's clock frequency and supply voltage to stay within power and thermal limits; during a large matrix multiplication that activates all SMs simultaneously, DVFS reduces the clock frequency to keep total power within TDP. When some SMs are idle, the active SMs can boost frequency because total chip power is below TDP, so the actual clock, and therefore the actual throughput, varies throughout a training step.
 
 Dynamic power management means that the actual power draw of a GPU varies continuously during training. A typical training step might see power swing from `{python} DvfsPowerSwingScenario.comm_phase_power_w_str` (during communication phases when most SMs are idle) to `{python} H100TdpWallRecap.tdp_w_str` (during the forward and backward pass when all Tensor Cores are active) and back, with each transition occurring in microseconds. The voltage regulator modules (VRMs)\index{Voltage regulator module!transient response} on the baseboard, which convert the board supply to the sub-volt core voltage, must respond to these transitions fast enough to maintain a stable supply voltage despite the rapidly changing current draw.

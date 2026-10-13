@@ -401,122 +401,156 @@ GPT-3\index{GPT-3!training compute} consumed an estimated `{python} Gpt3Training
 
 : **Training compute evolution**: Growth in hardware scale and training duration across published landmarks and an illustrative GPT-4-class scenario, showing why distributed systems become central as training budgets move from `{python} TrainingComputeLandmarks.alexnet_flops_oom_math`-scale to the largest training runs. {#tbl-training-compute-evolution}
 
-Plotted run by run from AlexNet to Llama 3 405B, the climb is steady on a logarithmic scale, and it separates early single-node vision models from multi-node transformer training (@fig-training-compute-trend).
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHERE TRAINING-COMPUTE GROWTH COMES FROM (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after @tbl-training-compute-evolution and
+# │          @fig-training-compute-trend.
+# │
+# │ Goal: Split training-compute growth into accelerator count, duration, and
+# │       per-accelerator delivered rate, using measured run records.
+# │ Show: ~3.9× per year = ~1.6× accelerators × ~1.3× duration × ~2× rate
+# │       (2012-2024); about half of the growth is more accelerators for longer.
+# │ How: Log-linear fits on Literature.Series.NotableModelTrainingRuns rows that
+# │      carry all three factors; compute = count × hours × 3600 × rate.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import math
+import numpy as np
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
 
-::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Training compute trends (2012–2024)**: The exponential growth of training compute for landmark ML models. The training compute (measured in FLOPs) has grown by roughly seven to eight orders of magnitude, highlighting the shift from single-node experimentation to massive-scale distributed fleets." fig-alt="Log-scale scatter of training compute in FLOPs by year from 2012 to 2024. Dark circles labeled vision (CNNs) mark AlexNet, VGG-19, and ResNet-50; blue triangles labeled language (transformers) mark models from the Transformer to Llama 3 405B. A dashed line labeled fitted trend runs through both groups, and a bracket at the right spans from the lowest to the highest point, labeled seven to eight orders of magnitude."}
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
+def _annual_factor(rows, value):
+    """10**slope of a least-squares fit of log10(value(row)) on publication date."""
+    return 10 ** np.polyfit([_decimal_year(r["date"]) for r in rows], np.log10([value(r) for r in rows]), 1)[0]
+
+def _in_window(rows, first, last):
+    return [r for r in rows if r["training_compute_flop"] and first <= r["date"][:4] <= last]
+
+def _complete(rows):
+    return [r for r in rows if r["hardware_quantity"] and r["training_time_hours"]]
+
+# ┌── LEGO ───────────────────────────────────────────────
+class TrainingComputeGrowth:
+    """Decomposition of training-compute growth into count, duration, and rate."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    first_year, last_year = "2012", "2024"
+    all_rows = _in_window(Literature.Series.NotableModelTrainingRuns.entries, first_year, last_year)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    runs = _complete(all_rows)
+    compute_g = _annual_factor(runs, lambda r: r["training_compute_flop"])
+    count_g = _annual_factor(runs, lambda r: r["hardware_quantity"])
+    duration_g = _annual_factor(runs, lambda r: r["training_time_hours"])
+    rate_g = _annual_factor(runs, lambda r: r["training_compute_flop"] / (r["hardware_quantity"] * r["training_time_hours"] * 3600))
+    fleet_share = (math.log(count_g) + math.log(duration_g)) / math.log(compute_g)
+    span_orders = math.log10(
+        max(r["training_compute_flop"] for r in all_rows) / next(r for r in all_rows if r["model"] == "AlexNet")["training_compute_flop"]
+    )
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(count_g * duration_g * rate_g / compute_g - 1) < 1e-6, "The three factors must multiply to the compute trend.")
+    check(0.4 <= fleet_share <= 0.6, f"Prose says about half of the growth is count and duration, got {fleet_share:.2f}.")
+    check(7 <= span_orders <= 8.5, f"Caption and @sec-sustainable-ai say seven to eight orders from AlexNet, got {span_orders:.1f}.")
+    check(len(runs) >= 100, "Decomposition rests on at least 100 complete runs.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    run_count_str = fmt_int(len(runs))
+    compute_mult_str = fmt_multiple(round(compute_g, 1))
+    count_mult_str = fmt_multiple(round(count_g, 1))
+    duration_mult_str = fmt_multiple(round(duration_g, 1))
+    rate_mult_str = fmt_multiple(round(rate_g, 1))
+    fleet_share_pct_str = fmt_percent(round(fleet_share, 2), precision=0, style="prose")
+```
+
+Epoch AI's database of notable models records, for each training run it can document, the compute the run consumed together with how many accelerators it used and for how long [@epochai2026notable]. Plotted run by run, training compute climbs steadily on a logarithmic scale, and it separates early single-node vision models from multi-node transformer training (@fig-training-compute-trend, panel a). Because training compute is the product of the accelerator count, the training duration, and the rate each accelerator delivers, the same records also show where the growth came from. Across the `{python} TrainingComputeGrowth.run_count_str` runs from 2012 through 2024 that report all three, compute grew about `{python} TrainingComputeGrowth.compute_mult_str` per year. The accelerator count grew `{python} TrainingComputeGrowth.count_mult_str` per year, the duration `{python} TrainingComputeGrowth.duration_mult_str`, and the delivered rate per accelerator, which folds in both faster hardware and better utilization, `{python} TrainingComputeGrowth.rate_mult_str` (@fig-training-compute-trend, panel b). A higher delivered rate per accelerator supplied roughly half of the exponential. More accelerators running for longer supplied the other `{python} TrainingComputeGrowth.fleet_share_pct_str`, and that half is the fleet's to deliver.
+
+::: {#fig-training-compute-trend fig-env="figure" fig-pos="htb" fig-cap="**Where Training-Compute Growth Comes From**: (a) Training compute of notable models published from 2012 through 2024 on a logarithmic axis, colored by domain, spanning about eight orders of magnitude from AlexNet to the largest runs; the dashed line is a least-squares fit. (b) Annual growth factors fitted to the runs that report accelerator count and training duration. Compute growth is the product of the other three bars, and the bar lengths are drawn on a logarithmic scale so each factor's share of the growth reads directly as its length. The delivered rate per accelerator includes both hardware speed and utilization. Data from @epochai2026notable; many values are Epoch AI estimates." fig-alt="Two stacked panels. Top: log-scale scatter of training compute from about 10 to the 14 to 10 to the 26 FLOPs against publication dates from 2012 to 2024, with language models in blue, vision models in green, and other domains in gray, and a dashed fitted line rising through them. AlexNet and Gemini 1.0 Ultra are labeled. Bottom: four horizontal bars of annual growth factor on a logarithmic axis. Training compute grows about 3.9 times per year; accelerator count about 1.6 times, training duration about 1.3 times, and delivered rate per accelerator about 2 times."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRAINING COMPUTE EXPLOSION (FIGURE)
+# │ WHERE TRAINING-COMPUTE GROWTH COMES FROM (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
-import pandas as pd
-import numpy as np
+# │ Context: @fig-training-compute-trend.
+# │
+# │ Goal: Show the training-compute trend and its three growth factors.
+# │ Show: (a) compute by date colored by domain with fit; (b) annual factors.
+# │ How: TrainingComputeGrowth (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
-
-# ┌── 1. LOAD DATA ─────────────────────────────────────────────────────────────
-df = pd.read_csv("vol2/01_introduction/data/training_compute.csv")
-
-# ┌── 2. PLOT POINTS ───────────────────────────────────────────────────────────
-vision = df[df['Domain'] == 'Vision']
-language = df[df['Domain'] == 'Language']
-
-ax.scatter(vision['Year'], vision['FLOPs'], color=COLORS["primary"], s=70, zorder=5)
-ax.scatter(language['Year'], language['FLOPs'], color=COLORS["BlueLine"], s=70, zorder=5, marker="^")
-
-# ┌── 3. TREND LINE ────────────────────────────────────────────────────────────
-coeffs = np.polyfit(df['Year'], np.log10(df['FLOPs']), 1)
-trend_x = np.linspace(2011, 2025.5, 200)
-trend_y = 10 ** np.polyval(coeffs, trend_x)
-ax.plot(trend_x, trend_y, "--", color=COLORS["secondary"], alpha=0.6, linewidth=1.5)
-
-# ┌── 4. ANNOTATE ──────────────────────────────────────────────────────────────
-# Points above the trend carry labels to their upper left, points below it to
-# their lower right, so no label sits on the trend line.
-offsets = {
-    "AlexNet": (-7, 7, "right"),
-    "VGG-19": (-8, 5, "right"),
-    "ResNet-50": (8, -12, "left"),
-    "Transformer": (7, -12, "left"),
-    "BERT-Large": (7, -12, "left"),
-    "Megatron-LM": (7, -12, "left"),
-    "GPT-3": (-7, 7, "right"),
-    "PaLM": (-7, 7, "right"),
-    "GPT-4 (Est.)": (-10, -3, "right"),
-    "Llama-3 (405B)": (-7, 7, "right"),
-}
-# Display text only; the CSV keys stay as they are.
-display = {"Llama-3 (405B)": "Llama 3 405B"}
-
-for _, row in df.iterrows():
-    m = row['Model']
-    dx, dy, ha = offsets.get(m, (7, 7, "left"))
-    color = COLORS["primary"] if row['Domain'] == 'Vision' else COLORS["BlueLine"]
-    ax.annotate(
-        display.get(m, m),
-        (row['Year'], row['FLOPs']),
-        textcoords="offset points",
-        xytext=(dx, dy),
-        ha=ha,
-        fontsize=9.5,
-        color=color,
-        bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none", alpha=0.9),
-        zorder=6,
+fig, _ax0, COLORS, plt = book_style.setup_plot(figsize=(6.2, 6.6))
+fig.delaxes(_ax0)
+a1, a2 = fig.subplots(2, 1, gridspec_kw=dict(height_ratios=[1.6, 1], hspace=0.45))
+_C = TrainingComputeGrowth
+_groups = [("Language", COLORS["BlueLine"]), ("Vision", COLORS["GreenLine"]), ("Other", COLORS["grid"])]
+for _name, _col in _groups:
+    _p = [r for r in _C.all_rows if (r["domain"] == _name) or (_name == "Other" and r["domain"] not in ("Language", "Vision"))]
+    a1.scatter(
+        [_decimal_year(r["date"]) for r in _p],
+        [r["training_compute_flop"] for r in _p],
+        s=12,
+        color=_col,
+        label=_name,
+        zorder=3 if _name != "Other" else 2,
     )
+_xs = np.array([_decimal_year(r["date"]) for r in _C.all_rows])
+_k, _b = np.polyfit(_xs, np.log10([r["training_compute_flop"] for r in _C.all_rows]), 1)
+_xx = np.linspace(2012, 2025, 50)
+a1.plot(_xx, 10 ** (_k * _xx + _b), "--", color=COLORS["primary"], lw=1.1, zorder=4)
+for _r in _C.all_rows:
+    if _r["model"] in ("AlexNet", "Gemini 1.0 Ultra"):
+        a1.annotate(
+            _r["model"],
+            (_decimal_year(_r["date"]), _r["training_compute_flop"]),
+            xytext=(6, -2) if _r["model"] == "AlexNet" else (-7, 0),
+            textcoords="offset points",
+            fontsize=9,
+            ha="left" if _r["model"] == "AlexNet" else "right",
+            va="center",
+            bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", pad=0.3),
+            zorder=5,
+        )
+a1.set_yscale("log")
+a1.set_xlim(2011.5, 2025.2)
+a1.set_xlabel("Publication date")
+a1.set_ylabel("Training compute (FLOPs, log scale)")
+a1.set_title("(a) Training compute of notable models", fontsize=10, loc="left")
+a1.legend(fontsize=9, loc="upper left")
 
-# ┌── 5. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_yscale("log")
-ax.set_ylim(1e17, 1e27)
-ax.set_xlim(2011, 2025.5)
-ax.set_xlabel("Year")
-ax.set_ylabel("Training Compute (FLOPs)")
-
-# Group names set directly beside each family instead of a legend.
-ax.text(2013.2, 2.5e19, "vision (CNNs)", fontsize=10, fontweight="bold", color=COLORS["primary"], ha="center", va="center")
-ax.text(2021.2, 6e19, "language\n(transformers)", fontsize=10, fontweight="bold", color=COLORS["BlueLine"], ha="center", va="center")
-# Trend label set on the line, rotated to its on-screen slope.
-_tx = 2016.3
-_p1 = ax.transData.transform((_tx, 10 ** np.polyval(coeffs, _tx)))
-_p2 = ax.transData.transform((_tx + 1, 10 ** np.polyval(coeffs, _tx + 1)))
-_ang = np.degrees(np.arctan2(_p2[1] - _p1[1], _p2[0] - _p1[0]))
-ax.annotate(
-    "fitted trend",
-    (_tx, 10 ** np.polyval(coeffs, _tx)),
-    textcoords="offset points",
-    xytext=(-4, 6),
-    rotation=_ang,
-    rotation_mode="anchor",
-    fontsize=10,
-    color=COLORS["secondary"],
-    ha="center",
-    va="bottom",
-)
-
-# Span bracket: first to last landmark, read off the data on a log axis.
-_lo, _hi = df['FLOPs'].min(), df['FLOPs'].max()
-_bx = 2025.25
-ax.plot([_bx, _bx], [_lo, _hi], color=COLORS["primary"], lw=1.1)
-for _v in (_lo, _hi):
-    ax.plot([_bx - 0.12, _bx + 0.12], [_v, _v], color=COLORS["primary"], lw=1.1)
-ax.text(
-    _bx - 0.25,
-    10 ** ((np.log10(_lo) + np.log10(_hi)) / 2),
-    "seven to eight\norders of magnitude",
-    fontsize=10,
-    color=COLORS["primary"],
-    ha="right",
-    va="center",
-    bbox=dict(boxstyle="square,pad=0.15", fc="white", ec="none"),
-)
-ax.set_title("")
+_bars = [
+    ("Training compute", _C.compute_g, COLORS["primary"]),
+    ("Accelerator count", _C.count_g, COLORS["OrangeLine"]),
+    ("Training duration", _C.duration_g, COLORS["OrangeLine"]),
+    ("Rate per accelerator", _C.rate_g, COLORS["VioletLine"]),
+]
+for _i, (_lab, _g, _col) in enumerate(_bars):
+    a2.barh(len(_bars) - 1 - _i, math.log10(_g), color=_col, height=0.6)
+    a2.text(math.log10(_g) + 0.01, len(_bars) - 1 - _i, f"{round(_g, 1):g}× per year", va="center", fontsize=9)
+a2.set_yticks(range(len(_bars)))
+a2.set_yticklabels([b[0] for b in reversed(_bars)])
+_ticks = [1, 1.5, 2, 3, 4]
+a2.set_xticks([math.log10(t) for t in _ticks])
+a2.set_xticklabels([f"{t:g}×" for t in _ticks])
+a2.set_xlim(0, math.log10(9))
+a2.set_xlabel("Annual growth factor (logarithmic length)")
+a2.set_title(f"(b) Growth factors, {_C.run_count_str} runs", fontsize=10, loc="left")
 plt.show()
 plt.close()
 ```
 
 :::
-The language-model points pull away from the vision points because compute demands escalated sharply as transformer architectures replaced convolutional pipelines. Raw arithmetic volume is only one dimension of scale, however. The number of accelerators allocated to a single run has roughly doubled every year over the same period (@fig-cluster-size-explosion), a rate that quickly outpaced what any single node could host.
+The language-model points pull away from the vision points because compute demands escalated sharply as transformer architectures replaced convolutional pipelines. Landmark frontier runs grew their accelerator counts faster than the average run, roughly doubling every year (@fig-cluster-size-explosion), a rate that quickly outpaced what any single node could host.
 
 ```{python}
 #| echo: false
@@ -588,7 +622,7 @@ class ClusterSizeLandmarks:
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.1, 5))
 
 # —Verified data points ---
 
@@ -1283,7 +1317,7 @@ Applying scaling laws in practice is a scarcity diagnosis: the useful question i
 
 In a compute-limited regime\index{Compute-limited regime!resource allocation}, compute scarcity restricts scaling potential despite abundant training data; measured learning curves guide the allocation between model size and training tokens within that budget. In a data-limited regime\index{Data!limited regime}, computational resources exceed what the available dataset can support, meaning that increasing model size is useful only if validation measurements show that the available data can support additional capacity. Between these extremes lies the optimal regime\index{Optimal regime!Chinchilla frontier}, where compute and data grow in balance following compute-optimal scaling laws, as DeepMind demonstrated with Chinchilla by outperforming much larger models through proportional scaling of model size and training data [@hoffmann2022chinchilla]. Recognizing which regime governs a given project prevents common inefficiencies: over-parameterized models with insufficient training data, or under-parameterized models that waste available compute. For the fleet, the diagnosis decides where the next investment goes. A compute-limited project needs accelerator-hours, while a data-limited one gains more from the storage and data pipelines of @sec-data-storage than from additional accelerators.
 
-::: {#fig-loss-vs-n-d fig-env="figure" fig-pos="htb" fig-cap="**Loss vs. dataset size across model scales**: Test loss curves show how models of different sizes (393.2K to 708M parameters) benefit from increased training data. Larger models achieve lower loss, but all curves exhibit diminishing returns at high token counts." fig-alt="Log-scale scatter plot of loss vs. tokens in dataset. Six curves for model sizes from 393.2K to 708M parameters, shaded from light to dark blue by model size and labeled at their right ends; the three largest also use square, diamond, and triangle markers. Italic labels mark small models: capacity plateau between the two flattest curves, shared power-law descent along the line the larger curves follow together, and large models: lower floor, set under the lowest curve where it levels off below all the others."}
+::: {#fig-loss-vs-n-d fig-env="figure" fig-pos="htb" fig-cap="**Loss vs. dataset size across model scales**: Test loss curves show how models of different sizes (393.2K to 708M parameters) benefit from increased training data. Larger models achieve lower loss, but all curves exhibit diminishing returns at high token counts. Points and curves are digitized from Figure 4 (left) of @kaplan2020scaling, so values carry the precision of a reading from the published plot." fig-alt="Log-scale scatter plot of loss vs. tokens in dataset. Six curves for model sizes from 393.2K to 708M parameters, shaded from light to dark blue by model size and labeled at their right ends; the three largest also use square, diamond, and triangle markers. Italic labels mark small models: capacity plateau between the two flattest curves, shared power-law descent along the line the larger curves follow together, and large models: lower floor, set under the lowest curve where it levels off below all the others."}
 
 ```{python}
 #| echo: false
@@ -1291,7 +1325,7 @@ from binder.tools.figures import style as book_style
 
 import numpy as np
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.1))
 
 models = [
     {
@@ -1404,13 +1438,13 @@ for m, shade, mk in zip(models, _shades, _markers):
     _lx = np.log10(tx)
     _gx = np.linspace(_lx[0], _lx[-1], 300)
     ax.plot(10**_gx, PchipInterpolator(_lx, ty)(_gx), color=shade, linestyle='--', linewidth=1.5, zorder=3)
-    ax.text(3.9e10, ty[-1], m["name"], va='center', ha='left', fontsize=9.5, color=COLORS['primary'], clip_on=False)
+    ax.text(3.9e10, ty[-1], m["name"], va='center', ha='left', fontsize=9, color=COLORS['primary'], clip_on=False)
 
-ax.text(3.9e10, 4.62, 'Parameters', va='center', ha='left', fontsize=9.5, color=COLORS['secondary'], clip_on=False)
+ax.text(3.9e10, 4.62, 'Parameters', va='center', ha='left', fontsize=9, color=COLORS['secondary'], clip_on=False)
 
 # Name the two behaviors the prose contrasts, in neutral text.
-ax.text(3.0e9, 4.07, 'small models: capacity plateau', va='center', ha='center', fontsize=10, color=COLORS['primary'], fontstyle='italic')
-ax.text(5.5e9, 2.33, 'large models: lower floor', va='center', ha='center', fontsize=10, color=COLORS['primary'], fontstyle='italic')
+ax.text(3.0e9, 4.07, 'small models: capacity plateau', va='center', ha='center', fontsize=9, color=COLORS['primary'], fontstyle='italic')
+ax.text(5.5e9, 2.33, 'large models: lower floor', va='center', ha='center', fontsize=9, color=COLORS['primary'], fontstyle='italic')
 
 ax.set_xscale('log')
 ax.set_xlim(1e7, 3.5e10)
@@ -1433,7 +1467,7 @@ ax.annotate(
     rotation_mode='anchor',
     ha='center',
     va='top',
-    fontsize=10,
+    fontsize=9,
     color=COLORS['primary'],
     fontstyle='italic',
 )
@@ -1459,7 +1493,7 @@ The second cut follows the return on additional data as a dataset grows, which d
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.2))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 3.9))
 
 # Schematic in log-log coordinates: a plateau at the best-guess ceiling, a
 # straight power-law segment, and an asymptote at the irreducible floor,
@@ -1513,7 +1547,7 @@ ax.text(4.1, 3.45, 'predictable returns', ha='left', va='bottom', fontsize=10, f
 ax.text(8.6, floor + 0.28, 'negligible gain', ha='center', va='bottom', fontsize=10, fontstyle='italic', color=COLORS['primary'])
 
 # Region names along the top
-for xc, name in ((x_a / 2, 'Small Data Region'), ((x_a + x_b) / 2, 'Power-Law Region'), ((x_b + 10) / 2, 'Irreducible Error Region')):
+for xc, name in ((x_a / 2, 'Small Data\nRegion'), ((x_a + x_b) / 2, 'Power-Law\nRegion'), ((x_b + 10) / 2, 'Irreducible\nError Region')):
     ax.text(xc, 4.85, name, ha='center', va='center', fontsize=10, fontweight='bold', color=COLORS['primary'])
 
 ax.set_xlim(0, 10)
@@ -1543,7 +1577,7 @@ plt.close()
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.2))
 
 # Curve stages:
 # Pretraining: 0.2 to 3.5
@@ -1856,7 +1890,7 @@ If each node has an illustrative `{python} ReliabilityGap.node_availability_str`
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 4.5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.2))
 
 # Scenario inputs come from the ReliabilityGap LEGO cell above.
 r_lo = ReliabilityGap.a_node

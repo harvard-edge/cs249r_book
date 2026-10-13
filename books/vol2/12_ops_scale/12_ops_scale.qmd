@@ -4221,6 +4221,143 @@ Hardware refresh cycles are ultimately about useful work per lifecycle dollar (@
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PEAK ARITHMETIC PER WATT OVER TIME (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after the refresh-cycle paragraph and
+# │          @fig-flops-per-watt-trend.
+# │
+# │ Goal: Place @tbl-power-efficiency on the cross-vendor efficiency trend
+# │       that sets the economic clock for refresh.
+# │ Show: ~1.2× per year across 64 accelerators (doubling ~every 4 years);
+# │       V100 -> B200 frontier 5.4× in seven years.
+# │ How: Log-linear fit of flops_per_w on release date over
+# │      Literature.Series.AcceleratorFlopsPerWatt; table GPUs from
+# │      Hardware.Cloud guard the series values.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import datetime as dt
+import math
+import numpy as np
+from mlsysim import Hardware, Literature
+from mlsysim.core.units import TFLOPs, second, watt
+from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple
+
+def _decimal_year(s):
+    d = dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
+def _registry_ratio(h):
+    """Dense FP16 TFLOP/s per watt from a registry device (peak_flops is the dense FP16 rate, as in @tbl-power-efficiency)."""
+    return (h.compute.peak_flops / h.tdp).to(TFLOPs / second / watt).magnitude
+
+def _series_ratio(rows, name):
+    return next(r["flops_per_w"] for r in rows if r["device"] == name) / 1e12
+
+# ┌── LEGO ───────────────────────────────────────────────
+class FlopsPerWattTrend:
+    """Cross-vendor trend in dense FP16 FLOP/s per watt of TDP."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.AcceleratorFlopsPerWatt.entries
+    table = (
+        ("V100", Hardware.Cloud.V100, "NVIDIA Tesla V100 SXM2"),
+        ("A100", Hardware.Cloud.A100, "NVIDIA A100 SXM4 40 GB"),
+        ("H100", Hardware.Cloud.H100, "NVIDIA H100 SXM5 80GB"),
+        ("B200", Hardware.Cloud.B200, "NVIDIA B200"),
+    )
+    refresh_years = 4  # scenario assumption: a four-year depreciation and refresh cycle
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    annual = 10 ** np.polyfit([_decimal_year(r["release_date"]) for r in rows], np.log10([r["flops_per_w"] for r in rows]), 1)[0]
+    doubling_years = math.log(2) / math.log(annual)
+    per_refresh = annual**refresh_years
+    v100_to_b200 = _registry_ratio(Hardware.Cloud.B200) / _registry_ratio(Hardware.Cloud.V100)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    for _lab, _h, _name in table:
+        check(abs(_series_ratio(rows, _name) / _registry_ratio(_h) - 1) < 0.01, f"{_lab}: Epoch row and registry disagree.")
+    check(1.1 <= annual <= 1.3, f"Prose says about 1.2x per year, got {annual:.2f}.")
+    check(3.5 <= doubling_years <= 4.5, f"Prose says doubling about every four years, got {doubling_years:.1f}.")
+    check(5 <= v100_to_b200 <= 6, f"Prose says V100 to B200 is about 5.4x, got {v100_to_b200:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    device_count_str = fmt_int(len(rows))
+    annual_mult_str = fmt_multiple(round(annual, 1))
+    doubling_years_str = fmt_int(round(doubling_years))
+    refresh_years_str = fmt_int(refresh_years)
+    per_refresh_mult_str = fmt_multiple(round(per_refresh))
+    v100_to_b200_mult_str = fmt_multiple(round(v100_to_b200, 1))
+```
+
+The four generations in @tbl-power-efficiency sit on a broader and slower trend. Across the `{python} FlopsPerWattTrend.device_count_str` accelerator models released since 2017 for which Epoch AI records both a dense FP16 tensor rate and a TDP, from every major vendor, peak arithmetic per watt improved about `{python} FlopsPerWattTrend.annual_mult_str` per year, doubling roughly every `{python} FlopsPerWattTrend.doubling_years_str` years (@fig-flops-per-watt-trend) [@epochai2026hardware]. The leading NVIDIA parts improved faster, `{python} FlopsPerWattTrend.v100_to_b200_mult_str` from the V100 to the B200 in seven years, because frontier devices adopt new process nodes and tensor formats first. A fleet on a `{python} FlopsPerWattTrend.refresh_years_str`-year refresh cycle therefore gains about `{python} FlopsPerWattTrend.per_refresh_mult_str` in peak arithmetic per watt each cycle on the broad trend. Peak ratios bound what a refresh can deliver, and only measurements at the workload level decide how much of it a given fleet realizes.
+
+::: {#fig-flops-per-watt-trend fig-env="figure" fig-pos="htb" fig-cap="**Peak Arithmetic per Watt over Time**: Dense FP16 tensor throughput divided by TDP for ML accelerators released since 2017, on a logarithmic axis, colored by vendor. The dashed line is a least-squares fit across all devices; the four GPUs of @tbl-power-efficiency are circled and labeled. The ratio compares arithmetic ceilings, not measured energy per workload. Data from @epochai2026hardware." fig-alt="Log-scale scatter of TFLOP/s per watt from about 0.1 to 3 against release dates from 2017 to 2026, with NVIDIA points in green and other vendors in other colors. A dashed fitted line rises about 1.2 times per year. Circled, labeled points mark the V100 near 0.42, A100 near 0.78, H100 near 1.4, and B200 near 2.25 TFLOP/s per watt."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PEAK ARITHMETIC PER WATT OVER TIME (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-flops-per-watt-trend.
+# │
+# │ Goal: Plot FP16 FLOP/s per watt by release date with a fitted trend.
+# │ Show: Vendor-colored points, fit line, labeled table GPUs.
+# │ How: FlopsPerWattTrend (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.2, 3.8))
+_C = FlopsPerWattTrend
+_vcol = {"NVIDIA": COLORS["GreenLine"], "Google": COLORS["BlueLine"], "AMD": COLORS["RedLine"]}
+for _v in ("Other", "AMD", "Google", "NVIDIA"):
+    _p = [r for r in _C.rows if (r["manufacturer"] == _v) or (_v == "Other" and r["manufacturer"] not in _vcol)]
+    ax.scatter(
+        [_decimal_year(r["release_date"]) for r in _p],
+        [r["flops_per_w"] / 1e12 for r in _p],
+        s=22,
+        color=_vcol.get(_v, COLORS["grid"]),
+        label=_v if _v != "Other" else "Other vendors",
+        zorder=3,
+    )
+_xx = np.linspace(2017, 2026.3, 50)
+_k, _b = np.polyfit([_decimal_year(r["release_date"]) for r in _C.rows], np.log10([r["flops_per_w"] / 1e12 for r in _C.rows]), 1)
+ax.plot(_xx, 10 ** (_k * _xx + _b), "--", color=COLORS["primary"], lw=1.2, label=f"Fit ({_C.annual:.1f}× per year)", zorder=2)
+_off = {"V100": (-28, 22), "A100": (-30, 22), "H100": (-36, 26), "B200": (-40, 18)}
+for _lab, _h, _name in _C.table:
+    _r = next(r for r in _C.rows if r["device"] == _name)
+    _pt = (_decimal_year(_r["release_date"]), _r["flops_per_w"] / 1e12)
+    ax.scatter([_pt[0]], [_pt[1]], s=90, facecolors="none", edgecolors=COLORS["primary"], linewidths=1.3, zorder=4)
+    ax.annotate(
+        _lab,
+        _pt,
+        xytext=_off[_lab],
+        textcoords="offset points",
+        fontsize=9,
+        ha="center",
+        arrowprops=dict(arrowstyle="-", color=COLORS["primary"], lw=0.8),
+        bbox=dict(facecolor="white", alpha=0.9, edgecolor="none", pad=0.2),
+        zorder=5,
+    )
+ax.set_yscale("log")
+ax.set_xlim(2016.6, 2026.6)
+ax.set_ylim(0.15, 3.6)
+_yt = [0.2, 0.5, 1, 2]
+ax.set_yticks(_yt)
+ax.set_yticklabels([f"{t:g}" for t in _yt])
+ax.minorticks_off()
+ax.set_xlabel("Release date")
+ax.set_ylabel("Dense FP16 TFLOP/s per watt (log scale)")
+ax.legend(fontsize=9, loc="upper left", frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
+```{python}
+#| echo: false
 #| label: refresh-screening-lego
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ REFRESH SCREENING (LEGO)
