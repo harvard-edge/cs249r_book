@@ -1,5 +1,6 @@
 ---
 number-offset: [9]
+concepts: agent_harness_concepts.yml
 notation-local: [\ApprovalHeldTrajectories, \CachedInputTokenCount, \CostBudgetUsedFraction, \ExecutedToolCall, \SchedulingClassWeight, \SettledTrajectoryCost, \TimeBudgetUsedFraction, \TokenBudgetUsedFraction, \ToolCallCost, \TurnBoundaryDelay, \TurnBudgetUsedFraction, \UncachedInputTokenCount]
 ---
 
@@ -51,13 +52,13 @@ A single model invocation succeeds or fails on its own, but an autonomous agent 
 
 ::: {.callout-learning-objectives}
 
-- Design a runtime-owned trajectory record that tracks live plans, grants, consumption, and outstanding obligations
+- Explain why continuation is decided outside the model, and design the runtime-owned trajectory record of plans, grants, consumption, and obligations
 - Construct guarded state transitions that keep stale observations out of the next turn while preserving unresolved effects
 - Calculate how long a control request waits for a turn boundary, and apply pause, cancel, or kill without dispatching incomplete output
 - Explain which resources an asynchronous wait releases and which the trajectory still owns and pays for
 - Design an approval gate with expiry and dispatch-time rechecks, and size the resources its held trajectories retain
 - Allocate shared model-call service by weighted deficit round-robin while keeping provider quotas separate from trajectory budgets
-- Apply bounded-liability admission before dispatch and select a budget ceiling by cost per accepted task
+- Apply bounded-liability admission across a trajectory's turn, token, time, and dollar budgets, and select a ceiling by cost per accepted task
 
 :::
 ## Supervising Continuation {#sec-vol3-harness-overview}
@@ -493,7 +494,7 @@ When a deadline expires, it terminates the harness's wait interval, not the unde
 
 ### Results during a pause {#sec-vol3-agent-harness-results-during-pause}
 
-Consider what happens when the test result for `r18` arrives while an operator pause is active. The supervisor authenticates the payload, correlates it with the outstanding job handle, and commits the outcome to the trajectory ledger, all while the trajectory state remains strictly `PAUSED`. A passing test suite (such as `test_waiter_notified_on_return`) provides verification for that specific revision, but it does not constitute approval of the overall repair, nor does it grant fresh execution budget. The decision to resume the repair belongs entirely to the resume guard. Consequently, the harness event processor must remain active even when trajectory continuation is suspended. The same principle governs finalization: late-arriving evidence can settle outstanding accounting liabilities without accidentally reviving an already terminated trajectory.
+The `r18` test result that arrives during a pause follows the path traced in @sec-vol3-agent-harness-pause-entry. It settles its ledger entry while the trajectory stays `PAUSED`, and only the resume guard can let it inform the next model call. The harness event processor must therefore remain active even when continuation is suspended. The same holds during finalization, where late-arriving evidence can settle outstanding liabilities without reviving an already terminated trajectory.
 
 ### Resources retained while waiting {#sec-vol3-agent-harness-retained-resources}
 
@@ -834,7 +835,7 @@ The harness may safely expose current budget metrics to the model, enabling the 
 
 ### Reservation and settlement {#sec-vol3-agent-harness-reservation-settlement}
 
-A budget serves as an absolute ceiling only when the admission gate accounts for unbilled in-flight operations before authorizing new liabilities.[^fn-reservation-escrow-method] The amount set aside for an admitted operation is its *reservation*; the chapter keeps the word escrow for held proposals awaiting approval, which hold an action rather than an amount. Test-time search already reserved each candidate's maximum completion before dispatch and kept unsettled reservations against its quota; the harness extends that discipline from one search to every operation of the trajectory, including tool jobs and the finalization reserve.
+A budget serves as an absolute ceiling only when the admission gate accounts for unbilled in-flight operations before authorizing new liabilities.[^fn-reservation-escrow-method] The amount set aside for an admitted operation is its **budget reservation**\index{Budget reservation!definition}, the operation's maximum additional charge, withheld from the allowance at admission and released only when evidence settles the operation. The chapter keeps the word escrow for held proposals awaiting approval, which hold an action rather than an amount. Test-time search reserved each candidate's maximum completion before dispatch and kept unsettled reservations against its quota; the harness extends that discipline from one search to every operation of the trajectory, including tool jobs and the finalization reserve.
 
 ::: {.column-margin .margin-pointer}
 ↩ Reserving a candidate's maximum completion before dispatch, within a task-wide quota, is established in @sec-vol3-test-time-compute-admission-limits.
@@ -1069,7 +1070,7 @@ class HarnessBudget:
 
 A well-designed harness introduces progressive interventions before the admission gate forcibly shuts down exploratory execution. A primary health indicator is the maximum consumed fraction across all active budget dimensions: $\max(\TurnBudgetUsedFraction, \TokenBudgetUsedFraction, \TimeBudgetUsedFraction, \CostBudgetUsedFraction)$. Factoring unbilled reservations into these fractions provides a far more accurate early warning signal than inspecting settled invoices alone, while the wall-clock timer yields the temporal fraction $\TimeBudgetUsedFraction$. This multi-dimensional indicator steers adaptive interventions, even as the underlying gate continues to evaluate bounded liabilities independently across each axis.
 
-@Tbl-vol3-budget-triggers delineates the progressive escalation stages that precede hard enforcement. A deployment policy triggers each stage from the admission terms themselves rather than from a fixed percentage of the allowance, because a fixed percentage ignores how large the next step is. Steering begins when the remaining headroom can fund only a few more calls at their current bounded liability, and finalization begins when the next call's liability no longer fits beside the finalization reserve.
+@Tbl-vol3-budget-triggers delineates the progressive escalation stages that precede hard enforcement. A deployment policy triggers each stage from the admission terms themselves rather than from a fixed percentage of the allowance, because a fixed percentage ignores how large the next step is. Steering begins when the remaining headroom can fund only a few more calls at their current bounded liability, and finalization begins when the next call's liability no longer fits beside the finalization reserve. The stages change how a trajectory approaches a hard ceiling, not which stopping rule prevails; a hard ceiling still takes precedence over satisficing and marginal stopping, the order established for search in @sec-vol3-test-time-compute-admission-limits.
 
 | Stage        | Harness action                                                                            | Scope and limitation                                                                                 |
 |:-------------|:------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
