@@ -464,6 +464,11 @@ def fetch_url(
                     if m:
                         page_title = re.sub(r"\s+", " ", m.group(1)).strip()
                     citation_meta = parse_citation_meta(peek)
+                    if not citation_meta and peek.lstrip().startswith("@"):
+                        # A publisher's own BibTeX export (e.g. LBNL, ACM) is a
+                        # citation record in itself; read it as source metadata.
+                        citation_meta = parse_bibtex_export(peek)
+                        page_title = citation_meta.get("title", page_title)
                     break
         except urllib.error.HTTPError as e:
             status_code = e.code
@@ -518,6 +523,52 @@ def fetch_url(
         "fields": fields,
         "evidence": evidence,
     }
+
+
+def parse_bibtex_export(text: str) -> dict[str, Any]:
+    """Read the first entry of a publisher's BibTeX export as source metadata.
+
+    Returns the same shape as :func:`parse_citation_meta` (title, ``"Last,
+    First"`` authors, year, pages, DOI), or ``{}`` if the text does not parse.
+    """
+    try:
+        entries, _ = bib_lint.parse_bib(text)
+    except ValueError:
+        return {}
+    if not entries:
+        return {}
+    entry = entries[0]
+
+    def value(name: str) -> str:
+        field = entry.get(name)
+        return re.sub(r"\s+", " ", field.value).strip() if field else ""
+
+    meta: dict[str, Any] = {}
+    if value("title"):
+        meta["title"] = clean_str(value("title"))
+    authors = []
+    for name in re.split(r"\s+and\s+", value("author")):
+        name = name.strip()
+        if not name:
+            continue
+        if "," in name:
+            authors.append(name)
+        else:
+            parts = name.split()
+            authors.append(f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) > 1 else name)
+    if authors:
+        meta["authors"] = authors
+    m_year = re.search(r"(19|20)\d\d", value("year"))
+    if m_year:
+        meta["year"] = int(m_year.group(0))
+    if value("pages"):
+        meta["pages"] = value("pages")
+    venue = value("journal") or value("booktitle") or value("institution")
+    if venue:
+        meta["venue"] = venue
+    if value("doi"):
+        meta["doi"] = value("doi")
+    return meta
 
 
 def parse_citation_meta(html_text: str) -> dict[str, Any]:
