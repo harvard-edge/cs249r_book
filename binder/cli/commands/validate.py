@@ -783,6 +783,12 @@ class ValidateCommand:
             # check noticed. The offset must equal the NN_ folder prefix minus one.
             Scope("number-offset", "_run_number_offset",
                   note="chapter number-offset matches its NN_ folder"),
+            # 2026-10-13: a top-level `number-sections: false` added to the
+            # volume entry files for the HTML landing page became book-wide
+            # metadata in the PDF, so every chapter went unnumbered and every
+            # figure printed as 0.x. Entry files may only switch it off for HTML.
+            Scope("pdf-entry-numbering", "_run_pdf_entry_numbering",
+                  note="volume PDF entry files must not turn number-sections off book-wide"),
             Scope("parts", "_run_parts",
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
@@ -5642,6 +5648,53 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # H2 landing prose  (detect ## followed immediately by ###)
     # ------------------------------------------------------------------
+
+    def _run_pdf_entry_numbering(self, root: Path) -> ValidationRunResult:
+        """Flag a top-level ``number-sections: false`` in a volume's PDF entry file.
+
+        The entry file (``index-volN.qmd``, ``volN/index.qmd``, or
+        ``volN/frontmatter/about.qmd``) supplies the whole book's metadata in a
+        PDF build, so a top-level ``number-sections: false`` there unnumbers
+        every chapter. Scope it under ``format: html:`` instead.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for file in files:
+            parts = file.parts
+            is_entry = (
+                re.fullmatch(r"index-vol\d\.qmd", file.name) is not None
+                or (file.name == "index.qmd" and len(parts) >= 2 and re.fullmatch(r"vol\d", parts[-2]))
+                or (file.name == "about.qmd" and len(parts) >= 3 and parts[-2] == "frontmatter"
+                    and re.fullmatch(r"vol\d", parts[-3]))
+            )
+            if not is_entry:
+                continue
+            lines = self._read_text(file).splitlines()
+            if not lines or lines[0].strip() != "---":
+                continue
+            checked += 1
+            for idx, line in enumerate(lines[1:], 2):
+                if line.strip() == "---":
+                    break
+                if re.match(r"^number-sections:\s*false\s*$", line):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="pdf_entry_number_sections_off",
+                        message=("top-level number-sections: false in a volume entry file "
+                                 "turns off chapter numbering for the whole PDF (figures print as 0.x)"),
+                        context=line.strip(),
+                        suggestion="move it under format: html:",
+                    ))
+        return ValidationRunResult(
+            name="pdf-entry-numbering",
+            description="Volume PDF entry files keep book-wide numbering on",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_number_offset(self, root: Path) -> ValidationRunResult:
         """Require each chapter's ``number-offset`` to equal its folder number minus one.
