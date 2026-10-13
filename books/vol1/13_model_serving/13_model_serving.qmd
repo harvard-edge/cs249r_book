@@ -56,9 +56,9 @@ Training and serving pursue opposing operating objectives. Training maximizes ag
 
 - Explain serving inversion from training throughput to per-request latency, headroom, and tail behavior
 - Decompose request latency across serialization, preprocessing, inference, queuing, postprocessing, and network overhead
-- Apply queueing laws and simple queue models to plan capacity against percentile latency targets
-- Select batching, load shedding, autoscaling, and runtime strategies for traffic patterns and latency budgets
-- Diagnose training-serving skew and cold starts from mismatched preprocessing, model loading, or cache behavior
+- Apply queueing laws and simple queue models to plan capacity and admission control against percentile latency targets
+- Select batching windows and inference runtimes that trade formation delay and precision for throughput within a latency budget
+- Diagnose cold-start delays from weight transfer, runtime initialization, graph compilation, and warmup during model loading
 - Evaluate LLM serving bottlenecks using token latency, KV-cache memory, and continuous batching constraints
 - Calculate cost per inference from precision, hardware utilization, replica count, and runtime throughput
 ```{=latex}
@@ -500,7 +500,7 @@ Static inference\index{Static inference!precomputed predictions} (also called of
 
 #### Dynamic inference {#sec-model-serving-dynamic-inference-d2d5}
 
-Dynamic inference\index{Dynamic inference!real-time prediction} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($\BatchSize=1$ to $\BatchSize=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs bind execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving more expensive per query than offline batching (example \ref{exmp-cost-latency}).
+**Dynamic inference**\index{Dynamic inference!definition}\index{Online inference|see{Dynamic inference}} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($\BatchSize=1$ to $\BatchSize=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs bind execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving more expensive per query than offline batching (example \ref{exmp-cost-latency}).
 
 ```{python}
 #| echo: false
@@ -4628,7 +4628,7 @@ To accelerate this transfer path, systems keep the weights in pinned memory\inde
 
 ### Training-serving skew {#sec-model-serving-trainingserving-skew-7b99}
 
-A model that performed well during validation may silently degrade when deployed. This phenomenon, training-serving skew\index{Training-serving skew!silent accuracy degradation}, represents one of the most subtle failure modes in production ML because it is invisible to latency monitoring and exception tracking [@sculley2015hidden; @baylor2017]. The consistency requirement belongs to the data pipeline; serving is where a violation surfaces. Because the divergence is measurable on identical inputs without labels (principle \ref{pri-training-serving-skew}), it is also one of the most preventable.
+A model that performed well during validation may still degrade silently once deployed through training-serving skew\index{Training-serving skew!silent accuracy degradation}, in which the two environments compute the same input differently. It is one of the most subtle failure modes in production ML because it is invisible to latency monitoring and exception tracking [@sculley2015hidden; @baylor2017]. The consistency requirement belongs to the data pipeline; serving is where a violation surfaces. Because the divergence is measurable on identical inputs without labels (principle \ref{pri-training-serving-skew}), it is also one of the most preventable.
 
 ::: {.column-margin .margin-pointer}
 ↩ The consistency imperative, which requires equivalent transformation behavior and state in training and serving, is established in @sec-data-engineering-ensuring-trainingserving-consistency-c683.
@@ -4644,7 +4644,7 @@ A model that performed well during validation may silently degrade when deployed
 
 :::
 
-@Sec-ml-operations-trainingserving-skew-diagnosis-prevention-9dc1 catalogs the skew categories and the method that detects each. The serving-specific manifestation of skew is **preprocessing divergence**\index{Preprocessing!divergence, training vs. serving}: the real-time inference pipeline processes raw data differently than the batch training pipeline, a common failure mode when training uses Python/Pandas while serving uses C++/Java or optimized inference servers. Unlike data drift, this divergence is internally introduced and often preventable through shared transformations, parity tests, and careful engineering.
+@Sec-ml-operations-trainingserving-skew-diagnosis-prevention-9dc1 catalogs the skew categories and the method that detects each. The serving-specific manifestation of skew is **preprocessing divergence**\index{Preprocessing!divergence, training vs. serving}: the real-time inference pipeline processes raw data differently than the batch training pipeline, a common failure mode when training uses Python/Pandas while serving uses C++/Java or optimized inference servers.
 
 ::: {#exmp-model-serving-resnet-50-image-preprocessing-skew .callout-example title="ResNet-50: Image preprocessing skew"}
 
@@ -4795,7 +4795,7 @@ The chapter's bandwidth-bound lighthouse puts numbers on both phases. A GPT-2 XL
 Recall the energy-movement principle\index{Energy-movement principle!decode phase} quantified in @tbl-energy-movement-cost: moving a 32-bit operand from DRAM costs 100--1,000$\times$ the arithmetic performed on it. In the decode phase, this law determines the physical "cost per word."
 <!-- end lego-ok-block -->
 
-**Physics**: In batch-one decode with FP16 weights, each parameter contributes a multiply and an add for every two bytes read, an arithmetic intensity of about `{python} Gpt2DecodeFloor.intensity_b1_str`. The H100's ridge point sits near `{python} Gpt2DecodeFloor.ridge_str`, so the step is memory-bandwidth bound by more than two orders of magnitude. Larger decode batches reuse the weight stream across sequences and raise arithmetic intensity [@pope2023efficiently]. The batch-one bandwidth floor is captured in @eq-token-generation-time:
+**Physics**: Batch-one decode with FP16 weights runs at the weight-only arithmetic intensity of about `{python} Gpt2DecodeFloor.intensity_b1_str` that @sec-network-architectures-inference-memory-bandwidth-wall-98d1 derived. The H100's ridge point sits near `{python} Gpt2DecodeFloor.ridge_str`, so the step is memory-bandwidth bound by more than two orders of magnitude. Larger decode batches reuse the weight stream across sequences and raise arithmetic intensity [@pope2023efficiently]. The batch-one bandwidth floor is captured in @eq-token-generation-time:
 $$ \DecodeTokenTimeFloor\approx \frac{\DataVolume}{\AcceleratorMemoryBandwidth} $$ {#eq-token-generation-time}
 
 **Implication**: Every generated token pays an energy cost to move the model's weights from HBM into compute registers, `{python} Gpt2DecodeFloor.weights_gb_str` per step for GPT-2 XL. When decode remains bandwidth bound, adding compute cores yields little latency improvement; faster memory (Machine), fewer bytes per parameter or a smaller model (Algorithm), or better batching and cache management change the bound.
