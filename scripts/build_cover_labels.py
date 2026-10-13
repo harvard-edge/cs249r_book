@@ -944,7 +944,7 @@ VOL4_CHAPTERS = [
             {'text': 'approval', 'pill': (520, 100), 'targ': (598, 262), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'staged permission', 'pill': (220, 650), 'targ': (370, 520), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'stopping envelope', 'pill': (560, 730), 'targ': (680, 495), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'bystanders', 'pill': (1240, 560), 'targ': (1045, 418), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'bystanders', 'pill': (1240, 520), 'targ': (1045, 410), 'border': '#0090B0', 'color': '#0090B0'},
         ]
     },
 ]
