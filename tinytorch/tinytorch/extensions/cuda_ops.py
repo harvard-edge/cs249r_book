@@ -1,15 +1,44 @@
 # Hand-maintained extension, NOT generated. This file is not produced by
 # `tito dev export` or `tito module complete`; it is tracked in git and
-# edited directly here. It is the CUDA SGEMM bridge (see cuda_sgemm.cu);
-# no src/ module or student notebook exports to it.
-"""CUDA SGEMM Bridge for TinyTorch.
+# edited directly here. It is the CUDA SGEMM bridge (see cuda_sgemm.cu), an
+# example of adding a GPU backend through the C ABI that students can read,
+# run, and time against their own Module 17 kernels; no src/ module or student
+# notebook exports to it.
+"""CUDA SGEMM Bridge for TinyTorch: an example extension.
 
-Compiles cuda_sgemm.cu with nvcc on first use and calls it through ctypes.
-Three teaching kernels are selected with stage: "naive", "coalesced", "tiled".
-Each call copies A and B to the GPU and C back, so timings include PCIe.
+This is an optional, hand-written extension: it is tracked in git as-is and is
+not generated from src/. Read it as a worked example of the silicon boundary:
+how a few lines of Python hand NumPy memory to a GPU kernel you wrote yourself,
+with no framework in between.
 
-Needs nvcc and an NVIDIA GPU, not PyTorch. Without them, cuda_matmul falls
-back to np.matmul and cuda_build_info() says why.
+How it works, end to end:
+
+1. Build on first use. The first call runs nvcc on cuda_sgemm.cu and writes
+   libtinytorch_cuda.so next to it. Later calls reuse the library until the
+   .cu file is edited, which triggers a rebuild.
+2. Load through ctypes. ctypes.CDLL opens the library, and the argtypes lines
+   below declare each C function's signature, so Python passes raw float
+   pointers and ints exactly as the C code expects them.
+3. Hand over the memory. cuda_matmul makes A and B contiguous float32 arrays
+   and passes their raw pointers, plus a NumPy buffer for C to be written into.
+   TinyTorch Tensors and plain arrays are both accepted, and the result comes
+   back in the same kind.
+4. Run on the GPU. The C side copies A and B to the GPU, launches the kernel
+   for the chosen stage, copies C back, and returns a CUDA error code.
+
+The three stages ("naive", "coalesced", "tiled") compute the same product and
+differ only in how threads map onto memory; cuda_sgemm.cu explains each one.
+Every call includes both PCIe copies, so time large matrices if you want to
+see the kernels rather than the bus.
+
+It needs nvcc and an NVIDIA GPU, not PyTorch. Without them, cuda_matmul falls
+back to np.matmul and cuda_build_info() says why. If a kernel fails at run
+time, it warns before falling back, so a NumPy timing is never mistaken for a
+GPU one.
+
+Try it:
+    from tinytorch.extensions.cuda_ops import benchmark_stages
+    benchmark_stages(2048)
 """
 
 import ctypes
@@ -39,7 +68,7 @@ def _compile():
     # Older nvcc has no -arch=native; retry with its default architecture
     for arch in (["-arch=native"], []):
         cmd = [nvcc, "-O3", "-shared", "-Xcompiler", "-fPIC", *arch, _CU_SOURCE, "-o", tmp]
-        res = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if res.returncode == 0:
             os.replace(tmp, _LIB_PATH)  # atomic, so a concurrent import never sees half a file
             _build_info.update(built=True, command=" ".join(cmd[:-2] + [_LIB_PATH]))
@@ -143,3 +172,42 @@ def cuda_matmul(a, b, stage="tiled"):
         from tinytorch.core.tensor import Tensor
         return Tensor(out)
     return out
+
+
+
+def benchmark_stages(n: int = 2048, repeats: int = 5) -> list:
+    """Time the three stages on one n x n product and check each against NumPy.
+
+    Prints one line per stage and returns them as dicts. Each timing is the
+    median of `repeats` calls after one warm-up call (the first call also pays
+    for CUDA context setup), and includes both PCIe copies. Returns an empty
+    list, after saying why, when CUDA is not available.
+    """
+    import time
+
+    if not has_cuda_support():
+        print(f"CUDA not available ({cuda_build_info()['error']}); nothing to time.")
+        return []
+
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((n, n), dtype=np.float32)
+    B = rng.standard_normal((n, n), dtype=np.float32)
+    reference = A @ B
+    flops = 2 * n ** 3
+
+    print(f"SGEMM {n}x{n}x{n}, median of {repeats}, PCIe copies included")
+    results = []
+    for stage in STAGES:
+        cuda_matmul(A, B, stage=stage)  # warm-up
+        times = []
+        for _ in range(repeats):
+            start = time.perf_counter()
+            C = cuda_matmul(A, B, stage=stage)
+            times.append(time.perf_counter() - start)
+        seconds = sorted(times)[len(times) // 2]
+        ok = bool(np.allclose(C, reference, rtol=1e-3, atol=1e-2))
+        gflops = flops / seconds / 1e9
+        print(f"  {stage:<10} {seconds * 1e3:9.2f} ms {gflops:9.1f} GFLOP/s   "
+              f"{'matches NumPy' if ok else 'MISMATCH'}")
+        results.append({"stage": stage, "ms": seconds * 1e3, "gflops": gflops, "matches_numpy": ok})
+    return results

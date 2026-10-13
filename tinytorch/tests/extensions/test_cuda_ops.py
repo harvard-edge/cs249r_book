@@ -63,3 +63,19 @@ def test_cuda_build_info():
     info = cuda_build_info()
     assert set(info) >= {"built", "devices", "command", "error"}
     assert has_cuda_support() == (info["devices"] > 0 and info["error"] is None)
+
+
+def test_benchmark_stages_without_cuda(monkeypatch, capsys):
+    """With no CUDA, the demo says why and times nothing."""
+    monkeypatch.setattr(cuda_ops, "compile_and_load_cuda", lambda: None)
+    assert cuda_ops.benchmark_stages(8) == []
+    assert "CUDA not available" in capsys.readouterr().out
+
+
+def test_benchmark_stages_reports_every_stage(monkeypatch):
+    """The demo loop times and checks all three stages (run here on the NumPy fallback)."""
+    monkeypatch.setattr(cuda_ops, "has_cuda_support", lambda: True)
+    monkeypatch.setattr(cuda_ops, "compile_and_load_cuda", lambda: None)
+    rows = cuda_ops.benchmark_stages(16, repeats=1)
+    assert [r["stage"] for r in rows] == list(STAGES)
+    assert all(r["matches_numpy"] and r["ms"] > 0 for r in rows)

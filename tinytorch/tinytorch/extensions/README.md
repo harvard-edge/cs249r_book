@@ -132,7 +132,8 @@ __all__ = [
 - **`cuda_sgemm.cu` & `cuda_ops.py` (`cuda_matmul`)**
   - *Bottleneck:* GPU global memory traffic in matrix multiplication: uncoalesced loads, and every operand re-read from DRAM for each output element.
   - *Mechanism:* Three teaching kernels selected with `stage`: `naive` (one thread per output, row-mapped warps), `coalesced` (column-mapped warps, so each warp reads 32 adjacent floats of B), and `tiled` (32 × 32 tiles of A and B staged in shared memory and reused 32 times). Built with `nvcc` on first use and called through `ctypes`, with no PyTorch dependency.
-  - *Impact:* About $9\times$ from naive to tiled on an RTX 4060 Laptop GPU (≈120 → ≈1,050 GFLOP/s, kernel only, $n = 2048$).
+  - *Impact:* About $9\times$ from naive to tiled on an RTX 4060 Laptop GPU (≈120 → ≈840 → ≈1,050 GFLOP/s, kernel only, $n = 2048$). Coalescing alone is worth $7\times$; tiling adds about 25%, less than its 32× cut in DRAM traffic suggests, which is the lesson.
+  - *Try it:* `from tinytorch.extensions.cuda_ops import benchmark_stages; benchmark_stages(2048)` times all three stages on your GPU and checks each against NumPy.
 
 - **`triton_gelu.py` (`triton_fused_gelu`)**
   - *Bottleneck:* GPU global memory bandwidth saturation from unfused bias addition and GELU activation.
