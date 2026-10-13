@@ -1471,7 +1471,142 @@ Across model architectures, @tbl-batching-by-model summarizes candidate batching
 
 : **Batching strategy by model type**: Each model class requires a distinct batching policy (from static/dynamic in vision to continuous in LLM decode and feature-parallel in recommendation) matched to its dominant hardware bottleneck. Typical batch sizes are operating ranges set by latency budgets and KV-cache capacity; they may fall below or above the workload-specific overhead-amortization knees illustrated in notebook \ref{nbk-inference-batching-efficiency-curve}, which mark where fixed costs stop dominating rather than where batching stops paying. {#tbl-batching-by-model}
 
-Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: Little's Law\index{Little's Law!capacity planning},[^fn-littles-law-queuing] which relates concurrency, throughput, and latency in any stable system.
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED SERVING FRONTIER (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Paragraph after @tbl-batching-by-model and
+# │          @fig-throughput-interactivity.
+# │
+# │ Goal: Show the batching trade-off as measured on production serving stacks.
+# │ Show: B200 frontier spans ~30× from peak throughput to 100 tok/s/user;
+# │       at 50 tok/s/user GB200 NVL72 delivers ~44× an H100 per GPU, against
+# │       a ~2.3× gap in peak dense FP8 rate.
+# │ How: Pareto upper envelope per accelerator over
+# │      Literature.Series.InferenceXDeepSeekR1; peak rates from Hardware.Cloud.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Hardware, Literature
+from mlsysim.fmt import check, fmt_int, fmt_multiple
+
+def _frontier(rows, hw):
+    """Configurations that no other configuration beats on both axes."""
+    pts = sorted(((r["interactivity_tok_s_user"], r["output_tok_s_gpu"]) for r in rows if r["hardware"] == hw), key=lambda p: -p[0])
+    out, best = [], -1.0
+    for x, y in pts:
+        if y > best:
+            out.append((x, y))
+            best = y
+    return sorted(out)
+
+def _best_at(rows, hw, tps_user):
+    return max(r["output_tok_s_gpu"] for r in rows if r["hardware"] == hw and r["interactivity_tok_s_user"] >= tps_user)
+
+# ┌── LEGO ───────────────────────────────────────────────
+class ServingFrontier:
+    """Measured throughput-interactivity frontier of LLM serving by accelerator."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    rows = Literature.Series.InferenceXDeepSeekR1.entries
+    hardware = (("h100", "H100"), ("h200", "H200"), ("b200", "B200"), ("gb200", "GB200 NVL72"), ("mi355x", "MI355X"))
+    target_tps_user = 50  # scenario assumption: a comfortable streaming rate for chat
+    high_tps_user = 100
+    h100_fp8 = Hardware.Cloud.H100.compute.precision_flops["fp8"]
+    gb200_rack = Hardware.Cloud.GB200_NVL72
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    frontiers = {}
+    for _hw, _ in hardware:
+        frontiers[_hw] = _frontier(rows, _hw)
+    h100_at_target = _best_at(rows, "h100", target_tps_user)
+    gb200_at_target = _best_at(rows, "gb200", target_tps_user)
+    gen_ratio = gb200_at_target / h100_at_target
+    gb200_fp8_per_gpu = gb200_rack.compute.precision_flops["fp8"] / gb200_rack.accelerator_count
+    peak_ratio = (gb200_fp8_per_gpu / h100_fp8).to("").magnitude
+    b200_peak = max(y for _, y in frontiers["b200"])
+    b200_peak_tps_user = max(frontiers["b200"], key=lambda p: p[1])[0]
+    b200_at_high = _best_at(rows, "b200", high_tps_user)
+    b200_span = b200_peak / b200_at_high
+    config_count = len(rows)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(20 <= gen_ratio <= 80, f"Prose says GB200 is roughly 44x an H100 at 50 tok/s/user, got {gen_ratio:.1f}.")
+    check(gen_ratio > 5 * peak_ratio, "Prose says the measured gap far exceeds the peak-rate gap.")
+    check(10 <= b200_span <= 60, f"Prose says the B200 frontier spans roughly 30x, got {b200_span:.1f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    target_tps_user_str = fmt_int(target_tps_user)
+    high_tps_user_str = fmt_int(high_tps_user)
+    h100_at_target_str = fmt_int(round(h100_at_target, -1))
+    gb200_at_target_str = fmt_int(round(gb200_at_target, -1))
+    gen_mult_str = fmt_multiple(round(gen_ratio), precision=0)
+    peak_mult_str = fmt_multiple(round(peak_ratio, 1), precision=1)
+    b200_peak_str = fmt_int(round(b200_peak, -2))
+    b200_peak_tps_user_str = fmt_int(round(b200_peak_tps_user))
+    b200_at_high_str = fmt_int(round(b200_at_high, -1))
+    b200_span_mult_str = fmt_multiple(round(b200_span), precision=0)
+    config_count_str = fmt_int(config_count)
+```
+
+The batching model predicts a trade-off, and production serving stacks measure it. The open InferenceX benchmark serves DeepSeek-R1, a mixture-of-experts reasoning model, with 1,024-token prompts and 1,024-token responses on each accelerator across many combinations of serving framework, parallelism, and concurrency [@semianalysis2026inferencex]. For every configuration it records the output tokens per second each user receives, called interactivity (the reciprocal of TPOT), and the output tokens per second each GPU delivers across all users. @Fig-throughput-interactivity plots `{python} ServingFrontier.config_count_str` such configurations at FP8 precision and traces, for each accelerator, the frontier of configurations that no other configuration beats on both rates. Every frontier falls as interactivity rises, because a faster stream per user permits fewer concurrent sequences per decode step. The best B200 configuration delivers about `{python} ServingFrontier.b200_peak_str` output tokens per second per GPU when each user receives about `{python} ServingFrontier.b200_peak_tps_user_str` tokens per second, and about `{python} ServingFrontier.b200_at_high_str` when each user must receive at least `{python} ServingFrontier.high_tps_user_str`, a `{python} ServingFrontier.b200_span_mult_str` difference in per-GPU output paid for faster streams. The interactivity target alone moves per-GPU output by that much, so it must be fixed before any two throughput figures can be compared.
+
+The same frontiers separate hardware generations by more than their datasheets do. At `{python} ServingFrontier.target_tps_user_str` tokens per second per user, the best measured H100 configuration delivers about `{python} ServingFrontier.h100_at_target_str` output tokens per second per GPU and the best GB200 NVL72 configuration about `{python} ServingFrontier.gb200_at_target_str`, a `{python} ServingFrontier.gen_mult_str` difference, although the peak dense FP8 rate of a GB200 GPU is only about `{python} ServingFrontier.peak_mult_str` that of an H100. The benchmark does not apportion the rest of the gap among its causes, but the remaining candidates lie mostly beyond peak arithmetic, among them memory bandwidth and capacity per GPU, a 72-GPU NVLink domain that lets experts and KV state spread across the rack without crossing a slower network, and serving software tuned for each platform. A serving operating point is a property of that whole system at a stated latency target, and a throughput figure quoted without its target says little about either system.
+
+::: {#fig-throughput-interactivity fig-env="figure" fig-pos="htb" fig-cap="**Throughput versus Interactivity in Measured LLM Serving**: Output tokens per second per GPU against output tokens per second per user for DeepSeek-R1 at FP8 with 1,024-token prompts and responses. Faint points are individual serving configurations (framework, parallelism, and concurrency); each line is the frontier of configurations that no other configuration on the same accelerator beats on both axes. The dashed line marks 50 tokens per second per user. Data from @semianalysis2026inferencex, latest published result per configuration as of October 2026." fig-alt="Scatter plot with frontier lines. The horizontal axis is interactivity in output tokens per second per user from 0 to 280; the vertical axis is output tokens per second per GPU on a logarithmic scale from 5 to 15,000. Five descending frontier lines for H100, H200, B200, GB200 NVL72, and MI355X all fall as interactivity rises. GB200 NVL72 is highest, near 8,000 at low interactivity and about 3,650 at 50 tokens per second per user; B200 starts near 6,300; MI355X and H200 lie below it; H100 is lowest, about 80 at 50 tokens per second per user. A dashed vertical line marks 50 tokens per second per user."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED SERVING FRONTIER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-throughput-interactivity.
+# │
+# │ Goal: Plot per-GPU throughput against per-user interactivity by accelerator.
+# │ Show: Faint configuration points, one frontier line per accelerator, and
+# │       the 50 tok/s/user reference.
+# │ How: ServingFrontier (above); book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from binder.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(7.2, 4))
+_C = ServingFrontier
+_col = {
+    "h100": COLORS["BrownLine"],
+    "h200": COLORS["VioletLine"],
+    "b200": COLORS["BlueLine"],
+    "gb200": COLORS["GreenLine"],
+    "mi355x": COLORS["RedLine"],
+}
+for _hw, _name in _C.hardware:
+    _pts = [r for r in _C.rows if r["hardware"] == _hw]
+    ax.scatter(
+        [r["interactivity_tok_s_user"] for r in _pts],
+        [r["output_tok_s_gpu"] for r in _pts],
+        s=10,
+        color=_col[_hw],
+        alpha=0.25,
+        edgecolor="none",
+        zorder=2,
+    )
+    _f = _C.frontiers[_hw]
+    ax.plot([p[0] for p in _f], [p[1] for p in _f], "-o", ms=3.5, lw=1.8, color=_col[_hw], label=_name, zorder=3)
+ax.axvline(_C.target_tps_user, color=COLORS["primary"], ls="--", lw=1, zorder=1)
+ax.text(_C.target_tps_user + 3, 9e3, f"{_C.target_tps_user} tokens/s per user", fontsize=9, color=COLORS["primary"], va="top")
+ax.set_yscale("log")
+ax.set_xlim(0, 280)
+ax.set_ylim(5, 1.5e4)
+ax.set_xlabel("Interactivity: output tokens/s per user (1 / TPOT)")
+ax.set_ylabel("Output tokens/s per GPU (log scale)")
+ax.legend(loc="upper right", fontsize=9, frameon=True, framealpha=0.95)
+plt.show()
+plt.close()
+```
+
+:::
+
+Translating the batch-level equations into system-wide capacity planning requires a classical result from queuing theory: Little's Law\index{Little's Law!capacity planning},[^fn-littles-law-queuing] which relates concurrency, throughput, and latency in any stable system.
 
 [^fn-littles-law-queuing]: **Little's Law**\index{Little's Law!serving concurrency}: The identity holds for any stable system regardless of the arrival or service distribution, which is why it survives the bursty, variable-length traffic of inference. Because it relates averages, it bounds neither maximum service capacity nor tail latency.
 

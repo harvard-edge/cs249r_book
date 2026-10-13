@@ -606,6 +606,15 @@ class ValidateCommand:
             Scope("files", "_run_images"),
             Scope("alt-text-style", "_run_mitpress_alt_text_style",
                   note="alt-text follows body-prose rules (§10.12)"),
+            # Added 2026-10-13: matplotlib figures are scaled to the text block,
+            # so printed text = font size x (text width / cropped image width).
+            # vol2 canvases drifted from 0.62x to 1.04x with no check failing.
+            # Default=False because it executes every chapter's python cells.
+            # Enforced instead by two pre-commit hooks (2026-10-13, all four
+            # volumes at 0): book-check-figure-print-scale on changed chapters,
+            # and book-check-figure-print-scale-all when the style changes.
+            Scope("print-scale", "_run_figure_print_scale", default=False,
+                  note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -761,6 +770,10 @@ class ValidateCommand:
         "structure": [
             Scope("concept-maps", "_run_concept_maps",
                   note="validate concept-map YAML files and frontmatter wiring"),
+            # 2026-10-12: forward touches (a concept used before its owning
+            # chapter) are a sculpting worklist, so they stay out of the gate.
+            Scope("concept-order", "_run_concept_order", default=False,
+                  note="concepts used before their owning chapter (schema v2 maps)"),
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
             Scope("h2-landings", "_run_h2_landings",
@@ -1237,6 +1250,8 @@ class ValidateCommand:
             elif method_name == "_run_check_references":
                 results.append(method(root, ns))
             elif method_name == "_run_sources":
+                results.append(method(root, ns))
+            elif method_name == "_run_figure_print_scale":
                 results.append(method(root, ns))
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
@@ -5478,7 +5493,15 @@ class ValidateCommand:
     # Concept Maps Validation
     # ------------------------------------------------------------------
 
-    def _run_concept_maps(self, root: Path) -> ValidationRunResult:
+    def _run_concept_order(self, root: Path) -> ValidationRunResult:
+        """Report schema-v2 concepts touched before their owning chapter teaches them."""
+        result = self._run_concept_maps(root, include_order=True)
+        result.issues = [i for i in result.issues if "used before it is taught" in i.message]
+        result.name = "concept-order"
+        result.description = "Concepts used before their owning chapter"
+        return result
+
+    def _run_concept_maps(self, root: Path, include_order: bool = False) -> ValidationRunResult:
         """Validate concept-map YAML files and QMD frontmatter wiring."""
         start = time.time()
         issues: List[ValidationIssue] = []
@@ -5489,7 +5512,7 @@ class ValidateCommand:
 
         repo_root = self.config_manager.root_dir
         contents_dir = root if "contents" in str(root) else repo_root  / "books"
-        findings = check_concept_maps(contents_dir, repo_root)
+        findings = check_concept_maps(contents_dir, repo_root, include_order=include_order)
         for finding in findings:
             issues.append(
                 ValidationIssue(
@@ -13582,6 +13605,36 @@ class ValidateCommand:
         return self._run_audit_check(
             root, "audit.checks.alt_text_style",
             "alt-text-style", "alt-text style compliance (§10.12)",
+        )
+
+    def _run_figure_print_scale(
+        self, root: Path, ns: Optional[argparse.Namespace] = None
+    ) -> ValidationRunResult:
+        """figures --scope print-scale: printed size of matplotlib body figures.
+
+        Executes each chapter's python cells in a subprocess and measures every
+        figure inside a ``#fig-`` div; see ``cli/checks/figure_print_scale.py``.
+        Positional files (pre-commit) narrow the run to those chapters.
+        """
+        try:
+            from cli.checks import figure_print_scale as fps
+        except ImportError:
+            from binder.cli.checks import figure_print_scale as fps
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        if ns is not None and getattr(ns, "files", None):
+            candidates = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
+            candidates = [q.resolve() for q in candidates if q.suffix == ".qmd" and q.is_file()]
+        else:
+            candidates = self._qmd_files(root)
+        qmds = [q for q in candidates if "```{python}" in q.read_text(encoding="utf-8")]
+        issues = [ValidationIssue(**f) for f in fps.check_chapters(qmds, repo_root)]
+        return ValidationRunResult(
+            name="figure-print-scale",
+            description="Matplotlib print scale and font floor (limits from mlsysim.viz.style)",
+            files_checked=len(qmds), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:

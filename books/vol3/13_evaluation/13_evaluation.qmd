@@ -1,5 +1,6 @@
 ---
 number-offset: [12]
+concepts: evaluation_concepts.yml
 notation-local: [\AcceptanceIntervalLowerLimit, \AcceptanceIntervalUpperLimit, \AcceptedSampleCount, \BaselineToolCallDistribution, \BaselineTrajectoryGoodput, \BatchCostPerAcceptedTask, \BetweenTaskStandardDeviation, \BudgetedAcceptanceProbability, \CanaryAllocationFraction, \CanaryLabelDelay, \CandidateAvailabilityProbability, \CandidateCheckingCost, \CandidateGenerationCost, \CandidateTailCompletionTime, \CandidateToolCallDistribution, \CandidateTrajectoryGoodput, \CandidateViolationCount, \CandidateWinCount, \ChanceAnnotatorAgreement, \DiscordantPairCount, \DiscordantPairFraction, \FailureModeOccurrenceCount, \FirstRaterCategoryFraction, \FunctionInputVariable, \GoodputRelativeTolerance, \HeadSamplingProbability, \InterAnnotatorAgreement, \JensenShannonDivergence, \JensenShannonMixtureDistribution, \MinimumDetectableEffect, \NoninferiorityTolerance, \ObservationIntervalEnd, \ObservationIntervalStart, \ObservedAnnotatorAgreement, \ObservedSignificanceLevel, \PairedAcceptanceDifference, \PassingRunCount, \PerTaskRunCount, \RatingCategory, \RequiredTaskPairCount, \SecondRaterCategoryFraction, \SequentialCandidateCount, \SequentialCostPerAcceptedTask, \ShipDecision, \TargetRepeatedRunConsistency, \TaskIndex, \TestFamilySize, \ToolCallCategory, \WilsonIntervalCenter, \WithinTaskRunStandardDeviation]
 ---
 
@@ -52,7 +53,7 @@ Evaluating an autonomous agent on final pass rates or aggregate benchmark scores
 ::: {.callout-learning-objectives}
 
 - Explain why a task acceptance contract credits a trial only on evidence and keeps pending and unknown verdicts in the count
-- Design hermetic trials and isolated graders, calibrating judges by their false-acceptance rate against independent assessment
+- Design hermetic, leakage-controlled trials and isolated graders, calibrating judges by their false-acceptance rate against independent assessment
 - Compare configurations by paired acceptance intervals, repeated-run consistency, and cost per accepted task, sampling tasks rather than runs
 - Analyze a trace's critical path and design retention that keeps rare failures within a storage budget
 - Diagnose a failure through a controlled intervention, stating what the result does and does not establish
@@ -276,7 +277,7 @@ Resource accounting likewise demands precisely defined observation boundaries. T
 
 For every declared criterion in the contract, the evaluation harness must retain the observed result and its supporting telemetry. Each criterion resolves to one of four discrete verdicts: `pass` when the evidence definitively meets the requirement, `fail` when it establishes a violation, `pending` while a required assessment remains actively underway within the observation window, and `unknown` when necessary evidence is missing or unavailable at the cutoff, accompanied by a structured record explaining why. These four categories function strictly as evaluation verdicts rather than trajectory lifecycle states.
 
-The aggregation logic follows strict short-circuiting rules: an established failure of any mandatory criterion immediately resolves the overall trial verdict to `fail`, even if other criteria remain pending or unobserved. A trial is accepted if and only if all mandatory criteria achieve a `pass`. If any required check remains unfulfilled and none have failed, the trial remains pending or unknown. This convention is the **four-verdict rule**\index{Four-verdict rule!definition}. Its most critical corollary governs every measurement in this chapter: incomplete, timed-out, or unresolvable trials must remain in the denominator under a declared rule, because dropping them changes the underlying population being evaluated. Unless a contract declares otherwise, this chapter applies one default. An unresolved trial stays in the count $\EvaluationTrialCount$ and is not accepted, so a point estimate of the accepted fraction treats it as a non-acceptance. The report lists unresolved trials separately from established failures and adds the two bounds obtained by resolving every one of them as accepted and every one as failed, which shows how far the open verdicts could still move the result.
+The aggregation logic follows strict short-circuiting rules: an established failure of any mandatory criterion immediately resolves the overall trial verdict to `fail`, even if other criteria remain pending or unobserved. A trial is accepted if and only if all mandatory criteria achieve a `pass`. If any required check remains unfulfilled and none have failed, the trial remains pending or unknown. This convention is the **four-verdict rule**\index{Four-verdict rule!definition}. Its most critical corollary governs every measurement in this chapter: incomplete, timed-out, or unresolvable trials must remain in the denominator under a declared rule, because dropping them changes the underlying population being evaluated. Unless a contract declares otherwise, this chapter applies one default. An unresolved trial stays in the count $\EvaluationTrialCount$ and is not accepted, so a point estimate of the accepted fraction, the acceptance estimator of @eq-vol3-task-acceptance, treats it as a non-acceptance. The report lists unresolved trials separately from established failures and adds the two bounds obtained by resolving every one of them as accepted and every one as failed, which shows how far the open verdicts could still move the result.
 
 ::: {#exmp-13-repair-acceptance-record .callout-example title="A targeted pass is not a completed evaluation"}
 
@@ -352,7 +353,11 @@ To maintain high throughput across thousands of evaluation runs, evaluation fram
 
 ### Grader isolation {#sec-vol3-evaluation-gyms-grader-isolation}
 
-During iterative problem-solving, visible unit tests provide the agent with intermediate feedback to guide code refinement. In contrast, held-out acceptance tests, the sealed tests of the closure evidence levels, must assess the final submission without turning the test assertions themselves into an optimization target. The evaluation harness must isolate reference solutions, secret test suites, grading scripts, and authoritative score registries completely outside the agent's execution environment. Furthermore, the grading pipeline must cryptographically bind the evaluation score to the exact artifact hash (for example, the SHA-256 fingerprint of workspace snapshot `ws_r19`) captured at the declared completion boundary.
+During iterative problem-solving, visible unit tests provide the agent with intermediate feedback to guide code refinement. In contrast, held-out acceptance tests, the sealed tests of the closure evidence levels, must assess the final submission without turning the test assertions themselves into an optimization target. **Grader isolation**\index{Grader isolation!definition} keeps reference solutions, secret test suites, grading scripts, and authoritative score registries completely outside the agent's execution environment. Furthermore, the grading pipeline must cryptographically bind the evaluation score to the exact artifact hash (for example, the SHA-256 fingerprint of workspace snapshot `ws_r19`) captured at the declared completion boundary.
+
+::: {.column-margin .margin-pointer}
+↩ Sealed tests outrank visible tests among the closure evidence levels established in @sec-vol3-intro-invariant-closure, because the agent never sees their definitions and cannot reach where they run.
+:::
 
 Submitted code stays untrusted after the agent process stops. If an evaluation harness imports the candidate package directly into the Python interpreter running the grading assertions, the submitted code can monkey-patch core assertions, manipulate built-in object prototypes, or rewrite test runner hooks. Similarly, if secret test files are mounted into the filesystem where candidate code can inspect directory trees or read file contents, the tests are irrevocably compromised. Mounting files as read-only prevents direct overwrites, but it provides zero protection against exfiltration or inspection.
 
@@ -370,7 +375,11 @@ When repository unit tests require in-process execution alongside submitted code
 
 ### Evaluation leakage {#sec-vol3-evaluation-gyms-leakage}
 
-Evaluation leakage can compromise benchmark integrity either before a trial begins or dynamically during execution. Pre-trial leakage occurs when benchmark solutions contaminate pretraining corpora or when external retrieval-augmented generation (RAG) vector indices index ground-truth patches. Runtime leakage occurs when multi-agent systems or persistent memory stores retain information across successive runs, inadvertently passing solutions from one trial to the next.
+Evaluation leakage can compromise benchmark integrity either before a trial begins or dynamically during execution. Pre-trial leakage occurs through **contamination**\index{Contamination!definition}, when benchmark solutions appear in pretraining corpora, or through retrieval, when external retrieval-augmented generation (RAG) vector indices index ground-truth patches. Runtime leakage occurs when multi-agent systems or persistent memory stores retain information across successive runs, inadvertently passing solutions from one trial to the next.
+
+::: {.column-margin .margin-pointer}
+↩ Cross-session memory trials keep reference answers and fixtures outside both writable and retrievable stores, under the trial design established in @sec-vol3-long-term-memory-policy-trials.
+:::
 
 Furthermore, an evaluation suite can leak methodologically even when the sandboxes remain completely sterile. Repeatedly refining prompts, tool definitions, or agent architectures based on error analyses of held-out test failures converts that held-out suite into an informal training set.[^fn-goodhart-holdout-evaluation] Hyperparameter adjustments and prompt changes guided by held-out feedback systematically overfit the evaluation suite, eroding its statistical validity as an unbiased assessment of generalization [@dwork2015reusable]. Maintaining sound evaluation requires tracking end-to-end data provenance for task prompts, gold-standard solutions, unit tests, and trajectory logs. While n-gram filtering and embedding similarity checks help flag potential contamination, falling below an arbitrary similarity threshold never guarantees true task independence; @sec-vol3-flywheel-evaluation formalizes the dataset splitting protocols required to enforce this separation.
 
@@ -1002,6 +1011,10 @@ Unresolved verdicts in a pool follow the default of the four-verdict rule, count
 
 Fix the task distribution, criteria, and resource envelope before comparing policies. An experiment that isolates a prompt change holds the rest of the configuration fixed; one that compares complete policies lets each spend the same envelope differently among generation, checking, and repair, so equal budgets need not mean equal sample counts. Report allowances and actual use, with time and tokens separate from monetary charges, since leaderboards that rank accuracy alone reward needlessly costly agent designs [@kapoor2024agents].
 
+::: {.column-margin .margin-pointer}
+↩ The controlled and system-level comparison designs are established in @sec-vol3-test-time-compute-comparison-design.
+:::
+
 For a fixed complete policy $\pi$, let $\text{Acc}_\pi$ indicate accepted completion under the declared criteria, $\AttemptCost$ its total monetary charge, and $\CostCeiling$ a monetary ceiling. Its budgeted acceptance is
 
 $$\BudgetedAcceptanceProbability(\CostCeiling)=\Pr(\text{Acc}_\pi=1\ \land\ \AttemptCost\le \CostCeiling).$$
@@ -1091,13 +1104,13 @@ Summing span durations to obtain total agent execution time is a common error in
 
 [^fn-lamport-happened-before]: **Happened-Before Order in a Trace**: The partial order that @sec-vol3-durable-execution-harness-regression-replay used to match replayed requests applies to spans as well. Parent and link relations recorded at dispatch carry causal order between spans on different hosts; cross-host timestamps without an alignment model do not, so two spans that appear to overlap may be ordered, and two that appear ordered may be concurrent. \index{Happened-before relation!trace ordering}
 
-To quantify where latency optimizations yield true wall-clock savings, systems engineers calculate the critical path through the trajectory's dependency graph.[^fn-critical-path-float] Sequential operations add their durations directly, whereas concurrent branches that join at a common synchronization barrier contribute only the duration of the slowest branch. Shortening a branch off the critical path leaves elapsed time unchanged, and shortening one on it helps only until the next-longest branch takes its place (notebook \ref{nbk-13-critical-path-latency-and-bottleneck}).
+To quantify where latency optimizations yield true wall-clock savings, systems engineers measure the critical path through the trajectory's dependency graph, the longest chain of dependent operations recorded in the trace.[^fn-critical-path-float] Sequential operations add their durations directly, whereas concurrent branches that join at a common synchronization barrier contribute only the duration of the slowest branch. Shortening a branch off the critical path leaves elapsed time unchanged, and shortening one on it helps only until the next-longest branch takes its place (notebook \ref{nbk-13-critical-path-latency-and-bottleneck}).
 
 ::: {.column-margin .margin-pointer}
-↪ Critical-path accounting for judging what an acceleration actually saves end to end is developed in @sec-vol3-agent-economics-criticalpath.
+↪ An acceleration is priced by the time it removes from this critical path, a trade-off developed in @sec-vol3-agent-economics-criticalpath.
 :::
 
-[^fn-critical-path-float]: **Critical Path Method**: Critical-path planning was formalized in 1959 for scheduling large engineering projects, computing for each activity the float by which it can slip without delaying completion [@kelley1959critical]. The notebook instead prices the duration gap to the next-longest parallel path: shortening the critical branch helps only until that path becomes critical. \index{Critical path!float}
+[^fn-critical-path-float]: **Critical Path Method**: Critical-path planning was formalized in 1959 for scheduling large engineering projects, computing for each activity the float by which it can slip without delaying completion [@kelley1959critical]. The notebook instead measures the duration gap to the next-longest parallel path: shortening the critical branch helps only until that path becomes critical. \index{Critical path!float}
 
 ```{python}
 #| label: calc-vol3-evaluation-observed-critical-path

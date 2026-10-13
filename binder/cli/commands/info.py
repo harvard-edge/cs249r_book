@@ -93,7 +93,7 @@ class InfoCommand:
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=["stats", "figures", "concepts", "headers", "acronyms"],
+            choices=["stats", "figures", "concepts", "concept-map", "headers", "acronyms"],
             help="Subcommand to run",
         )
         parser.add_argument("--path", default=None, help="File or directory")
@@ -143,6 +143,8 @@ class InfoCommand:
             return self._run_figures(root, ns)
         elif ns.subcommand == "concepts":
             return self._run_concepts(root, ns)
+        elif ns.subcommand == "concept-map":
+            return self._run_concept_map(root, ns)
         elif ns.subcommand == "headers":
             return self._run_headers(root, ns)
         elif ns.subcommand == "acronyms":
@@ -161,6 +163,7 @@ class InfoCommand:
         table.add_row("stats", "Count figures, tables, equations, listings, words, text lines")
         table.add_row("figures", "Extract figure list with labels, captions, and alt-text")
         table.add_row("concepts", "Extract key concepts (bold terms, definitions, headers)")
+        table.add_row("concept-map", "Render a volume's ownership map from its *_concepts.yml contracts")
         table.add_row("headers", "List all section headers with levels")
         table.add_row("acronyms", "Find acronyms in parentheses (e.g., (CNN))")
         console.print(Panel(table, title="binder info <subcommand>", border_style="cyan"))
@@ -170,6 +173,7 @@ class InfoCommand:
         console.print("  [cyan]./binder/binder info figures --vol1[/cyan]")
         console.print("  [cyan]./binder/binder info figures --vol1 --with-pdf[/cyan]            [dim]# merge LaTeX fig numbers + pages[/dim]")
         console.print("  [cyan]./binder/binder info concepts --vol1[/cyan]")
+        console.print("  [cyan]./binder/binder info concept-map --path books/vol3 --output vol3_map.md[/cyan]")
         console.print("  [cyan]./binder/binder info headers --vol1[/cyan]")
         console.print("  [cyan]./binder/binder info acronyms --vol1[/cyan]")
         console.print()
@@ -1009,6 +1013,25 @@ class InfoCommand:
     # ------------------------------------------------------------------
     # Concepts  (ported from extract_concepts.py)
     # ------------------------------------------------------------------
+
+    def _run_concept_map(self, root: Path, ns) -> bool:
+        """Render the schema-v2 ownership map of one volume directory as Markdown."""
+        try:
+            from cli.checks.concept_maps import render_volume_map
+        except ImportError:  # pragma: no cover - package-relative import path
+            from binder.cli.checks.concept_maps import render_volume_map
+
+        if not re.fullmatch(r"vol\d+", root.name):
+            console.print("[red]concept-map needs one volume: --vol1, --vol2, or --path books/volN[/red]")
+            return False
+        config = self.config_manager.book_dir / "config" / f"_quarto-pdf-{root.name}.yml"
+        text = render_volume_map(root, config)
+        if ns.output:
+            Path(ns.output).write_text(text, encoding="utf-8")
+            console.print(f"[green]Wrote {ns.output}[/green]")
+        else:
+            print(text)
+        return True
 
     def _run_concepts(self, root: Path, ns) -> bool:
         """Extract key concepts from QMD files."""

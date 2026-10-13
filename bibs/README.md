@@ -64,7 +64,22 @@ Place candidate entries in `bibs/inbox.bib`, then run:
 
 Entries with verifiable external sources are appended to `bibs/references.bib` and sealed into `bibs/manifest.json`. Unverified entries remain in `bibs/inbox.bib` for manual review.
 
-### 3. Verify ledger integrity (Pre-commit gate)
+### 3. Re-seal an entry after a house-style edit
+
+The gateway's output is rarely house style: titles need sentence case and braced exact-case tokens, and a `--url` source arrives as `@misc`. Edit the entry in `references.bib`, then re-seal it instead of hand-editing `manifest.json`:
+
+```bash
+# Re-resolve the source the entry was sealed from; check title, authors, year, DOI, pages
+./binder/binder bib reseal --key villalobos2024will --note "converted to @inproceedings" --dry-run
+./binder/binder bib reseal --key villalobos2024will --note "converted to @inproceedings"
+
+# Point at a different source, e.g. the published version of a preprint
+./binder/binder bib reseal --key KEY --url https://proceedings.mlr.press/v235/... --note "..."
+```
+
+`reseal` never edits `references.bib`. It rewrites the manifest record only if every field the source reports (title, author surnames in order, year, DOI, and pages) agrees with the edited entry, and it refuses otherwise. Publisher pages are checked through their `citation_*` meta tags.
+
+### 4. Verify ledger integrity (Pre-commit gate)
 
 ```bash
 # Fast offline SHA-256 verification (<350ms)
