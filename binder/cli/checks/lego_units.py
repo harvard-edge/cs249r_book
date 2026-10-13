@@ -46,7 +46,7 @@ DOMAIN_FMT_ASSIGN = re.compile(
     r"fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
     r"fmt_energy_per_byte|fmt_energy_per_bit|fmt_energy_per_flop|fmt_energy_per_op|"
     r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity|"
-    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|"
+    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_angular_acceleration|"
     r"fmt_velocity|fmt_acceleration|fmt_voltage|fmt_current|fmt_resistance|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_motor_constant|"
     r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|fmt_jerk|fmt_inertia|fmt_frequency|fmt_token_rate|"
     r"fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate|"
@@ -75,6 +75,13 @@ FMT_QTY_DOMAIN_UNIT = re.compile(
 )
 RAW_FMT_SUFFIX = re.compile(
     r"fmt\s*\([^)]*suffix\s*=\s*['\"]\s*(?:GB|TB|MB|kWh|MWh|TFLOP|W|MW|ms|s)\b"
+    # 2026-10-13: a physical unit glued on as text (suffix=" V", " hours",
+    # " Mb/s", " N/mm", " rad/s²") bypasses the Quantity; use the domain
+    # formatter. A leading space marks a unit, so suffix="K" (thousands) passes.
+    r"|\bfmt(?:_int)?\s*\([^\n]*suffix\s*=\s*['\"]\s+(?:"
+    r"mV|V|mA|A|hours?|minutes?|seconds?|days?|weeks?|years?|[kMG]?b/s|[KMGT]B/s|N/mm|N·m|N|"
+    r"rad/s²|rad/s\^2|rad/s|deg/s|[kMG]?Hz|°C|K|mm|cm|km|m/s|m|kg|g|Mt|t|[kMGT]?Wh|L|mL|lux|dB"
+    r")['\"]"
 )
 ALLOWED_UNIT_LABELS = frozenset({
     "GB", "Gb", "Gb/s", "Tb/s", "TFLOP/s", "PFLOP/s", "TFLOP/s per W",
@@ -89,8 +96,28 @@ ALLOWED_UNIT_LABELS = frozenset({
 UNIT_LABEL = re.compile(r"unit_label\s*=")
 UNIT_LABEL_VALUE = re.compile(r"""unit_label\s*=\s*['"]([^'"]+)['"]""")
 UPPER_TIME = re.compile(r"\b(MS|US|NS)\b")
+def _exported_ureg_units() -> set[str]:
+    """Pint unit names that mlsysim.core.units re-exports as an alias (``name = ureg.<unit>``).
+
+    2026-10-13: L009 used a hand-kept list of ten units, so ~1,350 inline
+    ``ureg.millimeter``/``ureg.second``/... uses across the books went unflagged.
+    Reading units.py keeps the rule in step with every alias it exports.
+    """
+    units_py = Path(__file__).resolve().parents[3] / "mlsysim" / "mlsysim" / "core" / "units.py"
+    try:
+        text = units_py.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    return set(re.findall(r"^[A-Za-z_]\w* = ureg\.([A-Za-z_]\w*)\s*(?:#.*)?$", text, re.M))
+
+
+_LEGACY_UREG_ALIAS = {
+    "millijoule", "megawatt", "joule", "kilowatt_hour", "megawatt_hour", "kilogram",
+    "millisecond", "microsecond", "minute", "watt_hour",
+}
 UREG_ALIAS = re.compile(
-    r"ureg\.(millijoule|megawatt|joule|kilowatt_hour|megawatt_hour|kilogram|millisecond|microsecond|minute|watt_hour)\b"
+    r"\bureg\.(" + "|".join(sorted(_LEGACY_UREG_ALIAS | _exported_ureg_units(), key=len, reverse=True))
+    + r")\b(?!\s*\()"
 )
 PROSE_DUP_UNIT = re.compile(
     r"\{python\}\s*[\w.]+\.(?P<name>\w+_(?:w|kw|mw|wh|kwh|mwh|gb|tb|ms|s|kg)_str)\`\s+(?:W|MW|kWh|MWh|GB|TB|ms|s|kg)\b",
