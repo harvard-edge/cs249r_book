@@ -673,6 +673,9 @@ class ValidateCommand:
             Scope("spelling-dict", "_run_mitpress_spelling_dict",
                   note="canonical spellings (§10.7): trade-off, dataset, data center, Wi-Fi, …"),
             Scope("duplicate-words", "_run_duplicate_words"),
+            # Added 2026-10-13 after "ledger" was removed from all four books.
+            Scope("coined-nouns", "_run_coined_nouns",
+                  note='no "ledger": name the record plainly (list, log, table, record)'),
             Scope("unblended-prose", "_run_unblended_prose",
                   note="space after period"),
             Scope("above-below", "_run_mitpress_above_below",
@@ -6331,6 +6334,21 @@ class ValidateCommand:
                        f"`@key` instead — citeproc renders it as "
                        f"'{h.detail} et al. (year)' and keeps the claim "
                        f"traceable to the bibliography."))
+
+    def _run_coined_nouns(self, root: Path) -> ValidationRunResult:
+        """Flag the coined noun "ledger" anywhere it renders.
+
+        Added 2026-10-13. A concept-map pass spread "ledger" across all four
+        books; the author ruled it jargon and every use was replaced with the
+        plain word for the record. The right word depends on context, so this
+        flags and never fixes.
+        """
+        from cli.checks.prose_integrity import find_coined_nouns
+        return self._run_prose_integrity(
+            root, find_coined_nouns, "coined-nouns", "coined_noun",
+            lambda h: (f"'{h.match}' is a banned coined noun. Name the record "
+                       f"plainly for what it holds: list, log, table, record, "
+                       f"or account."))
 
     def _run_underscore_italics(self, root: Path) -> ValidationRunResult:
         """Flag `_italic_` outside the Purpose hook question.
