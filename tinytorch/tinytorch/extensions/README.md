@@ -17,7 +17,7 @@ Every optimization in modern machine learning maps to one of four fundamental sy
 | **1. Autograd Boundary** | Subclass `Function`<br>(`forward` / `backward`) | Graph node allocations & activation memory retention | `checkpoint.py`<br>`template.py` (`CustomScaledShift`) |
 | **2. Architectural Boundary** | Subclass `Layer`<br>(`parameters`, weight freezing) | Parameter storage & Adam optimizer memory wall ($16\times$ weight bytes) | `lora.py` (`LoRALinear`)<br>`template.py` (`CustomResidualBlock`) |
 | **3. Training Dynamics** | Parameter gradient hooks / `Optimizer` wrapper | Float16 numerical underflow & gradient stability | `loss_scaler.py` (`LossScaler`)<br>`template.py` (`CustomGradientTransform`) |
-| **4. Silicon Boundary (FFI)** | `ctypes` C-ABI, Triton, Metal Performance Shaders | DRAM bandwidth memory wall & interpreter latency | `simd_ops.py`, `cpp_simd_gemm.cpp`<br>`mps_ops.py`, `triton_gelu.py`, `compile.py`<br>`template.py` (`custom_accelerated_op`) |
+| **4. Silicon Boundary (FFI)** | `ctypes` C-ABI, CUDA, Triton, Metal Performance Shaders | DRAM bandwidth memory wall & interpreter latency | `simd_ops.py`, `cpp_simd_gemm.cpp`<br>`cuda_ops.py`, `cuda_sgemm.cu`<br>`mps_ops.py`, `triton_gelu.py`, `compile.py`<br>`template.py` (`custom_accelerated_op`) |
 
 ---
 
@@ -129,6 +129,12 @@ __all__ = [
   - *Mechanism:* Offloads large matrix multiplications to Apple Silicon GPU cores via PyTorch Metal Performance Shaders (MPS).
   - *Impact:* Delivers up to $6\times$ higher throughput than CPU execution on $4096 \times 4096$ matrices, accounting for unified memory transfer latency.
 
+- **`cuda_sgemm.cu` & `cuda_ops.py` (`cuda_matmul`)**
+  - *Bottleneck:* GPU global memory traffic in matrix multiplication: uncoalesced loads, and every operand re-read from DRAM for each output element.
+  - *Mechanism:* Three teaching kernels selected with `stage`: `naive` (one thread per output, row-mapped warps), `coalesced` (column-mapped warps, so each warp reads 32 adjacent floats of B), and `tiled` (32 × 32 tiles of A and B staged in shared memory and reused 32 times). Built with `nvcc` on first use and called through `ctypes`, with no PyTorch dependency.
+  - *Impact:* About $9\times$ from naive to tiled on an RTX 4060 Laptop GPU (≈120 → ≈840 → ≈1,050 GFLOP/s, kernel only, $n = 2048$). Coalescing alone is worth $7\times$; tiling adds about 25%, less than its 32× cut in DRAM traffic suggests, which is the lesson.
+  - *Try it:* `from tinytorch.extensions.cuda_ops import benchmark_stages; benchmark_stages(2048)` times all three stages on your GPU and checks each against NumPy.
+
 - **`triton_gelu.py` (`triton_fused_gelu`)**
   - *Bottleneck:* GPU global memory bandwidth saturation from unfused bias addition and GELU activation.
   - *Mechanism:* Compiles an OpenAI Triton GPU kernel that loads inputs into on-chip SRAM/registers, computes bias addition and the Hendrycks GELU polynomial in registers, and writes back the final result in a single memory pass.
@@ -182,6 +188,9 @@ All extensions are thoroughly validated through automated test suites:
 ```bash
 # Run all extension tests
 pytest tinytorch/tests/extensions/ -v
+
+# Run CUDA SGEMM tests (all stages; NumPy fallback without a GPU)
+pytest tinytorch/tests/extensions/test_cuda_ops.py -v
 
 # Run template tests
 pytest tinytorch/tests/extensions/test_template.py -v
