@@ -54,7 +54,7 @@ Arithmetic is inexpensive relative to data movement. In the time required to fet
 
 ::: {.callout-learning-objectives}
 
-- Explain hardware acceleration as machine-axis specialization for tensor workloads, data reuse, and performance per watt
+- Explain hardware acceleration as tensor-workload specialization and why Amdahl's law bounds its end-to-end speedup
 - Compare Tensor Cores, systolic arrays, SIMD/SIMT units, and sparse execution for ML compute primitives
 - Diagnose memory-wall bottlenecks using bandwidth, cache hierarchy, host-device transfer, and energy-movement costs
 - Calculate arithmetic intensity and execution-path roofline ceilings, then use profiling to diagnose compute or memory limits
@@ -342,7 +342,7 @@ Co-design explains why model compression techniques deliver real speedups. Quant
 
 ::: {#thrm-hw-acceleration-fundamental-limit-acceleration-amdahls-law .callout-theorem title="The fundamental limit of acceleration (Amdahl's law)"}
 
-Hardware acceleration *does not speed up the entire system*; it speeds only the baseline-time fraction using the accelerated path. For that fraction $\ParallelFraction$ and path gain $\AcceleratorGain$, Amdahl's law\index{Amdahl's law!parallel fraction}\index{Parallel Computing!Amdahl's Law} [@amdahl1967] gives the bound in @eq-amdahl.
+Hardware acceleration *does not speed up the entire system*; it speeds only the baseline-time fraction using the accelerated path. For that fraction $\ParallelFraction$ and path gain $\AcceleratorGain$, **Amdahl's law**\index{Amdahl's law!definition}\index{Parallel Computing!Amdahl's Law} [@amdahl1967] gives the bound in @eq-amdahl.
 $$ \text{Speedup} = \frac{1}{(1 - \ParallelFraction) + \frac{\ParallelFraction}{\AcceleratorGain}} $$ {#eq-amdahl}
 
 *   **Accelerated fraction**\index{Parallel fraction!accelerated path} ($\ParallelFraction$): Share of baseline time receiving the stated gain, often in matrix multiplication or another supported kernel.
@@ -461,7 +461,7 @@ The accelerated fraction $\ParallelFraction$ differs substantially across worklo
 
 These checks turn Amdahl's bound into a hardware-selection test.
 
-**Amdahl's reality**\index{Amdahl's reality!definition}
+**Amdahl's reality**
 
 - [ ] **Serial bottlenecks**: use Amdahl's bound to explain why a 1,000$\times$ faster GPU may only speed up training by 5$\times$ when data loading is slow.
 - [ ] **Speedup ceiling**: for $\ParallelFraction=0.95$ and $\AcceleratorGain=100$, estimate total speedup and compare it with the infinite-accelerator ceiling.
@@ -595,10 +595,10 @@ This calculation still overstates the decode path gain. Decode is bandwidth boun
 
 :::
 
-Whether an operation is limited by compute rate or by data movement dictates both hardware selection and software optimization. Under the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}), upgrading to an accelerator with $10\times$ higher peak compute yields negligible speedup if data delivery is the binding bottleneck. The roofline model\index{Roofline model!hardware diagnosis} introduced in @sec-ml-systems-matching-workloads-hardware-bf91 makes this diagnosis [@williams2009]. It compares an operation's arithmetic intensity,[^fn-arithmetic-intensity-roofline] the ratio of operations to bytes of memory traffic (FLOP/byte), with the hardware's ridge point. An operation below the ridge is bandwidth bound, the regime the roofline literature calls *memory bound*; an operation above it is compute bound. GPT-2 decode and ResNet-50 sit on opposite sides of that line, a difference the Amdahl budget above already registered in the decode path gain. @Sec-hardware-acceleration-roofline-model-42ff turns the classification into numbers once the compute units and memory systems that set the two ceilings have been examined.
+Whether an operation is limited by compute rate or by data movement dictates both hardware selection and software optimization. Under the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}), upgrading to an accelerator with $10\times$ higher peak compute yields negligible speedup if data delivery is the binding bottleneck. The roofline model\index{Roofline model!hardware diagnosis}, previewed in @sec-ml-systems-matching-workloads-hardware-bf91, makes this diagnosis [@williams2009]. It compares an operation's arithmetic intensity,[^fn-arithmetic-intensity-roofline] the ratio of operations to bytes of memory traffic (FLOP/byte), with the hardware's ridge point. An operation below the ridge is bandwidth bound, the regime the roofline literature calls *memory bound*; an operation above it is compute bound. GPT-2 decode and ResNet-50 sit on opposite sides of that line, a difference the Amdahl budget above already registered in the decode path gain. @Sec-hardware-acceleration-roofline-model-42ff turns the classification into numbers once the compute units and memory systems that set the two ceilings have been examined.
 
 ::: {.column-margin .margin-pointer}
-↩ Arithmetic intensity and the spectrum of workload signatures it separates are established in @sec-network-architectures-understanding-arithmetic-intensity-ade5.
+↩ The arithmetic-intensity spectrum that separates the workload signatures of the major architectures is established in @sec-network-architectures-understanding-arithmetic-intensity-ade5.
 :::
 
 [^fn-arithmetic-intensity-roofline]: **Arithmetic intensity**\index{Arithmetic intensity!roofline diagnostic}: The ratio of compute operations to bytes transferred across the memory interface being modeled (FLOP/byte). For a matching arithmetic path, intensity above that level's ridge makes compute the lower modeled ceiling; intensity below it makes bandwidth the lower ceiling. Well-tiled matrix multiplications can approach their compute ceiling, while low-intensity kernels may benefit from more bandwidth or reuse. Profiling determines whether dependencies, dispatch, or another execution resource limits performance below either bound.
@@ -1855,7 +1855,7 @@ Each narrower format raises the arithmetic ceiling again. The H100 advertises `{
 
 #### N:M structured sparsity mechanics {#sec-hardware-acceleration-nm-structured-sparsity-mechanics-9a71}
 
-The sparse rating in that comparison depends on one more datapath feature, one that skips zeros only when they follow a fixed pattern. While unstructured pruning reduces model parameter counts, it rarely translates to hardware speedup\index{Sparsity!hardware speedup requirement} because arbitrary nonzero placements destroy memory locality. Hardware accelerators resolve this with N:M structured sparsity\index{Sparsity!N:M structured pattern},[^fn-sparsity-nm-regularity] a pruning constraint that bounds sparsity to a deterministic, fine-grained pattern. The label "N:M" specifies that exactly $\StructuredSparsityNonzeroCount$ of every $\StructuredSparsityGroupSize$ contiguous values along the reduction dimension must be nonzero. Restricting nonzeros to fixed local intervals guarantees uniform memory access and predictable indexing across parallel execution units.
+The sparse rating in that comparison depends on one more datapath feature, one that skips zeros only when they follow a fixed pattern. While unstructured pruning reduces model parameter counts, it rarely translates to hardware speedup\index{Sparsity!hardware speedup requirement} because arbitrary nonzero placements destroy memory locality. Hardware accelerators resolve this with N:M structured sparsity\index{Sparsity!N:M structured pattern},[^fn-sparsity-nm-regularity] the pruning constraint from model compression that keeps exactly $\StructuredSparsityNonzeroCount$ of every $\StructuredSparsityGroupSize$ contiguous values along the reduction dimension nonzero, so memory access stays uniform and indexing predictable across parallel execution units.
 
 ::: {.column-margin .margin-pointer}
 ↩ The N:M and 2:4 structured sparsity patterns and their compressed storage are established in @sec-model-compression-structured-pruning-9692.
@@ -2081,7 +2081,7 @@ minimum height=7.5mm,line width=0.75pt, fill=orange!15}]
 
 :::
 
-NVIDIA's Sparse Tensor Cores\index{Sparse Tensor Core!2:4 constraint} implement the 2:4 instance of this pattern\index{Sparsity!structured, 2:4 hardware support}, in which exactly two of every four contiguous values along the reduction dimension are nonzero [@NVIDIA2020; @nvidia_cusparse_block]. The storage side is the compressed 2:4 encoding that model compression introduced, the two retained values of each group plus a 4-bit metadata tag (2 bits per value) recording their original positions. The new material here is the datapath. During execution, the memory hierarchy transfers only the compressed weights and their metadata, halving the weight-value payload while adding metadata traffic; total transferred bytes therefore fall by less than half before other overheads. Inside the Sparse Tensor Core datapath, the 4-bit metadata steers an internal multiplexer network that selects the matching two values from an uncompressed four-element activation vector. These selected activations and the two nonzero weights are then routed into a half-sized dot-product multiplier tree. Because the hardware computes only on the nonzeros while streaming compressed weights, this design doubles the peak arithmetic instruction throughput, yielding an advertised 2$\times$ tensor-math speedup over dense operations when weights are fine-tuned to satisfy the pattern (@fig-2-4-gemm).
+NVIDIA's Sparse Tensor Cores\index{Sparse Tensor Core!2:4 constraint} implement the 2:4 instance of this pattern\index{Sparsity!structured, 2:4 hardware support} [@NVIDIA2020; @nvidia_cusparse_block]. Their input is the compressed 2:4 encoding, the two retained values of each group plus a 4-bit metadata tag (2 bits per value) recording their original positions. During execution, the memory hierarchy transfers only the compressed weights and their metadata, halving the weight-value payload while adding metadata traffic; total transferred bytes therefore fall by less than half before other overheads. Inside the Sparse Tensor Core datapath, the 4-bit metadata steers an internal multiplexer network that selects the matching two values from an uncompressed four-element activation vector. These selected activations and the two nonzero weights are then routed into a half-sized dot-product multiplier tree. Because the hardware computes only on the nonzeros while streaming compressed weights, this design doubles the peak arithmetic instruction throughput, yielding an advertised 2$\times$ tensor-math speedup over dense operations when weights are fine-tuned to satisfy the pattern (@fig-2-4-gemm).
 
 ::: {#fig-2-4-gemm fig-env="figure" fig-pos="htb" fig-cap="**2:4 Structured Sparsity GEMM**: Left: standard dense matrix multiplication on Tensor Cores using full 8-element rows. Right: 2:4 sparse multiplication retains two nonzeros in every group of four and uses compact indices to select matching elements from the dense right-hand matrix. A supported sparse inner loop can halve the multiplied values, although metadata handling and the rest of the execution path determine end-to-end speedup. Source: PyTorch blog [@pytorch_sparsity_blog]." fig-alt="Side-by-side comparison of dense and 2:4 sparse GEMM on Tensor Cores. Left shows an 8-element dense row multiplication. Right shows a sparse row with two retained values per group of four and compact indices selecting matching elements from the dense right-hand matrix."}
 
@@ -2592,7 +2592,7 @@ Because deep neural networks manipulate millions or billions of parameters acros
 
 ::: {#dfn-hw-acceleration-ai-memory-wall .callout-definition title="AI memory wall"}
 
-***The AI memory wall***\index{AI Memory Wall!definition} is the ML accelerator performance constraint that arises when arithmetic throughput $(\PeakRate)$ outpaces memory bandwidth $(\Bandwidth)$. The core issue is whether the memory system can supply operands and absorb results quickly enough to sustain the specialized primitives introduced in @sec-hardware-acceleration-compute-units-execution-models-f406.
+***The AI memory wall***\index{Memory wall!AI accelerators} is the ML accelerator performance constraint that arises when arithmetic throughput $(\PeakRate)$ outpaces memory bandwidth $(\Bandwidth)$. The core issue is whether the memory system can supply operands and absorb results quickly enough to sustain the specialized primitives introduced in @sec-hardware-acceleration-compute-units-execution-models-f406.
 
 1.  **Significance**: A workload has reached the memory wall when increasing FLOP/s alone no longer reduces execution time because the $\frac{\DataVolume}{\Bandwidth}$ term dominates the overall runtime.
 2.  **Distinction**: The classic memory wall concerns memory latency falling behind processor speed; the AI memory wall is chiefly a bandwidth limit, set by the parameter volumes and intermediate activation tensors of deep learning.
@@ -3344,7 +3344,7 @@ Global token interaction\index{Attention Mechanism!global token interaction} pro
 In autoregressive inference, memory pressure shifts to the key-value (KV) cache. Generating each subsequent token requires reading the accumulated historical KV states from HBM for a single vector-matrix operation, operating at very low arithmetic intensity and binding generation speed directly to memory bandwidth.
 
 ::: {.column-margin .margin-pointer}
-↪ The KV cache's growth with sequence length and its claim on accelerator memory are developed in @sec-model-serving-memory-kv-cache-d1ea.
+↩ How much memory one request's KV cache claims as its sequence grows is established in @sec-network-architectures-inference-memory-bandwidth-wall-98d1.
 :::
 
 ### Accelerator design implications {#sec-hardware-acceleration-ml-accelerators-implications-c962}
@@ -3369,7 +3369,7 @@ The compute units fix how fast an accelerator can calculate, and the memory syst
 
 ### The roofline model {#sec-hardware-acceleration-roofline-model-3e1a}
 
-Every section so far has leaned on the roofline informally, calling a kernel compute bound or memory bound and pointing to the ridge point that separates the two. The compute units and memory systems that set its two ceilings are now in place, so the diagnosis can be made quantitative. Peak FLOP/s indicates what execution units can deliver when operands are already on chip, but sustained accelerator throughput is ultimately bounded by the rate at which the memory hierarchy delivers data. The Roofline Model[^fn-roofline-performance-model]\index{Roofline Model!efficiency measurement} [@williams2009], the same model that sorted training kernels in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446, plots attainable performance against arithmetic intensity and identifies the lower modeled ceiling, compute\index{Compute-Bound!roofline classification} or memory bandwidth\index{Memory-Bound!roofline classification}, for the chosen execution path. Rather than evaluating compute capacity in isolation, the model intersects hardware arithmetic throughput with memory bandwidth, bounding performance before profiling establishes which resource limits execution.
+Every section so far has leaned on the roofline informally, calling a kernel compute bound or memory bound and pointing to the ridge point that separates the two. The compute units and memory systems that set its two ceilings are now in place, so the diagnosis can be made quantitative. Peak FLOP/s indicates what execution units can deliver when operands are already on chip, but sustained accelerator throughput is ultimately bounded by the rate at which the memory hierarchy delivers data. The **roofline model**\index{Roofline model!definition}[^fn-roofline-performance-model] [@williams2009], the same model that sorted training kernels in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446, plots attainable performance against arithmetic intensity and identifies the lower modeled ceiling, compute\index{Compute-Bound!roofline classification} or memory bandwidth\index{Memory-Bound!roofline classification}, for the chosen execution path. Rather than evaluating compute capacity in isolation, the model intersects hardware arithmetic throughput with memory bandwidth, bounding performance before profiling establishes which resource limits execution.
 
 [^fn-roofline-performance-model]: **Roofline model**\index{Roofline model!optimization diagnostic}: Introduced by @williams2009 at UC Berkeley, building on earlier I/O complexity work from the 1980s. Their specific contribution was making the compute vs. bandwidth trade-off visual and actionable: the characteristic roofline plot immediately reveals whether a kernel is compute bound (hitting the flat ceiling) or memory bound (hitting the sloped bandwidth line) and quantifies the gap to hardware limits. A kernel operating at only 50 percent of its ceiling has 2$\times$ theoretical headroom, but instruction mix, latency, and occupancy may prevent it from closing that gap.
 
@@ -3480,7 +3480,7 @@ $$\AttainableComputeRate = \min(\PeakRate, \Bandwidth \times \ArithmeticIntensit
 
 ::: {#dfn-hw-acceleration-arithmetic-intensity .callout-definition title="Arithmetic intensity"}
 
-***Arithmetic intensity***\index{Arithmetic intensity!per memory interface} is the ratio of operations to bytes transferred across the memory interface being modeled ($\text{FLOP}/\text{byte}$). Together with that level's bandwidth and the relevant compute peak, it determines which idealized roofline ceiling is lower.
+***Arithmetic intensity***\index{Arithmetic intensity!definition} is the ratio of operations to bytes transferred across the memory interface being modeled ($\text{FLOP}/\text{byte}$). Together with that level's bandwidth and the relevant compute peak, it determines which idealized roofline ceiling is lower.
 
 1.  **Significance**: The threshold between the two ceilings is the ridge point $\PeakRate / \Bandwidth$, the hardware balance developed in @sec-hardware-acceleration-hardware-balance. For the H100 (`{python} RooflineGap.h100_fp16_tflop_per_s_str` dense FP16, `{python} RooflineGap.h100_bw_tb_per_s_str`), it is roughly `{python} RooflineGap.h100_ridge_str`. Under the stated traffic models, a large well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, while standalone ReLU is about `{python} RooflineGap.relu_ai_str` FLOP/byte. They therefore meet different ceilings on the same hardware.
 2.  **Distinction**: Unlike total FLOPs (a count of operations), arithmetic intensity is a ratio that characterizes the shape of a workload's hardware demand. Two kernels with identical FLOPs but different memory access patterns can have different arithmetic intensities and face different modeled ceilings on the same hardware.
@@ -3493,13 +3493,9 @@ $$\ArithmeticIntensity = \frac{\Operations}{\DataVolume}$$ {#eq-arithmetic-inten
 
 The roofline visualization shows performance (TFLOP/s) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, the upper bound increases linearly along the memory bandwidth slope ($\Bandwidth \times \ArithmeticIntensity$). Above the ridge point, the upper bound is peak compute ($\PeakRate$). A kernel approaching the slope is bandwidth limited, while one approaching the flat roof is compute limited on the specified path. Merely lying below either line does not establish the cause; profiling explains that remaining gap. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps each regime to the optimizations that pay off and the ones that waste effort, so classifying a kernel tells the engineer whether more bandwidth, less traffic, or more arithmetic throughput is the investment to test first.
 
-::: {.column-margin .margin-pointer}
-↪ The optimizations that pay off in each regime, and the ones that waste effort, are collected for reference in @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9.
-:::
-
 ### Hardware ridge points {#sec-hardware-acceleration-hardware-balance}
 
-Different devices place the compute-bandwidth boundary at different intensities. The ridge point\index{Ridge Point!hardware balance}, the balance point between a machine's memory and compute limits previewed alongside the iron law, is a property of the device. Computer architects call the same ratio the **hardware balance $(\RooflineRidgePoint)$**\index{Hardware balance}, peak arithmetic throughput divided by peak memory bandwidth, the intensity at which the roofline's compute and bandwidth ceilings intersect:
+Different devices place the compute-bandwidth boundary at different intensities. The **ridge point**\index{Ridge point!definition}, the balance point between a machine's memory and compute limits previewed alongside the iron law, is a property of the device. Computer architects call the same ratio the **hardware balance $(\RooflineRidgePoint)$**\index{Hardware balance}, peak arithmetic throughput divided by peak memory bandwidth, the intensity at which the roofline's compute and bandwidth ceilings intersect:
 $$ \RooflineRidgePoint = \frac{\PeakRate}{\Bandwidth} $$
 
 The ratio sets a device-specific boundary. Depending on the chosen precision, the H100 requires about `{python} RooflineGap.h100_ridge_str` on its dense FP16 path to reach its arithmetic ceiling, and twice that on its INT8 path, whereas a microcontroller may have a much lower ridge point. The same kernel can therefore be bandwidth bound on a compute-dense accelerator and compute bound on an edge processor. Hardware balance does not label either device as universally efficient; it identifies how much reuse a workload needs on that device.
@@ -5015,10 +5011,10 @@ class TilingPrinciple:
     tiles_per_dim_str = fmt_int(tiles_per_dim)
 ```
 
-A stationary dataflow decides which operand stays local; tiling decides how large a block of it local storage can hold. A fundamental mismatch exists between the *computational graph* (which sees a single `{python} TilingPrinciple.layer_dim_str` $\times$ `{python} TilingPrinciple.layer_dim_str` matrix multiplication) and the *physical silicon* (which possesses a fixed `{python} TilingPrinciple.array_dim_str` $\times$ `{python} TilingPrinciple.array_dim_str` systolic array). Bridging this gap requires tiling\index{Tiling!principle, hardware-graph bridge}, the blocking technique of cache-aware matrix multiplication, here partitioning large tensor operations into tiles that fit exactly into the hardware's fast local memory (SRAM or scratchpad memory).
+A stationary dataflow decides which operand stays local; tiling decides how large a block of it local storage can hold. A fundamental mismatch exists between the *computational graph* (which sees a single `{python} TilingPrinciple.layer_dim_str` $\times$ `{python} TilingPrinciple.layer_dim_str` matrix multiplication) and the *physical silicon* (which possesses a fixed `{python} TilingPrinciple.array_dim_str` $\times$ `{python} TilingPrinciple.array_dim_str` systolic array). Bridging this gap requires **tiling**\index{Tiling!definition}, which partitions a large tensor operation into tiles that fit exactly into the hardware's fast local memory (SRAM or scratchpad memory), so that each tile is reused many times before it is evicted.
 
 ::: {.column-margin .margin-pointer}
-↩ Tiling as the blocking technique behind cache-aware matrix multiplication is established in @sec-ml-frameworks-basic-numerical-operations-5516.
+↩ Tiling in its software form, the cache-aware blocking a framework applies to matrix multiplication, is established in @sec-ml-frameworks-basic-numerical-operations-5516.
 :::
 
 To process the `{python} TilingPrinciple.layer_dim_str`-wide worked-example layer on a `{python} TilingPrinciple.array_dim_str`-wide systolic array, the compiler decomposes the result into `{python} TilingPrinciple.output_tile_count_str` output tiles. Each output tile accumulates across `{python} TilingPrinciple.tiles_per_dim_str` reduction-dimension tiles, so the complete matrix multiplication executes `{python} TilingPrinciple.tile_product_count_str` $\GemmLeftOperand$-tile-by-$\GemmRightOperand$-tile products. This decomposition is a physical requirement imposed by memory hierarchy limits: operand tiles are fetched from high-capacity, high-latency HBM, staged in fast SRAM, and pulsed through the systolic array.
@@ -5308,7 +5304,7 @@ Even when tensor layout is perfectly aligned with the hardware, executing operat
 Kernel fusion\index{Kernel Fusion!hardware data movement}[^fn-kernel-fusion-memory] entered the book as a framework optimization that combines successive operations into a single kernel to avoid intermediate memory round trips. The LayerNorm analysis (notebook \ref{nbk-hw-acceleration-layernorm-analysis}) shows why it matters on an accelerator. At `{python} LayernormAnalysisCalc.ln_ai_str` FLOP/byte, a standalone normalization kernel can reach at most `{python} LayernormAnalysisCalc.ln_attainable_tflop_per_s_str`, about `{python} LayernormAnalysisCalc.ln_util_pct_str` of the H100's tensor peak, however its arithmetic is scheduled. The hardware questions are which intermediates fusion removes from the memory bus and what the fused kernel costs in registers and occupancy.
 
 ::: {.column-margin .margin-pointer}
-↩ Kernel fusion (also called operator fusion), with its LayerNorm, dropout, and ReLU traffic example, is established in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8.
+↩ Kernel fusion (also called operator fusion), with its LayerNorm, dropout, and ReLU example and the traffic count for unfused versus fused chains, is established in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8.
 :::
 
 [^fn-kernel-fusion-memory]: **Kernel fusion**\index{Kernel fusion!memory traffic reduction}: Separate GPU kernels expose intermediate results through device memory, although caches can absorb some traffic. A fused kernel can keep intermediates in registers or local storage and avoid corresponding external write/read cycles. The resulting speedup depends on cache behavior, occupancy, launch overhead, and whether memory traffic was the bottleneck; it is not necessarily proportional to the byte reduction.
@@ -5316,10 +5312,6 @@ Kernel fusion\index{Kernel Fusion!hardware data movement}[^fn-kernel-fusion-memo
 #### Intermediate memory write {#sec-hardware-acceleration-intermediate-memory-write-f140}
 
 When operations execute as isolated kernels, each intermediate result is written to a global-memory buffer and read back by the downstream operator, and cache behavior determines how much of that traffic reaches DRAM or HBM. That traffic has no reuse outside the adjacent pair of operations, which is the physical motivation for kernel fusion. While @sec-hardware-acceleration-roofline-model-42ff analyzed bandwidth limits in terms of low operational intensity, chained elementwise operations aggravate the memory wall by multiplying global memory transactions [@nvidia2017gpu].
-
-::: {.column-margin .margin-pointer}
-↩ The traffic count for unfused versus fused operator chains, $2\,\ChainedOperationCount \IntermediateTensorSize$ versus $2\IntermediateTensorSize$, is established in @sec-model-compression-operator-fusion-ac1d.
-:::
 
 ```{python}
 #| echo: false
@@ -5356,7 +5348,7 @@ class MemoryFootprintCalc:
     total_mb_str = fmt_memory(total_memory, unit=MB, precision=1, commas=False)
 ```
 
-In a naïve execution model, each operation executes as a separate GPU kernel, forcing intermediate tensors to round-trip through device memory (@lst-naive_execution). In a chain of three operations (such as ReLU, batch normalization, and affine scaling), the intermediate outputs $\ReluIntermediateTensor$ and $\BatchNormIntermediateTensor$ are materialized in global-memory buffers and immediately reread by the subsequent kernel; the naive traffic model assumes those transfers reach DRAM. For elementwise operators where arithmetic intensity is low ($\ArithmeticIntensity\ll 1\text{ FLOP/byte}$), the time spent moving data across the memory bus outweighs the computation time [@Jia2019]. Furthermore, holding these un-fused intermediate buffers in memory inflates the live-tensor footprint during execution (@tbl-memory-footprint).
+@Lst-naive_execution runs a chain of three operations (ReLU, batch normalization, and affine scaling) as separate GPU kernels, so the intermediate outputs $\ReluIntermediateTensor$ and $\BatchNormIntermediateTensor$ are materialized in global-memory buffers and immediately reread by the subsequent kernel; the naive traffic model assumes those transfers reach DRAM. For elementwise operators where arithmetic intensity is low ($\ArithmeticIntensity\ll 1\text{ FLOP/byte}$), the time spent moving data across the memory bus outweighs the computation time [@Jia2019]. Furthermore, holding these un-fused intermediate buffers in memory inflates the live-tensor footprint during execution (@tbl-memory-footprint).
 
 ::: {#lst-naive_execution lst-cap="**Naïve Execution**: Each step writes intermediate results to memory before processing the next, leading to increased bandwidth usage and reduced efficiency."}
 
@@ -5449,7 +5441,7 @@ class FusionBenefitsCalc:
     fused_mb_str = fmt_memory(fused_memory, unit=MB, precision=1, commas=False)
 ```
 
-@Tbl-fusion-benefits highlights the impact of kernel fusion on memory efficiency. By keeping intermediate results in registers or local memory rather than writing them to main memory, fusion reduces external traffic. For three separate pointwise inference kernels, the idealized naïve path reads and writes one tensor per operation, whereas the fused path reads the input once and writes the output once.
+@Tbl-fusion-benefits applies the traffic count for unfused and fused chains from @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 to this three-kernel chain. The naïve path reads and writes one tensor per operation, whereas the fused path reads the input once and writes the output once.
 
 | Execution Model                            | **External tensor payloads** |              **Traffic (MB)**              |
 |:-------------------------------------------|:----------------------------:|:------------------------------------------:|
