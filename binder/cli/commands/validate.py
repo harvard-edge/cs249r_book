@@ -778,6 +778,11 @@ class ValidateCommand:
                   note="H1→H2→H3 hierarchy"),
             Scope("h2-landings", "_run_h2_landings",
                   note="## sections need prose before ### subsections"),
+            # 2026-10-13: two chapter renumberings (vol2 swap, vol3 split) left
+            # number-offset stale, so chapters printed the wrong number and no
+            # check noticed. The offset must equal the NN_ folder prefix minus one.
+            Scope("number-offset", "_run_number_offset",
+                  note="chapter number-offset matches its NN_ folder"),
             Scope("parts", "_run_parts",
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
@@ -5637,6 +5642,52 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # H2 landing prose  (detect ## followed immediately by ###)
     # ------------------------------------------------------------------
+
+    def _run_number_offset(self, root: Path) -> ValidationRunResult:
+        """Require each chapter's ``number-offset`` to equal its folder number minus one.
+
+        A chapter lives in ``books/volN/NN_name/NN_name.qmd``; its front matter
+        ``number-offset: [k]`` sets the printed chapter number to k + 1, so k
+        must be NN - 1. Files outside numbered chapter folders are skipped.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        offset_pat = re.compile(r"^number-offset:\s*\[\s*(\d+)\s*\]\s*$")
+        checked = 0
+        for file in files:
+            folder = file.parent.name
+            m_folder = re.match(r"^(\d\d)_", folder)
+            if not m_folder or file.stem != folder:
+                continue
+            lines = self._read_text(file).splitlines()
+            if not lines or lines[0].strip() != "---":
+                continue
+            checked += 1
+            for idx, line in enumerate(lines[1:], 2):
+                if line.strip() == "---":
+                    break
+                m = offset_pat.match(line.strip())
+                if m:
+                    expected = int(m_folder.group(1)) - 1
+                    if int(m.group(1)) != expected:
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="number_offset_mismatch",
+                            message=(f"number-offset [{m.group(1)}] prints chapter {int(m.group(1)) + 1}, "
+                                     f"but the folder is chapter {int(m_folder.group(1))}"),
+                            context=line.strip(),
+                            suggestion=f"number-offset: [{expected}]",
+                        ))
+                    break
+        return ValidationRunResult(
+            name="number-offset",
+            description="Chapter number-offset matches its NN_ folder",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_h2_landings(self, root: Path) -> ValidationRunResult:
         """Require H2 sections to orient readers before H3 subsections.
