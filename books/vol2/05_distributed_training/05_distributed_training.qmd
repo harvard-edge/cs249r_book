@@ -57,7 +57,7 @@ Splitting a training job across machines creates more compute capacity, but it a
 - Apply the Fleet Law to diagnose compute-, memory-, communication-, or coordination-bound distributed training regimes
 - Calculate scaling efficiency, estimate useful batch size, and budget synchronization overhead for data-parallel training
 - Design memory-sharding plans that trade accelerator capacity for additional communication
-- Map tensor, pipeline, expert, and data parallelism onto hardware bandwidth tiers and model structure
+- Map tensor, pipeline, sequence, expert, and data parallelism onto hardware bandwidth tiers and model structure
 - Analyze microbatch pipeline schedules for bubble overhead, activation residency, and synchronous update ordering
 - Evaluate synchronization and low-precision policies under staleness, straggler, and numerical-stability constraints
 - Synthesize hybrid parallelism configurations for frontier, recommendation, and alignment training constraints
@@ -1154,6 +1154,10 @@ As the backward pass traverses the computation graph in reverse, it produces gra
 Gradient synchronization combines local contributions into the synchronous update. Each replica must receive the aggregate before applying that update. In a centralized parameter-server design with fixed per-worker payload and update frequency, the server receives $\mathcal{O}(\DeviceCount)$ incoming traffic\index{Parameter server!bandwidth bottleneck}. That concentration becomes a bottleneck when demand exceeds the server tier's service capacity; sharding the server state or changing the communication pattern can relieve it.
 
 The replicated synchronous baseline distributes aggregation through collective communication. AllReduce lets each worker contribute its local gradient tensor and receive the same reduced result, which the training loop normalizes to obtain the global average\index{AllReduce!decentralized gradient synchronization}. In sharded variants such as ZeRO and FSDP, ReduceScatter\index{ReduceScatter!gradient aggregation} and AllGather\index{AllGather!parameter reconstruction} change which result each worker retains. ReduceScatter combines corresponding tensor elements, then leaves a different reduced shard on each worker. AllGather collects distinct shards and returns their concatenation to every worker without summing them. These contracts support gradient sharding and on-demand parameter reconstruction. Small messages emphasize startup latency; large messages emphasize sustained bandwidth. Centralized aggregation remains another design choice, particularly for the sparse workloads developed later.
+
+::: {.column-margin .margin-pointer}
+↪ The result contracts of AllReduce, ReduceScatter, and AllGather, and the decomposition of AllReduce into a ReduceScatter followed by an AllGather, are developed in @sec-collective-communication-six-core-primitives-8a66.
+:::
 
 At the Distributed Execution row of the fleet stack, the loop specifies an AllReduce contract while its implementation determines the cost. For a large worker group, ring AllReduce transfers approximately $2\GradientPayload$ bytes per worker for an $\GradientPayload$-byte gradient payload. @Sec-collective-communication derives this approximate $2\GradientPayload$ volume and compares algorithms whose startup costs, topology, and contention differ. It also examines how libraries such as NCCL schedule exchanges within and across communication domains.
 
@@ -2290,7 +2294,7 @@ When doubling the number of GPUs yields only 1.5$\times$ speedup for the same wo
 
 ### The mathematics of scaling efficiency {#sec-distributed-training-scaling-math}
 
-Whether scaling from one device to many is worthwhile is measured by scaling efficiency, a fleet-level ratio. If a model trains in time $\SingleDeviceRunTime$ on one device, ideal (linear) scaling would train it in time $\SingleDeviceRunTime/\DeviceCount$ on $\DeviceCount$ devices; communication overhead, pipeline bubbles, and load imbalance reduce the speedup. @Eq-distributed-training-scaling-efficiency restates the ratio\index{Scaling efficiency!mathematical definition}:
+Whether scaling from one device to many is worthwhile is measured by scaling efficiency, the fleet-level ratio introduced with the Fleet Law in @sec-vol2-introduction-fleet-law. If a model trains in time $\SingleDeviceRunTime$ on one device, ideal (linear) scaling would train it in time $\SingleDeviceRunTime/\DeviceCount$ on $\DeviceCount$ devices; communication overhead, pipeline bubbles, and load imbalance reduce the speedup. @Eq-distributed-training-scaling-efficiency restates the ratio\index{Scaling efficiency!mathematical definition}:
 
 $$\ScalingEfficiency = \frac{\SingleDeviceRunTime}{\DeviceCount\times \MultiDeviceRunTime}$$ {#eq-distributed-training-scaling-efficiency}
 
@@ -2437,6 +2441,10 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 
 :::
 
+::: {.column-margin .margin-pointer}
+↪ The compute window that caps how much of a collective can hide, and the exposed communication left on the step's critical path, are developed in @sec-communication-overlap-limits.
+:::
+
 #### Parallelism-infrastructure interaction {#sec-distributed-training-parallelism-infrastructure}
 
 The scaling efficiency analysis shows that the effective parallelism strategy is not determined by the *model architecture alone* but by the *interaction*\index{Parallelism!infrastructure interaction} between the model's communication requirements and the infrastructure's bandwidth hierarchy. Each combination of parallelism strategy and infrastructure topology produces a different scaling efficiency curve, and selecting the wrong combination can waste a significant fraction of the cluster's capacity. The preceding napkin math showed pure data parallelism stalling near `{python} CommScalingMath.scaling_efficiency_str` efficiency at this scale; recovering that lost capacity means mapping each parallelism dimension onto the bandwidth tier that can carry its traffic. @Sec-distributed-training-systems-systems-hybrid-parallelism-12a0 works that combination through three concrete configurations and formalizes it as hierarchy-aware parallelism, once tensor and pipeline parallelism have been developed.
@@ -2533,7 +2541,7 @@ class AmdahlObservedShare:
     n_str = fmt_count(n, commas=False, label="GPU")
 ```
 
-That baseline fraction is not the synchronization share a profiler reports for a distributed step, because the compute share has been divided by $\DeviceCount$ while the residual has not. A residual of `{python} AmdahlObservedShare.r_pct_str` of the single-device step occupies about `{python} AmdahlObservedShare.share_pct_str` of each step on `{python} AmdahlObservedShare.n_str`. Reading the observed share as $\SerialFraction$ would therefore overstate the residual many times over and predict a far lower speedup ceiling than the model implies.
+As perspective \ref{psp-introduction-amdahls-distributed-pitfall} cautioned, that baseline fraction is not the synchronization share a profiler reports for a distributed step, because the compute share has been divided by $\DeviceCount$ while the residual has not. A residual of `{python} AmdahlObservedShare.r_pct_str` of the single-device step occupies about `{python} AmdahlObservedShare.share_pct_str` of each step on `{python} AmdahlObservedShare.n_str`. Reading the observed share as $\SerialFraction$ would therefore overstate the residual many times over and predict a far lower speedup ceiling than the model implies.
 
 @Fig-scaling-tax illustrates this scaling tax\index{Scaling tax!communication overhead} up to 512 GPUs on log-log axes, complementing the scaling efficiency bound (principle \ref{pri-scaling-efficiency}). In this illustrative fixed-residual model, a small baseline fraction ($\SerialFraction= 0.1\%$) stays closer to ideal scaling than a larger fraction ($\SerialFraction= 1\%$). A residual equal to a tenth of baseline time ($\SerialFraction= 0.10$) limits asymptotic speedup to $1/\SerialFraction= 10\times$. Actual collective and coordination costs can change with worker count, so predicting a training run requires the more explicit Fleet Law below.
 
@@ -3373,6 +3381,10 @@ plt.close(fig)
 
 Several techniques occupy different positions on this trade-off curve. Gradient compression\index{Gradient compression!bandwidth reduction} reduces communication volume by transmitting compressed gradient information through quantization, sparsification, or low-rank approximation. Examples include sign-based updates [@bernstein2018signsgd], Deep Gradient Compression\index{Deep Gradient Compression!gradient sparsification} [@lin2018deep], PowerSGD\index{PowerSGD!low-rank gradient compression} [@vogels2020powersgd], quantized SGD with convergence analysis\index{QSGD!quantized gradients} [@alistarh2017qsgd], and empirical sparse gradient dropping for neural machine translation [@aji2017].
 
+::: {.column-margin .margin-pointer}
+↪ Quantized, sparsified, and low-rank gradient compression, the error feedback that keeps them convergent, and the criteria for when they pay, are developed in @sec-communication-collective-operations-collective-operations-gradient-compression-7a5c.
+:::
+
 Local SGD\index{Local SGD!communication frequency} lets workers perform $\LocalUpdateCount$ local updates before synchronizing, reducing synchronization frequency per local update by factor $\LocalUpdateCount$. Results for smooth, strongly convex objectives can recover synchronous SGD's asymptotic rate under specified learning-rate and local-update-interval conditions [@stich2019local]. The interval is part of the convergence assumptions, not an unrestricted communication saving.
 
 Decentralized SGD\index{Decentralized SGD!neighbor communication} exchanges information along a communication graph instead of performing a global AllReduce at each update. Sparse neighbor exchanges can reduce immediate communication demand, but spreading information across the group takes additional rounds. Graph connectivity, link service time, and the optimization effect of delayed mixing determine whether this trade-off helps a geographically distributed workload.
@@ -3389,7 +3401,11 @@ Numerical precision can become a distribution lever, but compute precision and c
 
 FP8 matters to distributed training only after four dtypes are distinguished: the stored parameter dtype, the GEMM operand dtype, the accumulator or master-state dtype, and the collective wire dtype. Traditional mixed-precision training commonly retains FP32 optimizer or master state while using FP16/BF16 operands. FP8-capable accelerators add E4M3\index{E4M3!weights and activations} and E5M2\index{E5M2!scaled gradients} operand formats optimized for different tensor distributions [@micikevicius2022fp8]. The collective may still transmit FP16/BF16 gradients or activations unless the runtime applies an explicit FP8 cast or compression protocol.
 
-The two FP8 formats trade precision against range. E4M3 (4-bit exponent, 3-bit mantissa) reaches approximately $\pm 448$ and offers finer precision, motivating its use for scaled *weights and activations* in the cited recipe. E5M2 (5-bit exponent, 2-bit mantissa) reaches approximately $\pm 57344$ with coarser precision, accommodating a wider range of scaled *gradients*. The assignment follows from the distributions. Forward activations and weights tend to cluster within a predictable range, so the extra mantissa bit of E4M3 buys accuracy, whereas gradients can span many orders of magnitude during backpropagation, so the extra exponent bit of E5M2 avoids the overflow and underflow that the narrower E4M3 range would cause more often. Neither format guarantees that every value survives conversion. Tensor distributions, scaling granularity, and numerical validation determine suitability. @Tbl-precision-formats summarizes the available range and typical roles without making those roles mandatory.
+The two FP8 formats trade precision against range. E4M3 keeps an extra mantissa bit for scaled *weights and activations*, which cluster within a predictable range, while E5M2 keeps an extra exponent bit for scaled *gradients*, which can span many orders of magnitude during backpropagation. Neither format guarantees that every value survives conversion. Tensor distributions, scaling granularity, and numerical validation determine suitability. @Tbl-precision-formats summarizes the available range and typical roles without making those roles mandatory.
+
+::: {.column-margin .margin-pointer}
+↪ The single-machine number formats, their byte widths, and the mixed-precision training state they produce are collected for reference in @sec-appdx-dam-taxonomy-training-memory.
+:::
 
 | **Format** | **Exponent** | **Mantissa** |        **Range**         | **Precision** |               **Typical numerical role**               |
 |:-----------|:------------:|:------------:|:------------------------:|:-------------:|:------------------------------------------------------:|
@@ -3401,7 +3417,7 @@ The two FP8 formats trade precision against range. E4M3 (4-bit exponent, 3-bit m
 
 : **Training Precision Formats**: Each row represents a floating-point format that can occupy one role in a mixed-precision training contract. E4M3 and E5M2 narrow selected operands; accumulator, optimizer-state, storage, and wire formats remain independent engineering decisions. {#tbl-precision-formats}
 
-One response to FP8's limited range is *dynamic scaling*\index{Dynamic scaling!FP8 dynamic range}. A scale suitable early in training can become unsuitable as tensor magnitudes change. Per-tensor scaling multiplies values before conversion and compensates for that scale when interpreting the result. A common policy tracks the recent maximum absolute value of each tensor and chooses the scale that maps that maximum near the largest representable FP8 value, so the tensor uses as much of the format's range as possible without overflowing. Scaling policy and granularity must balance overflow, underflow, and precision; changing the scale does not remove the need to validate training quality.
+FP8's limited range also requires *dynamic scaling*\index{Dynamic scaling!FP8 dynamic range}, which multiplies each tensor by a scale, commonly derived from its recent maximum absolute value, before conversion and compensates for that scale when interpreting the result. Scaling policy and granularity must balance overflow, underflow, and precision; changing the scale does not remove the need to validate training quality.
 
 An FP8 training contract\index{FP8!mixed-precision training} combines FP32 master or optimizer state and FP8 GEMM operands with higher-precision accumulation and output. The exact accumulator and output formats are properties of the operation and hardware implementation rather than universal FP16/BF16 choices. This approach can achieve near-FP16 training quality while improving effective throughput on FP8-capable hardware for suitable workloads [@micikevicius2022fp8]. The systems implication is concrete but scoped: FP8 halves bytes only for tensors actually stored or transmitted in FP8, while operation throughput and energy gains depend on the accelerator implementation. A collective that reduces FP16 gradients receives no wire-volume reduction merely because the preceding GEMMs used FP8.
 
@@ -4812,7 +4828,7 @@ In the Megatron-style arrangement just derived, the column-then-row pairing in @
 
 Megatron Sequence Parallelism\index{Megatron-LM!sequence parallelism} [@korthikanti2023activation] eliminates this redundancy by sharding the sequence dimension across the $\TensorParallelDegree$ ranks for all non-tensor-parallel operations. Instead of replicating activations, each GPU holds only a $\BatchSize\times (\SequenceLength/\TensorParallelDegree) \times \HiddenDimension$ slice during LayerNorm and Dropout.
 
-This sharding incurs zero additional communication volume. In standard tensor parallelism, the row-parallel matrix multiplication is followed by an AllReduce to sum partial products across ranks. An AllReduce mathematically decomposes into a ReduceScatter followed by an AllGather\index{Sequence parallelism!AllReduce decomposition}:
+This sharding incurs zero additional communication volume. In standard tensor parallelism, the row-parallel matrix multiplication is followed by an AllReduce to sum partial products across ranks. An AllReduce decomposes into a ReduceScatter followed by an AllGather\index{Sequence parallelism!AllReduce decomposition}, the identity that @sec-collective-communication-six-core-primitives-8a66 develops among the collective primitives:
 $$\text{AllReduce}(\RankContribution) \equiv \text{AllGather}(\text{ReduceScatter}(\RankContribution))$$
 Megatron-SP decouples this collective pair across the transformer block. Following the row-parallel linear layer, a ReduceScatter reduces partial sums while scattering the resulting activations along the sequence dimension, leaving each GPU with an $\SequenceLength/\TensorParallelDegree$ token slice. LayerNorm, residual additions, and Dropout then execute on these local slices with zero cross-device communication. Immediately before the next column-parallel linear layer, an AllGather across the sequence dimension reassembles the complete $\SequenceLength$ tokens required for the weight-partitioned matrix multiplication.
 
@@ -5106,6 +5122,10 @@ The primary advantage is decoupling model size from per-token compute, which let
 
 :::
 
+::: {.column-margin .margin-pointer}
+↪ The terms that set an AllToAll's completion time, from traffic across the fabric bisection to hotspots created by skewed expert loads, are developed in @sec-communication-alltoall.
+:::
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -5389,6 +5409,10 @@ Consider a training fleet configured with tensor parallelism (TP) of `{python} T
 The training step begins at the data-parallel level. Each of the `{python} TensorParallel3DTraffic.dp_value_str` model replicas receives a distinct slice of the global batch. Within each replica, the model is split across `{python} TensorParallel3DTraffic.pp_value_str` pipeline stages (nodes), with microbatches flowing sequentially from the embedding layer on Node 0 to the loss calculation on Node 15. At the finest granularity, within each node, the `{python} TensorParallel3DTraffic.tp_str` fuse into a single "super-accelerator" via TP. The transformer matrix multiplications are split across these devices; column- and row-parallel pairs retain local intermediate shards and exchange partial results at the reduction points already derived. For a 175B-scale hidden dimension, the activation payload is roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str`; the resulting tensor-parallel traffic is about `{python} TensorParallel3DTraffic.per_stage_forward_gb_str` per pipeline stage per microbatch in the forward pass, or `{python} TensorParallel3DTraffic.per_stage_forward_backward_gb_str` including the backward pass. Across the full `{python} TensorParallel3DTraffic.layers_str`-layer replica, the forward tensor-parallel traffic is about `{python} TensorParallel3DTraffic.full_forward_gb_str`. This traffic is the highest-intensity in the system, but its exposed latency can remain small relative to compute because the chips communicate over `{python} DistTrainNvlinkIntro.nvlink_a100_gb_per_s_str`--`{python} DistTrainNvlinkIntro.nvlink_h100_gb_per_s_str` of local bandwidth per direction.
 
 The backward pass exposes dependencies between parallelism dimensions. Nodes exchange activation gradients point-to-point, roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str` per microbatch per stage boundary in this example. A smaller payload still stalls a stage if it arrives after the stage needs it. Data-parallel synchronization creates another dependency: although full-model gradients occupy about `{python} HybridConfigFeasibility.gradient_gb_str`, each data-parallel group exchanges only the corresponding tensor- and pipeline-parallel parameter shard. Gradient bucketing\index{Gradient bucketing!overlap with backward pass} groups ready gradients as backward computation proceeds. Which exchange limits the step depends on its readiness, service time, and overlap; data parallelism is not necessarily the final bottleneck.
+
+::: {.column-margin .margin-pointer}
+↪ Bucket fusion, which groups gradients that become ready together into larger reductions so communication can begin during backpropagation, is developed in @sec-communication-bucket-fusion.
+:::
 
 The architectural imperative is *bandwidth matching*: each exchange's startup and transfer time must fit its available compute or overlap interval. In this mapping, frequent TP exchanges use the NVLink domain (`{python} DistTrainNvlinkIntro.nvlink_a100_gb_per_s_str` per direction or higher), while PP transfers cross nodes and DP reductions overlap backward computation. Accumulation can enlarge the compute interval between DP synchronizations, subject to the global-batch constraint. An infeasible mapping leaves part or all of the `{python} TensorParallel3DTraffic.total_gpus_str` fleet waiting. Comparing service time with the schedule completes the feasibility check introduced in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344.
 
@@ -5856,6 +5880,10 @@ class RLHFKVCache:
 
 The PPO rollout phase introduces autoregressive dependencies absent from the teacher-forced pretraining baseline. The policy generates responses before sequence-level rewards guide its updates. At small active batches, decoding is often memory bandwidth bound because each new token requires another model pass. For a Llama-2-70B-style grouped-query attention policy, KV storage grows by approximately $\KvCacheBytesPerToken = 2 \LayerCount \KvHeadCount \AttentionHeadDimension \ElementStorageSize$ per cached token per sequence. With `{python} RLHFKVCache.layers_str` layers, `{python} RLHFKVCache.kv_heads_str` KV heads, `{python} RLHFKVCache.head_dim_str`-dimensional heads, `{python} RLHFKVCache.seq_len_str` generated tokens, and `{python} RLHFKVCache.batch_size_str` active sequences, the generated-token portion occupies `{python} RLHFKVCache.kv_total_gb_str`, or `{python} RLHFKVCache.kv_formula_math` bytes. Dense multi-head attention using the full `{python} RLHFKVCache.hidden_dim_str` hidden width for K and V would require `{python} RLHFKVCache.dense_total_gb_str` for that portion. Even with grouped-query attention, that portion alone already exceeds the `{python} DistTrainH100Capacity.h100_mem_gb_str` of HBM on one H100, and prompt tokens add KV state as well. This temporary cache\index{KV cache!generation phase} must fit alongside the state live during rollout; its lifetime differs from training activations and optimizer state.
 
+::: {.column-margin .margin-pointer}
+↪ KV-cache sizing, and the capacity wall it imposes on autoregressive generation, are developed in @sec-inference-scale-kv-cache-wall.
+:::
+
 RLHF systems address this asymmetry through temporal multiplexing\index{Temporal multiplexing!RLHF phases}. During the generation phase, the cluster behaves like an inference system: the policy model generates sequences while the reference model computes log-probabilities, and the dominant resource is HBM reserved for token-by-token attention state. During the training phase, the same fleet switches back to training mode: gradients are computed through the policy and value models using the 3D parallelism configuration developed in @sec-distributed-training-systems-systems-hybrid-parallelism-12a0. During generation, batching active sequences and placing their KV state determine how much useful work shares each weight read. During the update phase, activation residency and gradient synchronization again govern the schedule. RLHF is not one steady training loop, but an alternation between inference-shaped work and training-shaped work, and standard training frameworks rarely manage that transition by themselves.
 
 ### Direct preference optimization in the fleet {#sec-distributed-training-rlhf-dpo}
@@ -6266,7 +6294,7 @@ Production frameworks expose these same strategies under different names, which 
 The training design therefore determines message size, readiness order, and frequency, while collective algorithms determine how those messages move. *No framework abstraction changes the underlying physics*: distributed-training efficiency ultimately depends on interconnect bandwidth, memory capacity, synchronization latency, and the useful overlap admitted by the computation graph.
 
 ::: {.column-margin .margin-pointer}
-↪ How much communication overlap can remove from a step's critical path, and how to quantify that opportunity, is developed in @sec-performance-engineering-overlap.
+↪ How layer-by-layer scheduling and gradient buckets overlap communication with backpropagation, and how much exchange that overlap removes from a step's critical path, are developed in @sec-communication-overlap.
 :::
 
 ## Fallacies and Pitfalls {#sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc}
