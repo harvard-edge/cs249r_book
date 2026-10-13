@@ -21,12 +21,12 @@ An agent adds three exposures beyond a single model call, horizon (how many turn
 | I. The Model | The Foundation Model; Test-Time Compute |
 | II. Agent Memory | Context Engineering; KV Cache Management; Long-Term Memory |
 | III. Tool Use | Tool Calling; Agent Sandboxes; Agent Security |
-| IV. The Agent Runtime | The Agent Harness; Durable Execution; Failure Recovery; Agent Evaluation |
+| IV. The Agent Runtime | The Agent Harness; Durable Execution; Failure Recovery; Agent Evaluation; Operating Agents |
 | V. Learning from Trajectories | Trajectory Curation; Trajectory Fine-Tuning; Reinforcement Learning from Verifiable Rewards |
 | VI. Agents at Scale | Multi-Agent Coordination; Agent Economics |
 | VII. Synthesis | Conclusion |
 
-Evaluation closes Part IV so that nothing is trained before it can be measured. If this table and `books/config/_quarto-pdf-vol3.yml` ever disagree, the config is authoritative.
+Evaluation and operation close Part IV so that nothing is trained before it can be measured. If this table and `books/config/_quarto-pdf-vol3.yml` ever disagree, the config is authoritative.
 
 ## Structure
 

@@ -110,7 +110,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 
 ## Volume III: Agentic Machine Learning Systems (`vol3`)
 
-22 chapters. Reading order:
+23 chapters. Reading order:
 
 | # | Kind | Path |
 |---:|---|---|
@@ -137,21 +137,22 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 11 | chapter | `11_durable_execution/11_durable_execution.qmd` |
 | 12 | chapter | `12_failure_recovery/12_failure_recovery.qmd` |
 | 13 | chapter | `13_evaluation/13_evaluation.qmd` |
+| 14 | chapter | `14_agent_operations/14_agent_operations.qmd` |
 |  | part | `parts/learning_principles.qmd` |
-| 14 | chapter | `14_trajectory_curation/14_trajectory_curation.qmd` |
-| 15 | chapter | `15_fine_tuning/15_fine_tuning.qmd` |
-| 16 | chapter | `16_rlvr/16_rlvr.qmd` |
+| 15 | chapter | `15_trajectory_curation/15_trajectory_curation.qmd` |
+| 16 | chapter | `16_fine_tuning/16_fine_tuning.qmd` |
+| 17 | chapter | `17_rlvr/17_rlvr.qmd` |
 |  | part | `parts/scale_principles.qmd` |
-| 17 | chapter | `17_multi_agent/17_multi_agent.qmd` |
-| 18 | chapter | `18_agent_economics/18_agent_economics.qmd` |
+| 18 | chapter | `18_multi_agent/18_multi_agent.qmd` |
+| 19 | chapter | `19_agent_economics/19_agent_economics.qmd` |
 |  | part | `parts/synthesis_principles.qmd` |
-| 19 | chapter | `19_conclusion/19_conclusion.qmd` |
+| 20 | chapter | `20_conclusion/20_conclusion.qmd` |
 |  | backmatter | `backmatter/appendix_math.qmd` |
 |  | backmatter | `backmatter/appendix_inference.qmd` |
 |  | backmatter | `backmatter/appendix_systems.qmd` |
-| 20 | chapter | `appendices/app_a_reference_architecture.qmd` |
-| 21 | chapter | `appendices/app_b_tool_design.qmd` |
-| 22 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
+| 21 | chapter | `appendices/app_a_reference_architecture.qmd` |
+| 22 | chapter | `appendices/app_b_tool_design.qmd` |
+| 23 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
 |  | backmatter | `backmatter/glossary/glossary.qmd` |
 
 ## Volume IV: Physical AI Systems (`vol4`)
