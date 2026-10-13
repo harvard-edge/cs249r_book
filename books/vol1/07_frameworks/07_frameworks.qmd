@@ -507,7 +507,7 @@ The memory wall classifies operations as either compute-bound\index{Compute-boun
 Kernel fusion\index{Kernel fusion!definition}\index{Kernel fusion!optimizing memory-bound ops} (also called operator fusion) fixes memory-bound operations by combining them into a single kernel, which avoids intermediate memory traffic. Instead of three round-trips to HBM, a fused kernel loads inputs from HBM once, evaluates normalization, dropout, and ReLU entirely within on-chip registers and SRAM, and writes only the final output tensor back to HBM, which cuts memory traffic by roughly 3$\times$. In general, for $\TensorElementCount$ elements of $\ElementStorageSize$ bytes each, fusing a chain of $\ChainedOperationCount$ elementwise operations into one kernel reduces idealized read-and-write traffic from $2\ChainedOperationCount \TensorElementCount\ElementStorageSize$ to $2\TensorElementCount\ElementStorageSize$ bytes, a derivation worked in @sec-appdx-algorithm-foundations-operator-fusion-5d73. Fusion also removes all but one of the chain's kernel launches. Attention kernels[^fn-flashattention-fusion-fw] use the same principle at larger scale: instead of materializing the full attention matrix in HBM, a fused implementation can keep tiles close to the compute units, cut HBM accesses by up to 9$\times$, and produce workload-specific speedups from 15 percent to 3$\times$ [@dao2022].
 
 ::: {.column-margin .margin-pointer}
-↪ Which intermediates fusion can remove on a specific accelerator, and the on-chip limits that bound a fused kernel, are developed in @sec-hardware-acceleration-kernel-fusion-7faf.
+↪ The on-chip limits that decide which intermediates a fused kernel can keep on a specific accelerator are developed in @sec-hardware-acceleration-kernel-fusion-7faf.
 :::
 
 [^fn-flashattention-fusion-fw]: **Fused attention kernel**\index{Attention mechanism!fused kernel}: A fused attention kernel combines the $\AttentionQueryMatrix\AttentionKeyMatrix^T$ product, softmax, and value-weighted output into a tiled implementation that keeps intermediate values in on-chip memory rather than materializing the full attention matrix in HBM. FlashAttention\index{FlashAttention!framework fusion example}, introduced in @sec-network-architectures-memory-requirements-72c3, is the canonical named example. The framework lesson is broader than the specific algorithm: fusion can shift an operation's position on the roofline model from bandwidth-limited toward throughput-limited execution by reducing round-trips through external memory.
@@ -875,7 +875,7 @@ In the illustrative eager-execution model used here, every operation pays a fixe
 Dispatch overhead explains why models with many small layers run significantly slower than their raw FLOP count predicts. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 places this symptom in the bottleneck taxonomy, classifying a dispatch-dominated workload as overhead-bound rather than compute-bound and showing which optimizations actually move it. Frameworks can move from *kernel-by-kernel dispatch* to *graph-level execution*, reducing repeated interpreter work and exposing operations that can be fused. A captured graph can still launch multiple kernels; fusion and runtime replay determine how much launch overhead remains. The hybrid JIT and compilation strategies in @sec-ml-frameworks-hybrid-approaches-jit-compilation-8954 exist precisely to address this overhead.
 
 ::: {.column-margin .margin-pointer}
-↩ That this fixed per-operation cost decides a small network's training time, on a CPU and an accelerator alike, is established for one MNIST epoch in @sec-neural-computation-iterative-learning-process-10b9.
+↩ The MNIST epoch estimate, in which this fixed per-operation cost decides training time on a CPU and an accelerator alike, is established in @sec-neural-computation-iterative-learning-process-10b9.
 :::
 
 The overhead costs of eager execution motivate the opposite design, which static computation graphs provide: capturing the entire computation before executing any of it.
@@ -2014,7 +2014,7 @@ Applying @eq-dispatch-overhead means comparing the software overhead $\HostSoftw
 
 :::
 
-On a microcontroller the problem is not the cost of each dispatch but the runtime itself, whose memory and latency footprint exceeds the device.
+On a microcontroller the binding cost is not each dispatch but the runtime itself, whose memory and latency footprint exceeds the device.
 
 ### Static runtimes for microcontrollers {#sec-ml-frameworks-tinyml-micro-runtimes-2a1b}
 
@@ -2590,7 +2590,7 @@ The recorded graph fixes which backward kernels the device must execute (the $\O
 
 #### Mixed-precision training support {#sec-ml-frameworks-mixedprecision-training-support-d31d}
 
-Mixed precision\index{Mixed-precision training!FP16 vs. FP32 trade-offs} [@micikevicius2017mixed] gains on two iron law terms at once, because Tensor Cores\index{Tensor Core!mixed-precision acceleration} run 16-bit matrix multiplications faster than FP32 units, raising $\PeakRate$, and eligible 16-bit activations halve the bytes stored and moved, reducing $\DataVolume$. When those gains justify the numerical risk is a training decision; the framework's part is the machinery that carries out a chosen policy.
+Mixed precision\index{Mixed-precision training!FP16 vs. FP32 trade-offs} [@micikevicius2017mixed] gains on two iron law terms at once, because Tensor Cores\index{Tensor Core!mixed-precision acceleration} run 16-bit matrix multiplications faster than FP32 units, raising $\PeakRate$, and eligible 16-bit activations halve the bytes stored and moved, reducing $\DataVolume$.
 
 Automatic mixed-precision APIs implement this as a dispatch policy rather than a change to model code. Inside an `autocast` region, the dispatcher consults a per-operator precision list before selecting a kernel. Compute-intensive operations such as convolutions and linear projections run in FP16 or BF16, while numerically sensitive operations such as softmax, reductions, and loss calculations run in FP32. The second framework component, `GradScaler`, compensates for FP16's narrow exponent range (5 bits, with normal values bounded below by $\approx 6.10 \times 10^{-5}$). It multiplies the scalar loss by a loss-scale factor $\LossScaleFactor$ before backward traversal so that small gradients remain representable\index{Loss Scaling!gradient underflow prevention}, divides the parameter gradients by $\LossScaleFactor$ before the optimizer update, and skips any step whose gradients overflow. BF16 keeps FP32's 8-bit exponent, so BF16 recipes usually run under `autocast` with the scaler disabled. The framework therefore supplies the dispatch and scaling machinery, while the choice among FP16, BF16, TF32 (an Ampere-class matrix-multiply format pairing FP32's exponent with FP16's mantissa), and FP8 and the way the loss scale adapts during training are policy decisions that @sec-model-training-mixedprecision-training-9218 develops, with the scaling mechanism itself in @sec-model-training-loss-scaling-f9f5. @Lst-autocast-usage shows the two framework components working together in the FP16 path.
 
