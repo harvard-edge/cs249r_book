@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 06: Collective Communication · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 05: Collective Communication · MLSysBook")
 
 
 @app.cell
@@ -302,7 +302,7 @@ def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
     </style>""")
     header = mo.Html(f"""
     <section class="collective-head">
-      <div class="collective-top"><span>VOLUME II · LAB 06</span><span>ABOUT 50 MIN</span></div>
+      <div class="collective-top"><span>VOLUME II · LAB 05</span><span>ABOUT 50 MIN</span></div>
       <h1>Collective Communication</h1>
       <p>When should a fleet change the operation, schedule, topology, bucket timeline, or payload it sends?</p>
       <div class="collective-meta">
@@ -564,7 +564,7 @@ def _(
         for part in "ABCDE"
     }
     report = build_lab_report(
-        get_lab_metadata("vol2/lab_06_collective_communication.py"),
+        get_lab_metadata("vol2/lab_05_collective_communication.py"),
         track=track_id, scenario=profile["fleet_semantics"],
         learning_objectives=[
             "Identify ring versus tree algorithm crossover points",
@@ -617,8 +617,8 @@ async def _(
     save_status = "EVIDENCE IN PROGRESS"
     if complete:
         try:
-            ledger.save(chapter=6, design={
-                "schema_version": 1, "lab_id": "v2_06", "track_id": track_id,
+            ledger.save(chapter=5, design={
+                "schema_version": 1, "lab_id": "v2_05", "track_id": track_id,
                 "model_id": "v2_06_experiments",
                 "evidence": {part: capture.to_dict() for part, capture in get_evidence().items()},
                 "recommendation": final_choice.value,
@@ -630,7 +630,7 @@ async def _(
             save_status = "SAVED"
         except Exception as exc:
             save_status = f"SAVE FAILED · {type(exc).__name__}"
-    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">06 · Collective Communication</span><span style="flex:1"></span><span class="hud-label">|</span><span class="hud-label">STATUS</span><span class="hud-active">{save_status}</span></div>')
+    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">05 · Collective Communication</span><span style="flex:1"></span><span class="hud-label">|</span><span class="hud-label">STATUS</span><span class="hud-active">{save_status}</span></div>')
     return
 
 

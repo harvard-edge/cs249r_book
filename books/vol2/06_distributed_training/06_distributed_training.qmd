@@ -1,5 +1,5 @@
 ---
-number-offset: [4]
+number-offset: [5]
 quiz: distributed_training_quizzes.json
 concepts: distributed_training_concepts.yml
 engine: jupyter
@@ -208,7 +208,7 @@ class DenseLLMReferenceFacts:
     min_h100_state_str = fmt_count(min_h100_state, commas=False, label="H100")
 ```
 
-The accelerator hierarchy, network fabric, and storage pipeline form the physical foundation of the fleet. The remaining challenge is algorithmic. A partition of the training job decides which intermediate results and gradients must cross that fabric and when workers must synchronize, and it must make those decisions while preserving the optimization process a single device would have followed. The universal scaling law (principle \ref{pri-universal-scaling}) explains why this pressure keeps rising. Frontier quality improvements demand disproportionately more compute, data, and parameters, so the training problem eventually outgrows any single machine in capacity, in calendar time, or in both. @Sec-data-storage closed on one instance of that growth, a 175B reference model whose FP16 weights alone exceed the memory of the device that must hold them.
+The accelerator hierarchy, network fabric, and storage pipeline form the physical foundation of the fleet, and @sec-collective-communication priced the collective operations that move state across it. The remaining challenge is algorithmic. A partition of the training job decides which intermediate results and gradients must cross that fabric and when workers must synchronize, and it must make those decisions while preserving the optimization process a single device would have followed. The universal scaling law (principle \ref{pri-universal-scaling}) explains why this pressure keeps rising. Frontier quality improvements demand disproportionately more compute, data, and parameters, so the training problem eventually outgrows any single machine in capacity, in calendar time, or in both. @Sec-data-storage closed on one instance of that growth, a 175B reference model whose FP16 weights alone exceed the memory of the device that must hold them.
 
 ::: {.column-margin .margin-pointer}
 ↩ The power-law relationship between quality and compute, data, and parameters, and the compute-optimal allocation it implies, are established in @sec-vol2-intro-ai-scaling-laws-a043.
@@ -480,7 +480,7 @@ Whichever signal motivates distribution, the system must state which optimizatio
 Distribution expands three costs that determine whether a partition is viable. Communication overhead\index{Communication overhead!gradient synchronization} includes gradient aggregation through AllReduce, which returns the same reduced tensor to each participant, or rank. For $\Parameters$ parameters across $\DeviceCount$ devices, a ring all-reduce\index{AllReduce!gradient exchange volume}, in which each worker passes gradient chunks only to its neighbor in a logical ring, sends approximately $2(\DeviceCount-1)/\DeviceCount\times \GradientPayload$ bytes per worker per step, where the gradient payload $\GradientPayload$ is the $\Parameters$ gradient values times their storage width; this is not total fleet traffic.
 
 ::: {.column-margin .margin-pointer}
-↪ The ring schedule and the derivation of its $2(\DeviceCount-1)/\DeviceCount$ volume are developed in @sec-collective-communication.
+↩ The ring schedule and the derivation of its $2(\DeviceCount-1)/\DeviceCount$ volume are established in @sec-collective-communication.
 :::
 
 Fault tolerance\index{Fault tolerance!cluster MTBF} becomes more demanding as the number of failure sources grows. Under independent constant-rate GPU failures, fleet-wide failure-free survival decays exponentially\index{Reliability!exponential survival decay}. If each of the `{python} DistTrainReliabilityFacts.reliability_gpu_count_str` GPUs has mean time between failures (MTBF)\index{MTBF!cluster scaling} of `{python} DistTrainReliabilityFacts.gpu_mtbf_hours_str`, the modeled probability of at least one GPU failure in an hour is `{python} DistTrainReliabilityFacts.cluster_failure_prob_pct_str`, with mean interval `{python} DistTrainReliabilityFacts.cluster_mtbf_hours_str` between such events. Whether each event interrupts training depends on recovery and redundancy. @Sec-appdx-reliability-foundations-mtbf-cascade develops the assumptions.
@@ -1153,18 +1153,18 @@ As the backward pass traverses the computation graph in reverse, it produces gra
 
 Gradient synchronization combines local contributions into the synchronous update. Each replica must receive the aggregate before applying that update. In a centralized parameter-server design with fixed per-worker payload and update frequency, the server receives $\mathcal{O}(\DeviceCount)$ incoming traffic\index{Parameter server!bandwidth bottleneck}. That concentration becomes a bottleneck when demand exceeds the server tier's service capacity; sharding the server state or changing the communication pattern can relieve it.
 
-The replicated synchronous baseline distributes aggregation through collective communication. AllReduce lets each worker contribute its local gradient tensor and receive the same reduced result, which the training loop normalizes to obtain the global average\index{AllReduce!decentralized gradient synchronization}. In sharded variants such as ZeRO and FSDP, ReduceScatter\index{ReduceScatter!gradient aggregation} and AllGather\index{AllGather!parameter reconstruction} change which result each worker retains. ReduceScatter combines corresponding tensor elements, then leaves a different reduced shard on each worker. AllGather collects distinct shards and returns their concatenation to every worker without summing them. These contracts support gradient sharding and on-demand parameter reconstruction. Small messages emphasize startup latency; large messages emphasize sustained bandwidth. Centralized aggregation remains another design choice, particularly for the sparse workloads developed later.
+The replicated synchronous baseline distributes aggregation through collective communication. AllReduce lets each worker contribute its local gradient tensor and receive the same reduced result, which the training loop normalizes to obtain the global average\index{AllReduce!decentralized gradient synchronization}. In sharded variants such as ZeRO and FSDP, ReduceScatter\index{ReduceScatter!gradient aggregation} and AllGather\index{AllGather!parameter reconstruction} change which result each worker retains, leaving each worker only its own shard of the reduced gradient and reconstructing full parameters on demand. Small messages emphasize startup latency; large messages emphasize sustained bandwidth. Centralized aggregation remains another design choice, particularly for the sparse workloads developed later.
 
 ::: {.column-margin .margin-pointer}
-↪ The result contracts of AllReduce, ReduceScatter, and AllGather, and the decomposition of AllReduce into a ReduceScatter followed by an AllGather, are developed in @sec-collective-communication-six-core-primitives-8a66.
+↩ The result contracts of AllReduce, ReduceScatter, and AllGather, and the decomposition of AllReduce into a ReduceScatter followed by an AllGather, are established in @sec-collective-communication-six-core-primitives-8a66.
 :::
 
-At the Distributed Execution row of the fleet stack, the loop specifies an AllReduce contract while its implementation determines the cost. For a large worker group, ring AllReduce transfers approximately $2\GradientPayload$ bytes per worker for an $\GradientPayload$-byte gradient payload. @Sec-collective-communication derives this approximate $2\GradientPayload$ volume and compares algorithms whose startup costs, topology, and contention differ. It also examines how libraries such as NCCL schedule exchanges within and across communication domains.
+At the Distributed Execution row of the fleet stack, the loop specifies an AllReduce contract while its implementation determines the cost. For a large worker group, ring AllReduce transfers approximately $2\GradientPayload$ bytes per worker for an $\GradientPayload$-byte gradient payload. @Sec-collective-communication derived this approximate $2\GradientPayload$ volume, compared algorithms whose startup costs, topology, and contention differ, and examined how libraries such as NCCL schedule exchanges within and across communication domains.
 
 When a measured collective deviates from these estimates, the diagnosis compares the trace against what each candidate algorithm would predict on the same hardware. The worked example below concerns a trace that the modeled flat-ring schedule cannot explain. The leading candidate is a hierarchical AllReduce\index{AllReduce!hierarchical}, which first ReduceScatters the tensor over NVLink across the eight ranks in each node. Each rank retains one eighth of the reduced tensor. Eight inter-node groups then AllReduce corresponding shards concurrently, after which a local AllGather reconstructs the full result on every rank. The example assumes an independent InfiniBand port for each local rank, so each port carries one shard; the node's aggregate payload has not fallen by a factor of eight. The flat-ring comparison assumes that each rank's full-tensor ring traffic crosses its inter-node port at the stated link rate.
 
 ::: {.column-margin .margin-pointer}
-↪ Hierarchical AllReduce and its cost relative to a flat ring are developed in @sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338.
+↩ Hierarchical AllReduce and its cost relative to a flat ring are established in @sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338.
 :::
 
 ```{python}
@@ -2442,7 +2442,7 @@ These factors interact, so efficiency cannot be inferred from model size or GPU 
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ The compute window that bounds how much of a collective can hide is measured in @sec-communication-overlap-limits.
+↩ The compute window that bounds how much of a collective can hide is established in @sec-communication-overlap-limits.
 :::
 
 #### Parallelism-infrastructure interaction {#sec-distributed-training-parallelism-infrastructure}
@@ -2451,10 +2451,10 @@ The scaling efficiency analysis shows that the effective parallelism strategy is
 
 Selecting a parallelism mapping determines which devices exchange each tensor and when that tensor becomes ready. The resulting collective cost depends on payload size, group size, topology, and contention. Its exposed share also depends on the remaining compute window. Those dependencies explain why neither a fixed AllReduce overhead percentage nor a mandatory combination of parallelism axes predicts performance across workloads.
 
-AllReduce complexity depends on latency $(\MessageStartupLatency)$ and bandwidth $(\LinkBandwidth)$. In the ring volume formula, $(\DeviceCount-1)/\DeviceCount$ describes the fraction of the buffer transferred per worker in each phase, not achieved link utilization\index{Ring AllReduce!bandwidth utilization}. Tree-based approaches reduce communication depth to $\mathcal{O}(\log \DeviceCount)$ steps\index{Tree AllReduce!latency bound}, making them attractive for small messages dominated by startup latency. Large gradient buffers emphasize sustained bandwidth instead. Message size, topology, and contention therefore determine which algorithm is faster; the next chapter develops those cost models.
+AllReduce complexity depends on latency $(\MessageStartupLatency)$ and bandwidth $(\LinkBandwidth)$. In the ring volume formula, $(\DeviceCount-1)/\DeviceCount$ describes the fraction of the buffer transferred per worker in each phase, not achieved link utilization\index{Ring AllReduce!bandwidth utilization}. Tree-based approaches reduce communication depth to $\mathcal{O}(\log \DeviceCount)$ steps\index{Tree AllReduce!latency bound}, making them attractive for small messages dominated by startup latency. Large gradient buffers emphasize sustained bandwidth instead. Message size, topology, and contention therefore determine which algorithm is faster.
 
 ::: {.column-margin .margin-pointer}
-↪ The message size at which ring AllReduce overtakes tree AllReduce, derived from the latency and bandwidth terms of each algorithm, is developed in @sec-communication-collective-operations-algorithm-crossover.
+↩ The message size at which ring AllReduce overtakes tree AllReduce, derived from the latency and bandwidth terms of each algorithm, is established in @sec-communication-collective-operations-algorithm-crossover.
 :::
 
 ```{python}
@@ -3382,7 +3382,7 @@ plt.close(fig)
 Several techniques occupy different positions on this trade-off curve. Gradient compression\index{Gradient compression!bandwidth reduction} reduces communication volume by transmitting compressed gradient information through quantization, sparsification, or low-rank approximation. Examples include sign-based updates [@bernstein2018signsgd], Deep Gradient Compression\index{Deep Gradient Compression!gradient sparsification} [@lin2018deep], PowerSGD\index{PowerSGD!low-rank gradient compression} [@vogels2020powersgd], quantized SGD with convergence analysis\index{QSGD!quantized gradients} [@alistarh2017qsgd], and empirical sparse gradient dropping for neural machine translation [@aji2017].
 
 ::: {.column-margin .margin-pointer}
-↪ Quantized, sparsified, and low-rank gradient compression, the error feedback that keeps them convergent, and the criteria for when they pay, are developed in @sec-communication-collective-operations-collective-operations-gradient-compression-7a5c.
+↩ Quantized, sparsified, and low-rank gradient compression, the error feedback that keeps them convergent, and the criteria for when they pay, are established in @sec-communication-collective-operations-collective-operations-gradient-compression-7a5c.
 :::
 
 Local SGD\index{Local SGD!communication frequency} lets workers perform $\LocalUpdateCount$ local updates before synchronizing, reducing synchronization frequency per local update by factor $\LocalUpdateCount$. Results for smooth, strongly convex objectives can recover synchronous SGD's asymptotic rate under specified learning-rate and local-update-interval conditions [@stich2019local]. The interval is part of the convergence assumptions, not an unrestricted communication saving.
@@ -4828,7 +4828,7 @@ In the Megatron-style arrangement just derived, the column-then-row pairing in @
 
 Megatron Sequence Parallelism\index{Megatron-LM!sequence parallelism} [@korthikanti2023activation] eliminates this redundancy by sharding the sequence dimension across the $\TensorParallelDegree$ ranks for all non-tensor-parallel operations. Instead of replicating activations, each GPU holds only a $\BatchSize\times (\SequenceLength/\TensorParallelDegree) \times \HiddenDimension$ slice during LayerNorm and Dropout.
 
-This sharding incurs zero additional communication volume. In standard tensor parallelism, the row-parallel matrix multiplication is followed by an AllReduce to sum partial products across ranks. An AllReduce decomposes into a ReduceScatter followed by an AllGather\index{Sequence parallelism!AllReduce decomposition}, the identity that @sec-collective-communication-six-core-primitives-8a66 develops among the collective primitives:
+This sharding incurs zero additional communication volume. In standard tensor parallelism, the row-parallel matrix multiplication is followed by an AllReduce to sum partial products across ranks. An AllReduce decomposes into a ReduceScatter followed by an AllGather\index{Sequence parallelism!AllReduce decomposition}, the identity established among the collective primitives in @sec-collective-communication-six-core-primitives-8a66:
 $$\text{AllReduce}(\RankContribution) \equiv \text{AllGather}(\text{ReduceScatter}(\RankContribution))$$
 Megatron-SP decouples this collective pair across the transformer block. Following the row-parallel linear layer, a ReduceScatter reduces partial sums while scattering the resulting activations along the sequence dimension, leaving each GPU with an $\SequenceLength/\TensorParallelDegree$ token slice. LayerNorm, residual additions, and Dropout then execute on these local slices with zero cross-device communication. Immediately before the next column-parallel linear layer, an AllGather across the sequence dimension reassembles the complete $\SequenceLength$ tokens required for the weight-partitioned matrix multiplication.
 
@@ -5123,7 +5123,7 @@ The primary advantage is decoupling model size from per-token compute, which let
 :::
 
 ::: {.column-margin .margin-pointer}
-↪ The terms that set an AllToAll's completion time, from traffic across the fabric bisection to hotspots created by skewed expert loads, are developed in @sec-communication-alltoall.
+↩ The terms that set an AllToAll's completion time, from traffic across the fabric bisection to hotspots created by skewed expert loads, are established in @sec-communication-alltoall.
 :::
 
 ```{python}
@@ -5411,7 +5411,7 @@ The training step begins at the data-parallel level. Each of the `{python} Tenso
 The backward pass exposes dependencies between parallelism dimensions. Nodes exchange activation gradients point-to-point, roughly `{python} TensorParallel3DTraffic.activation_payload_mb_str` per microbatch per stage boundary in this example. A smaller payload still stalls a stage if it arrives after the stage needs it. Data-parallel synchronization creates another dependency: although full-model gradients occupy about `{python} HybridConfigFeasibility.gradient_gb_str`, each data-parallel group exchanges only the corresponding tensor- and pipeline-parallel parameter shard. Gradient bucketing\index{Gradient bucketing!overlap with backward pass} groups ready gradients as backward computation proceeds. Which exchange limits the step depends on its readiness, service time, and overlap; data parallelism is not necessarily the final bottleneck.
 
 ::: {.column-margin .margin-pointer}
-↪ Bucket fusion, which groups gradients that become ready together into larger reductions so communication can begin during backpropagation, is developed in @sec-communication-bucket-fusion.
+↩ Bucket fusion, which groups gradients that become ready together into larger reductions so communication can begin during backpropagation, is established in @sec-communication-bucket-fusion.
 :::
 
 The architectural imperative is *bandwidth matching*: each exchange's startup and transfer time must fit its available compute or overlap interval. In this mapping, frequent TP exchanges use the NVLink domain (`{python} DistTrainNvlinkIntro.nvlink_a100_gb_per_s_str` per direction or higher), while PP transfers cross nodes and DP reductions overlap backward computation. Accumulation can enlarge the compute interval between DP synchronizations, subject to the global-batch constraint. An infeasible mapping leaves part or all of the `{python} TensorParallel3DTraffic.total_gpus_str` fleet waiting. Comparing service time with the schedule completes the feasibility check introduced in @sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344.
@@ -6294,7 +6294,7 @@ Production frameworks expose these same strategies under different names, which 
 The training design therefore determines message size, readiness order, and frequency, while collective algorithms determine how those messages move. *No framework abstraction changes the underlying physics*: distributed-training efficiency ultimately depends on interconnect bandwidth, memory capacity, synchronization latency, and the useful overlap admitted by the computation graph.
 
 ::: {.column-margin .margin-pointer}
-↪ Overlap of gradient exchange with backpropagation, the lever that takes communication off a step's critical path, is developed in @sec-communication-overlap.
+↩ Overlap of gradient exchange with backpropagation, the lever that takes communication off a step's critical path, is established in @sec-communication-overlap.
 :::
 
 ## Fallacies and Pitfalls {#sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc}
@@ -6444,9 +6444,9 @@ The chapter's strategies are complementary dimensions of one design space rather
 
 The displacement of overhead\index{Displacement of overhead!parallelism trade-offs} (principle \ref{pri-conservation-overhead}) makes a feasible partition the beginning of the design problem. A memory-saving split is useful only if its communication and schedule still meet the run's time-to-quality budget. Every mechanism in this chapter shrinks the per-device compute term $\IronLawComputeTime/\DeviceCount$ or the per-device training state, and pays for it in $\CommunicationTime(\DeviceCount)$, in $\SynchronizationTime(\DeviceCount)$ through barriers, stragglers, and pipeline bubbles, or in lost overlap. In C³ terms, no partition removes the execution tax of scale; it only relocates that tax among compute, communication, and coordination. The engineering judgment is therefore to compare complete configurations, including their exposed dependencies, rather than optimize each parallelism axis independently.
 
-::: {.callout-chapter-connection title="From logic to traffic"}
+::: {.callout-chapter-connection title="From logic to resilience"}
 
-Splitting the mathematics defines the *logical* exchanges the update protocol needs. Replicas AllReduce gradients, sharded layers ReduceScatter and AllGather their state, expert and embedding partitions route tokens through AllToAll, and pipeline stages pass activations point to point. Each exchange specifies a result that participants must receive, not how its bytes cross the *physical* fabric. The next chapter separates those result contracts from the ring, tree, and hierarchical schedules that carry them out and prices each schedule's latency, bandwidth, and topology costs, so that the communication budgets charged to $\CommunicationTime(\DeviceCount)$ here can be evaluated rather than assumed.
+The fleet now has its traffic patterns (communication) and its logic (parallelism). Every configuration in this chapter, however, assumed that all ranks in each communication group arrive, on time and with correct data. A collective is not a barrier, but each dependent consumer still waits for every contribution, so one crashed node, failed link, or GPU that slows down without failing stalls the whole synchronous group, and a contribution corrupted in transit is reduced into every replica's update. Across thousands of accelerators such events stop being rare. The next chapter begins by computing how often they arrive, then builds the checkpointing, recovery, and elastic training that keep the computation making progress on imperfect hardware.
 
 :::
 

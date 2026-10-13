@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 05: Scaling Without Illusions · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 06: Scaling Without Illusions · MLSysBook")
 
 
 @app.cell
@@ -431,7 +431,7 @@ def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
     .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}
     @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
     </style>""")
-    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME II · LAB 05</span><span>ABOUT 50–55 MIN</span></div><h1>Scaling Without Illusions</h1><p>When do more accelerators stop buying useful progress, and which parallel plan survives memory, network, pipeline, and convergence costs?</p><div class="pilot-meta"><div><b>Deployment fleet</b><br>{scenario.deployment_target.title()}</div><div><b>Training cluster</b><br>{scenario.fleet.name}</div><div><b>Output</b><br>Auditable training recommendation</div></div></section>""")
+    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME II · LAB 06</span><span>ABOUT 50–55 MIN</span></div><h1>Scaling Without Illusions</h1><p>When do more accelerators stop buying useful progress, and which parallel plan survives memory, network, pipeline, and convergence costs?</p><div class="pilot-meta"><div><b>Deployment fleet</b><br>{scenario.deployment_target.title()}</div><div><b>Training cluster</b><br>{scenario.fleet.name}</div><div><b>Output</b><br>Auditable training recommendation</div></div></section>""")
     mo.vstack([
         LAB_CSS, ACADEMIC_LAB_CSS, css, track, header,
         mo.Html(f'<p class="pilot-note"><b>Track workload:</b> {scenario.model.name}. {scenario.applicability_note} Parts B–D evaluate sharding, placement, and pipeline mechanisms on the upstream training cluster ({scenario.fleet.name}); model parallelism is an unsupported path on compact deployment devices.</p>'),
@@ -587,7 +587,7 @@ def _(
         "E": "time to matched illustrative quality",
     }
     report = build_lab_report(
-        get_lab_metadata("vol2/lab_05_dist_train.py"), track=track_id,
+        get_lab_metadata("vol2/lab_06_dist_train.py"), track=track_id,
         scenario=f"{scenario.model.name} training on {scenario.fleet.name} for {scenario.deployment_target}",
         learning_objectives=["Separate strong and weak scaling and quantify efficiency", "Account state and activations per accelerator", "Choose a layout using memory, link, pipeline, and time-to-quality evidence"],
         predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
@@ -615,8 +615,8 @@ async def _(
     _save_status = "EVIDENCE IN PROGRESS"
     if _ready:
         try:
-            ledger.save(chapter=5, design={
-                "schema_version": 1, "lab_id": "v2_05", "track_id": track_id,
+            ledger.save(chapter=6, design={
+                "schema_version": 1, "lab_id": "v2_06", "track_id": track_id,
                 "model_id": "v2_05_experiments",
                 "evidence": {part: capture.to_dict() for part, capture in get_evidence().items()},
                 "recommendation": final_choice.value,
@@ -628,7 +628,7 @@ async def _(
             _save_status = "SAVED"
         except Exception as _error:
             _save_status = f"SAVE FAILED · {type(_error).__name__}"
-    mo.Html(f'<div class="lab-hud" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#101827;color:#fff;padding:14px 18px;border-radius:9px;font-family:ui-monospace,monospace"><span>LAB 05 · Scaling Without Illusions</span><span aria-hidden="true">|</span><span>STATUS: {_save_status}</span></div>')
+    mo.Html(f'<div class="lab-hud" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#101827;color:#fff;padding:14px 18px;border-radius:9px;font-family:ui-monospace,monospace"><span>LAB 06 · Scaling Without Illusions</span><span aria-hidden="true">|</span><span>STATUS: {_save_status}</span></div>')
     return
 
 

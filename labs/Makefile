@@ -25,7 +25,7 @@ test-wasm: ## Smoke test: export representative labs to WASM HTML
 	@cp wheels/mlsysim-*.whl /tmp/wasm-smoke/wheels/
 	@if ls wheels/mlsysbook_labs-*.whl >/dev/null 2>&1; then cp wheels/mlsysbook_labs-*.whl /tmp/wasm-smoke/wheels/; fi
 	@PASS=0; FAIL=0; \
-	for lab in vol1/lab_00_introduction.py vol1/lab_01_ml_intro.py vol2/lab_01_introduction.py vol2/lab_06_collective_communication.py; do \
+	for lab in vol1/lab_00_introduction.py vol1/lab_01_ml_intro.py vol2/lab_01_introduction.py vol2/lab_05_collective_communication.py; do \
 		name=$$(basename "$$lab" .py); \
 		if marimo export html-wasm "$$lab" -o "/tmp/wasm-smoke/$$name/index.html" --mode run --no-show-code 2>/dev/null; then \
 			SIZE=$$(wc -c < "/tmp/wasm-smoke/$$name/index.html"); \

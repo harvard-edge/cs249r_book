@@ -296,19 +296,7 @@ VOL2_CHAPTERS = [
         ]
     },
     {
-        'slug': '05_distributed_training',
-        'prefix': 'distributed_training',
-        'font': FONT_ARIAL_BOLD,
-        'labels': [
-            {'text': 'parallelism', 'pill': (153, 135), 'targ': (221, 334), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'partition', 'pill': (435, 87), 'targ': (460, 169), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'efficiency', 'pill': (963, 139), 'targ': (965, 334), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'sync', 'pill': (736, 700), 'targ': (732, 660), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'convergence', 'pill': (1243, 705), 'targ': (1243, 640), 'border': '#0090B0', 'color': '#0090B0'},
-        ]
-    },
-    {
-        'slug': '06_collective_communication',
+        'slug': '05_collective_communication',
         'prefix': 'collective_communication',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -317,6 +305,18 @@ VOL2_CHAPTERS = [
             {'text': 'overlap', 'pill': (962, 47), 'targ': (939, 354), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'topology', 'pill': (708, 472), 'targ': (649, 472), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'scaling', 'pill': (1175, 472), 'targ': (1095, 511), 'border': '#0090B0', 'color': '#0090B0'},
+        ]
+    },
+    {
+        'slug': '06_distributed_training',
+        'prefix': 'distributed_training',
+        'font': FONT_ARIAL_BOLD,
+        'labels': [
+            {'text': 'parallelism', 'pill': (153, 135), 'targ': (221, 334), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'partition', 'pill': (435, 87), 'targ': (460, 169), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'efficiency', 'pill': (963, 139), 'targ': (965, 334), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'sync', 'pill': (736, 700), 'targ': (732, 660), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'convergence', 'pill': (1243, 705), 'targ': (1243, 640), 'border': '#0090B0', 'color': '#0090B0'},
         ]
     },
     {
