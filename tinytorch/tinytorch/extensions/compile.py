@@ -5,10 +5,9 @@
 # exports to it.
 """Graph Capture for TinyTorch: an example extension.
 
-This is an optional, hand-written extension: it is tracked in git as-is and is
-not generated from src/. Read it as the first half of a compiler: it captures
-a define-by-run function as a graph, and stops before the half that makes it
-faster.
+What it is: the first half of a compiler. It captures a define-by-run
+function as a single expression, and stops before the half that makes it
+faster. Hand-written and tracked in git as-is, not generated from src/.
 
 Why it exists: in eager execution every operation is a separate call that
 reads its inputs from memory and writes a full intermediate back. A compiler
@@ -16,6 +15,22 @@ first needs the whole computation in one place to see that, for example,
 (x + bias) * scale can be one loop that never stores x + bias. Tracing is how
 it gets there: run the function once on placeholder objects that record what
 is done to them instead of computing anything.
+
+How it is triggered: you call compile_graph once, on a function, and get
+source code back. Tracing happens during that call; your data is never
+involved.
+
+    from tinytorch.extensions import compile_graph
+    def f(x, bias, scale):
+        return (x + bias) * scale
+    src = compile_graph(f, "x", "bias", "scale")
+    print(src)               # def fused_kernel(x, bias, scale): ...
+    namespace = {}
+    exec(src, namespace)     # turn the source into a callable
+    y = namespace["fused_kernel"](x, bias, scale)
+
+    On the compile_graph call: f runs once, on TracedNode placeholders.
+    On every call of the result: ordinary Python evaluates the expression.
 
 How it works:
 
@@ -25,13 +40,13 @@ How it works:
    expression so far. The final node's name is the whole computation.
 3. It returns Python source for a function that evaluates that expression.
 
-What this example does not do: it only understands + and *, it returns source
-text rather than a callable, and running that source with NumPy still
-evaluates one operation at a time, so x + bias is still materialized. Real
-fusion needs the second half: a code generator that emits one loop over the
-elements (the hand-fused tinytorch_cpp_fused_bias_gelu kernel in
-cpp_simd_gemm.cpp is what such a loop looks like). Writing that generator is
-the natural next step.
+What it leaves out: fusion itself. It only understands + and *, it returns
+source text rather than a callable, and running that source with NumPy still
+evaluates one operation at a time, so x + bias is still materialized.
+
+Where to go next: write the second half, a code generator that emits one loop
+over the elements. The hand-fused tinytorch_cpp_fused_bias_gelu kernel in
+cpp_simd_gemm.cpp is what such a loop looks like.
 """
 
 class TracedNode:
