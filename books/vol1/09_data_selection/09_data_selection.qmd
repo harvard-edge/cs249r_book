@@ -3328,7 +3328,60 @@ In a basic data-parallel layout, each worker processes a distinct shard and mode
 
 : **Selection Dependencies in Distributed Training**: The table starts from a common centralized formulation of each technique and identifies the coordination problem introduced by sharding. Distributed variants may relax rather than reproduce the centralized result exactly. {#tbl-selection-dependencies .striped .hover}
 
-The selection dependencies admit two broad architectures, each at a different point in the trade-off between consistency and scalability. Centralized selection keeps selection global while training stays distributed. A coordinator process scores the full dataset and dispatches the selected indices to the workers, which preserves selection quality but makes the coordinator a single bottleneck that can serialize scoring or index dispatch. Whether that overhead is acceptable depends on the selection payload, refresh rate, worker count, and copies through shared host memory, and adding accelerator workers does not increase the host memory available to the coordinator. Hierarchical selection\index{Hierarchical selection!distributed coreset} distributes the selection computation itself. Each worker selects candidates from its own shard, and the coordinator merges and reranks them before dispatching the final indices. Shard-local selection reduces coordinator load but introduces a quality trade-off, because local quotas and score distributions may not preserve the global ranking or rare groups spread unevenly across shards. The merge step therefore needs normalization, coverage constraints, or a second global pass.
+The selection dependencies admit two broad architectures, each at a different point in the trade-off between consistency and scalability. Centralized selection keeps selection global while training stays distributed. A coordinator process scores the full dataset and dispatches the selected indices to the workers, which preserves selection quality but makes the coordinator a single bottleneck that can serialize scoring or index dispatch. Whether that overhead is acceptable depends on the selection payload, refresh rate, worker count, and copies through shared host memory, and adding accelerator workers does not increase the host memory available to the coordinator. Hierarchical selection\index{Hierarchical selection!distributed coreset} distributes the selection computation itself. Each worker selects candidates from its own shard, and the coordinator merges and reranks them before dispatching the final indices (@fig-distributed-coreset-architecture). Shard-local selection reduces coordinator load but introduces a quality trade-off, because local quotas and score distributions may not preserve the global ranking or rare groups spread unevenly across shards. The merge step therefore needs normalization, coverage constraints, or a second global pass.
+
+::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: Parallel shard-local scoring reduces the work assigned to a centralized rank-merging coordinator. Workers send local EL2N scores upward; the coordinator merges them and broadcasts final coreset indices. The design is beneficial only when this coordination overhead remains below the training time saved by the coreset." fig-alt="Architecture diagram with one wide Coordinator Node above three representative worker boxes labeled Worker 0, Worker 1, and Worker N, separated by ellipses. The coordinator lists a global FAISS embedding index, merged local selections, and broadcast final coreset indices. Paired arrows show local scores flowing upward from workers and final coreset indices flowing downward."}
+
+```{.tikz}
+\scalebox{0.85}{%
+\begin{tikzpicture}[font=\small\sffamily]
+\tikzset{
+  ScoreLine/.style={-{Triangle[width=6pt,length=6pt]}, line width=1.2pt,BrownLine!70,text=black},
+  IndexLine/.style={-{Triangle[width=6pt,length=6pt]}, line width=1.2pt,BlueLine!75,text=black},
+  Box/.style={inner xsep=2pt, draw=BlueD, line width=0.75pt,fill=BlueL!70,
+    text width=70mm,align=left,minimum width=110mm, minimum height=18mm},
+   Box2/.style={Box, draw=GreenLine,fill=green!80!black!10,align= flush center,
+   text width=23mm,minimum width=23mm, minimum height=16mm},
+   Text/.style={right,fill=none,text=black!70,font=\footnotesize\sffamily,align=left},
+}
+
+% Coordinator node
+\node[Box] (B0) {};
+\node[draw=none,fill=BlueD,text=white,below=0pt of B0.north] (BB0) {\textbf{Coordinator Node}};
+\node[draw=none,align=left,anchor=south]at($(B0.south)+(0,2pt)$){%
+    \textbullet\ Maintains global embedding index (FAISS)\\
+    \textbullet\ Merges local selections\\
+    \textbullet\ Broadcasts final coreset indices};
+
+% Worker 1
+\node[Box2,below=of B0.south] (W0){};
+\node[Box2,below=0pt of W0.north,minimum height=6mm,
+fill=GreenLine,text=white] (WW0){\textbf{Worker 1}};
+\node[align=center]at($(WW0.south)!0.5!(W0.south)$){150K images\\
+    Local EL2N};
+% Worker 0
+\node[Box2,below=of B0.194] (W1){};
+\node[Box2,below=0pt of W1.north,minimum height=6mm,
+fill=GreenLine,text=white] (WW1){\textbf{Worker 0}};
+\node[align=center]at($(WW1.south)!0.5!(W1.south)$){150K images\\
+    Local EL2N};
+% Worker N
+\node[Box2,below=of B0.346] (W2){};
+\node[Box2,below=0pt of W2.north,minimum height=6mm,
+fill=GreenLine,text=white] (WW2){\textbf{Worker N}};
+\node[align=center]at($(WW2.south)!0.5!(W2.south)$){150K images\\
+    Local EL2N};
+% Bidirectional coordination: local scores flow up; final coreset indices flow down.
+\foreach \i in{0,1,2}{
+\draw[ScoreLine] ([xshift=-1.7mm]W\i.north) -- ([xshift=-1.7mm]W\i.north |- B0.south);
+\draw[IndexLine] ([xshift=1.7mm]W\i.north |- B0.south) -- ([xshift=1.7mm]W\i.north);
+}
+\node at ($(W1)!0.5!(W0)$) {\Large$\cdots$};
+\node at ($(W2)!0.5!(W0)$) {\Large$\cdots$};
+\end{tikzpicture}}
+```
+
+:::
 
 Shard locality affects training as well as selection. Each worker maintains an independent shuffle buffer over a non-overlapping shard, and because randomization is local to each worker's memory buffer rather than global across the corpus, rare classes or boundary cases concentrated in specific shards receive uneven exposure across workers unless the dataset is stratified and shards are balanced prior to distribution.
 
