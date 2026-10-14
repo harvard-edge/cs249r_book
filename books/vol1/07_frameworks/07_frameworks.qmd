@@ -857,7 +857,7 @@ class DispatchOverhead:
     large_tax_pct_str = fmt_percent(round(large_share * 100) / 100, precision=0, commas=False, style="prose")
 ```
 
-Eager execution is slow on small operations because the host-side interpreter is slower than the device-side silicon. The **dispatch overhead share**\index{Dispatch overhead!definition}, defined here as the share of step time spent in host-side dispatch, $\HostSoftwareTime/(\HostSoftwareTime+\DeviceHardwareTime)$ for host software time $\HostSoftwareTime$ and device hardware time $\DeviceHardwareTime$, quantifies this mismatch in an additive model without host-device overlap. Asynchronous execution can hide part of that host cost.
+Eager execution is slow on small operations because the host-side interpreter is slower than the device-side silicon. The **dispatch overhead ratio**\index{Dispatch overhead!definition}, host software time $\HostSoftwareTime$ divided by device hardware time $\DeviceHardwareTime$, quantifies this mismatch in an additive model without host-device overlap. When the ratio exceeds 1, host dispatch takes more than half of each step. The dispatch overhead law of @sec-ml-frameworks-dispatch-overhead-law-9e0a later expresses the same ratio through operation count and per-operation cost. Asynchronous execution can hide part of that host cost.
 
 ::: {.column-margin}
 ```{=latex}
@@ -868,7 +868,7 @@ Eager execution is slow on small operations because the host-side interpreter is
 *Fixed dispatch dominates small ops and fades behind large ones.*
 :::
 
-In the illustrative eager-execution model used here, every operation pays a fixed cost of approximately `{python} DispatchOverhead.per_op_overhead_us_str` for Python-side dispatch and driver launch combined, the same per-operation cost as the decoding step that opened the chapter. Actual overhead varies by framework, backend, and hardware, but its relative weight still depends on operation size. For a small operation such as a ReLU on a small vector, the kernel might execute in only `{python} DispatchOverhead.small_kernel_us_str`, so the modeled dispatch overhead share reaches `{python} DispatchOverhead.small_tax_pct_str` and the GPU spends most of its time waiting for the next command. For a large operation such as a large matrix multiply, the kernel executes for `{python} DispatchOverhead.large_kernel_us_str`, the modeled dispatch overhead share drops to `{python} DispatchOverhead.large_tax_pct_str`, and host dispatch becomes a small share of the modeled time. The operation is device-work dominated; distinguishing compute from memory limits still requires comparing its work and traffic.
+In the illustrative eager-execution model used here, every operation pays a fixed cost of approximately `{python} DispatchOverhead.per_op_overhead_us_str` for Python-side dispatch and driver launch combined, the same per-operation cost as the decoding step that opened the chapter. Actual overhead varies by framework, backend, and hardware, but its relative weight still depends on operation size. For a small operation such as a ReLU on a small vector, the kernel might execute in only `{python} DispatchOverhead.small_kernel_us_str`, so dispatch takes `{python} DispatchOverhead.small_tax_pct_str` of the modeled step time, the dispatch overhead ratio sits far above 1, and the GPU spends most of its time waiting for the next command. For a large operation such as a large matrix multiply, the kernel executes for `{python} DispatchOverhead.large_kernel_us_str`, dispatch drops to `{python} DispatchOverhead.large_tax_pct_str` of the modeled step time, and the dispatch overhead ratio falls well below 1. The operation is device-work dominated; distinguishing compute from memory limits still requires comparing its work and traffic.
 
 Dispatch overhead explains why models with many small layers run significantly slower than their raw FLOP count predicts. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 places this symptom in the bottleneck taxonomy, classifying a dispatch-dominated workload as overhead-bound rather than compute-bound and showing which optimizations actually move it. Frameworks can move from *kernel-by-kernel dispatch* to *graph-level execution*, reducing repeated interpreter work and exposing operations that can be fused. A captured graph can still launch multiple kernels; fusion and runtime replay determine how much launch overhead remains. The hybrid JIT and compilation strategies in @sec-ml-frameworks-hybrid-approaches-jit-compilation-8954 exist to address this overhead.
 
@@ -1624,7 +1624,7 @@ These trade-offs are not binary choices. Modern frameworks offer a spectrum of e
 
 ### Compilation and dispatch costs {#sec-ml-frameworks-compilation-continuum-principle-c106}
 
-Two quantitative principles make the choice of execution model measurable. The compilation continuum principle\index{Compilation continuum!principle} asks when compilation gains justify development cost by comparing production executions with development iterations. The dispatch overhead law turns the per-operation dispatch overhead share into a threshold that says when a whole workload is overhead-bound.
+Two quantitative principles make the choice of execution model measurable. The compilation continuum principle\index{Compilation continuum!principle} asks when compilation gains justify development cost by comparing production executions with development iterations. The dispatch overhead law writes the dispatch overhead ratio in terms of operation count and per-operation cost, giving a threshold that says when a whole workload is overhead-bound.
 
 #### The compilation continuum principle {#sec-ml-frameworks-compilation-continuum-principle-7122}
 
@@ -1913,7 +1913,7 @@ $$
 \text{Overhead Ratio} = \frac{\DispatchedOperationCount\cdot \OperationDispatchOverhead}{\IronLawComputeTime + \IronLawMemoryTime}
 $$ {#eq-dispatch-overhead}
 
-When Overhead Ratio $> 1$, the model is overhead-bound. The ratio and the dispatch overhead share of @sec-ml-frameworks-dispatch-tax measure the same imbalance from two sides. With $\HostSoftwareTime= \DispatchedOperationCount\cdot \OperationDispatchOverhead$, the share $\HostSoftwareTime/(\HostSoftwareTime+\DeviceHardwareTime)$ equals $\text{Overhead Ratio}/(1+\text{Overhead Ratio})$, so a ratio above 1 is the same threshold as a dispatch overhead share above 50 percent. Compilation can provide its largest gains for overhead-bound workloads because fusion reduces the number of dispatches. The training-step trace in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1 works this effect through end to end, previewed by the numbers that follow.
+When Overhead Ratio $> 1$, the model is overhead-bound. This is the dispatch overhead ratio $\HostSoftwareTime/\DeviceHardwareTime$ of @sec-ml-frameworks-dispatch-tax, written with $\HostSoftwareTime= \DispatchedOperationCount\cdot \OperationDispatchOverhead$ so that operation count and per-operation cost appear explicitly. The fraction of step time spent in dispatch is $\text{Overhead Ratio}/(1+\text{Overhead Ratio})$, so a ratio above 1 means dispatch takes more than half of the step. Compilation can provide its largest gains for overhead-bound workloads because fusion reduces the number of dispatches. The training-step trace in @sec-ml-frameworks-putting-together-anatomy-training-step-c7f1 works this effect through end to end, previewed by the numbers that follow.
 
 ```{python}
 #| echo: false
@@ -3128,115 +3128,6 @@ The same placement machinery extends to the one to eight accelerators of a singl
 
 At the framework level, the central requirement is placement expressiveness on one machine with one to eight accelerators. The first arrangement is data parallelism; the second is pipeline parallelism. A third arrangement, tensor parallelism, splits individual tensor operations across devices. These are alternative placement choices, not a requirement to combine every strategy. The framework must express device ownership, transfers, and synchronization while preserving the model's semantics.
 
-@Fig-3d-parallelism illustrates how these three placement relationships compose when model dimensions exceed the memory capacity of any single accelerator. At GPT-3 scale, the `{python} GPT3MemoryFootprint.gpt3_fp16_gb_str` of FP16 weights alone exceed that capacity, compelling frameworks to partition state across three orthogonal axes: across layer groups (pipeline parallelism), across replicated batches (data parallelism), and within individual weight matrices (tensor parallelism). Interpreting the resulting multi-device grid is not required for the single-machine framework reasoning developed in this chapter.
-
-::: {#fig-3d-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Device Placement Dimensions**: A framework whose model no longer fits one device can place work across layer groups, across replicated batches, or within large tensors, and the braces show how the three placements compose over a grid of accelerator groups." fig-alt="Three-dimensional block of GPU cubes. The front face has two rows and four columns labeled GPU 0 through GPU 28, with further layers stacked behind. A horizontal brace is labeled Across layer groups, a vertical brace Across replicas, and a depth brace Within tensors."}
-
-```{.tikz}
-\resizebox{0.6\textwidth}{!}{
-\begin{tikzpicture}[line cap=round,line join=round,font=\small\sffamily]
-\tikzset{
-pics/square/.style = {
-        code = {
-        \pgfkeys{/channel/.cd, #1}
-\begin{scope}[local bounding box=SQUARE,scale=\scalefac,every node/.append style={transform shape}]
-% Right Face
-\draw[fill=\channelcolor!70,line width=\Linewidth]
-(\Depth,0,0)coordinate(\picname-ZDD)--(\Depth,\Width,0)--(\Depth,\Width,\Height)--(\Depth,0,\Height)--cycle;
-% Front Face
-\draw[fill=\channelcolor!40,line width=\Linewidth]
-(0,0,\Height)coordinate(\picname-DL)--(0,\Width,\Height)coordinate(\picname-GL)--
-(\Depth,\Width,\Height)coordinate(\picname-GD)--(\Depth,0,\Height)coordinate(\picname-DD)--(0,0,\Height);
-% Top Face
-\draw[fill=\channelcolor!20,line width=\Linewidth]
-(0,\Width,0)coordinate(\picname-ZGL)--(0,\Width,\Height)coordinate(\picname-ZGL)--
-(\Depth,\Width,\Height)--(\Depth,\Width,0)coordinate(\picname-ZGD)--cycle;
-\end{scope}
-    }
-  }
-}
-\pgfkeys{
-  /channel/.cd,
-  Depth/.store in=\Depth,
-  Height/.store in=\Height,
-  Width/.store in=\Width,
-  channelcolor/.store in=\channelcolor,
-  drawchannelcolor/.store in=\drawchannelcolor,
-  scalefac/.store in=\scalefac,
-  Linewidth/.store in=\Linewidth,
-  picname/.store in=\picname,
-  Depth=1.6,
-  Height=1.1,
-  Width=1.4,
-  channelcolor=BrownLine,
-  drawchannelcolor=BrownLine,
-  scalefac=1,
-  Linewidth=1.0pt,
-  picname=C
-}
-\def\ras{0.95}
-\def\dis{2.2}
-\begin{scope}[local bounding box=BELOW,shift={($(0,0)+(0,0)$)},scale=1,every node/.append style={transform shape}]
-\begin{scope}[local bounding box=GPU0,shift={($(0,0)+(0,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=4,channelcolor=BlueLine,Linewidth=0.7pt}};
-  }
-\end{scope}
-\begin{scope}[local bounding box=GPU8,shift={($(0,0)+(\dis,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=12,channelcolor=RedLine,Linewidth=0.7pt}};
-  }
-\end{scope}
-\begin{scope}[local bounding box=GPU16,shift={($(0,0)+(2*\dis,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=20,channelcolor=GreenLine,Linewidth=0.7pt}};
-  }
-\end{scope}
-\begin{scope}[local bounding box=GPU16,shift={($(0,0)+(3*\dis,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=28-\i,channelcolor=OrangeLine,Linewidth=0.7pt}};
-  }
-\end{scope}
-\end{scope}
-%%%%ABOVE
-\begin{scope}[local bounding box=ABOVE,shift={($(0,0)+(0,2.2)$)},scale=1,every node/.append style={transform shape}]
-\begin{scope}[local bounding box=GPU0,shift={($(0,0)+(0,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=0,channelcolor=OliveLine,Linewidth=0.7pt}};
-  }
-\end{scope}
-\begin{scope}[local bounding box=GPU8,shift={($(0,0)+(1*\dis,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=8,channelcolor=pink,Linewidth=0.7pt}};
-  }
-\end{scope}
-\begin{scope}[local bounding box=GPU16,shift={($(0,0)+(2*\dis,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=16,channelcolor=green!70!,Linewidth=0.7pt}};
-  }
-\end{scope}
-\begin{scope}[local bounding box=GPU16,shift={($(0,0)+(3*\dis,0)$)},scale=1,every node/.append style={transform shape}]
- \foreach \i in {1,...,4} {
- \pic[shift={(0,0)}] at  ({-\i*\ras}, {-\ras*\i}) {square={scalefac=1,picname=24,channelcolor=red,Linewidth=0.7pt}};
-  }
-\end{scope}
-\end{scope}
-\node[]at($(28-4-GL)!0.5!(28-4-DD)$){GPU 28};
-%
-\foreach \i in {0,8,16,24,4,12,20} {
-\node[]at($(\i-GL)!0.5!(\i-DD)$){GPU \i};
-}
-\draw[thick,decoration={brace,amplitude=5pt,mirror},decorate]([yshift=-2mm]4-DL)--
-([yshift=-2mm]28-4-DD) node [midway,below=2mm] {Across layer groups};
-\draw[thick,decoration={brace,amplitude=5pt},decorate]([xshift=-2mm]4-DL)--
-([xshift=-2mm]0-GL) node [midway,above=5mm, sloped,pos=0.9,anchor=east] {Across replicas};
-\draw[thick,decoration={brace,amplitude=5pt,mirror},decorate]([xshift=2mm]28-4-DD)--
-([xshift=2mm]28-1-ZDD)node[midway, below=4mm, anchor=west, sloped,pos=0.25] {Within tensors};
-\end{tikzpicture}}
-```
-
-:::
-
 ### Data loading {#sec-ml-frameworks-domainspecific-data-organizations-48d9}
 
 ```{python}
@@ -3536,47 +3427,7 @@ Training in FP32 uses `{python} PrecisionBytes.fp32_bytes_str` per parameter; qu
 
 #### System-level operations {#sec-ml-frameworks-systemlevel-operations-6a1c}
 
-Hardware abstraction and numerical operations provide the building blocks; system-level operations orchestrate them. The system layer ties scheduling, memory management, and resource optimization into a coherent execution engine.
-
-The operation scheduler uses graph dependencies to identify legal execution orders and possible concurrency. Static capture can expose more of the dependency structure before execution, while eager runtimes discover work incrementally. Neither visibility guarantees an optimal schedule or simultaneous execution: overlap depends on streams, compiler and runtime decisions, resource availability, and the operations themselves.
-
-```{python}
-#| echo: false
-#| label: module-memory-anchor
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MODULE MEMORY ANCHOR
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: System-level operations and nn.Module introduction below.
-# │
-# │ Goal: Keep 7-billion-parameter FP16 and ResNet-50 parameter counts local to module prose.
-# │ Show: A 7-billion-parameter FP16 checkpoint is 14 GB; ResNet-50 has about 25.6M params.
-# │ How: Use model_memory() and the ResNet-50 digital twin.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, BYTES_FP16, GB
-from mlsysim.physics import model_memory
-from mlsysim.fmt import check, fmt_memory
-
-# ┌── LEGO ───────────────────────────────────────────────
-class Module7bRuntimeMemory:
-    """7-billion-parameter FP16 weight memory for system-level memory manager prose."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model_7b_params = Models.Language.Llama2_7B.parameters
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    model_7b_fp16 = model_7b_params * BYTES_FP16
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(model_7b_fp16.to(GB).magnitude) == 14, "7-billion-parameter FP16 weights should be about 14 GB.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    model_7b_fp16_gb_str = fmt_memory(model_7b_fp16, unit=GB, precision=0, commas=False)
-```
-
-The memory manager allocates and reclaims GPU memory across the computational graph's lifetime. Model parameters (a 7-billion-parameter model consumes approximately `{python} Module7bRuntimeMemory.model_7b_fp16_gb_str` in FP16) persist for the entire training run, while activation tensors live only until the backward pass consumes them. Both draw on the caching allocator of @sec-ml-frameworks-memory-management-gradient-computation-bb77, which reuses freed blocks instead of paying for a `cudaMalloc` call (tens of microseconds, more when it synchronizes the device). When a model exceeds device memory, the same manager executes the activation-checkpointing policy of @sec-ml-frameworks-memory-management-strategies-b008. The policy question (which activations to keep, and how much recomputation to tolerate) belongs to the training pipeline; the framework abstraction is what makes that policy executable.
-
-The resource optimizer integrates scheduling and memory decisions with backend kernel selection. Matrix-multiplication libraries choose among tiled GEMM implementations according to shapes, dtype, layout, workspace, and hardware. A poor schedule can leave resources idle, while memory-pool fragmentation or excessive live state can cause an out-of-memory error even when aggregate device capacity appears sufficient.
+Hardware abstraction and numerical operations provide the building blocks; system-level operations orchestrate them, using mechanisms this chapter has already developed. The scheduler orders operations by their graph dependencies and overlaps independent work through the streams and events of @sec-ml-frameworks-device-memory-management-9404. The memory manager reuses freed blocks through the caching allocator of @sec-ml-frameworks-memory-management-gradient-computation-bb77 and, when a model exceeds device memory, executes the activation-checkpointing policy of @sec-ml-frameworks-memory-management-strategies-b008. The resource optimizer ties these decisions to the kernel selection described earlier. Its failures are the ones those mechanisms predict, since a poor schedule leaves resources idle and fragmentation or excessive live state can cause an out-of-memory error even when aggregate device capacity appears sufficient.
 
 ::: {#chk-frameworks-hardware-abstraction .callout-checkpoint title="Hardware abstraction"}
 
