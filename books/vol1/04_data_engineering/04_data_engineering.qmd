@@ -2048,8 +2048,6 @@ The ingestion paradigm also shapes how the downstream model trains. Batch ingest
 
 :::
 
-Even a single-machine pipeline needs an explicit policy for an unavailable source: wait for fresh data, use a validated stale-feature fallback, or reject the request. The allowable feature age and model-quality contract determine which response is safe; durable buffering alone does not make old inputs suitable for inference.
-
 ### ETL and ELT comparison {#sec-data-engineering-etl-elt-comparison-2e2b}
 
 Batch or streaming decides when records arrive; the next decision is where they are transformed relative to persistent storage. Traditional extract, transform, load (ETL)[^fn-etl-quality-first] ($\text{E} \to \text{T} \to \text{L}$) transforms records in an external engine before they land, whereas extract, load, transform (ELT)[^fn-elt-flexibility-first] ($\text{E} \to \text{L} \to \text{T}$) lands raw records in staging tables and transforms them inside the warehouse (@fig-etl-vs-elt). Where that boundary sits determines what each later schema change costs and how much raw data must be retained.
@@ -2558,7 +2556,7 @@ Reviewing the queue regularly turns it from passive error storage into a source 
 
 A circuit breaker\index{Reliability!circuit breakers} [@nygard2007releaseit] stops calling a dependency after repeated consecutive failures and fails fast or takes a fallback path until a trial request succeeds, so that one failed feature service does not stall every caller waiting on its timeouts.
 
-The ML-specific part of recovery is the fallback. Multi-tier fallback systems can provide degraded service when primary data sources fail, using cached or approximate features only when their age and quality satisfy a validated fallback contract. A recommendation system unable to compute user preferences from the past 30 days might fall back to preferences from the past 90 days if evaluation establishes acceptable recommendation quality with that representation. If no fallback meets the contract, the system rejects the request.
+The ML-specific part of recovery is the fallback. Even a pipeline on a single machine needs an explicit policy for an unavailable source, choosing among waiting for fresh data, serving a validated stale-feature fallback, and rejecting the request. Multi-tier fallback systems implement the middle option, providing degraded service when primary data sources fail by using cached or approximate features only when their age and quality satisfy a validated fallback contract. A recommendation system unable to compute user preferences from the past 30 days might fall back to preferences from the past 90 days if evaluation establishes acceptable recommendation quality with that representation. The allowable feature age and the model-quality contract determine which response is safe, and durable buffering alone does not make old inputs suitable for inference. If no fallback meets the contract, the system waits for fresh data or rejects the request.
 
 With ingestion, validation, and these error handlers in place, the boundary admits records that are well-formed and checked. They still say nothing about what they mean. A wake-word recording that passes every check does not yet state which word was spoken, or where in the clip it begins and ends, and the model cannot learn without that ground truth.
 
@@ -3399,44 +3397,7 @@ Within a single machine, parallelizing data ingestion across host CPU workers yi
 
 #### Coordination across machines {#sec-data-engineering-distributed-cluster-extension}
 
-When datasets or concurrent experimentation exceed single-node memory and throughput envelopes, processing must scale across distributed clusters. Partitioning data across multiple physical machines, however, introduces network coordination challenges absent on a single host. Distributed coordination is constrained by network round-trip times: local memory operations complete in nanoseconds, whereas a round trip across a data center network takes tens to hundreds of microseconds, several orders of magnitude longer. The cost falls hardest on operations that must exchange records rather than summaries. A global shuffle or a join sends records across every partition, while a decomposable reduction such as a mean exchanges only one partial result per partition.
-
-Data locality becomes critical at this scale. At 10 GB/s, moving one terabyte across the network takes about 100 seconds, while nodes that already hold their shard can scan it from RAM at 50–200 GB/s in seconds. That gap drives ML system design toward compute-follows-data architectures.[^fn-mapreduce-google-origin] When processing nodes access local data at RAM speeds but must coordinate over networks limited to 1–10 GB/s, every cross-node exchange pays the bandwidth mismatch. Which operations parallelize cleanly and which need expensive coordination therefore decides both the architecture and its performance. That **coordination overhead**\index{Coordination overhead!definition}\index{Coordination overhead!distributed processing} is the time machines spend exchanging data and waiting on one another rather than computing, and it limits distributed data processing. It parallels the coordination cost of ad hoc team workflows in @sec-ml-workflow-prototype-productionscale-development-168a, but the two costs differ. That one is paid in engineer time as a team grows; this one is paid in network time as a dataset spreads across machines. Whether centralizing or aggregating locally is faster depends on how much data each option moves relative to the local compute time, as Notebook \ref{nbk-data-engineering-coordination-tax} works out.
-
-[^fn-mapreduce-google-origin]: **MapReduce**\index{MapReduce!data locality}: Designed by @dean2004mapreduce at Google to process terabyte-scale data across thousands of commodity machines. Its scheduler preferentially assigns map tasks to nodes that hold the input data, reducing input-network traffic. This locality-aware pattern influenced Hadoop and later distributed data-processing systems.
-
-::: {.column-margin}
-![](images/svg/vol1_data_engineering_margin_003.svg){width="100%" fig-alt="Vertical time ladder comparing gather-all normalization around 120 seconds against local aggregation around 0.2 seconds."}
-
-*Local aggregation beats gather-all when network transfer dominates.*
-:::
-
-::: {#nbk-data-engineering-coordination-tax .callout-notebook title="Coordination overhead"}
-
-**Problem**: Mean normalization must be computed across 1 TB of features distributed across 100 equal-size partitions with equal record counts. Is it faster to (A) gather all data to one node and compute centrally, or (B) compute local means and aggregate them?
-
-**Option A (centralized)**:
-
-- Transfer 1 TB at 10 GB/s network: 100 seconds
-- Compute mean on single node: a running sum and count consume each record as it arrives, so the node never needs to hold the full terabyte; as a separate pass at RAM bandwidth (50 to 200 GB/s), the arithmetic would take ~5 to 20 seconds
-- Total: ~100 seconds if the sum overlaps the transfer, ~120 seconds if it does not
-
-```{=latex}
-\vspace*{-0.5ex}
-```
-**Option B (distributed)**:
-
-- Each node computes local mean: ~0.05 to 0.2 seconds (10 GB at RAM speed)
-- Send 100 partial means (8 bytes each): $<1\text{ ms}$ of idealized payload transmission at the stated bandwidth; round trips, coordination, and stragglers add latency
-- Aggregate: negligible
-- Modeled compute and payload-transfer bound: ~0.05 to 0.2 seconds, before coordination overhead; the complete reduction requires measurement
-
-```{=latex}
-\vspace*{-0.5ex}
-```
-**Systems insight**: Algebraically decomposable reductions can often use partial aggregation near the data. Averaging the partial means is valid here because record counts are equal; for unequal partitions, carry partial sums and counts and divide the combined sum by the combined count. The mathematical mean is unchanged, although floating-point reduction order can change rounding. Joins and cross-products may require shuffling, although partitioning and colocation can reduce that cost. Pipeline design should minimize unnecessary movement by pushing suitable computation toward the data, the compute-follows-data principle central to systems like MapReduce [@dean2004mapreduce], Spark [@zaharia2010spark], and modern ML frameworks.
-
-:::
+This book keeps data processing on one machine, but the boundary is worth knowing. When a corpus or the number of concurrent feature rebuilds outgrows one server, processing spreads across a cluster\index{Distributed Processing!beyond one machine}\index{Single-node scope!boundary}, and three things change. Data locality becomes a design constraint, because a network link moves bytes far more slowly than a node reads the shard it already holds, so cluster frameworks send the computation to the data instead of the data to the computation. Network transfer becomes the dominant cost of any operation that exchanges records rather than summaries. A global shuffle or a join sends records across every partition, whereas a decomposable reduction such as a mean sends only one partial result per partition. Coordination\index{Coordination overhead!distributed processing} becomes part of the work, because the machines wait on the slowest worker and must recover when one fails partway through a job, which is when the idempotent, deterministic transformations described earlier become essential rather than merely convenient. Within one machine none of these costs arises, and the transformations of this section appear in their simplest form.
 
 ```{python}
 #| echo: false
@@ -3884,7 +3845,7 @@ Because data movement incurs physical energy costs, data volume acts like physic
 
 :::
 
-The energy hierarchy and the signal-density heuristic converge on the same optimization lever, the Data Selection Gain of @eq-data-selection-gain, which effective data engineering maximizes. Data curation is **signal-to-noise engineering**\index{Signal-to-noise engineering!definition}\index{Data cleaning!signal-to-noise engineering}. Deduplication strips away redundant byte volume while preserving task-relevant signal, directly amplifying the selection gain. Active learning proposes examples whose labels may add learning value; validation determines whether that policy improves information density per byte transferred. Filtering uninformative records conserves interconnect bandwidth and storage energy, preventing upstream I/O starvation from idling accelerator execution units.
+The energy hierarchy and the signal-density heuristic converge on the same optimization lever, the Data Selection Gain of @eq-data-selection-gain, because every redundant or uninformative record removed early saves movement energy and interconnect bandwidth at each later stage without costing task-relevant signal.
 
 ::: {#chk-data-engineering-physics-data .callout-checkpoint title="The physics of data"}
 
