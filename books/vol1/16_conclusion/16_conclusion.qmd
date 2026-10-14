@@ -687,7 +687,8 @@ DLRM carries the first half, because several mechanisms can erode trust in its l
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ CONCLUSION CHAPTER ROOFLINE ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Cost-of-a-token callout demonstrating Iron Law in practice
+# │ Context: Llama 2 70B decode recall in the "Physical deliverability"
+# │          subsection and the chapter summary.
 # │
 # │ Goal: Illustrate the memory-compute trade-off for LLM inference.
 # │ Scope: chapter-anchor — the summary reuses this chapter-level result.
@@ -699,7 +700,7 @@ DLRM carries the first half, because several mechanisms can erode trust in its l
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.physics import calc_transformer_decode_flops
-from mlsysim.fmt import fmt, fmt_math, MarkdownStr, check, fmt_params, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_multiple
+from mlsysim.fmt import fmt, check, fmt_params, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ConclusionRoofline:
@@ -733,7 +734,6 @@ class ConclusionRoofline:
     check(30 <= family_scale <= 60, f"Llama 2 70B / GPT-2 parameter ratio drifted: {family_scale:.1f}x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    llama_params_count_str = fmt_params(model.parameters, scale_style="word", precision=0)
     llama_params_modifier_str = fmt_params(
         model.parameters,
         scale_style="word",
@@ -751,28 +751,6 @@ class ConclusionRoofline:
     ratio_mult_str = fmt_multiple(ratio.to("").magnitude, precision=1, commas=False)
     family_scale_mult_str = fmt_multiple(round(family_scale), precision=0, commas=False)
     gpt2_params_modifier_str = fmt_params(gpt2.parameters, scale_style="word", precision=1, attributive=True)
-
-    # LaTeX equations — use raw magnitudes, not suffixed _str exports
-    _dvol_gb_val = d_vol.to(GB).magnitude
-    _h100_bw_gb_val = aggregate_memory_bandwidth.to(GB / second).magnitude
-    _compute_gflops_val = compute_req.to(GFLOPs).magnitude
-    _h100_peak_tflops_val = aggregate_peak_flops.to(TFLOP / second).magnitude
-    _t_mem_ms_val = t_mem.to(ms).magnitude
-    _t_comp_ms_val = t_comp.to(ms).magnitude
-
-    t_mem_math = fmt_math(
-        f"\\IronLawMemoryTime = \\frac{{{_dvol_gb_val:.0f} \\text{{ GB}}}}{{{_h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {_t_mem_ms_val:.1f} \\text{{ ms}}"
-    )
-    t_comp_math = fmt_math(
-        f"\\IronLawComputeTime = \\frac{{{_compute_gflops_val:.0f} \\times 10^9 \\text{{ FLOPs}}}}{{{_h100_peak_tflops_val:.0f} \\times 10^{{12}} \\text{{ FLOP/s}}}} \\approx {_t_comp_ms_val:.2f} \\text{{ ms}}"
-    )
-
-ConclusionRoofline.dvol_gb_val = ConclusionRoofline._dvol_gb_val
-ConclusionRoofline.h100_bw_gb_val = ConclusionRoofline._h100_bw_gb_val
-ConclusionRoofline.compute_gflops_val = ConclusionRoofline._compute_gflops_val
-ConclusionRoofline.h100_peak_tflops_val = ConclusionRoofline._h100_peak_tflops_val
-ConclusionRoofline.t_mem_ms_val = ConclusionRoofline._t_mem_ms_val
-ConclusionRoofline.t_comp_ms_val = ConclusionRoofline._t_comp_ms_val
 ```
 
 GPT-2 carries the second half, and its family at scale shows the physics most sharply. Llama 2 70B is a decoder-only transformer of the same design with about `{python} ConclusionRoofline.family_scale_mult_str` as many parameters as GPT-2's `{python} ConclusionRoofline.gpt2_params_modifier_str`-parameter release. The larger scale does not move batch-one decode off the bandwidth side of the ridge point, because every generated token still reads every weight once. Serving one Llama 2 70B token on two H100s makes that cost concrete.
@@ -781,26 +759,7 @@ GPT-2 carries the second half, and its family at scale shows the physics most sh
 ↩ The intensity of batch-one decode, about 1 FLOP/byte in FP16 because each weight read feeds a single multiply-accumulate, is established in @sec-network-architectures-inference-memory-bandwidth-wall-98d1.
 :::
 
-:::: {#nbk-conclusion-cost-token .callout-notebook title="The cost of a token"}
-
-**Problem**: Applying the iron law (principle \ref{pri-iron-law}) and the arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) to serving one token from a `{python} ConclusionRoofline.llama_params_modifier_str`-parameter model like Llama 2 70B\index{Llama 2!70-billion-parameter bandwidth-bound workload}, with its FP16 weights sharded evenly across two NVIDIA H100s, which idealized lower bound is larger: memory transfer or peak compute? @Sec-appdx-assumptions-h100-reference-machine-2b6f supplies the H100 specifications. This calculation excludes KV-cache traffic, activations, context-dependent attention-over-KV FLOPs, interconnect communication, and dispatch overhead.
-
-**Physics**:
-
-- **Model-weight byte volume moved** $(\DataVolume)$: `{python} ConclusionRoofline.llama_params_count_str` parameters $\times$ 2 bytes (FP16) = `{python} ConclusionRoofline.llama_dvol_gb_str`.
-- **Compute** $(\Operations)$: $\Operations \approx 2 \times \Parameters =$ `{python} ConclusionRoofline.llama_compute_gflop_str` per token, where $\Parameters$ is the parameter count.
-- **Hardware**: Two H100s with aggregate $\Bandwidth$ = `{python} ConclusionRoofline.h100_bw_tb_per_s_str`, $\PeakRate \approx$ `{python} ConclusionRoofline.h100_peak_tflop_per_s_str` FP16.
-
-**Math**:
-
-- **Time to move data**: `{python} ConclusionRoofline.t_mem_math`
-- **Time to compute**: `{python} ConclusionRoofline.t_comp_math`
-
-**Systems insight**:
-
-The idealized memory-transfer lower bound $\IronLawMemoryTime$ is `{python} ConclusionRoofline.ratio_mult_str` larger than the peak-compute lower bound $\IronLawComputeTime$. Under this batch-one model, decode is heavily bandwidth-bound (arithmetic intensity $\approx 1$ FLOP/byte), falling far to the left of the ridge point as shown in the margin. Because each 2-byte FP16 weight is fetched from high-bandwidth memory to perform a single multiply-accumulate ($2\text{ FLOPs}$) with the active token activation, the arithmetic intensity is $\frac{2\text{ FLOPs}}{2\text{ bytes}} = 1\text{ FLOP/byte}$, far below the H100 ridge point of $\approx 295\text{ FLOP/byte}$, which is why the time ratio above is numerically the ridge point. Sharding across two GPUs does not move that ridge, because it doubles peak rate and bandwidth together. Under this traffic model, attainable arithmetic throughput is less than 1 percent of the stated peak. That bound does not measure tensor-core busy or stalled cycles; profiling is needed to characterize realized execution. Batching can increase reuse, while quantization can reduce weight traffic. Optimizing only compute execution can reduce realized compute time toward the `{python} ConclusionRoofline.t_comp_ms_str` lower bound, but it cannot reduce the `{python} ConclusionRoofline.t_mem_ms_str` memory-transfer lower bound.
-
-::::
+The calculation repeats, at larger scale, the throughput ceiling computed for GPT-2 XL on one H100 in @sec-hardware-acceleration-optimization-intensity-regime-cb3a and the decode floor of @eq-token-generation-time. In FP16 the `{python} ConclusionRoofline.llama_params_modifier_str`-parameter model\index{Llama 2!70-billion-parameter bandwidth-bound workload} holds about `{python} ConclusionRoofline.llama_dvol_gb_str` of weights, and each token costs about `{python} ConclusionRoofline.llama_compute_gflop_str`, two FLOPs per parameter. Sharded evenly across two NVIDIA H100s with an aggregate bandwidth of `{python} ConclusionRoofline.h100_bw_tb_per_s_str` and an aggregate FP16 peak of `{python} ConclusionRoofline.h100_peak_tflop_per_s_str` (@sec-appdx-assumptions-h100-reference-machine-2b6f), the iron law (principle \ref{pri-iron-law}) gives a memory-transfer lower bound $\IronLawMemoryTime$ of about `{python} ConclusionRoofline.t_mem_ms_str` against a peak-compute lower bound $\IronLawComputeTime$ of about `{python} ConclusionRoofline.t_comp_ms_str`, a ratio of `{python} ConclusionRoofline.ratio_mult_str`. The arithmetic intensity law (principle \ref{pri-arithmetic-intensity}) accounts for that ratio. Intensity is still about 1 FLOP/byte, far left of the ridge in the margin roofline, so the time ratio is numerically the H100 ridge point itself. Sharding does not move the ridge, because it doubles peak rate and bandwidth together. The bound leaves out KV-cache traffic, activations, attention over the cache, interconnect communication, and dispatch overhead, so only profiling establishes the realized step time. Compute-only tuning can approach the `{python} ConclusionRoofline.t_comp_ms_str` bound but cannot lower the `{python} ConclusionRoofline.t_mem_ms_str` one; batching, which reuses each weight across requests, and quantization, which moves fewer bytes per weight, are the levers that can.
 
 ::: {.column-margin}
 ```{=latex}
@@ -811,7 +770,7 @@ The idealized memory-transfer lower bound $\IronLawMemoryTime$ is `{python} Conc
 *In this batch-one lower-bound model, decode sits left of the roofline ridge in the bandwidth-bound regime.*
 :::
 
-The estimate turns a physical bound into a diagnosis. The silicon contract (principle \ref{pri-silicon-contract}) exposes the architectural consequence. Accelerators are provisioned and purchased by peak arithmetic throughput, yet this workload saturates memory bandwidth first, so deliverable token generation speed is governed by bytes per second transferred from memory rather than by peak FLOP/s. The energy-movement principle (\ref{pri-energy-movement}) highlights the same weight traffic. Because a reference DRAM access consumes approximately `{python} EnergyMovementMath.dram_vs_range_mult_str` as much energy as an arithmetic operation, and this workload performs only about one operation per byte fetched, moving weights dominates the energy expenditure of each token. The ratio compares single access events with single operations, and because DRAM moves data in multi-byte bursts, an exact per-byte figure depends on transfer width and is settled by hardware telemetry.
+The estimate turns a physical bound into a diagnosis. The silicon contract (principle \ref{pri-silicon-contract}) exposes the architectural consequence. Accelerators are provisioned and purchased by peak arithmetic throughput, yet this workload saturates memory bandwidth first, so deliverable token generation speed is governed by bytes per second transferred from memory rather than by peak FLOP/s. The energy-movement principle (\ref{pri-energy-movement}) highlights the same weight traffic. A DRAM access costs far more energy than an arithmetic operation, by the ratio stated with that principle in @sec-thirteen-quantitative-invariants-0dd2, and this workload performs only about one operation per byte fetched, so moving weights dominates the energy expenditure of each token. That ratio compares single access events with single operations, and because DRAM moves data in multi-byte bursts, an exact per-byte figure depends on transfer width and is settled by hardware telemetry.
 
 ::: {.column-margin .margin-pointer}
 ↩ The energy ladder from registers to off-chip memory, which sets the per-access cost of moving a weight, is established in @sec-hardware-acceleration-evolution-hardware-specialization-fdb7.
