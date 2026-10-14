@@ -3,7 +3,7 @@ number-offset: [11]
 quiz: benchmarking_quizzes.json
 concepts: benchmarking_concepts.yml
 engine: jupyter
-notation-local: [\AcceleratorSupplyCurrent, \AchievedKernelBandwidth, \ActiveInferencePower, \BaselineOnlyCorrectCount, \CalibrationBinCount, \CalibrationBinIndex, \CalibrationTemperature, \CompressedOnlyCorrectCount, \EstimatedAccuracy, \EvaluationSampleCount, \InferenceDutyCycle, \InferenceEnergy, \InterKernelGapTime, \KernelExecutionTime, \McnemarTestStatistic, \MeasurementWindowEnd, \NextTokenDistribution, \PeakMemoryBandwidth, \ProcessedSampleCount, \RepeatedRunCount, \RepeatedRunMean, \RepeatedRunStandardDeviation, \StandbyPower]
+notation-local: [\AchievedKernelBandwidth, \ActiveInferencePower, \BaselineOnlyCorrectCount, \CalibrationBinCount, \CalibrationBinIndex, \CalibrationTemperature, \CompressedOnlyCorrectCount, \EstimatedAccuracy, \EvaluationSampleCount, \InferenceDutyCycle, \InferenceEnergy, \InterKernelGapTime, \KernelExecutionTime, \McnemarTestStatistic, \MeasurementWindowEnd, \NextTokenDistribution, \PeakMemoryBandwidth, \ProcessedSampleCount, \RepeatedRunCount, \RepeatedRunMean, \RepeatedRunStandardDeviation, \StandbyPower]
 ---
 
 # Benchmarking {#sec-benchmarking}
@@ -288,12 +288,6 @@ A systematic evaluation isolates the accelerator's latency from preprocessing an
 :::
 
 Each stage of that pipeline arrives with a favorable number from its own chapter, such as a smaller model file or a faster kernel. The benchmarking question is which of those local numbers still hold once the stages run together on the target device.
-
-::: {#psp-benchmarking-related-efficiency-metrics .callout-perspective title="Benchmarking as cross-layer evidence"}
-
-An ML benchmark is meaningful only when it identifies which layer of the system is being validated. Data selection metrics such as performance-per-data (PPD), area under the learning curve (AULC), and data compression ratio (DCR), all defined in @sec-data-selection-core-metrics-32e9, measure whether fewer examples can preserve learning signal. Compression metrics measure whether fewer parameters or lower precision preserve quality. Hardware metrics such as roofline position and TOPS/W measure whether the machine executes the workload efficiently. The system benchmarks from @sec-benchmarking-benchmarking-granularity-3855 through @sec-benchmarking-power-measurement-techniques-bcc2 connect these layers by testing whether local improvements survive in an end-to-end workload.
-
-:::
 
 Three principles guide the chapter.
 
@@ -1061,7 +1055,7 @@ Moving from theory to trace means mapping the iron law equation onto a profiler 
 **Measuring the latency term $(\Latency)$**
 
 *   **Signal**: Look for gaps (empty space) between colored kernel bars on the timeline.
-*   **Formula**: $\text{Overhead Ratio} = \frac{\InterKernelGapTime}{\KernelExecutionTime+ \InterKernelGapTime}$.
+*   **Formula**: $\text{Kernel gap fraction} = \frac{\InterKernelGapTime}{\KernelExecutionTime+ \InterKernelGapTime}$.
 *   **Diagnosis**: A "Sawtooth" pattern (Compute, Gap, Compute, Gap) suggests exposed waiting; correlate CPU dispatch, dependencies, and transfers before attributing it to software overhead\index{Dispatch overhead reduction!kernel launch batching}. If dispatch dominates, candidates include kernel fusion\index{Operator fusion!latency gap elimination}, covered in @sec-hardware-acceleration-kernel-fusion-7faf, or the CUDA Graphs\index{CUDA graphs!kernel launch replay} of @sec-ml-frameworks-hybrid-approaches-jit-compilation-8954, which capture a repeated sequence of GPU launches so the runtime can replay it with less CPU dispatch overhead.
 
 :::
@@ -1330,9 +1324,7 @@ To capture these interactions, DAWNBench\index{DAWNBench!time-to-accuracy evalua
 
 [^fn-mlperf-benchmark-suite]: **MLPerf**\index{MLPerf!founding}: Launched in 2018 by a consortium of industry and academic institutions, MLPerf takes its name from "ML" combined with "Perf" (performance), echoing SPEC's benchmarking tradition. MLPerf's design principles (representative workloads, full-system measurement, and open submission) directly address the gaming that plagued Whetstone and LINPACK. Vendors who could previously report peak kernel throughput on cherry-picked problem sizes must now report end-to-end system performance on standardized tasks [@mattson2020mlperf; @reddi2020].
 
-Energy followed the same path\index{Benchmarking!energy, first-class metric}. Because energy dictates battery life at the edge and operating expense in warehouse-scale clusters, it became a first-class metric alongside performance. SPEC Power\index{SPEC Power!server energy efficiency} (2007) measures server performance per watt across load levels from idle to 100 percent [@lange2009], which matters for ML serving because inference rarely sustains full load. Green500\index{Green500!HPC energy efficiency ranking} (2007) ranks supercomputers by FLOP/s per watt rather than raw speed [@feng2007green500].
-
-Energy in ML workloads poses distinct measurement challenges. Accelerators alternate between memory-bound activation layers and power-dense matrix units, producing rapid current swings ($d\AcceleratorSupplyCurrent/d\TimeInstant$) that simple average-power meters fail to resolve, and isolating accelerator consumption from host CPU activity, PCIe interconnects, and cooling fans requires explicit measurement boundaries. MLPerf Power\index{MLPerf!power, ML energy measurement} [@mlperf_power_website] addresses these demands with standardized workloads and calibrated external power analyzers.
+Energy followed the same path\index{Benchmarking!energy, first-class metric}. SPEC Power\index{SPEC Power!server energy efficiency} (2007) [@lange2009] and Green500\index{Green500!HPC energy efficiency ranking} (2007) [@feng2007green500] made performance per watt a ranking metric for servers and supercomputers, and MLPerf Power\index{MLPerf!power, ML energy measurement} [@mlperf_power_website] carried it to ML workloads, whose rapid power swings and shared host components demand calibrated instruments and explicit measurement boundaries (@sec-benchmarking-standardized-power-measurement-7fae).
 
 Energy benchmarking also exposes algorithmic efficiency. Compression and efficient architectures such as MobileNet [@howard2017mobilenets; @sandler2018] save energy by reducing operations and off-chip traffic. Traffic reduction is a primary lever, because a DRAM read costs orders of magnitude more energy than an arithmetic operation (@sec-model-compression-energy-costs-d1d5).
 
@@ -1630,43 +1622,6 @@ Training and inference fail in opposite ways on the same accelerator. A training
 
 In an illustrative procurement failure, a team purchases a larger GPU cluster expecting proportional training-speed gains, only to discover that communication overhead and memory bottlenecks limit the actual speedup. Training benchmarks\index{ML training benchmark!convergence throughput scalability} exist to catch this kind of gap before procurement. Training benchmarks span six dimensions (@tbl-training-metrics), anchored by three: convergence metrics that measure learning progress, throughput metrics that measure computational efficiency, and scalability metrics that measure distributed performance.
 
-```{python}
-#| echo: false
-#| label: gpt3-training-specs
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-3 TRAINING SPECIFICATIONS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Training Benchmarks prose and footnote immediately below.
-# │
-# │ Goal: Provide GPT-3 parameter count, training token count, and the
-# │       accelerator count of the reference run.
-# │ Show: 175 billion parameters, 300 billion tokens, 10,000 V100 GPUs.
-# │ How:  Models.Language.GPT3 (alias) for parameters; Models.Language.GPT3.training_tokens
-# │       for token count (training_tokens is not a ModelSpec field);
-# │       training_accelerators_ref / training_hardware_label for the run.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_params, fmt_tokens, fmt_count
-
-class GPT3TrainingSpecs:
-    """GPT-3 parameter and token counts for training benchmark context."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _params_b = Models.Language.GPT3.parameters.to(Bparam).magnitude
-    _tokens_b = Models.Language.GPT3.training_tokens.to('count').magnitude / BILLION
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpt3_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-    gpt3_tokens_b_str = fmt_tokens(Models.Language.GPT3.training_tokens, scale="B", precision=0, commas=False)
-    _hw = Models.Language.GPT3.training_hardware_label
-    gpt3_gpus_str = fmt_count(
-        Models.Language.GPT3.training_accelerators_ref.to('count').magnitude,
-        commas=True,
-        label=f"{_hw} GPU",
-        plural_label=f"{_hw} GPUs",
-    )
-```
-
 ::: {#dfn-benchmarking-ml-training-benchmarks .callout-definition title="ML training benchmarks"}
 
 ***ML training benchmarks***\index{ML training benchmark!definition} are machine learning system benchmarks that measure the time to reach a target quality metric (for example, a specified validation accuracy or loss threshold) on a fixed dataset and model, quantifying the rate of convergence per unit of resource.
@@ -1677,11 +1632,7 @@ class GPT3TrainingSpecs:
 
 :::
 
-Training benchmarks validate whether hardware acceleration delivers promised training throughput. Accelerators and multi-chip systems all claim dramatic speedups, and training benchmarks reveal which claims hold under realistic workloads. They evaluate how hardware configurations, data loading mechanisms, and distributed training strategies perform when training production-scale models. These benchmarks are vital because training represents the largest capital expenditure in ML systems, and only rigorous time-to-accuracy measurement reveals whether that capital delivers proportional value rather than dissipating into scaling inefficiencies, memory bottlenecks, or communication overhead.
-
-For instance, large-scale models like OpenAI's GPT-3[^fn-gpt3-benchmark-scale] [@brown2020language], which consists of `{python} GPT3TrainingSpecs.gpt3_params_b_str` parameters trained on approximately 570 GB of filtered CommonCrawl text (from a ~45 TB raw dataset, combined with other sources to form `{python} GPT3TrainingSpecs.gpt3_tokens_b_str` training tokens), highlight the computational demands of modern training. Standardized ML training benchmarks provide systematic evaluation of the underlying systems to ensure that hardware and software configurations can meet these demands efficiently. Cluster-scale examples such as GPT-3 appear in this section as context for why the metrics matter; the metrics themselves (time-to-accuracy, scaling efficiency, utilization, checkpoint overhead) are defined and worked at the scale of one machine with one to eight accelerators, the scale of the scaling-efficiency notebook below.
-
-[^fn-gpt3-benchmark-scale]: **GPT-3 (Generative Pre-trained Transformer 3)**\index{GPT-3!training cost}: OpenAI's 2020 language model (`{python} GPT3TrainingSpecs.gpt3_params_b_str` parameters, `{python} GPT3TrainingSpecs.gpt3_tokens_b_str` training tokens) consumed an estimated 3,640 petaFLOP-days on `{python} GPT3TrainingSpecs.gpt3_gpus_str` [@patterson2021carbon]. This scale illustrates why training benchmarks are essential for predicting whether a planned training run is operationally viable before committing the compute.
+Training benchmarks validate whether hardware acceleration delivers promised training throughput. Accelerators and multi-chip systems all claim dramatic speedups, and training benchmarks reveal which claims hold under realistic workloads. They evaluate how hardware configurations, data loading mechanisms, and distributed training strategies perform when training production-scale models. These benchmarks are vital because training represents the largest capital expenditure in ML systems, and only rigorous time-to-accuracy measurement reveals whether that capital delivers proportional value rather than dissipating into scaling inefficiencies, memory bottlenecks, or communication overhead. The metrics themselves (time-to-accuracy, scaling efficiency, utilization, checkpoint overhead) are defined and worked at the scale of one machine with one to eight accelerators, the scale of the scaling-efficiency notebook below.
 
 ### Training benchmark motivation {#sec-benchmarking-training-benchmark-motivation-f365}
 
@@ -2047,7 +1998,7 @@ class Gpt3TrainingEnergyAnchor:
     )
 ```
 
-Training GPT-3 was estimated to consume `{python} Gpt3TrainingEnergyAnchor.gpt3_training_energy_mwh_str` of electricity [@patterson2021carbon]. Fewer iterations reduce energy when their total energy cost is lower; a more expensive step can offset the reduced count. Measure energy over the complete run to the same quality target. Energy-aware benchmarks help guide the development of hardware and training strategies that optimize power efficiency while maintaining accuracy targets.
+Training GPT-3\index{GPT-3!training cost} was estimated to consume `{python} Gpt3TrainingEnergyAnchor.gpt3_training_energy_mwh_str` of electricity [@patterson2021carbon]. Fewer iterations reduce energy when their total energy cost is lower; a more expensive step can offset the reduced count. Measure energy over the complete run to the same quality target. Energy-aware benchmarks help guide the development of hardware and training strategies that optimize power efficiency while maintaining accuracy targets.
 
 Cost considerations extend beyond electricity usage to include hardware expenses, cloud computing costs, and infrastructure maintenance. Training benchmarks provide insights into the cost-effectiveness of different hardware and software configurations by measuring training time in relation to resource expenditure. Organizations can use these benchmarks to balance performance and budget constraints when selecting training infrastructure.
 
@@ -2140,7 +2091,7 @@ Large-scale benchmark training commonly runs on dedicated data center hardware, 
 
 Deployment differences of this breadth motivate inference benchmarks, which evaluate the bottlenecks that emerge when models transition from development to production serving. The motivating factors parallel those for training (hardware optimization, scalability, cost, fair comparison) but differ in specifics. Software optimization frameworks\index{Inference!compiler, graph optimization framework} apply inference-specific techniques such as kernel fusion, precision calibration, and kernel tuning, whose impact on latency, throughput, and power efficiency must be measured under realistic conditions to confirm they deliver real improvements without degrading accuracy. Auto-tuning compilers\index{Inference!compiler auto-tuning} add a hidden variable: the compiler itself can require hours of optimization per model-hardware pair, meaning benchmark results reflect the tuning budget as much as the hardware capability, and comparing results across submissions requires normalizing for compiler optimization time.
 
-Scalability concerns also shift character. Training scales by adding GPUs to reduce time-to-accuracy on a fixed workload, whereas inference must scale dynamically in response to fluctuating user demand, handling traffic spikes without violating latency guarantees. Cold-start performance, the time required for a model to load and begin processing queries, makes initialization cost directly visible to inference users. Applications that load models on demand, such as serverless AI deployments, are particularly sensitive to this overhead.
+Scalability concerns also shift character. Training scales by adding GPUs to reduce time-to-accuracy on a fixed workload, whereas inference must scale dynamically in response to fluctuating user demand, handling traffic spikes without violating latency guarantees. Applications that load models on demand, such as serverless deployments, also expose the model's loading time, its cold start, directly to users.
 
 The cost and energy profile of inference differs sharply from training. Training concentrates cost in discrete runs that may recur as data, objectives, or models change; inference cost accumulates continuously with production traffic. Running an inefficient model at scale can multiply cloud compute expenses, and on battery-powered devices, excessive computation directly affects usability. Benchmarks that measure cost per inference request and efficiency per watt help organizations optimize for both performance and sustainability across deployment platforms.
 
@@ -2247,7 +2198,53 @@ Latency is only half of the serving envelope. Throughput counts how many inferen
 
 Speed alone is insufficient because inference optimizations can change model behavior. Reducing numerical precision can accelerate computation while cutting memory and energy, as the simplified MobileNetV2 energy estimate worked out in the power section shows (@sec-benchmarking-power-measurement-boundaries-982c), but lower-precision calculations can introduce accuracy degradation. Inference benchmarks therefore evaluate how well models perform under different numerical settings, such as FP32, FP16, and INT8.[^fn-int8-quantized-benchmark] Model compression techniques[^fn-model-compression-benchmarking] further improve efficiency, but their impact on model accuracy varies depending on the task and dataset. Benchmarks help determine whether these optimizations are viable for deployment, ensuring that improvements in efficiency do not come at the cost of unacceptable accuracy loss.
 
-Beyond speed and accuracy, @tbl-inference-metrics lists the resource terms an inference benchmark must also report, and each exists because a system can pass the latency test and still fail to deploy. Memory footprint decides whether the model fits the device's budget at all, since inference rarely spans accelerators the way training can. Cold-start performance\index{Cold start latency!serverless AI impact}, the load time plus first-request latency, exposes initialization cost to the requesting user. It dominates in serverless AI environments[^fn-serverless-ai-inference] and on devices that evict models to free memory, so benchmarks must state whether initialization is included. Scalability records whether added accelerators or concurrent models raise throughput or collide on memory bandwidth, and energy per inference (joules per inference, or QPS/W in the cloud) sets battery life on mobile devices and operating cost in data centers.
+Beyond speed and accuracy, @tbl-inference-metrics lists the resource terms an inference benchmark must also report, and each exists because a system can pass the latency test and still fail to deploy. Memory footprint decides whether the model fits the device's budget at all, since inference rarely spans accelerators the way training can. Cold-start performance\index{Cold start latency!serverless AI impact}, the load time plus first-request latency,[^fn-cold-start-latency] exposes initialization cost to the requesting user. It dominates in serverless AI environments[^fn-serverless-ai-inference] and on devices that evict models to free memory. When provisioning, model transfer, runtime initialization, and the first response lie on the user request path, the benchmark must include them; a warm-instance result answers a different question. Scalability records whether added accelerators or concurrent models raise throughput or collide on memory bandwidth, and energy per inference (joules per inference, or QPS/W in the cloud) sets battery life on mobile devices and operating cost in data centers.
+
+```{python}
+#| echo: false
+#| label: cold-start-transfer-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COLD-START WEIGHT-TRANSFER LOWER BOUND
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: fn-cold-start-latency footnote in Throughput and resource
+# │          metrics, immediately below.
+# │
+# │ Goal:    Compute the physical lower bound on cold-start latency for a
+# │          7-billion-parameter FP16 model over PCIe 4.0.
+# │ Show:    Parameter count, model size in GB, PCIe effective bandwidth, and
+# │          weight-transfer time in milliseconds.
+# │ How:     Model size equals params times bytes per param; transfer time
+# │          equals model size divided by effective PCIe bandwidth.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Models
+from mlsysim.core.units import BYTES_FP16, GB, ms, second
+from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_params, fmt_time
+
+class ColdStartTransferCalc:
+    """FP16 weight transfer lower bound for a 7-billion-parameter model on PCIe 4.0."""
+
+    # LOAD
+    model = Models.Language.Llama2_7B
+    params = model.parameters
+    model_size = model.size_in_bytes(BYTES_FP16)
+    pcie_effective_bw = 25 * (GB / second)  # Illustrative PCIe 4.0 effective bandwidth
+
+    # EXECUTE
+    transfer = (model_size / pcie_effective_bw).to(ms)
+
+    # GUARD
+    check(round(model_size.to(GB).magnitude) == 14, f"Expected ~14 GB FP16 weights, got {model_size.to(GB).magnitude:.1f}")
+    check(round(transfer.to(ms).magnitude) == 560, f"Expected ~560 ms transfer, got {transfer.to(ms).magnitude:.0f}")
+
+    # OUTPUT
+    params_b_str = fmt_params(params, scale='B', precision=0, commas=False)
+    model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
+    pcie_effective_gb_per_s_str = fmt_bandwidth(pcie_effective_bw, unit=GB / second, precision=0, commas=False)
+    transfer_ms_str = fmt_time(transfer, ms, precision=0, commas=False)
+```
+
+[^fn-cold-start-latency]: **Cold-start latency**\index{Cold start latency!physical lower bound}: The initialization time from idle state includes storage reads, host-to-accelerator transfer, and framework setup. For a `{python} ColdStartTransferCalc.params_b_str`-parameter model in FP16 (~`{python} ColdStartTransferCalc.model_size_gb_str`) already resident in host memory, PCIe 4.0 transfer at `{python} ColdStartTransferCalc.pcie_effective_gb_per_s_str` effective bandwidth alone takes ~`{python} ColdStartTransferCalc.transfer_ms_str`; storage and initialization add to it. This lower bound makes cold-start mitigation (model caching, speculative loading) a systems design requirement.
 
 [^fn-int8-quantized-benchmark]: **INT8 (8-bit integer)**\index{INT8!calibration dependency}: INT8 sits at the aggressive end of the precision hierarchy (FP32 baseline, FP16 halves raw weight storage, INT8 quarters it), and each step demands increasing care to preserve accuracy. Post-training INT8 quantization normally fits its value ranges on a representative calibration dataset (quantization-range calibration, distinct from the confidence calibration of @sec-benchmarking-calibration-confidence-scores-matter-3669); accuracy depends on the model, operator coverage, quantization method, and how well the calibration data represent deployment inputs. INT8 benchmarks must specify whether they use post-training quantization or quantization-aware training and document any range-calibration procedure.
 
@@ -2681,54 +2678,7 @@ Because physical constraints differ across environments, no single metric orderi
 
 A metric that dictates architectural success in one deployment context may be irrelevant in another. Latency ranks first for autonomous robotics, where sensor-processing pipelines must complete within strict execution deadlines to maintain vehicle stability, whereas cloud batch services accept higher queuing latency in exchange for lower operational cost per query. A 2$\times$ throughput gain represents substantial economic value in a hyperscale cloud cluster, but it provides little benefit on a battery-powered device such as the camera trap, where a 20 percent power reduction extends operational lifetime.
 
-For the camera example, use the required deadline or percentile as the timing gate, the runtime peak allocation as the capacity gate, and the permitted quality loss as the model gate. If any gate lacks a measurement, the decision remains unresolved even when the reported inference speedup is large. A protocol should identify the missing evidence rather than treating the favorable metric as approval.
-
-On-demand deployments add **cold-start latency**\index{Cold start!inference concern}[^fn-cold-start-latency] to this decision. The benchmark must include provisioning, model transfer, runtime initialization, and the first response when those costs lie on the user request path; a warm-instance result answers a different question.
-
-```{python}
-#| echo: false
-#| label: cold-start-transfer-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COLD-START WEIGHT-TRANSFER LOWER BOUND
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: fn-cold-start-latency footnote definition immediately below.
-# │
-# │ Goal:    Compute the physical lower bound on cold-start latency for a
-# │          7-billion-parameter FP16 model over PCIe 4.0.
-# │ Show:    Parameter count, model size in GB, PCIe effective bandwidth, and
-# │          weight-transfer time in milliseconds.
-# │ How:     Model size equals params times bytes per param; transfer time
-# │          equals model size divided by effective PCIe bandwidth.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.core.units import BYTES_FP16, GB, ms, second
-from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_params, fmt_time
-
-class ColdStartTransferCalc:
-    """FP16 weight transfer lower bound for a 7-billion-parameter model on PCIe 4.0."""
-
-    # LOAD
-    model = Models.Language.Llama2_7B
-    params = model.parameters
-    model_size = model.size_in_bytes(BYTES_FP16)
-    pcie_effective_bw = 25 * (GB / second)  # Illustrative PCIe 4.0 effective bandwidth
-
-    # EXECUTE
-    transfer = (model_size / pcie_effective_bw).to(ms)
-
-    # GUARD
-    check(round(model_size.to(GB).magnitude) == 14, f"Expected ~14 GB FP16 weights, got {model_size.to(GB).magnitude:.1f}")
-    check(round(transfer.to(ms).magnitude) == 560, f"Expected ~560 ms transfer, got {transfer.to(ms).magnitude:.0f}")
-
-    # OUTPUT
-    params_b_str = fmt_params(params, scale='B', precision=0, commas=False)
-    model_size_gb_str = fmt_memory(model_size, unit=GB, precision=0, commas=False)
-    pcie_effective_gb_per_s_str = fmt_bandwidth(pcie_effective_bw, unit=GB / second, precision=0, commas=False)
-    transfer_ms_str = fmt_time(transfer, ms, precision=0, commas=False)
-```
-
-[^fn-cold-start-latency]: **Cold-start latency**\index{Cold start latency!physical lower bound}: The initialization time from idle state includes storage reads, host-to-accelerator transfer, and framework setup. For a `{python} ColdStartTransferCalc.params_b_str`-parameter model in FP16 (~`{python} ColdStartTransferCalc.model_size_gb_str`) already resident in host memory, PCIe 4.0 transfer at `{python} ColdStartTransferCalc.pcie_effective_gb_per_s_str` effective bandwidth alone takes ~`{python} ColdStartTransferCalc.transfer_ms_str`; storage and initialization add to it. This lower bound makes cold-start mitigation (model caching, speculative loading) a systems design requirement.
+For the camera example, use the required deadline or percentile as the timing gate, the runtime peak allocation as the capacity gate, and the permitted quality loss as the model gate. If any gate lacks a measurement, the decision remains unresolved even when the reported inference speedup is large. A protocol should identify the missing evidence rather than treating the favorable metric as approval. An on-demand deployment adds a fourth gate, cold-start latency\index{Cold start!inference concern}, measured on the user request path as @sec-benchmarking-throughput-resource-metrics-7c2b specifies.
 
 Beyond initialization delays, inference benchmarks become misleading when operational metrics are reported without functional validation.
 
@@ -3185,7 +3135,7 @@ class EnergyPerOp:
     check(dram_vs_reg_ratio_value == 1600, f"DRAM vs. register energy ratio should be 1600, got {dram_vs_reg_ratio_value}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    fp32_vs_int8_mult_str = fmt_multiple(round(1.0 / int8_rel_value), precision=0, commas=False)
+    fp32_vs_int8_mult_str = fmt_multiple(1.0 / int8_rel_value, precision=1, commas=False)
     dram_vs_reg_ratio_mult_str = fmt_multiple(dram_vs_reg_ratio_value, precision=0, commas=True)
 ```
 
@@ -3541,15 +3491,11 @@ For a training benchmark, reproducibility is therefore the full run envelope, no
 
 Reproducibility\index{Reproducibility!cross-platform challenge} also limits comparisons across software environments. A compiler or library revision can change kernel tiling, memory access, and reduction order, so an unexplained version change is a second intervention in the experiment. The run envelope above must accompany the result; matching a model name and seed alone does not make two stacks equivalent.
 
-### Laboratory-to-deployment performance gaps {#sec-benchmarking-laboratorytodeployment-performance-gaps-16c8}
-
-Statistical rigor ensures that benchmark measurements are precise, but precise measurements of the wrong operational regime still lead to production failures. Benchmark suites must align with the physical constraints of deployment, and the mismatch is sharpest where a standardized scenario meets live serving traffic. The summary returns to these gaps as a release problem once model and data evaluation are in place.
-
-Misalignment with real-world goals\index{Laboratory-to-deployment gap!performance misalignment} persists even when a standardized benchmark is measured correctly. Offline throughput and Server throughput answer different questions, and the Server scenario still specifies only one arrival distribution. A production trace with correlated bursts or a different input mix can produce a different queue and memory footprint. The experiment must state which operating conditions its conclusion covers, and production qualification tests those boundaries before release.
-
 ### System design challenges {#sec-benchmarking-system-design-challenges-9ed2}
 
-Statistical methodology and deployment alignment govern how performance is measured and targeted. A third category of limitations stems directly from the physical hardware executing the workload. Accelerator behavior fluctuates with thermal conditions, operating system resource contention, and underlying microarchitectural topology.
+Statistical rigor ensures that benchmark measurements are precise, but precise measurements of the wrong operational regime still lead to production failures. Benchmark suites must align with the physical constraints of deployment, and the mismatch is sharpest where a standardized scenario meets live serving traffic. Misalignment with real-world goals\index{Laboratory-to-deployment gap!performance misalignment} persists even when a standardized benchmark is measured correctly. Offline throughput and Server throughput answer different questions, and the Server scenario still specifies only one arrival distribution. A production trace with correlated bursts or a different input mix can produce a different queue and memory footprint. The experiment must state which operating conditions its conclusion covers, and production qualification tests those boundaries before release. The summary returns to these gaps as a release problem once model and data evaluation are in place.
+
+Beyond deployment alignment, a further category of limitations stems directly from the physical hardware executing the workload. Accelerator behavior fluctuates with thermal conditions, operating system resource contention, and underlying microarchitectural topology.
 
 Environmental controls must match the claim being tested. Fixed clocks, CPU affinity, and isolated memory allocations can reduce noise in a comparison of implementations, while a deployment test must retain the relevant contention and thermal policy. The sustained-state mechanisms in @sec-benchmarking-mobile-edge-benchmarks-fd4f apply to servers as well as edge devices. A result obtained under tighter isolation supports an implementation comparison, but does not by itself establish production capacity.
 
@@ -3780,11 +3726,19 @@ Benchmark engineering occurs when developers tune hyperparameters, preprocessing
 
 Procurement contracts and marketing claims reward exactly this tuning. It is Goodhart's Law (@sec-benchmarking-machine-learning-benchmarking-framework-70b8) acting on an organization rather than on a single team's choice of metric.
 
+To keep this benchmark gaming\index{Benchmark gaming!distorting performance metrics} from corrupting procurement and engineering evaluations, standardized suites enforce strict run rules backed by reference implementations, submission audits, and division boundaries. Their rules forbid three classes of non-generalizable shortcuts:
+
+1. **Precision truncation without disclosure**: A compiler silently lowers numerical precision (for instance, executing intermediate activations in FP8 or INT8 instead of BF16) to inflate arithmetic throughput, without disclosing the reduced dynamic range or verifying whether the lower precision degrades numerical stability on production workloads.
+2. **Work pruning and operator elimination**: An execution engine exploits fixed benchmark test sets to skip operations required by general production inputs, such as bypassing dynamic padding removal, masking out-of-bounds tokens, or skipping input boundary validation.
+3. **Benchmark fingerprinting**: A runtime inspects input tensor dimensions, dataset hash fingerprints, or memory layout patterns to identify the benchmark suite, executing hardcoded, pre-tuned execution graphs and bespoke kernel configurations that are inaccessible to arbitrary user workloads.
+
+MLPerf detects and deters these shortcuts through its submission divisions (defined in @sec-benchmarking-communitydriven-standardization-5c56), reference-equivalence checks, and peer-reviewed code audits. The closed division permits reproducible runtime optimizations, memory layout transformations (such as converting NCHW to NHWC), hardware-generalizable kernel fusion, and approved low-precision formats with documented, verifiable output quality, while non-generalizable shortcuts remain prohibited. Broader architectural alterations belong in the open division.
+
 #### Bias and over-optimization {#sec-benchmarking-bias-overoptimization-6c65}
 
 System engineers evaluating benchmark results must distinguish legitimate architectural gains from benchmark engineering, and several practices expose the difference. Submissions that publish complete compiler flags, kernel configurations, and execution traces let independent evaluators separate general efficiency gains from harness-specific tuning. Paired results from controlled benchmarks and uncurated production traces expose discrepancies in latency distributions and memory use, and evaluating across several independently maintained suites raises the barrier against overfitting\index{Overfitting!benchmark, over-optimization to test sets}, because an optimization tailored to the quirks of one harness rarely transfers to others.
 
-Third-party verification adds accountability. Independent audits check whether reported speedups reproduce on identical hardware, as in MLPerf's reference-versus-submission validation (@sec-benchmarking-gaming), and application-specific stress tests probe failure modes that static benchmarks omit, such as vision models under adverse imaging conditions or inference engines under skewed request traffic.
+Third-party verification adds accountability. Independent audits check whether reported speedups reproduce on identical hardware, as in MLPerf's reference-versus-submission validation (@sec-benchmarking-benchmark-engineering-3af4), and application-specific stress tests probe failure modes that static benchmarks omit, such as vision models under adverse imaging conditions or inference engines under skewed request traffic.
 
 #### Benchmark evolution {#sec-benchmarking-benchmark-evolution-b523}
 
@@ -3895,16 +3849,6 @@ table[meta=label, row sep=crcr]{
 :::
 
 Managing benchmark evolution introduces a fundamental trade-off between longitudinal stability and architectural relevance. Benchmarks must remain fixed long enough to allow rigorous cross-generation hardware and software comparisons. If benchmarks change too frequently, tracking historical progress becomes impossible. Conversely, freezing a benchmark indefinitely leads to metric stagnation and over-specialization. Modern benchmarking consortia balance this trade-off by operating on fixed release cycles that introduce new representative workloads while deprecating obsolete suites.
-
-### MLPerf synthesis and benchmark gaming {#sec-benchmarking-gaming}
-
-To prevent benchmark gaming\index{Benchmark gaming!distorting performance metrics} from corrupting procurement and engineering evaluations, standardized suites enforce strict run rules backed by reference implementations, submission audits, and division boundaries. In quantitative computer architecture, benchmark rules strictly forbid three classes of non-generalizable shortcuts:
-
-1. **Precision truncation without disclosure**: A compiler silently lowers numerical precision (for instance, executing intermediate activations in FP8 or INT8 instead of BF16) to inflate arithmetic throughput, without disclosing the reduced dynamic range or verifying whether the lower precision degrades numerical stability on production workloads.
-2. **Work pruning and operator elimination**: An execution engine exploits fixed benchmark test sets to skip operations required by general production inputs, such as bypassing dynamic padding removal, masking out-of-bounds tokens, or skipping input boundary validation.
-3. **Benchmark fingerprinting**: A runtime inspects input tensor dimensions, dataset hash fingerprints, or memory layout patterns to identify the benchmark suite, executing hardcoded, pre-tuned execution graphs and bespoke kernel configurations that are inaccessible to arbitrary user workloads.
-
-MLPerf detects and deters these shortcuts through its submission divisions (defined in @sec-benchmarking-communitydriven-standardization-5c56), reference-equivalence checks, and peer-reviewed code audits. The closed division permits reproducible runtime optimizations, memory layout transformations (such as converting NCHW to NHWC), hardware-generalizable kernel fusion, and approved low-precision formats with documented, verifiable output quality, while non-generalizable shortcuts remain prohibited. Broader architectural alterations belong in the open division.
 
 Even the most rigorous system benchmarks validate only one dimension of deployment readiness. Achieving record throughput and energy efficiency on an MLPerf workload confirms that the hardware and runtime stack can deliver high computational efficiency, but it cannot determine whether the deployed model generalizes to real-world distributions or whether the underlying dataset represents the operational population. In the D·A·M taxonomy, hardware throughput (Machine) is a necessary foundation, but algorithmic fidelity (Algorithm) and dataset integrity (Data) must hold simultaneously. Validation therefore continues with the model and the data.
 
@@ -4152,7 +4096,7 @@ In @tbl-benchmarking-mobilenet-int8-validation, aggregate accuracy barely change
 
 :::
 
-The lottery ticket hypothesis\index{Lottery ticket hypothesis!compression trade-off} supplies benchmark evidence of the same nonlinear shape. Through iterative pruning, @frankle2019lottery found sparse subnetworks that match the dense network's test accuracy up to a critical sparsity, beyond which quality degrades sharply (@sec-model-compression-lottery-ticket-hypothesis-1b3d develops the hypothesis). Compression validation must therefore establish empirical trade-off curves for each specific model and architecture, identifying where the model sits on the Pareto frontier and whether further pruning yields hardware efficiency or merely degrades accuracy.
+Pruning trade-offs are also nonlinear. Iterative pruning finds subnetworks that match the dense network's accuracy up to a critical sparsity and degrade sharply beyond it [@frankle2019lottery], the evidence behind the lottery ticket hypothesis\index{Lottery ticket hypothesis!compression trade-off} of @sec-model-compression-lottery-ticket-hypothesis-1b3d. Compression validation must therefore establish empirical trade-off curves for each specific model and architecture, identifying where the model sits on the Pareto frontier and whether further pruning yields hardware efficiency or merely degrades accuracy.
 
 #### Large language model benchmarks {#sec-benchmarking-large-language-model-benchmarks-4ec7}
 

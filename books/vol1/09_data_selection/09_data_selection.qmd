@@ -500,7 +500,7 @@ Each test in the right-hand column depends on measuring what an example is worth
 
 ## Measuring Data Value {#sec-data-selection-measurement-framework-733b}
 
-A ResNet-50 trained on an aggressively filtered ImageNet subset can hold its aggregate accuracy while failing on rare classes that the filter discarded as low-density noise, and a GPT-2 run on a filtered corpus can cost less per epoch while needing more epochs to reach the same loss. A measurement framework\index{Measurement framework!data selection metrics} is therefore needed to show what a reduction actually saves. Every data selection technique claims to improve efficiency, but only measurement separates genuine training savings from work that has merely moved to another pipeline stage, or from degradation on safety-critical tail distributions. The measures build from the information-compute ratio through metrics that tie sample reduction to accuracy and a diagnostic of whether a run is data-limited, to the selection inequality that every training-time claim must satisfy.
+A ResNet-50 trained on an aggressively filtered ImageNet subset can hold its aggregate accuracy while failing on rare classes that the filter discarded as low-density noise, and a GPT-2 run on a filtered corpus can cost less per epoch while needing more epochs to reach the same loss. A measurement framework\index{Measurement framework!data selection metrics} is therefore needed to show what a reduction actually saves. Every data selection technique claims to improve efficiency, but only measurement separates genuine training savings from work that has merely moved to another pipeline stage, or from degradation on safety-critical tail distributions. The measures build from the information-compute ratio through a diagnostic of whether a run is data-limited, metrics that tie sample reduction to accuracy, and checks that a reduced set still covers the cases deployment needs, to the selection inequality that every training-time claim must satisfy.
 
 ### The information-compute ratio {#sec-data-selection-informationcompute-ratio-8c0b}
 
@@ -641,43 +641,11 @@ The goal is to improve ICR subject to target quality and required coverage, then
 
 :::
 
-A reduction in sample count remains a claim until it is shown to translate into end-to-end efficiency without silently compromising generalization. Notebook \ref{nbk-data-selection-computing-icr-coresets} holds per-sample work fixed and assumes its accuracy gains; testing the claim on a real workload requires measured metrics that weigh arithmetic savings, data movement overhead, and task quality across the complete pipeline.
-
-### Core metrics {#sec-data-selection-core-metrics-32e9}
-
-Three core metrics connect sample reduction to model quality instead of reporting accuracy alone. Performance-per-data measures accuracy gain per sample, the area under the learning curve measures cumulative learning efficiency across dataset scales, and the data compression ratio measures dataset reduction at a target accuracy. Together they complement the measured information-compute ratio (@sec-data-selection-informationcompute-ratio-8c0b). PPD measures average gain per sample, which becomes gain per FLOP once per-sample cost is fixed. AULC summarizes performance across a common dataset-size range, while DCR measures retained sample reduction at fixed quality. None establishes the causal value of an individual example.
-
-#### Performance-per-data {.unnumbered}
-
-The most direct metric, **performance-per-data (PPD)**\index{Performance-per-data!metric definition}, measures accuracy gain per sample:
-$$
-\text{PPD}(\LearningCurveSampleCount) = \frac{\text{Accuracy}(\LearningCurveSampleCount) - \text{Accuracy}(0)}{\LearningCurveSampleCount}
-$$
-where $\LearningCurveSampleCount$ is the number of training samples. A higher PPD indicates greater average improvement per sample over the stated interval. Its shape must be measured because diminishing returns and their onset are workload-dependent.
-
-#### Area under the learning curve {.unnumbered}
-
-Rather than comparing at a single point, the **area under the learning curve**\index{Area under the learning curve!definition} (AULC) integrates performance across all dataset sizes:
-$$
-\text{AULC} = \int_0^\DatasetSize\text{Accuracy}(\LearningCurveSampleCount) \, d\LearningCurveSampleCount$$
-where $\LearningCurveSampleCount$ is the dataset size and $\DatasetSize$ is the total dataset size.
-
-For the same metric and integration range, a higher AULC means stronger integrated performance across dataset sizes, though one strategy need not outperform the other at every size. Comparisons must use the same upper limit $\DatasetSize$ or normalize the integral. Measuring AULC requires training at several dataset sizes, so the metric itself spends compute, and when it guides a selection decision that cost belongs to the selection overhead.
-
-#### Data compression ratio {.unnumbered}
-
-For coreset methods, the **data compression ratio**\index{Data compression ratio!definition} (DCR) measures how much data reduction is achieved at a target accuracy:
-$$
-\text{DCR} = \frac{\FullDatasetSize}{\SubsetDatasetSize} \text{ at } \text{Accuracy}_{\text{target}}
-$$
-
-A DCR of 5$\times$ means the coreset achieves target accuracy with 20 percent of the data.
-
-Applied to the coreset notebook, the three metrics behave differently. Over one epoch, the full ImageNet set gains `{python} IcrCoresetComparison.acc_gain_random_str` while the half-size coreset gains `{python} IcrCoresetComparison.acc_gain_coreset_str`, so the coreset's PPD is higher by the same `{python} IcrCoresetComparison.icr_ratio_mult_str` as its ICR, because per-sample work is fixed. DCR cannot be computed from that notebook at all, because the two runs never reach a common target accuracy. Exposing that missing equal-quality check is exactly the job DCR is designed for.
+A reduction in sample count remains a claim until it is shown to translate into end-to-end efficiency without silently compromising generalization. Notebook \ref{nbk-data-selection-computing-icr-coresets} holds per-sample work fixed and assumes its accuracy gains. Testing the claim on a real workload first requires knowing whether the run is limited by data at all, and then measured metrics that weigh arithmetic savings, data movement overhead, and task quality across the complete pipeline.
 
 ### The compute-optimal frontier {#sec-data-selection-computeoptimal-frontier-24ba}
 
-While the core metrics in @sec-data-selection-core-metrics-32e9 measure individual techniques, a higher-level diagnostic is also needed to test whether the overall training strategy is data-limited or compute-limited. Neural scaling-law experiments [@kaplan2020scaling; @hoffmann2022chinchilla] fit power-law relationships over particular model families, datasets, and compute ranges. Controlled sweeps can use those fitted relationships to compare model and data allocations, but no single ratio diagnoses every training run.
+Before any individual technique is measured, a higher-level diagnostic tests whether the overall training strategy is data-limited or compute-limited. Neural scaling-law experiments [@kaplan2020scaling; @hoffmann2022chinchilla] fit power-law relationships over particular model families, datasets, and compute ranges. Controlled sweeps can use those fitted relationships to compare model and data allocations, but no single ratio diagnoses every training run.
 
 The Chinchilla study\index{Chinchilla!compute-optimal training}[^fn-chinchilla-scaling-law] [@hoffmann2022chinchilla] fit a compute-optimal balance between model size and training data within its experimental regime. Allocations on either side of that fitted balance used the study's compute budget less effectively.
 
@@ -865,7 +833,30 @@ GPT-2 sits well short of that reference. WebText supplies about `{python} GPT2Da
 
 If a training run underperforms expectations, extending one run can reveal whether additional optimization steps still help, but a plateau does not identify data starvation by itself. Learning-rate schedules, optimization limits, model capacity, and data quality can all produce a plateau. A reliable diagnosis compares controlled runs that vary model size, token count, and compute allocation while holding the evaluation protocol fixed.
 
-When controlled runs do point to the data, the remedy that keeps compute fixed is better selection, which changes the shape of the learning curve itself. Seeing that change requires switching axes, from the frontier's training compute to the core metrics' dataset size, where the area under each curve is the AULC defined in @sec-data-selection-core-metrics-32e9. In the illustrative curves of @fig-ppd-curve, efficient selection bends into an accuracy plateau near 25 percent of the data while uniform random sampling climbs gradually across the entire budget. The horizontal separation between the curves is the reduction in required samples, and at an identical 20 percent data budget the vertical gap is the accuracy that selection adds without any additional compute.
+When controlled runs do point to the data, the remedy that keeps compute fixed is better selection, which changes the shape of the learning curve itself. Seeing that change requires switching axes, from the frontier's training compute to dataset size, where the core metrics measure what a reduction preserves.
+
+### Core metrics {#sec-data-selection-core-metrics-32e9}
+
+Three core metrics connect sample reduction to model quality instead of reporting accuracy alone. Performance-per-data measures accuracy gain per sample, the area under the learning curve measures cumulative learning efficiency across dataset scales, and the data compression ratio measures dataset reduction at a target accuracy. Together they complement the measured information-compute ratio (@sec-data-selection-informationcompute-ratio-8c0b). PPD measures average gain per sample, which becomes gain per FLOP once per-sample cost is fixed. AULC summarizes performance across a common dataset-size range, while DCR measures retained sample reduction at fixed quality. None establishes the causal value of an individual example.
+
+#### Performance-per-data {.unnumbered}
+
+The most direct metric, **performance-per-data (PPD)**\index{Performance-per-data!metric definition}, measures accuracy gain per sample:
+$$
+\text{PPD}(\LearningCurveSampleCount) = \frac{\text{Accuracy}(\LearningCurveSampleCount) - \text{Accuracy}(0)}{\LearningCurveSampleCount}
+$$
+where $\LearningCurveSampleCount$ is the number of training samples. A higher PPD indicates greater average improvement per sample over the stated interval. Its shape must be measured because diminishing returns and their onset are workload-dependent.
+
+#### Area under the learning curve {.unnumbered}
+
+Rather than comparing at a single point, the **area under the learning curve**\index{Area under the learning curve!definition} (AULC) integrates performance across all dataset sizes:
+$$
+\text{AULC} = \int_0^\DatasetSize\text{Accuracy}(\LearningCurveSampleCount) \, d\LearningCurveSampleCount$$
+where $\LearningCurveSampleCount$ is the dataset size and $\DatasetSize$ is the total dataset size.
+
+For the same metric and integration range, a higher AULC means stronger integrated performance across dataset sizes, though one strategy need not outperform the other at every size. Comparisons must use the same upper limit $\DatasetSize$ or normalize the integral. Measuring AULC requires training at several dataset sizes, so the metric itself spends compute, and when it guides a selection decision that cost belongs to the selection overhead.
+
+In the illustrative curves of @fig-ppd-curve, efficient selection bends into an accuracy plateau near 25 percent of the data while uniform random sampling climbs gradually across the entire budget, so over the same range the efficient curve encloses the larger area. The horizontal separation between the curves is the reduction in required samples, and at an identical 20 percent data budget the vertical gap is the accuracy that selection adds without any additional compute.
 
 ::: {#fig-ppd-curve fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Diminishing Returns of Data**: The synthetic data-efficient curve (blue) reaches the same plateau with fewer samples than random sampling (gray). The vertical red arrow marks the modeled performance gap at a fixed dataset size; measured curves need not have this shape." fig-alt="Line chart with Dataset Size (% of Total) on the x-axis and Model Accuracy (%) on the y-axis. A gray dashed Random Sampling curve rises gradually, while a blue Efficient Selection curve rises more steeply and reaches the same plateau earlier; the area between them is lightly shaded blue. A vertical red double-headed arrow is labeled Performance Gap (Same Data Budget)."}
 
@@ -928,9 +919,22 @@ plt.close()
 
 :::
 
+#### Data compression ratio {.unnumbered}
+
+For coreset methods, the **data compression ratio**\index{Data compression ratio!definition} (DCR) measures how much data reduction is achieved at a target accuracy:
+$$
+\text{DCR} = \frac{\FullDatasetSize}{\SubsetDatasetSize} \text{ at } \text{Accuracy}_{\text{target}}
+$$
+
+A DCR of 5$\times$ means the coreset achieves target accuracy with 20 percent of the data.
+
+Applied to the coreset notebook, the three metrics behave differently. Over one epoch, the full ImageNet set gains `{python} IcrCoresetComparison.acc_gain_random_str` while the half-size coreset gains `{python} IcrCoresetComparison.acc_gain_coreset_str`, so the coreset's PPD is higher by the same `{python} IcrCoresetComparison.icr_ratio_mult_str` as its ICR, because per-sample work is fixed. DCR cannot be computed from that notebook at all, because the two runs never reach a common target accuracy. Exposing that missing equal-quality check is exactly the job DCR is designed for.
+
 These metrics identify when marginal samples waste training compute rather than improve generalization. They can look good, however, while the reduced set still fails on rare cases, so coverage must be checked as well.
 
-Data selection techniques implicitly rank sample value, and validating that a curated dataset preserves model quality requires systematic benchmarking across three dimensions. Coverage metrics validate that coreset selection preserved representation across classes and demographic groups. Distribution alignment metrics (such as KL divergence and population stability index, which @sec-appdx-data-foundations-measuring-drift-divergence-a6dd defines) detect whether the curated training set drifted from the deployment distribution. Label quality metrics (inter-annotator agreement, and confident learning, which flags examples whose given label disagrees with a model's confident out-of-sample prediction) validate that active learning did not introduce systematic labeling errors. A 50 percent dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
+### Validating a reduced dataset {#sec-data-selection-validating-reduced-dataset}
+
+Data selection techniques implicitly rank sample value, and validating that a curated dataset preserves model quality requires systematic benchmarking across three dimensions. Coverage metrics validate that coreset selection preserved representation across classes and demographic groups. Distribution alignment metrics (such as KL divergence and population stability index, the drift statistics of @sec-data-engineering-detecting-responding-data-drift-509a) detect whether the curated training set drifted from the deployment distribution. Label quality metrics (inter-annotator agreement, and confident learning, which flags examples whose given label disagrees with a model's confident out-of-sample prediction) validate that active learning did not introduce systematic labeling errors. A 50 percent dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
 
 ::: {.column-margin .margin-pointer}
 ↪ Coverage, label-quality, and distribution-alignment checks are developed into a full data-benchmarking protocol in @sec-benchmarking-data-benchmarking-22f9.
@@ -952,7 +956,7 @@ An efficiency gain measured against a single benchmark can evaporate under distr
 
 ### The selection inequality {#sec-data-selection-selection-inequality-3b7e}
 
-Every measure so far counts learning against training compute alone. A selection method also spends time choosing, and a claim that it shortens training must count that time.
+The efficiency measures so far count learning against training compute alone. A selection method also spends time choosing, and a claim that it shortens training must count that time.
 
 To reduce overall training time at a fixed quality target, selection plus subset training must take less time than training on the full corpus. Let $\SelectionTime$ be total wall-clock selection overhead, including candidate scoring and any prerequisite scorer preparation charged to the training run. Let $\TrainingTime(\DatasetSize)$ be wall-clock training time for a dataset of size $\DatasetSize$, and let $\SubsetDatasetSize$ and $\FullDatasetSize$ be the retained and full sample counts. @Eq-selection-inequality formalizes this break-even condition as the **selection inequality**\index{Selection inequality!definition}:
 $$ \SelectionTime+ \TrainingTime(\SubsetDatasetSize) < \TrainingTime(\FullDatasetSize) $$ {#eq-selection-inequality}
@@ -3161,9 +3165,7 @@ Data loaders (whose general mechanism @sec-ml-frameworks-domainspecific-data-org
 
 Converting a logical set of selected indices into sequential physical reads requires choosing between two storage strategies. For static pruning (such as a fixed coreset or a deduplicated corpus), the pipeline can materialize the subset offline by repacking the retained records into new, contiguous shards. This step incurs a one-time sequential read and write cost alongside additional disk storage, but ensures that every subsequent training epoch transfers only retained bytes from storage. Conversely, when the selection policy updates dynamically across training iterations or active-learning rounds, repeatedly repacking multi-terabyte shards on disk would choke the filesystem on write bandwidth. Data loaders instead stream the original, full-volume shards sequentially into host memory and discard unselected records before populating the shuffle buffer. This online filtering preserves sequential read throughput and eliminates seek penalties, but it leaves physical storage traffic unchanged: the host continues to read 100 percent of the corpus bytes from disk even when accelerators train on only a 10 percent subset. Systems engineers must count this ongoing read traffic on storage-bound nodes and include offline materialization costs when evaluating the selection inequality.
 
-In distributed training across multiple accelerators, each worker maintains an independent shuffle buffer over a non-overlapping shard. Because randomization is local to each worker's memory buffer rather than global across the corpus, rare classes or boundary cases concentrated in specific shards receive uneven exposure across workers unless the dataset is stratified and shards are balanced prior to distribution.
-
-::: {#chk-data-selection-selection-inequality .callout-checkpoint title="The selection inequality"}
+::: {#chk-data-selection-selection-inequality .callout-checkpoint title="Selection overhead and storage access"}
 
 **Equation checks**
 
@@ -3326,106 +3328,9 @@ In a basic data-parallel layout, each worker processes a distinct shard and mode
 
 : **Selection Dependencies in Distributed Training**: The table starts from a common centralized formulation of each technique and identifies the coordination problem introduced by sharding. Distributed variants may relax rather than reproduce the centralized result exactly. {#tbl-selection-dependencies .striped .hover}
 
-The selection dependencies admit several architectural solutions, each navigating a different point in the consistency-scalability trade-off space. The most straightforward approach centralizes selection while distributing training. A coordinator process performs selection on the full dataset, then distributes selected indices to workers. This preserves selection quality but introduces a single bottleneck:
+The selection dependencies admit two broad architectures, each at a different point in the trade-off between consistency and scalability. Centralized selection keeps selection global while training stays distributed. A coordinator process scores the full dataset and dispatches the selected indices to the workers, which preserves selection quality but makes the coordinator a single bottleneck that can serialize scoring or index dispatch. Whether that overhead is acceptable depends on the selection payload, refresh rate, worker count, and copies through shared host memory, and adding accelerator workers does not increase the host memory available to the coordinator. Hierarchical selection\index{Hierarchical selection!distributed coreset} distributes the selection computation itself. Each worker selects candidates from its own shard, and the coordinator merges and reranks them before dispatching the final indices (@fig-distributed-coreset-architecture). Shard-local selection reduces coordinator load but introduces a quality trade-off, because local quotas and score distributions may not preserve the global ranking or rare groups spread unevenly across shards. The merge step therefore needs normalization, coverage constraints, or a second global pass.
 
-```
-Coordinator: score_all_samples() → selected_indices
-Broadcast: selected_indices → all workers
-Workers: train on subset(local_shard, selected_indices)
-```
-
-The semantics remain clean, but the coordinator can serialize scoring or index dispatch. Whether that overhead is acceptable depends on the selection payload, refresh rate, worker count, and copies through shared host memory. Adding accelerator workers does not increase the host memory available to the coordinator.
-
-Hierarchical selection\index{Hierarchical selection!distributed coreset} addresses this scalability limitation by distributing the selection computation itself. Each worker performs local selection on its shard, then a coordinator merges results:
-
-```
-Workers: local_selected = select_top_k(local_shard)
-Coordinator: global_selected = merge_and_rerank(all local_selected)
-Broadcast: final_indices → all workers
-```
-
-Shard-local selection reduces coordinator load but introduces a quality trade-off: local quotas and score distributions may not preserve the global ranking or rare groups spread unevenly across shards. The merge step therefore needs normalization, coverage constraints, or a second global pass.
-
-Cross-shard deduplication has the same visibility requirement. Workers can compute MinHash\index{MinHash!distributed, cross-shard deduplication} signatures locally, but a shared merge must compare candidates across shard boundaries. Independent local hash tables cannot detect a duplicate whose counterpart belongs to another worker. The merge must fit the host's memory budget or operate in bounded batches, rather than assuming that more workers supply more host capacity.
-
-#### Consistency challenges in active learning {#sec-data-selection-consistency-challenges-active-learning-59c9}
-
-Shard-local selection already needs a coherent score scale, but active learning introduces an additional complication because the model changes during selection. Consider what happens when Worker A scores samples using the model at step $\OptimizerStepIndex$ while Worker B simultaneously updates the model to step $\OptimizerStepIndex+1$. Worker A's scores are now stale and may select samples that the updated model would rank differently.
-
-The scoring schedule therefore defines the meaning of a query, not merely its cost. A reproducible system versions the model checkpoint, candidate-pool snapshot, scoring rule, and selected indices together. It can then measure how much ranking agreement decays with checkpoint age and choose a refresh interval from that evidence rather than from an arbitrary number of steps.
-
-Several strategies mitigate this staleness problem, each with distinct overhead characteristics:
-
-- **Synchronous scoring**\index{Synchronous scoring!active learning}: All workers pause training and score simultaneously, guaranteeing consistency but at substantial cost in accelerator utilization.
-- **Periodic score refresh**\index{Periodic score refresh!active learning}: Workers re-score every $\ScoreRefreshInterval$ epochs rather than every batch, trading freshness for reduced overhead.
-- **Checkpoint-robust selection**: The system selects samples that exhibit high uncertainty under multiple model checkpoints, favoring decisions that are less sensitive to checkpoint choice. Agreement across past checkpoints is a robustness heuristic; ranking quality still needs validation as the model evolves.
-
-An illustrative one-host scenario with eight accelerator workers estimates the cost of the shard-local scoring and centralized merge of a one-time coreset selection. Repeated refreshes incur this cost again; the assumed phase times include parallel execution and host coordination rather than promising linear speedup from the worker count.
-
-```{python}
-#| echo: false
-#| label: distributed-overhead-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ DISTRIBUTED CORESET SELECTION OVERHEAD
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Distributed coreset selection" callout in
-# │          @sec-data-selection-distributed-selection-d03e.
-# │
-# │ Goal: Show where the time goes when eight accelerators share one selection job.
-# │ Show: Accelerator phases (embedding, proxy scoring) vs. host phases
-# │       (cross-shard deduplication, centralized merge) and the total.
-# │ How:  Accelerator phases from the one-H100 forward-pass times split across
-# │       eight workers; host phases are scenario assumptions.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Datasets
-from mlsysim.core.units import count, second, minute
-from mlsysim.fmt import check, fmt_count, fmt_percent, fmt_time
-
-# ┌── LEGO ───────────────────────────────────────────────
-class DistributedOverheadCalc:
-    """Eight H100 workers on one host: accelerator phases take seconds, host phases take minutes."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    workers = 8  # one machine at the top of this book's scope
-    t_embed_one = ResNetEpochOnH100.score_time  # target-backbone forward pass over the pool
-    t_score_one = SelectionInequalityCalc.score_b_time  # proxy forward pass over the pool
-    t_dedup = 15 * minute  # scenario assumption: host-side signature hashing and cross-shard merge
-    t_select = 2 * minute  # scenario assumption: centralized candidate merge and dispatch
-    coreset_fraction = 0.10
-    imagenet_images = Datasets.ImageNet.training_examples.to(count).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    t_embed = (t_embed_one / workers).to(second)
-    t_score = (t_score_one / workers).to(second)
-    t_accel = t_embed + t_score
-    t_host = (t_dedup + t_select).to(second)
-    t_total_overhead = (t_accel + t_host).to(minute)
-    host_share = (t_host / (t_accel + t_host)).to("").magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(16 < t_total_overhead.magnitude < 18, f"Prose says about 17 minutes in total, got {t_total_overhead}.")
-    check(t_accel.magnitude < 10, f"Prose says the accelerator phases take seconds, got {t_accel}.")
-    check(host_share > 0.99, f"Prose says the host phases dominate, got {host_share:.3f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    t_accel_s_str = fmt_time(round(t_accel.magnitude) * second, 'second', precision=0, style='word')
-    t_total_overhead_min_str = fmt_time(round(t_total_overhead.magnitude) * minute, 'minute', precision=0, style='word')
-    coreset_pct_str = fmt_percent(coreset_fraction, precision=0, commas=False, style='prose')
-    imagenet_images_m_str = fmt_count(imagenet_images, scale="M", precision=1, commas=False)
-    workers_str = fmt_count(workers, precision=0, commas=False)
-```
-
-::: {#exmp-data-selection-distributed-coreset-selection .callout-example title="Distributed coreset selection"}
-
-**Scenario**: One host with `{python} DistributedOverheadCalc.workers_str` H100 accelerator workers selects a `{python} DistributedOverheadCalc.coreset_pct_str` coreset from ImageNet (`{python} DistributedOverheadCalc.imagenet_images_m_str` images) across local worker processes.
-
-**Diagnosis**: Scoring on one accelerator leaves the other devices unused. Shard-local embedding, parallel signature generation with cross-shard deduplication, local EL2N scoring, and a centralized candidate merge distribute that work. Under the assumed host phase times, dataset selection takes about `{python} DistributedOverheadCalc.t_total_overhead_min_str`, almost all of it on the host: the embedding and scoring passes, split across the accelerators, take about `{python} DistributedOverheadCalc.t_accel_s_str`.
-
-**Systems lesson**: Parallel scoring reduces work per accelerator, while embeddings, score arrays, and the global index must still fit within the machine's memory budget. In @fig-distributed-coreset-architecture, “Coordinator Node” names the logical selection role on this same host; the worker boxes represent accelerator processes, not additional machines. Workers return candidate scores and indices to the coordinator, which maintains the global FAISS index for embedding-based checks, merges local candidates, and dispatches the final coreset indices. The merge must enforce coverage floors and compare its result with the centralized reference, because candidates discarded locally cannot be recovered from their scores alone.
-
-:::
-
-::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: Parallel shard-local scoring reduces the work assigned to a centralized rank-merging coordinator. Workers send local EL2N scores upward; the coordinator merges them and broadcasts final coreset indices. The design is beneficial only when this coordination overhead remains below the training time saved by the coreset." fig-alt="Architecture diagram with one wide Coordinator Node above three representative worker boxes labeled Worker 0, Worker 1, and Worker N, separated by ellipses. The coordinator lists a global FAISS embedding index, merged local selections, and broadcast final coreset indices. Paired arrows show local scores flowing upward from workers and final coreset indices flowing downward."}
+::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: Parallel shard-local scoring reduces the work assigned to a centralized rank-merging coordinator. Workers send local EL2N scores upward; the coordinator merges them and broadcasts final coreset indices. All boxes are processes on one host; the coordinator is a selection role, and each worker drives one accelerator. The design is beneficial only when this coordination overhead remains below the training time saved by the coreset." fig-alt="Architecture diagram with one wide Coordinator Node above three representative worker boxes labeled Worker 0, Worker 1, and Worker N, separated by ellipses. The coordinator lists a global FAISS embedding index, merged local selections, and broadcast final coreset indices. Paired arrows show local scores flowing upward from workers and final coreset indices flowing downward."}
 
 ```{.tikz}
 \scalebox{0.85}{%
@@ -3477,6 +3382,22 @@ fill=GreenLine,text=white] (WW2){\textbf{Worker N}};
 ```
 
 :::
+
+Shard locality affects training as well as selection. Each worker maintains an independent shuffle buffer over a non-overlapping shard, and because randomization is local to each worker's memory buffer rather than global across the corpus, rare classes or boundary cases concentrated in specific shards receive uneven exposure across workers unless the dataset is stratified and shards are balanced prior to distribution.
+
+Cross-shard deduplication needs the same global view as hierarchical selection. Workers can compute MinHash\index{MinHash!distributed, cross-shard deduplication} signatures locally, but a shared merge must compare candidates across shard boundaries. Independent local hash tables cannot detect a duplicate whose counterpart belongs to another worker. The merge must fit the host's memory budget or operate in bounded batches, rather than assuming that more workers supply more host capacity.
+
+#### Consistency challenges in active learning {#sec-data-selection-consistency-challenges-active-learning-59c9}
+
+Shard-local selection already needs a coherent score scale, but active learning introduces an additional complication because the model changes during selection. Consider what happens when Worker A scores samples using the model at step $\OptimizerStepIndex$ while Worker B simultaneously updates the model to step $\OptimizerStepIndex+1$. Worker A's scores are now stale and may select samples that the updated model would rank differently.
+
+The scoring schedule therefore defines the meaning of a query, not merely its cost. A reproducible system versions the model checkpoint, candidate-pool snapshot, scoring rule, and selected indices together. It can then measure how much ranking agreement decays with checkpoint age and choose a refresh interval from that evidence rather than from an arbitrary number of steps.
+
+Several strategies mitigate this staleness problem, each with distinct overhead characteristics:
+
+- **Synchronous scoring**\index{Synchronous scoring!active learning}: All workers pause training and score simultaneously, guaranteeing consistency but at substantial cost in accelerator utilization.
+- **Periodic score refresh**\index{Periodic score refresh!active learning}: Workers re-score every $\ScoreRefreshInterval$ epochs rather than every batch, trading freshness for reduced overhead.
+- **Checkpoint-robust selection**: The system selects samples that exhibit high uncertainty under multiple model checkpoints, favoring decisions that are less sensitive to checkpoint choice. Agreement across past checkpoints is a robustness heuristic; ranking quality still needs validation as the model evolves.
 
 Positive ROI can erode quickly when workers coordinate frequently during training. Selection across workers adds coordination overhead\index{Coordination overhead!multi-accelerator data selection} whose size depends on what is synchronized and how often. That overhead must remain smaller than the training time saved, and when it approaches that limit, a simpler strategy or a longer refresh interval restores the margin.
 
@@ -3843,18 +3764,7 @@ When labeling budget, redundancy, rare classes, privacy, and convergence speed c
 
 : **Three-Stage Data Selection Pipeline**: The ranges illustrate possible outcomes rather than portable expectations. Actual gains depend on the dataset, model, selection method, and target metric. {#tbl-data-selection .striped .hover tbl-colwidths="[23,21,28,28]"}
 
-Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why. The same mapping recurs across the five lighthouse workloads, because each is bound by a different resource.
-
-| **Constraint**                  | **Candidate Technique**   | **Why**                                              |
-|:--------------------------------|:--------------------------|:-----------------------------------------------------|
-| **Limited labeling budget**     | Active Learning           | Maximizes label ROI by selecting informative samples |
-| **High redundancy in data**     | Deduplication + Coreset   | Removes waste before training begins                 |
-| **Rare classes or edge cases**  | Synthetic Generation      | Creates samples that do not exist in raw data        |
-| **Slow convergence**            | Curriculum Learning       | Improves gradient quality in early training          |
-| **Privacy requirements**        | Privacy-audited synthesis | Reduce direct use of real records; verify leakage    |
-| **Capable teacher, small data** | Knowledge Distillation    | Teacher's soft targets add supervision per example   |
-
-: **Technique Selection Guide by Primary Constraint**: Candidate data-selection techniques mapped to the dominant resource constraint in the ML pipeline. The table begins the diagnosis; prerequisites and measured ROI determine the final choice. {#tbl-technique-selection .striped .hover}
+Once the dominant constraint is named, it points to a candidate technique, and the five lighthouse workloads, each bound by a different resource, show the pairing in practice. Privacy carries a condition of its own. When privacy requirements limit direct use of real records, privacy-audited synthesis can reduce that use, provided the synthetic data is checked for leakage of the records it was derived from.
 
 ::: {#lhs-data-selection-lighthouse-data-selection .callout-lighthouse title="Lighthouse data selection"}
 
@@ -3883,7 +3793,7 @@ Across these workloads, data selection functions as a systems optimization tailo
 
 :::
 
-Both @tbl-technique-selection and the lighthouse mapping assume a single dominant constraint, but real projects face several at once. The triage flowchart in @fig-technique-decision-tree therefore routes candidate strategies hierarchically from the root bottleneck (labeling expense, compute limits, or data scarcity) through operational checks on oracle availability, dataset redundancy, teacher or simulator support, and unlabeled-pool size to isolate actionable techniques.
+The lighthouse mapping assumes a single dominant constraint, but real projects face several at once. The triage flowchart in @fig-technique-decision-tree therefore routes candidate strategies hierarchically from the root bottleneck (labeling expense, compute limits, or data scarcity) through operational checks on oracle availability, dataset redundancy, teacher or simulator support, and unlabeled-pool size to isolate actionable techniques.
 
 ::: {#fig-technique-decision-tree fig-pos="htb" fig-cap="**Data Selection Decision Tree**: The tree begins with the primary bottleneck (labeling cost, compute cost, or data scarcity) and narrows each branch using available pools, oracles, redundancy, teachers, or simulators. Its leaves identify candidate techniques; projects with multiple binding constraints may require more than one branch." fig-alt="Decision tree rooted at Primary bottleneck, with branches for labeling cost, compute cost, and data scarcity. Labeling cost branches to self-supervised, active, or semi-supervised learning based on pool and oracle availability. Compute cost branches through redundant data to deduplication plus coreset selection or curriculum learning. Data scarcity branches through teacher or simulator availability to knowledge distillation, synthetic generation, or data augmentation."}
 ```{.tikz}
@@ -3996,11 +3906,11 @@ Data selection techniques are not mutually exclusive, but combining them does no
 
 *Stages can compound efficiency gains when their effects do not overlap and their overhead remains small; combined savings must be measured rather than assumed.*
 
-A choice made at the data layer does not stay there. This decision process weighs a technique by its own scoring cost and the training work it removes, but a smaller or reordered corpus also changes what the model learns to represent, which hardware resource binds once compute pressure falls, and how much synchronization a multi-accelerator run performs. A selection that looks optimal in isolation can therefore move cost into compression, the input pipeline, or communication, so the chosen strategy must be checked against the layers it feeds.
+A choice made at the data layer does not stay there. This decision process weighs a technique by its own scoring cost and the training work it removes, but a smaller or reordered corpus also changes what the model learns to represent, and the compression and deployment stages downstream inherit that representation. A selection that looks optimal in isolation can therefore move cost into those later stages, so the chosen strategy must be checked against the layers it feeds.
 
 ## Cross-Layer Interactions {#sec-data-selection-crosslayer-interactions-1f39}
 
-Halving a training corpus halves the forward and backward passes, yet the resulting model may be no cheaper to compress or serve, and a selection policy that balanced work on one accelerator can leave eight workers idle at a synchronization barrier. Real ML systems combine data selection with model-level efficiency, machine-level throughput, and distributed training, and these cross-layer interactions\index{Cross-layer interaction!cross-optimization effects} amplify or undermine each other in ways no single layer reveals.
+Halving a training corpus halves the forward and backward passes, yet the resulting model may be no cheaper to compress or serve. Real ML systems combine data selection with model compression and hardware acceleration, and these cross-layer interactions\index{Cross-layer interaction!cross-optimization effects} amplify or undermine each other in ways no single layer reveals.
 
 Model compression (post-training weight pruning, lower-precision representation, and distillation) acts on the trained network, and its arithmetic reductions reach serving latency only when the target execution substrate and runtime kernels support the resulting sparsity or precision patterns [@hoefler2021sparsity]. The training corpus shapes the representations that compression later works on. A model trained on an uncurated, repetitive corpus can spend capacity on redundant features that post-training pruning then discards, whereas a curated corpus of diverse, informative examples can yield more compact representations from the start. That effect is an empirical hypothesis to verify, not a property of every selected dataset. The two levers therefore compose without substituting for each other. Data selection reduces training work and shapes learned representations, model compression shrinks the deployment artifact, and their combined impact is measured on serving latency and task accuracy rather than inferred from the upstream dataset reduction.
 
@@ -4012,21 +3922,7 @@ Model compression (post-training weight pruning, lower-precision representation,
 ↪ Co-designing post-training pruning and quantization under the silicon contract is developed in @sec-model-compression-optimization-framework-9e21.
 :::
 
-While model-level efficiency determines the computational work remaining after training, machine-level throughput determines how efficiently hardware executes the training loop itself. Under the iron law of ML systems, training runtime depends on whether execution is bound by input data transfer ($\DataVolume/\Bandwidth$), arithmetic execution ($\Operations/(\PeakRate \cdot \EfficiencyHw)$), or scheduling latency ($\Latency$). Pruning samples reduces total floating-point operations, but non-uniform sampling and dynamic filtering alter data-loader access patterns and expose new hardware limits. @Tbl-bottleneck-shifts outlines how selection strategies shift the dominant system bottleneck.
-
-| **Observed Condition**                  | **Possible Bottleneck**        | **Candidate Response**                    |
-|:----------------------------------------|:-------------------------------|:------------------------------------------|
-| **Input rate below accelerator demand** | Storage, decode, or host link  | Sharding, prefetching, parallel decode    |
-| **Low-intensity training kernels**      | Accelerator memory bandwidth   | Fusion, reduced traffic, lower precision  |
-| **Dynamic scoring dominates iteration** | Selection compute or index I/O | Proxy models, cached scores or embeddings |
-
-: **Diagnosing Bottlenecks after Data Selection**: Dataset and access-pattern changes can expose a different bottleneck, but dataset size alone does not determine the limiting resource. Re-profile the pipeline and match the response to the measured condition. {#tbl-bottleneck-shifts .striped .hover}
-
-Data selection can therefore shift the hardware execution regime. A technique that reduces sample count by 80 percent may relieve pressure on the accelerator's arithmetic units, only to expose random-access storage latency, host-to-device PCIe bandwidth, or scoring overhead as the new critical path. Before applying aggressive data reduction, engineers must profile the full pipeline to verify which bottleneck actually binds execution.
-
-The same caution applies across the several accelerators of one machine. With per-device batch size and epoch count held fixed, pruning the corpus removes optimizer steps and with them the gradient all-reduce rounds whose mechanics @sec-model-training-data-parallelism-ad1c develops. The scoring and index exchanges of @sec-data-selection-distributed-selection-d03e, however, travel through host memory and CPU dispatch rather than the accelerator interconnect, and an imbalanced shard can stall every device at the next synchronization barrier, eroding the compute time that pruning saved.
-
-Pairwise interactions expose localized bottlenecks, but production deployments execute these techniques as one pipeline in two stages: data selection and training turn raw inputs into a trained model, and post-training compression and hardware acceleration then deploy that artifact (@fig-optimization-stack). Every stage along this end-to-end path amplifies or attenuates downstream efficiency\index{Optimization stack!multiplicative effects}.
+Production deployments execute these techniques as one pipeline in two stages: data selection and training turn raw inputs into a trained model, and post-training compression and hardware acceleration then deploy that artifact (@fig-optimization-stack). Every stage along this end-to-end path amplifies or attenuates downstream efficiency\index{Optimization stack!multiplicative effects}.
 
 ::: {#fig-optimization-stack fig-env="figure" fig-pos="htb" fig-cap="**The Optimization Stack**: Data artifacts flow through selection and training before the resulting model enters compression and deployment. Upstream changes propagate quality and cost effects downstream, but reducing training data does not automatically simplify the model or deployment hardware." fig-alt="Two-row pipeline. The top row shows raw data, data selection, curated data, training, and a model. The bottom row shows the model, compression, a compact model, hardware, and a deployed system."}
 ```{.tikz}
@@ -4623,9 +4519,9 @@ Every row of the opening chapter map (@tbl-data-selection-chapter-spine) has now
 |:-----------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------|
 | **Information-compute ratio**      | $\text{ICR} = \FiniteChange\DataInformationContent/\FiniteChange\Operations$                                                          | @sec-data-selection-informationcompute-ratio-8c0b                       |
 | **Marginal ICR (log-information)** | $\text{ICR}(\DatasetSize) \approx 1/(\OperationsPerSample\cdot \DatasetSize)$                                                         | @eq-icr-decay                                                           |
+| **Training compute**               | $\Operations \approx 6\Parameters\DatasetSize$; compute-optimal tokens $\ComputeOptimalTokenCount \propto \sqrt{\Operations}$         | @sec-data-selection-computeoptimal-frontier-24ba                        |
 | **Performance-per-data**           | $\text{PPD}(\LearningCurveSampleCount) = [\text{Accuracy}(\LearningCurveSampleCount) - \text{Accuracy}(0)]/\LearningCurveSampleCount$ | @sec-data-selection-core-metrics-32e9                                   |
 | **Data compression ratio**         | $\text{DCR} = \FullDatasetSize/\SubsetDatasetSize$ at target accuracy                                                                 | @sec-data-selection-core-metrics-32e9                                   |
-| **Training compute**               | $\Operations \approx 6\Parameters\DatasetSize$; compute-optimal tokens $\ComputeOptimalTokenCount \propto \sqrt{\Operations}$         | @sec-data-selection-computeoptimal-frontier-24ba                        |
 | **Selection inequality**           | $\SelectionTime+ \TrainingTime(\SubsetDatasetSize) < \TrainingTime(\FullDatasetSize)$                                                 | @eq-selection-inequality                                                |
 | **Curriculum warmup samples**      | $\DatasetSize (\WarmupEpochCount+1)/2$ in place of $\WarmupEpochCount\cdot \DatasetSize$                                              | @sec-data-selection-curriculum-learning-easy-hard-2c4e                  |
 | **Offline distillation targets**   | $4\ClassCount$ bytes per sample in place of $\lceil \log_2 \ClassCount \rceil$ bits                                                   | @sec-data-selection-knowledge-distillation-compressing-information-ce68 |
