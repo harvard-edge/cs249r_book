@@ -4276,7 +4276,7 @@ Recommendation systems stress a different part of the machine than CNNs or trans
 
 With DLRM, the roster of five families is complete, and each has been analyzed on its own terms: the pattern it targets, the computation it performs, the mapping it induces, and the bottleneck it exposes. A deployment rarely gets to examine one family in isolation. The same accelerator that serves a vision model today may serve a language model or a recommender tomorrow, and the architecture decides which of its resources gives out first.
 
-## Choosing an Architecture {#sec-network-architectures-architecture-selection-framework-a442}
+## Comparing and Choosing Architectures {#sec-network-architectures-architecture-selection-framework-a442}
 
 The three requests that opened this chapter can now be costed in numbers. A single ResNet-50 frame performs about `{python} LighthouseSpecs.resnet_gflop_str` of arithmetic against `{python} LighthouseSpecs.resnet_fp32_mb_str` of FP32 weights, and each convolutional filter is reused across its feature map, creating opportunities to keep arithmetic units busy. A single GPT-2 token at batch size one performs about `{python} LighthouseSpecs.gpt2_gflop_per_token_str` against `{python} AutoregressiveInferenceCost.fp16_weight_gb_str` of FP16 weights. Streaming those weights once gives a weight-only arithmetic intensity of roughly `{python} AutoregressiveInferenceCost.intensity_fp16_str`, making bandwidth a likely limit. A DLRM request gathers a handful of embedding rows from tables totaling `{python} LighthouseSpecs.dlrm_model_size_gb_str`, more than the accelerator's `{python} CapacityWall.a100_mem_gb_str` of memory, so before any question of speed arises the system must decide where those tables live.
 
@@ -4501,55 +4501,15 @@ The parameter and activation columns of @tbl-nn-architectures-machine-demands de
 
 Whether an access incurs DRAM traffic at all depends on the working set\index{Working set size}, the data the execution units need at once. Small layers, such as the $784{\times}128$ reference layer at `{python} MLPLayerStats.weight_kb_str` in FP32, fit in on-chip SRAM. Production-width layers of tens of megabytes do not, which is why unbatched MLP inference and transformer decode stream their weights from off-chip memory on every request. Accelerators answer both ends of the table with memory hierarchy rather than arithmetic. HBM\index{HBM!streaming weights} stacks DRAM dies beside the processor to supply the streaming rows at more than an order of magnitude above standard DDR channels, and multi-megabyte on-chip SRAM, often an explicitly managed scratchpad\index{Scratchpad memory!explicit control}, lets compilers stage tiles so that reuse happens on chip. The intensity column measures how much a family can profit from that staging, and it doubles as an energy column.
 
-```{python}
-#| echo: false
-#| label: energy-consumption-analysis
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ENERGY CONSUMPTION ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Energy perspective callout in the workload-profile subsection
-# │
-# │ Goal: Contrast the energy cost of compute vs. data movement.
-# │ Show: That DRAM access consumes over 100× more energy than an FP32 multiply.
-# │ How: Compare picojoules per FLOP vs. a 32-bit DRAM read.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-from mlsysim.fmt import fmt_int, fmt, check, fmt_energy, fmt_energy_per_flop, fmt_multiple
-
-class EnergyConsumptionAnalysis:
-    """Contrast energy cost of compute vs. data movement using Horowitz-style anchors."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
-    multiply_pj = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude  # pJ per FP32 multiply
-    dram_pj = ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude  # pJ per 32-bit access
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dram_to_flop_ratio = dram_pj / multiply_pj
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(dram_to_flop_ratio > 100, "DRAM access should cost over 100x a reference FP32 FLOP.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_multiply_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
-    energy_dram_pj_str = fmt_energy(ENERGY_DRAM_ACCESS_PJ, unit=pJ, precision=0, commas=False)
-    energy_ratio_mult_str = fmt_multiple(round(dram_to_flop_ratio), precision=0, commas=True)
-```
-
 ::: {.column-margin}
 ![](images/svg/vol1_nn_architectures_margin_004.svg){width="100%" fig-alt="Two horizontal log-scale energy bars labeled DRAM 640 pJ and FP32 multiply 3.7 pJ, with the DRAM bar much longer."}
 
 *Moving a 32-bit value from DRAM costs far more energy than one FP32 multiply.*
 :::
 
-::: {#psp-nn-architectures-energy-cost-data-movement .callout-perspective title="The energy cost of data movement"}
+::: {#psp-nn-architectures-energy-cost-data-movement .callout-perspective title="Reuse sets each family's energy cost"}
 
-A core systems principle: *moving data costs more than computing on it*. In the reference model of @horowitz2014, an FP32 multiply costs about `{python} EnergyConsumptionAnalysis.energy_multiply_pj_str`, while fetching one 32-bit operand from off-chip DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_pj_str`, a gap of `{python} EnergyConsumptionAnalysis.energy_ratio_mult_str` against the multiply alone and `{python} DenseLayerEnergy.move_vs_arith_mult_str` against the full multiply-accumulate that a dense layer performs, the basis used for the MLP and RNN above. Low-intensity rows are therefore energy-dominated by DRAM traffic. An unbatched MLP or a decode step loads each weight once per request and spends most of its energy moving it. A CNN amortizes each filter load over $\FeatureMapHeight\times \FeatureMapWidth$ applications, so the locality that makes it compute bound also makes it energy efficient, unless a fully materialized im2col buffer inflates temporary traffic by up to $\KernelSize^2$. An RNN keeps its compact state in SRAM but idles execution units across serial steps, which raises energy per token. Tiled attention keeps score blocks on chip, so its energy tracks matrix multiplication rather than DRAM round-trips.
-
-Later optimizations exploit this principle directly. Quantization reduces the bits moved per value and pruning removes unnecessary movement (both developed in @sec-model-compression), while tiling keeps working sets in faster, lower-energy memory (@sec-hardware-acceleration-tiling-principle).
+Moving a 32-bit value from DRAM costs far more energy than one arithmetic operation on it (@tbl-energy-movement-cost in @sec-data-engineering-feeding-problem); against the full multiply-accumulate that a dense layer performs, the gap is about `{python} DenseLayerEnergy.move_vs_arith_mult_str`, the basis used for the MLP and RNN above. How much of that cost each family pays depends on reuse, so low-intensity rows are energy-dominated by DRAM traffic. An unbatched MLP or a decode step loads each weight once per request and spends most of its energy moving it. A CNN amortizes each filter load over $\FeatureMapHeight\times \FeatureMapWidth$ applications, so the locality that makes it compute bound also makes it energy efficient, unless a fully materialized im2col buffer inflates temporary traffic by up to $\KernelSize^2$. An RNN keeps its compact state in SRAM but idles execution units across serial steps, which raises energy per token. Tiled attention keeps score blocks on chip, so its energy tracks matrix multiplication rather than DRAM round-trips.
 
 :::
 
