@@ -3,7 +3,7 @@ number-offset: [7]
 quiz: training_quizzes.json
 concepts: training_concepts.yml
 engine: jupyter
-notation-local: [\AcceleratorConsumptionRate, \AccumulatedSyncTime, \AccumulatedUpdateTime, \AccumulationStepCount, \ActivationCheckpointCount, \AdamFirstMoment, \AdamMomentDecayRate, \AdamSecondMoment, \BaseBatchSize, \BaseLearningRate, \BatchBufferMemory, \BatchDataVolume, \BatchFetchTime, \BatchOperations, \BatchProcessingTime, \ClusterNodeCount, \CommunicationTime, \EffectiveStorageThroughput, \FeedForwardOperations, \FullBatchLoss, \HostPower, \HostTransferBandwidth, \InputPipelineRate, \LayerIntermediateStateMemory, \LayerSavedTensorCount, \MicrobatchGradient, \MicrobatchIndex, \MicrobatchPassTime, \MicrobatchSize, \ModelStepOperations, \OptimizerStepTime, \OutputProjectionOperations, \PerExampleForwardBackwardTime, \PipelineBufferMemory, \PipelineIterationTime, \PrefetchBufferCount, \PreprocessingServiceTime, \PreprocessingThroughput, \ProcessingBufferCount, \RmspropSquaredGradientAverage, \ScaledBatchSize, \ScaledLearningRate, \StandardNormalCumulativeDistribution, \StorageReadTime, \StorageThroughput, \SystemMemoryBandwidth, \TensorCoreAccumulatorMatrix, \TensorCoreLeftInput, \TensorCoreOutputMatrix, \TensorCoreRightInput, \TokenizationTime, \TrainingThroughput, \TransferBufferCount, \UpdatedSoftmaxRunningMaximum, \WorkerTransformTime]
+notation-local: [\AcceleratorConsumptionRate, \AccumulatedSyncTime, \AccumulatedUpdateTime, \AccumulationStepCount, \ActivationCheckpointCount, \AdamFirstMoment, \AdamMomentDecayRate, \AdamSecondMoment, \BaseBatchSize, \BaseLearningRate, \BatchBufferMemory, \BatchDataVolume, \BatchFetchTime, \BatchOperations, \BatchProcessingTime, \ClusterNodeCount, \CommunicationTime, \EffectiveStorageThroughput, \FeedForwardOperations, \FullBatchLoss, \HostPower, \HostTransferBandwidth, \InputPipelineRate, \LayerIntermediateStateMemory, \LayerSavedTensorCount, \MicrobatchGradient, \MicrobatchIndex, \MicrobatchPassTime, \MicrobatchSize, \ModelStepOperations, \OptimizerStepTime, \OutputProjectionOperations, \PipelineBufferMemory, \PipelineIterationTime, \PrefetchBufferCount, \PreprocessingServiceTime, \PreprocessingThroughput, \ProcessingBufferCount, \RmspropSquaredGradientAverage, \ScaledBatchSize, \ScaledLearningRate, \StandardNormalCumulativeDistribution, \StorageReadTime, \StorageThroughput, \SystemMemoryBandwidth, \TensorCoreAccumulatorMatrix, \TensorCoreLeftInput, \TensorCoreOutputMatrix, \TensorCoreRightInput, \TokenizationTime, \TrainingThroughput, \TransferBufferCount, \UpdatedSoftmaxRunningMaximum, \WorkerTransformTime]
 ---
 
 # Model Training {#sec-model-training}
@@ -826,26 +826,7 @@ Matrix multiplications dominate training compute, but neural networks require mo
 
 #### Activation functions {#sec-model-training-activation-functions-faa7}
 
-Activation functions\index{Activation function!training efficiency} such as sigmoid, tanh, ReLU\index{ReLU!hardware efficiency}, and softmax supply the nonlinearity that keeps a stack of layers from collapsing into one linear map; @sec-neural-computation-nonlinear-activation-functions-38bc established what each computes, with its shape and output range. For training at scale, the property that matters is how their execution cost behaves in hardware. Per-element arithmetic complexity varies across activations: piecewise linear functions like ReLU require only a single comparison and selection instruction (`fmax`), whereas sigmoid, tanh, and the exact Gaussian Error Linear Unit (GELU)\index{GELU} require transcendental functions, typically implemented via multi-cycle polynomial approximations in Special Function Units (SFUs).
-
-These per-element differences are real, but in end-to-end accelerator execution they rarely dictate throughput. For a bandwidth-bound activation kernel, the cost that matters is set by bytes, not instructions. Simple elementwise activations can perform only 1 to 4 FLOPs per element while moving 8 bytes (an FP32 read and write), roughly $0.125\text{--}0.5\text{ FLOP/byte}$, so their low arithmetic intensity can make standalone kernels memory-bandwidth limited\index{Memory bandwidth!activation function bottleneck} when launch overhead does not dominate. Because accelerator arithmetic has grown faster than external-memory bandwidth, scalar operation counts alone do not predict their latency. In modern compiled frameworks, the realized latency of an activation is largely determined by whether the compiler can fuse it directly into the epilogue of the preceding matrix multiplication, avoiding a separate intermediate write and read between kernels.
-
-Modern accelerators can implement these functions through native instructions, polynomial approximations, lookup methods, or fused kernels. ReLU may produce zeros that a later system can exploit, but the sparsity fraction depends on the activation distribution and trained model. Softmax\index{Softmax!global normalization}[^fn-softmax-cross-entropy] adds a reduction and normalization across the selected axis. Those dependencies require coordination, though optimized implementations remain highly parallel.
-
-[^fn-softmax-cross-entropy]: **Softmax**\index{Softmax!memory access pattern}: Computing a numerically stable softmax requires a maximum reduction, exponentiation, a sum reduction, and normalization across the selected axis. Parallel kernels implement these stages with coordinated reductions. FlashAttention restructures the larger attention computation so softmax statistics can be maintained while tiles remain near the compute units.
-
-@Tbl-compare-activations summarizes how these behaviors translate into system constraints.
-
-| **Function** | **Key Advantages**                                             | **Key Disadvantages**                                                | **System Implications**                                                            |
-|:-------------|:---------------------------------------------------------------|:---------------------------------------------------------------------|:-----------------------------------------------------------------------------------|
-| **Sigmoid**  | Smooth; bounded output in $(0, 1)$.                            | Gradients saturate at large magnitudes; output is not zero-centered. | Uses exponential or approximation kernels whose cost depends on the target.        |
-| **Tanh**     | Smooth; zero-centered output in $(-1, 1)$.                     | Gradients saturate at large magnitudes.                              | Uses special-function or approximation kernels similar in structure to sigmoid.    |
-| **ReLU**     | Simple threshold operation; nonsaturating for positive inputs. | Can produce persistently inactive units.                             | Often inexpensive and fusible; exploitable sparsity depends on downstream support. |
-| **Softmax**  | Produces a normalized distribution over an axis.               | Requires reductions and cross-element coordination.                  | Parallel implementations coordinate maximum, sum, and normalization stages.        |
-
-: **Activation Function Systems Comparison**: Activation functions differ in mathematical behavior, kernel cost, fusion opportunities, and memory access patterns. {#tbl-compare-activations tbl-colwidths="[10,28,23,39]"}
-
-ReLU remains common because it is simple and efficient, while softmax is essential when a model must normalize scores into probabilities. GPT-2 illustrates a different choice through GELU, the Gaussian Error Linear Unit.
+@Sec-neural-computation-nonlinear-activation-functions-38bc established what sigmoid, tanh, ReLU\index{ReLU!hardware efficiency}, and softmax compute, why the S-curves saturate, and why a ReLU comparison costs far less silicon than an exponential. At training scale, what matters is that their arithmetic rarely sets throughput\index{Activation function!training efficiency}. A standalone elementwise activation performs only 1 to 4 FLOPs per element while moving 8 bytes (an FP32 read and write), roughly $0.125\text{--}0.5\text{ FLOP/byte}$, so its latency is set by memory bandwidth\index{Memory bandwidth!activation function bottleneck}, and whether the compiler fuses it into the epilogue of the preceding matrix multiplication matters more than which function it computes. GPT-2's activation, the Gaussian Error Linear Unit (GELU)\index{GELU}, shows the trade-off.
 
 ```{python}
 #| echo: false
@@ -904,40 +885,11 @@ Gradient descent iteratively adjusts parameters in the direction of steepest des
 
 ##### Gradient descent {#sec-model-training-gradient-descent-4034}
 
-In a training system, each iteration of gradient descent\index{Gradient descent!parameter optimization}\index{Gradient descent!training foundation}\index{Gradient descent!etymology}\index{Gradient descent!full-batch computation} becomes a chain of four dependent operations, none of which can start before its predecessor finishes:
-
-1. Compute forward pass activations
-2. Calculate loss value
-3. Compute gradients through backpropagation
-4. Update parameters using the gradient values
-
-The computational demands of gradient descent scale with both model size and dataset size. Computing gradients requires storing intermediate activations during the forward pass for backpropagation. These activations consume memory proportional to the depth of the network and the number of examples being processed.
-
-Traditional gradient descent processes the entire dataset before each parameter update. For a training set with one million examples, the system must compute an aggregate gradient over all examples before taking one step. Write $\DatasetSize$ for the dataset size, counted here in examples rather than in the tokens of the lighthouse's $6\Parameters\DatasetSize$ budget. The examples cannot all be resident at once, so the system streams them through the accelerator in groups of $\MicrobatchSize$ examples per forward/backward pass. With $\PerExampleForwardBackwardTime$ the amortized forward/backward time per example at that group size and $\ActivationMemory$ the peak activation memory, @eq-gd-memory and @eq-gd-time separate what bounds memory from what bounds step time:
-$$ \ActivationMemory \propto \MicrobatchSize$$ {#eq-gd-memory}
-$$ \TrainingStepTime\propto \DatasetSize \times \PerExampleForwardBackwardTime$$ {#eq-gd-time}
-
-Full-batch training therefore does not require storing every example's activations simultaneously; peak memory is governed by the examples held in memory at once. The systems problem lies in time instead. Processing $\DatasetSize=1{,}000{,}000$ examples before each update creates million-example iteration times during which parameters remain frozen, reducing the rate at which the model can learn from data.
-
-Hardware-friendly variants relax the need for an exact full-dataset gradient on every update. Stochastic gradient descent (SGD)\index{Stochastic gradient descent!gradient estimation}\index{Stochastic gradient descent!etymology}\index{Stochastic gradient descent!Robbins and Monro}[^fn-sgd-robbins-monro] estimates gradients from sampled examples or mini-batches rather than the entire dataset. This changes update frequency and gradient variance while allowing each update to operate on a bounded working set.
-
-[^fn-sgd-robbins-monro]: **Stochastic gradient descent\index{Gradient descent!gradient noise}**\index{Stochastic gradient descent!memory-utilization trade-off}: "Stochastic" from Greek *stochastikos* ("able to guess"); rather than waiting for an exact full-dataset gradient, SGD updates from sampled examples or mini-batches. Full-batch and stochastic methods can both stream data through bounded micro-batches, so their peak activation memory is determined by the resident micro-batch rather than by dataset size alone. Their central difference is how many sampled gradients contribute to each parameter update.
-
-Evaluating single examples ($\BatchSize=1$) can reduce accelerator efficiency when each example supplies only one row to a dense layer, returning its operations to the bandwidth-limited matrix-vector regime of @sec-model-training-matrixvector-operations-dbd8, although sequence and spatial dimensions can still supply multiple rows even at batch size one. Single-example updates also require reading parameter tensors from device memory, applying gradients, and writing updated weights back after every sample, saturating memory bandwidth without amortizing parameter access across multiple inputs.
+In a training system, each gradient descent\index{Gradient descent!parameter optimization}\index{Gradient descent!full-batch computation} iteration is a chain of dependent operations (forward pass, loss, backward pass, parameter update), none of which can start before its predecessor finishes. Full-batch gradient descent, which computes each update from the entire training set, need not hold the dataset in memory at once, because examples can stream through the accelerator in micro-batches; its cost is time rather than memory. With one million training examples, every update waits for a million examples of forward and backward work, and the parameters stay frozen throughout, reducing the rate at which the model can learn from data.
 
 ##### Mini-batch processing {#sec-model-training-minibatch-processing-4eb0}
 
-Mini-batch gradient descent\index{Mini-batch processing!accelerator efficiency} sits between full-batch and single-example updates. It computes gradients over small batches of examples, small enough to fit in memory and large enough to keep the accelerator busy [@dean2012large]. The batch size $\BatchSize$ becomes a key system parameter, influencing both computational efficiency and memory requirements.
-
-::: {#dfn-training-batch-processing .callout-definition title="Batch processing"}
-
-***Batch processing***\index{Batch processing!definition} aggregates multiple training examples into tensor operations that amortize fixed per-step overhead across $\BatchSize$ examples and can expose more parallel work. Increasing $\BatchSize$ may improve occupancy and arithmetic intensity, but it does not guarantee that every operation becomes compute bound.
-
-1.  Significance: Throughput often increases with batch size until the target hardware is sufficiently occupied, while the number and quality of updates needed for convergence follow a separate workload-dependent curve. Goyal et al. demonstrated a ResNet-50 ImageNet recipe at $\BatchSize=8{,}192$ using linear learning-rate scaling and warmup [@goyal2017accurate]. That result is a configuration-specific demonstration rather than a universal critical batch size\index{Critical batch size!throughput-convergence limit}.
-2.  Distinction: A mini-batch update averages gradients over $\BatchSize$ examples. Under independent, similarly distributed samples, the standard deviation of this mean decreases approximately as $1/\sqrt{\BatchSize}$. The update processes more data than a single-example update, so its net data movement and time depend on reuse, implementation, and how batch size changes the number of updates required.
-3.  Common pitfall: A frequent misconception is that linear learning-rate scaling ($\ScaledLearningRate = \BaseLearningRate \times \ScaledBatchSize/\BaseBatchSize$, where $\LearningRate$ is the optimizer's learning rate, not the utilization factor $\EfficiencyHw$ of the training-time law) works at any batch size. It is a training recipe that commonly requires warmup and empirical validation, and its useful range depends on the model, data, optimizer, and target accuracy.
-
-:::
+Mini-batch gradient descent\index{Mini-batch processing!accelerator efficiency} (definition \ref{dfn-nn-computation-mini-batch}) sits between full-batch and single-example updates, computing each update over a batch small enough to fit in memory and large enough to keep the accelerator busy [@dean2012large]. Purely stochastic gradient descent (SGD)\index{Stochastic gradient descent!gradient estimation} updates after every example, which returns dense layers to the bandwidth-limited matrix-vector regime of @sec-model-training-matrixvector-operations-dbd8 and rewrites every parameter once per example. Averaging over $\BatchSize$ independent examples shrinks the standard deviation of the gradient estimate approximately as $1/\sqrt{\BatchSize}$, and the batch size becomes a key system parameter, influencing both computational efficiency and memory requirements.
 
 The choice of batch size $\BatchSize$ directly governs accelerator memory allocation. The partial decomposition in @eq-batch-memory-decomposition separates fixed parameter and gradient storage from the batch-dependent activation working set; optimizer states, any master weights, and runtime workspaces must also enter the full budget:
 $$
@@ -946,7 +898,7 @@ $$ {#eq-batch-memory-decomposition}
 
 Because the activation term scales with $\BatchSize$ while parameter and gradient memory stay fixed, doubling the batch doubles the activation working set, and a model that fits comfortably at a small batch can exhaust the 80 GB of HBM on the reference H100 once the batch grows. @Sec-model-training-memory-management-c1ec works through an illustrative ResNet-50 budget.
 
-Sharing each loaded weight across the batch lets a larger batch move dense feedforward and attention projections toward the compute-bound regime; shape and the hardware ridge point determine whether compute throughput becomes limiting. Learning-rate scaling and warmup can preserve convergence over a validated range of batch sizes [@goyal2017accurate].
+Sharing each loaded weight across the batch lets a larger batch move dense feedforward and attention projections toward the compute-bound regime; shape and the hardware ridge point determine whether compute throughput becomes limiting. Throughput and convergence follow separate curves, however. @goyal2017accurate trained ResNet-50 on ImageNet at $\BatchSize=8{,}192$ by scaling the learning rate linearly with batch size and adding a warmup period, a configuration-specific recipe rather than evidence of a universal critical batch size\index{Critical batch size!throughput-convergence limit}; its useful range depends on the model, data, optimizer, and target accuracy.
 
 ::: {.column-margin .margin-pointer}
 ⇄ **Contrast:** Training packs large batches to amortize weight transfers and saturate arithmetic units, whereas online serving inverts the priority to per-request latency under stochastic arrivals, as analyzed in @sec-model-serving-serving-paradigm-9634.
@@ -3195,7 +3147,7 @@ plt.close()
 
 :::
 
-For a fixed token budget, doubling the global batch size halves the number of parameter updates per epoch. To traverse a comparable distance in parameter space with fewer updates, the linear scaling rule\index{Linear scaling rule!large batch training} named in the batch-processing definition scales the learning rate proportionally with batch size ($\ScaledLearningRate = \BaseLearningRate \times \ScaledBatchSize/\BaseBatchSize$). Although effective across moderate batch ranges when combined with learning-rate warmup, linear scaling does not guarantee equivalent convergence or generalization. Beyond a critical batch size, gradient noise is largely eliminated, and further batch expansion yields diminishing returns per training sample while escalating memory pressure.
+For a fixed token budget, doubling the global batch size halves the number of parameter updates per epoch. To traverse a comparable distance in parameter space with fewer updates, the linear scaling rule\index{Linear scaling rule!large batch training} of the large-batch ResNet-50 recipe in @sec-model-training-minibatch-processing-4eb0 scales the learning rate proportionally with batch size ($\ScaledLearningRate = \BaseLearningRate \times \ScaledBatchSize/\BaseBatchSize$). Although effective across moderate batch ranges when combined with learning-rate warmup, linear scaling does not guarantee equivalent convergence or generalization. Beyond a critical batch size, gradient noise is largely eliminated, and further batch expansion yields diminishing returns per training sample while escalating memory pressure.
 
 Beyond convergence dynamics, batch size dictates communication frequency in distributed systems. A larger global batch reduces the number of optimizer steps and gradient synchronizations per epoch. Because the communication payload of dense all-reduce synchronizations depends on parameter count rather than batch size, larger batches amortize interconnect latency over more compute FLOPs. In distributed settings, local micro-batch size and global batch size jointly determine the maximum degree of data parallelism. When memory capacity constrains the local micro-batch, gradient accumulation (@sec-model-training-gradient-accumulation-checkpointing-0c47) decouples the effective batch size from per-device activation memory, accumulating gradients across multiple forward-backward passes before triggering an optimizer step.
 
@@ -5865,72 +5817,7 @@ plt.close()
 
 The red curve's widening gap from the dashed ideal is that communication overhead made visible; shrinking that gap is what the distributed strategies in @sec-model-training-singlenode-multigpu-training-c87f exist to do.
 
-### Historical context: The evolution of training infrastructure {#sec-model-training-evolution-training-infrastructure-f3a6}
-
-Training platforms\index{Training!infrastructure evolution} inherit dense matrix multiplication kernels and tightly synchronized parallel execution from high-performance computing (HPC), and cluster orchestration and automated fault recovery for multi-day jobs from warehouse-scale computing\index{Warehouse-scale computing!training evolution}. @Fig-evolution-systems places this lineage on a timeline, from mainframes through HPC supercomputers and warehouse-scale clusters to GPU and TPU systems, and @tbl-computing-eras summarizes the workload each era contributed.
-
-::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Four overlapping eras place representative system milestones against time. The overlap matters: AI hypercomputing builds on, rather than replaces, the parallel numerical methods of HPC and the distributed coordination of warehouse-scale computing." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\sf,node distance=0pt,xscale=2]
-\tikzset{
-  Box/.style={inner xsep=2pt, draw=black!80, line width=0.75pt,
-    fill=black!10, anchor=south, rounded corners=2pt,
-    font=\sf\footnotesize, align=center, minimum height=5mm},
-}
-\definecolor{col1}{RGB}{240,240,255}
-\definecolor{col2}{RGB}{255, 255, 205}
-\def\du{199mm}
-\def\vi{15mm}
-\node[fill=green!10,draw=none,minimum width=\du,
-name path=G4,anchor=south west, minimum height=\vi](B1)at(-19.0mm,3mm){};
-\node[right=2mm of B1.west,anchor=west,align=left]{AI Hypercomputing\\ Era};
-\node[fill=col2,draw=none,minimum width=\du,
-name path=G3,anchor=south west, minimum height=\vi](Z)at(B1.north west){};
-\node[right=2mm of Z.west,anchor=west,align=left]{Warehouse Scale\\ Computing};
-\node[fill=red!10,draw=none,minimum width=\du,
-anchor=south west, minimum height=\vi](B2)at (Z.north west){};
-\node[right=2mm of B2.west,anchor=west,align=left]{High-Performance\\ Computing};
-\node[fill=col1,draw=none,minimum width=\du,
-name path=G1,anchor=south west, minimum height=\vi](V)at(B2.north west){};
-\node[right=2mm of V.west,anchor=west,align=left]{Mainframe};
-\def\hi{6.75}
-\draw[thick,name path=V1](0mm,0)node[below]{1950}--++(90:\hi);
-\draw[thick,name path=V2](10mm,0)node[below]{1960}--++(90:\hi);
-\draw[thick,name path=V3](20mm,0)node[below]{1970}--++(90:\hi);
-\draw[thick,name path=V4](30mm,0)node[below]{1980}--++(90:\hi);
-\draw[thick,name path=V5](40mm,0)node[below]{1990}--++(90:\hi);
-\draw[thick,name path=V6](50mm,0)node[below]{2000}--++(90:\hi);
-\draw[thick,name path=V7](60mm,0)node[below]{2010}--++(90:\hi);
-\draw[thick,name path=V8](70mm,0)node[below]{2020}--++(90:\hi);
-\def\fa{2}
-\path [name intersections={of=V1 and G1,by={A,B}}];
-\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]B){ENIAC};
-\path [name intersections={of=V3 and G1,by={C,D}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]C){IBM\\ System/360};
-\node[Box, minimum width=40mm, anchor=north west, xshift=-\fa*6mm]at([yshift=-1pt]D){CDC 6600};
-\path [name intersections={of=V4 and G3,by={E,F}}];
-\node[Box, minimum width=30mm, anchor=south west, xshift=-\fa*4mm]at([yshift=1pt]E){Cray-1};
-\path [name intersections={of=V6 and G3,by={G,H}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=0mm]at([yshift=-1pt]G){Google Data\\ Centers};
-\path [name intersections={of=V7 and G3,by={I,J}}];
-\node[Box, minimum width=22mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]J){AWS};
-\path [name intersections={of=V8 and G4,by={K,L}}];
-\node[Box, minimum width=20mm, anchor=north west, xshift=-\fa*5mm]at([yshift=-1pt]K){NVIDIA GPU};
-\node[Box, minimum width=20mm, anchor=south west, xshift=-\fa*5mm]at([yshift=1pt]L){Google TPUs};
-\end{tikzpicture}
-```
-
-:::
-
-| **Era**               | **Primary Workload**        | **Memory Patterns**           | **Processing Model**         |
-|:----------------------|:----------------------------|:------------------------------|:-----------------------------|
-| **Mainframe**         | Sequential batch processing | Simple memory hierarchy       | Single instruction stream    |
-| **HPC**               | Scientific simulation       | Regular array access          | Synchronized parallel        |
-| **Warehouse-scale**   | Internet services           | Sparse, irregular access      | Independent parallel tasks   |
-| **AI Hypercomputing** | Neural network training     | Parameter-heavy, mixed access | Hybrid parallel, distributed |
-
-: **Computing Era Characteristics**: Each computing era optimized for different workload patterns, and modern training systems inherit requirements from multiple predecessors. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale distributed processing, while adding specialized support for the gradient-based optimization and massive parameter state management central to neural network training. {#tbl-computing-eras}
+Training platforms\index{Training!infrastructure evolution} inherit dense matrix multiplication kernels and tightly synchronized parallel execution from high-performance computing (HPC), the lineage behind the parallelism strategies of this section. From warehouse-scale computing\index{Warehouse-scale computing!training evolution} they inherit cluster orchestration and automated fault recovery for multi-day jobs, the lineage that matters once a run spans many machines.
 
 The same inheritance appears inside one training system as pressure at three scales. At data scale, large corpora require high-throughput input pipelines to avoid accelerator starvation. At model scale, billion-parameter architectures force a choice between replicating weights across devices and partitioning the model. At infrastructure scale, coordinating multiple accelerators introduces synchronization overhead that can dominate training time. The stage interfaces formalized in @sec-ml-workflow-stage-interface-specification-ae3c govern what each scale may assume of the others.
 
