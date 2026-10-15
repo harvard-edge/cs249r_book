@@ -96,8 +96,10 @@ symbols:
     or not
   kind: scalar
   unit: s
-  notes: Denominator of the goodput ratio, $\GoodputRatio \approx T_{\text{useful}}/T_{\text{wall}}$.
+  notes: Denominator of runtime goodput, $\RuntimeGoodput \approx T_{\text{useful}}/T_{\text{wall}}$.
     Not $\Time$, the time of one unit of work.
+  aliases:
+  - \AllocationHoldTime
 - macro: \AllowedViolationFraction
   latex: V^{\text{allow}}
   definition: fraction of eligible observations allowed to violate one reliability target over a window,
@@ -716,8 +718,8 @@ symbols:
   kind: scalar
   unit: FLOP/s
   notes: '$\EffectiveFleetThroughput = N \PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency
-    \times \GoodputRatio$: $\ModelFlopsUtilization$ is the single-device baseline, $\ScalingEfficiency$
-    the in-step scaling loss, and $\GoodputRatio$ the out-of-step operational loss.'
+    \times \RuntimeGoodput$: $\ModelFlopsUtilization$ is the single-device baseline, $\ScalingEfficiency$
+    the in-step scaling loss, and $\RuntimeGoodput$ the out-of-step operational loss.'
 - macro: \EffectiveSpotTrainingCost
   latex: C_{\text{effective}}
   definition: spot price scaled by billed time over productive time, the cost of each hour of retained
@@ -1056,14 +1058,6 @@ symbols:
   kind: vector
   notes: Equals $(1/\DeviceCount)\sum_k \MinibatchGradient_k$ for equal local batches; AllReduce computes
     it.
-- macro: \GoodputRatio
-  latex: \eta_{\text{goodput}}
-  definition: fraction of allocated wall time left for productive steps after out-of-step operational
-    losses
-  kind: scalar
-  unit: dimensionless
-  notes: Often $\GoodputRatio = 1 - \OperationalOverheadFraction$. In-step losses belong to $\ScalingEfficiency$,
-    not here.
 - macro: \GpdScaleParameter
   latex: \tilde{\sigma}
   definition: scale parameter of the generalized Pareto distribution fitted to exceedances over a threshold
@@ -1172,6 +1166,14 @@ symbols:
     as Benjamini-Hochberg. Same meaning as $\SignificanceLevel$ ($\alpha$); the two should merge.
   aliases:
   - \TypeIAndTypeIiErrorRatesSig
+- macro: \IdealAcceleratorTime
+  latex: T_{\text{ideal}}
+  definition: accelerator-time a job's work needs when every device runs at the ideal rate with no scheduling,
+    runtime or program loss
+  kind: scalar
+  unit: s
+  notes: Dividing it by $\DeviceCount \times \RuntimeGoodput \times \ProgramGoodput$ gives the job's run time once it
+    holds its devices.
 - macro: \IndependentEventProbability
   latex: p
   definition: probability of one of several independent, identical events, such as one component failing
@@ -1283,6 +1285,14 @@ symbols:
   unit: dimensionless
   notes: One means no delay from sharing. Themis finish-time fairness has the same form with a fair-share
     denominator.
+- macro: \JobStartupTime
+  latex: T_{\text{startup}}
+  definition: time from a job's complete allocation to its first retained step, spent loading, initializing
+    and compiling
+  kind: scalar
+  unit: s
+  notes: A runtime goodput loss; dated from the scheduler's record of the complete allocation, not from the
+    first step.
 - macro: \KrumClientCount
   latex: n
   definition: total number of client updates a Krum-style robust aggregation rule selects among
@@ -1476,6 +1486,14 @@ symbols:
   definition: number of microbatches one pipeline-parallel step splits its batch into
   kind: count
   notes: The pipeline bubble fraction $\PipelineBubbleFraction$ falls as it grows.
+- macro: \MlProductivityGoodput
+  latex: \text{MPG}
+  definition: fraction of a fleet's capacity-time that becomes useful work at the ideal rate, the product
+    of scheduling, runtime and program goodput
+  kind: scalar
+  unit: dimensionless
+  notes: $\MlProductivityGoodput = \SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput$, each loss charged
+    to exactly one factor. Written as a text acronym, like $\ModelFlopsUtilization$.
 - macro: \ModelLifetimeCost
   latex: C_{\text{total}}
   definition: total cost of one model version over its deployment, the one-time training cost plus the
@@ -1512,7 +1530,7 @@ symbols:
   definition: wall-clock time for a fixed amount of productive work on N devices
   kind: scalar
   unit: s
-  notes: Per step it equals $\DistributedStepTime$; excludes operational downtime counted by $\GoodputRatio$.
+  notes: Per step it equals $\DistributedStepTime$; excludes operational downtime counted by $\RuntimeGoodput$.
   aliases:
   - \NdeviceTime
 - macro: \NetworkDelayStandardDeviation
@@ -1591,7 +1609,7 @@ symbols:
   kind: scalar
   unit: dimensionless
   notes: Checkpoint pauses, failure recovery, scheduler preemption and maintenance; in-step losses are
-    in $\ScalingEfficiency$. Often $\GoodputRatio = 1 - \OperationalOverheadFraction$.
+    in $\ScalingEfficiency$. Often $\RuntimeGoodput = 1 - \OperationalOverheadFraction$.
 - macro: \OperationalTaxonomyDimension
   latex: C
   definition: one of the three operational dimensions of the C-cubed taxonomy, indexed 1 to 3 as compute,
@@ -1755,6 +1773,19 @@ symbols:
   definition: number of lower-priority jobs one admission displaces at each level of a preemption cascade
   kind: count
   notes: Two levels interrupt k plus k squared jobs; a no-repreemption rule caps it at k.
+- macro: \PreemptionRate
+  latex: \lambda_{\text{preempt}}
+  definition: number of forced preemptions a job suffers per hour of held time
+  kind: scalar
+  unit: hours^-1
+  notes: Multiplied by $\PreemptionTaxTime$ it gives the share of held time preemption costs.
+- macro: \PreemptionTaxTime
+  latex: T_{\text{preempt}}
+  definition: held time one forced preemption costs a job, the work discarded since its last checkpoint
+    plus reload and warmup
+  kind: scalar
+  unit: hours
+  notes: Not $\FailureRecoveryTime$, which has a detection step a scheduled preemption does not.
 - macro: \PreviousPeriodCost
   latex: C_{\text{previous}}
   definition: observed cost of the accounting period before the current one
@@ -2088,9 +2119,12 @@ symbols:
   kind: scalar
   unit: dimensionless
   notes: One factor of ML Productivity Goodput, $\SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput$;
-    loses initialization, input stalls and work lost after the last checkpoint.
+    loses initialization, input stalls and work lost after the last checkpoint. It is also the out-of-step
+    operational goodput of the fleet throughput factorization, often $1 - \OperationalOverheadFraction$
+    (formerly \GoodputRatio).
   aliases:
   - \MlProductivityGoodputFactorsRuntime
+  - \GoodputRatio
 - macro: \SavedEngineeringTime
   latex: T_{\text{saved}}
   definition: engineering time a shared platform saves for one model in one accounting period
@@ -2463,6 +2497,12 @@ symbols:
   kind: scalar
   unit: varies
   notes: Unit of \TailRiskObservation; indexed $y_i$ for one exceedance.
+- macro: \TimeToResult
+  latex: T_{\text{result}}
+  definition: wall-clock time from a job's submission to its result, its queue wait plus its run time
+  kind: scalar
+  unit: s
+  notes: One axis of the efficiency frontier, with goodput and cost per useful unit.
 - macro: \TimeToTarget
   latex: T_{\text{target}}
   definition: wall-clock time a federated run takes to reach a held-out quality target, the sum of its
@@ -2606,6 +2646,14 @@ symbols:
   notes: 'Renders like \IronLawComputeTime but is broader: it is the sum of the iron law''s data and compute
     terms plus host dispatch, not $\Operations/(\PeakRate \cdot \EfficiencyHw)$ alone. Partitioning a
     fixed workload across $\DeviceCount$ devices gives the local-execution term $T_{\text{compute}}/\DeviceCount$.'
+- macro: \UsefulAcceleratorHourCost
+  latex: C_{\text{useful}}
+  definition: price of one accelerator-hour of useful work at the ideal rate, the capacity price divided
+    by ML productivity goodput
+  kind: scalar
+  unit: USD/h
+  notes: $\UsefulAcceleratorHourCost = \AcceleratorHourlyPrice/\MlProductivityGoodput$, with the price taken per in-service
+    accelerator-hour.
 - macro: \UsefulComputeFraction
   latex: f_{\text{compute}}
   definition: share of the distributed step time spent on useful local arithmetic
@@ -2628,7 +2676,7 @@ symbols:
     the final model
   kind: scalar
   unit: s
-  notes: Numerator of the goodput ratio, $\GoodputRatio \approx T_{\text{useful}}/T_{\text{wall}}$; excludes
+  notes: Numerator of runtime goodput, $\RuntimeGoodput \approx T_{\text{useful}}/T_{\text{wall}}$; excludes
     checkpoint stalls, failure recovery, replayed work and scheduler preemptions.
 - macro: \VersionSkewBound
   latex: k_{\text{skew}}

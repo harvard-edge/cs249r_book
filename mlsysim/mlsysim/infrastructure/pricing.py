@@ -148,7 +148,20 @@ class Labeling(Registry):
 
 class Fleet(Registry):
     """Internal fleet chargeback and spot references."""
-    GpuHourRef = PricePoint(name="Fleet GPU-hour (reference)", rate=2.0 * USD / hour, metadata=_FLEET)
+    # Rate is per in-service (offered) accelerator-hour: the fleet pays it whether or not a
+    # complete allocation holds the hour, so cost per useful hour = rate / ML productivity goodput.
+    GpuHourRef = PricePoint(
+        name="Fleet GPU-hour (reference)",
+        rate=2.0 * USD / hour,
+        metadata=Metadata(
+            provenance=pc.FLEET_ECONOMICS_2024,
+            description=(
+                "Price of one in-service (offered) accelerator-hour, paid whether or not a complete "
+                "allocation holds it, a retained step uses it, or that step runs at the ideal rate; "
+                "dividing it by ML productivity goodput gives the cost of one useful accelerator-hour."
+            ),
+        ),
+    )
     SpotGpuHourRef = PricePoint(name="Fleet spot GPU-hour", rate=0.70 * USD / hour, metadata=_FLEET)
     InternalChargebackPerHour = PricePoint(
         name="Internal chargeback per GPU-hour",

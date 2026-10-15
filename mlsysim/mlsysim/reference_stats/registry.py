@@ -186,6 +186,104 @@ class TrainingScaleProfiles(Registry):
     )
 
 
+# --- Added 2026-10-15: shared fleet-scheduling scenarios. Each was hand-typed in
+# one LEGO cell and copied by hand into others; every reader now loads it here.
+class ForcedPreemptionProfile(Registry):
+    """Forced-preemption scenario for a low-priority job on a shared fleet.
+
+    The preemption tax is ``LostWork`` plus the cold-restart steps of
+    ``Systems.Reliability.Recovery.cold_restart_time(ckpt, include_detection=False)``,
+    so a preempted job and a failed job pay the same relaunch, reload, and warmup.
+    """
+
+    LostWork = sourced_qty(
+        15 * minute, pc.FORCED_PREEMPTION_SCENARIO,
+        name="Work lost per forced preemption",
+        description="Execution discarded since the last durable checkpoint (half of a 30-minute interval).")
+    UnbudgetedRate = sourced_qty(
+        12 / day, pc.FORCED_PREEMPTION_SCENARIO,
+        name="Forced preemptions without a budget",
+        description="Forced preemptions per day for a lowest-priority job with no preemption budget.")
+
+
+class SpotInterruptionProfile(Registry):
+    """Spot-capacity interruption scenario (graceful save to slow storage)."""
+
+    CheckpointOverhead = sourced_qty(
+        15 * minute, pc.SPOT_INTERRUPTION_SCENARIO,
+        name="Spot checkpoint overhead",
+        description="Graceful save to slow storage per spot interruption.")
+    RestartOverhead = sourced_qty(
+        30 * minute, pc.SPOT_INTERRUPTION_SCENARIO,
+        name="Spot restart overhead",
+        description="Reacquire capacity, restart, and reload per spot interruption.")
+    RetainedInterval = sourced_qty(
+        2 * _hour, pc.SPOT_INTERRUPTION_SCENARIO,
+        name="Retained progress between spot interruptions",
+        description="Hours of retained training progress between consecutive interruptions.")
+
+
+class ElasticResizeProfile(Registry):
+    """Elastic-resize decision: start small, wait for the full allocation, or step up."""
+
+    Window = sourced_qty(
+        24 * _hour, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Comparison window", description="Wall-clock window over which the strategies are compared.")
+    QueueWait = sourced_qty(
+        4 * _hour, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Queue wait for the full allocation", description="Hours until the full allocation frees.")
+    RescaleOverhead = sourced_qty(
+        10 * minute, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Resize overhead", description="Time to checkpoint, reshard, and restart at a resize.")
+    SmallGpus = sourced(
+        128, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Small allocation (GPUs)", description="Allocation available immediately.")
+    StepUpGpus = sourced(
+        256, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Step-up allocation (GPUs)", description="Capped allocation after the elastic step-up.")
+    FullGpus = sourced(
+        512, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Full allocation (GPUs)", description="Allocation the target batch calls for.")
+    SmallThroughput = sourced(
+        1.0, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Throughput at the small allocation (epochs/hour)", description="Baseline relative throughput.")
+    StepUpThroughput = sourced(
+        1.8, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Throughput at the step-up allocation (epochs/hour)", description="90 percent scaling efficiency against the baseline.")
+    FullThroughput = sourced(
+        3.2, pc.ELASTIC_RESIZE_SCENARIO,
+        name="Throughput at the full allocation (epochs/hour)", description="80 percent scaling efficiency against the baseline.")
+
+
+class UtilizationTierProfile(Registry):
+    """One team's allocated, active, and productive capacity (time-averaged GPU equivalents)."""
+
+    AllocatedGpus = sourced(
+        500, pc.UTILIZATION_TIERS_SCENARIO,
+        name="Allocated GPUs", description="GPUs held by the team's complete allocations.")
+    ActiveEquivalents = sourced(
+        350, pc.UTILIZATION_TIERS_SCENARIO,
+        name="Active-device equivalents", description="Time-averaged devices showing hardware activity.")
+    ProductiveEquivalents = sourced(
+        280, pc.UTILIZATION_TIERS_SCENARIO,
+        name="Productive-device equivalents",
+        description="Time-averaged useful work at the job's fault-free step rate, in device equivalents.")
+
+
+class FleetUtilizationSnapshot(Registry):
+    """Shares of a shared fleet's in-service capacity in one utilization snapshot."""
+
+    AssignedShare = sourced(
+        0.80, pc.FLEET_UTILIZATION_SNAPSHOT_SCENARIO,
+        name="Assigned share", description="In-service capacity assigned to jobs, including incomplete gangs.")
+    IncompleteGangShare = sourced(
+        0.15, pc.FLEET_UTILIZATION_SNAPSHOT_SCENARIO,
+        name="Incomplete-gang share", description="In-service capacity held by gangs still waiting for members.")
+    InputWaitShare = sourced(
+        0.05, pc.FLEET_UTILIZATION_SNAPSHOT_SCENARIO,
+        name="Input-wait share", description="In-service capacity in complete allocations waiting for input.")
+
+
 class TrainingCostAnchors(Registry):
     """Cited training-cost estimates anchoring the training-vs-inference cost asymmetry."""
 
@@ -319,6 +417,36 @@ class ModelLoading(Registry):
         pc.MODEL_LOADING_SCENARIO_ASSUMPTIONS,
         name="PCIe model-swap reference model size",
         description="Reference model footprint for host-to-device model-swap latency examples.",
+    )
+
+
+class ReplicaColdStartProfile(Registry):
+    """Cold start of a newly placed LLM serving replica (autoscaling scenario).
+
+    A replica is ready after provisioning, fetching its weight artifact from
+    object storage at ``ArtifactFetchBandwidth``, and ``LoadWarmupTime`` of
+    device loading and warmup. The artifact size comes from the model registry
+    (e.g. ``Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)``), so the fetch
+    term scales with the model while these three inputs stay shared.
+    """
+
+    ArtifactFetchBandwidth = sourced_qty(
+        0.5 * GB / second,
+        pc.REPLICA_COLD_START_SCENARIO,
+        name="Replica artifact fetch bandwidth",
+        description="Effective object-storage read rate for a replica's weight artifact during cold start.",
+    )
+    ProvisioningTime = sourced_qty(
+        60 * second,
+        pc.REPLICA_COLD_START_SCENARIO,
+        name="Replica provisioning time",
+        description="Instance acquisition and boot before the artifact fetch begins.",
+    )
+    LoadWarmupTime = sourced_qty(
+        60 * second,
+        pc.REPLICA_COLD_START_SCENARIO,
+        name="Replica load and warmup time",
+        description="Device loading of the fetched weights plus runtime warmup before the replica serves traffic.",
     )
 
 
@@ -1076,10 +1204,16 @@ class ReferenceStats(Registry):
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
+    ForcedPreemptionProfile = ForcedPreemptionProfile
+    SpotInterruptionProfile = SpotInterruptionProfile
+    ElasticResizeProfile = ElasticResizeProfile
+    UtilizationTierProfile = UtilizationTierProfile
+    FleetUtilizationSnapshot = FleetUtilizationSnapshot
     TrainingCostAnchors = TrainingCostAnchors
     FleetEvolution = FleetEvolution
     StorageTrainingCorpus = StorageTrainingCorpus
     ModelLoading = ModelLoading
+    ReplicaColdStartProfile = ReplicaColdStartProfile
     ServingProfiles = ServingProfiles
     CheckpointArchetypes = CheckpointArchetypes
     MixedPrecisionAdam = MixedPrecisionAdam

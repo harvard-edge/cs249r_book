@@ -1607,6 +1607,18 @@ MODEL_LOADING_SCENARIO_ASSUMPTIONS = _est(
     ),
 )
 
+REPLICA_COLD_START_SCENARIO = _est(
+    "prov:replica-cold-start-scenario",
+    "Reference cold start of a newly placed LLM serving replica",
+    notes=(
+        "Documented teaching assumption: 60 seconds to acquire and boot an instance, the weight "
+        "artifact fetched from object storage at an effective 0.5 GB/s, and 60 seconds of device "
+        "loading and warmup. Calibrate all three from fleet measurements for production sizing; "
+        "cached artifacts or overlapped phases shorten the path, shared storage lengthens it."
+    ),
+    verified="2026-10-15",
+)
+
 LLM_SERVING_PRECISION_DIVIDEND_PROFILE = _est(
     "prov:llm-serving-precision-dividend-profile",
     "Reference LLM serving precision-dividend profile",
@@ -2335,4 +2347,64 @@ GOOGLE_SEARCH_VOLUME_2025 = _lit(
     url="https://blog.google/products/ads-commerce/ai-personalization-and-the-future-of-shopping/",
     verified="2026-10-13",
     notes="'We already see more than 5 trillion searches on Google annually.' Daily figure = 5e12 / 365, a lower bound.",
+)
+
+# --- Fleet scheduling scenarios (2026-10-15) ---
+# Shared scenario anchors for the orchestration and performance-engineering
+# examples, registered so every reader computes from one source instead of
+# copying the values by hand.
+FORCED_PREEMPTION_SCENARIO = _est(
+    "prov:forced-preemption-scenario",
+    "Reference forced-preemption scenario for a low-priority training job on a shared fleet",
+    notes=(
+        "Documented teaching assumption: a forced (non-graceful) preemption discards 15 minutes of "
+        "work since the last durable checkpoint (half of a 30-minute checkpoint interval), and a "
+        "low-priority job with no preemption budget is struck 12 times a day. Relaunch, checkpoint "
+        "reload, and warmup are not part of this record: they come from "
+        "Systems.Reliability.Recovery.cold_restart_time(), the same cold-restart steps as a failure "
+        "recovery, without failure detection because the scheduler initiates the stop."
+    ),
+    verified="2026-10-15",
+)
+SPOT_INTERRUPTION_SCENARIO = _est(
+    "prov:spot-interruption-scenario",
+    "Reference spot-capacity interruption scenario for a large training job on slow storage",
+    notes=(
+        "Documented teaching assumption: each spot reclamation costs a 15-minute graceful checkpoint "
+        "to slow (object-class) storage plus 30 minutes to reacquire capacity, restart, and reload, "
+        "after every 2 hours of retained progress. Slower than the cluster recovery budget "
+        "(Systems.Reliability.Recovery) because the capacity is re-provisioned and the checkpoint "
+        "path is not the cluster's parallel file system."
+    ),
+    verified="2026-10-15",
+)
+ELASTIC_RESIZE_SCENARIO = _est(
+    "prov:elastic-resize-scenario",
+    "Reference elastic-resize decision scenario (128/256/512 GPUs over a 24-hour window)",
+    notes=(
+        "Documented teaching assumption: relative throughput 1.0, 1.8, and 3.2 epochs/hour at 128, "
+        "256, and 512 GPUs (90 and 80 percent scaling efficiency against 128); the full 512-GPU "
+        "allocation frees after a 4-hour queue wait; one resize costs 10 minutes to checkpoint, "
+        "reshard, and restart; 24-hour comparison window."
+    ),
+    verified="2026-10-15",
+)
+UTILIZATION_TIERS_SCENARIO = _est(
+    "prov:utilization-tiers-scenario",
+    "Reference allocated/active/productive capacity tiers for one team's allocation",
+    notes=(
+        "Documented teaching assumption: 500 GPUs allocated, 350 active-device equivalents, and 280 "
+        "device-equivalents of useful work at the job's fault-free step rate (time averages)."
+    ),
+    verified="2026-10-15",
+)
+FLEET_UTILIZATION_SNAPSHOT_SCENARIO = _est(
+    "prov:fleet-utilization-snapshot-scenario",
+    "Reference shared-fleet utilization snapshot (assigned, incomplete-gang, input-wait shares)",
+    notes=(
+        "Documented teaching assumption: 80 percent of in-service capacity assigned to jobs, of which "
+        "15 percent of the fleet sits in gangs still waiting for members and another 5 percent sits "
+        "in complete allocations waiting for input."
+    ),
+    verified="2026-10-15",
 )
