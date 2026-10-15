@@ -26,6 +26,7 @@ from .test import ModuleTestCommand
 from ...core.exceptions import ModuleNotFoundError
 from ...core import auth
 from ...core.submission import SubmissionHandler, auto_sync_after_completion
+from ...core.virtual_env_manager import resolve_venv_tool
 from ...core.modules import (
     get_module_mapping,
     get_module_name,
@@ -897,7 +898,8 @@ class ModuleWorkflowCommand(BaseCommand):
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
 
             # Launch Jupyter Lab with the notebook file directly
-            cmd = ["jupyter", "lab", f"--ServerApp.root_dir={modules_dir}"]
+            jupyter_path = resolve_venv_tool("jupyter")
+            cmd = [jupyter_path, "lab", f"--ServerApp.root_dir={modules_dir}"]
             if notebook_path and notebook_path.exists():
                 cmd.append(notebook_path.relative_to(modules_dir).as_posix())
 
@@ -937,8 +939,8 @@ class ModuleWorkflowCommand(BaseCommand):
             return 0
 
         except FileNotFoundError:
-            self.console.print("[yellow]⚠️  Jupyter Lab not found. Install with:[/yellow]")
-            self.console.print("[dim]pip install jupyterlab[/dim]")
+            self.console.print(f"[yellow]⚠️  Jupyter not found at '{jupyter_path}' and not on PATH.[/yellow]")
+            self.console.print("[dim]Activate your virtual environment, or run: tito setup[/dim]")
             return 1
         except Exception as e:
             self.console.print(f"[red]❌ Failed to launch Jupyter: {e}[/red]")

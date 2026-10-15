@@ -12,6 +12,19 @@ def get_venv_bin_dir(venv_path: Path) -> Path:
     return venv_path / "bin"
 
 
+def resolve_venv_tool(tool_name: str, venv_path: Path = None) -> str:
+    """Resolve a console-script tool to its venv executable, falling back to PATH.
+
+    A bare name like "jupyter" or "jupytext" is only found by subprocess if
+    it's on PATH, which isn't true when tito runs outside an activated venv
+    shell even though the tool is correctly installed inside .venv. Checking
+    the venv's bin/Scripts dir first avoids that false "not installed" result.
+    """
+    venv_bin_dir = get_venv_bin_dir(venv_path or get_venv_path())
+    exe = venv_bin_dir / (f"{tool_name}.exe" if sys.platform == "win32" else tool_name)
+    return str(exe) if exe.exists() else tool_name
+
+
 def get_venv_path() -> Path:
     """
     Fetch venv in case users have a custom path
