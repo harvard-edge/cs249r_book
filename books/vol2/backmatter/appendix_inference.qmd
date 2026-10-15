@@ -18,11 +18,11 @@ This appendix is a quantitative reference for serving systems. Use the queuing s
 
 ## Serving Performance Analysis {#sec-appdx-appendix-inference-serving}
 
-Serving performance analysis has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. The subsections that follow derive the queuing model first, then connect that model to memory-capacity limits in the worked serving examples.
+When a GPT-3 serving replica receives a burst of 100 queries per second, an aggressive batch size can saturate high-bandwidth memory with key-value states while a conservative batch size causes the arrival queue to grow without bound. Serving performance analysis therefore has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. The subsections that follow derive the queuing model first, then connect that model to memory-capacity limits in the worked serving examples.
 
 ### Queuing theory for batched inference {#sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0}
 
-The batching efficiency curve provides intuition about throughput-latency trade-offs, but production systems require rigorous analysis to determine optimal batch sizes under stochastic arrival patterns. Queuing theory provides the mathematical framework to derive these optimal operating points and to understand why certain batch sizes outperform others under specific conditions.
+Processing requests one at a time leaves GPU tensor cores starved for work, yet waiting to accumulate a batch of 64 requests adds tens of milliseconds of collection delay before the first kernel even launches. Batching trades waiting time for throughput, and production systems require quantitative analysis to choose batch sizes under stochastic arrival patterns. Queuing theory provides the mathematical framework to derive these operating points and to explain why certain batch sizes outperform others under specific load conditions.
 
 #### Queuing notation and the M/G/1 batch surrogate {#sec-appdx-inference-scale-mgck-queue-model-gpu-serving-c4c4}
 
@@ -47,7 +47,7 @@ $$\BatchServiceTime(\BatchSize) = \BatchFixedOverheadTime+ \MarginalRequestServi
 
 where $\BatchFixedOverheadTime$ represents fixed service overhead (kernel launch, weight loading from high-bandwidth memory (HBM)) and $\MarginalRequestServiceTime$ represents marginal per-request computation time. This linear model captures the first-order behavior observed in production systems, though actual service times may exhibit slight sublinearity due to memory bandwidth saturation at large batch sizes.
 
-The **Effective Service Rate**\index{Effective Service Rate} for batched processing is:
+The **effective service rate**\index{Effective Service Rate} for batched processing is:
 
 $$\EffectiveServiceRate(\BatchSize) = \frac{\BatchSize}{\BatchServiceTime(\BatchSize)} = \frac{\BatchSize}{\BatchFixedOverheadTime+ \MarginalRequestServiceTime\cdot \BatchSize}$$
 
@@ -111,7 +111,7 @@ where $\TargetServingUtilization$ is the target utilization (typically 0.7--0.8 
 
 ::: {#psp-appendix-inference-target-utilization-batch-sizing .callout-perspective title="Target-utilization batch sizing"}
 
-The target-utilization batch bound (@eq-optimal-batch-approx) reveals a fundamental insight: *minimum utilization-feasible batch size grows with fixed overhead and arrival rate*. This means:
+The target-utilization batch bound (@eq-optimal-batch-approx) shows that the minimum utilization-feasible batch size grows with fixed overhead and arrival rate, through three dependencies:
 
 1. **Higher traffic** $(\ArrivalRate)$: Required batch size increases.
 2. **Higher fixed overhead** $(\BatchFixedOverheadTime)$: Required batch size increases to amortize overhead.
@@ -276,9 +276,7 @@ Applying @eq-optimal-batch-approx to compute the minimum batch size that meets t
 
 `{python} PrefillServing.b_min_eq_math`
 
-Rounding up gives $\BatchSize=$ `{python} PrefillServing.b_target_str` as the smallest batch size that meets the target utilization headroom. Evaluating the surrogate response-time expression under the full-batch assumption then shows how larger batches reduce utilization but add batch-accumulation delay:
-
-Evaluating GPT-3 serving performance across batch sizes (@tbl-batch-size-comparison) exposes the trade-off between queuing delay and server utilization:
+Rounding up gives $\BatchSize=$ `{python} PrefillServing.b_target_str` as the smallest batch size that meets the target utilization headroom. Evaluating the surrogate response-time expression under the full-batch assumption then shows how larger batches reduce utilization and queuing delay but add batch-accumulation delay (@tbl-batch-size-comparison).
 
 | **Size $\BatchSize$** |  **$\BatchServiceTime(\BatchSize)$ (ms)**  |                  **req/s**                  |         **$\ServingUtilization$**          |    **$\mathbb{E}[\QueueWaitTime]$ (ms)**    |  **$(\BatchSize-1)/(2\ArrivalRate)$ (ms)**   | **$\mathbb{E}[\RequestResponseTime]$ (ms)**  |
 |:----------------------|:------------------------------------------:|:-------------------------------------------:|:------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:--------------------------------------------:|
@@ -386,17 +384,17 @@ ax.text(
 # Plot M/M/1 curve
 ax.plot(rho, L, color=c_blue, linewidth=2.5, zorder=4, label=r'M/M/1 Queue: $L = \frac{\rho_{\mathrm{serv}}}{1 - \rho_{\mathrm{serv}}}$')
 
-# Watermark / Zone labels
+# Band badge for the safe band, matching the caution and danger badges
 ax.text(
     0.35,
-    12.0,
-    'Safe Operating Zone\n' + r'$\rho_{\mathrm{serv}} < 0.7 \cdot \mathrm{Minimal\ Delay}$',
+    23.5,
+    'Safe\n' + r'$\rho_{\mathrm{serv}} < 0.70$',
     fontsize=10.0,
     fontweight='bold',
-    color=c_safe,
+    color='#15803D',
     ha='center',
-    va='center',
-    alpha=0.95,
+    va='top',
+    bbox=dict(boxstyle='round,pad=0.3', facecolor='#DCFCE7', edgecolor=c_safe, lw=0.8),
 )
 
 # Band badges: Caution at the top of its band; Danger at the foot of its band,
@@ -454,26 +452,6 @@ ax.text(
     va='center',
     bbox=dict(boxstyle='round,pad=0.4', facecolor='#FFFFFF', edgecolor=c_sec, lw=0.9),
     linespacing=1.8,
-)
-
-# Regime card in top left
-regime_card = (
-    "Queuing Regime Thresholds:\n"
-    r"$\bullet$ $\mathbf{Safe\ (\rho_{\mathrm{serv}} < 0.70):}$ Stable queue depth" + "\n"
-    r"$\bullet$ $\mathbf{Caution\ (0.70–0.85):}$ Variance amplifies delay" + "\n"
-    r"$\bullet$ $\mathbf{Danger\ (\rho_{\mathrm{serv}} > 0.85):}$ Delay rises steeply"
-)
-ax.text(
-    0.03,
-    0.94,
-    regime_card,
-    transform=ax.transAxes,
-    fontsize=10.0,
-    verticalalignment='top',
-    horizontalalignment='left',
-    bbox=dict(boxstyle='round,pad=0.45', facecolor='#FFFFFF', edgecolor=c_sec, lw=0.9),
-    color=c_dark,
-    linespacing=1.35,
 )
 
 ax.set_xlabel(r'Serving Utilization ($\rho_{\mathrm{serv}}$)', fontsize=10.0, fontweight='bold', color=c_dark)
@@ -548,9 +526,9 @@ This matches the response-time decomposition: roughly `{python} LittlesLawVerify
 
 :::
 
-#### Batch size selection framework given an SLA {#sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e}
+#### Batch size selection framework given an SLO {#sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e}
 
-Production systems must select batch size to meet Service Level Objectives (SLOs), typically specified as latency percentiles (for example, p99 latency < 200 ms). The following framework systematizes this decision:
+Production systems must select batch size to meet SLOs, typically specified as latency percentiles (for example, p99 latency < 200 ms). The following framework systematizes this decision:
 
 ##### Step 1 characterize service time {.unnumbered}
 
@@ -599,7 +577,7 @@ These rules generate candidate configurations; load tests must verify their late
 
 #### Trade-off curves for visualizing the operating region {#sec-appdx-inference-scale-tradeoff-curves-visualizing-operating-region-9f95}
 
-@Fig-batch-tradeoff-curves charts the competing pressures of batch execution by plotting normalized throughput against batch service time across batch sizes $\BatchSize\in [1, 128]$ on a logarithmic scale. While throughput climbs with diminishing returns as fixed overheads are amortized, batch service time expands steadily, defining the envelope where latency budgets constrain throughput gains.
+Batch execution sets two pressures against each other. As batch size $\BatchSize$ grows from 1 to 128, throughput climbs with diminishing returns as fixed overheads are amortized, while batch service time expands steadily, so a latency budget caps how much of the throughput gain a server can take (@fig-batch-tradeoff-curves).
 
 ::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-Off Curves**: Dimensionless schematic with batch service time t(B) = 1 + 0.15(B − 1) and throughput B/t(B), each normalized to its batch-1 value. Larger batches amortize fixed work but take longer to complete. These hypothetical curves are not a benchmark, exclude queuing and batch-formation delay, and establish neither a memory-capacity boundary nor an optimal batch size." fig-alt="Schematic normalized throughput and batch service time versus batch size. Throughput rises toward a ceiling while service time continues to increase. No optimal point or memory boundary is asserted."}
 
@@ -638,7 +616,7 @@ plt.close()
 
 :::
 
-The trade-off curve demonstrates several key insights:
+Four properties of these curves guide the choice of batch size:
 
 1. **Pareto Frontier**\index{Pareto Frontier}: An operating point is Pareto efficient when no other candidate provides at least as much throughput and no more latency, with a strict improvement in at least one objective. The frontier is the set of these nondominated points.
 2. **Knee of the Curve**\index{Knee of the Curve}: A knee marks diminishing throughput gains relative to increasing service time; it does not by itself select the best operating point.
@@ -649,7 +627,7 @@ The queuing-theoretic framework provides the mathematical foundation for the bat
 
 ### KV cache fundamentals {#sec-appdx-inference-scale-kv-cache-fundamentals-2ccd}
 
-@Sec-inference-scale-kv-cache-management-04ed defines the KV cache and the paged allocation that manages it, and @sec-appdx-dam-taxonomy-transformer-arithmetic gives its per-token size. This section expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
+During a single 2,048-token GPT-3 generation request, the key and value vectors accumulated across all 96 layers consume roughly 9.4 GB of high-bandwidth memory, so a batch of 32 concurrent requests exhausts the remaining memory of an eight-GPU A100 node before compute ever saturates. @Sec-inference-scale-kv-cache-management-04ed defines the KV cache and the paged allocation that manages it, and @sec-appdx-dam-taxonomy-transformer-arithmetic gives its per-token size. This section expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
 
 For a standard attention implementation at fixed model width, autoregressive generation without caching requires $\mathcal{O}(\SequenceLength^2)$ computation per token because each transformer layer recomputes the full prefix, including attention among its tokens. The KV cache stores previously computed key and value vectors, allowing each new token to attend to the prefix in $\mathcal{O}(\SequenceLength)$ computation. For serving at scale, this compute saving creates a critical memory-management challenge since KV cache memory can exceed model weights for long contexts.
 

@@ -103,7 +103,7 @@ The Data · Algorithm · Machine (D·A·M) taxonomy is the diagnostic framework 
 
 ## Diagnostic Summary {#sec-appdx-dam-taxonomy-diagnostic-summary}
 
-The taxonomy maps directly to the iron law of ML systems, introduced in @sec-vol2-introduction-fleet-law. @Tbl-v2-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
+The taxonomy maps directly to the iron law of ML systems, the single-machine equation that @sec-vol2-introduction-fleet-law restates before extending it to the Fleet Law. @Tbl-v2-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
 
 | **Axis**          |          **Role**          |  **Physical Constraint**   | **High-Leverage Optimization** |
 |:------------------|:--------------------------:|:--------------------------:|:------------------------------:|
@@ -115,7 +115,7 @@ The taxonomy maps directly to the iron law of ML systems, introduced in @sec-vol
 
 ## Iron Law Mapping {#sec-appdx-dam-taxonomy-iron-law-mapping}
 
-With the three axes named, the next step is to connect them to time. The performance of any ML task is governed by the distribution of work across the D·A·M axes, and the iron law mapping reveals which component's variables dominate execution:
+When a training step or serving request runs slower than expected on a single GPU, the first question is whether the time went to moving bytes, executing arithmetic, or waiting on dispatch overhead. The iron law connects the three D·A·M axes directly to execution time and reveals which component's variables dominate:
 
 $$ \Time= \underbrace{ \frac{\DataVolume}{\Bandwidth} }_{\text{Data (D)}} + \underbrace{ \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} }_{\text{Algorithm (A)/Machine (M)}} + \underbrace{ \Latency }_{\text{Overhead}} $$
 
@@ -123,7 +123,7 @@ Algorithm and Machine share the compute term and are separated by which variable
 
 ### D·A·M coordination from sum to max {#sec-appdx-dam-taxonomy-dam-coordination-sum-max}
 
-The additive iron law represents **Sequential Execution**\index{Sequential execution!D·A·M coordination}, the worst case where Data, Algorithm, and Machine take turns. Overlap can move the sum toward a max, with perfect overlap defining the ideal lower bound:
+The additive iron law represents **sequential execution**\index{Sequential execution!D·A·M coordination}, the worst case where Data, Algorithm, and Machine take turns. Overlap can move the sum toward a max, with perfect overlap defining the ideal lower bound:
 
 $$ \SequentialExecutionTime= \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency \quad \xrightarrow{\text{overlap}} \quad \PipelinedExecutionTime\geq \max\left(\frac{\DataVolume}{\Bandwidth},\; \frac{\Operations}{\PeakRate \cdot \EfficiencyHw}\right) + \Latency $$
 
@@ -140,7 +140,7 @@ The systems engineer's job is to make these components run in parallel, not in s
 
 ## Arithmetic Intensity Boundary {#sec-appdx-dam-taxonomy-arithmetic-intensity-boundary}
 
-This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by arithmetic intensity[^fn-intensity-v2-ratio] ($\ArithmeticIntensity$) of the workload.
+This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by the arithmetic intensity[^fn-intensity-v2-ratio] ($\ArithmeticIntensity$) of the workload.
 
 [^fn-intensity-v2-ratio]: **Arithmetic Intensity**\index{Arithmetic intensity!appendix refresher}: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($\PeakRate/\Bandwidth$).
 
@@ -163,9 +163,9 @@ For an H100, the book's hardware constants give a dense FP16 peak of `{python} D
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
 
-Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimizations help and which ones are wasted:
+Each optimization shortens only one term of the iron law, so a fix aimed at a term that does not bind is wasted. @Tbl-v2-bottleneck-actions pairs each bottleneck with the optimizations that help and those that do not.
 
-| **If the workload is...** |               **Dominant Term**               | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
+| **If the workload is...** |               **Dominant Term**               | **Optimization That Works**                                             | **Optimization That Is Wasted**                    |
 |:--------------------------|:---------------------------------------------:|:------------------------------------------------------------------------|:---------------------------------------------------|
 | **Memory-Bound**          |            $\DataVolume/\Bandwidth$           | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
 | **Compute-Bound**         | $\Operations/(\PeakRate \cdot \EfficiencyHw)$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (not binding)                |
@@ -307,7 +307,7 @@ Four techniques shorten one device's step without changing the model's mathemati
 
 ## Numeric Precision and Training Memory {#sec-appdx-dam-taxonomy-training-memory}
 
-The notation conventions at the front of the book list the number formats used throughout and their byte widths. FP32 occupies `{python} SingleMachineRecap.fp32_bytes_str` bytes, BF16 and FP16 occupy `{python} SingleMachineRecap.fp16_bytes_str`, and FP8 and INT8 occupy one. **Mixed-precision training**\index{Mixed-precision training!appendix refresher} runs the forward and backward passes in a 16-bit format for speed and memory, while it keeps an FP32 master copy of the weights so that small updates are not lost to rounding. The Adaptive Moment Estimation (Adam) optimizer adds two FP32 moment estimates per parameter. @Tbl-appdx-dam-training-state totals the resulting bytes per parameter.
+Whether a large model fits in an 80 GB H100 memory bank or must be partitioned across dozens of accelerators depends on how many bytes each parameter and optimizer state occupies. In the number formats listed in the notation conventions at the front of the book, FP32 occupies `{python} SingleMachineRecap.fp32_bytes_str` bytes, BF16 and FP16 occupy `{python} SingleMachineRecap.fp16_bytes_str`, and FP8 and INT8 occupy one. **Mixed-precision training**\index{Mixed-precision training!appendix refresher} runs the forward and backward passes in a 16-bit format for speed and memory, while it keeps an FP32 master copy of the weights so that small updates are not lost to rounding. The Adaptive Moment Estimation (Adam) optimizer adds two FP32 moment estimates per parameter. @Tbl-appdx-dam-training-state totals the resulting bytes per parameter.
 
 | **State**              | **Format** |                   **Bytes per Parameter**                    |          **In a Resumable Checkpoint**           |
 |:-----------------------|:----------:|:------------------------------------------------------------:|:------------------------------------------------:|
@@ -365,7 +365,7 @@ The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance agai
 
 ## Scaling the Taxonomy from Node to Fleet {#sec-appdx-dam-taxonomy-scaling}
 
-These single-node grades become most useful when they are carried forward into distributed design. The D·A·M taxonomy is the diagnostic baseline for a single machine, but as systems scale from a single node to the machine learning fleet, each axis undergoes a qualitative transformation. Understanding these connections is essential for transitioning from local optimization to fleet-scale engineering.
+These single-node grades become most useful when they are carried forward into distributed design. The D·A·M taxonomy is the diagnostic baseline for a single machine, but as systems scale from a single node to the machine learning fleet, each axis undergoes a qualitative transformation.
 
 ### The evolution of constraints {.unnumbered}
 

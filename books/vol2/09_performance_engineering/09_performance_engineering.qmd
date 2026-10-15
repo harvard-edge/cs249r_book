@@ -164,7 +164,7 @@ Capacity can be lost in three places, and the order follows the life of a job. A
 Each place has a name in the accounting. Scheduling goodput\index{Scheduling Goodput!fleet capacity accounting} measures the first, runtime goodput\index{Runtime Goodput!fleet capacity accounting} the second, and program goodput\index{Program Goodput!fleet capacity accounting} the third, and useful output is fleet capacity multiplied by all three [@wongpanich2025fleet]. In the Llama 3 run, effective training time stands in for runtime goodput and model FLOPs utilization (MFU) for program goodput, and a shared fleet multiplies both by a scheduling factor below one.
 
 ::: {.column-margin .margin-pointer}
-↩ Program, runtime, and scheduling goodput are established alongside the Fleet Law in @sec-vol2-introduction-fleet-law.
+↩ The Fleet Law, where these three factors are first previewed, is established in @sec-vol2-introduction-fleet-law.
 :::
 
 One training job carries the accounting through the chapter. It trains Llama 2 70B, a smaller Archetype A model than the archetype's 175B reference, on `{python} FleetCapacityOpening.example_gpus_str` (`{python} FleetCapacityOpening.example_nodes_str` of eight) of that shared fleet. Its layout is `{python} FleetCapacityOpening.tp_width_str`-way tensor parallelism within each node and data parallelism across nodes. The job competes for complete allocations with other teams' jobs, survives the failures and preemptions that fleet sees, and runs steps whose exposed communication grows with its device count, so all three losses apply to one job on one fleet.
@@ -203,7 +203,13 @@ The three factors follow the life of a job, and each is a fraction of what the o
 
 $$\MlProductivityGoodput = \SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput$$ {#eq-perf-ml-productivity-goodput}
 
-The product is valid because each factor divides by what the previous one produced. Scheduling goodput divides held time by capacity-time, runtime goodput divides retained step time by held time, and program goodput divides ideal time by retained step time, so each numerator cancels the next denominator and what remains is the ideal-rate time of the useful work over the capacity-time the fleet offered. MPG is therefore a fraction of capacity rather than a throughput rate. Useful output is peak capacity multiplied by it, and the cost of a unit of useful work is the cost of capacity divided by it. The cancellation also states when the product holds. If two factors divide by overlapping quantities, a lost interval is subtracted twice, and if a factor's denominator is wider than the previous factor's numerator, an interval is subtracted at neither.
+The product is valid because each factor divides by what the previous one produced. Scheduling goodput divides held time by capacity-time, runtime goodput divides retained step time by held time, and program goodput divides ideal time by retained step time, so each numerator cancels the next denominator and what remains is the ideal-rate time of the useful work over the capacity-time the fleet offered (@fig-performance-engineering-goodput-boundaries). MPG is therefore a fraction of capacity rather than a throughput rate. Useful output is peak capacity multiplied by it, and the cost of a unit of useful work is the cost of capacity divided by it. The cancellation also states when the product holds. If two factors divide by overlapping quantities, a lost interval is subtracted twice, and if a factor's denominator is wider than the previous factor's numerator, an interval is subtracted at neither.
+
+::: {#fig-performance-engineering-goodput-boundaries fig-env="figure" fig-pos="htb" fig-cap="**ML goodput as a chain of three boundaries**: Capacity-time becomes useful work only by crossing three boundaries in the order a job meets them, and each factor divides what crossed its boundary by what reached it. The dashed slice at the end of each row is the capacity-time lost at the boundary above that row, and the losses beside it are charged there and at no other boundary, so the three factors multiply into the share of offered capacity-time that becomes useful work. Widths are schematic, not measured." fig-alt="Four horizontal bars stacked top to bottom, each shorter than the one above and separated by dashed boundary lines. The top bar reads capacity-time the fleet offers. A navy chip S labeled complete allocation, held divided by offered, marks the first boundary; the next bar reads held by complete allocations, with a dashed empty slice at its right end and beside it the losses unallocated capacity, partial gangs, and fragmentation. A chip R labeled retained step, retained divided by held, marks the second boundary; the next bar reads time on retained steps, with a dashed slice and the losses startup, input waits, checkpoint pauses, and recovery and rework. A chip P labeled ideal rate, ideal divided by retained, marks the third boundary; the bottom bar is green and reads useful work, with a dashed slice and the losses exposed communication, stragglers, bubbles, memory stalls, and dispatch. Below the bars a line reads useful work equals capacity-time times S times R times P."}
+
+![](images/svg/performance_engineering_goodput_boundaries.svg)
+
+:::
 
 Each factor loses capacity to the events that @sec-performance-engineering-memory-wall listed for its place in a job's life, and the factors cut across the C$^3$ taxonomy rather than extending the Fleet Law. Communication overlap raises program goodput, while checkpointing and recovery, which the Fleet Law files under Coordination, lower runtime goodput. The factor says where in a job's life the capacity went and C$^3$ says which mechanism took it, so a diagnosis names the factor first and the mechanism inside it second.
 
@@ -311,7 +317,7 @@ The mapping behind the estimate is close but not exact, since effective training
 
 ### Program goodput and its measure {#sec-performance-engineering-fleet-efficiency-metric-dff4}
 
-Program goodput needs a named ideal, because the rate the hardware allows depends on which resource the work must use. For training steps and for the prefill pass over a prompt, arithmetic dominates, and the ideal time of a step is the time the accelerators would need to perform the model's required operations at their peak rate. Busy counters cannot measure against that ideal, because busy intervals include communication waits, recomputation, and arithmetic far below peak. MFU\index{MFU!as program goodput} can, because it counts only the operations the model requires.[^fn-mfu-hfu-origin]
+Hardware activity counters cannot measure how efficiently a retained step ran, because an accelerator looks equally busy when it waits on a collective, recomputes dropped activations, or runs arithmetic far below its peak rate. Measuring program goodput instead requires a named ideal rate that depends on which resource the work must use. For training steps and for the prefill pass over a prompt, arithmetic dominates, and the ideal time of a step is the time the accelerators would need to perform the model's required operations at their peak rate. MFU\index{MFU!as program goodput} measures against that ideal because it counts only the operations the model requires.[^fn-mfu-hfu-origin]
 
 [^fn-mfu-hfu-origin]: **MFU and HFU**\index{Model FLOPs Utilization!PaLM origin}\index{Hardware FLOPs Utilization!vs. MFU}: The PaLM report proposed MFU in place of hardware FLOPs utilization (HFU), which counts every executed operation, because the executed count depends on implementation and compiler choices, most visibly rematerialization, which recomputes activations to save memory [@chowdhery2022palm]. MFU's reference rate depends only on the model architecture and the published peak rate, so runs of one model on different software stacks compare directly. For goodput accounting, the choice means that recomputation which lets a layout fit in memory is charged to program goodput as lost time rather than credited as work.
 
@@ -326,14 +332,14 @@ Program goodput needs a named ideal, because the rate the hardware allows depend
 :::
 
 ::: {.column-margin .margin-pointer}
-↩ Model FLOPs utilization is established as the compute-axis efficiency measure in @sec-vol2-introduction-dim-compute.
+↩ The compute axis, where the memory wall limits MFU, is established in @sec-vol2-introduction-dim-compute.
 :::
 
 The identity between MFU and program goodput follows from the definition of the ideal. A retained step on $\DeviceCount$ devices performs $\UsefulModelFlops$ of required work, which the devices could finish in $\UsefulModelFlops/(\DeviceCount\PeakRate)$ at peak, and the step actually takes $\DistributedStepTime$. @Eq-perf-program-goodput-mfu writes program goodput as the ratio of the two times:
 
 $$\ProgramGoodput = \frac{\UsefulModelFlops/(\DeviceCount\PeakRate)}{\DistributedStepTime} = \ModelFlopsUtilization$$ {#eq-perf-program-goodput-mfu}
 
-The identity holds only when MFU is measured over the steps that runtime goodput retained, with input waits already removed. An MFU averaged over a whole run, as published figures often are, divides by elapsed time that includes restarts and checkpoint pauses, so multiplying it by a runtime factor charges those losses twice. Hardware FLOPs utilization\index{Hardware FLOPs Utilization!vs. MFU} (HFU), which counts the executed arithmetic including recomputation, is useful evidence beside MFU, because the gap between them is recomputation. That gap is a program goodput loss even when recomputation is the right price for the memory it saves.
+The identity holds only when MFU is measured over the steps that runtime goodput retained, with input waits already removed. An MFU averaged over a whole run, as published figures often are, divides by elapsed time that includes restarts and checkpoint pauses, so multiplying it by a runtime factor charges those losses twice. Hardware FLOPs utilization\index{Hardware FLOPs Utilization!vs. MFU} (HFU), which counts the executed arithmetic including recomputation, is useful evidence beside MFU, because the gap between them is recomputation. That gap is a program goodput loss even when recomputation is the right price for the memory it saves. Capacity planning sizes a run in accelerator-hours from peak throughput scaled by a measured utilization (@sec-compute-infrastructure-peak-vs-sustained-throughput-625a), and a plan that takes retained-step MFU as that utilization still omits the runtime and scheduling losses that the other two factors charge.
 
 ```{python}
 #| echo: false
@@ -377,7 +383,7 @@ class MfuProgression:
     llama3_16k_gpus_str = fmt(llama3_16k_gpus, precision=0, commas=True)
 ```
 
-@Fig-mfu-progression collects the MFU that published training runs report\index{Model FLOPs Utilization!published training runs}, which stays below half of peak and falls for Llama 3 405B when the same model moves to twice as many GPUs.
+The MFU that published training runs report\index{Model FLOPs Utilization!published training runs} stays below half of peak, and for Llama 3 405B it falls when the same model moves to twice as many GPUs (@fig-mfu-progression).
 
 ::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU progression**: Model FLOPs Utilization across published training systems, ordered chronologically. Reported MFU rises from `{python} MfuProgression.gpt3_mfu_str` (GPT-3, 2020) to `{python} MfuProgression.palm_mfu_str` (PaLM, 2022), with later illustrated runs near 40--45 percent. These systems differ in hardware and workload, so the comparison does not isolate the effect of parallelism or overlap. The Llama 3 data points show lower reported MFU at the larger scale: MFU drops from `{python} MfuProgression.llama3_8k_mfu_str` at `{python} MfuProgression.llama3_8k_gpus_str` GPUs to `{python} MfuProgression.llama3_16k_mfu_str` at `{python} MfuProgression.llama3_16k_gpus_str` GPUs. Interpreting the difference requires the batch, execution configuration, and measurement convention. Data sources: @chowdhery2022palm, @dubey2024llama." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent. Each orange bar sits inside a light gray track that runs to 100 percent of peak, the remainder labeled unused share of peak. A dashed line marks 50 percent of peak, and a bracket notes that the Llama 3 run on twice the GPUs reports lower MFU."}
 
@@ -578,7 +584,7 @@ Program goodput also agrees with the volume's earlier efficiency measures. Under
 
 ### Accounting boundaries {#sec-performance-engineering-goodput-boundaries}
 
-An hour of fleet capacity crosses up to three boundaries before it becomes useful work, and each boundary must be defined precisely enough that two teams measuring the same interval charge it to the same factor. A loss is charged to the factor whose boundary it fails to cross, and only to that factor. @Tbl-performance-engineering-goodput-boundaries states each boundary, the losses charged at it, the evidence that measures it, the utilization tier of @sec-fleet-orchestration-resource-accounting it corresponds to, and the chapter that owns its levers. The last three rows apply the same boundaries to the serving replica.
+Without sharp boundaries between the three factors, two teams measuring the same lost hour—such as devices held by a gang still waiting for its members, or a step slowed by a straggling peer—will either charge it to different factors or subtract it twice. An hour of fleet capacity crosses up to three boundaries before it becomes useful work, and a loss is charged to the factor whose boundary it fails to cross, and only to that factor. @Tbl-performance-engineering-goodput-boundaries states each boundary, the losses charged at it, the evidence that measures it, the utilization tier of @sec-fleet-orchestration-resource-accounting it corresponds to, and the chapter that owns its levers. The last three rows apply the same boundaries to the serving replica.
 
 | **Factor**                              | **What ends at its boundary**                                 | **Losses charged**                                                                                                                                                                                                                                         | **Evidence**                                                                                                       | **Utilization tier**                                         | **Lever owner**                                                                                              |
 |:----------------------------------------|:--------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------|
@@ -645,9 +651,9 @@ The boundary decides where a loss is counted, and the cause decides who fixes it
 
 ### One word, several measures {#sec-performance-engineering-goodput-family}
 
-The word goodput now names four measures in the volume, each correct for its own question. Run-level goodput, from @sec-vol2-introduction-dim-coord, is one job's rate of useful training progress after wasted and repeated work are discounted. MPG is the fraction of fleet capacity that becomes useful work at the ideal rate. Service-level objective (SLO) goodput\index{Goodput!SLO-constrained}, developed in @sec-inference-scale-serving-tax-overhead-distribution-5ef3, is the rate of completed requests that meet their latency targets. Statistical goodput\index{Goodput!statistical}, which the Pollux scheduler of @sec-fleet-orchestration-pollux maximizes [@qiao2021pollux], discounts training throughput by the optimization progress each example contributes at the current batch size.
+A report that quotes "goodput" without qualifying it leaves a reader unable to tell whether a job kept its steps across restarts, used its fleet allocation well, met its serving latency targets, or made statistical progress per training example. The word goodput now names four distinct measures in the volume, each correct for its own question. Run-level goodput, from @sec-vol2-introduction-dim-coord, is one job's rate of useful training progress after wasted and repeated work are discounted. MPG is the fraction of fleet capacity that becomes useful work at the ideal rate. Service-level objective (SLO) goodput\index{Goodput!SLO-constrained}, developed in @sec-inference-scale-serving-tax-overhead-distribution-5ef3, is the rate of completed requests that meet their latency targets. Statistical goodput\index{Goodput!statistical}, which the Pollux scheduler of @sec-fleet-orchestration-pollux maximizes [@qiao2021pollux], discounts training throughput by the optimization progress each example contributes at the current batch size.
 
-SLO goodput applies after MPG rather than replacing it, so work served at a high fraction of its ideal rate on average can still miss its targets in the tail. Statistical goodput measures against progress per example rather than operations per second, so a larger batch can raise program goodput while lowering statistical goodput. A report that says only "goodput" therefore says nothing a reader can check, and every efficiency claim names the measure, the boundary it divides by, and the window over which it was taken.
+SLO goodput applies after MPG rather than replacing it, so work served at a high fraction of its ideal rate on average can still miss its targets in the tail. Statistical goodput measures against progress per example rather than operations per second, so a larger batch can raise program goodput while lowering statistical goodput. Every efficiency claim must therefore name the measure, the boundary it divides by, and the window over which it was taken.
 
 ::: {.column-margin .margin-pointer}
 ↪ MPG applied across a whole portfolio of jobs, in fleet dashboards and chargeback, is developed in @sec-ml-operations-scale-advanced-fleet-metrics-ml-productivity-goodput-mpg-fabf.
@@ -657,11 +663,11 @@ Fixing those three choices for each factor is the measurement contract that open
 
 ## Measuring Goodput {#sec-performance-engineering-measuring-goodput}
 
-A goodput factor guides a decision only when two measurements of it can be compared and a shortfall can be traced to the factor that lost it. Two measurements of the Llama 2 70B job taken a week apart can report different program goodput because they traced different ranks, spanned a framework upgrade, began before compilation finished, or averaged over a restart, with no change in how well the job used the fleet. Measuring goodput therefore requires a contract that holds everything fixed except the change being judged, an order of evidence that finds the losing factor before its mechanism, and fleet-wide collection at a cost the fleet can afford.
+Two measurements of the Llama 2 70B job taken a week apart can report different program goodput because they traced different ranks, spanned a framework upgrade, began before compilation finished, or averaged over a restart, with no change in how well the job used the fleet. A goodput factor guides a decision only when two measurements of it can be compared and a shortfall can be traced to the factor that lost it. Measuring goodput therefore requires a contract that holds everything fixed except the change being judged, an order of evidence that finds the losing factor before its mechanism, and fleet-wide collection at a cost the fleet can afford.
 
 ### The measurement contract {#sec-performance-engineering-measurement-contract}
 
-A goodput claim compares two measurements, and the comparison holds only if both measured the same thing. A speedup can come from different work, a different machine state, timing that missed asynchronous execution, or a relaxed quality target rather than from the change under evaluation. A fleet adds sources of disagreement that one machine lacks, since two runs may land on different topologies, share the network with different neighbors, run under a different scheduler policy, or cover a window too short to contain the failures that a longer one would. Benchmark suites resolve this by fixing the workload, the quality target, and the measurement rules before any system is compared [@mattson2020mlperf; @reddi2020], and fleet measurement needs the same discipline for every factor it reports.
+An apparent speedup between two runs can come from different work, a different machine state, timing that missed asynchronous execution, or a relaxed quality target rather than from the change under evaluation. A fleet adds sources of disagreement that one machine lacks, since two runs may land on different topologies, share the network with different neighbors, run under a different scheduler policy, or cover a window too short to contain the failures that a longer one would. Benchmark suites resolve these discrepancies by fixing the workload, the quality target, and the measurement rules before any system is compared [@mattson2020mlperf; @reddi2020], and fleet measurement needs the same discipline for every factor it reports.
 
 ::: {#dfn-performance-engineering-measurement-contract .callout-definition title="Measurement contract"}
 
@@ -987,9 +993,9 @@ Scheduling goodput counts a narrower set of losses than an orchestrator can see.
 
 ### What scheduling goodput counts {#sec-performance-engineering-scheduling-goodput-counts}
 
-Scheduling goodput divides two capacity-times taken over the same window. The denominator is the in-service capacity the pool offers, its allocatable accelerators multiplied by the length of the window. The numerator is the capacity-time held by complete allocations, summed over jobs as the devices each job holds multiplied by the interval from the moment its allocation became complete until it released them. A complete allocation is the minimum viable execution group of @sec-fleet-orchestration-gang-scheduling, every accelerator, interconnect domain, and co-scheduled resource that one synchronous step needs. For a rigid job it is the full gang. For an elastic job it is the size at which the job runs between two reconfiguration boundaries, and the devices it gives up count again only when another job's complete allocation takes them. Nothing after completion enters the factor, so a job that holds a complete gang and never takes a step scores as well here as one that runs at its ideal rate.
+A rigid training job that holds half of its requested accelerators while waiting for the rest completes zero steps, not half as many, yet a cluster utilization counter credits every held device as allocated. Scheduling goodput avoids that distortion by dividing two capacity-times taken over the same window. The denominator is the in-service capacity the pool offers, its allocatable accelerators multiplied by the length of the window. The numerator is the capacity-time held by complete allocations, summed over jobs as the devices each job holds multiplied by the interval from the moment its allocation became complete until it released them. A complete allocation is the minimum viable execution group of @sec-fleet-orchestration-gang-scheduling, every accelerator, interconnect domain, and co-scheduled resource that one synchronous step needs. For a rigid job it is the full gang. For an elastic job it is the size at which the job runs between two reconfiguration boundaries, and the devices it gives up count again only when another job's complete allocation takes them. Nothing after completion enters the factor, so a job that holds a complete gang and never takes a step scores as well here as one that runs at its ideal rate.
 
-Every interval of offered capacity outside a complete allocation is a scheduling loss, whatever caused it. Capacity sits unassigned because no job wants it, because the jobs that want it have exhausted their quota, or because the free devices are scattered where no queued gang fits. Capacity is assigned without being complete when a gang holds some members while it waits for the rest, when two partial gangs deadlock, or when freed devices idle as a reservation for the gang at the head of the queue, and it passes through short changeovers between tenants that belong to no allocation. A rigid job that holds half its devices completes zero steps, not half as many, which is why @sec-performance-engineering-goodput-boundaries narrowed the allocated tier to complete allocations.
+Every interval of offered capacity outside a complete allocation is a scheduling loss, whatever caused it. Capacity sits unassigned because no job wants it, because the jobs that want it have exhausted their quota, or because the free devices are scattered where no queued gang fits. Capacity is assigned without being complete when a gang holds some members while it waits for the rest, when two partial gangs deadlock, or when freed devices idle as a reservation for the gang at the head of the queue, and it passes through short changeovers between tenants that belong to no allocation. Because an incomplete gang cannot advance its step, @sec-performance-engineering-goodput-boundaries narrowed the allocated tier to complete allocations.
 
 The denominator leaves out accelerators that are out of service for repair or maintenance, because no scheduling policy can allocate them. Their downtime is reported beside the product as the pool's availability, which keeps it visible without charging it to the scheduler. A report that divides by installed capacity instead folds hardware reliability into scheduling goodput, so the measurement contract of @sec-performance-engineering-measurement-contract records which denominator was used, and two reports that differ on it silently cannot be compared.
 
@@ -1003,7 +1009,7 @@ Scheduling goodput is a property of a pool, because capacity lost while gangs as
 
 ### Attributing scheduler losses {#sec-performance-engineering-scheduler-attribution}
 
-The debugging analysis of @sec-fleet-orchestration-debugging sorts utilization losses by symptom, and the accounting sorts the same losses by the first boundary they fail to cross, which groups them differently. Capacity outside a complete allocation is charged to scheduling goodput. Capacity held without producing a retained step is charged to runtime goodput. A retained step that ran slower than its ideal is charged to program goodput. Each interval stops at the first test it fails, so it is charged once. @Tbl-performance-engineering-scheduler-attribution applies the test to the losses the orchestration chapter diagnoses, and its last column names the layer whose levers remove each loss, which is often not the owner of the factor the loss is charged to.
+Charging a cluster loss to the team whose lever fixes it—such as billing a zombie job to scheduling goodput because orchestrator leases terminate it—subtracts those hours from capacity the scheduling numerator already counted as held, counting the same loss twice. While the debugging analysis of @sec-fleet-orchestration-debugging sorts utilization losses by symptom, goodput accounting sorts the same losses by the first boundary they fail to cross, which groups them differently. Capacity outside a complete allocation is charged to scheduling goodput. Capacity held without producing a retained step is charged to runtime goodput. A retained step that ran slower than its ideal is charged to program goodput. Each interval stops at the first test it fails, so it is charged once. @Tbl-performance-engineering-scheduler-attribution applies the test to the losses that debugging analysis diagnoses, and its last column names the layer whose levers remove each loss, which is often not the owner of the factor the loss is charged to.
 
 ::: {.column-margin .margin-pointer}
 ↩ The utilization anti-patterns and the evidence that diagnoses each one are established in @sec-fleet-orchestration-anti-patterns.
@@ -1023,21 +1029,19 @@ The debugging analysis of @sec-fleet-orchestration-debugging sorts utilization l
 | **Communication bottleneck**, including noisy neighbors | Retained steps expose collectives that computation does not hide, or that a co-located job's traffic slows | Ideal rate                | Program goodput    | Collectives and parallel layout; orchestration (isolation)                         |
 | **Cache fragmentation limiting admission** (serving)    | A ready replica admits fewer concurrent requests than its node could serve                                 | Ideal rate                | Program goodput    | Serving (paged cache allocation)                                                   |
 
-: **Attributing orchestration losses to goodput factors**: Each loss pattern from the orchestration chapter is charged to the first accounting boundary its capacity fails to cross. Scheduling goodput receives only the losses that occur before a complete allocation exists, and a topology mismatch lands in scheduling or program goodput depending on whether the job waited or ran. The factor a loss lowers and the layer that removes it are recorded separately. {#tbl-performance-engineering-scheduler-attribution tbl-colwidths="[20,28,14,14,24]"}
+: **Attributing orchestration losses to goodput factors**: Each utilization loss pattern of fleet orchestration is charged to the first accounting boundary its capacity fails to cross. Scheduling goodput receives only the losses that occur before a complete allocation exists, and a topology mismatch lands in scheduling or program goodput depending on whether the job waited or ran. The factor a loss lowers and the layer that removes it are recorded separately. {#tbl-performance-engineering-scheduler-attribution tbl-colwidths="[20,28,14,14,24]"}
 
 Idle devices appear in two rows. A partial gang, a fragment, or a draining reservation leaves devices idle outside any complete allocation, which is a scheduling loss. A reserved block of the kind that @sec-fleet-orchestration-quota-governance describes is granted as an allocation and refused to everyone else, so it crosses the first boundary and fails the second, which makes it a runtime loss. Reclaiming the block therefore moves part of the loss instead of recovering all of it. The share a borrower uses is recovered, and the share no borrower takes becomes free capacity, now a scheduling loss. A lever can move a loss between factors without removing it, and only the product shows whether the fleet gained.
 
-Charging each loss to the layer that removes it would break the product. A zombie job charged to scheduling goodput would be subtracted from hours the scheduling numerator already counted as held, so the same hours would be lost twice.
-
 The table charges the interval that defines a pattern, not every interval of a job that shows it. A zombie job loses its whole allocation from the failure until release, so its loss grows with the time the platform takes to notice that progress stopped, which the leases of @sec-fleet-orchestration-deadlock bound. A starved job's input waits are runtime losses read from the job timeline rather than from the sawtooth activity trace, while the busy intervals between them can still run below the ideal rate and lose program goodput.
 
-The communication bottleneck lies wholly beyond the first two boundaries. The orchestration chapter's first check compares a step's time with its compute-only time, and since a step's ideal time is at most its compute-only time, compute-only time divided by step time is an upper bound on program goodput that needs no trace. A step trace then locates the exposed interval in the Fleet Law's communication term (@sec-performance-engineering-exposed-communication).
+The communication bottleneck lies wholly beyond the first two boundaries. The quick first bound of @sec-fleet-orchestration-anti-patterns compares a step's time with its compute-only time, and since a step's ideal time is at most its compute-only time, compute-only time divided by step time is an upper bound on program goodput that needs no trace. A step trace then locates the exposed interval in the Fleet Law's communication term (@sec-performance-engineering-exposed-communication).
 
 ### Evidence, size, and the serving replica {#sec-performance-engineering-scheduling-evidence}
 
-Scheduler records, the first rung of the ladder in @sec-performance-engineering-localize-factor, measure scheduling goodput completely. The numerator sums devices multiplied by the interval from completion to release, the partial-gang loss sums devices multiplied by the interval from first assignment to completion, and free capacity, split by whether queued work could have used it, gives the rest. One timestamp carries most of the weight. The moment an allocation became complete must be logged by the scheduler as an event, as group admission of a PodGroup is in @sec-fleet-orchestration-kubernetes, because inferring it from the job's first step would move startup, a runtime loss, into the scheduling factor. A scheduler that logs only individual device assignments forces the analyst to reconstruct completeness from each job's declared minimum membership, which works for rigid jobs and fails for elastic ones.
+If a scheduler logs only individual device assignments and leaves the analyst to infer gang completion from the job's first training step, every minute the job spends launching processes and compiling graphs before Step 1 is mischarged from runtime goodput to scheduling goodput. Scheduler records, the first rung of the ladder in @sec-performance-engineering-localize-factor, measure scheduling goodput completely only when the moment an allocation became complete is logged by the scheduler as an event, as group admission of a PodGroup is in @sec-fleet-orchestration-kubernetes. With that timestamp recorded, the numerator sums devices multiplied by the interval from completion to release, the partial-gang loss sums devices multiplied by the interval from first assignment to completion, and free capacity, split by whether queued work could have used it, gives the rest. Without it, the analyst must reconstruct completeness from each job's declared minimum membership, which works for rigid jobs and fails for elastic ones.
 
-The orchestration chapter's pitfall on treating all GPU-hours as equal (@sec-fleet-orchestration-fallacies) gives one breakdown of a shared fleet's capacity. Read through the boundaries, it sizes the scheduling goodput of the kind of pool the running example draws its nodes from.
+The pitfall of treating all GPU-hours as equal (@sec-fleet-orchestration-fallacies) gives one breakdown of a shared fleet's capacity. Read through the boundaries, it sizes the scheduling goodput of the kind of pool the running example draws its nodes from.
 
 ```{python}
 #| echo: false
@@ -1143,11 +1147,11 @@ Once a complete allocation holds the devices, the question becomes whether the t
 
 ## Runtime Goodput {#sec-performance-engineering-runtime-goodput}
 
-Runtime goodput is the share of a job's held time that becomes retained progress, and it is the one factor that places the losses of three earlier chapters on a single boundary. @Sec-data-storage priced input waits as a share of one step, @sec-fault-tolerance-reliability priced checkpoints and recovery against training time, and @sec-fleet-orchestration priced preemption in minutes of allocation per event. Charged to one interval of held time, those losses can be compared, so the largest is found by measurement rather than by whichever chapter a team read last. The levers that shorten each loss stay with those chapters.
+A team whose job loses held time to input stalls, checkpoint pauses, hardware restarts, and forced preemptions meets each loss in a different unit: @sec-data-storage prices input waits as a share of one step, @sec-fault-tolerance-reliability prices checkpoints and recovery against fault-free training time, and @sec-fleet-orchestration prices preemption in minutes of allocation per event. Runtime goodput—the share of a job's held time that becomes retained progress—places all of those losses on a single boundary so that the largest is found by measurement rather than by whichever chapter a team read last. The levers that shorten each loss stay with those chapters.
 
 ### What runtime goodput counts {#sec-performance-engineering-runtime-goodput-counts}
 
-Runtime goodput is a ratio of two times taken over the same window for the same allocation. Its denominator is held time, from the moment the job's allocation became complete until the job released its devices, which the scheduler records date (@sec-performance-engineering-scheduling-evidence). Its numerator is the number of retained steps multiplied by the job's fault-free step time. A step is retained when a committed checkpoint contains its result, or when the job ends and saves its final state. The fault-free step time is the job's steady-state step time with the input batch ready and no recovery in progress, measured on the same job and the same allocation. Runtime goodput is the share of held time that this product fills.
+A job that holds its full gang for an hour can still spend much of that hour launching processes, waiting on a stalled input pipeline, pausing for synchronous checkpoints, or replaying steps erased by a node failure. Runtime goodput measures the share of held time that survives those interruptions by dividing two times taken over the same window for the same allocation. Its denominator is held time, from the moment the job's allocation became complete until the job released its devices, which the scheduler records date (@sec-performance-engineering-scheduling-evidence). Its numerator is the number of retained steps multiplied by the job's fault-free step time. A step is retained when a committed checkpoint contains its result, or when the job ends and saves its final state. The fault-free step time is the job's steady-state step time with the input batch ready and no recovery in progress, measured on the same job and the same allocation. Runtime goodput is the share of held time that this product fills.
 
 Normalizing to the job's own fault-free rate keeps the runtime boundary separate from the program boundary. The fault-free step time already contains exposed communication, pipeline bubbles, memory stalls, and a straggling rank, so those losses pass through this boundary untouched and are charged to program goodput. Steps just after a relaunch are a different case. Caches are cold, kernels are still compiling, and the input pipeline is refilling, so their excess over the fault-free step time belongs to the recovery that caused it and is a runtime loss, while the fault-free part of each step counts as retained progress. A straggler that slows every step for days is therefore a program loss, and the same slowdown confined to the minutes after a restart is a runtime loss.
 
@@ -1392,7 +1396,7 @@ The running example is small by the standard of that reference, and its terms co
 **Variables**:
 
 - Mean time between failures $\SystemMtbf$ is about `{python} RuntimeGoodputComposition.mtbf_h_str`, from the component failure rates of @sec-fault-tolerance-young-daly.
-- The resumable checkpoint takes about `{python} RuntimeGoodputComposition.t_write_s_str` to write at the `{python} RuntimeGoodputComposition.ckpt_bw_str` of that chapter's recovery budget, the job's tenth of a parallel file system shared by ten jobs (@sec-storage-checkpointing), so the Young-Daly interval $\CheckpointInterval$ is about `{python} RuntimeGoodputComposition.tau_min_str`.
+- The resumable checkpoint takes about `{python} RuntimeGoodputComposition.t_write_s_str` to write at the `{python} RuntimeGoodputComposition.ckpt_bw_str` of the recovery budget in @sec-fault-tolerance-reliability-reliability-recovery-procedures-002d, the job's tenth of a parallel file system shared by ten jobs (@sec-storage-checkpointing), so the Young-Daly interval $\CheckpointInterval$ is about `{python} RuntimeGoodputComposition.tau_min_str`.
 - Recovery $\FailureRecoveryTime$ is about `{python} RuntimeGoodputComposition.t_recovery_min_str` per failure, and startup $\JobStartupTime$ is about `{python} RuntimeGoodputComposition.t_startup_min_str` per launch, the same steps without detection.
 - The data stall ratio $\DataStallFraction$ is `{python} RuntimeGoodputComposition.input_wait_pct_str` of held time, the snapshot's `{python} SchedulingGoodputSnapshot.input_wait_pct_str` of in-service capacity divided by its scheduling goodput of `{python} SchedulingGoodputSnapshot.scheduling_goodput_str` (@sec-performance-engineering-scheduling-evidence).
 - The preemption tax $\PreemptionTaxTime$ is about `{python} RuntimeGoodputComposition.preempt_tax_min_plain_str` per forced event, the `{python} RuntimeGoodputComposition.preempt_lost_min_str` of lost work that @sec-fleet-orchestration-preemption-cascades assumes plus one startup.
@@ -1508,7 +1512,7 @@ class RuntimeLossScaling:
     llama_loss_pct_str = fmt_percent(llama_loss_bound, precision=0, commas=False, style='prose')
 ```
 
-The total is close to what a well-run job achieves, so the lesson lies in how it divides. A team that read only the fault-tolerance chapter would invest in faster checkpoint writes and warm restart, and on this job those levers could recover at most the `{python} RuntimeGoodputComposition.ckpt_waste_pct_str` and `{python} RuntimeGoodputComposition.failure_term_pct_str` the composition assigns them, while the input pipeline that @sec-storage-pipeline-equation sizes reaches about `{python} RuntimeGoodputComposition.input_vs_failure_mult_str` as much held time. Without the budget, the `{python} RuntimeGoodputComposition.preempt_unbudgeted_per_day_str` forced preemptions a day that @sec-fleet-orchestration-preemption-cascades assumes for a low-priority run would cost `{python} RuntimeGoodputComposition.preempt_unbudgeted_pct_str` of held time, too large for the first-order sum and larger than every other term. Device count reorders the terms, since checkpoint waste and recovery grow with it until together they pass input waits near `{python} RuntimeLossScaling.crossover_gpus_str` GPUs (@fig-performance-engineering-runtime-scaling), and so does the length of the job. The same `{python} RuntimeGoodputComposition.t_startup_min_str` of startup are about `{python} RuntimeGoodputComposition.startup_short_pct_str` of an evaluation job that holds its allocation for an hour. The composition does not choose among these levers. It tells each owner how much held time its lever can reach, a comparison none of them could make alone.
+The total is close to what a well-run job achieves, so the lesson lies in how it divides. A team that consulted only @sec-fault-tolerance-reliability would invest in faster checkpoint writes and warm restart, and on this job those levers could recover at most the `{python} RuntimeGoodputComposition.ckpt_waste_pct_str` and `{python} RuntimeGoodputComposition.failure_term_pct_str` the composition assigns them, while the input pipeline that @sec-storage-pipeline-equation sizes reaches about `{python} RuntimeGoodputComposition.input_vs_failure_mult_str` as much held time. Without the budget, the `{python} RuntimeGoodputComposition.preempt_unbudgeted_per_day_str` forced preemptions a day that @sec-fleet-orchestration-preemption-cascades assumes for a low-priority run would cost `{python} RuntimeGoodputComposition.preempt_unbudgeted_pct_str` of held time, too large for the first-order sum and larger than every other term. Device count reorders the terms, since checkpoint waste and recovery grow with it until together they pass input waits near `{python} RuntimeLossScaling.crossover_gpus_str` GPUs (@fig-performance-engineering-runtime-scaling), and so does the length of the job. The same `{python} RuntimeGoodputComposition.t_startup_min_str` of startup are about `{python} RuntimeGoodputComposition.startup_short_pct_str` of an evaluation job that holds its allocation for an hour. The composition does not choose among these levers. It tells each owner how much held time its lever can reach, a comparison none of them could make alone.
 
 ::: {#fig-performance-engineering-runtime-scaling fig-env="figure" fig-pos="htb" fig-cap="**Runtime loss versus job size**: Each bar recomputes the five terms of @eq-perf-runtime-loss-composition for the running example at one job size, from `{python} RuntimeLossScaling.n_min_str` to `{python} RuntimeLossScaling.n_max_str` GPUs, holding the 70B checkpoint, the recovery budget, the data stall ratio, the preemption budget, and the week of held time at the running example's values and recomputing the Young-Daly interval at each size. Input waits and preemption stay flat and dominate small jobs, while checkpoint waste and recovery grow with device count, pass input waits near `{python} RuntimeLossScaling.crossover_gpus_str` GPUs (dotted line), and lift the loss from `{python} RuntimeLossScaling.loss_min_pct_str` to `{python} RuntimeLossScaling.loss_max_pct_str`, above the loss of at most `{python} RuntimeLossScaling.llama_loss_pct_str` implied by the effective training time Llama 3 405B reported on its dedicated cluster (hollow bar) [@dubey2024llama]." fig-alt="Stacked bar chart of runtime loss as a percent of held time against job size, with eight bars at 128, 256, 512, 1,024, 2,048, 4,096, 8,192, and 16,384 GPUs. Each bar stacks, from the bottom, input waits in light tan at about 7.7 percent, preemption in light violet at about 1.4 percent, a gray startup sliver too thin to see, checkpoints in medium brown, and recovery in dark brown. The bottom two segments are the same height in every bar, while the two brown segments on top grow from slivers at 128 GPUs to about 4.8 and 4.3 percent at 16,384. Totals above the bars read 10, 10, 10, 11, 11, 13, 15, and 18 percent; the first bar is labeled running example. A dotted vertical line just left of the 16,384 bar is labeled checkpoints plus recovery pass input waits. Beside the last bar a narrow hollow bar reaches 10 percent, labeled at most 10 percent, Llama 3 405B, dedicated, cited. A key at the upper left names the five terms."}
 
@@ -1631,9 +1635,9 @@ The composition describes one job. A pool's runtime goodput is also lowered by r
 
 ### Evidence, size, and the serving replica {#sec-performance-engineering-runtime-evidence}
 
-Runtime goodput is measured from the job timeline, the second rung of @sec-performance-engineering-localize-factor, whose fields map onto the terms. Startup runs from the scheduler's gang-complete event to the first step, input stalls are the input-wait field of each retained step, and checkpoint pauses are the gaps at each commit. Each failure or preemption contributes its detection, relaunch, and warmup intervals plus the steps it forced the job to repeat, with the queue wait after an eviction excluded. The retained-checkpoint markers decide which steps count, and the steady-state step times fix the fault-free rate.
+A job that hangs inside a collective past its detection timeout, warms up much more slowly than its recovery budget assumed, or compiles longer after each software release loses held time that no analytical model predicts. Measuring runtime goodput directly from the job timeline, the second rung of @sec-performance-engineering-localize-factor, catches both the modeled terms and any unmodeled residual. In that timeline, startup runs from the scheduler's gang-complete event to the first step, input stalls are the input-wait field of each retained step, and checkpoint pauses are the gaps at each commit. Each failure or preemption contributes its detection, relaunch, and warmup intervals plus the steps it forced the job to repeat, with the queue wait after an eviction excluded. The retained-checkpoint markers decide which steps count, and the steady-state step times fix the fault-free rate.
 
-The composition is then a test of the timeline rather than a substitute for it. When prediction and measurement agree, the largest term names the owner to call. When the measured loss exceeds the prediction, the residual is held time that no term explains, most often a hang inside a collective that the detection time did not bound, a warmup far longer than the recovery budget assumes, or startup that grows with each software release. A residual that grows across many jobs after one change is the regression that the runtime row of @tbl-performance-engineering-scaling-regression-tests catches.
+The composition of @eq-perf-runtime-loss-composition is then a test of the timeline rather than a substitute for it. When prediction and measurement agree, the largest term names the owner to call. When the measured loss exceeds the prediction, the residual exposes the unmodeled hang, slow warmup, or creeping startup cost, and a residual that grows across many jobs after one change is the regression that the runtime row of @tbl-performance-engineering-scaling-regression-tests catches.
 
 The Llama 3 405B run is the reference for a well-run large job. Meta reported more than `{python} RuntimeGoodputComposition.llama_effective_pct_str` effective training time, which stands in for a runtime goodput of at least `{python} RuntimeGoodputComposition.llama_effective_str` [@dubey2024llama], a level that the failure cadence of @sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b makes demanding.
 
@@ -1674,7 +1678,7 @@ Program goodput is also the only factor whose losses this chapter both locates a
 
 ### The iron law and the Fleet Law terms {#sec-performance-engineering-iron-law}
 
-The time of one step on one device decomposes into three competing costs. @Eq-iron-law-perf applies the single-machine iron law\index{Iron law!performance decomposition} to the local execution of each device, the data that crosses its memory boundary, the arithmetic it performs, and the overhead that neither accounts for:
+Speeding up a kernel on one accelerator often produces a much smaller gain—or none at all—when the job runs across a fleet, because the step spends most of its time moving data, waiting at barriers, or exchanging gradients over the fabric. Separating what a local kernel change can reach from what only a fleet-level change can reach starts with the single-machine iron law\index{Iron law!performance decomposition} in @eq-iron-law-perf, which splits the local execution of each device into the data that crosses its memory boundary, the arithmetic it performs, and the overhead that neither accounts for:
 
 $$
 \Time= \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency
@@ -1806,7 +1810,7 @@ The Llama 3 405B run calibrates the number. It ran its retained steps at an MFU 
 
 ### Drilling into the step {#sec-performance-engineering-roofline}
 
-Once the loss has been charged to program goodput, the step trace becomes the evidence, and it is read from the top down. The step-trace rung of @sec-performance-engineering-localize-factor expands into four levels (@fig-optimization-hierarchy). Fleet measures such as step time against plan, MFU of retained steps, and per-rank step timers detect the loss. Framework and distributed traces associate step time with model operations across ranks, where a lagging rank or an exposed collective first appears. Kernel timelines show launch gaps and the overlap of computation and communication streams on one rank, and hardware counters report achieved bandwidth, occupancy, and instruction mix for one kernel. Each level is taken only for the ranks and the window that the level above it selected. The single-device tools at each level are mapped in @sec-appdx-dam-taxonomy-tooling-map.
+Inspecting hardware counters on an arbitrary kernel before knowing which rank or stream delayed the step wastes profiling budget on operations that may not even lie on the critical path. Once the loss has been charged to program goodput, the step trace becomes the evidence, and it is read from the top down. The step-trace rung of @sec-performance-engineering-localize-factor expands into four levels (@fig-optimization-hierarchy). Fleet measures such as step time against plan, MFU of retained steps, and per-rank step timers detect the loss. Framework and distributed traces associate step time with model operations across ranks, where a lagging rank or an exposed collective first appears. Kernel timelines show launch gaps and the overlap of computation and communication streams on one rank, and hardware counters report achieved bandwidth, occupancy, and instruction mix for one kernel. Each level is taken only for the ranks and the window that the level above it selected. The single-device tools at each level are mapped in @sec-appdx-dam-taxonomy-tooling-map.
 
 ::: {#fig-optimization-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The profiling hierarchy**: Diagnosis of a program goodput loss descends from the fleet measure that detected it to the hardware root cause. Each rung names the evidence that level exposes and a representative tool; the navy label under each tool gives the scope and time scale one sample covers, and each highlighted window expands into the trace below it. Each lower level trades breadth for the detail needed to isolate a root cause, and the three lower levels together are the step-trace rung of factor localization." fig-alt="Four numbered levels stacked from 4 at the top to 1 at the bottom, each with a name, its evidence, and a tool on the left and a small illustrative trace on the right. Level 4, job and fleet, showing step time against plan, MFU, and rank timers, with Prometheus and OpenTelemetry: a step-time line over hours that runs just above a dashed gray plan line, then drifts upward and stays high, the gap above plan shaded red and labeled above plan. Level 3, framework and distributed traces, with PyTorch Profiler: bars for three ranks across three steps separated by dashed barriers, one rank's bar in the last step long and red, labeled straggler. Level 2, kernel timeline, with Nsight Systems: orange kernels on a compute stream and violet blocks on a comm stream, with a red-shaded launch gap between two kernels. Level 1, hardware counters, with Nsight Compute: gauges for bandwidth, occupancy, and stalls, the stalls gauge in red. A navy window in each of the upper three traces opens through a shaded wedge into the full trace below it. A navy label under each tool reads job hours, rank steps, stream milliseconds, or SM microseconds."}
 ![](images/svg/profiling-hierarchy.svg)
@@ -1824,229 +1828,8 @@ The window must also describe the job's steady state. A profiler's own warmup st
 
 Triage of a slow step starts outside the kernel. A step that misses its time target while its accelerators show low activity points first to waits on input, on host preprocessing, or on communication, because no kernel change helps a device that is waiting for work. Only once the device is busy does the question become whether its kernels are bound by arithmetic or by memory traffic, a test against the ridge point, the intensity at which the bandwidth and compute bounds of the roofline meet. @Fig-iron-law-flowchart arranges these tests in the order they are applied. Its first branches do not lead to the program at all. A device that waits for its next batch, or for preprocessing on the host, is losing runtime goodput at the input boundary, and the diagnosis returns to @sec-performance-engineering-runtime-goodput.
 
-::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron law diagnostic flowchart**: A triage flow for a job or replica whose retained steps miss their step-time target while accelerator activity is low. The I/O and CPU branches identify input waits and host preprocessing, which are runtime goodput losses at the input boundary, so a yes on either sends the reader back to @sec-performance-engineering-runtime-goodput rather than to the program. The communication-overhead leaf is exposed communication, a program goodput loss in the Fleet Law's communication term. Only a busy device reaches the roofline panel, whose memory-bound and compute-bound leaves are candidate levers to test, not prescriptions. Fusion and tiling are developed in @sec-performance-engineering-program-goodput, serving precision and speculative decoding in @sec-inference-scale, and expert routing in @sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45. Every path returns to re-profiling." fig-alt="Troubleshooting flowchart starting from a box reading Target is missed. A GPU-utilization check sends its yes branch right along an overhead lane: an I/O-bound check whose yes branch leads to a green More DL workers box, then a CPU-bound check whose yes branch leads to a green Offload preprocessing box, and whose no branch ends at a violet Comm overhead box. The utilization check's no branch leads down into a panel titled Intensity greater than ridge, which draws a small roofline: a blue rising slope over a blue memory-bound region meets a flat orange ceiling over an orange compute-bound region at a dot marked ridge. Below the blue region, a blue group holds operator fusion and INT4 or speculative decoding; below the orange region, an orange group holds FP8 math and MoE routing. Every remedy joins a bus into a Re-profile workload box, and a dashed loop labeled iterate until the target is met returns to the start."}
+::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron law diagnostic flowchart**: A triage flow for a job or replica whose retained steps miss their step-time target. Low accelerator activity sends the diagnosis right, toward waits, and high activity sends it down to the roofline. The I/O and CPU branches identify input waits and host preprocessing, which are runtime goodput losses at the input boundary, so a yes on either sends the reader back to @sec-performance-engineering-runtime-goodput rather than to the program. The communication-overhead leaf is exposed communication, a program goodput loss in the Fleet Law's communication term. Only a busy device reaches the roofline panel, whose memory-bound and compute-bound leaves are candidate levers to test, not prescriptions. Fusion and tiling are developed in @sec-performance-engineering-program-goodput, serving precision and speculative decoding in @sec-inference-scale, and expert routing in @sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45. Every path returns to re-profiling." fig-alt="Troubleshooting flowchart starting from a box reading Target is missed. A GPU-utilization check sends its yes branch right along an overhead lane: an I/O-bound check whose yes branch leads to a green More DL workers box, then a CPU-bound check whose yes branch leads to a green Offload preprocessing box, and whose no branch ends at a violet Comm overhead box. The utilization check's no branch leads down into a panel titled Intensity greater than ridge, which draws a small roofline: a blue rising slope over a blue memory-bound region meets a flat orange ceiling over an orange compute-bound region at a dot marked ridge. Below the blue region, a blue group holds operator fusion and INT4 or speculative decoding; below the orange region, an orange group holds FP8 math and MoE routing. Every remedy joins a bus into a Re-profile workload box, and a dashed loop labeled iterate until the target is met returns to the start."}
 ![](images/svg/diagnostic-flow.svg)
-
-<!--
-```{=latex}
-\begin{tikzpicture}[
-    >=Stealth,
-    font=\small,
-    box/.style={
-        rectangle, rounded corners=4pt,
-        align=center, inner sep=5pt,
-        line width=0.9pt
-    },
-    root_box/.style={
-        box, draw=NavyBlue!80, fill=NavyBlue!8!white,
-        line width=1.1pt, minimum width=4.0cm, minimum height=0.95cm
-    },
-    decision_box/.style={
-        box, draw=SlateGrey!75, fill=SlateGrey!6!white,
-        minimum width=3.3cm, minimum height=1.0cm
-    },
-    compute_box/.style={
-        box, draw=NavyBlue!85, fill=NavyBlue!8!white,
-        line width=1.1pt, minimum width=3.6cm, minimum height=0.95cm
-    },
-    memory_box/.style={
-        box, draw=Crimson!85, fill=Crimson!6!white,
-        line width=1.1pt, minimum width=3.6cm, minimum height=0.95cm
-    },
-    action_green/.style={
-        box, draw=ForestGreen!80, fill=ForestGreen!6!white,
-        minimum width=3.3cm, minimum height=0.9cm
-    },
-    action_blue/.style={
-        box, draw=NavyBlue!75, fill=NavyBlue!5!white,
-        minimum width=3.3cm, minimum height=0.9cm
-    },
-    action_amber/.style={
-        box, draw=Amber!85, fill=Amber!8!white,
-        minimum width=3.3cm, minimum height=0.9cm
-    },
-    action_crimson/.style={
-        box, draw=Crimson!75, fill=Crimson!5!white,
-        minimum width=3.0cm, minimum height=0.9cm
-    },
-    action_purple/.style={
-        box, draw=violet!75, fill=violet!5!white,
-        minimum width=3.0cm, minimum height=0.9cm
-    },
-    action_sub/.style={
-        box, draw=NavyBlue!70, fill=NavyBlue!4!white,
-        minimum width=2.8cm, minimum height=0.9cm
-    },
-    reprofile_box/.style={
-        box, draw=NavyBlue!80, fill=white,
-        line width=1.0pt, minimum width=4.2cm, minimum height=0.85cm
-    }
-]
-
-    % Provide colors if not defined
-    \providecolor{ForestGreen}{RGB}{34,139,34}
-    \providecolor{NavyBlue}{RGB}{20,45,110}
-    \providecolor{Amber}{RGB}{217,119,6}
-    \providecolor{BurntOrange}{RGB}{210,105,30}
-    \providecolor{BrickRed}{RGB}{180,30,30}
-    \providecolor{Crimson}{RGB}{180,30,30}
-    \providecolor{SlateGrey}{RGB}{112,128,144}
-
-    % -------------------------------------------------------------------------
-    % NODES
-    % -------------------------------------------------------------------------
-
-    % Root
-    \node[root_box] (root) at (0, 0) {
-        \bfseries\color{NavyBlue!90!black} Training is slow
-    };
-
-    % Level 1: GPU util
-    \node[decision_box] (gpu_util) at (0, -1.6) {
-        \textbf{GPU util $<$ 70\%?}\\[2pt]
-        {\tiny\color{black!70}(Nsight / nvidia-smi)}
-    };
-
-    % Level 2 (Left path from GPU util = No): AI > ridge point?
-    \node[decision_box] (ridge) at (0, -3.5) {
-        \textbf{AI $>$ ridge point?}\\[2pt]
-        {\tiny\color{black!70}(Roofline analysis)}
-    };
-
-    % Level 3 (Left path from ridge = Yes): COMPUTE BOUND
-    \node[compute_box] (compute_bound) at (-5.6, -3.5) {
-        \bfseries\color{NavyBlue!90!black} COMPUTE BOUND
-    };
-
-    % Sub-actions under COMPUTE BOUND
-    \node[action_sub] (fp8) at (-7.1, -5.1) {
-        \textbf{\scriptsize\color{NavyBlue!90!black} FP8 / INT4}\\[2pt]
-        {\tiny\color{black!70}Precision eng.}
-    };
-    \node[action_sub] (moe) at (-4.1, -5.1) {
-        \textbf{\scriptsize\color{NavyBlue!90!black} MoE / Speculative}\\[2pt]
-        {\tiny\color{black!70}Algorithmic opt.}
-    };
-
-    % Level 3 (Down from ridge = No): MEMORY BOUND
-    \node[memory_box] (mem_bound) at (0, -5.3) {
-        \bfseries\color{Crimson} MEMORY BOUND
-    };
-
-    % Sub-actions under MEMORY BOUND
-    \node[action_crimson] (fusion) at (-1.7, -6.8) {
-        \textbf{\scriptsize\color{Crimson} Operator fusion}\\[2pt]
-        {\tiny\color{black!70}FlashAttention}
-    };
-    \node[action_purple] (compile) at (1.7, -6.8) {
-        \textbf{\scriptsize\color{violet!90!black} torch.compile}\\[2pt]
-        {\tiny\color{black!70}Graph compilation}
-    };
-
-    % Right branches from GPU util = Yes:
-    \node[decision_box] (io_bound) at (4.0, -1.6) {
-        \textbf{I/O bound?}\\[2pt]
-        {\tiny\color{black!70}(DataLoader stall)}
-    };
-
-    \node[action_green] (dl_workers) at (8.0, -2.5) {
-        \textbf{\scriptsize\color{ForestGreen!85!black} More DL workers}\\[2pt]
-        {\tiny\color{black!70}Use GDS / NVMe}
-    };
-
-    \node[decision_box] (cpu_bound) at (4.0, -3.5) {
-        \textbf{CPU bound?}\\[2pt]
-        {\tiny\color{black!70}(preprocessing)}
-    };
-
-    \node[action_blue] (offload_gpu) at (8.0, -4.4) {
-        \textbf{\scriptsize\color{NavyBlue!90!black} Offload to GPU}\\[2pt]
-        {\tiny\color{black!70}DALI / async preproc}
-    };
-
-    \node[action_amber] (comm_overhead) at (4.0, -5.3) {
-        \textbf{\scriptsize\color{Amber!90!black} Comm overhead}\\[2pt]
-        {\tiny\color{black!70}Overlap / compress}
-    };
-
-    % Bottom: Re-profile Workload
-    \node[reprofile_box] (reprofile) at (0, -8.6) {
-        \bfseries\color{NavyBlue!90!black} Re-profile Workload
-    };
-
-    % -------------------------------------------------------------------------
-    % EDGES
-    % -------------------------------------------------------------------------
-
-    % Root -> GPU util
-    \draw[->, line width=0.9pt, SlateGrey!90!black] (root) -- (gpu_util);
-
-    % GPU util -> Ridge (No)
-    \draw[->, line width=0.9pt, Crimson] (gpu_util) -- node[right=1pt, font=\scriptsize\bfseries\color{Crimson}] {No} (ridge);
-
-    % GPU util -> I/O bound (Yes)
-    \draw[->, line width=0.9pt, ForestGreen!85!black] (gpu_util) -- node[above=2pt, font=\scriptsize\bfseries\color{ForestGreen!85!black}] {Yes} (io_bound);
-
-    % I/O bound -> DL workers (Yes)
-    \draw[->, line width=0.9pt, ForestGreen!85!black] (io_bound.east) -| node[above, pos=0.2, font=\scriptsize\bfseries\color{ForestGreen!85!black}] {Yes} (dl_workers.north);
-
-    % I/O bound -> CPU bound (No)
-    \draw[->, line width=0.9pt, Crimson] (io_bound) -- node[right=1pt, font=\scriptsize\bfseries\color{Crimson}] {No} (cpu_bound);
-
-    % CPU bound -> Offload to GPU (Yes)
-    \draw[->, line width=0.9pt, ForestGreen!85!black] (cpu_bound.east) -| node[above, pos=0.2, font=\scriptsize\bfseries\color{ForestGreen!85!black}] {Yes} (offload_gpu.north);
-
-    % CPU bound -> Comm overhead (No)
-    \draw[->, line width=0.9pt, Crimson] (cpu_bound) -- node[right=1pt, font=\scriptsize\bfseries\color{Crimson}] {No} (comm_overhead);
-
-    % Ridge -> COMPUTE BOUND (Yes)
-    \draw[->, line width=0.9pt, ForestGreen!85!black] (ridge) -- node[above=2pt, font=\scriptsize\bfseries\color{ForestGreen!85!black}] {Yes} (compute_bound);
-
-    % Ridge -> MEMORY BOUND (No)
-    \draw[->, line width=0.9pt, Crimson] (ridge) -- node[right=1pt, font=\scriptsize\bfseries\color{Crimson}] {No} (mem_bound);
-
-    % Under COMPUTE BOUND: fork to fp8 and moe
-    \draw[line width=0.9pt, SlateGrey!80!black] (compute_bound.south) -- ++(0, -0.35) coordinate (c_split);
-    \draw[->, line width=0.9pt, SlateGrey!80!black] (c_split) -| (fp8.north);
-    \draw[->, line width=0.9pt, SlateGrey!80!black] (c_split) -| (moe.north);
-
-    % Under MEMORY BOUND: fork to fusion and compile
-    \draw[line width=0.9pt, SlateGrey!80!black] (mem_bound.south) -- ++(0, -0.35) coordinate (m_split);
-    \draw[->, line width=0.9pt, SlateGrey!80!black] (m_split) -| (fusion.north);
-    \draw[->, line width=0.9pt, SlateGrey!80!black] (m_split) -| (compile.north);
-
-    % -------------------------------------------------------------------------
-    % Convergence bus to Re-profile Workload
-    % -------------------------------------------------------------------------
-    \coordinate (bus_y) at (0, -7.7);
-
-    % Drops to the horizontal bus
-    \draw[line width=0.8pt, SlateGrey!70] (fp8.south) -- (fp8.south |- bus_y);
-    \draw[line width=0.8pt, SlateGrey!70] (moe.south) -- (moe.south |- bus_y);
-    \draw[line width=0.8pt, SlateGrey!70] (fusion.south) -- (fusion.south |- bus_y);
-    \draw[line width=0.8pt, SlateGrey!70] (compile.south) -- (compile.south |- bus_y);
-    \draw[line width=0.8pt, SlateGrey!70] (comm_overhead.south) -- (comm_overhead.south |- bus_y);
-    \draw[line width=0.8pt, SlateGrey!70] (offload_gpu.south) |- (bus_y);
-    \draw[line width=0.8pt, SlateGrey!70] (dl_workers.east) -- ++(0.4, 0) |- (bus_y);
-
-    % The continuous horizontal bus line
-    \draw[line width=0.8pt, SlateGrey!70] (-7.1, -7.7) -- (10.0, -7.7);
-
-    % Three arrows from the bus into Re-profile Workload
-    \draw[->, line width=0.9pt, SlateGrey!80!black] (-0.7, -7.7) -- (-0.7, -8.6);
-    \draw[->, line width=0.9pt, SlateGrey!80!black] (0.0, -7.7) -- (0.0, -8.6);
-    \draw[->, line width=0.9pt, SlateGrey!80!black] (0.7, -7.7) -- (0.7, -8.6);
-
-    % Return loop to Root
-    \draw[dashed, ->, line width=0.9pt, SlateGrey!70]
-        (reprofile.west) -- ++(-6.7, 0) coordinate (loop_left)
-        -- node[left, font=\scriptsize\itshape\color{black!70}, rotate=90, anchor=south, pos=0.5] {iterate until target met}
-           (loop_left |- root.west)
-        -- (root.west);
-
-\end{tikzpicture}
-```
--->
 
 :::
 
@@ -2200,7 +1983,7 @@ The floor counts only weight bytes, so a measured decode step always runs above 
 
 ### Common bottleneck patterns {#sec-performance-engineering-bottleneck-patterns}
 
-Recurring trace patterns supply hypotheses that the drill-down can test quickly (@tbl-performance-engineering-bottleneck-patterns), and the factor a pattern lowers matters as much as its cause, since a pattern that looks like a slow step is not always a program loss.
+A device that idles between steps because its next batch is not ready shows the same falling activity as a device that idles inside a step while a collective runs, yet the first loses runtime goodput at the input pipeline and the second loses program goodput in exposed communication. Recurring trace signatures supply hypotheses that the drill-down can test quickly (@tbl-performance-engineering-bottleneck-patterns), and the factor a pattern lowers matters as much as its cause, since a trace that looks like a slow step is not always a program loss.
 
 | **Trace pattern**                                 | **Likely cause**                                                                     | **Factor and term**                                           | **Candidate lever**                                                                                                                                                              | **Trade-off to check**                                                    |
 |:--------------------------------------------------|:-------------------------------------------------------------------------------------|:--------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------|
@@ -2216,13 +1999,11 @@ Recurring trace patterns supply hypotheses that the drill-down can test quickly 
 
 : **Common bottleneck trace patterns**: Each trace signature maps to a likely cause, the goodput factor and term the cause lengthens, a candidate lever, and the trade-off to check before applying it. Levers marked with a section reference are developed there. {#tbl-performance-engineering-bottleneck-patterns tbl-colwidths="[17,19,17,27,20]"}
 
-The last row is the one most often misread. A device that idles between steps because its next batch is not ready shows the same falling activity as a device that idles inside a step while a collective runs, but the first loses runtime goodput and is fixed by the input pipeline, while the second loses program goodput and is fixed by overlap. The per-step input-wait field of the job timeline tells the two apart before any trace is read.
-
-The drill-down ends with a named term and its share of the step, exposed communication for the training job and the distance to the bandwidth floor for the serving replica, and @sec-performance-engineering-program-goodput takes up the levers that recover it.
+The last row is the one most often misread, because the per-step input-wait field of the job timeline tells an input stall apart from an exposed collective before any trace is read. The drill-down ends with a named term and its share of the step—exposed communication for the training job and the distance to the bandwidth floor for the serving replica—and @sec-performance-engineering-program-goodput takes up the levers that recover it.
 
 ## Recovering Program Goodput {#sec-performance-engineering-program-goodput}
 
-A program goodput loss is recovered by changing how a retained step executes, and the change helps only through the term of the step it shortens. Three levers reach different terms. A compiler that derives the program's partitioning decides which collectives a step performs and over which links. Overlap hides part of that communication behind computation, which enlarges the credit $\OverlappedTime$ of the Fleet Law. Kernel-level changes shorten local execution on each device. Because the gain from one lever depends on what the others leave exposed, levers are applied one at a time and the step is measured again after each.
+Tuning a single-device kernel when a step is bound by cross-node gradient reductions, or overlapping collectives when the step is bound by host kernel launches, leaves the critical path untouched. A program goodput loss is recovered by changing how a retained step executes, and the change helps only through the term of the step it shortens. Three levers reach different terms. A compiler that derives the program's partitioning decides which collectives a step performs and over which links. Overlap hides part of that communication behind computation, which enlarges the credit $\OverlappedTime$ of the Fleet Law. Kernel-level changes shorten local execution on each device. Because the gain from one lever depends on what the others leave exposed, levers are applied one at a time and the step is measured again after each.
 
 ### Compiler-derived partitioning {#sec-performance-engineering-gspmd}
 
@@ -2362,7 +2143,13 @@ torch.cuda.synchronize()  # Wait for both to complete
 ```
 :::
 
-Separate streams make concurrent execution possible, but they do not reserve independent hardware.\index{SM Partitioning!resource contention} A matrix multiplication and a collective\index{NCCL!communication collectives} compete for the device's streaming multiprocessors, its memory bandwidth, and its cache, because the collective library runs its own kernels on the same processors to move and reduce the data [@pati2024t3]. On a timeline, successful overlap shows the collective's interval moving under computation while the compute kernels beside it grow longer. The overlap raises program goodput only if the communication time it removes from the critical path exceeds the time it adds to the computation, and only an end-to-end measurement of the step establishes which is larger.
+Separate streams make concurrent execution possible, but they do not reserve independent hardware.\index{SM Partitioning!resource contention} A matrix multiplication and a collective\index{NCCL!communication collectives} compete for the device's streaming multiprocessors, its memory bandwidth, and its cache, because the collective library runs its own kernels on the same processors to move and reduce the data [@pati2024t3]. On a timeline, successful overlap shows the collective's interval moving under computation while the compute kernels beside it grow longer, so the step ends later than the contention-free schedule predicts (@fig-performance-engineering-overlap-contention). The overlap raises program goodput only if the communication time it removes from the critical path exceeds the time it adds to the computation, and only an end-to-end measurement of the step establishes which is larger.
+
+::: {#fig-performance-engineering-overlap-contention fig-env="figure" fig-pos="htb" fig-cap="**Overlap on a shared device**: One step of three kernels and one collective on a compute stream and a communication stream. Serialized, the collective runs after the kernels and is exposed. Overlapped on a device with resources to spare, it hides completely behind the kernels. Overlapped on a real device, the collective's own kernels take streaming multiprocessors and memory bandwidth from the kernel beside it, which runs longer, so the step ends between the two. Only a measured step shows where between them it ends. Durations are schematic, not measured." fig-alt="Three timelines stacked top to bottom, each with a compute lane of blue kernel blocks and a comm lane below it, and a dark vertical bar marking where the step ends. Dotted vertical guides run through all three, labeled ideal overlap end and serialized end at the bottom. In panel a, serialized, three kernels run back to back and an amber block labeled exposed follows them on the comm lane, so the step ends at the serialized guide. In panel b, overlapped, no contention, an amber block labeled hidden runs beneath the second kernel, and the step ends at the ideal overlap guide. In panel c, overlapped, shared device, the same hidden amber block runs beneath the second kernel, whose end is extended by a short red block, with the red word contention beside it; the third kernel starts after the red block, so the step ends between the two guides."}
+
+![](images/svg/performance_engineering_overlap_contention.svg)
+
+:::
 
 Overlap that a program arranges for itself must also meet two obligations that a data-parallel wrapper otherwise meets for it. Readiness requires that no consumer read a tensor before its producer finishes, and lifetime requires that no tensor's storage be reused while a side stream still uses it. Both must hold before a shorter step is credited to overlap rather than to a race that skipped work.
 
@@ -2418,7 +2205,7 @@ The serving replica, whose layout is the model axis alone on one node, shows the
 
 ### Kernel-level levers {#sec-performance-engineering-kernel-levers}
 
-Four techniques shorten the execution of one device's share of a step without changing the model's mathematics. They are fusion, tiling, graph replay, and compilation, and in the Fleet Law all four act on local execution, $\UnshardedLocalExecutionTime/\DeviceCount$. None touches $\CommunicationTime(\DeviceCount)$ or $\SynchronizationTime(\DeviceCount)$, so their fleet gain shrinks as those terms take a larger share of the step.
+Even when communication is well hidden, a device can spend much of its local step time writing short-lived intermediate tensors to HBM and reading them right back, materializing large attention score matrices, or idling between thousands of tiny host kernel launches. Four techniques—fusion, tiling, graph replay, and compilation—remove those local losses without changing the model's mathematics. In the Fleet Law all four act on local execution, $\UnshardedLocalExecutionTime/\DeviceCount$, and none touches $\CommunicationTime(\DeviceCount)$ or $\SynchronizationTime(\DeviceCount)$, so their fleet gain shrinks as those terms take a larger share of the step.
 
 ::: {.column-margin .margin-pointer}
 ↪ Fusion, tiling, graph replay, and compilation are collected for reference in @sec-appdx-dam-taxonomy-kernel-levers.
@@ -2545,7 +2332,7 @@ The levers matter differently to the two running cases. The training job's matri
 
 ### Composing program fixes {#sec-performance-engineering-playbook}
 
-Program fixes are found in a fixed order and applied one at a time, and the order begins with the whole job, not with a kernel.\index{Benchmarking!end-to-end measurement} Program goodput of retained steps is measured under the contract of @sec-performance-engineering-measurement-contract, and the localization of @sec-performance-engineering-localize-factor confirms that the shortfall lies in the program rather than in scheduling or the runtime. The drill-down of @sec-performance-engineering-roofline names the term that holds the loss, and @tbl-performance-engineering-bottleneck-patterns supplies a candidate lever for that term. One lever is applied, the step is measured again under the same contract, and the sequence restarts from the drill-down, because removing one exposed interval usually exposes the next.
+Applying several kernel and communication optimizations at once—or adding their isolated microbenchmark speedups on paper—often produces a smaller fleet gain than expected, because a faster backward pass can shrink the compute window that previously hid gradient communication. Program fixes are therefore found in a fixed order and applied one at a time, and the order begins with the whole job, not with a kernel.\index{Benchmarking!end-to-end measurement} Program goodput of retained steps is measured under the contract of @sec-performance-engineering-measurement-contract, and the localization of @sec-performance-engineering-localize-factor confirms that the shortfall lies in the program rather than in scheduling or the runtime. The drill-down of @sec-performance-engineering-roofline names the term that holds the loss, and @tbl-performance-engineering-bottleneck-patterns supplies a candidate lever for that term. One lever is applied, the step is measured again under the same contract, and the sequence restarts from the drill-down, because removing one exposed interval usually exposes the next.
 
 Within the program, the cheapest lever that targets the measured interval comes first. For the running example, the drill-down named the data-axis exchange, so the first experiment is overlap of that exchange, through bucket sizing and ordering, or through sharding the optimizer state so that the reduction runs during the backward pass and the parameter gather runs ahead of the next forward pass. The second experiment targets the remaining node-level loss, the model-axis exchanges and the non-GEMM kernels, through a decomposed schedule and fusion.
 
@@ -2575,7 +2362,7 @@ The Llama 2 70B job keeps `{python} RuntimeGoodputComposition.runtime_goodput_st
 
 ### Decomposing the running example {#sec-performance-engineering-whole-fleet-decomposition}
 
-Composing the three factors requires them to describe one job on one fleet, which the factor sections arranged by sizing each boundary for the same Llama 2 70B job.
+Evaluating the Llama 2 70B job's runtime and program goodput inside its 128-GPU allocation makes the job look nearly half-efficient, yet the shared pool that supplies its nodes loses another third of its capacity before any job holds a complete gang. Composing all three factors on one job and one fleet shows where the whole gap goes.
 
 ```{python}
 #| echo: false
@@ -3007,7 +2794,7 @@ A recommendation model\index{Archetype B!goodput decomposition}\index{DLRM!goodp
 
 ### Cost per useful unit {#sec-performance-engineering-cost-per-useful-unit}
 
-Every factor of the decomposition divides the cost of useful work. A fleet pays for capacity by the accelerator-hour, whether or not a complete allocation holds it, a retained step uses it, or that step runs at the ideal rate, so the price of one accelerator-hour of ideal-rate progress is the capacity price divided by MPG. With the capacity price per accelerator-hour $\AcceleratorHourlyPrice$ and the cost of one useful accelerator-hour $\UsefulAcceleratorHourCost$, @eq-perf-cost-per-useful-unit states the relation:
+A fleet pays for capacity by the accelerator-hour, whether or not a complete allocation holds it, a retained step uses it, or that step runs at the ideal rate, so every factor of the goodput decomposition directly multiplies the cost of useful work. The price of one accelerator-hour of ideal-rate progress is the capacity price divided by MPG. With the capacity price per accelerator-hour $\AcceleratorHourlyPrice$ and the cost of one useful accelerator-hour $\UsefulAcceleratorHourCost$, @eq-perf-cost-per-useful-unit states the relation:
 
 $$\UsefulAcceleratorHourCost = \frac{\AcceleratorHourlyPrice}{\MlProductivityGoodput} = \frac{\AcceleratorHourlyPrice}{\SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput}$$ {#eq-perf-cost-per-useful-unit}
 
@@ -3027,7 +2814,7 @@ A lever that raises one goodput factor often lowers another, so it is judged by 
 
 ### Judging a trade by the product {#sec-performance-engineering-trade-product-rule}
 
-A change that touches more than one factor multiplies MPG (@eq-perf-ml-productivity-goodput) by the product of each factor's ratio, its value after the change divided by its value before, with every ratio measured on the same boundary and over the same window. The change is worth making only when that product exceeds one, whichever factor the lever was designed to raise. Ratios let separate owners apply the rule. The reliability team measures what a restart policy does to runtime goodput, and the compiler team what a build does to program goodput, each from its own records, and the two ratios multiply. A 1 percent change in any factor is 1 percent of the product, so for small changes the rule reduces to adding percentage gains and subtracting percentage losses. The value of one point of a factor in @sec-performance-engineering-whole-fleet-decomposition, the product of the other two factors, is the same rule written in absolute points, which is why a point of the lowest factor, the largest relative change, was worth the most there.
+Waiting in the queue for a compact node placement raises program goodput once the job runs, and running an autotuning compiler raises program goodput at the cost of a longer startup, so evaluating either change on program goodput alone ignores the scheduling or runtime loss that paid for it. A change that touches more than one factor multiplies MPG (@eq-perf-ml-productivity-goodput) by the product of each factor's ratio, its value after the change divided by its value before, with every ratio measured on the same boundary and over the same window. The change is worth making only when that product exceeds one, whichever factor the lever was designed to raise. Ratios let separate owners apply the rule. The reliability team measures what a restart policy does to runtime goodput, and the compiler team what a build does to program goodput, each from its own records, and the two ratios multiply. A 1 percent change in any factor is 1 percent of the product, so for small changes the rule reduces to adding percentage gains and subtracting percentage losses. The value of one point of a factor in @sec-performance-engineering-whole-fleet-decomposition, the product of the other two factors, is the same rule written in absolute points, which is why a point of the lowest factor, the largest relative change, was worth the most there.
 
 ```{python}
 #| echo: false
@@ -3329,7 +3116,7 @@ Checkpoint cadence trades within one factor, the time spent writing checkpoints 
 
 ### Compilation builds {#sec-performance-engineering-compilation-overhead}
 
-Compilation is the trade between factors that this chapter owns, because both of its charges fall on the job's own execution. A compiler that captures a region of the program, fuses its operations, plans its memory, and selects a kernel for each fused group shortens every later step, which raises program goodput (@sec-performance-engineering-kernel-levers). It does that work before the first step it improves, in build and warmup time that the job holds its devices for and retains no steps in, which is startup and therefore a runtime goodput loss (@sec-performance-engineering-runtime-goodput-counts). A build pays when the time it saves across the executions that reuse its result exceeds the time it took, so the number of those executions, not how long a model stays deployed, decides it.
+An autotuning compiler that searches for 15 minutes before the first step shortens every later step by fusing operations, planning memory, and selecting faster kernels, yet the accelerators sit held without retaining a single step while that build runs. Compilation is the cross-factor trade that this chapter owns directly, because both of its charges fall on the job's own execution: the faster steps raise program goodput (@sec-performance-engineering-kernel-levers), while the build and warmup time before the first step is startup and therefore a runtime goodput loss (@sec-performance-engineering-runtime-goodput-counts). A build pays when the time it saves across the executions that reuse its result exceeds the time it took, so the number of those executions, not how long a model stays deployed, decides it.
 
 The boundary rule decides where a recompilation is charged. A build at a job's start, after a restart, or after a resize to a new mesh happens once per launch and is charged to runtime goodput with the rest of that launch's startup. A recompilation triggered repeatedly during steady operation, because the input's shapes vary or the captured graph keeps breaking, recurs inside the job's own fault-free step rate, so it lowers program goodput instead. A shape distribution that forces a recompile every few hundred steps therefore shows up as slow steps, not as a startup cost, and the remedy is a compilation that accepts the distribution, not a faster build.
 
@@ -3489,7 +3276,7 @@ Training jobs meet the same choice through relaunches rather than replicas. Unle
 
 [^fn-compile-cache-keys]: **Persistent compilation caches**\index{Compilation Cache!persistence across launches}: JAX writes compiled executables to a persistent cache directory and keys each entry by the unoptimized program, the jaxlib version, the relevant compiler flags, and the device count and topology. PyTorch's compiler keeps on-disk graph and kernel caches that later processes reuse, and it accepts an entry only for the same PyTorch and Triton versions and the same GPU. TensorRT serializes a built engine so that it can be reloaded, and by default the engine runs only on the GPU model and TensorRT version that built it. In all three frameworks the key is the tuple the text names, so an upgrade to the compiler or the accelerator turns every cached build into a new one.
 
-@Tbl-performance-engineering-compiler-tradeoffs compares the common compilation paths by build cost, the shapes a compiled artifact accepts, and how far it can be reused. Deeper specialization pays only when the model version and its shape distribution stay fixed long enough for many executions to share one build.
+The common compilation paths differ in build cost, in the shapes a compiled artifact accepts, and in how far it can be reused (@tbl-performance-engineering-compiler-tradeoffs). Deeper specialization pays only when the model version and its shape distribution stay fixed long enough for many executions to share one build.
 
 | **Compilation path**           | **Build cost**                    | **Shape flexibility**                           | **Specialization depth**                       | **Reused across jobs by**                                                     | **Typical fit**                       |
 |:-------------------------------|:----------------------------------|:------------------------------------------------|:-----------------------------------------------|:------------------------------------------------------------------------------|:--------------------------------------|
@@ -3516,7 +3303,7 @@ $$\TimeToResult = \JobQueueWaitTime + \frac{\IdealAcceleratorTime}{\DeviceCount 
 
 Scheduling goodput does not appear in the equation, because the pool's unallocated capacity does not slow a job that already holds its allocation, and the pool enters the job's time only through its queue wait. The device count does appear, but program goodput falls as the device count grows, by the scaling efficiency of the job's layout, so adding devices shortens held time only while their product with program goodput keeps rising, and each added device lowers the pool's goodput. A deadline-driven job buys time by holding more devices at lower program goodput, and a fleet with a deep queue buys goodput by holding the same job to fewer. The elastic strategies of @sec-performance-engineering-trade-product-rule are three such points, and none of them dominates the others.
 
-On one fleet at one price, goodput and cost per useful unit are one dimension seen from two sides, and the frontier reduces to goodput against time to result. The two separate only when the options carry different prices. Preemptible capacity is discounted and interrupted more often, so it lowers runtime goodput along with the price, and the spot-cost relation of @eq-fleet-orchestration-spot-cost decides whether the discount survives the interruptions. On the orchestration chapter's elastic and spot scenarios it survives, so spot capacity holds every point of the frontier except the fastest (@fig-performance-engineering-efficiency-frontier). Reserved against on-demand capacity, older accelerators at a lower internal rate, and a second accelerator type present the same choice, and each is compared by cost per useful unit, not by price per accelerator-hour.
+On one fleet at one price, goodput and cost per useful unit are one dimension seen from two sides, and the frontier reduces to goodput against time to result. The two separate only when the options carry different prices. Preemptible capacity is discounted and interrupted more often, so it lowers runtime goodput along with the price, and the spot-cost relation of @eq-fleet-orchestration-spot-cost decides whether the discount survives the interruptions. On the elastic scenario of @sec-fleet-orchestration-elastic-policies and the spot interruption scenario of @sec-fleet-orchestration-fallacies it survives, so spot capacity holds every point of the frontier except the fastest (@fig-performance-engineering-efficiency-frontier). Reserved against on-demand capacity, older accelerators at a lower internal rate, and a second accelerator type present the same choice, and each is compared by cost per useful unit, not by price per accelerator-hour.
 
 ```{python}
 #| echo: false
@@ -3625,7 +3412,7 @@ class EfficiencyFrontierPoints:
     small_gpus_num_str = fmt(E.gpus_small, precision=0, commas=False)
 ```
 
-::: {#fig-performance-engineering-efficiency-frontier fig-env="figure" fig-pos="htb" fig-cap="**Efficiency frontier of the elastic strategies at two prices**: Time to result and cost per useful unit for one fixed target, the `{python} EfficiencyFrontierPoints.target_str` the full allocation completes in the `{python} EfficiencyFrontierPoints.window_attr_str` window of the orchestration chapter's elastic scaling decision, under its three strategies on the fleet rate and on spot capacity at `{python} EfficiencyFrontierPoints.spot_price_pct_str` of that rate; marker area and the labels' relative goodput give each strategy's useful work per held GPU-hour as a ratio to the `{python} EfficiencyFrontierPoints.small_gpus_num_str`-GPU run on the fleet rate (1.00), not the running example's absolute goodput. At one price, cost per useful unit is the price divided by goodput, so cost and goodput move together and the three fleet-rate points trade time against cost with none dominating another. Spot's discount outlasts its interruption losses here, so the frontier runs through every spot point and only the fastest fleet-rate point; the other two fall behind it (hollow). Values are illustrative, derived from that decision's inputs and the same chapter's spot interruption scenario; spot points keep the fleet-rate queue wait and count each interruption as a graceful save." fig-alt="Scatter plot with time to result for 64 epochs, 0 to 100 hours, on the x axis and cost per useful unit relative to 128 GPUs at the fleet rate, 0 to 1.5, on the y axis. Dark circles mark three fleet-rate strategies: wait for 512 at 24 hours and 1.25, filled, relative goodput 0.80; step-up 128 to 256 at about 38 hours and 1.11, hollow, relative goodput 0.90; and 128 GPUs now at 64 hours and 1.00, hollow, relative goodput 1.00. Brown squares mark the same strategies on spot capacity, all filled: wait for 512 at about 32 hours and 0.60, relative goodput 0.58; step-up at about 51 hours and 0.53, relative goodput 0.66; and 128 GPUs now at 88 hours and 0.48, relative goodput 0.73. Marker size grows with relative goodput, which is measured against the 128-GPU fleet-rate run at 1.00. A dark line labeled efficiency frontier falls steeply from the filled fleet-rate circle to the spot wait point and then runs nearly flat through the other two spot squares. A key at the top right reads fleet rate, spot at 0.35 times the price, and dominated, hollow."}
+::: {#fig-performance-engineering-efficiency-frontier fig-env="figure" fig-pos="htb" fig-cap="**Efficiency frontier of the elastic strategies at two prices**: Time to result and cost per useful unit for one fixed target, the `{python} EfficiencyFrontierPoints.target_str` the full allocation completes in the `{python} EfficiencyFrontierPoints.window_attr_str` window of the elastic scaling decision in @sec-fleet-orchestration-elastic-policies, under its three strategies on the fleet rate and on spot capacity at `{python} EfficiencyFrontierPoints.spot_price_pct_str` of that rate; marker area and the labels' relative goodput give each strategy's useful work per held GPU-hour as a ratio to the `{python} EfficiencyFrontierPoints.small_gpus_num_str`-GPU run on the fleet rate (1.00), not the running example's absolute goodput. At one price, cost per useful unit is the price divided by goodput, so cost and goodput move together and the three fleet-rate points trade time against cost with none dominating another. Spot's discount outlasts its interruption losses here, so the frontier runs through every spot point and only the fastest fleet-rate point; the other two fall behind it (hollow). Values are illustrative, derived from that decision's inputs and the spot interruption scenario of @sec-fleet-orchestration-fallacies; spot points keep the fleet-rate queue wait and count each interruption as a graceful save." fig-alt="Scatter plot with time to result for 64 epochs, 0 to 100 hours, on the x axis and cost per useful unit relative to 128 GPUs at the fleet rate, 0 to 1.5, on the y axis. Dark circles mark three fleet-rate strategies: wait for 512 at 24 hours and 1.25, filled, relative goodput 0.80; step-up 128 to 256 at about 38 hours and 1.11, hollow, relative goodput 0.90; and 128 GPUs now at 64 hours and 1.00, hollow, relative goodput 1.00. Brown squares mark the same strategies on spot capacity, all filled: wait for 512 at about 32 hours and 0.60, relative goodput 0.58; step-up at about 51 hours and 0.53, relative goodput 0.66; and 128 GPUs now at 88 hours and 0.48, relative goodput 0.73. Marker size grows with relative goodput, which is measured against the 128-GPU fleet-rate run at 1.00. A dark line labeled efficiency frontier falls steeply from the filled fleet-rate circle to the spot wait point and then runs nearly flat through the other two spot squares. A key at the top right reads fleet rate, spot at 0.35 times the price, and dominated, hollow."}
 
 ```{python}
 #| echo: false
@@ -3859,7 +3646,7 @@ Each of these errors measures one boundary correctly and reports it as the whole
 
 ## Summary {#sec-performance-engineering-summary}
 
-A fleet can be fully allocated and visibly busy while most of its capacity never becomes useful work, because capacity is lost in three places along a job's life: before the job holds a complete allocation, while it holds devices without retaining progress, and inside retained steps that run below the ideal rate. Scheduling, runtime, and program goodput measure those places, and their product is MPG (@eq-perf-ml-productivity-goodput). The product holds only when each lost interval is charged once, at the first boundary it fails to cross.
+A fleet can be fully allocated and visibly busy while most of its capacity never becomes useful work, because capacity is lost in three places along a job's life. It is lost before the job holds a complete allocation, while the job holds devices without retaining progress, and inside retained steps that run below the ideal rate. Scheduling, runtime, and program goodput measure those places, and their product is MPG (@eq-perf-ml-productivity-goodput). The product holds only when each lost interval is charged once, at the first boundary it fails to cross.
 
 Each factor loses time at its own rate, program losses in every step, runtime losses in rare interruptions, and scheduling losses with the cycle of demand, so a measurement contract fixes the window as well as the workload, the system state, and the timing boundary. Sized from their owners' results, the running example's runtime loss came mostly from input waits and preemption rather than from failures, so the same value of a factor can point to different owners.
 

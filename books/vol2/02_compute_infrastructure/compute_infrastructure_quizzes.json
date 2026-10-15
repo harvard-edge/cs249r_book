@@ -3,8 +3,8 @@
     "source_file": "books/vol2/02_compute_infrastructure/02_compute_infrastructure.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 9,
-    "sections_with_quizzes": 8,
+    "total_sections": 11,
+    "sections_with_quizzes": 10,
     "sections_without_quizzes": 1
   },
   "sections": [
@@ -90,7 +90,7 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Comparing the V100 and B200 at dense FP16 reveals an 'Accelerator Efficiency Wall.' Which statement correctly captures the difference between peak throughput growth and throughput per TDP watt, and its infrastructure consequence?",
+            "question": "Comparing the V100 and B200 at dense FP16 separates peak throughput growth from growth in throughput per TDP watt. Which statement correctly captures that difference and its infrastructure consequence?",
             "choices": [
               "Peak throughput per TDP watt grew faster than peak throughput, allowing higher-density clusters to ignore power delivery.",
               "Both peak throughput and power efficiency scaled linearly at exactly the same rate, confirming that Dennard scaling remains fully active in modern 4nm nodes.",
@@ -171,9 +171,60 @@
           },
           {
             "question_type": "FILL",
-            "question": "In the Roofline Model, the specific arithmetic intensity where the diagonal memory bandwidth slope meets the horizontal peak compute ceiling ($I = R_{\\text{peak}} / \\text{BW}$) is called the ____.",
-            "answer": "The correct answer is Ridge Point (or ridge point). It is the hardware balance threshold where the bandwidth and arithmetic ceilings meet. Below it, bandwidth supplies the lower modeled ceiling; above it, arithmetic does. A measured kernel can remain below either ceiling, so this classification does not establish its actual bottleneck.",
+            "question": "In the roofline model, the specific arithmetic intensity where the diagonal memory bandwidth slope meets the horizontal peak compute ceiling ($I = R_{\\text{peak}} / \\text{BW}$) is called the ____.",
+            "answer": "The correct answer is ridge point. It is the hardware balance threshold where the bandwidth and arithmetic ceilings meet. Below it, bandwidth supplies the lower modeled ceiling; above it, arithmetic does. A measured kernel can remain below either ceiling, so this classification does not establish its actual bottleneck.",
             "learning_objective": "Define the ridge point and distinguish the lower roofline ceiling from a measured execution bottleneck."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-tensor-cores",
+      "section_title": "Sustained Compute and Precision",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Precision-specific peak rates and the eligibility of operations for FP8 and FP16 Tensor Core execution",
+            "Peak versus sustained throughput and planning GPU-hours from measured utilization",
+            "Device variation and its cost in synchronous training",
+            "The mixed-precision recipe and FP32 master weights"
+          ],
+          "question_strategy": "An MCQ on why an FP8 peak is a ceiling rather than a plan, a SHORT calculation of GPU-hours from MFU with its comparability conditions, a TF on how one slow device affects a synchronous group, and a FILL on master weights.",
+          "difficulty_progression": "Moves from reading a precision-specific peak, to a planning calculation, to the fleet consequence of device variation, and closes with the recipe vocabulary the node memory budget uses.",
+          "integration": "Builds on the matrix units of the accelerator section and prepares the node memory budget, which counts master weights and optimizer state.",
+          "ranking_explanation": "Owns the chapter's plan-on-sustained-throughput concept, which every later sizing calculation in the chapter applies."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "An H100 advertises twice the dense arithmetic rate in FP8 that it advertises in FP16. A team sizes a training run's GPU-hours by assuming the full FP8 rate. Which statement best describes the planning error?",
+            "choices": [
+              "FP8 halves the bytes per weight, so memory-bound phases also run exactly twice as fast and the plan is correct.",
+              "The FP8 rating is a ceiling for eligible matrix operations; ineligible operations, memory stalls, communication, and the need to validate the precision policy keep the sustained rate below it, so the plan must use a measured sustained rate.",
+              "FP8 Tensor Core rates apply only to inference, so a training plan must use the FP32 rate instead.",
+              "FP8 runs slower than FP16 on Tensor Cores because of scaling overhead, so the plan overestimates the time."
+            ],
+            "answer": "The correct answer is B. Peak FLOP/s assumes every eligible arithmetic unit stays fed at the stated precision. Operations that cannot run in FP8, memory and dependency stalls, exposed communication, and launch overhead all sit outside that ceiling, and a layer is not numerically safe in FP8 merely because the hardware supports it. Halving the bytes does not double a whole run, FP8 recipes are used in training, and FP8 is not slower than FP16 on supported operations.",
+            "learning_objective": "Distinguish a precision-specific peak rate from the sustained throughput that capacity planning must use."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A training run is estimated at 1,000 GPU-hours from peak FLOP/s. Profiling a representative window shows a model FLOPs utilization (MFU) of 0.4. How many GPU-hours should the plan budget, and what must match before this MFU can be compared with another team's figure?",
+            "answer": "The plan should budget 1,000 / 0.4 = 2,500 GPU-hours, because a run planned from peak needs 1/MFU times the peak-based estimate at the measured utilization. The comparison is meaningful only when both figures use the same model-FLOP convention, the same precision and hardware peak, and a similar system scale and workload shape; otherwise a higher MFU can reflect a different denominator rather than better execution.",
+            "learning_objective": "Apply measured utilization to a peak-based estimate and state the conditions under which MFU figures are comparable."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In synchronous training, an accelerator that sustains a clock about 2.5 percent below its peers costs the job at most 2.5 percent of that one device's throughput.",
+            "answer": "False. Every participant waits for the slowest one at each collective, so a device that finishes its dependent work late can slow every synchronous step of its whole group by up to that fraction. Fleets therefore track per-device sustained throughput and move persistent underperformers to pools, such as inference serving, where they do not gate a synchronized group, after profiling confirms the cause.",
+            "learning_objective": "Explain how device variation propagates through synchronous training."
+          },
+          {
+            "question_type": "FILL",
+            "question": "The standard mixed-precision recipe runs the forward and backward passes in BF16 or FP16 but keeps a full-precision FP32 copy of the parameters, called the ____ weights, so that updates much smaller than a weight are not lost to FP16 rounding.",
+            "answer": "The correct answer is master. The FP32 master weights are the copy the optimizer updates; they add four bytes per parameter to the training state, which the node memory budget must hold or offload.",
+            "learning_objective": "Identify the FP32 master weights in the mixed-precision recipe and their memory cost."
           }
         ]
       }
@@ -382,6 +433,57 @@
             "question": "Arrange the stages in the worked scenario's accounting sequence: begin with the compute-only baseline, add the distributed-step losses, then checkpointing, restart, and maintenance allowances. (1) Checkpoint I/O overhead ($\\approx 3\\%$), (2) Compute-only training time ($6PD$ FLOPs divided by aggregate peak throughput times assumed local compute efficiency), (3) Hardware failure and restart overhead ($\\approx 10\\%$), (4) Scaling efficiency covering communication and pipeline bubbles ($\\approx 0.56$), (5) Maintenance overhead ($\\approx 5\\%$). Each additive percentage is relative to the preceding subtotal.",
             "answer": "The correct order is: (2) Compute-only baseline, (4) Scaling efficiency, (1) Checkpoint I/O overhead, (3) Failure and restart overhead, (5) Maintenance overhead. Starting near 12 hours gives successive subtotals near 21.4, 22.1, 24.3, and 25.5 hours. The scaling factor already includes pipeline fill and drain, so adding a separate bubble step would count that loss twice. This is an illustrative accounting convention, not a physical chronology or universal minimum. Local compute efficiency excludes the distributed losses added here; using measured distributed MFU would double-count them.",
             "learning_objective": "Sequence the worked training-time accounting model and distinguish its local efficiency and incremental overhead denominators."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-accelerator-selection",
+      "section_title": "Accelerator Selection for Fleet Workloads",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Choosing the procurement metric from the binding per-device constraint",
+            "Quantization as a change in device count for serving",
+            "Per-device versus fleet-level binding constraints",
+            "Reading benchmark results under their measurement rules"
+          ],
+          "question_strategy": "An MCQ on the serving metric for batch-1 decode, a SHORT calculation of device counts under quantization with its limits, a TF separating per-device and fleet constraints, and a FILL on the benchmark division that fixes workload and quality.",
+          "difficulty_progression": "Starts from a single-workload metric choice, adds a capacity calculation, then generalizes to the difference between device and fleet constraints and to the evidence a procurement team may trust.",
+          "integration": "Applies the roofline screen, the capacity-versus-bandwidth tests, and the sustained-throughput rule from earlier sections to hardware selection.",
+          "ranking_explanation": "Owns the chapter's workload-matched hardware selection concept, the decision the rest of the chapter equips the reader to make."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A team will serve a dense language model at batch size 1 with a strict per-token latency target. Which metric should dominate its comparison of candidate accelerators?",
+            "choices": [
+              "Peak FP8 TFLOP/s per dollar, because decode performs two floating-point operations per parameter.",
+              "Memory bandwidth per dollar, confirmed by measured throughput at the required latency, because batch-1 decode streams the weights with little reuse.",
+              "Host DRAM capacity per dollar, because the weights should be served from host memory.",
+              "Bisection bandwidth of the cluster fabric, because every request crosses the network."
+            ],
+            "answer": "The correct answer is B. Batch-1 decode sits near 1 FLOP/byte, far below the ridge point, so the weight-streaming time set by memory bandwidth dominates and more arithmetic barely changes it. Peak FLOP/s raises a nonbinding ceiling, host memory is far slower than HBM, and independent replicas need not send every request across the cluster fabric. Measured throughput at the latency target confirms the screen.",
+            "learning_objective": "Select the procurement metric that matches the binding constraint of a serving workload."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "The 175B running model needs about 350 GB for FP16 weights. Using 80 GB accelerators, how many devices are needed for the weights alone at FP16, INT8, and INT4, and why does a fourfold smaller payload not guarantee a fourfold lower token latency?",
+            "answer": "The weights need at least five devices at FP16 (350 GB), three at INT8 (175 GB), and two at INT4 (87.5 GB). These are weight-only capacity bounds; quantization metadata, key-value cache, and workspace also need memory. Reading 4-bit instead of 16-bit weights quarters the raw payload, but kernel support, dequantization work, other memory traffic, any change in device count and communication, and validation of model quality determine the realized latency gain.",
+            "learning_objective": "Calculate how quantization changes serving device counts and explain why payload reduction does not translate directly into latency."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A workload whose binding constraint on each device is arithmetic throughput cannot be communication-bound across the cluster.",
+            "answer": "False. The decision matrix names the per-device constraint, what one accelerator must supply. Whether the fleet as a whole is limited by compute, communication, or coordination is a separate question. Large-batch LLM training can be compute-bound on each device and still be communication-bound across the cluster, as Archetype A (GPT-4/Llama-3) is.",
+            "learning_objective": "Distinguish the per-device binding constraint from the constraint that binds the fleet as a whole."
+          },
+          {
+            "question_type": "FILL",
+            "question": "MLPerf results that fix the workload and the quality target so that different implementations can be compared belong to the ____ division.",
+            "answer": "The correct answer is closed. The open division permits broader changes. Neither predicts a deployment automatically, so a procurement team must compare the submission's workload, software, precision, hardware count, and quality target with the intended system.",
+            "learning_objective": "Interpret benchmark results under the measurement rules that produced them."
           }
         ]
       }
