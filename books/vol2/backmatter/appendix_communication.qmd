@@ -58,12 +58,13 @@ class CommAlphaBeta:
     pcie_gen5_bw = Hardware.Cloud.H100.interconnect.bandwidth
     # α convention (release ruling D24): effective per-message launch latency including the
     # communication library's software stack, as in @tbl-interconnect-parameters (ch05 owns it).
-    # Scenario ranges match ch05's InterconnectAlphaBeta cell; keep the two in step.
-    nvlink_alpha_lo, nvlink_alpha_hi = 1 * microsecond, 2 * microsecond
-    pcie_alpha_lo, pcie_alpha_hi = 2 * microsecond, 5 * microsecond
-    ndr_alpha_lo, ndr_alpha_hi = 1 * microsecond, 3 * microsecond
-    hdr_alpha_lo, hdr_alpha_hi = 2 * microsecond, 5 * microsecond
-    roce_alpha_lo, roce_alpha_hi = 5 * microsecond, 10 * microsecond
+    # Scenario ranges come from the registry (Systems.SwitchFabric.EffectiveAlpha*), shared with ch05 and App G.
+    _sf = Systems.SwitchFabric
+    nvlink_alpha_lo, nvlink_alpha_hi = _sf.EffectiveAlphaNvlinkLow, _sf.EffectiveAlphaNvlinkHigh
+    pcie_alpha_lo, pcie_alpha_hi = _sf.EffectiveAlphaPcieGen5Low, _sf.EffectiveAlphaPcieGen5High
+    ndr_alpha_lo, ndr_alpha_hi = _sf.EffectiveAlphaNdrLow, _sf.EffectiveAlphaNdrHigh
+    hdr_alpha_lo, hdr_alpha_hi = _sf.EffectiveAlphaHdrLow, _sf.EffectiveAlphaHdrHigh
+    roce_alpha_lo, roce_alpha_hi = _sf.EffectiveAlphaRoceLow, _sf.EffectiveAlphaRoceHigh
     check(ndr_alpha_lo <= Systems.SwitchFabric.AlphaNdr <= ndr_alpha_hi, "NDR α anchor must sit inside the ch05 NDR range")
     check(roce_alpha_lo <= Systems.SwitchFabric.AlphaRoce <= roce_alpha_hi, "Registry RoCE α must sit inside the ch05 RoCE range")
     ring_n_gpus = Systems.Clusters.Research_256.total_accelerators
@@ -125,7 +126,7 @@ The model decomposes every transfer into exactly two costs: a per-message cost (
 
 Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the baseline $\MessageStartupLatency$ and $\LinkBandwidth$ values for hardware commonly found in ML clusters:
 
-| **Interconnect**                                              |      **$\MessageStartupLatency$ (Latency)**     |          **$\LinkBandwidth$ (Bandwidth)**         | **Typical Role**                 |
+| **Interconnect**                                              |      **$\MessageStartupLatency$ (latency)**     |          **$\LinkBandwidth$ (bandwidth)**         | **Typical role**                 |
 |:--------------------------------------------------------------|:-----------------------------------------------:|:-------------------------------------------------:|:---------------------------------|
 | **NVLink 4.0 (H100)**                                         | `{python} CommAlphaBeta.nvlink_alpha_range_str` |  `{python} CommAlphaBeta.nvlink_bw_gb_per_s_str`  | Intra-node GPU-to-GPU            |
 | **PCIe Gen5**                                                 |  `{python} CommAlphaBeta.pcie_alpha_range_str`  |   `{python} CommAlphaBeta.pcie_bw_gb_per_s_str`   | CPU-GPU, NIC-GPU                 |
@@ -308,7 +309,7 @@ Broadcast is inherently asymmetric (one sender, many receivers), which makes a t
 
 With the individual formulas in place, @tbl-collective-summary provides a compact reference for comparing the cost structure of each collective operation.
 
-| **Operation**            |                                         **Bandwidth Term**                                        |                  **Latency Term**                  |       **Primary Use Case**       |
+| **Operation**            |                                         **Bandwidth term**                                        |                  **Latency term**                  |       **Primary use case**       |
 |:-------------------------|:-------------------------------------------------------------------------------------------------:|:--------------------------------------------------:|:--------------------------------:|
 | **AllReduce (Ring)**     | $2 \cdot \frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$ |  $2(\DeviceCount-1) \cdot \MessageStartupLatency$  |   Data-parallel gradient sync    |
 | **AllReduce (Tree)**     |             $2\log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$             | $2\log_2 \DeviceCount\cdot \MessageStartupLatency$ |        Small-message sync        |
@@ -343,7 +344,7 @@ $$ \RingTreeCrossoverPayload(\DeviceCount) = \LatencyBandwidthCrossoverSize \tim
 
 Recursive halving-doubling is a third candidate in every regime, with near-optimal bandwidth and logarithmic steps, but it requires a power-of-two participant count (@tbl-algorithm-selection).
 
-| **Regime**                                                                  |                **Ring**               |                      **Tree**                     | **Recursive Halving-Doubling**                              |
+| **Regime**                                                                  |                **Ring**               |                      **Tree**                     | **Recursive halving-doubling**                              |
 |:----------------------------------------------------------------------------|:-------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------|
 | **$\CollectivePayloadSize> \RingTreeCrossoverPayload(\DeviceCount)$**       | Lower cost under the displayed models |               Higher bandwidth term               | Candidate with near-optimal bandwidth and logarithmic steps |
 | **$\CollectivePayloadSize< \RingTreeCrossoverPayload(\DeviceCount)$**       |       Higher linear startup term      |       Lower cost under the displayed models       | Candidate with logarithmic startup steps                    |
@@ -456,7 +457,7 @@ class CommPipeline:
     bubble_p8_m64_pct_str = fmt_percent(bubble_p8_m64, precision=1, commas=False, style='symbol')
 ```
 
-| **Pipeline Stages ($\PipelineParallelDegree$)** |          **$\MicrobatchCount$ = 8**          |          **$\MicrobatchCount$ = 16**          |          **$\MicrobatchCount$ = 32**          |          **$\MicrobatchCount$ = 64**          |
+| **Pipeline stages ($\PipelineParallelDegree$)** |          **$\MicrobatchCount$ = 8**          |          **$\MicrobatchCount$ = 16**          |          **$\MicrobatchCount$ = 32**          |          **$\MicrobatchCount$ = 64**          |
 |:------------------------------------------------|:--------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|
 | **$\PipelineParallelDegree$ = 4**               | `{python} CommPipeline.bubble_p4_m8_pct_str` | `{python} CommPipeline.bubble_p4_m16_pct_str` | `{python} CommPipeline.bubble_p4_m32_pct_str` | `{python} CommPipeline.bubble_p4_m64_pct_str` |
 | **$\PipelineParallelDegree$ = 8**               | `{python} CommPipeline.bubble_p8_m8_pct_str` | `{python} CommPipeline.bubble_p8_m16_pct_str` | `{python} CommPipeline.bubble_p8_m32_pct_str` | `{python} CommPipeline.bubble_p8_m64_pct_str` |
@@ -591,7 +592,7 @@ class CommCompression:
 
 Break-even codec overhead limits (@tbl-compression-breakeven) scale with compression ratio and uncompressed AllReduce time. Higher compression ratios tolerate larger codec overheads, up to the bandwidth-dependent portion of the uncompressed collective.
 
-| **Compression Ratio ($\CompressionRatio$)** |    **AllReduce = 10 ms (Max Codec Overhead)**   |    **AllReduce = 40 ms (Max Codec Overhead)**   |   **AllReduce = 100 ms (Max Codec Overhead)**    |
+| **Compression ratio ($\CompressionRatio$)** |    **AllReduce = 10 ms (max codec overhead)**   |    **AllReduce = 40 ms (max codec overhead)**   |   **AllReduce = 100 ms (max codec overhead)**    |
 |:--------------------------------------------|:-----------------------------------------------:|:-----------------------------------------------:|:------------------------------------------------:|
 | **4$\times$**                               |  `{python} CommCompression.breakeven_4_10_str`  |  `{python} CommCompression.breakeven_4_40_str`  |  `{python} CommCompression.breakeven_4_100_str`  |
 | **16$\times$**                              |  `{python} CommCompression.breakeven_16_10_str` |  `{python} CommCompression.breakeven_16_40_str` | `{python} CommCompression.breakeven_16_100_str`  |
