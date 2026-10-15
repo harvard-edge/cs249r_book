@@ -158,7 +158,7 @@ Fleet efficiency characterizes a replica in steady state by how close its decode
 
 The service contract makes that distinction measurable. Offered load is the work arriving at the endpoint, including requests the service may reject; admitted load is the work it accepts. A service-level objective (SLO) specifies the required outcome over a measurement window, such as a latency percentile or successful-request fraction. For language models, request rate alone is insufficient because prompt and output lengths determine different amounts of work. Capacity comparisons must therefore hold the request mix and SLO fixed while measuring how much offered work completes successfully within the targets.
 
-An admitted request passes through routing, preprocessing, queueing, batch formation, model execution, and response delivery. @Fig-inference-lifecycle traces this traversal across the host CPU and accelerator boundaries. The host manages admission, tokenization, and detokenization, while the GPU executes the prompt prefill pass and iterative KV-cache decode loop; the figure maps noncompute serving overhead against the time-to-first-token (TTFT) and time-per-output-token (TPOT, the average gap between streamed tokens) latency budgets. For an autoregressive model, prefill processes the prompt and builds cached attention keys and values; decode extends that KV cache as it generates subsequent tokens. Waiting before prefill delays the first token, while competition during decode delays the stream. The scheduler must budget both delays alongside execution time. Batching and cache management govern work within a replica, sharding changes the replica's capacity, and routing and autoscaling distribute demand across replicas.
+An admitted request passes through routing, preprocessing, queueing, batch formation, model execution, and response delivery, crossing between the host CPU and the accelerator twice on the way (@fig-inference-lifecycle). The host manages admission, tokenization, and detokenization, while the GPU executes the prompt prefill pass and iterative KV-cache decode loop; the figure maps noncompute serving overhead against the time-to-first-token (TTFT) and time-per-output-token (TPOT, the average gap between streamed tokens) latency budgets. For an autoregressive model, prefill processes the prompt and builds cached attention keys and values; decode extends that KV cache as it generates subsequent tokens. Waiting before prefill delays the first token, while competition during decode delays the stream. The scheduler must budget both delays alongside execution time. Batching and cache management govern work within a replica, sharding changes the replica's capacity, and routing and autoscaling distribute demand across replicas.
 
 ::: {.column-margin .margin-pointer}
 ↩ Prefill's arithmetic-bound regime and decode's bandwidth floor, measured as MBU, are established in @sec-performance-engineering-fleet-efficiency-metric-dff4.
@@ -400,7 +400,7 @@ Beyond memory constraints, throughput limitations emerge when request volume exc
 
 Finally, latency requirements can motivate distribution even when memory is sufficient. A 70-billion parameter model requires approximately `{python} InferenceSetup.llama70b_fp16_gb_str` of weight memory in FP16, exceeding a single `{python} InferenceSetup.h100_mem_gb_str` H100-class GPU before KV cache is considered. Quantization or larger-memory hardware can make a single-device configuration feasible, yet its execution time may still exceed the request budget. Sharding the model\index{Model sharding!latency reduction} across multiple GPUs can divide computation and weight traffic, but it adds communication and synchronization. Because sharding shortens compute-bound prefill and bandwidth-bound decode by different amounts, the latency benefit must be measured for each phase against its own target.
 
-| **Constraint** |             **Single-Machine Limit**             |                          **Example Workload**                         |  **Distribution Strategy**  |
+| **Constraint** |             **Single-machine limit**             |                          **Example workload**                         |  **Distribution strategy**  |
 |:---------------|:------------------------------------------------:|:---------------------------------------------------------------------:|:---------------------------:|
 | **Memory**     | `{python} InferenceSetup.h100_mem_gb_str` (H100) | Illustrative MoE (`{python} InferenceSetup.gpt4_weights_tb_str` FP16) | Tensor/pipeline parallelism |
 | **Throughput** |                ~10K QPS (vision)                 |                            100K QPS RecSys                            |    Horizontal replication   |
@@ -427,9 +427,9 @@ A served request carries a contract, a set of latency and quality targets it mus
 
 ### The inversion from training to inference {#sec-inference-scale-fundamental-inversion-training-vs-inference-8834}
 
-The contrast between training and inference\index{Training!vs. inference requirements} centers on the unit of useful progress. Training evaluates throughput together with convergence over a run; interactive serving evaluates completed requests against quality and latency targets. Offline inference can also prioritize throughput, while training still loses progress to stragglers and stalls. The distinction is therefore which delays violate the workload's contract, not whether one activity cares about time and the other does not. @Tbl-training-inference-inversion summarizes the priorities of long-running training and interactive serving across six system aspects.
+The contrast between training and inference\index{Training!vs. inference requirements} centers on the unit of useful progress. Training evaluates throughput together with convergence over a run; interactive serving evaluates completed requests against quality and latency targets. Offline inference can also prioritize throughput, while training still loses progress to stragglers and stalls. The distinction is therefore which delays violate the workload's contract, not whether one activity cares about time and the other does not. That difference reorders priorities across six system aspects, from the primary metric onward (@tbl-training-inference-inversion).
 
-| **Aspect**              |    **Distributed Training**   |      **Distributed Inference**       |
+| **Aspect**              |    **Distributed training**   |      **Distributed inference**       |
 |:------------------------|:-----------------------------:|:------------------------------------:|
 | **Primary metric**      |   Throughput (samples/hour)   |           Latency (p99 ms)           |
 | **Acceptable variance** |             Hours             |             Milliseconds             |
@@ -641,9 +641,9 @@ class InferenceEconomics:
     engineering_mult_str = fmt_multiple(engineering_multiplier, commas=False, precision=0)
 ```
 
-The same leverage can hold across application categories with different cost structures. In the chapter's illustrative recommendation scenario, a DLRM trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.training_hardware_cost_str` hardware for `{python} InferenceEconomics.n_gpu_hours_str` at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, plus `{python} InferenceEconomics.engineering_mult_str` additional engineering cost for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries. At the assumed `{python} InferenceEconomics.cost_per_million_queries_usd_str`, those queries cost `{python} InferenceEconomics.serving_cost_total_str` to serve, producing a `{python} InferenceEconomics.leverage_ratio_mult_str` ratio in this scenario. @Tbl-cost-ratios gives sensitivity ranges for several illustrative workload envelopes rather than market-price estimates:
+The same leverage can hold across application categories with different cost structures. In the chapter's illustrative recommendation scenario, a DLRM trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.training_hardware_cost_str` hardware for `{python} InferenceEconomics.n_gpu_hours_str` at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, plus `{python} InferenceEconomics.engineering_mult_str` additional engineering cost for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries. At the assumed `{python} InferenceEconomics.cost_per_million_queries_usd_str`, those queries cost `{python} InferenceEconomics.serving_cost_total_str` to serve, producing a `{python} InferenceEconomics.leverage_ratio_mult_str` ratio in this scenario. Other workload envelopes span orders of magnitude in both terms, and the sensitivity ranges in @tbl-cost-ratios are illustrative envelopes rather than market-price estimates.
 
-| **Application**               | **Training Cost** | **Annual Serving Cost** |
+| **Application**               | **Training cost** | **Annual serving cost** |
 |:------------------------------|:------------------|:------------------------|
 | **Recommendation (high QPS)** | \$10K--\$100K     | \$1M--\$10M             |
 | **Search ranking**            | \$100K--\$1M      | \$10M--\$100M           |
@@ -693,7 +693,7 @@ class ServingCostCurve:
     single_cross_math = fmt_math(sci_latex(single_cross, precision=0))
 ```
 
-A reduction in cost per completed request yields recurring savings only if workload volume and service quality stay fixed; lower latency alone does not reduce billed capacity. @Fig-serving-cost-curve uses constructed cost curves to illustrate how unit cost can change with daily request volume. Against its assumed price of `{python} ServingCostCurve.price_per_k_tokens_str` per 1,000 tokens, the optimized curve crosses near `{python} ServingCostCurve.optimized_cross_math` requests per day and the unbatched single-GPU curve near `{python} ServingCostCurve.single_cross_math` requests. These crossings follow from the assumed curves, not measured profitability, so a deployment needs its own token mix, occupied capacity, and cost boundary to locate its break-even point.
+A reduction in cost per completed request yields recurring savings only if workload volume and service quality stay fixed; lower latency alone does not reduce billed capacity. Unit cost also changes with daily request volume, as the constructed cost curves of @fig-serving-cost-curve illustrate. Against its assumed price of `{python} ServingCostCurve.price_per_k_tokens_str` per 1,000 tokens, the optimized curve crosses near `{python} ServingCostCurve.optimized_cross_math` requests per day and the unbatched single-GPU curve near `{python} ServingCostCurve.single_cross_math` requests. These crossings follow from the assumed curves, not measured profitability, so a deployment needs its own token mix, occupied capacity, and cost boundary to locate its break-even point.
 
 ::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Curve**: Constructed unit-cost curves cross an assumed price line at different request volumes. The optimized curve crosses earlier under these assumptions; the crossings do not establish measured profitability or guaranteed savings from quantization and batching." fig-alt="Log-log plot of cost per 1000 tokens vs. daily request volume for single-GPU, multi-GPU, and optimized serving, drawn as three gray lines that grow heavier with optimization, the optimized line darkest, each labeled at its right end. A dashed horizontal price line divides a shaded region above it, where cost exceeds price, from a shaded region below it, and an open circle marks where each of the three curves crosses the line."}
 
@@ -938,7 +938,7 @@ Recommendation traffic illustrates why request volume must be derived from appli
 
 Workload structure also determines which techniques can help. Embedding sharding and lookup locality address large recommendation models [@naumov2019deep; @gupta2020architectural], and feature store architectures\index{Feature store!recommendation systems} must deliver the inputs a model expects within its latency budget, while continuous batching and KV cache management address variable-length autoregressive work. Text-to-image systems such as DALL-E add multimodal serving demands [@ramesh2021zero] whose volume and latency targets remain product-specific.
 
-| **Model Type**               |        **Serving Pressure**       |  **Latency Target** |    **Key Challenge**     |
+| **Model type**               |        **Serving pressure**       |  **Latency target** |    **Key challenge**     |
 |:-----------------------------|:---------------------------------:|:-------------------:|:------------------------:|
 | **Recommendation/ranking**   | High volume in consumer platforms | $<10\text{ ms}$ p99 |     Embedding lookup     |
 | **Vision (CNN)**             |         Workload-dependent        |      20--100 ms     |     Batch efficiency     |
@@ -954,7 +954,7 @@ The optimization techniques organize into a serving hierarchy\index{Serving!hier
 
 Each level supplies a different measurement boundary. @Tbl-serving-hierarchy associates request latency, replica throughput, aggregate service capacity, and cross-tenant efficiency with the controls most directly responsible for them. Their effects still cross boundaries: batching can increase replica throughput while adding request delay, and replica placement can change both communication cost and service capacity. The hierarchy helps locate the decision without treating its metric in isolation. In C³ terms, batching and cache management improve compute reuse, sharding introduces communication, and routing, isolation, and autoscaling coordinate the resources that make those gains usable.
 
-| **Level**    | **Optimization Target** | **Key Techniques**                   |
+| **Level**    | **Optimization target** | **Key techniques**                   |
 |:-------------|:-----------------------:|:-------------------------------------|
 | **Request**  |   Per-request latency   | Dynamic batching, response caching   |
 | **Replica**  | Throughput, utilization | KV-cache paging, kernel fusion       |
@@ -1871,7 +1871,7 @@ The waste grows with the spread of output lengths, a dependence that @sec-infere
 \end{algorithm}
 ```
 
-Admitting, completing, and refilling slots on every iteration lets waiting work use capacity released before the longest sequence finishes. The illustrated preemption path adds HBM-to-CPU-DRAM transfers under memory pressure, so recovered capacity must repay both scheduling and state-movement costs. @Fig-continuous-batching-comparison depicts the opportunity in slot-iterations. Fixed membership leaves only 20 of 32 productive, while continuous admission fills all 32 under the illustrated arrival and capacity assumptions. Prefill and decode cells do not necessarily take equal time. Slot occupancy therefore measures the opportunity; the realized throughput gain depends on how much longer the inserted prefill cells take than the decode steps they share an iteration with.
+Admitting, completing, and refilling slots on every iteration lets waiting work use capacity released before the longest sequence finishes. The illustrated preemption path adds HBM-to-CPU-DRAM transfers under memory pressure, so recovered capacity must repay both scheduling and state-movement costs. Counted in slot-iterations (@fig-continuous-batching-comparison), fixed membership leaves only 20 of 32 productive, while continuous admission fills all 32 under the illustrated arrival and capacity assumptions. Prefill and decode cells do not necessarily take equal time. Slot occupancy therefore measures the opportunity; the realized throughput gain depends on how much longer the inserted prefill cells take than the decode steps they share an iteration with.
 
 ::: {#fig-continuous-batching-comparison fig-env="figure" fig-pos="htb" fig-cap="**Static vs. Continuous Batching**: In static batching (a), completed slots cannot be reused until the longest request finishes, although completed responses may already be released. Continuous batching (b) admits waiting requests into freed slots at iteration boundaries, starting each with a prefill step. Over the eight iterations shown, 20 of 32 slot-iterations do useful work under static batching and all 32 under continuous batching; the hatched idle slots are the capacity recovered when arrivals and cache capacity permit." fig-alt="Two stacked grids of four slots by eight iterations. Top: static batching, where requests R1 to R4 end at iterations 3, 8, 5, and 4, and every later cell in the finished slots is hatched as idle; a note reads 20 of 32 slots busy. Bottom: continuous batching, where requests R5, R6, and R7 enter the freed slots with a dark prefill cell and continue decoding, leaving no idle cells; a note reads 32 of 32 slots busy. Final-token cells are green."}
 ![](images/svg/continuous-batching.svg)
@@ -2219,7 +2219,7 @@ class BatchingRequestTotals:
     r4_total_str = fmt_int(totals[3])
 ```
 
-| **Request** | **Prompt Length** | **Output Length** |                **Total Tokens**               |
+| **Request** | **Prompt length** | **Output length** |                **Total tokens**               |
 |:------------|:-----------------:|:-----------------:|:---------------------------------------------:|
 | **R1**      |        100        |         50        | `{python} BatchingRequestTotals.r1_total_str` |
 | **R2**      |         80        |        200        | `{python} BatchingRequestTotals.r2_total_str` |
@@ -2384,7 +2384,7 @@ $$\text{Improvement} \approx \frac{\BatchMaxOutputLength}{\BatchMeanOutputLength
 
 where $\BatchMaximumDeviationMultiple$ specifies how far the batch maximum lies above the mean, so the expression is a scenario ceiling on the opportunity from filling otherwise unused slots; scheduler overhead, KV-cache pressure, and refill gaps reduce the recovered fraction. In the table that follows, the CV and $\BatchMaximumDeviationMultiple$ columns are inputs, the speedup column is an assumed realized fraction held below the $1 + \BatchMaximumDeviationMultiple\cdot \text{CV}$ ceiling, and the waste column restates that speedup through $\text{speedup} \approx 1/(1 - \EffectiveWasteFraction)$. Neither column is a measurement. Together they show how much of the ceiling a scheduler must recover to reach a given gain, which is the quantity a load test should measure.
 
-@Tbl-continuous-batching-benefit applies this accounting across workload types, including retrieval-augmented generation (RAG) [@lewis2020retrieval]:
+Across workload types, including retrieval-augmented generation (RAG) [@lewis2020retrieval], this accounting yields the scenario rows of @tbl-continuous-batching-benefit.
 
 ```{python}
 #| echo: false
@@ -2474,7 +2474,7 @@ class ContinuousBatchingBenefit:
     rag_speedup_mult_str = fmt_multiple(rag_speedup, precision=1, commas=False)
 ```
 
-| **Workload Type**           |                        **CV**                        |                        **k**                        |                      **Waste (Trad.)**                      |                    **Speedup (Continuous)**                    |
+| **Workload type**           |                        **CV**                        |                        **k**                        |                      **Waste (trad.)**                      |                    **Speedup (continuous)**                    |
 |:----------------------------|:----------------------------------------------------:|:---------------------------------------------------:|:-----------------------------------------------------------:|:--------------------------------------------------------------:|
 | **Code completion**         |   `{python} ContinuousBatchingBenefit.code_cv_str`   |   `{python} ContinuousBatchingBenefit.code_k_str`   |   `{python} ContinuousBatchingBenefit.code_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.code_speedup_mult_str`   |
 | **Chat (short responses)**  |   `{python} ContinuousBatchingBenefit.chat_cv_str`   |   `{python} ContinuousBatchingBenefit.chat_k_str`   |   `{python} ContinuousBatchingBenefit.chat_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.chat_speedup_mult_str`   |
@@ -2492,9 +2492,9 @@ Because arrivals, KV-cache admission, prefill scheduling, and scheduler overhead
 
 The same variability that makes continuous batching valuable also makes it harder to operate. Memory management must support overlapping request lifetimes. Fixed-membership batching can reserve cache regions when a batch forms and release them together, whereas continuous admission must track which request owns each region and when it becomes reusable, either through fixed-capacity slots that retain unused reservations or through paging with its block tables. Kernels must also handle variable-length sequences and changing batch membership, often by packing short sequences under shared attention masks.
 
-Scheduler work moves into the decode loop as well. A fixed-membership policy checks once per batch whether it is full or its timeout has expired, while continuous admission tracks completions, free cache capacity, and eligible waiting requests at every iteration boundary. That work must stay small relative to a decode step or it erodes the throughput that slot reuse recovers, so engines keep the per-iteration path short and prepare the next iteration's batch on the host while the accelerator executes the current one. @Tbl-batching-tradeoffs sets this operational cost against the throughput gain.
+Scheduler work moves into the decode loop as well. A fixed-membership policy checks once per batch whether it is full or its timeout has expired, while continuous admission tracks completions, free cache capacity, and eligible waiting requests at every iteration boundary. That work must stay small relative to a decode step or it erodes the throughput that slot reuse recovers, so engines keep the per-iteration path short and prepare the next iteration's batch on the host while the accelerator executes the current one. Continuous batching therefore buys its throughput gain with implementation and operating cost, weighed dimension by dimension in @tbl-batching-tradeoffs.
 
-| **Dimension**             |  **Traditional Batching** | **Continuous Batching**                                   |
+| **Dimension**             |  **Traditional batching** | **Continuous batching**                                   |
 |:--------------------------|:-------------------------:|:----------------------------------------------------------|
 | **Implementation effort** | Low (standard frameworks) | High (custom scheduler, kernels)                          |
 | **Memory overhead**       |      Fixed allocation     | Dynamic + fragmentation mgmt                              |
@@ -2598,7 +2598,7 @@ The batching strategies examined so far expose different sources of reusable cap
 
 Recommendation systems add the placement of sparse state to this decision. *Sparse embedding lookups* can dominate memory access and communication in an embedding-heavy workload even when *dense matrix multiplications* account for much of the arithmetic. A single request may issue thousands of lookups across shards of tables holding billions of entries before the ranking head combines the results. Grouping those accesses by feature type and destination, feature-parallel batching\index{Feature-parallel batching}, can improve locality, complementing request batching in the dense stages.
 
-Recommendation batching starts by grouping work around embedding locality rather than request shape. @Fig-feature-parallel-pipeline traces this feature-parallel pipeline: an incoming request splits across user, item, and context feature types to query sharded embedding tables concurrently, after which a gather barrier concatenates the retrieved representations for the dense MLP ranking head.
+Recommendation batching starts by grouping work around embedding locality rather than request shape. An incoming request splits across user, item, and context feature types to query sharded embedding tables concurrently, after which a gather barrier concatenates the retrieved representations for the dense MLP ranking head (@fig-feature-parallel-pipeline).
 
 ::: {#fig-feature-parallel-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Feature-Parallel Batching Pipeline**: Requests are batched by feature type (Users, Items, Context) and dispatched to specialized embedding servers in parallel. The retrieved embeddings are then concatenated and processed by the dense ranking head. This architecture enables scaling to trillions of parameters by decoupling embedding storage from dense compute." fig-alt="Left to right: a request enters a feature split box, by type, which fans out to three embedding tables labeled user, item, and context embeddings. Each table is drawn as rows split across two side-by-side shards, shard 0 and shard 1, with the one looked-up row filled solid: the user row in shard 0, the item row in shard 1, and the context row in shard 0. Amber lines labeled gather, concatenate carry the three rows into one stacked vector of segments U, I, and C. The vector feeds a ranking head, dense MLP, drawn as three narrowing layers, which produces a ranked output drawn as four green bars of decreasing length."}
 ![](images/svg/feature-parallel-pipeline.svg)
@@ -2941,7 +2941,7 @@ From a serving-systems perspective, the relevant shift is the work issued per re
 from mlsysim.fmt import check, fmt, fmt_int, fmt_time
 
 class LogicScaling:
-    """The latency tax of test-time reasoning."""
+    """The latency cost of test-time reasoning."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
     LOGIC_WALL_REASONING_STEPS_EXAMPLE = 128  # pedagogical reasoning-steps example
@@ -3012,9 +3012,9 @@ Is it autoregressive text generation?
                 `- No → Dynamic batching with adaptive parameters
 ```
 
-@Tbl-batching-by-model pairs each resulting strategy with its typical batch range, the constraint that binds it, and the parameter it tunes. Vision and long-prompt prefill can emphasize compute utilization, small-batch decode can emphasize weight bandwidth, and sharded recommendation can emphasize embedding access, while speech introduces deadlines tied to the input stream. Each row is a starting point for measurement against both useful throughput and the latency budget, not a fixed bottleneck or batch-size requirement for every model in a category.
+Each resulting strategy has a typical batch range, a constraint that binds it, and a parameter it tunes (@tbl-batching-by-model). Vision and long-prompt prefill can emphasize compute utilization, small-batch decode can emphasize weight bandwidth, and sharded recommendation can emphasize embedding access, while speech introduces deadlines tied to the input stream. Each row is a starting point for measurement against both useful throughput and the latency budget, not a fixed bottleneck or batch-size requirement for every model in a category.
 
-| **Model Type**    | **Strategy**     |   **Typical Batch Size**   | **Key Constraint** | **Key Parameters**               | **Tuning Goal**                  |
+| **Model type**    | **Strategy**     |   **Typical batch size**   | **Key constraint** | **Key parameters**               | **Tuning goal**                  |
 |:------------------|:-----------------|:--------------------------:|:-------------------|:---------------------------------|:---------------------------------|
 | **Vision (CNN)**  | Static/Dynamic   |           32–256           | GPU compute        | Batch size; window and max batch | Balance latency vs. throughput   |
 | **LLM (prefill)** | Dynamic          |            1–64            | GPU compute        | Window, max batch                | Balance latency vs. throughput   |
@@ -3410,7 +3410,7 @@ With on-demand allocation, each suitcase receives any free locker, and a directo
 
 :::
 
-PagedAttention [@kwon2023], introduced in vLLM\index{vLLM!PagedAttention integration}\index{vLLM!paged KV cache}, applies virtual memory concepts to KV cache management\index{Paged memory management}\index{KV cache!paged memory allocation}. Instead of contiguous allocation, the KV cache is divided into fixed-size pages, using 16-token blocks in the original paper's default configuration, and sequences are allocated pages on demand. @Fig-paged-attention contrasts this physical fragmentation with virtualized memory management. Whereas contiguous reservation strands non-adjacent free slots when earlier sequences finish, PagedAttention uses a per-sequence block table to map logical token pages to scattered physical HBM slots on demand. The block size\index{PagedAttention!block size trade-off} fixes how many tokens each page holds, so a sequence's pages need not form one contiguous allocation run.
+PagedAttention [@kwon2023], introduced in vLLM\index{vLLM!PagedAttention integration}\index{vLLM!paged KV cache}, applies virtual memory concepts to KV cache management\index{Paged memory management}\index{KV cache!paged memory allocation}. Instead of contiguous allocation, the KV cache is divided into fixed-size pages, using 16-token blocks in the original paper's default configuration, and sequences are allocated pages on demand. Whereas contiguous reservation strands non-adjacent free slots when earlier sequences finish, PagedAttention uses a per-sequence block table to map logical token pages to scattered physical HBM slots on demand (@fig-paged-attention). The block size\index{PagedAttention!block size trade-off} fixes how many tokens each page holds, so a sequence's pages need not form one contiguous allocation run.
 
 ::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**: The panels replay the eight-slot example from the text. (a) Contiguous reservation holds the maximum length of four slots per sequence, so the slots Seq A and Seq B never fill sit idle (internal fragmentation). (b) After sequences finish, four slots are free but the largest contiguous gap is two, so Seq E, which needs four contiguous slots, cannot be admitted (external fragmentation). (c) PagedAttention maps Seq E's logical pages through a block table onto any free physical blocks, so the same memory now holds it; only the unfilled tail of its final block remains unused." fig-alt="Three panels built from eight memory slots. Panel a: Seq A uses two of its four reserved slots and Seq B uses three of four; the unused reserved slots are hatched. Panel b: slots 2 and 3 hold Seq C and slots 6 and 7 hold Seq D, leaving two 2-slot gaps; four dashed red cells for Seq E, which needs four contiguous slots, do not fit. Panel c: Seq E's logical pages 0 to 3 pass through a block table mapping them to physical slots 0, 1, 4 and 5 among the C and D slots; page 3's slot is only partly filled. A legend identifies in-use entries, reserved but unused slots, free slots and other sequences."}
 ![](images/svg/kv-cache-fragmentation.svg)
@@ -3658,7 +3658,7 @@ Beyond the fragmentation bounds in the definition, paging gives two further capa
 
 Many LLM workloads share common prefixes\index{Prefix caching!prompt sharing} across requests. System prompts like "You are a helpful assistant..." are prepended to every request. Few-shot examples use the same examples for many queries. Document context involves multiple questions about the same document. Recomputing these shared prefixes wastes both compute (prefill) and memory (duplicate KV cache entries).
 
-Prefix caching shares KV cache entries across requests with compatible common prefixes. Reuse requires the same token prefix and the same model computation, including any task-specific weight adapter and other inputs that affect the cached state. The cache key must distinguish those conditions, and the service must restrict sharing to the permitted users or tenants. Matching visible text alone is insufficient. @Fig-prefix-caching diagrams valid block-level sharing. Logical tables for independent requests map common prefix tokens to physical blocks B0–B5, skipping their repeated prefill work while storing request-specific suffix state separately.
+Prefix caching shares KV cache entries across requests with compatible common prefixes. Reuse requires the same token prefix and the same model computation, including any task-specific weight adapter and other inputs that affect the cached state. The cache key must distinguish those conditions, and the service must restrict sharing to the permitted users or tenants. Matching visible text alone is insufficient. In valid block-level sharing (@fig-prefix-caching), logical tables for independent requests map common prefix tokens to physical blocks B0–B5, skipping their repeated prefill work while storing request-specific suffix state separately.
 
 ::: {#fig-prefix-caching fig-env="figure" fig-pos="htb" fig-cap="**Prefix Caching via Block Sharing**: PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the system prompt is stored in blocks 0--5. Request A and Request B map their first six logical pages to these same physical blocks, storing only their unique suffixes in new blocks. Sharing reduces KV memory and repeated prefill computation for workloads with a common context." fig-alt="Three rows. Request A logical pages at top and Request B logical pages at bottom each begin with green shared-prefix pages P0, P1, P2, and P5, separated by an ellipsis, and green arrows from both rows point to the same green physical blocks B0 to B5 in the GPU HBM panel in the middle. Request A's gray suffix pages P6 and P7 point to private blocks B10 and B11, and Request B's gray suffix pages P6 to P8 point to private blocks B12 to B14."}
 
@@ -3770,7 +3770,7 @@ class PrefixCachingAnalysis:
 
 **Systems insight**: Prefix caching pays off when the prefix hit rate is high because many requests share a long prefix. @Tbl-inference-prefix-caching-workloads uses illustrative hit-rate envelopes to show where the technique changes serving capacity and where it does not; production sizing must derive the distribution from a request trace.
 
-| **Workload**                     | **Prefix Hit Rate** | **Memory Savings** |
+| **Workload**                     | **Prefix hit rate** | **Memory savings** |
 |:---------------------------------|:-------------------:|:------------------:|
 | **Chatbot (same system prompt)** |         95%+        |      70--80%       |
 | **Document QA (same doc)**       |       80--90%       |      50--70%       |
@@ -3976,7 +3976,7 @@ This comparison uses a conservative decimal HBM budget of `{python} PrecisionDiv
 
 KV compression and GQA shrink the state each decode step reads; speculative decoding instead raises the useful work each step performs. A small draft model\index{Speculative decoding!draft model} proposes $\SpeculativeDraftLength$ tokens, and the target model verifies\index{Speculative decoding!verification step} all of them in one parallel forward pass [@leviathan2023speculative; @chen2023accelerating]. That pass streams the target's weights once, as a single decode step does, so it processes $\SpeculativeDraftLength$ candidate positions for roughly the weight traffic of one token. This is the reuse that batching buys, drawn from one request's future tokens instead of from other requests, and it moves the decode operating point up the bandwidth slope toward the ridge\index{Speculative decoding!bandwidth optimization}.
 
-@Fig-speculative-decoding aligns standard and speculative generation on a shared time axis. Standard decoding uses four target passes to emit four tokens. In the speculative round, the draft model proposes $\DraftedToken_1$ through $\DraftedToken_4$ sequentially and the target evaluates those positions in one pass; three drafts are accepted, and the first rejected token, $\DraftedToken_4$, is replaced by $\ResampledReplacementToken$ sampled from the target. The shorter timeline holds only when drafting, verification, and correction together cost less than the target passes they replace. If too many drafts are rejected, the target streams its weights and keeps little of the work; if the draft model is too expensive, its own sequential passes consume the time that one-pass verification saved.
+On a shared time axis (@fig-speculative-decoding), standard decoding uses four target passes to emit four tokens. In the speculative round, the draft model proposes $\DraftedToken_1$ through $\DraftedToken_4$ sequentially and the target evaluates those positions in one pass; three drafts are accepted, and the first rejected token, $\DraftedToken_4$, is replaced by $\ResampledReplacementToken$ sampled from the target. The shorter timeline holds only when drafting, verification, and correction together cost less than the target passes they replace. If too many drafts are rejected, the target streams its weights and keeps little of the work; if the draft model is too expensive, its own sequential passes consume the time that one-pass verification saved.
 
 ::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $\SpeculativeDraftLength$ tokens. The target model verifies all $\SpeculativeDraftLength$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Two timelines above a shared time axis. Top lane, standard decoding: four equal-width target passes in sequence, each emitting one green token, T1 to T4, at its end. Bottom lane, speculative decoding: four narrow gray draft steps labeled T1 to T4 followed by one target pass that verifies T1 to T4. Beneath the verify pass, green tokens T1 to T3 are marked accepted, draft T4 is crossed out in red and marked rejected, and a resampled token T4 prime sits below it. Dashed guides and ticks on the time axis, labeled speculative and standard, mark where each lane has four tokens, and a green double arrow between them marks the time saved for the same four tokens."}
 
@@ -4109,9 +4109,9 @@ Acceptance depends on the draft-target pair, sampling policy, and request distri
 #| echo: false
 #| label: speculation-draft-weights
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ SPECULATION TAX: DRAFT-MODEL WEIGHTS (LEGO)
+# │ SPECULATION OVERHEAD: DRAFT-MODEL WEIGHTS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "speculation tax" paragraph in
+# │ Context: draft-memory overhead paragraph in
 # │          @sec-inference-scale-speculative-decoding-c438.
 # │
 # │ Goal: Size the resident FP16 weights of a 7B draft model paired with a 70B target.
@@ -4138,7 +4138,7 @@ class SpeculationDraftWeights:
     draft_fp16_gb_str = fmt_memory(draft_fp16, unit=GB, precision=0, commas=False)
 ```
 
-The first concern is memory. The draft model is not free state. It requires memory for weights, and each in-flight request that uses it reserves additional draft KV state. Pairing a 7B draft model with a 70B target adds roughly `{python} SpeculationDraftWeights.draft_fp16_gb_str` of FP16 weights per replica plus per-request draft cache. When colocated with the target, this *speculation tax*\index{Speculative decoding!speculation tax} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall; every gigabyte reserved for the draft is unavailable to target requests. Under a binding memory limit, that reservation lowers maximum concurrency. Placing the draft on separate devices preserves target memory at the cost of additional hardware and communication. The admission controller and the speculation policy therefore require a joint capacity and latency evaluation.
+The first concern is memory. The draft model is not free state. It requires memory for weights, and each in-flight request that uses it reserves additional draft KV state. Pairing a 7B draft model with a 70B target adds roughly `{python} SpeculationDraftWeights.draft_fp16_gb_str` of FP16 weights per replica plus per-request draft cache. When colocated with the target, this memory overhead\index{Speculative decoding!memory overhead} competes directly with the KV-cache admission budget developed in @sec-inference-scale-kv-cache-wall; every gigabyte reserved for the draft is unavailable to target requests. Under a binding memory limit, that reservation lowers maximum concurrency. Placing the draft on separate devices preserves target memory at the cost of additional hardware and communication. The admission controller and the speculation policy therefore require a joint capacity and latency evaluation.
 
 The second concern is which service-level objective the endpoint must meet. At sufficient acceptance, speculation can reduce TPOT, while draft execution and cache residency reduce admission capacity, so the scheduler should compare SLO-compliant goodput with and without speculation under the intended load\index{Speculative decoding!SLA trade-offs}. TTFT needs separate measurement because draft setup and prefill can add work before the first response token.
 
@@ -4347,7 +4347,7 @@ where $\ActiveParameterCount$ is the active parameter count, $\SustainedMemoryBa
 
 Chunked prefill keeps prefill and decode on one worker and bounds how much prompt work lands between decode steps. Disaggregation takes the other route and gives each phase its own hardware. The KV-cache sizing of @sec-inference-scale-kv-cache-wall now supplies what that choice costs, because the cache a prefill builds is exactly the payload the decode pool must receive.
 
-@Fig-disaggregated-serving partitions the serving pipeline into specialized physical tiers. In the illustrated long-prompt, small-decode-batch regime, the compute-bound prefill pool and the bandwidth-bound decode pool are joined by a remote direct memory access (RDMA) KV-cache transfer [@zhong2024distserve], which keeps the phases from competing on one accelerator and permits independent parallelism and capacity plans. The phase asymmetry tells each pool what to buy: the prefill pool wants arithmetic throughput for its compute-bound GEMMs, while the decode pool wants memory bandwidth and capacity for weight streaming and KV cache, which also makes it the natural home for aggressive weight quantization. The transfer and queueing at each pool still add to request latency, and other batch or context sizes can change which resources bind.
+Disaggregation partitions the serving pipeline into specialized physical tiers (@fig-disaggregated-serving). In the illustrated long-prompt, small-decode-batch regime, the compute-bound prefill pool and the bandwidth-bound decode pool are joined by a remote direct memory access (RDMA) KV-cache transfer [@zhong2024distserve], which keeps the phases from competing on one accelerator and permits independent parallelism and capacity plans. The phase asymmetry tells each pool what to buy: the prefill pool wants arithmetic throughput for its compute-bound GEMMs, while the decode pool wants memory bandwidth and capacity for weight streaming and KV cache, which also makes it the natural home for aggressive weight quantization. The transfer and queueing at each pool still add to request latency, and other batch or context sizes can change which resources bind.
 
 ::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**: A long-prompt, small-decode-batch regime separates compute-bound prefill instances from memory-bandwidth-bound decode instances, mediated by RDMA KV-cache transfer. Because prefill sets time to first token and decode sets time per output token, each pool is sized for its own token rate. Other batch and context sizes can change the binding resources." fig-alt="Left to right: a prompt enters a prefill pool labeled compute-bound, sets TTFT, and sized for prompt tokens per second. Each of its three workers, Prefill 0 to 2, shows its work as two wide solid blocks, each a whole-prompt pass. An amber arrow carrying four small KV-cache page tiles, labeled KV cache transfer (RDMA), crosses to a decode pool labeled bandwidth-bound, sets TPOT, and sized for output tokens per second. Each of its three workers, Decode 0 to 2, shows its work as a row of eight narrow cells, each a one-token decode step. The decode pool emits a token stream. A key below names the wide block a whole-prompt pass and the narrow cell a one-token decode step."}
 ![](images/svg/disaggregated-serving.svg)
@@ -4744,7 +4744,7 @@ class W8A8Ceilings:
     int8_ratio_mult_str = fmt_multiple(round(int8_compute_ratio), precision=0, commas=False)
 ```
 
-The prefill-decode split decides which of these paths can pay, because weight-only quantization and W8A8 both shrink the weights but only W8A8 changes the arithmetic. @Tbl-smoothquant-w8a8 bounds what each 8-bit path can buy relative to the FP16 baseline:
+The prefill-decode split decides which of these paths can pay, because weight-only quantization and W8A8 both shrink the weights but only W8A8 changes the arithmetic. @Tbl-smoothquant-w8a8 bounds what each 8-bit path can buy relative to the FP16 baseline.
 
 | **Configuration**        |                    **Weight bytes**                   |                      **Prefill compute ceiling**                      |          **Decode weight-traffic ceiling**          |   **Quality**    |
 |:-------------------------|:-----------------------------------------------------:|:---------------------------------------------------------------------:|:---------------------------------------------------:|:----------------:|
@@ -4764,7 +4764,7 @@ Hardware and software support decide which of these savings reach the serving wo
 
 ### Runtime contract for quantized serving {#sec-inference-scale-framework-integration-945c}
 
-Production serving frameworks\index{Serving framework!runtime contract} determine whether a quantized artifact retains its intended memory and execution advantages. Expanding the entire model into resident FP16 weights can forfeit capacity savings, while converting packed weights inside a kernel can preserve reduced HBM storage and traffic. The serving stack must therefore report the resident representation and kernel path, budget KV state around actual allocations, and expose quality and latency regressions. @Tbl-quantized-serving-runtime-contract summarizes these responsibilities; the distinction between full-model expansion and on-chip conversion is essential when interpreting its dequantization warning.
+Production serving frameworks\index{Serving framework!runtime contract} determine whether a quantized artifact retains its intended memory and execution advantages. Expanding the entire model into resident FP16 weights can forfeit capacity savings, while converting packed weights inside a kernel can preserve reduced HBM storage and traffic. The serving stack must therefore report the resident representation and kernel path, budget KV state around actual allocations, and expose quality and latency regressions (@tbl-quantized-serving-runtime-contract).
 
 | **Runtime responsibility**              | **Why it matters**                                                                       |
 |:----------------------------------------|:-----------------------------------------------------------------------------------------|
@@ -4837,7 +4837,7 @@ This comparison uses a conservative decimal HBM budget matching the A100 namepla
 
 The final selection must satisfy memory, quality, and latency requirements together. Native support makes a precision path a candidate without establishing the model's quality at that precision, and no universal quality ordering separates 4-bit weight-only from 8-bit weight-and-activation quantization, so both are evaluated against the same task baseline. For compute-bound prefill, W8A8 offers the illustrated `{python} W8A8Ceilings.int8_ratio_mult_str` INT8 compute ceiling; for decode dominated by weight reads, W4A16 can cut the weight payload by up to 4$\times$, provided conversion and other costs leave a useful saving.
 
-These precision choices affect cost per million useful tokens. The A100 residency calculation explains why fewer GPUs become possible at all, because INT4 weights shrink the resident payload enough for a 70B replica to fit on fewer devices. @Tbl-quantization-serving-cost isolates the effect of GPU count by assuming equal per-GPU prices and the same completed token rate across three configurations. Under that contract, reducing the number of billed GPUs reduces cost proportionally. The calculation does not establish that the smaller replicas sustain the same rate or meet the same quality and latency targets:
+These precision choices affect cost per million useful tokens. The A100 residency calculation explains why fewer GPUs become possible at all, because INT4 weights shrink the resident payload enough for a 70B replica to fit on fewer devices. @Tbl-quantization-serving-cost isolates the effect of GPU count by assuming equal per-GPU prices and the same completed token rate across three configurations. Under that contract, reducing the number of billed GPUs reduces cost proportionally. The calculation does not establish that the smaller replicas sustain the same rate or meet the same quality and latency targets.
 
 ```{python}
 #| echo: false
@@ -5071,7 +5071,7 @@ class TpSpeedupCalc:
 
 Pipeline parallelism distributes layers across devices sequentially, with each device handling a subset of layers. Unlike tensor parallelism, there is no synchronization within a layer, only between pipeline stages.
 
-For inference, pipeline parallelism creates bubbles\index{Pipeline parallelism!bubble overhead} differently than in training. @Fig-pipeline-bubbles contrasts single-request latency with pipelined throughput. Executing an isolated request serially across four GPU stages leaves three accelerators idle at every step, whereas maintaining multiple in-flight requests fills the pipeline and amortizes the initial bubble across steady-state token delivery.
+For inference, pipeline parallelism creates bubbles\index{Pipeline parallelism!bubble overhead} differently than in training. Executing an isolated request serially across four GPU stages leaves three accelerators idle at every step, whereas maintaining multiple in-flight requests fills the pipeline and amortizes the initial bubble across steady-state token delivery (@fig-pipeline-bubbles).
 
 ::: {#fig-pipeline-bubbles fig-env="figure" fig-pos="htb" fig-cap="**Pipeline Parallelism Bubbles**: (a) An 80-layer model split into four stages passes one request's activations from stage to stage, so splitting the layers alone does not shorten its sequential computation; it must still traverse all four stages. (b) With many requests in flight, later stages idle during the fill bubble, and from slot t4 onward every stage is busy and one request leaves the pipeline per slot. Pipeline parallelism therefore suits throughput-oriented serving better than latency-critical interactive serving." fig-alt="Two panels. Top: a request box, four stage boxes labeled GPU 0 to GPU 3 with layer ranges 1 to 20, 21 to 40, 41 to 60, and 61 to 80, and an output box, joined by activation arrows. Bottom: a grid of four GPU rows and seven time slots in which requests R1 to R7 enter GPU 0 one slot apart and shift one GPU down per slot. Hatched fill-bubble cells precede the first request on GPUs 1 to 3, and a dashed line at slot t4 marks the pipeline as full."}
 ![](images/svg/pipeline-bubbles.svg)
@@ -5324,7 +5324,7 @@ Pipeline parallelism therefore suits inference when memory forces sharding but l
 
 The two sharding approaches differ in single-request latency, throughput, communication pattern, activation memory, and implementation complexity (@tbl-pipeline-tensor-comparison).
 
-| **Aspect**                 |                  **Tensor Parallelism**                  |              **Pipeline Parallelism**             |
+| **Aspect**                 |                  **Tensor parallelism**                  |              **Pipeline parallelism**             |
 |:---------------------------|:--------------------------------------------------------:|:-------------------------------------------------:|
 | **Single-request latency** | Compute term reduced up to $\TensorParallelDegree\times$ |  No reduction from overlapping this request alone |
 | **Throughput**             |   Below $\TensorParallelDegree\times$ (AllReduce cost)   | Up to $\PipelineParallelDegree\times$ (pipelined) |
@@ -5500,7 +5500,7 @@ Serving inherits training's balance controls without their guarantees. The auxil
 
 Router behavior affects both system performance and model quality. Expert collapse\index{Expert collapse!routing failure} during training concentrates traffic on a few experts, and at serving time a shifted input distribution can create hotspots without any change to the stored model. Token dropping\index{Token dropping!capacity factor overflow} under a capacity limit makes the computation differ from the uncapped model, so its quality impact must be evaluated together with any throughput gain. Because routing selects experts dynamically,[^fn-moe-expert-serving] the routing pattern becomes a systems workload rather than only a model-internal choice.
 
-[^fn-moe-expert-serving]: **MoE (Mixture-of-Experts) Serving Trade-Off**\index{MoE!serving}: Only a subset of experts activates per token (`{python} MoEEconomics.mixtral_active_experts_str` of `{python} MoEEconomics.mixtral_experts_str` in Mixtral, `{python} MoEEconomics.deepseek_active_experts_str` of `{python} MoEEconomics.deepseek_experts_str` routed experts in DeepSeek-V3). Keeping all weights accelerator-resident gives a total-to-active weight ratio of roughly `{python} MoEEconomics.mixtral_resident_mult_str` (Mixtral) to `{python} MoEEconomics.deepseek_resident_mult_str` (DeepSeek-V3). Expert parallelism distributes that storage while adding token-routing communication; offloading is an alternative that trades resident capacity for weight transfers.
+[^fn-moe-expert-serving]: **MoE (mixture-of-experts) serving trade-off**\index{MoE!serving}: Only a subset of experts activates per token (`{python} MoEEconomics.mixtral_active_experts_str` of `{python} MoEEconomics.mixtral_experts_str` in Mixtral, `{python} MoEEconomics.deepseek_active_experts_str` of `{python} MoEEconomics.deepseek_experts_str` routed experts in DeepSeek-V3). Keeping all weights accelerator-resident gives a total-to-active weight ratio of roughly `{python} MoEEconomics.mixtral_resident_mult_str` (Mixtral) to `{python} MoEEconomics.deepseek_resident_mult_str` (DeepSeek-V3). Expert parallelism distributes that storage while adding token-routing communication; offloading is an alternative that trades resident capacity for weight transfers.
 
 ```{python}
 #| echo: false
@@ -5638,9 +5638,9 @@ The tier percentages below describe the admitted resident population, not the fu
 
 Each inference request requires approximately `{python} MetaEmbeddingScaleCheck.lookups_per_request_str` embedding lookups. Instead of one RPC per lookup, the batched design accumulates lookups for 1 ms, deduplicates entities across requests, groups lookups by destination shard, dispatches to all shards in parallel, and assembles embeddings as responses arrive.
 
-Illustrative before-and-after assumptions for sequential dispatch versus parallel shard batching appear in @tbl-inference-meta-embedding-perf:
+Illustrative before-and-after assumptions for sequential dispatch versus parallel shard batching appear in @tbl-inference-meta-embedding-perf.
 
-| **Metric**                    | **Without Optimization** |         **With Optimization**          |
+| **Metric**                    | **Without optimization** |         **With optimization**          |
 |:------------------------------|:------------------------:|:--------------------------------------:|
 | **Sequential dispatch waves** |  5,000 individual RPCs   | One parallel wave; multiple shard RPCs |
 | **Lookup latency**            |          50 ms           |                  2 ms                  |
@@ -5718,9 +5718,9 @@ class InterconnectSpecs:
     eth_latency_str = fmt_time(eth_100g.latency, microsecond, precision=0, commas=False)
 ```
 
-Communication overhead depends heavily on the interconnect technology. @Tbl-inference-interconnect-specs records the physical bandwidth, latency, and intended scope of each candidate interconnect:
+Communication overhead depends heavily on the interconnect technology, because each candidate link fixes the physical bandwidth, latency, and scope available to the sharded model (@tbl-inference-interconnect-specs).
 
-| **Interconnect**   |                                       **Bandwidth**                                       |                   **Latency**                   |      **Use Case**      |
+| **Interconnect**   |                                       **Bandwidth**                                       |                   **Latency**                   |      **Use case**      |
 |:-------------------|:-----------------------------------------------------------------------------------------:|:-----------------------------------------------:|:----------------------:|
 | **NVLink (H100)**  |                         `{python} InterconnectSpecs.nvlink_bw_str`                        | `{python} InterconnectSpecs.nvlink_latency_str` |     Intra-node TP      |
 | **PCIe Gen5**      |                          `{python} InterconnectSpecs.pcie_bw_str`                         |  `{python} InterconnectSpecs.pcie_latency_str`  | Intra-node (no NVLink) |
@@ -5733,9 +5733,9 @@ For tensor parallelism the latency column, not the bandwidth column, decides pla
 
 ### Sharding strategy selection {#sec-inference-scale-sharding-strategy-selection-f69c}
 
-The choice of sharding strategy depends on model architecture and deployment priorities. @Tbl-sharding-selection evaluates each approach across four critical factors:
+The choice of sharding strategy depends on model architecture and deployment priorities. No approach wins on latency priority, throughput priority, interconnect limits, and implementation effort at once (@tbl-sharding-selection).
 
-| **Factor**                |        **Tensor Parallel**         |   **Pipeline Parallel**   |   **Expert Parallel**   | **Embedding Shard**  |
+| **Factor**                |        **Tensor parallel**         |   **Pipeline parallel**   |   **Expert parallel**   | **Embedding shard**  |
 |:--------------------------|:----------------------------------:|:-------------------------:|:-----------------------:|:--------------------:|
 | **Latency priority**      | Compute savings exceed collectives | No staging-only reduction |    Routing-dependent    |   Lookup-dependent   |
 | **Throughput priority**   |         Collective-limited         |  Full, balanced pipeline  | Balanced expert traffic | Balanced lookup load |
@@ -6509,7 +6509,7 @@ Soft quotas permit borrowing unused capacity while preserving an enforceable sha
 
 Priority-aware scheduling\index{Priority-aware scheduling} gives eligible high-priority requests precedence at scheduling boundaries. A production API might classify revenue-generating customer requests as critical, internal batch processing as standard, and free-tier traffic as best-effort. Already-running kernels and shared resources can still delay critical work, so admission limits and reserved capacity must complement priority ordering. Priority becomes an isolation tool\index{Priority scheduling!multi-tenant isolation} once its classes map to tenants and service tiers. Fleet priority classes govern preemption across allocations; request priority applies inside a serving allocation. @Tbl-priority-scheduling-classes illustrates a policy that combines precedence with reservations. Those reservations must be provisioned and enforced separately: priority alone cannot create capacity, interrupt every running kernel, or guarantee a deadline under unbounded critical traffic.
 
-| **Class**       |    **Use Case**    |      **Preemption**     | **Resource Guarantee** |
+| **Class**       |    **Use case**    |      **Preemption**     | **Resource guarantee** |
 |:----------------|:------------------:|:-----------------------:|:----------------------:|
 | **Critical**    | Revenue-generating |    Can preempt lower    |     100% reserved      |
 | **Standard**    |  General traffic   | Can preempt best-effort |     Weighted share     |
@@ -6567,7 +6567,7 @@ The scaling response budget is the sum of the control loop's detection, decision
 
 $$\AutoscalingResponseTime= \AutoscalingDetectionTime+ \AutoscalingDecisionTime+ \ReplicaProvisioningTime+ \ReplicaWarmupTime$$ {#eq-scaling-response}
 
-@Tbl-scaling-response-components decomposes each term and identifies its primary optimization path:
+Each term has its own typical duration and its own primary lever, from a shorter metrics interval for detection to warm pools for provisioning and precompilation for warmup (@tbl-scaling-response-components).
 
 | **Component**    | **Duration** |     **Optimization**    |
 |:-----------------|:------------:|:-----------------------:|
@@ -6668,7 +6668,7 @@ class ColdStartTimeline:
 
 **Systems lesson**: Predictive autoscaling\index{Autoscaling!predictive scaling} converts demand forecasts into planned pre-warming windows (@tbl-inference-chatbot-predictive-schedule). Starting `{python} ColdStartTimeline.lead_min_str` ahead of the expected ramps exceeds the modeled startup time. Readiness still depends on actual provisioning and warmup, and forecast errors can leave the fleet short or idle. Reactive correction and an overload policy remain necessary.
 
-| **Time** |  **Action**  | **Replicas Active** | **Replicas Starting** |
+| **Time** |  **Action**  | **Replicas active** | **Replicas starting** |
 |:---------|:------------:|:-------------------:|:---------------------:|
 | 05:30    |   Scale up   |          5          |      +10 warming      |
 | 06:00    | Traffic ramp |          15         |           -           |
@@ -6769,7 +6769,7 @@ plt.tight_layout(h_pad=1.0)
 
 ### Warm pool management {#sec-inference-scale-warm-pool-management-a360}
 
-Maintaining prewarmed replicas buys readiness before demand arrives. Warm pool\index{Warm pool!replica management} sizing begins with the total capacity needed during the provisioning delay, then subtracts capacity already ready to serve. If peak demand doubles and the chosen headroom factor is 1.5, the target is three times baseline capacity, assuming unchanged per-replica throughput. Partly prepared replicas count only if they can become ready before that capacity is needed. The expression $\text{Pool size} \times \text{GPU cost/hour} \times \text{Idle fraction}$ estimates the hourly cost attributed to idle GPU capacity; it excludes busy capacity and non-GPU resources. @Tbl-warm-pool-tiers distinguishes readiness levels and their activation costs:
+Maintaining prewarmed replicas buys readiness before demand arrives. Warm pool\index{Warm pool!replica management} sizing begins with the total capacity needed during the provisioning delay, then subtracts capacity already ready to serve. If peak demand doubles and the chosen headroom factor is 1.5, the target is three times baseline capacity, assuming unchanged per-replica throughput. Partly prepared replicas count only if they can become ready before that capacity is needed. The expression $\text{Pool size} \times \text{GPU cost/hour} \times \text{Idle fraction}$ estimates the hourly cost attributed to idle GPU capacity; it excludes busy capacity and non-GPU resources. Readiness comes in tiers, each trading activation delay against the cost of waiting (@tbl-warm-pool-tiers).
 
 | **Tier** | **State**                                   | **Activation requirement**           | **Cost while waiting**              |
 |:---------|:--------------------------------------------|:-------------------------------------|:------------------------------------|
@@ -7399,9 +7399,9 @@ A fleet confined to one region can batch, shard, route, isolate, and autoscale w
 
 ### Drivers for multi-region deployment {#sec-inference-scale-multiregion-matters-d7d3}
 
-Single-region deployment couples every user to the same geographic site and regional failure domain. Network round-trip time (RTT) adds a latency floor for distant users. @Tbl-rtt-by-user-location gives illustrative regional timings; actual paths, access networks, and congestion require measurement:
+Single-region deployment couples every user to the same geographic site and regional failure domain. Network round-trip time (RTT) adds a latency floor for distant users, and illustrative regional timings show that floor rising with distance from the serving region (@tbl-rtt-by-user-location). Actual paths, access networks, and congestion require measurement.
 
-| **User Location** | **RTT to US-East** | **RTT to Local Region** |
+| **User location** | **RTT to US-East** | **RTT to local region** |
 |:------------------|:------------------:|:-----------------------:|
 | **New York**      |       10 ms        |          10 ms          |
 | **London**        |       75 ms        |          10 ms          |
@@ -7667,7 +7667,7 @@ During a rollout, regions may serve different versions. The application must dec
 
 ### Edge caching with central inference {#sec-inference-scale-pattern-2-edge-caching-central-inference-f08e}
 
-Caching responses at the edge\index{Edge caching!central inference} can avoid repeated central inference when a stored response remains valid for the incoming request. Before returning a hit, the edge must enforce authorization and match the relevant model version, conversation or retrieval context, generation policy, and freshness requirements. Identical visible queries do not necessarily permit the same answer, and fresh-sample semantics may prohibit reuse. @Fig-edge-cache-routing shows the hit and miss paths with an illustrative 10 ms hit budget. A miss reaches the central cluster; only responses eligible for reuse should enter the edge store.
+Caching responses at the edge\index{Edge caching!central inference} can avoid repeated central inference when a stored response remains valid for the incoming request. Before returning a hit, the edge must enforce authorization and match the relevant model version, conversation or retrieval context, generation policy, and freshness requirements. Identical visible queries do not necessarily permit the same answer, and fresh-sample semantics may prohibit reuse. A hit returns within an illustrative 10 ms budget, while a miss reaches the central cluster (@fig-edge-cache-routing); only responses eligible for reuse should enter the edge store.
 
 ::: {#fig-edge-cache-routing fig-env="figure" fig-pos="htb" fig-cap="**Cache Hit and Cache Miss Paths at the Edge**: A query first reaches the nearest edge point of presence (PoP). After enforcing authorization and reuse eligibility, the edge targets a cache-hit response in under 10 ms without touching a GPU. On a miss, the request passes through the regional gateway to the central GPU cluster, which runs prefill and decode. Generated tokens stream back to the user, and a response eligible for reuse can be stored at the edge for later queries. The saving depends on the rate of requests eligible for reuse; open-ended generation may offer few such requests." fig-alt="Four boxes in a row joined by arrows: User, Edge PoP with authorize then cache, Regional gateway for auth and rate limiting, and GPU cluster for prefill and decode. The arrows are labeled query, miss, and forward. A green path above the row returns from the Edge PoP to the User, labeled cache hit, returned from edge in under 10 ms. A navy path below the row returns from the GPU cluster to the User, labeled cache miss, generated tokens stream back. A dashed green branch from that path goes up into the Edge PoP, labeled store response."}
 ![](images/svg/edge-cache-routing.svg)
@@ -7854,7 +7854,7 @@ Caching responses at the edge\index{Edge caching!central inference} can avoid re
 
 On the two paths of @fig-edge-cache-routing, cache hits avoid the backend round trip, while misses incur it. Effectiveness depends on request repeatability across workloads such as autocomplete, FAQ chatbots, open-ended chat, and code generation. @Tbl-edge-cache-hit-rates supplies illustrative hit-rate envelopes for sensitivity analysis; an actual design must derive hit rate and correctness from production traces.
 
-| **Workload**        | **Cache Hit Rate** | **Suitability** |
+| **Workload**        | **Cache hit rate** | **Suitability** |
 |:--------------------|:------------------:|:---------------:|
 | **Autocomplete**    |      60--80%       |    Excellent    |
 | **FAQ chatbot**     |      40--60%       |       Good      |
@@ -7879,7 +7879,7 @@ Because cross-region sharding is so costly on the steady-state path, most produc
 
 ### Cross-region failover {#sec-inference-scale-crossregion-failover-0d67}
 
-When a region becomes unavailable, failover must choose a healthy destination permitted to process the request and able to absorb its work. @Lst-active-failover illustrates a simplified timeout fallback. A production policy must also preserve the request's remaining deadline, version requirements, and data-placement constraints when selecting the secondary region.
+When a region becomes unavailable, failover must choose a healthy destination permitted to process the request and able to absorb its work. A simplified fallback tries the nearest eligible region first and, on timeout or rejection, the next one (@lst-active-failover). A production policy must also preserve the request's remaining deadline, version requirements, and data-placement constraints when selecting the secondary region.
 
 ::: {#lst-active-failover lst-cap="**Active-Active Failover**: A bounded retry policy selects eligible regions and limits each attempt to the remaining request deadline." lst-pos="H"}
 
@@ -7914,9 +7914,9 @@ Rerouting is only part of regional failover. The destination needs accessible, a
 
 ### Cost optimization across regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
 
-GPU pricing varies by provider, contract, region, and time. @Tbl-gpu-region-pricing uses a hypothetical price snapshot to show how placement can balance cost against latency requirements; it must not be used for procurement:
+GPU pricing varies by provider, contract, region, and time. @Tbl-gpu-region-pricing uses a hypothetical price snapshot to show how placement can balance cost against latency requirements; it must not be used for procurement.
 
-| **Region**  | **H100 Spot Price** | **On-Demand** | **Latency to US Users** |
+| **Region**  | **H100 spot price** | **On-demand** | **Latency to US users** |
 |:------------|:-------------------:|:-------------:|:-----------------------:|
 | **US-East** |      \$2.50/hr      |   \$4.00/hr   |        10--50 ms        |
 | **US-West** |      \$2.30/hr      |   \$3.80/hr   |        30--70 ms        |
@@ -8171,7 +8171,7 @@ To meet this latency budget while evaluating thousands of documents, the ranking
 
 :::
 
-The central design decision is progressive refinement through a ranking cascade rather than one expensive model applied to every candidate. @Tbl-google-ranking-cascade shows the trade the cascade makes: each stage spends a larger latency budget on a smaller candidate set, so the expensive L3 transformer is affordable only because L0 through L2 have already cut the candidates by four orders of magnitude.
+The central design decision is progressive refinement through a ranking cascade rather than one expensive model applied to every candidate. Each stage of the cascade spends a larger latency budget on a smaller candidate set (@tbl-google-ranking-cascade), so the expensive L3 transformer is affordable only because L0 through L2 have already cut the candidates by four orders of magnitude.
 
 ```{python}
 #| echo: false
@@ -8223,7 +8223,7 @@ class RankingCascadeCost:
     cost_reduction_rounded_mult_str = fmt_multiple(cost_reduction_rounded, precision=0, commas=True)
 ```
 
-| **Stage**            |     **Model Complexity**    |   **Candidates**   | **Latency Budget** |
+| **Stage**            |     **Model complexity**    |   **Candidates**   | **Latency budget** |
 |:---------------------|:---------------------------:|:------------------:|:------------------:|
 | **L0 (Retrieval)**   |  Lexical and ANN embeddings | 1,000,000 → 10,000 |       10 ms        |
 | **L1 (First pass)**  |      Two-tower or GBDT      |   10,000 → 1,000   |       20 ms        |
@@ -8281,11 +8281,11 @@ User request → User embedding → Candidate videos → Video understanding →
            (Transformer)        (Pre-computed)        (On-demand)
 ```
 
-The scenario separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching.[^fn-two-tower-serving] @Tbl-tiktok-two-tower-updates contrasts the online and offline tower update cadences:
+The scenario separates user understanding (online) from content understanding (offline) through a two-tower architecture with caching.[^fn-two-tower-serving] The user tower runs online on every request, while the video tower refreshes in hourly offline batches (@tbl-tiktok-two-tower-updates).
 
-[^fn-two-tower-serving]: **Two-Tower Architecture**\index{Two-tower architecture!serving}: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. Its serving advantage is that item embeddings can be precomputed offline and cached, reducing online candidate generation to the user tower forward pass and vector similarity search. Search latency depends on index size, placement, and the required recall. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding.
+[^fn-two-tower-serving]: **Two-tower architecture**\index{Two-tower architecture!serving}: Encodes user features and item features through separate neural networks ("towers") into embeddings, then scores via dot product. Its serving advantage is that item embeddings can be precomputed offline and cached, reducing online candidate generation to the user tower forward pass and vector similarity search. Search latency depends on index size, placement, and the required recall. The trade-off is reduced model expressiveness from late interaction, since the towers cannot attend to each other's features during encoding.
 
-| **Tower**       | **Update Frequency** | **Latency** | **Compute**  |
+| **Tower**       | **Update frequency** | **Latency** | **Compute**  |
 |:----------------|:--------------------:|:-----------:|:------------:|
 | **User tower**  |      Real-time       |     5 ms    | GPU (online) |
 | **Video tower** |        Hourly        |     N/A     | GPU (batch)  |
@@ -8312,7 +8312,7 @@ The serving lesson is that freshness requires separating online and offline work
 
 Across these cases, the common pattern is specialization rather than a universal serving stack: embedding and retrieval separate from ranking and generation, hardware matched to each stage, caches that accept bounded staleness, candidate sets that shrink before expensive work, and deadlines that propagate so quality-latency trade-offs stay explicit under pressure. @Tbl-serving-architecture-dimensions distills the same choices along five design axes for the three workload families the cases cover. Its entries are candidate combinations for the illustrated constraint regimes, not prescriptions, because a model class alone does not fix a scheduler or topology, which also depend on model size, request mix, available hardware, and service targets.
 
-| **Dimension**  |       **Vision/Embedding**      |        **LLM (Autoregressive)**       | **Recommendation**                    |
+| **Dimension**  |       **Vision/embedding**      |        **LLM (autoregressive)**       | **Recommendation**                    |
 |:---------------|:-------------------------------:|:-------------------------------------:|:--------------------------------------|
 | **Batching**   | Static/dynamic (uniform inputs) |     Continuous (variable outputs)     | Feature-parallel (sharded embeddings) |
 | **Memory**     |    Preallocated (predictable)   |       Paged (variable KV cache)       | Distributed (embedding tables)        |
