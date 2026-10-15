@@ -3,6 +3,7 @@
 # =============================================================================
 # Usage:
 #   make ch01              Build Chapter 1 PDF
+#   make v3-05_kv_cache    Build a Volume III or IV deck by directory name
 #   make all               Build all chapters (PDF)
 #   make pptx              Build all PPTX from PDFs
 #   make pptx-vol1         Build Vol1 PPTX only
@@ -10,7 +11,7 @@
 #   make svgs              Convert all SVGs to PDFs
 #   make clean             Remove build artifacts from source dirs
 #
-# Build outputs go to _build/vol{1,2}/ (source dirs stay clean).
+# Build outputs go to _build/vol{1,2,3,4}/ (source dirs stay clean).
 # PPTX outputs go to _build/vol{1,2}/ alongside PDFs.
 # SVG→PDF conversion happens automatically before LaTeX compilation.
 # =============================================================================
@@ -23,6 +24,10 @@ VOL1_SRC  := vol1
 VOL1_OUT  := $(BUILD_DIR)/vol1
 VOL2_SRC  := vol2
 VOL2_OUT  := $(BUILD_DIR)/vol2
+VOL3_SRC  := vol3
+VOL3_OUT  := $(BUILD_DIR)/vol3
+VOL4_SRC  := vol4
+VOL4_OUT  := $(BUILD_DIR)/vol4
 SCRIPTS   := scripts
 
 # All chapter directories (auto-detected)
@@ -81,7 +86,7 @@ all: vol1 vol2
 
 svgs:
 	@echo "Converting SVGs to PDFs..."
-	@find $(VOL1_SRC) $(VOL2_SRC) -name "*.svg" 2>/dev/null | while read svg; do \
+	@find $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -name "*.svg" 2>/dev/null | while read svg; do \
 		pdf="$${svg%.svg}.pdf"; \
 		if [ ! -f "$$pdf" ] || [ "$$svg" -nt "$$pdf" ]; then \
 			$(SVG2PDF) --export-filename="$$pdf" "$$svg" 2>/dev/null && echo "  ✓ $$pdf" || echo "  ✗ $$svg"; \
@@ -185,6 +190,10 @@ define build-chapter-impl
 	fi
 endef
 
+# Volume III and IV decks by directory name: make v3-05_kv_cache, make v4-01_boundary
+v3-%: svgs ; $(call build-chapter-impl,$(VOL3_SRC),$(VOL3_OUT),$*)
+v4-%: svgs ; $(call build-chapter-impl,$(VOL4_SRC),$(VOL4_OUT),$*)
+
 # Convenience aliases: v2ch01, v2ch02, ..., v2ch17
 # Each target explicitly calls the build function with vol2 paths
 v2ch01: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),01_introduction)
@@ -261,13 +270,13 @@ pptx-v2ch17: v2ch17 ; @$(PDF2PPTX) $(VOL2_OUT)/17_conclusion.pdf --output-dir $(
 
 clean:
 	@echo "Cleaning build artifacts from source directories..."
-	@find $(VOL1_SRC) $(VOL2_SRC) -type f \( \
+	@find $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -type f \( \
 		-name "*.aux" -o -name "*.log" -o -name "*.nav" -o \
 		-name "*.out" -o -name "*.snm" -o -name "*.toc" -o \
 		-name "*.vrb" -o -name "*.fls" -o -name "*.fdb_latexmk" -o \
 		-name "*.synctex.gz" -o -name "*.bbl" -o -name "*.blg" \
 	\) -delete 2>/dev/null
-	@find $(VOL1_SRC) $(VOL2_SRC) -name "*.pdf" ! -path "*/images/*" -delete 2>/dev/null
+	@find $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -name "*.pdf" ! -path "*/images/*" -delete 2>/dev/null
 	@rm -rf $(BUILD_DIR)
 	@echo "Done. Source directories and build output are clean."
 
