@@ -26,7 +26,7 @@ Machine learning infrastructure at scale inherits design DNA from two distinct c
 
 ### High-performance computing {.unnumbered}
 
-HPC systems descend from the supercomputer tradition. Their design philosophy is to maximize FLOP/s on tightly coupled simulations such as weather modeling, molecular dynamics, and nuclear physics. Every node matters: they use specialized interconnects (InfiniBand), low-latency fabrics, and homogeneous hardware. Fault tolerance follows the **checkpoint/restart**\index{Checkpoint/Restart} model: if one node fails, the entire job stops, rolls back to the last checkpoint, and resumes from that saved state. Scheduling is batch-oriented (Slurm), with jobs requesting rigid resource shapes ("512 nodes for 24 hours"). Nodes are pets, individually important and individually tracked.
+HPC systems descend from the supercomputer tradition. Their design philosophy is to maximize FLOP/s on tightly coupled simulations such as weather modeling, molecular dynamics, and nuclear physics. Every node matters: they use specialized interconnects (InfiniBand), low-latency fabrics, and homogeneous hardware. Fault tolerance follows the **checkpoint/restart**\index{Checkpoint/restart} model: if one node fails, the entire job stops, rolls back to the last checkpoint, and resumes from that saved state. Scheduling is batch-oriented (Slurm), with jobs requesting rigid resource shapes ("512 nodes for 24 hours"). Nodes are pets, individually important and individually tracked.
 
 ### Warehouse-scale computing {.unnumbered}
 
@@ -36,7 +36,7 @@ WSC systems descend from the web services tradition. Their design philosophy is 
 
 ML systems require the computational throughput of HPC (to train massive models with synchronous gradient updates) but must operate at the scale and unreliability of WSC (thousands of accelerators running for weeks). This creates a hybrid that borrows selectively from both traditions.
 
-Training workloads are synchronous and bandwidth-hungry like HPC, but long-running and failure-tolerant like WSC. Inference workloads are latency-sensitive like WSC, but computationally heavy like HPC. The network is a fusion: TCP/IP for control planes, InfiniBand or NVLink for data planes. Fault tolerance combines checkpoint/restart with **elastic training**\index{Elastic Training!fleet fault tolerance} strategies where supported. Jobs can change their resource allocation, but resharding, restoration, or worker restarts may still be necessary. Scheduling combines gang allocation (all-or-nothing for training) with dynamic preemption and replacement.
+Training workloads are synchronous and bandwidth-hungry like HPC, but long-running and failure-tolerant like WSC. Inference workloads are latency-sensitive like WSC, but computationally heavy like HPC. The network is a fusion: TCP/IP for control planes, InfiniBand or NVLink for data planes. Fault tolerance combines checkpoint/restart with **elastic training**\index{Elastic training!fleet fault tolerance} strategies where supported. Jobs can change their resource allocation, but resharding, restoration, or worker restarts may still be necessary. Scheduling combines gang allocation (all-or-nothing for training) with dynamic preemption and replacement.
 
 ML fleets cannot adopt either HPC or WSC patterns wholesale; they combine elements from each according to the workload phase, as the design trade-offs across the three paradigms in @tbl-fleet-paradigm-comparison show.
 
@@ -588,7 +588,7 @@ class FleetPowerNumbers:
 
 #### Power and sustainability numbers {.unnumbered}
 
-Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **rack power density**\index{Power Density!rack}, **power usage effectiveness (PUE)**\index{PUE}, and the **air-cooling limit**\index{Air-cooling limit}, which determine where construction is feasible and what the facility load will be. @Tbl-appendix-fleet-power-cooling-reference collects these reference values.
+Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **rack power density**\index{Power density!rack}, **power usage effectiveness (PUE)**\index{PUE}, and the **air-cooling limit**\index{Air-cooling limit}, which determine where construction is feasible and what the facility load will be. @Tbl-appendix-fleet-power-cooling-reference collects these reference values.
 
 | **Quantity**               |                    **Typical value**                    | **Use**                                                                                                                                                       |
 |:---------------------------|:-------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -981,7 +981,8 @@ These losses reflect the physics of fleet-scale computation rather than a failur
 ```{python}
 #| echo: false
 
-from mlsysim.fmt import fmt, fmt_percent, fmt_power
+from mlsysim.core.units import HOURS_PER_YEAR
+from mlsysim.fmt import check, fmt, fmt_percent, fmt_power, fmt_usd
 
 class FleetThermalRecap:
     rack_ratio = Infrastructure.Racks.AI_Standard.power_kw / Infrastructure.Racks.Traditional.power_kw
@@ -1023,6 +1024,17 @@ class FleetThermalRecap:
         precision=1,
         commas=False,
     )
+    # Annual electricity value of the legacy-to-liquid PUE gap at the reference IT load,
+    # priced at the on-premises industrial rate (replaces an uncomputed "millions of dollars").
+    onprem_kwh_rate = Infrastructure.Pricing.OnPremises.ElectricityPerKwh.rate.m
+    pue_savings_annual_usd = (
+        (ref_it_load * (Infrastructure.FacilityCooling.Legacy.pue - Infrastructure.FacilityCooling.LiquidCooled.pue)).to(kilowatt).magnitude
+        * HOURS_PER_YEAR
+        * onprem_kwh_rate
+    )
+    check(pue_savings_annual_usd > 1e6, "Prose: the PUE gap at the reference IT load is worth millions of dollars per year")
+    onprem_kwh_rate_str = fmt_usd(onprem_kwh_rate, precision=2, commas=False, per="kWh")
+    pue_savings_annual_musd_str = fmt_usd(pue_savings_annual_usd, scale="M", precision=1, commas=False)
     pue_industry_avg = Infrastructure.FacilityCooling.Typical.pue
     pue_industry_avg_str = fmt(pue_industry_avg, precision=2, commas=False)
     pue_industry_avg_overhead_kw_str = fmt_power((pue_industry_avg - 1) * MW, unit=kilowatt, precision=0, commas=False)
@@ -1036,7 +1048,7 @@ A cluster design calling for `{python} FleetThermalRecap.tenk_gpus_str` H100 GPU
 
 ### Power density wall {#sec-appdx-fleet-foundations-power-density}
 
-The shift from traditional data center workloads to AI training has multiplied the power each rack draws\index{Power Density!crisis}, and @tbl-fleet-power-density-fleet quantifies the increase.
+The shift from traditional data center workloads to AI training has multiplied the power each rack draws\index{Power density!AI training racks}, and @tbl-fleet-power-density-fleet quantifies the increase.
 
 | **Configuration**             |                **Power per Rack**                | **Cooling Implication**                     |
 |:------------------------------|:------------------------------------------------:|:--------------------------------------------|
@@ -1053,7 +1065,7 @@ The `{python} FleetThermalRecap.rack_ratio_mult_str` increase in rack power dens
 
 PUE measures facility energy overhead: total facility energy divided by IT equipment energy [@thegreengrid2007pue; @davis2022uptime]. A PUE of 1.0 would mean all facility energy is delivered to IT equipment; values above 1.0 represent overhead for cooling, power conversion, lighting, and other facility systems.
 
-@Tbl-fleet-pue-fleet compares PUE across data center generations and cooling technologies.
+Cooling technology drives much of that overhead, so PUE falls from legacy enterprise facilities to liquid-cooled AI data centers (@tbl-fleet-pue-fleet).
 
 | **Data Center Type**             |                      **PUE**                      |                          **Overhead per MW of IT Load**                          |
 |:---------------------------------|:-------------------------------------------------:|:--------------------------------------------------------------------------------:|
@@ -1064,7 +1076,7 @@ PUE measures facility energy overhead: total facility energy divided by IT equip
 
 : **PUE by Facility Type**: Lower is better. The listed PUE values are facility scenarios. Direct liquid cooling can reduce heat-removal overhead, but PUE also depends on climate, heat rejection, power conversion, and load. The gap between legacy (`{python} FleetThermalRecap.pue_legacy_str`) and liquid-cooled (`{python} FleetThermalRecap.pue_liquid_str`) represents about a `{python} FleetThermalRecap.pue_reduction_pct_str` reduction in total facility power at fixed IT load; the non-IT overhead drops from `{python} FleetThermalRecap.pue_legacy_overhead_mw_str` to `{python} FleetThermalRecap.pue_liquid_overhead_mw_str` per MW of IT load. {#tbl-fleet-pue-fleet}
 
-For fleet-scale cost calculations, PUE directly multiplies the electricity bill. A `{python} FleetThermalRecap.tenmw_it_load_str` IT load in a legacy data center (PUE `{python} FleetThermalRecap.pue_legacy_str`) requires `{python} FleetThermalRecap.pue_legacy_facility_10mw_str` total, while the same load in a liquid-cooled facility (PUE `{python} FleetThermalRecap.pue_liquid_str`) requires only `{python} FleetThermalRecap.pue_liquid_facility_10mw_str`, a savings of `{python} FleetThermalRecap.pue_savings_10mw_str`. At typical commercial electricity rates, this difference translates to millions of dollars per year. @Sec-sustainable-ai covers the full sustainability implications.
+For fleet-scale cost calculations, PUE directly multiplies the electricity bill. A `{python} FleetThermalRecap.tenmw_it_load_str` IT load in a legacy data center (PUE `{python} FleetThermalRecap.pue_legacy_str`) requires `{python} FleetThermalRecap.pue_legacy_facility_10mw_str` total, while the same load in a liquid-cooled facility (PUE `{python} FleetThermalRecap.pue_liquid_str`) requires only `{python} FleetThermalRecap.pue_liquid_facility_10mw_str`, a savings of `{python} FleetThermalRecap.pue_savings_10mw_str`. For a facility that runs continuously at the reference on-premises electricity price of `{python} FleetThermalRecap.onprem_kwh_rate_str`, that difference is worth about `{python} FleetThermalRecap.pue_savings_annual_musd_str` per year. @Sec-sustainable-ai covers the full sustainability implications.
 
 ---
 
