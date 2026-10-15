@@ -3,8 +3,8 @@
     "source_file": "books/vol2/06_distributed_training/06_distributed_training.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 10,
-    "sections_with_quizzes": 9,
+    "total_sections": 11,
+    "sections_with_quizzes": 10,
     "sections_without_quizzes": 1
   },
   "sections": [
@@ -15,14 +15,12 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "communication-computation ratio governing the distributed step-time model",
-            "physical triggers that force distribution (memory, wall-clock, dataset)",
-            "matching parallelism strategy to interconnect bandwidth tiers (bandwidth feasibility check)",
-            "3D parallelism cube and multiplicative axis composition",
-            "loop-transformation mental model (DP as parallel-for, TP as SIMD, PP as instruction pipeline)"
+            "physical triggers that force distribution (memory, wall-clock, input delivery)",
+            "communication-computation ratio and the distributed step-time model",
+            "cluster failure cadence as one of the three costs distribution expands"
           ],
-          "question_strategy": "Open with an operational trigger scenario MCQ, test step-time scaling physics in a SHORT question, evaluate cross-rack tensor parallelism feasibility in a TF question, probe 3D parallelism multiplicative composition in an MCQ, and test the communication-computation ratio definition in a FILL question.",
-          "difficulty_progression": "Foundational operational trigger -> quantitative step-time reasoning -> network feasibility check -> 3D cube resource composition -> core metric recall.",
+          "question_strategy": "Open with an operational trigger scenario MCQ, test step-time scaling physics in a SHORT question, check the cluster failure cadence in a TF question, and test the communication-computation ratio definition in a FILL question.",
+          "difficulty_progression": "Foundational operational trigger -> quantitative step-time reasoning -> failure-rate arithmetic -> core metric recall.",
           "integration": "Builds on the Fleet Stack and the empirical scaling law, grounding the Distribution Layer in physical constraints of finite HBM and network bisection bandwidth.",
           "ranking_explanation": "This section introduces the chapter's governing physical framework and constraint satisfaction logic that every later parallelism strategy depends on."
         },
@@ -47,10 +45,36 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: If a neural network's parameters exceed a single GPU's memory capacity, tensor parallelism can be scaled across standard commodity Ethernet switches between server racks, provided the global batch size is made large enough.",
-            "answer": "False. Increasing global batch size does not guarantee that frequent tensor-parallel exchanges fit within the compute window. Slow inter-rack links can dominate every layer. Tensor parallelism should use the fastest available domain; pipeline or data parallelism usually better matches slower links, subject to measured workload and topology constraints.",
-            "learning_objective": "Evaluate the physical feasibility of tensor parallelism across commodity network fabrics"
+            "question": "True or False: A cluster of 1,024 GPUs, each with a 50,000-hour mean time to failure, should expect a GPU failure roughly every two days if failures are independent, even though any single GPU fails only about once every five to six years.",
+            "answer": "True. Independent constant-rate failures add, so the cluster failure rate is about 1,024/50,000 per hour and the cluster mean time between failures is about 49 hours. Whether each failure interrupts training depends on recovery and redundancy, which is why distribution makes fault tolerance a first-order budget rather than an afterthought.",
+            "learning_objective": "Estimate how cluster size converts a rare per-device failure into a frequent cluster-level event"
           },
+          {
+            "question_type": "FILL",
+            "question": "The dimensionless ratio $\\rho = T_{\\text{comm}}(N) / (T_{\\text{compute}}/N)$, which screens communication demand relative to per-worker compute time, is defined as the ____.",
+            "answer": "Communication-Computation Ratio. The ratio compares communication time with per-worker compute time. A large ratio warns that communication may limit scaling, but actual step time depends on overlap, readiness, and other exposed work. A small ratio alone does not guarantee near-linear scaling.",
+            "learning_objective": "Define the metric governing the transition between compute-bound and communication-bound cluster operation"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4",
+      "section_title": "The Parallelism Design Space",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "loop-transformation mental model (DP as parallel-for, TP as SIMD, PP as instruction pipelining)",
+            "3D parallelism cube, multiplicative composition, and joint feasibility of the degrees",
+            "matching each strategy's traffic to the interconnect tier that can carry it (bandwidth feasibility check)"
+          ],
+          "question_strategy": "Classify the strategies through the loop-transformation analogy in an MCQ, test multiplicative and jointly constrained composition of the 3D cube in an MCQ, evaluate cross-rack tensor parallelism in a TF question, and apply the per-layer bandwidth feasibility numbers in a SHORT question.",
+          "difficulty_progression": "Conceptual classification -> resource composition -> feasibility judgment -> quantitative placement reasoning.",
+          "integration": "Uses the bandwidth hierarchy and the communication-computation ratio to narrow the parallelism choice before the mechanisms of each strategy are developed.",
+          "ranking_explanation": "The design space frames every later strategy section and the hybrid layouts that combine them."
+        },
+        "questions": [
           {
             "question_type": "MCQ",
             "question": "Framing distributed parallelism strategies as compiler loop transformations across the training loop's iterators (batches, layers, and operations), which distributed strategy corresponds to vectorization (SIMD) of inner matrix multiplications?",
@@ -65,21 +89,27 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In the 3D Parallelism Cube ($N_{\\text{total}} = d \\times p \\times t$), how do the three orthogonal scaling axes interact to allocate cluster accelerators for large models?",
+            "question": "In the 3D parallelism cube, where the device count equals the product of the data-, pipeline-, and tensor-parallel degrees, how do the three scaling axes interact to allocate cluster accelerators for large models?",
             "choices": [
               "The three axes are mutually exclusive; choosing data parallelism precludes using tensor or pipeline parallelism in the same cluster",
               "Tensor and pipeline parallelism can combine within a node, but data parallelism can only be used if model parallelism is disabled",
-              "The total accelerator count is the sum of the dimensions ($N_{\\text{total}} = d + p + t$), with each parallelism type requiring a disjoint node pool",
-              "The axes compose multiplicatively ($N_{\\text{total}} = d \\times p \\times t$), allowing systems to simultaneously shard layers (TP), pipeline stages (PP), and replicate the pipeline across data shards (DP)"
+              "The total accelerator count is the sum of the three degrees, with each parallelism type requiring a disjoint node pool",
+              "The axes compose multiplicatively, so one layout can split layers (TP), stage the layer stack (PP), and replicate the pipeline across data shards (DP), and its device count is the product of the three degrees"
             ],
-            "answer": "The correct answer is D. Data ($d$), pipeline ($p$), and tensor ($t$) parallelism partition orthogonal workload dimensions whose degrees must jointly satisfy memory, communication, and global-batch constraints. The product of the degrees determines total accelerator count ($N_{\\text{total}} = d \\times p \\times t$). Large-model training configurations routinely compose all three (e.g., $\\text{TP}=8$ within an NVLink node, $\\text{PP}=16$ across nodes via InfiniBand, and $\\text{DP}=128$ across the cluster) to satisfy memory capacity, per-layer latency, and global throughput constraints simultaneously. The assertion of mutual exclusivity is contradicted by production 3D training loops. Restricting data parallelism from combining with model parallelism ignores standard hybrid practices. Adding rather than multiplying dimensions confuses additive resource partitioning with multiplicative coordinate composition.",
+            "answer": "The correct answer is D. Data, pipeline, and tensor parallelism partition different workload dimensions, and the product of their degrees gives the accelerator count. The degrees are not independent knobs: tensor and pipeline degrees must divide the model, the data-parallel degree and microbatch schedule must give a viable global batch, every partition must fit memory, and each axis's traffic must map onto a tier that can carry it. Large-model configurations routinely compose all three, for example TP=8 inside an NVLink node, PP=16 across nodes, and DP=128 across the cluster. Mutual exclusivity, a ban on combining data and model parallelism, and an additive count all contradict that multiplicative composition.",
             "learning_objective": "Calculate total cluster resource allocation using the multiplicative axes of the 3D parallelism cube"
           },
           {
-            "question_type": "FILL",
-            "question": "The dimensionless ratio $\\rho = T_{\\text{comm}}(N) / (T_{\\text{compute}}/N)$, which screens communication demand relative to per-worker compute time, is defined as the ____.",
-            "answer": "Communication-Computation Ratio. The ratio compares communication time with per-worker compute time. A large ratio warns that communication may limit scaling, but actual step time depends on overlap, readiness, and other exposed work. A small ratio alone does not guarantee near-linear scaling.",
-            "learning_objective": "Define the metric governing the transition between compute-bound and communication-bound cluster operation"
+            "question_type": "TF",
+            "question": "True or False: If a neural network's parameters exceed a single GPU's memory capacity, tensor parallelism can be scaled across standard commodity Ethernet switches between server racks, provided the global batch size is made large enough.",
+            "answer": "False. Increasing global batch size does not guarantee that frequent tensor-parallel exchanges fit within the compute window. Slow inter-rack links can dominate every layer. Tensor parallelism should use the fastest available domain; pipeline or data parallelism usually better matches slower links, subject to measured workload and topology constraints.",
+            "learning_objective": "Evaluate the physical feasibility of tensor parallelism across commodity network fabrics"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "For one GPT-3 layer split eight ways, the chapter's bandwidth feasibility check finds about 1.9 ms of local compute, about 0.4 ms of tensor-parallel transfer over NVLink, and about 3.5 ms for the same transfer over one NDR InfiniBand port. Explain what these numbers imply for where the tensor-parallel group should be placed and what a planner must still check before accepting that placement.",
+            "answer": "Over NVLink the per-layer exchange is a fraction of the layer's compute, so it can fit inside the layer-time budget; over one InfiniBand port it takes longer than the compute it serves, so every layer would wait on the network. The tensor-parallel group therefore belongs in the fast communication domain. The planner must still check how much of the transfer the schedule can actually hide, the message startup latency, and whether the pipeline and data-parallel traffic placed on the slower tiers fits their own budgets.",
+            "learning_objective": "Apply a per-layer bandwidth feasibility test to place tensor parallelism on a fabric tier"
           }
         ]
       }
@@ -330,7 +360,7 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "In a 3D parallelism layout ($N_{\\text{total}} = d \\times p \\times t$), what hardware-matching principle dictates mapping tensor parallelism intra-node while pipeline parallelism spans inter-node links?",
+            "question": "In a 3D parallelism layout whose device count is the product of the data-, pipeline-, and tensor-parallel degrees, what hardware-matching principle dictates mapping tensor parallelism intra-node while pipeline parallelism spans inter-node links?",
             "choices": [
               "Pipeline parallelism requires more memory bandwidth than NVLink can provide, forcing it onto InfiniBand",
               "Tensor parallelism requires only point-to-point transfers, making it insensitive to link latency",
