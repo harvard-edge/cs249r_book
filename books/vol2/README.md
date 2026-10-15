@@ -22,7 +22,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
     <tr>
       <th width="25%">Part</th>
       <th width="20%">Focus</th>
-      <th width="55%">What You Will Learn</th>
+      <th width="55%">What you will learn</th>
     </tr>
   </thead>
   <tbody>
@@ -57,7 +57,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
       <th width="5%">#</th>
       <th width="22%">Chapter</th>
       <th width="22%">Directory</th>
-      <th width="51%">Core Question</th>
+      <th width="51%">Core question</th>
     </tr>
   </thead>
   <tbody>
@@ -168,7 +168,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
 
 ## Prerequisites
 
-Volume II is a standalone book. It assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. No other book is required. Appendix A recaps the single-machine performance model (the iron law, arithmetic intensity, and the roofline), and the book introduces its own C³ taxonomy for reasoning about fleets.
+Volume II is a standalone book. It assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. No other book is required. Appendix A recaps the single-machine performance model (the iron law, arithmetic intensity, and the Roofline Model), and the book introduces its own C³ taxonomy for reasoning about fleets.
 
 ## Working in the Open
 
