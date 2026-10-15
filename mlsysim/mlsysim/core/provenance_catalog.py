@@ -1487,6 +1487,21 @@ FABRIC_LATENCY_ASSUMPTIONS = _conv(
     notes="Order-of-magnitude μs values for napkin math; not vendor QoS guarantees.",
 )
 
+EFFECTIVE_COLLECTIVE_ALPHA_RANGES = _est(
+    "prov:effective-collective-alpha-ranges",
+    "Effective per-message collective-launch latency (alpha) ranges by interconnect: NVLink 4.0, "
+    "PCIe Gen5, InfiniBand NDR and HDR, 100G RoCE",
+    notes=(
+        "Teaching assumption, not a vendor figure: alpha here is the EFFECTIVE launch latency of one "
+        "collective message, communication-library software stack included, so it sits above the wire "
+        "latencies in Tech.Interconnect and Fabrics. Ranges: NVLink 1-2 us, PCIe Gen5 2-5 us, IB NDR "
+        "1-3 us, IB HDR 2-5 us, RoCE 100G 5-10 us. They bracket the single-value anchors AlphaNdr "
+        "(1.5 us) and AlphaRoce (5 us) from prov:fabric-latency-assumptions. Consolidated 2026-10-15 "
+        "from three identical hand-typed copies in book cells into this one source."
+    ),
+    verified="2026-10-15",
+)
+
 SWITCH_OPTICS_REFERENCE = _conv(
     "prov:switch-optics-reference",
     "Datacenter switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
@@ -2137,6 +2152,15 @@ NVIDIA_HOPPER_HBM_STACKS = _ds(
     "https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/",
     verified=_V,
     notes="H100 SXM5: five active HBM3 stacks (six sites) for 80 GB; B200: eight HBM3e stacks for 192 GB.",
+)
+NVIDIA_BLACKWELL_NV_HBI = _ds(
+    "prov:nvidia-blackwell-nv-hbi",
+    "NVIDIA Blackwell Architecture (technology overview page)",
+    "https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/",
+    verified="2026-10-15",
+    notes=("Quoted: two reticle-limited dies 'connected by a 10 terabytes per second (TB/s) "
+           "chip-to-chip interconnect in a unified single GPU' (NV-HBI). NVIDIA does not say "
+           "whether 10 TB/s is per direction or a bidirectional total."),
 )
 DGX_H100_USER_GUIDE_PHYSICAL = _ds(
     "prov:nvidia-dgx-h100-user-guide-physical",

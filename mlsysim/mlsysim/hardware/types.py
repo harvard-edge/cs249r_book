@@ -230,6 +230,11 @@ class HardwareNode(BaseModel):
     tdp_min: Optional[Quantity] = None
     tdp_max: Optional[Quantity] = None
     die_area: Optional[Quantity] = None
+    # Package-internal link joining the compute dies of a multi-die (chiplet)
+    # accelerator, stored as the vendor quotes it. None for monolithic dies.
+    # Vendors do not state a per-direction convention for this figure, so it
+    # is not an IOInterconnect; do not feed it into beta terms as a one-way rate.
+    die_to_die_bandwidth: Optional[Quantity] = None
     battery_capacity: Optional[Quantity] = None
     unit_cost: Optional[Quantity] = None
     unit_cost_max: Optional[Quantity] = None
@@ -253,6 +258,11 @@ class HardwareNode(BaseModel):
     @classmethod
     def _validate_die_area(cls, v):
         return require_dimensionality(v, ureg.meter**2, "die_area")
+
+    @field_validator("die_to_die_bandwidth", mode="after")
+    @classmethod
+    def _validate_die_to_die_bandwidth(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "die_to_die_bandwidth", "data")
 
     @field_validator("battery_capacity", mode="after")
     @classmethod
