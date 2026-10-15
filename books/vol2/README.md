@@ -168,7 +168,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
 
 ## Prerequisites
 
-Volume II is a standalone book. It assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. No other book is required. Appendix A recaps the single-machine performance model (the iron law, arithmetic intensity, and the roofline), and the book introduces its own C³ framework for reasoning about fleets.
+Volume II is a standalone book. It assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. No other book is required. Appendix A recaps the single-machine performance model (the iron law, arithmetic intensity, and the roofline), and the book introduces its own C³ taxonomy for reasoning about fleets.
 
 ## Working in the Open
 
