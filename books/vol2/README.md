@@ -13,7 +13,7 @@
 
 Volume II moves from introductory single-machine ML systems to fleets of machines connected by high-speed networks. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
 
-The assumed foundation is local model execution, memory hierarchy, training and inference, and accelerator basics. The advanced material explains how those constraints change when many nodes coordinate through network fabrics, message passing, and fault tolerance across racks and datacenters. Security, privacy, environmental limits, and governance enter as design requirements throughout; the final part develops their enforcement mechanisms.
+The assumed foundation is local model execution, memory hierarchy, training and inference, and accelerator basics. The advanced material explains how those constraints change when many nodes coordinate through network fabrics, message passing, and fault tolerance across racks and data centers. Security, privacy, environmental limits, and governance enter as design requirements throughout; the final part develops their enforcement mechanisms.
 
 ## What You Will Learn
 
@@ -63,7 +63,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
   <tbody>
     <tr>
       <td>1</td>
-      <td><b>Introduction to Scale</b></td>
+      <td><b>Introduction</b></td>
       <td><code>01_introduction/</code></td>
       <td>Why do single-machine systems break down at production scale?</td>
     </tr>
@@ -129,7 +129,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
     </tr>
     <tr>
       <td>12</td>
-      <td><b>Ops at Scale</b></td>
+      <td><b>ML Operations at Scale</b></td>
       <td><code>12_ops_scale/</code></td>
       <td>How do you monitor, version, and operate fleets of production models?</td>
     </tr>
