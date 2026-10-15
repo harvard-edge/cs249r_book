@@ -4,8 +4,8 @@
     "schema_version": 2,
     "generated_on": "2026-09-01",
     "total_sections": 11,
-    "sections_with_quizzes": 11,
-    "sections_without_quizzes": 0
+    "sections_with_quizzes": 10,
+    "sections_without_quizzes": 1
   },
   "sections": [
     {
@@ -88,13 +88,13 @@
           "focus_areas": [
             "Imperative (Slurm) vs. Declarative (Kubernetes) control planes",
             "Slurm partitions, consumable resources (cons_tres), and fair-share decay",
-            "Kubernetes controller pattern, device plugins, and MIG partitioning",
+            "Kubernetes controller pattern, device plugins, and PodGroup group admission",
             "Volcano and Kueue batch scheduling abstractions",
             "Host networking and GPUDirect RDMA bypass in Kubernetes",
             "Hybrid Kubernetes-over-Slurm architectures"
           ],
           "question_strategy": "Examine the fundamental design tensions between batch-oriented predictable allocations and level-triggered self-healing reconciliation loops.",
-          "difficulty_progression": "Start with core architectural differences and MIG hardware isolation, move to fair-share decay dynamics and network bypass, and finish with full distributed job lifecycle sequencing.",
+          "difficulty_progression": "Start with core architectural differences and PodGroup group admission, move to fair-share decay dynamics and network bypass, and finish with full distributed job lifecycle sequencing.",
           "integration": "Bridges the system software layer with distributed training operators and hardware network interfaces.",
           "ranking_explanation": "Focuses on control model trade-offs because choosing between imperative and declarative systems dictates operational failure recovery and scaling behavior."
         },
@@ -113,15 +113,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "How does NVIDIA Multi-Instance GPU (MIG) partitioning on A100/H100 accelerators differ from software-based GPU time-slicing in multi-tenant serving environments?",
+            "question": "Kubernetes' default scheduler places a 64-pod training job one pod at a time, and the cluster has room for only 60 of the pods. How does a PodGroup with a minimum membership of 64 change the outcome?",
             "choices": [
-              "MIG uses OS-level software schedulers to alternate kernel execution times, but shares the same L2 cache and memory controllers dynamically.",
-              "MIG compiles user PyTorch models into specialized FPGA bitstreams, preventing simultaneous execution of untrusted kernels.",
-              "MIG allows dynamic resizing of GPU partitions on a millisecond basis without draining running containers or resetting the device.",
-              "MIG dedicates compute, memory-controller, and cache resources to instances, strengthening resource isolation while imposing fixed-profile placement and reconfiguration constraints."
+              "The scheduler binds the first 60 pods immediately and starts training with a smaller communication group, adding the last 4 pods as capacity frees.",
+              "The scheduler tentatively reserves placements but binds no pod until all 64 members are placed, releasing every reservation if the attempt fails or times out.",
+              "The scheduler preempts every lower-priority pod in the cluster until 64 GPUs are free, regardless of priority-class settings.",
+              "The PodGroup guarantees that all 64 containers start at the same instant, so the framework no longer needs to establish its communication group."
             ],
-            "answer": "The correct answer is D. MIG partitions device resources rather than merely alternating whole-device execution in time. Fixed profiles strengthen predictable resource isolation but can strand capacity and require draining affected workloads for reconfiguration. The GPU still shares some physical infrastructure, and MIG alone does not establish a complete tenant-security boundary. Software time-slicing provides weaker performance isolation.",
-            "learning_objective": "Evaluate Multi-Instance GPU (MIG) architectural characteristics and trade-offs for multi-tenant inference."
+            "answer": "The correct answer is B. A PodGroup turns admission into a group decision. The scheduler reserves placements as it finds them but binds none until the minimum membership is placed, and it releases the reservations on failure or timeout, so 60 pods never hold GPUs while waiting for 4 more. Binding 60 pods recreates the partial allocation that strands capacity, and preemption follows priority-class policy rather than group admission. Group admission also does not make launches simultaneous; the framework must still form its communication group.",
+            "learning_objective": "Explain how PodGroup minimum membership supplies the group admission that a rigid training job needs on Kubernetes."
           },
           {
             "question_type": "SHORT",
@@ -291,41 +291,53 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Spot instances / preemptible VMs and correlated eviction risks",
-            "Capacity reservation mechanisms and Cloud Capacity Blocks",
-            "How lifecycle TCO and cost accounting reach the scheduler as price signals and constraints",
-            "Hybrid spot/on-demand placement strategies for distributed architectures",
-            "Preemption-aware checkpoint interval tuning"
+            "Preemption tax and preemption cascades",
+            "Spot effective cost after interruption overhead",
+            "Correlated spot reclamation risks",
+            "Reserved, on-demand, and spot capacity tiers",
+            "How lifecycle TCO and cost accounting reach the scheduler as price signals and constraints"
           ],
-          "question_strategy": "Combine financial engineering concepts (spot markets, reservations, TCO) with concrete systems design (hybrid master/worker topologies, correlated evictions).",
-          "difficulty_progression": "Examine spot preemption vulnerabilities, compare reservation models, trace how cost signals reach the scheduler, and evaluate hybrid placement patterns.",
-          "integration": "Connects financial pricing models with fault tolerance checkpointing and cluster capacity planning.",
-          "ranking_explanation": "Spot preemption correlation is emphasized because unmitigated spot revocations can reduce effective training goodput to zero despite large discounts."
+          "question_strategy": "Start from the price of one interruption, then test how that price decides whether spot discounts and capacity tiers pay off.",
+          "difficulty_progression": "Explain preemption cascades, apply the spot effective-cost relation, map workloads to capacity tiers, trace how cost signals reach the scheduler, and decompose the preemption tax.",
+          "integration": "Connects interruption economics with fault tolerance checkpointing and cluster capacity planning.",
+          "ranking_explanation": "Interruption cost is emphasized because it decides whether preemption, spot capacity, and reclamation save or waste capacity."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "When training large foundation models on preemptible/spot cloud GPU instances discounted by $70\\%$ compared to on-demand pricing, what operational vulnerability poses the greatest threat to training goodput?",
+            "question": "What is a preemption cascade in a shared GPU cluster, and which control stops it at the first level?",
             "choices": [
-              "Spot instances limit maximum GPU memory to half of on-demand instances due to hypervisor virtualization overhead.",
-              "Spot preemption events within a single Availability Zone or accelerator pool are often highly correlated during market capacity crunches, simultaneously terminating all nodes in a multi-node gang and causing repetitive re-rendezvous overhead unless checkpoint frequency is tuned.",
-              "Spot instances cannot communicate over InfiniBand networks and must route all AllReduce collectives through public HTTP REST APIs.",
-              "Cloud providers prohibit running PyTorch or TensorFlow frameworks on spot instances under standard acceptable use policies."
+              "A cascade is a burst of hardware failures in one rack; spare-capacity reservation stops it.",
+              "A cascade is a high-priority admission that evicts medium-priority jobs, each of which then evicts lower-priority jobs to reschedule itself; requiring evicted jobs to requeue without preempting anyone stops it after the first level.",
+              "A cascade is a queue of jobs waiting behind a large gang; backfill scheduling stops it.",
+              "A cascade is repeated checkpointing by one job; lengthening its checkpoint interval stops it."
             ],
-            "answer": "The correct answer is B. Spot instances offer substantial cost discounts (60-90%) but carry preemption risk. Crucially, spot revocations are not independent random events; during demand surges, cloud providers reclaim entire pools of specific GPU types in a given Availability Zone at once. For multi-node distributed training, losing even a single node halts synchronous training, and frequent correlated preemptions can degrade goodput to zero unless checkpoint intervals and recovery are tightly optimized. Memory limitations, HTTP-only AllReduce, and framework prohibitions are fabricated distractors.",
-            "learning_objective": "Evaluate the cost trade-offs and operational risks of running large-scale distributed training on cloud spot instances."
+            "answer": "The correct answer is B. If an urgent job displaces a handful of jobs and each of those displaces as many again on rescheduling, the interruptions multiply with each level, each paying the preemption tax and adding checkpoint reload traffic at the same moment. A rule that evicted jobs requeue without preempting caps the damage at the first level, and a preemption budget limits how often any one job can be displaced. Failure bursts, queueing behind a gang, and checkpoint frequency are different problems.",
+            "learning_objective": "Explain how preemption cascades multiply interruption cost and which controls bound them."
           },
           {
             "question_type": "MCQ",
-            "question": "How do Cloud Capacity Blocks (or contiguous reserved GPU instances) differ from standard on-demand and spot instance allocations for large-scale training?",
+            "question": "A training job moves from on-demand to spot capacity at the chapter's scenario discount. According to the effective-cost relation, in which effective cost equals the spot price times billed allocation time divided by retained productive time, what determines whether the discount survives?",
             "choices": [
-              "A topology-qualified capacity block reserves a stated accelerator configuration for a committed time window, reducing spot-reclaim and allocation-availability risk at the cost of commitment.",
-              "Capacity Blocks allow unlimited instantaneous bursting beyond physical cluster limits without financial commitment.",
-              "Capacity Blocks dynamically convert idle inference GPUs into spot training nodes with sub-second preemption notices.",
-              "Capacity Blocks provide 99% cost discounts by sharing GPU streaming multiprocessors across unrelated cloud tenants."
+              "Only the advertised discount, because interruptions are free once a provider sends a notice.",
+              "The ratio of billed allocation time to retained productive time, which grows with checkpoint overhead, restart time, and work replayed after each interruption.",
+              "The number of GPUs in the job, because larger jobs always receive deeper spot discounts.",
+              "The provider's capacity-placement score, which predicts how many interruptions the job will see per day."
             ],
-            "answer": "The correct answer is A. A capacity block can reserve accelerators and the stated network configuration for a planned interval. This trades commitment for more predictable access. A generic capacity reservation does not necessarily guarantee contiguous topology, and reserved instances can still fail. The contract must specify placement and interruption terms; reservation cannot create unlimited bursting or remove fault-tolerance requirements.",
-            "learning_objective": "Compare capacity reservation mechanisms (such as Cloud Capacity Blocks) with spot and on-demand purchasing models."
+            "answer": "The correct answer is B. Effective cost is the spot price scaled by billed time over retained progress. Checkpointing, recovery, and discarded work all add billed time without adding retained progress, so frequent or expensive interruptions can erase the discount. A notice gives an opportunity to save state but does not make the interruption free, and a placement score estimates whether a request will succeed, not how often the job will be interrupted.",
+            "learning_objective": "Apply the spot effective-cost relation to decide whether a discount survives interruption overhead."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "An organization runs steady 24/7 inference, urgent retraining with tight deadlines, and a large hyperparameter sweep. Which assignment of these workloads to reserved, on-demand, and spot capacity matches each workload's deadline and recovery contract?",
+            "choices": [
+              "Inference on spot, retraining on reserved, sweep on on-demand.",
+              "Inference on reserved, retraining on on-demand, sweep on spot.",
+              "All three on spot, because the discount outweighs any interruption risk.",
+              "Inference on on-demand, retraining on spot, sweep on reserved."
+            ],
+            "answer": "The correct answer is B. Reserved capacity suits predictable continuous load such as steady inference. On-demand capacity avoids long-term commitment for urgent work that cannot tolerate reclamation, at full price and with admission and startup delay. Spot capacity suits restart-tolerant work such as independent sweep trials. Placing inference or deadline-bound retraining on reclaimable capacity, or reserving capacity for a bursty sweep, mismatches the tier to the workload's contract.",
+            "learning_objective": "Map workloads to reserved, on-demand, and spot capacity tiers by deadline and restart tolerance."
           },
           {
             "question_type": "SHORT",
@@ -335,9 +347,9 @@
           },
           {
             "question_type": "SHORT",
-            "question": "In a distributed training architecture with parameter servers or a central coordinator/master node alongside data-parallel workers, how should roles be partitioned between on-demand and spot instances to optimize cost while maintaining system stability?",
-            "answer": "Keep the coordinator and durable metadata on less-preemptible capacity, with replication and recovery appropriate to their failure budget. Assign recoverable workers to spot capacity when checkpointing and elastic membership support it. On-demand instances can still fail, and training workers hold mutable model and optimizer state, so neither tier should be treated as intrinsically stateless or failure-free.",
-            "learning_objective": "Design a fault-tolerant hybrid spot/on-demand placement strategy for distributed training architectures."
+            "question": "A low-priority 64-GPU fine-tuning run is forcibly preempted. What makes up the preemption tax for that event, and why does a per-job preemption budget matter more for this run than for a high-priority job?",
+            "answer": "The tax is the work discarded since the last durable checkpoint plus the relaunch, checkpoint reload, and warmup needed before the job is productive again, charged across every GPU of the allocation. A low-priority run sits at the bottom of every preemption cascade, so without a budget it can be struck many times a day and lose hours of allocation time; a budget caps how often it can be displaced, at the cost of delaying some higher-priority admissions.",
+            "learning_objective": "Decompose the preemption tax and explain why preemption budgets protect low-priority work."
           },
           {
             "question_type": "TF",
@@ -490,41 +502,15 @@
           "focus_areas": [
             "Hierarchical fair-share tree structures",
             "Guaranteed quota vs. limit quota in burst capacity models",
-            "Three utilization metrics: Allocated, Compute, Productive Goodput",
-            "Priority preemption cascades and cooldown protection",
             "Quota hoarding organizational anti-patterns",
             "Dominant Resource Fairness across multi-dimensional resources"
           ],
           "question_strategy": "Test multi-tenant governance policies, mathematical fair-share mechanisms, and observability metrics.",
-          "difficulty_progression": "Start with multi-dimensional metric distinctions, analyze preemption cascades, evaluate quota bursting and hoarding, and explain feasible admission under hierarchical entitlements.",
+          "difficulty_progression": "Start with guaranteed versus burst quota, evaluate quota hoarding and DRF, and finish with feasible admission under hierarchical entitlements.",
           "integration": "Connects multi-tenant organizational hierarchy with low-level scheduler preemption and accounting primitives.",
-          "ranking_explanation": "The three utilization metrics and preemption cascade protections are emphasized as essential for multi-tenant cluster governance."
+          "ranking_explanation": "Quota borrowing and reclamation are emphasized because they decide whether a guarantee is honored in time."
         },
         "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "A cluster monitoring dashboard reports $85\\%$ GPU utilization, yet researchers complain of slow progress and low experiment output. What distinction between fleet utilization metrics explains this apparent contradiction?",
-            "choices": [
-              "Allocated utilization (GPUs reserved by containers) may be high ($85\\%$) while compute utilization (SM active time) is low ($20\\%$) due to data loader stalls, or productive utilization (goodput advancing converged training steps) is near zero due to unhandled AllReduce synchronization deadlocks.",
-              "Hardware sensors on GPUs report utilization in hexadecimal rather than decimal percentages.",
-              "Grafana dashboards invert metric percentages when cluster temperature exceeds 25 degrees Celsius.",
-              "GPU utilization metrics only count CPU core cycles, concealing whether the GPU is plugged into power."
-            ],
-            "answer": "The correct answer is A. Cluster observability requires distinguishing between three metrics: (1) **Allocated Utilization** (fraction of GPUs assigned to jobs, which can be 85%), (2) **Compute Utilization** (fraction of time GPU SMs are actively executing instructions rather than waiting on CPU data loading, host memory, or I/O), and (3) **Productive Utilization / Goodput** (fraction of compute advancing valid training steps rather than stalled in communication barriers, deadlocks, or throwaway restarts). The hexadecimal, temperature inversion, and CPU-only options are absurd distractors.",
-            "learning_objective": "Differentiate between Allocated Utilization, Compute Utilization, and Productive Goodput in cluster observability."
-          },
-          {
-            "question_type": "MCQ",
-            "question": "What is a 'preemption cascade' in a multi-tenant GPU cluster, and how can orchestrators mitigate its destructive impact on cluster throughput?",
-            "choices": [
-              "A preemption cascade occurs when a single GPU catches fire and burns adjacent GPUs in the same server rack; it is mitigated by Halon fire suppression systems.",
-              "A preemption cascade occurs when Slurm automatically deletes user source code repositories upon job completion; it is mitigated by Git branch protection.",
-              "A preemption cascade occurs when Kubernetes continuously restarts healthy pods due to Docker daemon upgrades; it is mitigated by disabling Linux kernel updates.",
-              "A preemption cascade occurs when high-priority jobs evict medium-priority jobs, which in turn evict low-priority jobs across the cluster, triggering simultaneous checkpoint I/O storms and thrashing compute progress; it is mitigated by preemption cooldown periods and holistic preemption limits."
-            ],
-            "answer": "The correct answer is D. In multi-priority environments, an influx of high-priority jobs can evict medium-priority jobs, which then preempt low-priority jobs to find room. If dozens of jobs simultaneously start saving checkpoints before termination, the resulting I/O storm saturates shared storage, prolongs eviction delays, and causes cluster thrashing. Schedulers mitigate this using preemption cooldown timers (preventing a recently started job from immediate re-preemption), holistic bandwidth reservation for checkpointing, and non-preempting priority tiers (`preemptionPolicy: Never`). The physical fire, code deletion, and Docker upgrade options are incorrect.",
-            "learning_objective": "Evaluate the risks of cascading preemption storms and design mechanisms to prevent them."
-          },
           {
             "question_type": "SHORT",
             "question": "In a multi-tenant cluster, how does decoupling 'guaranteed quota' from 'limit (burst) quota' prevent stranded idle capacity while protecting team allocations?",
@@ -559,6 +545,7 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
+            "Allocated, active, and productive utilization tiers",
             "Utilization paradox forensics (fragmentation, queuing theory)",
             "Input pipeline bottlenecks and host CPU/DataLoader stalls",
             "Zombie process / ghost allocation detection and cleanup",
@@ -571,6 +558,18 @@
           "ranking_explanation": "Root-cause diagnostics for DataLoader stalls and zombie allocations are prioritized as they represent the most common real-world efficiency drains."
         },
         "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A cluster dashboard reports $85\\%$ GPU utilization, yet researchers see slow progress. Which distinction between utilization tiers explains the contradiction?",
+            "choices": [
+              "Allocated capacity can be high while active utilization is low because jobs wait on input or communication, and productive utilization can be lower still because of restarts and replayed work.",
+              "The dashboard counts only CPU time, so GPU activity is invisible to it.",
+              "High utilization always means the cluster is healthy, so the researchers' perception must be wrong.",
+              "Productive utilization always exceeds allocated utilization, so the dashboard understates the cluster's progress."
+            ],
+            "answer": "The correct answer is A. Allocated capacity counts devices held by complete allocations, active utilization counts hardware activity under a stated counter, and productive utilization counts retained progress at the job's fault-free rate. Each tier counts no more than the one above it, so an 85 percent allocation figure can hide idle kernels and discarded work. High utilization does not establish health, and productive capacity cannot exceed what is allocated.",
+            "learning_objective": "Distinguish allocated, active, and productive utilization when diagnosing a cluster."
+          },
           {
             "question_type": "MCQ",
             "question": "An administrator observes that average GPU compute utilization across a 1,000-GPU cluster is only $55\\%$, yet users experience multi-day queue wait times for 64-GPU jobs. Which diagnostic finding points to the primary root cause?",
@@ -664,44 +663,8 @@
       "section_id": "#sec-fleet-orchestration-summary",
       "section_title": "Summary",
       "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Synthesis of the fleet orchestration stack",
-            "Convergence of HPC batch scheduling and cloud-native service orchestration",
-            "Workload progress, headroom, and declared measurement boundaries for fleet efficiency"
-          ],
-          "question_strategy": "Test holistic conceptual synthesis across physical hardware topology, scheduling algorithms, and organizational economics.",
-          "difficulty_progression": "Synthesize the overarching orchestration stack challenge, explain paradigm convergence, and explain why allocation alone cannot establish fleet value.",
-          "integration": "Provides a comprehensive capstone across all fleet orchestration themes.",
-          "ranking_explanation": "Reinforces the fundamental takeaways that connect hardware constraints to economic productivity."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "Which statement best synthesizes the central architectural challenge of fleet orchestration for machine learning?",
-            "choices": [
-              "Orchestration is purely a software compilation task that translates PyTorch code into C++ CUDA binaries without considering cluster hardware.",
-              "Orchestration requires balancing physical hardware constraints (NVLink topology, failure rates, power limits) against organizational policies (fairness, priorities, cost) across diverse, long-running, and failure-prone distributed workloads.",
-              "Orchestration has been completely solved by standard web application load balancers like NGINX, which handle GPU AllReduce synchronization transparently.",
-              "Orchestration only matters for single-GPU laptops and has no relevance to multi-thousand GPU datacenters."
-            ],
-            "answer": "The correct answer is B. Fleet orchestration operates at the intersection of physical infrastructure (GPU heterogeneity, NVLink topologies, power boundaries, component failure rates) and organizational objectives (fair-share equity, priority preemption, budget optimization, latency vs. throughput). It translates multi-dimensional, distributed resource demands into physical allocations while ensuring high goodput and fault resilience. Software compilation, NGINX load balancing, and laptop-only claims misrepresent the role of orchestration.",
-            "learning_objective": "Synthesize the primary architectural trade-offs across the fleet orchestration stack."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "How is the historical boundary between HPC batch scheduling (Slurm) and cloud-native service orchestration (Kubernetes) evolving to meet the demands of modern ML lifecycles?",
-            "answer": "The boundary is converging: Kubernetes is integrating HPC capabilities (gang scheduling via Volcano/Kueue, topology-aware placement, RDMA bypass, and fair-share queues) to support large-scale distributed training, while HPC environments are incorporating containerization, declarative APIs, and dynamic service management. Organizations increasingly deploy hybrid architectures where outer Kubernetes control planes manage end-to-end pipelines and serving, orchestrating high-performance batch training clusters beneath.",
-            "learning_objective": "Explain how the convergence of cloud-native and HPC orchestration paradigms addresses modern AI training and serving needs."
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: In large-scale ML cluster management, maximizing raw GPU allocated utilization (the percentage of GPUs assigned to active containers) guarantees optimal economic value and research productivity.",
-            "answer": "False. Allocation measures reservation, whereas hardware activity can include communication, replay, or work that fails the quality target. Productive utilization ties retained training progress or SLO-meeting serving work to a declared reference rate. Economic value additionally depends on price, completion delay, fairness, and recovery or serving headroom; maximizing one unlabeled utilization or goodput metric does not establish the best fleet policy.",
-            "learning_objective": "Explain why fleet efficiency requires workload progress, declared measurement boundaries, and service objectives beyond raw allocation."
-          }
-        ]
+        "quiz_needed": false,
+        "rationale": "Summary sections recap the chapter; the body and fallacy quizzes already test this material, and a quiz here would render after the chapter connection."
       }
     }
   ]
