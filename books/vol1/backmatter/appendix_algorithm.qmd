@@ -44,7 +44,7 @@ Neural networks turn linear algebra into learned behavior. Matrices transform ac
 
 ## Linear Algebra {#sec-appdx-algorithm-foundations-linear-algebra-c937}
 
-Most of the compute in a deep learning system is matrix multiplication. Frameworks such as PyTorch hide the raw math, but performance engineering still depends on the underlying linear algebra. Building on how numbers are stored in @sec-appdx-machine-foundations-numerical-representations-c889, this section focuses on how they are manipulated.
+Shrinking a square matrix multiply from dimension 4,096 to 64 drops its arithmetic intensity more than tenfold below an H100's ridge point, turning a compute-bound layer into a bandwidth-bound stall without changing a line of model logic. Most of the compute in a deep learning system is matrix multiplication, and although frameworks such as PyTorch hide the raw math, performance engineering still depends on the underlying linear algebra. Building on how numbers are stored in @sec-appdx-machine-foundations-numerical-representations-c889, this section focuses on how they are manipulated.
 
 ```{=latex}
 \vspace*{-1ex}
@@ -57,7 +57,7 @@ Many dense neural networks, especially transformers and large convolutional neur
 
 ### Tensor operations and einsum notation {#sec-appdx-algorithm-foundations-tensor-operations-notation-2758}
 
-Einstein summation[^fn-einsum-tensor-contraction] notation makes tensor contractions explicit throughout this book (implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy). Matrix multiplication $\GemmOutputMatrix= \GemmLeftOperand\GemmRightOperand$ becomes:
+When a tensor operation contracts across batch, head, sequence, and hidden dimensions at once, nested loop indices and transpose calls obscure which axis is summed and which axes remain in the output. Einstein summation[^fn-einsum-tensor-contraction] notation makes those contractions explicit in a single index string (implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy). Matrix multiplication $\GemmOutputMatrix= \GemmLeftOperand\GemmRightOperand$ becomes:
 $$ \GemmOutputEntry = \sum_k \GemmLeftOperandEntry \GemmRightOperandEntry $$
 
 [^fn-einsum-tensor-contraction]: **Einstein summation convention**\index{Einstein summation convention!definition}: Repeated indices in a product are implicitly summed over, eliminating explicit summation signs. ML frameworks adopted the convention because it concisely expresses arbitrary tensor contractions in a single string.
@@ -66,13 +66,13 @@ In einsum notation, this is `ik,kj->ij`. The same notation handles batched multi
 
 ### The dot product as similarity {#sec-appdx-algorithm-foundations-dot-product-similarity-7957}
 
-The dot product\index{Dot product!appendix refresher} $\InnerProductLeftVector\cdot \InnerProductRightVector= \sum \InnerProductLeftComponent_i \InnerProductRightComponent_i$ is geometrically equivalent to $\|\InnerProductLeftVector\| \|\InnerProductRightVector\| \cos \VectorAngle$, which makes it a natural measure of similarity between two vectors: for nonzero vectors, its sign distinguishes acute, right, and obtuse angles, while its magnitude also depends on both vector norms.
+Comparing two token embeddings or feature vectors requires a scalar score that grows when the vectors point in the same direction and shrinks when they are orthogonal. The dot product\index{Dot product!appendix refresher} $\InnerProductLeftVector\cdot \InnerProductRightVector= \sum \InnerProductLeftComponent_i \InnerProductRightComponent_i$ provides that score because it equals $\|\InnerProductLeftVector\| \|\InnerProductRightVector\| \cos \VectorAngle$: for nonzero vectors, its sign distinguishes acute, right, and obtuse angles, while its magnitude also depends on both vector norms.
 
 In attention mechanisms, query ($\AttentionQueryMatrix$) and key ($\AttentionKeyMatrix$) vectors are dot-produced to compute a similarity score that determines how much each token attends to every other token. The resulting attention weights are then used to form a weighted combination of value ($\AttentionValuesMatrix$) vectors, so every token can draw on every other token. @Sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df develops attention itself, including the cost of computing one score for every query-key pair.
 
 ### General matrix multiply (GEMM) {#sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d}
 
-Most training and inference FLOPs are GEMMs.[^fn-gemm-blas-routines] For matrices of size $\GemmRowDimension{\times}\GemmInnerDimension$ and $\GemmInnerDimension{\times}\GemmColumnDimension$, GEMM performs $2\GemmRowDimension \GemmColumnDimension \GemmInnerDimension$ floating-point operations (multiply-accumulate counts as two operations).
+Whether a dense layer saturates an accelerator's Tensor Cores or stalls on memory bandwidth depends on the three dimensions of its matrix multiply. Most training and inference FLOPs execute as general matrix multiplies (GEMMs):[^fn-gemm-blas-routines] for matrices of size $\GemmRowDimension{\times}\GemmInnerDimension$ and $\GemmInnerDimension{\times}\GemmColumnDimension$, a GEMM performs $2\GemmRowDimension \GemmColumnDimension \GemmInnerDimension$ floating-point operations (counting multiply-accumulate as two operations).
 
 [^fn-gemm-blas-routines]: **General matrix multiply (GEMM)**\index{GEMM!appendix refresher}: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine [@dongarra1988]. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\GemmOutputMatrix= \GemmProductScale\GemmLeftOperand\GemmRightOperand+ \GemmAccumulatorScale\GemmOutputMatrix$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
 
@@ -212,7 +212,7 @@ A shape mismatch crash, a silently wrong broadcast, and a kernel running at 5 pe
 
 ### Shapes, strides, and memory layout {#sec-appdx-algorithm-foundations-shapes-strides-1aea}
 
-A tensor\index{Tensor!appendix refresher} is a view over an underlying storage buffer, described by shape, stride, dtype, and offset metadata. Its shape specifies the dimensions of the tensor (for example, `(3, 4)`), while its stride defines the number of elements to skip in memory to move to the next element along each dimension. Only contiguous tensors lay their logical elements out as one adjacent block.
+Transposing a matrix in PyTorch takes microseconds because it copies no bytes, yet the kernel that consumes the transposed view can run an order of magnitude slower or fail outright when its elements are no longer adjacent in memory. That behavior follows from how frameworks represent a tensor\index{Tensor!appendix refresher}: as a view over an underlying storage buffer, described by shape, stride, dtype, and offset metadata. Its shape specifies the dimensions of the tensor (for example, `(3, 4)`), while its stride defines the number of elements to skip in memory to move to the next element along each dimension, so only contiguous tensors lay their logical elements out as one adjacent block.
 
 Operations like `transpose()` or `view()` often just change the strides, not the data in memory. This is fast ($\mathcal{O}(1)$) but can lead to noncontiguous tensors that fail in kernels requiring contiguous data. In such cases, calling `contiguous()` on a tensor of $\TensorElementCount$ elements forces an $\mathcal{O}(\TensorElementCount)$ memory copy that can dominate runtime if triggered repeatedly inside a loop.
 
@@ -222,7 +222,7 @@ A common optimization pattern is to materialize a transposed tensor once before 
 
 ### Broadcasting {#sec-appdx-algorithm-foundations-broadcasting-ec16}
 
-**Broadcasting**\index{Broadcasting!definition} allows arithmetic operations on tensors of different shapes by comparing dimensions from right to left. Two dimensions are compatible when they are equal or when one of them is 1.
+Adding a $(\BatchSize, 1)$ column vector of predictions to a $(\BatchSize,)$ row vector of targets does not fail with a shape error; it silently allocates a $(\BatchSize, \BatchSize)$ matrix that can exhaust memory or corrupt a loss calculation. **Broadcasting**\index{Broadcasting!definition} is the rule that governs such implicit expansions, allowing arithmetic operations on tensors of different shapes by comparing dimensions from right to left: two dimensions are compatible when they are equal or when one of them is 1.
 
 Adding a $(3, 1)$ column tensor ($\BroadcastColumnTensor$) to a $(1, 4)$ row tensor ($\BroadcastRowTensor$) expands both virtually across their complementary singleton dimensions and generates a $(3, 4)$ matrix of pairwise sums $\BroadcastColumnElement_i + \BroadcastRowElement_j$ (@fig-broadcasting-rules). Dashed cell boundaries mark result elements whose operands are read through stride-0 views, so neither input is copied; only the $(3, 4)$ output is allocated, and hardware repeatedly accesses identical input buffer addresses.
 
@@ -236,7 +236,7 @@ Shapes, strides, and broadcasting govern how tensors flow through a model's forw
 
 ## Mechanics of Learning {#sec-appdx-algorithm-foundations-mechanics-learning-24f6}
 
-This section follows the resulting gradient signal from the chain rule through backpropagation to the memory it holds, the graphs that compilers optimize, and the numerically stable softmax at the loss.
+Training a neural network takes roughly three times the compute of a forward pass and holds gigabytes of intermediate activations in memory until the backward sweep consumes them. This section traces how the chain rule and reverse-mode automatic differentiation create that compute and memory footprint, how compilers fuse the resulting computational graph, and how the log-sum-exp shift prevents the softmax at the loss from overflowing in reduced precision.
 
 ::: {#psp-appendix-algorithm-backpropagation-matters .callout-perspective title="Why this matters"}
 
@@ -463,7 +463,7 @@ The dependency structure exposed by backpropagation also gives compilers somethi
 
 #### Static single assignment {#sec-appdx-algorithm-foundations-static-single-assignment-9e88}
 
-Compilers transform graphs into static single-assignment (SSA) form\index{Static single assignment!appendix refresher}, where each variable is assigned exactly once. This makes data dependencies explicit, enabling safe optimizations, most notably operator fusion\index{Operator fusion!appendix refresher}.
+When a program overwrites the same tensor variable in place across several steps, a compiler cannot safely reorder or fuse those steps without proving which writes each read depends on. Compilers remove that ambiguity by transforming graphs into static single-assignment (SSA) form\index{Static single assignment!appendix refresher}, where each variable is assigned exactly once, making data dependencies explicit and enabling safe optimizations such as operator fusion\index{Operator fusion!appendix refresher}.
 
 #### Operator fusion {#sec-appdx-algorithm-foundations-operator-fusion-5d73}
 
@@ -633,7 +633,7 @@ Softmax: `{python} LogSumExp.sm_math`
 
 ## Derivations {#sec-appdx-algorithm-foundations-derivations-4b1d}
 
-Three results recur across the book as stated facts: a full gradient costs a small constant multiple of the forward pass, tiled attention cuts memory traffic without changing its output, and a fixed compute budget has a best split between parameters and training tokens. Each subsection states one result, proves it, and closes on the systems consequence that the chapters rely on, so a reader can check the derivation without interrupting a chapter's argument.
+Without a constant-factor bound on reverse-mode differentiation, training a 175-billion-parameter model would require 175 billion forward passes per step; without an online softmax recurrence, attention would have to materialize an $\SequenceLength \times \SequenceLength$ matrix in HBM; and without a constrained-optimum derivation, a fixed compute budget could be wasted on an oversized model starved of tokens. Each subsection below states one of these three results, proves it, and closes on the systems consequence that the chapters rely on.
 
 ### Cost of reverse-mode differentiation {#sec-appdx-algorithm-baur-strassen}
 
@@ -834,7 +834,7 @@ Multiplying Equation (1) by $\Parameters$ and Equation (2) by $\DatasetSize$ giv
 $$ \ParameterScalingExponent \ParameterScaleCoefficient \Parameters^{-\ParameterScalingExponent} = 6 \ComputeConstraintMultiplier \Parameters \DatasetSize, $$
 $$ \DataScalingExponent \DataScaleCoefficient \DatasetSize^{-\DataScalingExponent} = 6 \ComputeConstraintMultiplier \Parameters \DatasetSize. $$
 
-Equating these expressions yields the fundamental power-law optimality condition:
+Equating these expressions yields the power-law optimality condition:
 $$ \ParameterScalingExponent \ParameterScaleCoefficient \Parameters^{-\ParameterScalingExponent} = \DataScalingExponent \DataScaleCoefficient \DatasetSize^{-\DataScalingExponent}. $$
 
 This condition states that at the compute-optimal allocation, the marginal loss reduction per fractional increase in parameter count must equal the marginal loss reduction per fractional increase in dataset tokens.
