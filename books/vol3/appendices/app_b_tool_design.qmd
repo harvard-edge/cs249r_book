@@ -18,7 +18,7 @@ Select the section that matches the observed failure at the tool boundary.
 
 ## Schema Rules for Tool Definitions {#sec-vol3-app-b-json-schema}
 
-A tool schema has two readers. The model uses its names and descriptions to propose arguments; the runtime validates the proposal before considering a grant (@sec-vol3-tool-calling-schemas). A description can communicate intent without enforcing it. The distinction between assertions and annotations in the JSON Schema validation specification [@wright2022jsonschemavalidation] supports five checks on this boundary:
+Writing "path must stay inside the workspace" in a tool description tells the model what to propose, but leaves an unvalidated `../` traversal free to pass unless the schema and runtime enforce the constraint. Because a tool schema has two readers—the model uses its names and descriptions to propose arguments, and the runtime validates the proposal before considering a grant (@sec-vol3-tool-calling-schemas)—a description can communicate intent without enforcing it. The distinction between assertions and annotations in the JSON Schema validation specification [@wright2022jsonschemavalidation] supports five checks on this boundary:
 
 - Close each fixed argument object with `additionalProperties: false`, so the validator rejects undeclared fields rather than silently forwarding them. A constrained decoder can enforce the same restriction only when its supported schema subset includes it.
 - Put mandatory fields in `required`. An optional field needs explicit absence semantics; the `default` annotation does not insert a missing value during validation [@jsonschemaUnderstanding]. Any defaulting step is part of the runtime's argument-normalization contract.
@@ -92,7 +92,7 @@ Tools adapted from existing service interfaces often carry patterns that suit a 
 
 The last row can matter for latency when generated output lies on the critical path (@sec-vol3-foundation-model-cost). A whole-file rewrite pays decode time for every unchanged line, and @sec-vol3-foundation-model-interface-design works an example in which the rewrite misses a per-call deadline that an anchored diff meets. Exact replacement has its own cost when the selected anchor is ambiguous or stale; the right representation depends on the edits the workload requires.
 
-## Architectural Criteria for Constrained Decoding {#sec-vol3-app-b-logit-masking}
+## When Constrained Decoding Pays for Itself {#sec-vol3-app-b-logit-masking}
 
 A model that samples freely can emit malformed arguments. Under a supported grammar and correct masking, a generation that reaches an accepting completion belongs to that grammar; truncation or interruption does not supply a complete valid call (@sec-vol3-foundation-model-grammar-constrained, @sec-vol3-appendix-math-dfa). @Sec-vol3-appendix-inference-decode-loop develops mask placement and storage. Here the narrower question is whether masking overhead is lower than the expected latency of one repair under a stipulated comparison.
 
@@ -120,13 +120,13 @@ Operation identity and authorization solve different problems. An idempotency ke
 
 ### Retaining operation identity
 
-Assign an identifier to the intended operation and retain it across retries and recovery. A fresh transport attempt can have a new call identifier while referring to the same operation. Conversely, two separately intended operations may have identical arguments and still need distinct identities. Deriving an identifier from recorded inputs or storing a generated identifier are both possible; either method requires enough durable state to recover the same identity after a crash.
+Generating a fresh UUID inside a retry loop makes every network timeout look like a brand-new mutation to the receiving endpoint. Instead, the runtime must assign an identifier to the intended operation and retain it across retries and recovery. A fresh transport attempt can have a new call identifier while referring to the same operation. Conversely, two separately intended operations may have identical arguments and still need distinct identities. Deriving an identifier from recorded inputs or storing a generated identifier are both possible; either method requires enough durable state to recover the same identity after a crash.
 
 The endpoint binds this identity to the authorized scope and request payload and rejects conflicting reuse. If canonical serialization is used to compare payloads, its rules must match at both ends. Identity does not authorize the request, and hashing arguments alone cannot distinguish an intentional second operation from a retry.
 
 ### The endpoint contract
 
-A useful status model distinguishes an unseen operation, work in flight, a completed operation with a retained result, and an operation whose effect is in doubt. These states describe the required behavior, not a complete implementation:
+When a retried request arrives with the same operation ID, an endpoint that only returns "success" or "error" cannot tell the caller whether the first attempt is still running or failed partway through. A useful status model distinguishes an unseen operation, work in flight, a completed operation with a retained result, and an operation whose effect is in doubt. These states describe the required behavior, not a complete implementation:
 
 1. **Admission.** Claim the operation under the endpoint's concurrency and durability contract, checking scope and payload consistency.
 2. **In flight.** A repeated request must not start an independent execution of the same effect. It can obtain status or wait under the endpoint's defined limits.
@@ -141,7 +141,7 @@ A reconciliation probe supplies scoped evidence. Finding the pre-dispatch state 
 
 ### The capability check
 
-The tuple $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
+An idempotency key prevents duplicate execution of the same request, but does not check whether the caller is allowed to touch the target object in the first place. The capability tuple $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes the rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$ that govern access. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
 
 For delegation, let $\GrantAllowedAccesses(\CapabilityGrant)$ denote the accesses a grant permits. A derived child must satisfy
 
