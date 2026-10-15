@@ -68,7 +68,7 @@ Computation scales by adding processors; communication scales by moving data bet
 
 When 10,000 GPUs cooperate on one training update, the splits created by data, tensor, pipeline, and expert parallelism determine which results must cross device boundaries. Workers execute collective operations within participating groups and point-to-point transfers between pipeline stages. In the multi-tier fleet stack of @fig-fleet-stack, these exchanges occupy the Distributed Execution row of the Distribution band, where logical parallelism becomes physical traffic.
 
-Every such split assumes that replicas, shards, stages, and experts can exchange gradients, activations, parameters, and tokens quickly enough for the optimizer to see one coherent training run. In data parallelism, each worker holds a full copy of the model and processes its own slice of the batch, so the copies must agree on one combined gradient before every update; tensor, pipeline, and expert parallelism divide the model itself, so partial results must cross device boundaries within each step. Each of these exchanges is charged to the Fleet Law's communication term $\CommunicationTime(\DeviceCount)$. Every way of splitting the model relocates work onto the network, and this chapter turns those exchanges into schedules whose latency, bandwidth, and topology costs can be computed.
+Every such split assumes that replicas, shards, stages, and experts can exchange gradients, activations, parameters, and tokens quickly enough for the optimizer to see one coherent training run. In data parallelism, each worker holds a full copy of the model and processes its own slice of the batch, so the copies must agree on one combined gradient before every update; tensor, pipeline, and expert parallelism divide the model itself, so partial results must cross device boundaries within each step. Each of these exchanges is charged to the Fleet Law's communication term $\CommunicationTime(\DeviceCount)$, and the part of it not hidden behind computation is a program goodput loss (@sec-performance-engineering-iron-law). Every way of splitting the model relocates work onto the network, and this chapter turns those exchanges into schedules whose latency, bandwidth, and topology costs can be computed.
 
 ::: {.column-margin .margin-pointer}
 ↪ The partitioning strategies themselves, and the 3D parallelism cube that composes data, pipeline, and tensor parallelism into one configuration space, are developed in @sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4.
@@ -476,109 +476,15 @@ class AllReduceCost:
     halved_saving_gpu_hours_str = fmt_int(round(halved_saving_gpu_hours, -2), commas=True)
 ```
 
-The opening ring budget shows why data movement can become the governing constraint at scale. A single AllReduce on a 70B model's gradients consumes seconds of wall-clock time, which becomes exposed delay when no independent computation overlaps it, and a training campaign repeats it at every step, so a seemingly modest improvement to the collective repays itself many times over. That budget is one instance of the network wall that @sec-introduction-communication-becomes-dominant-e1b6 established, in which exposed communication takes a growing share of each step as a fixed workload spreads across more devices. @Fig-compute-comm-timeline charts that trend for illustrative tiers from 8 to 4,096 GPUs, where compute falls from 75 percent of the step to 20 percent. The fractions are assumed regimes rather than measurements; gradient size, local batch size, partition topology, and asynchronous overlap determine where the critical path actually lies.
+The opening ring budget is one instance of the network wall that @sec-introduction-communication-becomes-dominant-e1b6 established, in which exposed communication takes a growing share of each step as a fixed workload spreads across more devices. How large that share becomes depends on gradient size, local batch size, partitioning, and overlap, so the critical path must be measured at each scale.
 
-::: {#fig-compute-comm-timeline fig-env="figure" fig-pos="htb" fig-cap="**The compute-communication timeline**: Illustrative fractions show how exposed communication and synchronization can take a growing share of a training step as a fixed workload spreads across more devices. The fractions are assumed scenarios, not measurements or predictions for a particular model or cluster; they motivate measuring the critical path at each scale." fig-alt="Stacked horizontal bars for 8, 64, 512, and 4,096 GPUs, each split into blue compute, amber communication, and gray sync or idle segments labeled with percentages: 75, 25, 0; 45, 50, 5; 32, 58, 10; and 20, 65, 15. Thin connector lines and a pale amber band link the communication segments from bar to bar, showing compute shrinking and communication widening."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMPUTE-COMM TIMELINE (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-compute-comm-timeline—communication overhead at scale
-# │
-# │ Goal: Stacked barh of compute/comm/sync at 8/64/512/4096 GPUs; show
-# │       comm growing 25%→65%; NVLink vs InfiniBand domains.
-# │ Show: Four horizontal stacks; percentage labels; annotations.
-# │ How: compute_pct, comm_pct, sync_pct; barh; book_style.setup_plot().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Stacked barh of compute/comm/sync at 8/64/512/4096 GPUs; show
-import numpy as np
-import matplotlib.pyplot as plt
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.8, 3.7))
-
-# ┌── 2. COMPUTE FRACTIONS ─────────────────────────────────────────────────────
-# Assumed teaching scenarios, not hardware measurements. Each row sums to 100.
-gpu_counts_num = [8, 64, 512, 4096]
-
-compute_pct = [75, 45, 32, 20]
-comm_pct = [25, 50, 58, 65]
-sync_pct = [0, 5, 10, 15]
-
-gpu_counts_labels = ['8 GPUs\n(1 node)', '64 GPUs\n(8 nodes)', '512 GPUs\n(64 nodes)', '4,096 GPUs\n(512 nodes)']
-y_pos = np.arange(len(gpu_counts_num))
-bar_height = 0.56
-
-# Compute (blue) and communication (amber) match the chapter SVG roles;
-# sync/idle is subordinate time, so it is a desaturated neutral, not red.
-seg_style = dict(height=bar_height, edgecolor='white', linewidth=1.2, zorder=3)
-comm_left = list(compute_pct)
-sync_left = [c + m for c, m in zip(compute_pct, comm_pct)]
-ax.barh(y_pos, compute_pct, color=COLORS['BlueLine'], **seg_style)
-ax.barh(y_pos, comm_pct, left=comm_left, color=COLORS['OrangeLine'], **seg_style)
-ax.barh(y_pos, sync_pct, left=sync_left, color=COLORS['secondary'], **seg_style)
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-# Thin connectors trace each boundary from tier to tier, so the compute share
-# visibly contracts while communication widens; the gap between consecutive
-# bars is tinted with the communication hue to make that band continuous.
-half = bar_height / 2
-for i in range(len(y_pos) - 1):
-    y0, y1 = y_pos[i] + half, y_pos[i + 1] - half
-    ax.fill([comm_left[i], sync_left[i], sync_left[i + 1], comm_left[i + 1]], [y0, y0, y1, y1], color=COLORS['OrangeL'], lw=0, zorder=1)
-    for xs in ((comm_left[i], comm_left[i + 1]), (sync_left[i], sync_left[i + 1])):
-        ax.plot(xs, (y0, y1), color=COLORS['secondary'], lw=0.8, zorder=2)
-
-lab = dict(ha='center', va='center', fontweight='bold', color='white', zorder=4)
-for i in range(len(y_pos)):
-    last = i == len(y_pos) - 1
-    ax.text(compute_pct[i] / 2, i, f'{compute_pct[i]}%', fontsize=11.5, **lab)
-    ax.text(comm_left[i] + comm_pct[i] / 2, i, f'{comm_pct[i]}%', fontsize=11.5, **lab)
-    if sync_pct[i] > 0:
-        ax.text(
-            sync_left[i] + sync_pct[i] / 2,
-            i,
-            (f'Sync/idle\n{sync_pct[i]}%' if last else f'{sync_pct[i]}%'),
-            fontsize=10.5 if sync_pct[i] < 10 else 11.5,
-            **lab,
-        )
-
-# Direct segment names above the first bar replace a legend.
-top = y_pos[0] - half - 0.08
-ax.text(compute_pct[0] / 2, top, 'Compute', ha='center', va='bottom', fontsize=12, fontweight='bold', color=COLORS['BlueLine'])
-ax.text(comm_left[0] + comm_pct[0] / 2, top, 'Communication', ha='center', va='bottom', fontsize=12, fontweight='bold', color=COLORS['OrangeLine'])
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_yticks(y_pos)
-ax.set_yticklabels(gpu_counts_labels, fontsize=11.5)
-ax.tick_params(axis='y', length=0)
-ax.tick_params(axis='x', labelsize=11)
-ax.set_xlabel('Share of training step (%)', fontsize=12)
-ax.set_xlim(0, 100)
-ax.set_xticks([0, 25, 50, 75, 100])
-ax.grid(False)
-ax.invert_yaxis()
-for side in ('top', 'right', 'left'):
-    ax.spines[side].set_visible(False)
-
-plt.tight_layout()
-plt.show()
-plt.close()
-```
-
-:::
-
-## The Gradient's Travel Manifest {#sec-communication-parallelism-patterns}
+## Parallelism Strategies and Their Traffic {#sec-communication-parallelism-patterns}
 
 Data movement begins as gradients become ready during the backward pass. A synchronous data-parallel worker computes gradients from its local batch, and the optimizer requires the combined global contributions before applying the parameter update. Some exchanges can begin while independent backward computation continues. Tensor ownership determines the destination; gradient readiness determines when transfers can start.
 
-The travel manifest for this exchange is dictated by the chosen parallelism strategy, because the mathematical decomposition determines which tensors must cross device boundaries. For Archetype A (GPT-4/Llama-3), dense gradient contributions are combined within each data-parallel group; in a hybrid layout, that group contains the matching parameter shard from each replica. AllReduce serves the replicated-gradient baseline. For Archetype B (DLRM at Scale),[^fn-dlrm-embedding-alltoall] lookup requests travel to embedding-shard owners and the resulting vectors return to the workers that need them. Mixture-of-experts (MoE)\index{MoE!token routing} routing similarly sends activations to the ranks hosting selected experts and returns their outputs. These destination-specific exchanges motivate AllToAll.
+Which tensors travel, and between which ranks, is dictated by the chosen parallelism strategy, because the mathematical decomposition determines which tensors must cross device boundaries. For Archetype A (GPT-4/Llama-3), dense gradient contributions are combined within each data-parallel group; in a hybrid layout, that group contains the matching parameter shard from each replica. AllReduce serves the replicated-gradient baseline. For Archetype B (DLRM at Scale),[^fn-dlrm-embedding-alltoall] lookup requests travel to embedding-shard owners and the resulting vectors return to the workers that need them. Mixture-of-experts (MoE)\index{MoE!token routing} routing similarly sends activations to the ranks hosting selected experts and returns their outputs. These destination-specific exchanges motivate AllToAll.
 
-[^fn-dlrm-embedding-alltoall]: [offset=6mm] **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction uses sharded embedding tables and exchanges the resulting sparse lookups across workers. The resulting AllToAll may be startup-bound when each destination receives a fine-grained message, injection- or reception-bound as aggregate payload grows, or fabric-bound under oversubscription, unfavorable routing, or shard-access skew. DLRM therefore supplies a destination-specific traffic pattern, not a universal latency regime.
+[^fn-dlrm-embedding-alltoall]: [offset=6mm] **DLRM (Deep Learning Recommendation Model)**\index{DLRM!AllToAll}: Meta's 2019 architecture for click-through rate prediction uses sharded embedding tables and exchanges the resulting sparse lookups across workers, an AllToAll whose limiting term @sec-communication-alltoall develops.
 
 ::: {.column-margin .margin-pointer}
 ↩ The three lighthouse archetypes and the C³ regimes each one stresses are established in @sec-vol2-introduction-archetypes.
@@ -588,7 +494,7 @@ At large scale, these parallelism strategies can be combined. A 3D parallelism\i
 
 Each primitive operates on a different process group\index{Process Group}, a subset of the total GPU population that participates in that particular collective. Classical Message Passing Interface (MPI) uses a communicator\index{MPI!communicator} as the object that names such a participating set; its communicator size is the number of ranks in that set. MPI libraries already selected collective algorithms based on communicator size and message size [@thakur2005]. GPU communication libraries inherit that algorithm-selection problem and add the further challenge of coordinating overlapping process groups without creating contention between concurrent collectives.
 
-@Tbl-parallelism-communication-mapping maps each parallelism strategy to the data it must move, the collective primitive that moves it, and the term most likely to bind. The table acts as a traffic map that specifies which participants must exchange data. The network transfer model then prices those exchanges, and the collective algorithms that follow provide execution schedules.
+@Tbl-parallelism-communication-mapping maps each parallelism strategy to the data it must move, the collective primitive that moves it, and the term most likely to bind. The table acts as a traffic map that specifies which participants must exchange data. The collective primitives that follow make each exchange's contract precise, the pricing model then charges it per round, and the collective algorithms provide its execution schedule.
 
 | **Parallelism Strategy**      | **What Must Move**                         |   **Primary Primitive**    |            **Primary Constraint**            |
 |:------------------------------|:-------------------------------------------|:--------------------------:|:--------------------------------------------:|
@@ -600,15 +506,15 @@ Each primitive operates on a different process group\index{Process Group}, a sub
 | **Expert Parallelism (MoE)**  | Tokens to the ranks hosting their experts  |          AllToAll          |    Startup, injection/bisection, or skew     |
 | **Embedding Sharding (DLRM)** | Embedding lookups to and from shard owners |          AllToAll          |    Granularity, fabric capacity, or skew     |
 
-: **The Travel Manifest**: How each parallelism strategy becomes a traffic pattern. Pipeline parallelism alone relies on point-to-point transfers rather than a collective. {#tbl-parallelism-communication-mapping tbl-colwidths="[21,33,20,26]"}
+: **Parallelism-to-Collective Mapping**: How each parallelism strategy becomes a traffic pattern. Pipeline parallelism alone relies on point-to-point transfers rather than a collective. {#tbl-parallelism-communication-mapping tbl-colwidths="[21,33,20,26]"}
 
 In this table, expert parallelism refers to the mixture-of-experts\index{MoE!communication} architecture pattern, in which each token activates only a few experts. The mapping shows that different parallelism strategies impose fundamentally different communication patterns. Data parallelism and fully sharded data parallel (FSDP), which divides each replica's parameters, gradients, and optimizer state across the data-parallel ranks, commonly generate large messages that benefit from ring-based algorithms and hierarchical decomposition. Tensor and pipeline parallelism generate smaller, more frequent messages whose cost sits on the critical path, so low-overhead software stacks and fast local links matter. Expert parallelism and sharded embedding tables generate destination-specific traffic whose limiting term depends on message granularity, endpoint injection and reception, fabric bisection, oversubscription, routing, and skew.
 
-The manifest's rows describe data center parallelism, so they leave out the federated Archetype C. Across all three lighthouse archetypes, the dominant exchange and its bottleneck differ.
+The table's rows describe data center parallelism, so they leave out the federated Archetype C. Across all three lighthouse archetypes, the dominant exchange and its bottleneck differ.
 
 ::: {#lhs-collective-communication-communication-archetype-patterns .callout-lighthouse title="Communication archetype patterns"}
 
-The travel manifest for a gradient depends on the system's objective function and constraint regime. Each lighthouse archetype faces a distinct communication challenge, and the techniques developed in this chapter map to those challenges differently, as @tbl-archetype-collective-mapping summarizes.
+A gradient's communication pattern depends on the system's objective function and constraint regime. Each lighthouse archetype faces a distinct communication challenge, and the techniques developed in this chapter map to those challenges differently, as @tbl-archetype-collective-mapping summarizes.
 
 | **Archetype**                         |             **Primary Collective**             |         **Candidate Limiter**         | **Optimization Strategy**                                   |
 |:--------------------------------------|:----------------------------------------------:|:-------------------------------------:|:------------------------------------------------------------|
@@ -622,452 +528,7 @@ The table separates traffic pattern from limiting resource. A dense reduction, a
 
 :::
 
-Choosing among those interventions requires pricing each exchange, and pricing requires a model of network performance.
-
-## Network Performance Modeling {#sec-communication-collective-operations-collective-operations-network-performance-modeling-0d8e}
-
-Predicting transfer duration across a cluster requires separating two physical variables: the time required to initiate a message and the rate at which data moves once in transit. Across a data center fabric, these two terms govern communication latency and throughput differently depending on message size, network topology, and software overhead.
-
-### The alpha-beta cost model for network transfers {#sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4}
-
-The $\MessageStartupLatency$-$\LinkBandwidth$ model\index{Hockney Model!latency and bandwidth} $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$ prices a transfer over a single link (principle \ref{pri-alpha-beta-model}), separating a fixed startup cost ($\MessageStartupLatency$) from a per-byte transfer cost ($\PointToPointMessageSize/\LinkBandwidth$) [@hockney1994]. A collective pays that price at every step of its schedule, so the two terms, multiplied by the schedule's round count and traffic factor, determine algorithm selection across the fleet.
-
-::: {.column-margin .margin-pointer}
-↩ The $\MessageStartupLatency$-$\LinkBandwidth$ model for a single link and its latency-dominated and bandwidth-dominated regimes are established in @sec-network-fabrics-performance-model.
-:::
-
-::: {.column-margin .margin-pointer}
-↪ Worked message-size regimes and crossover calculations for this model are developed in @sec-appdx-comm-foundations-alpha-beta.
-:::
-
-For collectives, the parameters must describe the effective path. Latency ($\MessageStartupLatency$) is the startup cost paid at every step of a schedule, so it includes recurring software overhead, PCIe\index{PCIe}\index{Peripheral Component Interconnect Express|see{PCIe}} traversal, and network switching time; one-time communicator initialization is a separate setup cost. Bandwidth ($\LinkBandwidth$) is the sustained per-direction transfer rate. The critical message size\index{Critical Message Size} $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, where the two terms are equal, carries over unchanged, but a collective changes what must be compared with it. Each step of a schedule transfers a chunk rather than the whole tensor, and a ring over $\DeviceCount$ ranks moves $\CollectivePayloadSize/\DeviceCount$ bytes per step. A bucket of tens of megabytes split across a thousand ranks therefore yields chunks of tens of kilobytes, below the inter-node crossovers in @tbl-interconnect-parameters, even though the bucket itself is far above them. Below $\LatencyBandwidthCrossoverSize$, a step is latency-bound\index{Latency!bound}; above it, bandwidth-bound\index{Bandwidth!bound}.
-```{python}
-#| echo: false
-#| label: collective-message-fusion
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MESSAGE FUSION ON NDR (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The crossover explains two recurring optimizations" paragraph.
-# │ Goal: Price 100 separate small messages vs. one fused message on NDR.
-# │ How: n* = alpha·beta with alpha = Systems.SwitchFabric.AlphaNdr (the
-# │      chapter's canonical NDR alpha) and beta = InfiniBand_NDR bandwidth;
-# │      T_sep = k·alpha (bandwidth term negligible); T_fused = alpha + k·n/beta.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_time
-
-class MessageFusion:
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    alpha = Systems.SwitchFabric.AlphaNdr
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    small_msg = 4 * KB  # scenario assumption: MoE routing message
-    n_msgs = 100  # scenario assumption: messages fused into one
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    n_star = (alpha * beta).to(KB)
-    fused_msg = n_msgs * small_msg
-    t_separate = (n_msgs * alpha).to(microsecond)
-    t_fused = (alpha + fused_msg / beta).to(microsecond)
-    speedup = (t_separate / t_fused).to_base_units().magnitude
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(small_msg < n_star / 10, "Routing message must sit far below n*")
-    check(fused_msg > n_star, "Fused message should cross into the bandwidth-bound regime")
-    check(n_msgs == 100, "Prose math writes the separate-message cost as 100α")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
-    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
-    n_star_kb_str = fmt_memory(n_star, unit=KB, precision=0, commas=False)
-    small_msg_kb_str = fmt_memory(small_msg, unit=KB, precision=0, commas=False)
-    n_msgs_str = fmt(n_msgs, precision=0, commas=False)
-    fused_msg_kb_str = fmt_memory(fused_msg, unit=KB, precision=0, commas=False)
-    t_separate_us_str = fmt_time(t_separate, microsecond, precision=0, commas=False)
-    t_fused_us_str = fmt_time(t_fused, microsecond, precision=1, commas=False)
-    speedup_mult_str = fmt_multiple(round(speedup), precision=0, commas=False)
-```
-
-The crossover explains two recurring optimizations. For InfiniBand NDR at $\MessageStartupLatency\approx$ `{python} MessageFusion.alpha_us_str` and $\LinkBandwidth\approx$ `{python} MessageFusion.beta_gb_per_s_str`, the knee sits at $\LatencyBandwidthCrossoverSize \approx$ `{python} MessageFusion.n_star_kb_str`, the value @sec-network-fabrics-performance-model computed for a single transfer. A `{python} MessageFusion.small_msg_kb_str` routing message is far below $\LatencyBandwidthCrossoverSize$, so the startup cost dominates. If `{python} MessageFusion.n_msgs_str` ready messages have compatible destinations and can share one transfer, fusing them into a `{python} MessageFusion.fused_msg_kb_str` message\index{Message fusion!startup latency amortization} reduces the modeled cost from approximately $100\MessageStartupLatency=$ `{python} MessageFusion.t_separate_us_str` to $\MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth\approx$ `{python} MessageFusion.t_fused_us_str`, roughly a `{python} MessageFusion.speedup_mult_str` improvement before packing costs. More generally, $\SplitMessageCount$ serialized messages of size $\PointToPointMessageSize/\SplitMessageCount$ can cost up to $\SplitMessageCount\times$ as much as one message of size $\PointToPointMessageSize$ when $\PointToPointMessageSize/\SplitMessageCount\ll \LatencyBandwidthCrossoverSize$. Fusion is the first optimization, and it motivates framework gradient buckets and destination-aware token coalescing.
-
-Compression is the second, and the crossover tells where it pays. A `{python} GradSyncSignificance.gradient_gb_str` gradient tensor sits far above $\LatencyBandwidthCrossoverSize$, so shrinking its bytes shrinks the dominant $\PointToPointMessageSize/\LinkBandwidth$ term directly, provided encoding and aggregation costs are counted. Even keeping only the largest 1 percent of values (Top-k sparsification, developed in @sec-communication-collective-operations-collective-operations-gradient-compression-7a5c) leaves `{python} GradSyncSignificance.gradient_top1_gb_str` of values before their indices are added, still far above $\LatencyBandwidthCrossoverSize$, so the saving remains a byte saving. Compressing a `{python} MessageFusion.small_msg_kb_str` routing message, by contrast, offers little, because its unchanged $\MessageStartupLatency$ term already dominates.
-
-Across the typical data center interconnects tabulated in @tbl-interconnect-parameters, the critical-size column carries the load-bearing pattern: intra-node NVLink stays latency-bound up to several hundred kilobytes, whereas the inter-node fabrics cross over below roughly 100 KB. A message between those crossover sizes can therefore be latency-bound inside a node but bandwidth-bound once it travels between nodes.
-
-```{python}
-#| echo: false
-#| label: collective-communication-interconnect-parameters
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ INTERCONNECT ALPHA-BETA PARAMETERS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-interconnect-parameters and the crossover discussion above it.
-# │
-# │ Goal: Make the alpha-beta table internally consistent: beta comes from the
-# │       registry, and the critical-size column is COMPUTED from this table's
-# │       own alpha midpoints via calc_alpha_beta_crossover instead of being a
-# │       second set of hand-typed numbers that drifted from the rows.
-# │ Show: Effective collective-launch alpha ranges, registry bandwidths, and
-# │       the computed latency/bandwidth crossover size per interconnect.
-# │ How: Alpha ranges are EFFECTIVE collective-launch values (software stack
-# │      included) — pedagogical assumptions consistent with the chapter's
-# │      wire-vs-effective discussion; the registry holds wire latencies
-# │      (Tech.Interconnect, Fabrics) and two effective anchors
-# │      (SwitchFabric.AlphaNdr/AlphaRoce). Editor ruling 2026-09-28: AlphaNdr
-# │      is the canonical NDR alpha, so the NDR crossover uses it; the
-# │      per-fabric ranges stay here as documented LOAD assumptions.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_alpha_beta_crossover
-from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_qty_range, fmt_time
-
-class InterconnectAlphaBeta:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Effective collective-launch alpha ranges (scenario assumptions; see How)
-    nvlink_alpha_lo, nvlink_alpha_hi = 1 * microsecond, 2 * microsecond
-    ndr_alpha_lo, ndr_alpha_hi = 1 * microsecond, 3 * microsecond
-    hdr_alpha_lo, hdr_alpha_hi = 2 * microsecond, 5 * microsecond
-    pcie_alpha_lo, pcie_alpha_hi = 2 * microsecond, 5 * microsecond
-    roce_alpha_lo, roce_alpha_hi = 5 * microsecond, 10 * microsecond
-    # Registry bandwidths, all PER-DIRECTION deliverable rates (the beta in
-    # T(n) = alpha + n/beta). NVLink's datasheet 900 GB/s is the bidirectional
-    # total, so the alpha-beta beta is the 450 GB/s one-way rate — consistent
-    # with the per-port IB/PCIe/Ethernet figures in the other rows.
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    ndr_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
-    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
-    roce_bw = Systems.Fabrics.Ethernet_100G.bandwidth
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Crossover at the alpha midpoint of each range: n* = alpha * beta
-    nvlink_nstar = calc_alpha_beta_crossover((nvlink_alpha_lo + nvlink_alpha_hi) / 2, nvlink_bw)
-    # NDR row is anchored to the chapter's canonical NDR alpha (editor ruling
-    # 2026-09-28), not its range midpoint; the range stays as context.
-    ndr_alpha_anchor = Systems.SwitchFabric.AlphaNdr
-    ndr_nstar = calc_alpha_beta_crossover(ndr_alpha_anchor, ndr_bw)
-    hdr_nstar = calc_alpha_beta_crossover((hdr_alpha_lo + hdr_alpha_hi) / 2, hdr_bw)
-    pcie_nstar = calc_alpha_beta_crossover((pcie_alpha_lo + pcie_alpha_hi) / 2, pcie_bw)
-    roce_nstar = calc_alpha_beta_crossover((roce_alpha_lo + roce_alpha_hi) / 2, roce_bw)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(nvlink_nstar > 500 * KB, "NVLink crossover should be several hundred KB — intra-node stays latency-bound up to large messages")
-    check(ndr_alpha_lo <= ndr_alpha_anchor <= ndr_alpha_hi, "Registry NDR alpha must fall inside the tabulated NDR range")
-    check(max(ndr_nstar, hdr_nstar, roce_nstar) < 100 * KB, "Prose: inter-node fabrics cross over below roughly 100 KB")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    nvlink_alpha_range_str = fmt_qty_range(nvlink_alpha_lo, nvlink_alpha_hi, microsecond, precision=0, commas=False)
-    ndr_alpha_range_str = fmt_qty_range(ndr_alpha_lo, ndr_alpha_hi, microsecond, precision=0, commas=False)
-    ndr_alpha_anchor_us_str = fmt_time(ndr_alpha_anchor, microsecond, precision=1, commas=False)
-    hdr_alpha_range_str = fmt_qty_range(hdr_alpha_lo, hdr_alpha_hi, microsecond, precision=0, commas=False)
-    pcie_alpha_range_str = fmt_qty_range(pcie_alpha_lo, pcie_alpha_hi, microsecond, precision=0, commas=False)
-    roce_alpha_range_str = fmt_qty_range(roce_alpha_lo, roce_alpha_hi, microsecond, precision=0, commas=False)
-    nvlink_bw_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
-    nvlink_bidir_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
-    ndr_bw_str = fmt_bandwidth(ndr_bw, unit=GB / second, precision=0, commas=False)
-    hdr_bw_str = fmt_bandwidth(hdr_bw, unit=GB / second, precision=0, commas=False)
-    pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
-    roce_bw_str = fmt_bandwidth(roce_bw, unit=GB / second, precision=1, commas=False)
-    nvlink_nstar_str = fmt_memory(nvlink_nstar, unit=MB, precision=1, commas=False, approx=True)
-    ndr_nstar_str = fmt_memory(ndr_nstar, unit=KB, precision=0, commas=False, approx=True)
-    hdr_nstar_str = fmt_memory(hdr_nstar, unit=KB, precision=1, commas=False, approx=True)
-    pcie_nstar_str = fmt_memory(pcie_nstar, unit=KB, precision=0, commas=False, approx=True)
-    roce_nstar_str = fmt_memory(roce_nstar, unit=KB, precision=1, commas=False, approx=True)
-```
-
-| **Interconnect**                        |          **Latency ($\MessageStartupLatency$)**         |            **Bandwidth ($\LinkBandwidth$)**            | **Critical Size ($\LatencyBandwidthCrossoverSize$)** |
-|:----------------------------------------|:-------------------------------------------------------:|:------------------------------------------------------:|:----------------------------------------------------:|
-| **NVLink 4.0 (intra-node)**             | `{python} InterconnectAlphaBeta.nvlink_alpha_range_str` |     `{python} InterconnectAlphaBeta.nvlink_bw_str`     |  `{python} InterconnectAlphaBeta.nvlink_nstar_str`   |
-| **InfiniBand NDR 400 Gbps**             |   `{python} InterconnectAlphaBeta.ndr_alpha_range_str`  | `{python} InterconnectAlphaBeta.ndr_bw_str` (per port) |    `{python} InterconnectAlphaBeta.ndr_nstar_str`    |
-| **InfiniBand HDR 200 Gbps**             |   `{python} InterconnectAlphaBeta.hdr_alpha_range_str`  |      `{python} InterconnectAlphaBeta.hdr_bw_str`       |    `{python} InterconnectAlphaBeta.hdr_nstar_str`    |
-| **PCIe Gen5 (GPU$\leftrightarrow$CPU)** |  `{python} InterconnectAlphaBeta.pcie_alpha_range_str`  |      `{python} InterconnectAlphaBeta.pcie_bw_str`      |   `{python} InterconnectAlphaBeta.pcie_nstar_str`    |
-| **Ethernet 100 Gbps (RoCE)**            |  `{python} InterconnectAlphaBeta.roce_alpha_range_str`  |      `{python} InterconnectAlphaBeta.roce_bw_str`      |   `{python} InterconnectAlphaBeta.roce_nstar_str`    |
-
-: **Interconnect Performance Parameters**: Effective per-message launch latency ($\MessageStartupLatency$, including the software stack), per-direction link bandwidth ($\LinkBandwidth$, the one-way deliverable rate that enters $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$; NVLink's datasheet `{python} InterconnectAlphaBeta.nvlink_bidir_str` is the bidirectional total, so its $\LinkBandwidth$ is the `{python} InterconnectAlphaBeta.nvlink_bw_str` one-way rate), and the computed crossover size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$ at each row's $\MessageStartupLatency$ midpoint (for InfiniBand NDR, at the representative `{python} InterconnectAlphaBeta.ndr_alpha_anchor_us_str` used throughout this chapter), where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
-
-The same comparison across generations shows that the roughly ninefold per-direction cliff between a GPU's NVLink capacity and its one InfiniBand port, which @sec-compute-bandwidth-hierarchy established for the H100 generation, is not an artifact of one product cycle (@fig-bandwidth-divergence). Every point in the figure is per direction, so NVLink values are half the bidirectional datasheet totals, exactly as for the NVLink 4.0 row of @tbl-interconnect-parameters. A gap of that order has persisted for a decade even as both tiers grew. A GPU's NVLink aggregate and a single network port are different endpoint boundaries, but that persistent gap is why collective design must be hierarchy-aware, because unpartitioned traffic routed across the slower external fabric saturates it long before the local links are busy.
-
-::: {#fig-bandwidth-divergence fig-env="figure" fig-pos="htb" fig-cap="**Interconnect bandwidth conventions**: Selected advertised intra-node and inter-node capacities, expressed per direction. NVLink points sum a GPU's links; PCIe uses one x16 interface, and InfiniBand uses one port. These capacities reveal a hierarchy but are not equal-sized endpoint budgets or achieved collective rates. Algorithm selection additionally requires startup cost, port count, routing, and contention. Points sit at each generation's first commercial product year; rates and first-product years are from IEEE 802.3, InfiniBand Trade Association, PCI-SIG, and NVIDIA specifications and product announcements." fig-alt="Log-scale line chart of one-way capacity from 2011 to 2025: an orange intra-node curve per GPU rising from PCIe 3.0 through NVLink 1.0 to 5.0, and a lower violet curve for one InfiniBand port from FDR to XDR. The band between the two curves is shaded gray, and a double-headed arrow at 2025 marks a ninefold gap between NVLink 5.0 and InfiniBand XDR."}
-
-```{python}
-#| echo: false
-#| label: bandwidth-divergence-plot
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from binder.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.2))
-from mlsysim import Literature
-
-# Per-direction capacities by first commercial product year: PCIe 3.0 x16 then
-# each NVLink generation per GPU (summed links), and one InfiniBand port.
-def _divergence_rows(rows):
-    pick = {"PCIe 3.0 x16": ("PCIe 3.0", "Intra-node")}
-    for i in range(1, 6):
-        pick[f"NVLink {i}"] = (f"NVLink {i}.0", "Intra-node")
-    for g in ("FDR", "EDR", "HDR", "NDR", "XDR"):
-        pick[g] = (f"InfiniBand {g}", "Inter-node")
-    out = []
-    for r in rows:
-        key = next((k for k in pick if r["generation"].startswith(k)), None)
-        if key and r["first_product_year"] is not None:
-            name, kind = pick[key]
-            out.append({"Year": int(r["first_product_year"]), "Technology": name, "Type": kind, "Bandwidth_GBps": r["per_direction_GBps"]})
-    return pd.DataFrame(out).sort_values("Year")
-
-df = _divergence_rows(Literature.Series.InterconnectGenerations.entries)
-
-intra = df[df["Type"] == "Intra-node"]
-inter = df[df["Type"] == "Inter-node"]
-
-# The persistent cliff between the tiers, shaded between the two curves
-# (log-linear interpolation between the plotted points, presentation only).
-import numpy as np
-
-yrs = np.linspace(max(intra["Year"].min(), inter["Year"].min()), min(intra["Year"].max(), inter["Year"].max()), 200)
-hi_curve = np.exp(np.interp(yrs, intra["Year"], np.log(intra["Bandwidth_GBps"])))
-lo_curve = np.exp(np.interp(yrs, inter["Year"], np.log(inter["Bandwidth_GBps"])))
-ax.fill_between(yrs, lo_curve, hi_curve, color=COLORS['grid'], alpha=0.35, lw=0, zorder=1)
-
-line = dict(linestyle='-', linewidth=2.2, markersize=6, zorder=3)
-ax.plot(intra["Year"], intra["Bandwidth_GBps"], marker='o', color=COLORS['OrangeLine'], **line)
-ax.plot(inter["Year"], inter["Bandwidth_GBps"], marker='s', color=COLORS['VioletLine'], **line)
-# Generation labels: above-left of each rising intra-node point (below-right for the
-# first, which would otherwise cross the y-axis), below-right of inter-node points.
-for i, (yr, bw, txt) in enumerate(zip(intra["Year"], intra["Bandwidth_GBps"], intra["Technology"])):
-    _first = i == 0
-    ax.annotate(
-        txt,
-        (yr, bw),
-        textcoords="offset points",
-        xytext=(6, -6) if _first else (-6, 6),
-        ha='left' if _first else 'right',
-        va='top' if _first else 'bottom',
-        fontsize=9,
-        color=COLORS['primary'],
-    )
-for yr, bw, txt in zip(inter["Year"], inter["Bandwidth_GBps"], inter["Technology"]):
-    ax.annotate(
-        txt.replace("InfiniBand ", "IB "),
-        (yr, bw),
-        textcoords="offset points",
-        xytext=(6, -6),
-        ha='left',
-        va='top',
-        fontsize=9,
-        color=COLORS['primary'],
-    )
-
-# Direct series labels replace the legend.
-ax.text(2011.0, 1900, 'Intra-node, per GPU\n(PCIe x16, then NVLink)', ha='left', va='top', fontsize=9, fontweight='bold', color=COLORS['OrangeLine'])
-ax.text(2025.9, 4.2, 'Inter-node, one InfiniBand (IB) port', ha='right', va='bottom', fontsize=9, fontweight='bold', color=COLORS['VioletLine'])
-
-# Gap between the newest generation on each tier, computed from the data.
-hi = float(intra.sort_values("Year")["Bandwidth_GBps"].iloc[-1])
-lo = float(inter.sort_values("Year")["Bandwidth_GBps"].iloc[-1])
-gx = int(inter["Year"].max())
-ax.annotate('', xy=(gx, hi), xytext=(gx, lo), arrowprops=dict(arrowstyle="<->", color=COLORS["primary"], lw=1.2, shrinkA=7, shrinkB=7))
-ax.text(gx + 0.3, (hi * lo) ** 0.5, f'{hi / lo:.0f}\u00d7\ngap', ha='left', va='center', fontsize=10, fontweight='bold', color=COLORS['primary'])
-
-ax.set_yscale("log")
-ax.set_ylabel("One-way capacity (GB/s)")
-ax.set_xlabel("Year")
-ax.set_xticks(range(2012, 2026, 2))
-ax.set_xlim(2010.8, 2026.2)
-ax.set_ylim(3, 3000)
-ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f'{v:,.0f}'))
-ax.grid(which='minor', visible=False)
-for side in ('top', 'right'):
-    ax.spines[side].set_visible(False)
-
-plt.tight_layout()
-plt.show()
-plt.close()
-```
-
-:::
-
-A bucket far above $\LatencyBandwidthCrossoverSize$ can still travel in chunks below it, because a ring divides the bucket among its $\DeviceCount$ ranks. Pricing one bucket at two group sizes shows when that happens and what it costs.
-
-```{python}
-#| echo: false
-#| label: critical-msg-size-calc
-from mlsysim.fmt import check, fmt_bandwidth, fmt_math, fmt_memory, fmt_time, sci_latex
-from mlsysim.core.units import GB, KB, microsecond, second
-from mlsysim import Systems
-
-class CriticalMsgSize:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
-    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    alpha = Systems.SwitchFabric.AlphaNdr
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    n_star = (alpha * beta).to(KB)
-    n_star_kb = round(n_star.to(KB).magnitude)
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(n_star_kb == round(MessageFusion.n_star.to(KB).magnitude), "n* must match the crossover paragraph")
-    check(n_star == InterconnectAlphaBeta.ndr_nstar.to(KB), "n* must match the NDR row of the interconnect table")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
-    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
-    n_star_kb_str = fmt_memory(n_star, unit=KB, precision=0, commas=False)
-    # Operands of n* = alpha . beta as scientific-notation math spans: alpha in
-    # seconds, beta in bytes/s (so the derivation reads off the LOAD values).
-    alpha_s_sci_math = fmt_math(sci_latex(alpha.to(second).magnitude, precision=1))
-    beta_bytes_s_sci_math = fmt_math(sci_latex(beta.to("byte/s").magnitude, precision=0))
-```
-
-```{python}
-#| echo: false
-#| label: chunk-regime-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PER-CHUNK REGIME OF ONE DDP BUCKET (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The critical message size" .callout-notebook.
-# │
-# │ Goal: Show that the latency/bandwidth regime belongs to the ring's per-step
-# │       chunk (bucket / N), not to the bucket: one 25 MB bucket is
-# │       bandwidth-bound per step on 64 ranks and latency-bound on 1,024.
-# │ Show: chunk ~391 KB vs ~24 KB against n* = 75 KB; ring time ~1.2 ms vs
-# │       ~4.1 ms with an almost unchanged byte term (~1 ms).
-# │ How: chunk = M/N; T_ring = 2(N-1)(alpha + M/(N beta)) via the shared ring
-# │      formula; alpha, beta, n* from CriticalMsgSize (canonical NDR values).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
-from mlsysim.core.units import KB, MB, ms, second
-from mlsysim.fmt import check, fmt, fmt_memory, fmt_time
-from mlsysim.physics import calc_ring_allreduce_time
-
-class ChunkRegime:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    bucket = 25 * MB  # DDP's common bucket reference size (bucket-fusion section)
-    n_small = 64  # the chapter's 64-GPU worked examples
-    n_large = Scenarios.DenseLLMPretrainingReference.system.total_accelerators  # 1,024-GPU reference cluster
-    alpha = CriticalMsgSize.alpha
-    beta = CriticalMsgSize.beta
-    n_star = CriticalMsgSize.n_star
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    chunk_small = (bucket / n_small).to(KB)
-    chunk_large = (bucket / n_large).to(KB)
-    ring_small = calc_ring_allreduce_time(bucket, n_small, beta, alpha).to(ms)
-    ring_large = calc_ring_allreduce_time(bucket, n_large, beta, alpha).to(ms)
-    bytes_small = calc_ring_allreduce_time(bucket, n_small, beta, 0 * second).to(ms)
-    bytes_large = calc_ring_allreduce_time(bucket, n_large, beta, 0 * second).to(ms)
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(chunk_small > n_star, "64-rank chunk should sit above n*")
-    check(chunk_large < n_star, "1,024-rank chunk should sit below n*")
-    check(ring_large > 3 * ring_small, "Large-group ring should be several times slower for the same bucket")
-    check(abs((bytes_large / bytes_small).to_base_units().magnitude - 1) < 0.05, "Byte term should barely change with N")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    bucket_mb_str = fmt_memory(bucket, unit=MB, precision=0, commas=False)
-    n_small_str = fmt(n_small, precision=0, commas=False)
-    n_large_str = fmt(n_large, precision=0, commas=True)
-    chunk_small_kb_str = fmt_memory(chunk_small, unit=KB, precision=1, commas=False)
-    chunk_large_kb_str = fmt_memory(chunk_large, unit=KB, precision=1, commas=False)
-    ring_small_ms_str = fmt_time(ring_small, ms, precision=1, commas=False)
-    ring_large_ms_str = fmt_time(ring_large, ms, precision=1, commas=False)
-    bytes_small_ms_str = fmt_time(bytes_small, ms, precision=1, commas=False)
-    bytes_large_ms_str = fmt_time(bytes_large, ms, precision=1, commas=False)
-```
-
-::: {#nbk-collective-communication-critical-message-size .callout-notebook title="The critical message size"}
-
-**Problem**: A data-parallel job reduces a `{python} ChunkRegime.bucket_mb_str` gradient bucket with Ring AllReduce over InfiniBand NDR, with $\MessageStartupLatency=$ `{python} CriticalMsgSize.alpha_us_str` and $\LinkBandwidth=$ `{python} CriticalMsgSize.beta_gb_per_s_str`. The bucket is hundreds of times larger than the single-transfer knee. Does each step of the ring run in the bandwidth-bound regime on `{python} ChunkRegime.n_small_str` GPUs, and on the `{python} ChunkRegime.n_large_str`-GPU reference cluster?
-
-**Math**:
-
-1.  **Knee**: $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth=$ `{python} CriticalMsgSize.alpha_s_sci_math` s $\times$ `{python} CriticalMsgSize.beta_bytes_s_sci_math` B/s $=$ `{python} CriticalMsgSize.n_star_kb_str`.
-2.  **Chunk per step**: A ring sends $\CollectivePayloadSize/\DeviceCount$ per step, `{python} ChunkRegime.chunk_small_kb_str` on `{python} ChunkRegime.n_small_str` ranks (above the knee) but only `{python} ChunkRegime.chunk_large_kb_str` on `{python} ChunkRegime.n_large_str` ranks (below it).
-3.  **Ring time** $2(\DeviceCount-1)\left(\MessageStartupLatency+ \frac{\CollectivePayloadSize}{\DeviceCount\LinkBandwidth}\right)$: about `{python} ChunkRegime.ring_small_ms_str` on `{python} ChunkRegime.n_small_str` ranks, of which the byte term is `{python} ChunkRegime.bytes_small_ms_str`; about `{python} ChunkRegime.ring_large_ms_str` on `{python} ChunkRegime.n_large_str` ranks, where the byte term is still only `{python} ChunkRegime.bytes_large_ms_str`.
-
-**Systems insight**: The regime belongs to the chunk, not to the tensor. The byte term barely moves as the group grows, but at `{python} ChunkRegime.n_large_str` ranks each step carries a chunk below $\LatencyBandwidthCrossoverSize$, so startup dominates and the same bucket takes several times longer. Large language model (LLM)\index{LLM}\index{Large Language Model|see{LLM}} gradients are bandwidth-bound as tensors, yet a flat ring over a large group can still carry them in latency-bound steps. The levers then shift to larger buckets, fewer rounds, and hierarchy, which is why the algorithms of @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 compete on round count as well as bytes.
-
-:::
-
-::: {.column-margin}
-![](images/svg/collective_communication_alpha_beta_dominance.svg){width="100%" fig-alt="Two normalized horizontal bars showing each term's share of one transfer's time, with the bandwidth term n over beta always amber and the latency term alpha always dark slate. Top bar, large message: amber n over beta fills about nine tenths of the bar and a thin slate alpha sliver fills the rest. Bottom bar, small message: slate alpha fills about nine tenths and a thin amber n over beta sliver fills the rest. The dominant term flips."}
-
-*Below $\LatencyBandwidthCrossoverSize$ the latency term $\MessageStartupLatency$ dominates; above it, the byte term $\PointToPointMessageSize/\LinkBandwidth$ does.*
-:::
-
-For collectives, the two regimes map onto different levers. In the latency-bound\index{Latency!operating regime} regime $(\PointToPointMessageSize< \LatencyBandwidthCrossoverSize)$, where MoE routing tokens, scalar reductions, and the small chunks of a large-group schedule sit, the levers are fusion, fewer schedule rounds, fewer hops, and a leaner software stack. In the bandwidth-bound\index{Bandwidth!operating regime} regime $(\PointToPointMessageSize\gg \LatencyBandwidthCrossoverSize)$, where LLM gradients and optimizer states sit, they are compression\index{Gradient Compression}, a byte-efficient algorithm, and link aggregation\index{Link Aggregation} across multiple network interface cards (NICs). Classifying each exchange, and each chunk within it, into one regime is the diagnostic skill the rest of the chapter applies.
-
-::: {#chk-collective-communication-alpha-beta-diagnostics .callout-checkpoint title="Alpha-beta diagnostics"}
-
-Verify your understanding of network performance regimes:
-
-- [ ] **Bound regime**: classify a 10 KB message sent over a link with $\MessageStartupLatency=2\ \MicroUnitPrefix\text{s}$ and $\LinkBandwidth=10\ \text{GB/s}$ as latency-bound or bandwidth-bound.
-- [ ] **Software overhead**: determine which type of parallelism benefits more when "Software Overhead" ($\MessageStartupLatency$) is reduced by half: Data Parallelism or Tensor Parallelism.
-- [ ] **Critical message size**: describe how the critical message size $(\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth)$ changes when networking upgrades from 100 Gbps to 400 Gbps while software latency stays constant.
-- [ ] **NIC scaling**: assess the True or False claim that, in the bandwidth-bound regime, doubling the number of NICs per node effectively doubles the transmission speed for large tensors.
-
-:::
-
-### The LogP model {#sec-communication-collective-operations-collective-operations-logp-model-e45d}
-
-The α-β model estimates transfer duration without specifying how much independent computation can proceed during that transfer. Adding the entire estimate to compute time therefore overstates step time when overlap is possible. The **LogP model**\index{LogP Model!definition} [@culler1993] separates network transit from processor involvement with four parameters:
-
-*   **$\LogpNetworkLatency$ (latency)**: The time for a message to traverse the network (similar to $\MessageStartupLatency$).
-*   **$\SymmetricMessageOverhead$ (overhead)**\index{LogP Model!processor overhead}\index{LogP Model!overhead parameter}: The processor time spent initiating or completing a transfer. During this work, the same execution resource cannot compute, making $\SymmetricMessageOverhead$ the nonoverlappable cost. In a distributed training context, dispatch, device-kernel launch, memory registration, and runtime progress can all contribute. The value is an effective parameter of a particular software and hardware path, so it must be measured with the same collective, process group, and topology used by the workload.
-*   **$\MessageInjectionGap$ (gap)**: The minimum spacing between consecutive sends or consecutive receives at a processor. It limits endpoint message rate but does not describe every source of link contention\index{Link Contention} in a routed fabric.
-*   **$\DeviceCount$ (rank count)**: The number of ranks in the communication group. The original model names this processor count with its final letter, P; this chapter writes it $\DeviceCount$ to match its other collective cost formulas.
-
-LogP distinguishes network latency ($\LogpNetworkLatency$, which can be hidden) from processor overhead ($\SymmetricMessageOverhead$, which cannot). Independent computation can overlap the network transit interval\index{Communication-computation overlap!LogP analysis}, while initiation and completion overhead remain exposed on the execution resource that performs them.
-
-```{python}
-#| echo: false
-#| label: logp-overlap-calc
-# ┌── LEGO ───────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_time
-from mlsysim.core.units import microsecond
-
-class LogPOverlap:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    L = 100 * microsecond  # scenario assumption: network latency
-    o = 50 * microsecond  # scenario assumption: per-side processor overhead
-    compute = 500 * microsecond  # scenario assumption: overlapped compute window
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    two_o = 2 * o
-    effective = two_o + max(compute, L)
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(two_o == 100 * microsecond, f"2o = {two_o.to(microsecond).magnitude}, expected 100 us")
-    check(effective == 600 * microsecond, f"Effective = {effective.to(microsecond).magnitude}, expected 600 us")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    L_us_str = fmt_time(L, microsecond, precision=0, commas=False)
-    o_us_str = fmt_time(o, microsecond, precision=0, commas=False)
-    two_o_us_str = fmt_time(two_o, microsecond, precision=0, commas=False)
-    compute_us_str = fmt_time(compute, microsecond, precision=0, commas=False)
-    effective_us_str = fmt_time(effective, microsecond, precision=0, commas=False)
-```
-
-::: {#nbk-collective-communication-hiding-communication-behind-computation .callout-notebook title="Hiding communication behind computation"}
-
-**Problem**: A training pipeline attempts to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes `{python} LogPOverlap.compute_us_str`. Represent the complete transfer by a toy budget with network time `{python} LogPOverlap.L_us_str`, processor overhead $\SymmetricMessageOverhead=$ `{python} LogPOverlap.o_us_str` to initiate, and $\SymmetricMessageOverhead=$ `{python} LogPOverlap.o_us_str` to receive. Assume both overhead intervals occupy the same execution resource as backward computation, with independent network progress and no contention. Can the communication be hidden under these assumptions?
-
-**Math**:
-
-1.  **Overlappable portion**\index{LogP Model!overlappable latency}: Network latency $\LogpNetworkLatency$ = `{python} LogPOverlap.L_us_str` (data in flight while GPU computes).
-2.  **Non-overlappable portion**\index{LogP Model!nonoverlappable overhead}: $2\SymmetricMessageOverhead$ = `{python} LogPOverlap.two_o_us_str` (GPU busy initiating/receiving).
-3.  **Compute available**: `{python} LogPOverlap.compute_us_str`.
-4.  **Hidden**: All `{python} LogPOverlap.L_us_str` of $\LogpNetworkLatency$ can overlap with compute.
-5.  **Exposed**: The `{python} LogPOverlap.two_o_us_str` of $2\SymmetricMessageOverhead$ overhead cannot overlap.
-
-**Result**: Effective time is `{python} LogPOverlap.two_o_us_str` + max(`{python} LogPOverlap.compute_us_str`, `{python} LogPOverlap.L_us_str`) = `{python} LogPOverlap.effective_us_str`. The network latency is hidden, but the processor overhead remains exposed. Applied to every layer of a backward pass, the same split determines which gradient transfers a training step can hide (@sec-communication-layer-overlap).
-
-**Systems insight**: The α-β model captures the total communication time. The LogP model reveals how much of it can be hidden. When designing pipelined training, optimize for low $\SymmetricMessageOverhead$ (kernel bypass, GPUDirect) rather than high $\LinkBandwidth$ alone.
-
-:::
-
-The $\MessageStartupLatency$-$\LinkBandwidth$ model estimates transfer duration from latency and bandwidth measurements. LogP adds the processor/network distinction needed to estimate exposed delay in pipelined execution\index{Pipelined Execution}. Choosing a communication schedule therefore requires both a transfer budget and the independent computation available to overlap it.
-
-When messages are large and pipelined across the network, the LogGP model\index{LogGP Model!large message transfer} [@alexandrov1995] extends LogP with a gap-per-byte parameter $\LongMessageGapPerByte$, modeling the streaming cost of long messages. These models describe multiprocessor communication with endpoint rate and capacity limits; they are not restricted to one flow on one link. Their compact parameters do not explicitly represent every shared path, oversubscribed cut, or routing hotspot. For congestion-sensitive workloads, particularly AllToAll for MoE, measurements on the target placement must test whether the model captures the active bottleneck.
-
-::: {.column-margin .margin-pointer}
-↪ The LogGP long-message cost model and its gap parameters are developed in @sec-appdx-comm-foundations-loggp.
-:::
-
-The transfer model prices one message, but a training dependency usually requires a coordinated set of messages. Counting algorithmic rounds or bytes first requires a precise statement of which result each participating worker must receive.
+Before any of those interventions can be priced, each exchange needs a precise contract that states which ranks contribute and what each holds afterward.
 
 ## Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
@@ -1393,119 +854,9 @@ Beyond defining data-movement dependencies, collective operations carry explicit
 
 Reduction order introduces a second, numerical contract. Floating-point addition is not associative, so ring, tree, and switch-assisted reductions may accumulate the same values in different orders and produce different low-order bits [@goldberg1991]. A correct AllReduce therefore guarantees the specified reduction over all contributions, not bitwise identity across algorithms, rank counts, or hardware. Reproducibility-sensitive workloads must fix the algorithm and process-group configuration or use a reproducible accumulation\index{Numerical reproducibility!reduction order} scheme; ordinary training should treat small order-dependent differences as numerical behavior while still checking for larger rank disagreement.
 
-AllToAll and AllReduce also scale differently with cluster size.
+AllToAll scales differently from AllReduce with cluster size, and @sec-communication-alltoall develops the bound that governs it.
 
-:::: {#psp-collective-communication-alltoall-vs-allreduce-why-scale-differs .callout-perspective title="AllToAll vs. AllReduce: Why scale differs"}
-
-Ring AllReduce can pipeline a uniform payload through neighbor exchanges. AllToAll presents a different scaling problem because every rank has destination-specific traffic, but the logical peer count alone does not determine its cost.
-
-An AllToAll over $\DeviceCount$ ranks creates $\DeviceCount(\DeviceCount-1)$ logical source-destination transfers, yet each rank's aggregate payload can remain fixed under weak scaling. Its lower bound is governed by the largest of four terms: source injection time\index{All-to-All!injection bound}, destination reception time\index{All-to-All!reception bound}, traffic crossing the fabric bisection\index{Bisection bandwidth!All-to-All communication}, and per-message startup or scheduling overhead. Oversubscription and routing determine how much physical capacity those flows share. Message granularity determines how often they pay $\MessageStartupLatency$. Routing skew determines whether one destination or link becomes the critical path. A full-bisection network carrying balanced, coarse-grained traffic can therefore scale well despite the quadratic logical connection count, whereas an oversubscribed fabric or skewed expert assignment can stall at much smaller $\DeviceCount$.
-
-::: {.column-margin}
-```{=latex}
-\vspace*{-14mm}
-```
-![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="Schematic against rank count N: a curve labeled N(N−1) pairs starts near zero and rises quadratically, crossing a flat line labeled per-rank payload that stays at a fixed nonzero level."}
-
-*Logical pairs grow quadratically while per-rank payload can stay flat.*
-:::
-
-Expert parallelism and large-scale recommendation systems\index{Recommendation System} can reach a communication wall earlier than standard data parallelism when their traffic exhausts injection, reception, or bisection capacity, or when routing and destination skew create hotspots. The primitive determines the traffic matrix\index{Traffic matrix!collective communication}; the physical fabric and routing distribution determine the scaling ceiling.
-
-::::
-
-A mixture-of-experts model with 64 experts distributed across 8 GPUs (8 experts per GPU) shows the AllToAll pattern at small scale. During each forward pass, a gating network assigns each input token to one or more experts. The tokens assigned to experts on remote GPUs must be physically moved to those GPUs before computation can proceed, and the results must be moved back afterward.
-
-```{python}
-#| echo: false
-#| label: moe-alltoall-calc
-from mlsysim.core.units import BYTES_FP16, GB, KB, MB, microsecond, second
-from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time, fmt_count
-from mlsysim import Systems
-
-class MoeAllToAll:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    total_tokens = 4096
-    n_gpus = 8
-    hidden_dim = 2048
-    bytes_per_elem = BYTES_FP16
-    n_experts = 64
-    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
-    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
-    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    alpha = Systems.SwitchFabric.AlphaNdr
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    tokens_per_gpu = total_tokens // n_gpus
-    experts_per_gpu = n_experts // n_gpus
-    bytes_per_token = hidden_dim * bytes_per_elem
-    kb_per_token = bytes_per_token.to(KB)
-    tokens_per_expert = total_tokens // n_experts
-    tokens_per_transfer = tokens_per_gpu // n_gpus
-    remote_gpus = n_gpus - 1
-    data_per_transfer = tokens_per_transfer * bytes_per_token
-    total_sent = remote_gpus * data_per_transfer
-    # Bandwidth term rounded to whole microseconds: the worked trace presents it
-    # as the clean "≈ 5 μs" approximation the callout math line displays, so the
-    # downstream per-transfer and serialized totals stay on visible
-    # arithmetic (1.5 + 5 = 6.5; 7 × 6.5 = 45.5).
-    bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
-    per_transfer = alpha + bw_time
-    serialized = remote_gpus * per_transfer
-    # Concurrent peer streams share the GPU's aggregate NIC injection bandwidth.
-    # Full duplex permits simultaneous send and receive, but does not multiply the
-    # outgoing 50 GB/s port by the number of remote peers.
-    parallel = alpha + total_sent / beta
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(tokens_per_gpu == 512, f"tokens/GPU = {tokens_per_gpu}")
-    check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
-    check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
-    check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
-    check(abs(per_transfer.to(microsecond).magnitude - 6.5) < 1e-9, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
-    check(abs(parallel.to(microsecond).magnitude - 38.20016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
-    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
-    tokens_per_gpu_str = fmt_count(tokens_per_gpu, label="token", commas=False)
-    tokens_per_transfer_str = fmt_count(tokens_per_transfer, label="token", commas=False)
-    kb_per_token_str = fmt_memory(kb_per_token, unit=KB, precision=3, commas=False)
-    tokens_per_expert_str = fmt_count(tokens_per_expert, label="token", commas=False)
-    data_per_transfer_kb_str = fmt_memory(data_per_transfer, unit=KB, precision=3, commas=False)
-    total_sent_mb_str = fmt_memory(total_sent, unit=MB, precision=2, commas=False)
-    bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
-    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=1, commas=False)
-    serialized_us_str = fmt_time(serialized, unit=microsecond, precision=1, commas=False)
-    parallel_us_str = fmt_time(parallel, unit=microsecond, precision=1, commas=False)
-    total_tokens_str = fmt_count(total_tokens, label="token", commas=False)
-    n_gpus_str = fmt(n_gpus, precision=0, commas=False)
-    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
-    n_experts_str = fmt(n_experts, precision=0, commas=False)
-    experts_per_gpu_str = fmt(experts_per_gpu, precision=0, commas=False)
-    remote_gpus_str = fmt(remote_gpus, precision=0, commas=False)
-```
-
-::: {#nbk-collective-communication-alltoall-moe-token-routing .callout-notebook title="AllToAll for MoE token routing"}
-
-**Problem**: An MoE model processes a batch of `{python} MoeAllToAll.total_tokens_str` across `{python} MoeAllToAll.n_gpus_str` GPUs (`{python} MoeAllToAll.tokens_per_gpu_str` per GPU). Each token is a `{python} MoeAllToAll.hidden_dim_str`-dimensional hidden state in BF16 (`{python} MoeAllToAll.kb_per_token_str` per token). The gating network assigns each token to exactly 1 of `{python} MoeAllToAll.n_experts_str` experts (`{python} MoeAllToAll.experts_per_gpu_str` experts per GPU). Assuming uniform routing (each expert receives `{python} MoeAllToAll.tokens_per_expert_str`), how much data does each GPU send and receive?
-
-**Math**:
-
-Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` that need to reach `{python} MoeAllToAll.n_experts_str` different experts across `{python} MoeAllToAll.n_gpus_str` GPUs. With uniform routing, each GPU sends `{python} MoeAllToAll.tokens_per_transfer_str` to each of the other `{python} MoeAllToAll.remote_gpus_str` GPUs (keeping `{python} MoeAllToAll.tokens_per_transfer_str` local).
-
-*   Data per GPU-to-GPU transfer: `{python} MoeAllToAll.tokens_per_transfer_str` $\times$ `{python} MoeAllToAll.kb_per_token_str`/token = `{python} MoeAllToAll.data_per_transfer_kb_str`
-*   Total data sent per GPU: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
-*   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
-
-**Latency Analysis** (InfiniBand NDR, $\MessageStartupLatency=$ `{python} MoeAllToAll.alpha_us_str`, $\LinkBandwidth=$ `{python} MoeAllToAll.beta_gb_per_s_str`):
-
-Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\MessageStartupLatency$-$\LinkBandwidth$ model: $\TransferTimeForPayload$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
-
-If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\MessageStartupLatency+ \text{total bytes sent}/\LinkBandwidth=$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
-
-**Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\BisectionBandwidth$ and $\CutCrossingDataVolume$ bytes must cross its minimum cut, the exchange also obeys $\AllToAllExchangeTime\geq \CutCrossingDataVolume/\BisectionBandwidth$. Oversubscription reduces $\BisectionBandwidth$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
-
-:::
-
-With the six contracts defined, every row of the travel manifest in @tbl-parallelism-communication-mapping names a primitive whose output and traffic pattern are precise. The sharded data-parallel row repays closer study, because sharding changes how often those primitives run rather than which ones run.
+With the six contracts defined, every row of @tbl-parallelism-communication-mapping names a primitive whose output and traffic pattern are precise. The sharded data-parallel row repays closer study, because sharding changes how often those primitives run rather than which ones run.
 
 ### FSDP communication patterns {#sec-communication-fsdp-patterns}
 
@@ -1519,7 +870,280 @@ The consequence is a displacement of overhead from memory to communication frequ
 
 Selecting the right collective algorithm at each invocation requires distinguishing transfer cost from dependency exposure. An FSDP AllGather is latency-sensitive\index{FSDP!AllGather latency sensitivity} in the scheduling sense, because a layer cannot compute until its full parameters arrive. Its transfer can nevertheless be bandwidth-bound when the parameter tensor is large. Prefetching can hide part of that gather, while a ReduceScatter can overlap with the remaining backward computation. Neither dependency alone selects Ring or Tree; message size, group size, topology, and the available overlap window jointly determine the useful schedule.
 
-The primitives specify what must be communicated, and sharding shows how often a training step invokes them. The remaining question is how to execute them efficiently on real networks. The most performance-critical primitive, AllReduce, admits multiple algorithmic implementations whose latency and bandwidth characteristics differ sharply. For the 70B gradient across 1,000 ranks, a simple tree that forwards the whole tensor at every level (the schedule @sec-communication-collective-operations-tree-allreduce examines) pays about $2\log_2 1000 \approx 20$ full-message transfers against the ring's two, a tenfold difference in byte time, so this choice can decide whether gradient synchronization can be hidden at all.
+The primitives specify what must be communicated, and sharding shows how often a training step invokes them. Choosing a schedule for each invocation first requires a price for every round of an exchange.
+
+## Pricing Collectives by Rounds and Chunks {#sec-communication-collective-operations-collective-operations-network-performance-modeling-0d8e}
+
+A transfer's duration separates into two physical quantities, the time to initiate a message and the rate at which data moves once in transit, and their balance depends on message size, network topology, and software overhead.
+
+The $\MessageStartupLatency$-$\LinkBandwidth$ model\index{Hockney Model!latency and bandwidth} $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$ prices a transfer over a single link (principle \ref{pri-alpha-beta-model}), separating a fixed startup cost ($\MessageStartupLatency$) from a per-byte transfer cost ($\PointToPointMessageSize/\LinkBandwidth$) [@hockney1994]. A collective pays that price at every step of its schedule, so the two terms, multiplied by the schedule's round count and traffic factor, determine algorithm selection across the fleet.
+
+::: {.column-margin .margin-pointer}
+↩ The $\MessageStartupLatency$-$\LinkBandwidth$ model for a single link and its latency-dominated and bandwidth-dominated regimes are established in @sec-network-fabrics-performance-model.
+:::
+
+::: {.column-margin .margin-pointer}
+↪ Worked message-size regimes and crossover calculations for this model are developed in @sec-appdx-comm-foundations-alpha-beta.
+:::
+
+For collectives, the parameters must describe the effective path. Latency ($\MessageStartupLatency$) is the startup cost paid at every step of a schedule, so it includes recurring software overhead, PCIe\index{PCIe}\index{Peripheral Component Interconnect Express|see{PCIe}} traversal, and network switching time; one-time communicator initialization is a separate setup cost. Bandwidth ($\LinkBandwidth$) is the sustained per-direction transfer rate. The critical message size\index{Critical Message Size} $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, where the two terms are equal, carries over unchanged, but a collective changes what must be compared with it. Each step of a schedule transfers a chunk rather than the whole tensor, and a ring over $\DeviceCount$ ranks moves $\CollectivePayloadSize/\DeviceCount$ bytes per step. A bucket of tens of megabytes split across a thousand ranks therefore yields chunks of tens of kilobytes, below the inter-node crossovers in @tbl-interconnect-parameters, even though the bucket itself is far above them. Below $\LatencyBandwidthCrossoverSize$, a step is latency-bound\index{Latency!bound}; above it, bandwidth-bound\index{Bandwidth!bound}.
+```{python}
+#| echo: false
+#| label: collective-message-fusion
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MESSAGE FUSION ON NDR (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The crossover explains two recurring optimizations" paragraph.
+# │ Goal: Price 100 separate small messages vs. one fused message on NDR.
+# │ How: n* = alpha·beta with alpha = Systems.SwitchFabric.AlphaNdr (the
+# │      chapter's canonical NDR alpha) and beta = InfiniBand_NDR bandwidth;
+# │      T_sep = k·alpha (bandwidth term negligible); T_fused = alpha + k·n/beta.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_time
+
+class MessageFusion:
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    alpha = Systems.SwitchFabric.AlphaNdr
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    small_msg = 4 * KB  # scenario assumption: MoE routing message
+    n_msgs = 100  # scenario assumption: messages fused into one
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    n_star = (alpha * beta).to(KB)
+    fused_msg = n_msgs * small_msg
+    t_separate = (n_msgs * alpha).to(microsecond)
+    t_fused = (alpha + fused_msg / beta).to(microsecond)
+    speedup = (t_separate / t_fused).to_base_units().magnitude
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(small_msg < n_star / 10, "Routing message must sit far below n*")
+    check(fused_msg > n_star, "Fused message should cross into the bandwidth-bound regime")
+    check(n_msgs == 100, "Prose math writes the separate-message cost as 100α")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
+    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
+    n_star_kb_str = fmt_memory(n_star, unit=KB, precision=0, commas=False)
+    small_msg_kb_str = fmt_memory(small_msg, unit=KB, precision=0, commas=False)
+    n_msgs_str = fmt(n_msgs, precision=0, commas=False)
+    fused_msg_kb_str = fmt_memory(fused_msg, unit=KB, precision=0, commas=False)
+    t_separate_us_str = fmt_time(t_separate, microsecond, precision=0, commas=False)
+    t_fused_us_str = fmt_time(t_fused, microsecond, precision=1, commas=False)
+    speedup_mult_str = fmt_multiple(round(speedup), precision=0, commas=False)
+```
+
+The crossover explains two recurring optimizations. For InfiniBand NDR at $\MessageStartupLatency\approx$ `{python} MessageFusion.alpha_us_str` and $\LinkBandwidth\approx$ `{python} MessageFusion.beta_gb_per_s_str`, the knee sits at $\LatencyBandwidthCrossoverSize \approx$ `{python} MessageFusion.n_star_kb_str`, the value @sec-network-fabrics-performance-model computed for a single transfer. A `{python} MessageFusion.small_msg_kb_str` routing message is far below $\LatencyBandwidthCrossoverSize$, so the startup cost dominates. If `{python} MessageFusion.n_msgs_str` ready messages have compatible destinations and can share one transfer, fusing them into a `{python} MessageFusion.fused_msg_kb_str` message\index{Message fusion!startup latency amortization} reduces the modeled cost from approximately $100\MessageStartupLatency=$ `{python} MessageFusion.t_separate_us_str` to $\MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth\approx$ `{python} MessageFusion.t_fused_us_str`, roughly a `{python} MessageFusion.speedup_mult_str` improvement before packing costs. More generally, $\SplitMessageCount$ serialized messages of size $\PointToPointMessageSize/\SplitMessageCount$ can cost up to $\SplitMessageCount\times$ as much as one message of size $\PointToPointMessageSize$ when $\PointToPointMessageSize/\SplitMessageCount\ll \LatencyBandwidthCrossoverSize$. Fusion is the first optimization, and it motivates framework gradient buckets and destination-aware token coalescing.
+
+Compression is the second, and the crossover tells where it pays. A `{python} GradSyncSignificance.gradient_gb_str` gradient tensor sits far above $\LatencyBandwidthCrossoverSize$, so shrinking its bytes shrinks the dominant $\PointToPointMessageSize/\LinkBandwidth$ term directly, provided encoding and aggregation costs are counted. Even keeping only the largest 1 percent of values (Top-k sparsification, developed in @sec-communication-collective-operations-collective-operations-gradient-compression-7a5c) leaves `{python} GradSyncSignificance.gradient_top1_gb_str` of values before their indices are added, still far above $\LatencyBandwidthCrossoverSize$, so the saving remains a byte saving. Compressing a `{python} MessageFusion.small_msg_kb_str` routing message, by contrast, offers little, because its unchanged $\MessageStartupLatency$ term already dominates.
+
+Across the typical data center interconnects tabulated in @tbl-interconnect-parameters, the critical-size column carries the load-bearing pattern: intra-node NVLink stays latency-bound up to several hundred kilobytes, whereas the inter-node fabrics cross over below roughly 100 KB. A message between those crossover sizes can therefore be latency-bound inside a node but bandwidth-bound once it travels between nodes.
+
+```{python}
+#| echo: false
+#| label: collective-communication-interconnect-parameters
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTERCONNECT ALPHA-BETA PARAMETERS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-interconnect-parameters and the crossover discussion above it.
+# │
+# │ Goal: Make the alpha-beta table internally consistent: beta comes from the
+# │       registry, and the critical-size column is COMPUTED from this table's
+# │       own alpha midpoints via calc_alpha_beta_crossover instead of being a
+# │       second set of hand-typed numbers that drifted from the rows.
+# │ Show: Effective collective-launch alpha ranges, registry bandwidths, and
+# │       the computed latency/bandwidth crossover size per interconnect.
+# │ How: Alpha ranges are EFFECTIVE collective-launch values (software stack
+# │      included) — pedagogical assumptions consistent with the chapter's
+# │      wire-vs-effective discussion; the registry holds wire latencies
+# │      (Tech.Interconnect, Fabrics) and two effective anchors
+# │      (SwitchFabric.AlphaNdr/AlphaRoce). Editor ruling 2026-09-28: AlphaNdr
+# │      is the canonical NDR alpha, so the NDR crossover uses it; the
+# │      per-fabric ranges stay here as documented LOAD assumptions.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import calc_alpha_beta_crossover
+from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_qty_range, fmt_time
+
+class InterconnectAlphaBeta:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Effective collective-launch alpha ranges (scenario assumptions; see How)
+    nvlink_alpha_lo, nvlink_alpha_hi = 1 * microsecond, 2 * microsecond
+    ndr_alpha_lo, ndr_alpha_hi = 1 * microsecond, 3 * microsecond
+    hdr_alpha_lo, hdr_alpha_hi = 2 * microsecond, 5 * microsecond
+    pcie_alpha_lo, pcie_alpha_hi = 2 * microsecond, 5 * microsecond
+    roce_alpha_lo, roce_alpha_hi = 5 * microsecond, 10 * microsecond
+    # Registry bandwidths, all PER-DIRECTION deliverable rates (the beta in
+    # T(n) = alpha + n/beta). NVLink's datasheet 900 GB/s is the bidirectional
+    # total, so the alpha-beta beta is the 450 GB/s one-way rate — consistent
+    # with the per-port IB/PCIe/Ethernet figures in the other rows.
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
+    ndr_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    hdr_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
+    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
+    roce_bw = Systems.Fabrics.Ethernet_100G.bandwidth
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Crossover at the alpha midpoint of each range: n* = alpha * beta
+    nvlink_nstar = calc_alpha_beta_crossover((nvlink_alpha_lo + nvlink_alpha_hi) / 2, nvlink_bw)
+    # NDR row is anchored to the chapter's canonical NDR alpha (editor ruling
+    # 2026-09-28), not its range midpoint; the range stays as context.
+    ndr_alpha_anchor = Systems.SwitchFabric.AlphaNdr
+    ndr_nstar = calc_alpha_beta_crossover(ndr_alpha_anchor, ndr_bw)
+    hdr_nstar = calc_alpha_beta_crossover((hdr_alpha_lo + hdr_alpha_hi) / 2, hdr_bw)
+    pcie_nstar = calc_alpha_beta_crossover((pcie_alpha_lo + pcie_alpha_hi) / 2, pcie_bw)
+    roce_nstar = calc_alpha_beta_crossover((roce_alpha_lo + roce_alpha_hi) / 2, roce_bw)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(nvlink_nstar > 500 * KB, "NVLink crossover should be several hundred KB — intra-node stays latency-bound up to large messages")
+    check(ndr_alpha_lo <= ndr_alpha_anchor <= ndr_alpha_hi, "Registry NDR alpha must fall inside the tabulated NDR range")
+    check(max(ndr_nstar, hdr_nstar, roce_nstar) < 100 * KB, "Prose: inter-node fabrics cross over below roughly 100 KB")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    nvlink_alpha_range_str = fmt_qty_range(nvlink_alpha_lo, nvlink_alpha_hi, microsecond, precision=0, commas=False)
+    ndr_alpha_range_str = fmt_qty_range(ndr_alpha_lo, ndr_alpha_hi, microsecond, precision=0, commas=False)
+    ndr_alpha_anchor_us_str = fmt_time(ndr_alpha_anchor, microsecond, precision=1, commas=False)
+    hdr_alpha_range_str = fmt_qty_range(hdr_alpha_lo, hdr_alpha_hi, microsecond, precision=0, commas=False)
+    pcie_alpha_range_str = fmt_qty_range(pcie_alpha_lo, pcie_alpha_hi, microsecond, precision=0, commas=False)
+    roce_alpha_range_str = fmt_qty_range(roce_alpha_lo, roce_alpha_hi, microsecond, precision=0, commas=False)
+    nvlink_bw_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
+    nvlink_bidir_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    ndr_bw_str = fmt_bandwidth(ndr_bw, unit=GB / second, precision=0, commas=False)
+    hdr_bw_str = fmt_bandwidth(hdr_bw, unit=GB / second, precision=0, commas=False)
+    pcie_bw_str = fmt_bandwidth(pcie_bw, unit=GB / second, precision=0, commas=False)
+    roce_bw_str = fmt_bandwidth(roce_bw, unit=GB / second, precision=1, commas=False)
+    nvlink_nstar_str = fmt_memory(nvlink_nstar, unit=MB, precision=1, commas=False, approx=True)
+    ndr_nstar_str = fmt_memory(ndr_nstar, unit=KB, precision=0, commas=False, approx=True)
+    hdr_nstar_str = fmt_memory(hdr_nstar, unit=KB, precision=1, commas=False, approx=True)
+    pcie_nstar_str = fmt_memory(pcie_nstar, unit=KB, precision=0, commas=False, approx=True)
+    roce_nstar_str = fmt_memory(roce_nstar, unit=KB, precision=1, commas=False, approx=True)
+```
+
+| **Interconnect**                        |          **Latency ($\MessageStartupLatency$)**         |            **Bandwidth ($\LinkBandwidth$)**            | **Critical Size ($\LatencyBandwidthCrossoverSize$)** |
+|:----------------------------------------|:-------------------------------------------------------:|:------------------------------------------------------:|:----------------------------------------------------:|
+| **NVLink 4.0 (intra-node)**             | `{python} InterconnectAlphaBeta.nvlink_alpha_range_str` |     `{python} InterconnectAlphaBeta.nvlink_bw_str`     |  `{python} InterconnectAlphaBeta.nvlink_nstar_str`   |
+| **InfiniBand NDR 400 Gbps**             |   `{python} InterconnectAlphaBeta.ndr_alpha_range_str`  | `{python} InterconnectAlphaBeta.ndr_bw_str` (per port) |    `{python} InterconnectAlphaBeta.ndr_nstar_str`    |
+| **InfiniBand HDR 200 Gbps**             |   `{python} InterconnectAlphaBeta.hdr_alpha_range_str`  |      `{python} InterconnectAlphaBeta.hdr_bw_str`       |    `{python} InterconnectAlphaBeta.hdr_nstar_str`    |
+| **PCIe Gen5 (GPU$\leftrightarrow$CPU)** |  `{python} InterconnectAlphaBeta.pcie_alpha_range_str`  |      `{python} InterconnectAlphaBeta.pcie_bw_str`      |   `{python} InterconnectAlphaBeta.pcie_nstar_str`    |
+| **Ethernet 100 Gbps (RoCE)**            |  `{python} InterconnectAlphaBeta.roce_alpha_range_str`  |      `{python} InterconnectAlphaBeta.roce_bw_str`      |   `{python} InterconnectAlphaBeta.roce_nstar_str`    |
+
+: **Interconnect Performance Parameters**: Effective per-message launch latency ($\MessageStartupLatency$, including the software stack), per-direction link bandwidth ($\LinkBandwidth$, the one-way deliverable rate that enters $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$; NVLink's datasheet `{python} InterconnectAlphaBeta.nvlink_bidir_str` is the bidirectional total, so its $\LinkBandwidth$ is the `{python} InterconnectAlphaBeta.nvlink_bw_str` one-way rate), and the computed crossover size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$ at each row's $\MessageStartupLatency$ midpoint (for InfiniBand NDR, at the representative `{python} InterconnectAlphaBeta.ndr_alpha_anchor_us_str` used throughout this chapter), where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
+
+The NVLink and NDR rows show the roughly ninefold per-direction cliff of @sec-compute-bandwidth-hierarchy, which @sec-network-fabrics-introduction traces across a decade of interconnect generations.
+
+A bucket far above $\LatencyBandwidthCrossoverSize$ can still travel in chunks below it, because a ring divides the bucket among its $\DeviceCount$ ranks. Pricing one bucket at two group sizes shows when that happens and what it costs.
+
+```{python}
+#| echo: false
+#| label: critical-msg-size-calc
+from mlsysim.fmt import check, fmt_bandwidth, fmt_math, fmt_memory, fmt_time, sci_latex
+from mlsysim.core.units import GB, KB, microsecond, second
+from mlsysim import Systems
+
+class CriticalMsgSize:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
+    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    alpha = Systems.SwitchFabric.AlphaNdr
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    n_star = (alpha * beta).to(KB)
+    n_star_kb = round(n_star.to(KB).magnitude)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(n_star_kb == round(MessageFusion.n_star.to(KB).magnitude), "n* must match the crossover paragraph")
+    check(n_star == InterconnectAlphaBeta.ndr_nstar.to(KB), "n* must match the NDR row of the interconnect table")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
+    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
+    n_star_kb_str = fmt_memory(n_star, unit=KB, precision=0, commas=False)
+    # Operands of n* = alpha . beta as scientific-notation math spans: alpha in
+    # seconds, beta in bytes/s (so the derivation reads off the LOAD values).
+    alpha_s_sci_math = fmt_math(sci_latex(alpha.to(second).magnitude, precision=1))
+    beta_bytes_s_sci_math = fmt_math(sci_latex(beta.to("byte/s").magnitude, precision=0))
+```
+
+```{python}
+#| echo: false
+#| label: chunk-regime-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PER-CHUNK REGIME OF ONE DDP BUCKET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The critical message size" .callout-notebook.
+# │
+# │ Goal: Show that the latency/bandwidth regime belongs to the ring's per-step
+# │       chunk (bucket / N), not to the bucket: one 25 MB bucket is
+# │       bandwidth-bound per step on 64 ranks and latency-bound on 1,024.
+# │ Show: chunk ~391 KB vs ~24 KB against n* = 75 KB; ring time ~1.2 ms vs
+# │       ~4.1 ms with an almost unchanged byte term (~1 ms).
+# │ How: chunk = M/N; T_ring = 2(N-1)(alpha + M/(N beta)) via the shared ring
+# │      formula; alpha, beta, n* from CriticalMsgSize (canonical NDR values).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.core.units import KB, MB, ms, second
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_time
+from mlsysim.physics import calc_ring_allreduce_time
+
+class ChunkRegime:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    bucket = 25 * MB  # DDP's common bucket reference size (bucket-fusion section)
+    n_small = 64  # the chapter's 64-GPU worked examples
+    n_large = Scenarios.DenseLLMPretrainingReference.system.total_accelerators  # 1,024-GPU reference cluster
+    alpha = CriticalMsgSize.alpha
+    beta = CriticalMsgSize.beta
+    n_star = CriticalMsgSize.n_star
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    chunk_small = (bucket / n_small).to(KB)
+    chunk_large = (bucket / n_large).to(KB)
+    ring_small = calc_ring_allreduce_time(bucket, n_small, beta, alpha).to(ms)
+    ring_large = calc_ring_allreduce_time(bucket, n_large, beta, alpha).to(ms)
+    bytes_small = calc_ring_allreduce_time(bucket, n_small, beta, 0 * second).to(ms)
+    bytes_large = calc_ring_allreduce_time(bucket, n_large, beta, 0 * second).to(ms)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(chunk_small > n_star, "64-rank chunk should sit above n*")
+    check(chunk_large < n_star, "1,024-rank chunk should sit below n*")
+    check(ring_large > 3 * ring_small, "Large-group ring should be several times slower for the same bucket")
+    check(abs((bytes_large / bytes_small).to_base_units().magnitude - 1) < 0.05, "Byte term should barely change with N")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    bucket_mb_str = fmt_memory(bucket, unit=MB, precision=0, commas=False)
+    n_small_str = fmt(n_small, precision=0, commas=False)
+    n_large_str = fmt(n_large, precision=0, commas=True)
+    chunk_small_kb_str = fmt_memory(chunk_small, unit=KB, precision=1, commas=False)
+    chunk_large_kb_str = fmt_memory(chunk_large, unit=KB, precision=1, commas=False)
+    ring_small_ms_str = fmt_time(ring_small, ms, precision=1, commas=False)
+    ring_large_ms_str = fmt_time(ring_large, ms, precision=1, commas=False)
+    bytes_small_ms_str = fmt_time(bytes_small, ms, precision=1, commas=False)
+    bytes_large_ms_str = fmt_time(bytes_large, ms, precision=1, commas=False)
+```
+
+::: {#nbk-collective-communication-critical-message-size .callout-notebook title="The critical message size"}
+
+**Problem**: A data-parallel job reduces a `{python} ChunkRegime.bucket_mb_str` gradient bucket with Ring AllReduce over InfiniBand NDR, with $\MessageStartupLatency=$ `{python} CriticalMsgSize.alpha_us_str` and $\LinkBandwidth=$ `{python} CriticalMsgSize.beta_gb_per_s_str`. The bucket is hundreds of times larger than the single-transfer knee. Does each step of the ring run in the bandwidth-bound regime on `{python} ChunkRegime.n_small_str` GPUs, and on the `{python} ChunkRegime.n_large_str`-GPU reference cluster?
+
+**Math**:
+
+1.  **Knee**: $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth=$ `{python} CriticalMsgSize.alpha_s_sci_math` s $\times$ `{python} CriticalMsgSize.beta_bytes_s_sci_math` B/s $=$ `{python} CriticalMsgSize.n_star_kb_str`.
+2.  **Chunk per step**: A ring sends $\CollectivePayloadSize/\DeviceCount$ per step, `{python} ChunkRegime.chunk_small_kb_str` on `{python} ChunkRegime.n_small_str` ranks (above the knee) but only `{python} ChunkRegime.chunk_large_kb_str` on `{python} ChunkRegime.n_large_str` ranks (below it).
+3.  **Ring time** $2(\DeviceCount-1)\left(\MessageStartupLatency+ \frac{\CollectivePayloadSize}{\DeviceCount\LinkBandwidth}\right)$: about `{python} ChunkRegime.ring_small_ms_str` on `{python} ChunkRegime.n_small_str` ranks, of which the byte term is `{python} ChunkRegime.bytes_small_ms_str`; about `{python} ChunkRegime.ring_large_ms_str` on `{python} ChunkRegime.n_large_str` ranks, where the byte term is still only `{python} ChunkRegime.bytes_large_ms_str`.
+
+**Systems insight**: The regime belongs to the chunk, not to the tensor. The byte term barely moves as the group grows, but at `{python} ChunkRegime.n_large_str` ranks each step carries a chunk below $\LatencyBandwidthCrossoverSize$, so startup dominates and the same bucket takes several times longer. Large language model (LLM)\index{LLM}\index{Large Language Model|see{LLM}} gradients are bandwidth-bound as tensors, yet a flat ring over a large group can still carry them in latency-bound steps. The levers then shift to larger buckets, fewer rounds, and hierarchy, which is why the algorithms of @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 compete on round count as well as bytes.
+
+:::
+
+For collectives, the two regimes map onto different levers. In the latency-bound\index{Latency!operating regime} regime $(\PointToPointMessageSize< \LatencyBandwidthCrossoverSize)$, where MoE routing tokens, scalar reductions, and the small chunks of a large-group schedule sit, the levers are fusion, fewer schedule rounds, fewer hops, and a leaner software stack. In the bandwidth-bound\index{Bandwidth!operating regime} regime $(\PointToPointMessageSize\gg \LatencyBandwidthCrossoverSize)$, where LLM gradients and optimizer states sit, they are compression\index{Gradient Compression}, a byte-efficient algorithm, and link aggregation\index{Link Aggregation} across multiple network interface cards (NICs). Classifying each exchange, and each chunk within it, into one regime is the diagnostic skill the rest of the chapter applies.
+
+::: {#chk-collective-communication-alpha-beta-diagnostics .callout-checkpoint title="Per-chunk pricing diagnostics"}
+
+Verify your understanding of per-chunk pricing regimes:
+
+- [ ] **Chunk regime**: classify each ring step of a 25 MB gradient bucket reduced over 1,024 ranks, on links with $\MessageStartupLatency=5\ \MicroUnitPrefix\text{s}$ and $\LinkBandwidth=50\ \text{GB/s}$, as latency-bound or bandwidth-bound.
+- [ ] **Software overhead**: determine which type of parallelism benefits more when "Software Overhead" ($\MessageStartupLatency$) is reduced by half: Data Parallelism or Tensor Parallelism.
+- [ ] **Chunks under an upgrade**: explain why upgrading links from 100 Gbps to 400 Gbps at constant software latency can move a large ring's per-step chunks from the bandwidth-bound to the latency-bound side of $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$.
+- [ ] **NIC scaling**: assess the True or False claim that, in the bandwidth-bound regime, doubling the number of NICs per node effectively doubles the transmission speed for large tensors.
+
+:::
+
+The pricing model charges a schedule per round and per chunk, but it does not choose the schedule. AllReduce, the most performance-critical primitive, admits several schedules whose round counts and byte volumes differ sharply, and for a large gradient the choice can decide whether gradient synchronization can be hidden at all.
 
 ## AllReduce Algorithms and Topologies {#sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545}
 
@@ -1603,13 +1227,11 @@ class RingTreeByteGap:
     tree_ring_ratio_mult_str = fmt_multiple((tree_bw / ring_bw).to_base_units().magnitude, precision=1, commas=False)
 ```
 
-As $\DeviceCount$ grows large, the bandwidth lower bound approaches $2\CollectivePayloadSize/\LinkBandwidth$, independent of $\DeviceCount$. Ring AllReduce matches the required byte volume under this model; startup and local reduction still add time [@patarasuk2009; @thakur2005]. On a `{python} RingTreeByteGap.n_gpus_str`-GPU cluster synchronizing the chapter's `{python} RingTreeByteGap.gradient_gb_str` reference buffer over `{python} RingTreeByteGap.beta_gb_per_s_str` links, the ring's byte term is about `{python} RingTreeByteGap.ring_bw_ms_str`. The simple full-message tree, which forwards the whole tensor once per level on the way up and once per level on the way down (the schedule @sec-communication-collective-operations-tree-allreduce develops), pays $2\log_2 64 = 12$ full-message transfers, about `{python} RingTreeByteGap.tree_bw_ms_str`. The byte-term difference of roughly `{python} RingTreeByteGap.gap_ms_str` per step would accumulate to about `{python} RingTreeByteGap.gap_run_hours_str` hours over a `{python} RingTreeByteGap.run_steps_str`-step run if fully exposed. Actual wall-clock savings also depend on startup, placement, and overlap.
+As $\DeviceCount$ grows large, the bandwidth lower bound approaches $2\CollectivePayloadSize/\LinkBandwidth$, independent of $\DeviceCount$ (principle \ref{pri-allreduce-bandwidth-bound}). Ring AllReduce matches the required byte volume under this model; startup and local reduction still add time [@patarasuk2009; @thakur2005]. On a `{python} RingTreeByteGap.n_gpus_str`-GPU cluster synchronizing the chapter's `{python} RingTreeByteGap.gradient_gb_str` reference buffer over `{python} RingTreeByteGap.beta_gb_per_s_str` links, the ring's byte term is about `{python} RingTreeByteGap.ring_bw_ms_str`.
 
 ### Ring AllReduce {#sec-communication-collective-operations-collective-operations-ring-allreduce-ffce}
 
-Ring AllReduce[^fn-ring-bandwidth-optimal]\index{AllReduce!ring algorithm}\index{Ring AllReduce!pipelining} arranges nodes in a logical ring ($0 \to 1 \to \dots \to \DeviceCount-1 \to 0$). Each node sends to its successor while receiving from its predecessor. The chunk schedule distributes the required byte volume evenly across ranks, achieving the bandwidth lower bound in the ideal endpoint model [@patarasuk2009].
-
-[^fn-ring-bandwidth-optimal]: **Bandwidth-Optimal**\index{Ring AllReduce!bandwidth optimality}: Under the point-to-point model above, Ring AllReduce sends $2(\DeviceCount-1)\CollectivePayloadSize/\DeviceCount$ bytes per rank and receives the same amount. With simultaneous full-duplex transfers at bandwidth $\LinkBandwidth$ in each direction, its bandwidth time is $2(\DeviceCount-1)\CollectivePayloadSize/(\DeviceCount\LinkBandwidth)$. Adding send and receive bytes would double-count elapsed time.
+Ring AllReduce\index{AllReduce!ring algorithm}\index{Ring AllReduce!pipelining} arranges nodes in a logical ring ($0 \to 1 \to \dots \to \DeviceCount-1 \to 0$). Each node sends to its successor while receiving from its predecessor. The chunk schedule distributes the required byte volume evenly across ranks, achieving the bandwidth lower bound in the ideal endpoint model [@patarasuk2009].
 
 The algorithm splits the vector of size $\CollectivePayloadSize$ into $\DeviceCount$ chunks and then alternates communication and local reduction in two phases, a ReduceScatter phase (often called scatter-reduce)\index{Ring AllReduce!scatter-reduce phase}\index{ReduceScatter!bandwidth bound} followed by an AllGather phase\index{Ring AllReduce!AllGather phase}\index{AllGather!ring topology}. @Algo-ring-allreduce states the mechanics before the figure and trace make the same dataflow concrete.
 
@@ -1801,7 +1423,7 @@ Across the $2(\DeviceCount-1)$ send/receive rounds each rank moves $\CollectiveP
 
 :::
 
-In the ideal schedule in @fig-ring-allreduce, every logical ring edge carries a chunk in each round. Each node sends exactly $2(\DeviceCount-1)/\DeviceCount\cdot \CollectivePayloadSize$ bytes across both phases, matching the stated byte-volume lower bound. Logical edges may share physical links, however, and startup, local reduction, or contention can leave transfer capacity unused. Byte optimality does not guarantee peak physical-link utilization.
+Logical ring edges may share physical links, and startup, local reduction, or contention can leave transfer capacity unused, so byte optimality does not guarantee peak physical-link utilization.
 
 Consider 4 GPUs reducing a vector of 4 elements by summation. Each GPU $\RankIndex$ starts with a local gradient vector $\LocalGradient_i = [\FirstRingTraceElement_i, \SecondRingTraceElement_i, \ThirdRingTraceElement_i, \FourthRingTraceElement_i]$. The vector is split into 4 chunks (one per GPU), and the algorithm proceeds through two phases.
 
@@ -1971,7 +1593,7 @@ $$ \TreeLikeAllReduceTime\approx \underbrace{2\log_2 \DeviceCount\cdot \MessageS
 
 The latency term is logarithmic ($\mathcal{O}(\log \DeviceCount)$): for 1024 nodes, Ring needs 2046 steps while Tree needs only 20, and that 100$\times$ reduction in steps makes Tree attractive for small, frequent collectives across large process groups, such as scalar reductions, control messages, or small-batch activation reductions. The bandwidth term carries the penalty, because tree-like algorithms can underutilize links or concentrate traffic on interior links, and recursive-doubling-style full-message exchanges add a $\log_2 \DeviceCount$ bandwidth factor; these penalties make naive tree variants a poor choice for data parallelism's large gradient AllReduce, where bandwidth efficiency determines whether the network is saturated or partially idle.
 
-For large-scale data parallelism, this bandwidth penalty decides the comparison whenever the implementation repeatedly exchanges full messages or creates root/interior bottlenecks. In the 64-GPU example of @sec-communication-bandwidth-lower-bound, the simple tree already pays about `{python} RingTreeByteGap.tree_ring_ratio_mult_str` the ring's byte time. For a 70B-parameter model's `{python} GradSyncSignificance.gradient_gb_str` gradient AllReduce across 1,000 GPUs, a bandwidth-inefficient tree-like variant can erase the latency advantage that motivated it. Optimized double-tree algorithms exist precisely to keep logarithmic latency without imposing that naive bandwidth penalty.
+For large-scale data parallelism, this bandwidth penalty decides the comparison whenever the implementation repeatedly exchanges full messages or creates root/interior bottlenecks. On the `{python} RingTreeByteGap.n_gpus_str`-GPU cluster of @sec-communication-bandwidth-lower-bound, the simple tree forwards the whole tensor once per level on the way up and once per level on the way down, $2\log_2 64 = 12$ full-message transfers, about `{python} RingTreeByteGap.tree_bw_ms_str` against the ring's `{python} RingTreeByteGap.ring_bw_ms_str`, or `{python} RingTreeByteGap.tree_ring_ratio_mult_str` the ring's byte time. The difference of roughly `{python} RingTreeByteGap.gap_ms_str` per step would accumulate to about `{python} RingTreeByteGap.gap_run_hours_str` hours over a `{python} RingTreeByteGap.run_steps_str`-step run if fully exposed, although actual wall-clock savings also depend on startup, placement, and overlap. For a 70B-parameter model's `{python} GradSyncSignificance.gradient_gb_str` gradient AllReduce across 1,000 GPUs, a bandwidth-inefficient tree-like variant can erase the latency advantage that motivated it. Optimized double-tree algorithms exist precisely to keep logarithmic latency without imposing that naive bandwidth penalty.
 
 Small activation reductions provide a useful case for fewer startup rounds. For an eight-GPU group communicating a 1 MB tensor, the simple model reduces Ring's $2(8-1)\MessageStartupLatency= 14\MessageStartupLatency$ to Tree's $2\log_2(8)\MessageStartupLatency= 6\MessageStartupLatency$, but Tree's byte term remains about $3.4\times$ Ring's. Whether the saved startups outweigh those extra byte transfers depends on the measured latency and bandwidth. Tensor-parallel collectives also have a scheduling constraint independent of this comparison: a layer that needs the reduced activation must wait for it. A critical-path dependency does not by itself imply a latency-dominated transfer or select a tree algorithm.
 
@@ -2225,7 +1847,7 @@ class CrossoverReference:
 
 On the reference cluster, with the chapter's effective NDR $\MessageStartupLatency=$ `{python} CrossoverReference.alpha_us_str` and $\LinkBandwidth=$ `{python} CrossoverReference.beta_gb_per_s_str` across all `{python} CrossoverReference.n_ranks_str` GPUs, the estimate gives $\RingTreeCrossoverPayload \approx$ `{python} CrossoverReference.crossover_sub_math` $\approx$ `{python} CrossoverReference.crossover_mb_str`. A gradient bucket of tens of megabytes or the full model gradient therefore sits on the ring side of the crossover, while a reduction of a few hundred kilobytes sits on the tree side. The two other configurations in this section depart from that anchor in stated ways. @Fig-allreduce-crossover uses a smaller 256-GPU group on a slower 200 Gbps fabric with $\MessageStartupLatency= 1\ \MicroUnitPrefix\text{s}$, which moves the curves' intersection down to about 1 MB, and notebook \ref{nbk-collective-communication-ring-vs-tree-crossover} uses a 64-GPU group on a still slower, higher-latency fabric, where a 1 MB buffer lands almost exactly on the crossover.
 
-NCCL's algorithm selection is more nuanced than a two-way split. The double binary tree offers logarithmic latency with near-optimal bandwidth, so it competes with both Ring and Tree across a broad range of message sizes, and the library also weighs the number of channels (parallel communication streams), the network topology, and whether a hop is inter-node or intra-node. The effective selection logic resembles a multi-way decision indexed by message size, GPU count, and topology type rather than a single crossover point. The crossover formula nevertheless explains the shape of those choices, because every candidate trades startup rounds against bytes moved. When a library selects an unexpected algorithm, the same analysis shows whether the choice is correct or whether a manual override is warranted.
+NCCL's algorithm selection is more nuanced than a two-way split. The double binary tree offers logarithmic latency with near-optimal bandwidth, so it competes with both Ring and Tree across a broad range of message sizes, and the library also weighs the number of channels (parallel communication streams), the network topology, and whether a hop is inter-node or intra-node. The effective selection logic resembles a multi-way decision indexed by message size, GPU count, and topology type rather than a single crossover point. The crossover formula nevertheless explains the shape of those choices, because every candidate trades startup rounds against bytes moved. The model therefore names a candidate worth benchmarking rather than proving the library wrong, and an override is retained only after measured collective duration and exposed training-step time confirm it.
 
 Training frameworks decide which payloads reach that analysis. PyTorch DistributedDataParallel (DDP) groups gradient tensors into buckets (@sec-communication-bucket-fusion), while FSDP groups parameter gathers and gradient reductions according to its sharding units. A bucket size alone does not locate a crossover, because rank count, effective startup cost, and available bandwidth also enter the comparison, so NCCL's algorithm selection\index{NCCL!algorithm selection} must be evaluated for the actual invocation and topology rather than inferred from a nominal bucket-size range. A single 1 MB buffer on a slower fabric shows how close to the crossover a real bucket can sit.
 
@@ -2344,8 +1966,6 @@ The crossover point sits inside the range that gradient reductions can traverse 
 
 :::
 
-The crossover analysis makes algorithm selection a comparison under specified conditions. Communication libraries such as NCCL use tuning logic that accounts for message size, rank count, topology, and protocol. The simple model can identify a candidate worth benchmarking, but an apparent disagreement with the library is not proof that its choice is wrong. Compare measured collective duration and exposed training-step time before retaining an override.
-
 ::: {#chk-collective-communication-allreduce-algorithm-selection .callout-checkpoint title="AllReduce algorithm selection"}
 
 Verify your understanding of Ring vs. Tree AllReduce trade-offs:
@@ -2391,28 +2011,19 @@ class CommInfraScenario:
     bandwidth_ratio = (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / ib_ndr_raw).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import check, fmt_bandwidth, fmt_multiple
+    from mlsysim.fmt import check, fmt_bandwidth
 
     check(bandwidth_ratio > 1, "NVLink bandwidth should exceed InfiniBand bandwidth")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_h100_bw_gb_per_s_str = fmt_bandwidth(nvlink_raw, unit=GB / second, precision=0, commas=False)
     ib_ndr_bw_gb_per_s_str = fmt_bandwidth(ib_ndr_raw, unit=GB / second, precision=0, commas=False)
-    # Approx-prefixed forms + the intra/inter ratio for @tbl-bandwidth-hierarchy.
-    bandwidth_ratio_mult_str = fmt_multiple(bandwidth_ratio, precision=0, commas=False)
     nvlink_perdir_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, unit=GB / second, precision=0, commas=False)
 ```
 
 ### Hierarchical AllReduce {#sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338}
 
-On a DGX H100 node, each GPU's local NVLink capacity is `{python} CommInfraScenario.nvlink_perdir_gb_per_s_str` per direction, while its inter-node port provides `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str` over InfiniBand. These are endpoint capacity budgets, not a promise of uniform achieved rate to every peer. Intra-node connectivity and simultaneous traffic still matter. The hierarchical network\index{Hierarchical Network} in @tbl-bandwidth-hierarchy motivates a schedule that assigns work to each tier according to its usable capacity.
-
-| **Tier**       |   **Interconnect**  |                      **Bandwidth**                      |                      **Relative Speed**                      |
-|:---------------|:-------------------:|:-------------------------------------------------------:|:------------------------------------------------------------:|
-| **Intra-Node** |      NVLink 4.0     | `{python} CommInfraScenario.nvlink_perdir_gb_per_s_str` | `{python} CommInfraScenario.bandwidth_ratio_mult_str` faster |
-| **Inter-Node** | InfiniBand NDR 400G |   `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str`   |                     1$\times$ (baseline)                     |
-
-: **The Bandwidth Hierarchy**: Per-GPU bandwidth per direction at each tier, the convention of @tbl-interconnect-parameters. NVLink's `{python} CommInfraScenario.nvlink_h100_bw_gb_per_s_str` datasheet figure is the bidirectional total; InfiniBand is one port. The order-of-magnitude gap is what hierarchical algorithms exploit. {#tbl-bandwidth-hierarchy}
+On a DGX H100 node, each GPU's local NVLink capacity is `{python} CommInfraScenario.nvlink_perdir_gb_per_s_str` per direction (the `{python} CommInfraScenario.nvlink_h100_bw_gb_per_s_str` datasheet figure is the bidirectional total), while its one inter-node port provides `{python} CommInfraScenario.ib_ndr_bw_gb_per_s_str` over InfiniBand. These are endpoint capacity budgets, not a promise of uniform achieved rate to every peer. Intra-node connectivity and simultaneous traffic still matter. That hierarchical network\index{Hierarchical Network} motivates a schedule that assigns work to each tier according to its usable capacity.
 
 A flat ring whose ordering repeatedly crosses node boundaries can leave local NVLink capacity unused while loading scarce inter-node links. Hierarchical AllReduce\index{Hierarchical AllReduce}\index{Hierarchical AllReduce!three-phase decomposition} explicitly partitions the global operation into three stages that align communication volume with the fabric tiers (@fig-hierarchical-allreduce).
 
@@ -2738,94 +2349,18 @@ class HierarchicalAllreduceCalc:
 
 ```{python}
 #| echo: false
-#| label: llama-budget-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LLAMA 70B COMMUNICATION BUDGET
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Model-scale paragraphs after the 8-node hierarchical notebook in
-# │          @sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338
-# │
-# │ Goal: Quantify the headline gap between flat Ring AllReduce and
-# │       hierarchical AllReduce for a 70B model across 128 GPUs
-# │       (16 nodes × 8 GPUs). The per-phase derivation lives in the 8-node
-# │       notebook; here only the totals are surfaced.
-# │ Show: hier_total_llama_ms ≈ 1,201 ms vs flat_total_ms ≈ 5,557 ms—inline.
-# │ How: α-β model applied per tier (NVLink ReduceScatter → IB Ring → NVLink
-# │      AllGather) to compute the hierarchical total, compared to a flat ring.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Systems
-from mlsysim.core.units import BYTES_FP16, GB, byte, microsecond, ms, param, second
-from mlsysim.fmt import check, fmt_count, fmt_int, fmt_memory, fmt_time
-from mlsysim.physics import (
-    calc_ring_allreduce_time,
-    calc_ring_collective_data_factor,
-)
-
-class LlamaBudgetCalc:
-    """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gpus_llama = 128
-    gpus_per_node_llama = Systems.Nodes.DGX_H100.accelerators_per_node
-    n_nodes_llama = n_gpus_llama // gpus_per_node_llama
-    param_count = Models.Language.Llama2_70B.parameters
-    gradient_bf16 = Models.Language.Llama2_70B.size_in_bytes(BYTES_FP16)  # 140 GB in BF16
-
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way beta for ring math (datasheet 900 is bidirectional)
-    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # NDR 400 Gbps per port
-    ib_alpha = Systems.SwitchFabric.AlphaNdr  # canonical effective NDR launch latency
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Hierarchical AllReduce—Step 1: Intra-node ReduceScatter
-    intra_payload = gradient_bf16 * calc_ring_collective_data_factor(gpus_per_node_llama)
-    intra_rs_time = (intra_payload / nvlink_bw).to(ms)
-
-    # Step 2: Inter-node AllReduce (reduced payload)
-    inter_payload = gradient_bf16 / gpus_per_node_llama
-    inter_ring_total = calc_ring_allreduce_time(message_bytes=inter_payload, n_gpus=n_nodes_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
-    inter_ring_bw_time = calc_ring_allreduce_time(
-        message_bytes=inter_payload, n_gpus=n_nodes_llama, bandwidth_bytes_s=ib_bw, latency_s=0 * second
-    ).to(ms)
-    inter_ring_lat_time = (inter_ring_total - inter_ring_bw_time).to(ms)
-
-    # Step 3: Intra-node AllGather (symmetric)
-    intra_ag_time = intra_rs_time
-
-    hier_total_llama = intra_rs_time + inter_ring_bw_time + inter_ring_lat_time + intra_ag_time
-
-    # Flat Ring AllReduce (BF16)
-    flat_ring_total = calc_ring_allreduce_time(message_bytes=gradient_bf16, n_gpus=n_gpus_llama, bandwidth_bytes_s=ib_bw, latency_s=ib_alpha).to(ms)
-    flat_total = flat_ring_total
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(flat_total > hier_total_llama, "Flat AllReduce should be much slower than Hierarchical")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gradient_bf16_gb_str = fmt_memory(gradient_bf16, unit=GB, precision=0, commas=False)
-    hier_total_llama_ms_str = fmt_time(hier_total_llama, ms, precision=1, commas=True)
-    flat_total_ms_str = fmt_time(flat_total, ms, precision=None, commas=True)
-    n_gpus_llama_str = fmt_count(n_gpus_llama, commas=False, label="rank")
-    n_nodes_llama_str = fmt_count(n_nodes_llama, commas=False, label="node")
-    gpus_per_node_llama_str = fmt_count(gpus_per_node_llama, commas=False, label="GPU")
-```
-
-The speedup carries over to model-sized payloads, because every phase is linear in bytes. Applied to the chapter's `{python} GradSyncSignificance.gradient_gb_str` 70B gradient across `{python} LlamaBudgetCalc.n_gpus_llama_str`, the same three phases cut a flat ring's `{python} LlamaBudgetCalc.flat_total_ms_str` to about `{python} LlamaBudgetCalc.hier_total_llama_ms_str`, provided each GPU has its own port for the concurrent shard exchanges.
-
-```{python}
-#| echo: false
 #| label: archetype-a-hierarchical-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ARCHETYPE A ON THE REFERENCE CLUSTER: FLAT VS. HIERARCHICAL ALLREDUCE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: paragraph after the 70B/128-GPU budget in
+# │ Context: paragraph after the 8-node hierarchical notebook in
 # │          @sec-communication-collective-operations-collective-operations-hierarchical-allreduce-1338
 # │
 # │ Goal: Price the volume's running instance (175B, BF16 gradient) on the
 # │       1,024-GPU reference cluster (128 DGX H100 nodes of 8) with the same
 # │       three-phase hierarchical schedule, against a single flat ring.
 # │ Show: 350 GB gradient; flat ring ~14.0 s; hierarchical ~3.1 s; ~4.5x.
-# │ How: Same alpha-beta phase model as LlamaBudgetCalc; workload and cluster
+# │ How: Same alpha-beta phase model as the 8-node notebook; workload and cluster
 # │      from Scenarios.DenseLLMPretrainingReference.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -3258,7 +2793,119 @@ Hierarchical execution and topology-aware routing connect the cost model to a ph
 
 ## AllToAll Exchanges at Scale {#sec-communication-alltoall}
 
-Hierarchy, in-network reduction, and rail alignment were all developed for AllReduce, whose uniform payload lets every rank follow the same schedule. The AllToAll rows of @tbl-parallelism-communication-mapping, expert parallelism and sharded embedding tables, break that uniformity. As perspective \ref{psp-collective-communication-alltoall-vs-allreduce-why-scale-differs} showed, an AllToAll finishes when its slowest term finishes: startup across many fine-grained peer messages, injection or reception at an endpoint, traffic across the fabric bisection, or a hotspot created by skew. Production routing makes every one of those terms data-dependent, and the hierarchy just developed for AllReduce reappears as one of the schedules that can contain them.
+Hierarchy, in-network reduction, and rail alignment were all developed for AllReduce, whose uniform payload lets every rank follow the same schedule. The AllToAll rows of @tbl-parallelism-communication-mapping, expert parallelism and sharded embedding tables, break that uniformity, because each rank sends different data to each destination and the exchange finishes only when its slowest term finishes.
+
+:::: {#psp-collective-communication-alltoall-vs-allreduce-why-scale-differs .callout-perspective title="AllToAll vs. AllReduce: Why scale differs"}
+
+Ring AllReduce can pipeline a uniform payload through neighbor exchanges. AllToAll presents a different scaling problem because every rank has destination-specific traffic, but the logical peer count alone does not determine its cost.
+
+An AllToAll over $\DeviceCount$ ranks creates $\DeviceCount(\DeviceCount-1)$ logical source-destination transfers, yet each rank's aggregate payload can remain fixed under weak scaling. Its lower bound is governed by the largest of four terms: source injection time\index{All-to-All!injection bound}, destination reception time\index{All-to-All!reception bound}, traffic crossing the fabric bisection\index{Bisection bandwidth!All-to-All communication}, and per-message startup or scheduling overhead. Oversubscription and routing determine how much physical capacity those flows share. Message granularity determines how often they pay $\MessageStartupLatency$. Routing skew determines whether one destination or link becomes the critical path. A full-bisection network carrying balanced, coarse-grained traffic can therefore scale well despite the quadratic logical connection count, whereas an oversubscribed fabric or skewed expert assignment can stall at much smaller $\DeviceCount$.
+
+::: {.column-margin}
+```{=latex}
+\vspace*{-14mm}
+```
+![](images/svg/vol2_collective_communication_margin_001.svg){width="100%" fig-alt="Schematic against rank count N: a curve labeled N(N−1) pairs starts near zero and rises quadratically, crossing a flat line labeled per-rank payload that stays at a fixed nonzero level."}
+
+*Logical pairs grow quadratically while per-rank payload can stay flat.*
+:::
+
+Expert parallelism and large-scale recommendation systems\index{Recommendation System} can reach a communication wall earlier than standard data parallelism when their traffic exhausts injection, reception, or bisection capacity, or when routing and destination skew create hotspots. The primitive determines the traffic matrix\index{Traffic matrix!collective communication}; the physical fabric and routing distribution determine the scaling ceiling.
+
+::::
+
+A mixture-of-experts model with 64 experts distributed across 8 GPUs (8 experts per GPU) shows the AllToAll pattern at small scale. During each forward pass, a gating network assigns each input token to one or more experts. The tokens assigned to experts on remote GPUs must be physically moved to those GPUs before computation can proceed, and the results must be moved back afterward.
+
+```{python}
+#| echo: false
+#| label: moe-alltoall-calc
+from mlsysim.core.units import BYTES_FP16, GB, KB, MB, microsecond, second
+from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time, fmt_count
+from mlsysim import Systems
+
+class MoeAllToAll:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    total_tokens = 4096
+    n_gpus = 8
+    hidden_dim = 2048
+    bytes_per_elem = BYTES_FP16
+    n_experts = 64
+    # IB NDR bandwidth from the registry (400 Gbps = 50 GB/s); alpha is the
+    # chapter's canonical effective NDR launch latency (Systems.SwitchFabric.AlphaNdr).
+    beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    alpha = Systems.SwitchFabric.AlphaNdr
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    tokens_per_gpu = total_tokens // n_gpus
+    experts_per_gpu = n_experts // n_gpus
+    bytes_per_token = hidden_dim * bytes_per_elem
+    kb_per_token = bytes_per_token.to(KB)
+    tokens_per_expert = total_tokens // n_experts
+    tokens_per_transfer = tokens_per_gpu // n_gpus
+    remote_gpus = n_gpus - 1
+    data_per_transfer = tokens_per_transfer * bytes_per_token
+    total_sent = remote_gpus * data_per_transfer
+    # Bandwidth term rounded to whole microseconds: the worked trace presents it
+    # as the clean "≈ 5 μs" approximation the callout math line displays, so the
+    # downstream per-transfer and serialized totals stay on visible
+    # arithmetic (1.5 + 5 = 6.5; 7 × 6.5 = 45.5).
+    bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
+    per_transfer = alpha + bw_time
+    serialized = remote_gpus * per_transfer
+    # Concurrent peer streams share the GPU's aggregate NIC injection bandwidth.
+    # Full duplex permits simultaneous send and receive, but does not multiply the
+    # outgoing 50 GB/s port by the number of remote peers.
+    parallel = alpha + total_sent / beta
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(tokens_per_gpu == 512, f"tokens/GPU = {tokens_per_gpu}")
+    check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
+    check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
+    check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
+    check(abs(per_transfer.to(microsecond).magnitude - 6.5) < 1e-9, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
+    check(abs(parallel.to(microsecond).magnitude - 38.20016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    alpha_us_str = fmt_time(alpha, microsecond, precision=1, commas=False)
+    beta_gb_per_s_str = fmt_bandwidth(beta, unit=GB / second, precision=0, commas=False)
+    tokens_per_gpu_str = fmt_count(tokens_per_gpu, label="token", commas=False)
+    tokens_per_transfer_str = fmt_count(tokens_per_transfer, label="token", commas=False)
+    kb_per_token_str = fmt_memory(kb_per_token, unit=KB, precision=3, commas=False)
+    tokens_per_expert_str = fmt_count(tokens_per_expert, label="token", commas=False)
+    data_per_transfer_kb_str = fmt_memory(data_per_transfer, unit=KB, precision=3, commas=False)
+    total_sent_mb_str = fmt_memory(total_sent, unit=MB, precision=2, commas=False)
+    bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
+    per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=1, commas=False)
+    serialized_us_str = fmt_time(serialized, unit=microsecond, precision=1, commas=False)
+    parallel_us_str = fmt_time(parallel, unit=microsecond, precision=1, commas=False)
+    total_tokens_str = fmt_count(total_tokens, label="token", commas=False)
+    n_gpus_str = fmt(n_gpus, precision=0, commas=False)
+    hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
+    n_experts_str = fmt(n_experts, precision=0, commas=False)
+    experts_per_gpu_str = fmt(experts_per_gpu, precision=0, commas=False)
+    remote_gpus_str = fmt(remote_gpus, precision=0, commas=False)
+```
+
+::: {#nbk-collective-communication-alltoall-moe-token-routing .callout-notebook title="AllToAll for MoE token routing"}
+
+**Problem**: An MoE model processes a batch of `{python} MoeAllToAll.total_tokens_str` across `{python} MoeAllToAll.n_gpus_str` GPUs (`{python} MoeAllToAll.tokens_per_gpu_str` per GPU). Each token is a `{python} MoeAllToAll.hidden_dim_str`-dimensional hidden state in BF16 (`{python} MoeAllToAll.kb_per_token_str` per token). The gating network assigns each token to exactly 1 of `{python} MoeAllToAll.n_experts_str` experts (`{python} MoeAllToAll.experts_per_gpu_str` experts per GPU). Assuming uniform routing (each expert receives `{python} MoeAllToAll.tokens_per_expert_str`), how much data does each GPU send and receive?
+
+**Math**:
+
+Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` that need to reach `{python} MoeAllToAll.n_experts_str` different experts across `{python} MoeAllToAll.n_gpus_str` GPUs. With uniform routing, each GPU sends `{python} MoeAllToAll.tokens_per_transfer_str` to each of the other `{python} MoeAllToAll.remote_gpus_str` GPUs (keeping `{python} MoeAllToAll.tokens_per_transfer_str` local).
+
+*   Data per GPU-to-GPU transfer: `{python} MoeAllToAll.tokens_per_transfer_str` $\times$ `{python} MoeAllToAll.kb_per_token_str`/token = `{python} MoeAllToAll.data_per_transfer_kb_str`
+*   Total data sent per GPU: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.data_per_transfer_kb_str` = `{python} MoeAllToAll.total_sent_mb_str`
+*   Total data received per GPU: `{python} MoeAllToAll.total_sent_mb_str` (symmetric)
+
+**Latency Analysis** (InfiniBand NDR, $\MessageStartupLatency=$ `{python} MoeAllToAll.alpha_us_str`, $\LinkBandwidth=$ `{python} MoeAllToAll.beta_gb_per_s_str`):
+
+Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\MessageStartupLatency$-$\LinkBandwidth$ model: $\TransferTimeForPayload$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
+
+If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\MessageStartupLatency+ \text{total bytes sent}/\LinkBandwidth=$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
+
+**Systems insight**: The injection result is only a lower bound. If the topology's usable bisection bandwidth is $\BisectionBandwidth$ and $\CutCrossingDataVolume$ bytes must cross its minimum cut, the exchange also obeys $\AllToAllExchangeTime\geq \CutCrossingDataVolume/\BisectionBandwidth$. Oversubscription reduces $\BisectionBandwidth$, fine-grained peer messages add startup cost, and expert skew raises the maximum receive volume above the uniform estimate. The forward pass runs the AllToAll twice per layer, once for token dispatch and once for result collection; training also communicates gradients during backward.
+
+:::
+
+Production routing makes every one of those terms data-dependent, and the hierarchy just developed for AllReduce reappears as one of the schedules that can contain them.
 
 ### Dynamic routing and expert imbalance in MoE AllToAll {#sec-collective-communication-moe-dynamic-routing}
 
@@ -3735,7 +3382,70 @@ Verify your understanding of when and how to apply gradient compression:
 
 ## Communication-Computation Overlap {#sec-communication-overlap}
 
-In notebook \ref{nbk-collective-communication-hiding-communication-behind-computation}, `{python} LogPOverlap.L_us_str` of network transit disappeared beneath `{python} LogPOverlap.compute_us_str` of backward computation, and only the `{python} LogPOverlap.two_o_us_str` of processor overhead stayed on the critical path, with no change to the physical network. **Communication-computation overlap**\index{Communication-computation overlap!definition} applies that observation to a whole training step by running transfers concurrently with independent backward-pass computation, so that transfer time spent behind useful arithmetic does not lengthen the step. Rather than shrinking payload bytes or restructuring network routes, it attacks the communication that compression and scheduling leave exposed.
+**Communication-computation overlap**\index{Communication-computation overlap!definition} runs transfers concurrently with independent backward-pass computation, so that transfer time spent behind useful arithmetic does not lengthen the step. Rather than shrinking payload bytes or restructuring network routes, it attacks the communication that compression and scheduling leave exposed. How much of a transfer it can hide depends on which parts of that transfer occupy the processor and which occupy only the network.
+
+### The LogP model of what overlap can hide {#sec-communication-collective-operations-collective-operations-logp-model-e45d}
+
+The α-β model estimates transfer duration without specifying how much independent computation can proceed during that transfer. Adding the entire estimate to compute time therefore overstates step time when overlap is possible. The **LogP model**\index{LogP Model!definition} [@culler1993] separates network transit from processor involvement with four parameters:
+
+*   **$\LogpNetworkLatency$ (latency)**: The time for a message to traverse the network (similar to $\MessageStartupLatency$).
+*   **$\SymmetricMessageOverhead$ (overhead)**\index{LogP Model!processor overhead}\index{LogP Model!overhead parameter}: The processor time spent initiating or completing a transfer. During this work, the same execution resource cannot compute, making $\SymmetricMessageOverhead$ the nonoverlappable cost. In a distributed training context, dispatch, device-kernel launch, memory registration, and runtime progress can all contribute. The value is an effective parameter of a particular software and hardware path, so it must be measured with the same collective, process group, and topology used by the workload.
+*   **$\MessageInjectionGap$ (gap)**: The minimum spacing between consecutive sends or consecutive receives at a processor. It limits endpoint message rate but does not describe every source of link contention\index{Link Contention} in a routed fabric.
+*   **$\DeviceCount$ (rank count)**: The number of ranks in the communication group. The original model names this processor count with its final letter, P; this chapter writes it $\DeviceCount$ to match its other collective cost formulas.
+
+LogP distinguishes network latency ($\LogpNetworkLatency$, which can be hidden) from processor overhead ($\SymmetricMessageOverhead$, which cannot). Independent computation can overlap the network transit interval\index{Communication-computation overlap!LogP analysis}, while initiation and completion overhead remain exposed on the execution resource that performs them.
+
+```{python}
+#| echo: false
+#| label: logp-overlap-calc
+# ┌── LEGO ───────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_time
+from mlsysim.core.units import microsecond
+
+class LogPOverlap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    L = 100 * microsecond  # scenario assumption: network latency
+    o = 50 * microsecond  # scenario assumption: per-side processor overhead
+    compute = 500 * microsecond  # scenario assumption: overlapped compute window
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    two_o = 2 * o
+    effective = two_o + max(compute, L)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(two_o == 100 * microsecond, f"2o = {two_o.to(microsecond).magnitude}, expected 100 us")
+    check(effective == 600 * microsecond, f"Effective = {effective.to(microsecond).magnitude}, expected 600 us")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    L_us_str = fmt_time(L, microsecond, precision=0, commas=False)
+    o_us_str = fmt_time(o, microsecond, precision=0, commas=False)
+    two_o_us_str = fmt_time(two_o, microsecond, precision=0, commas=False)
+    compute_us_str = fmt_time(compute, microsecond, precision=0, commas=False)
+    effective_us_str = fmt_time(effective, microsecond, precision=0, commas=False)
+```
+
+::: {#nbk-collective-communication-hiding-communication-behind-computation .callout-notebook title="Hiding communication behind computation"}
+
+**Problem**: A training pipeline attempts to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes `{python} LogPOverlap.compute_us_str`. Represent the complete transfer by a toy budget with network time `{python} LogPOverlap.L_us_str`, processor overhead $\SymmetricMessageOverhead=$ `{python} LogPOverlap.o_us_str` to initiate, and $\SymmetricMessageOverhead=$ `{python} LogPOverlap.o_us_str` to receive. Assume both overhead intervals occupy the same execution resource as backward computation, with independent network progress and no contention. Can the communication be hidden under these assumptions?
+
+**Math**:
+
+1.  **Overlappable portion**\index{LogP Model!overlappable latency}: Network latency $\LogpNetworkLatency$ = `{python} LogPOverlap.L_us_str` (data in flight while GPU computes).
+2.  **Non-overlappable portion**\index{LogP Model!nonoverlappable overhead}: $2\SymmetricMessageOverhead$ = `{python} LogPOverlap.two_o_us_str` (GPU busy initiating/receiving).
+3.  **Compute available**: `{python} LogPOverlap.compute_us_str`.
+4.  **Hidden**: All `{python} LogPOverlap.L_us_str` of $\LogpNetworkLatency$ can overlap with compute.
+5.  **Exposed**: The `{python} LogPOverlap.two_o_us_str` of $2\SymmetricMessageOverhead$ overhead cannot overlap.
+
+**Result**: Effective time is `{python} LogPOverlap.two_o_us_str` + max(`{python} LogPOverlap.compute_us_str`, `{python} LogPOverlap.L_us_str`) = `{python} LogPOverlap.effective_us_str`. The network latency is hidden, but the processor overhead remains exposed. Applied to every layer of a backward pass, the same split determines which gradient transfers a training step can hide.
+
+**Systems insight**: The α-β model captures the total communication time. The LogP model reveals how much of it can be hidden. When designing pipelined training, optimize for low $\SymmetricMessageOverhead$ (kernel bypass, GPUDirect) rather than high $\LinkBandwidth$ alone.
+
+:::
+
+The $\MessageStartupLatency$-$\LinkBandwidth$ model estimates transfer duration from latency and bandwidth measurements. LogP adds the processor/network distinction needed to estimate exposed delay in pipelined execution\index{Pipelined Execution}. Choosing a communication schedule therefore requires both a transfer budget and the independent computation available to overlap it.
+
+When messages are large and pipelined across the network, the LogGP model\index{LogGP Model!large message transfer} [@alexandrov1995] extends LogP with a gap-per-byte parameter $\LongMessageGapPerByte$, modeling the streaming cost of long messages. These models describe multiprocessor communication with endpoint rate and capacity limits; they are not restricted to one flow on one link. Their compact parameters do not explicitly represent every shared path, oversubscribed cut, or routing hotspot. For congestion-sensitive workloads, particularly AllToAll for MoE, measurements on the target placement must test whether the model captures the active bottleneck.
+
+::: {.column-margin .margin-pointer}
+↪ The LogGP long-message cost model and its gap parameters are developed in @sec-appdx-comm-foundations-loggp.
+:::
 
 ### Layer-by-layer overlap {#sec-communication-layer-overlap}
 
@@ -4076,41 +3786,15 @@ An overlap budget joins the collective's transfer cost to the model's dependency
 
 ## Communication Libraries and Runtimes {#sec-communication-collective-operations-collective-operations-communication-libraries-nccl-5307}
 
-An overlap schedule only works if the communication backend can move the required tensors while independent computation proceeds. The engineering decision is which library preserves the chapter's model, topology, and overlap assumptions on the target hardware. Production libraries realize the same algorithms and schedules but differ in four properties, namely the device memory path, topology awareness, portability, and observability. Each library is strongest on a different subset of them, and the selection guide in @sec-communication-library-selection compares them side by side.
+An overlap schedule only works if the communication backend can move the required tensors while independent computation proceeds. Production libraries realize the same algorithms and schedules, so the engineering decision is which one preserves the chapter's model, topology, and overlap assumptions on the target hardware.
 
-### NCCL communication backend {#sec-communication-nccl}
+### Backend selection {#sec-communication-backend-selection}
 
-NCCL\index{NCCL!performance} is central to many NVIDIA multi-GPU training deployments because it turns collective algorithms (covered in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 and @sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214) into GPU-resident data movement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. Its integration with GPU memory and execution paths makes three mechanisms especially relevant. Kernel fusion\index{NCCL!kernel fusion} combines reduction with data movement, avoiding separate copy-reduce-copy stages and reducing intermediate HBM\index{HBM} traffic. Channel pipelining\index{Channel Pipelining}\index{NCCL!channel allocation} opens multiple parallel communication channels to exploit available network interfaces, but realized bandwidth depends on NIC placement, routing, and contention; multiple channels do not create additional port capacity. GPUDirect RDMA\index{NCCL!GPUDirect RDMA} lets the network card access GPU memory directly over PCIe, avoiding host-memory staging. CPU work may still be needed to set up and coordinate transfers, but the payload need not follow the staged GPU → CPU memory → NIC → network path. Together these mechanisms make NCCL a natural first backend to benchmark for NVIDIA GPU collectives.
+Four properties separate communication backends: the device memory path, topology awareness, portability, and observability. NCCL\index{NCCL!performance} leads on the first two for NVIDIA GPUs, because it turns the collective algorithms of @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 and @sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214 into GPU-resident data movement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. Kernel fusion\index{NCCL!kernel fusion} combines reduction with data movement, avoiding separate copy-reduce-copy stages and the intermediate HBM\index{HBM} traffic they cause. Channel pipelining\index{Channel Pipelining}\index{NCCL!channel allocation} opens several parallel channels to use the available network interfaces, although realized bandwidth still depends on NIC placement, routing, and contention, and more channels do not create port capacity. GPUDirect RDMA\index{NCCL!GPUDirect RDMA} lets the network card read and write GPU memory directly over PCIe, so the payload need not be staged through host memory. For observability, documented environment variables\index{NCCL!environment variables} such as `NCCL_ALGO` and `NCCL_PROTO` inspect or override the algorithm and protocol that the library's tuning logic selects, and `NCCL_DEBUG`\index{NCCL!debug logging} reports the topology, channels, and algorithm in use [@nvidiaNcclUserGuide].
 
-NCCL's topology discovery also informs algorithm selection. The topology-detection phase from @sec-communication-collective-operations-collective-operations-topology-detection-selection-2dc7 uses hardware information about NVLink connectivity, PCIe paths, and NIC placement. On a DGX H100, NCCL detects that all eight GPUs are fully connected through NVSwitch\index{NVSwitch!fully connected topology}, which makes switch-based algorithms available that a system with point-to-point NVLink connections cannot use. Detecting NVSwitch does not mandate one algorithm, however; message size, process-group membership, software support, and tuning logic still determine the selected schedule.
+MPI\index{MPI!legacy} matters when portability, CPU-side coordination, or HPC integration is the binding requirement [@mpiforum2015mpi31], and two of its features bear directly on overlap. Non-blocking collectives\index{Non-Blocking Collective} such as `MPI_Iallreduce` return a request handle that the application tests or waits on, a completion model different from NCCL's ordering on CUDA streams. Persistent collectives\index{Persistent Collective}, introduced in MPI 4.0, initialize an operation once and activate it at every step, amortizing setup for a training loop that repeats the same AllReduce shape. Either model hides a transfer only when independent work exists and the runtime makes progress. MPI's one-sided communication\index{One-Sided Communication} (`MPI_Put`, `MPI_Get`, `MPI_Accumulate`) maps onto RDMA hardware and suits asynchronous designs in which one process writes another's memory without its participation. CUDA-aware MPI\index{MPI!CUDA-aware} implementations accept GPU pointers, but the selected transport decides whether data still passes through host memory, so that path must be benchmarked against NCCL.
 
-NCCL also implements automatic algorithm selection based on message size and GPU count. Internally, it maintains tuning logic that maps message size, GPU count, and topology to a selected algorithm or protocol family. Users can override or inspect some built-in choices through documented environment variables\index{NCCL!environment variables} such as `NCCL_ALGO`, `NCCL_PROTO`, and `NCCL_DEBUG` when benchmarking reveals suboptimal choices for specific workloads [@nvidiaNcclUserGuide]. The debug output\index{NCCL!debug logging} provides essential visibility for performance debugging.
-
-A newer NCCL capability is limited support for user-defined reduction operators, such as the documented premultiplied-sum reduction for a communicator and datatype [@nvidiaNcclUserGuide]. This support is narrower than MPI-style arbitrary reductions and custom datatypes, so application-specific aggregation such as outlier clipping usually still requires separate kernels or framework-level logic.
-
-NCCL is open source but tightly coupled to NVIDIA GPUs and networking, so it cannot serve as the native collective library on AMD or Intel accelerators. Multi-vendor infrastructure, or a requirement for full control over the communication stack, motivates the alternatives that follow.
-
-### MPI distributed foundation {#sec-communication-mpi}
-
-MPI\index{MPI!legacy} standardized collective operations before the emergence of modern large-scale GPU training. The MPI Forum's standards history records Version 1.0 in May 1994, defining a vendor-neutral API for point-to-point messaging, collective operations, and process management that became the lingua franca of high-performance computing [@mpiforum2015mpi31; @mpiforum1993]. MPI remains relevant for ML systems when portability, CPU-side coordination, or HPC integration is the binding requirement.
-
-MPI's specification provides persistent collectives\index{Persistent Collective} and non-blocking collective operations\index{Non-Blocking Collective} with explicit request-based completion semantics. Persistent collectives (introduced in MPI 4.0) let applications initialize a collective once and activate it repeatedly, giving the implementation an opportunity to amortize setup costs. This fits training loops where the same AllReduce shape repeats at every step. Non-blocking collectives (`MPI_Iallreduce`) return request handles that applications can test or wait on. Their completion model differs from NCCL's CUDA-stream ordering; either approach requires independent work and effective runtime progress to realize overlap. MPI also provides one-sided communication\index{One-Sided Communication} (MPI_Put, MPI_Get, MPI_Accumulate), which maps naturally onto RDMA hardware and lets a process read or write another process's memory without that process participating, a pattern suited to parameter-server and asynchronous training designs.
-
-GPU-awareness depends on the MPI implementation and its configuration. A host-only implementation cannot accept a device pointer in `MPI_Allreduce`; the application must stage data through host buffers. CUDA-aware MPI\index{MPI!CUDA-aware} extensions (available in OpenMPI and MVAPICH2) can accept GPU pointers directly, but the selected transport and reduction path determine whether data still passes through host memory. Benchmark that path against NCCL for NVIDIA GPU collectives. MPI also supports CPU collective operations, process management (`mpirun`, `mpiexec`), and integration with portable HPC applications, so a training system can use MPI and a device-specific collective library together.
-
-### Gloo communication library {#sec-communication-gloo}
-
-Gloo\index{Gloo} is Meta's open-source collective communication library and a PyTorch backend for development, CPU workloads, and portability. Its TCP/IP transport\index{Gloo!TCP transport} supports multi-process testing over a loopback interface, so engineers can exercise collective semantics before deploying to an accelerator cluster, and it provides AllReduce and Broadcast for CPU tensors within PyTorch process groups. Its performance relative to MPI depends on the collective, message size, and transport selected by the installed implementation. Local process placement alone does not establish that a shared-memory transport\index{Gloo!shared-memory transport} is active; communication through a loopback network interface still incurs protocol and copying costs, so the relevant comparison measures the actual intra-node and inter-node paths used by the workload. Gloo prioritizes portability over the GPU-specific memory paths and topology tuning developed earlier, so a hardware-optimized backend remains the candidate to benchmark for performance-critical accelerator training.
-
-### Vendor-specific libraries {#sec-communication-vendor-libs}
-
-The three libraries (@sec-communication-nccl, @sec-communication-mpi, and @sec-communication-gloo) do not exhaust available options because the same collective algorithm has different effective $\MessageStartupLatency$, $\LinkBandwidth$, and topology constraints on different accelerator platforms. The consistent rule is to use the backend that understands the device memory path and interconnect on the hardware actually running the job. AMD's RCCL (ROCm Communication Collectives Library)\index{RCCL} implements collectives for AMD GPUs and the ROCm stack\index{RCCL!ROCm stack}, while Intel's oneCCL (oneAPI Collective Communications Library)\index{oneCCL} targets Intel accelerator and CPU deployments\index{oneCCL!oneAPI architecture}. Their names matter less than the durable selection criteria: device-memory access, topology awareness, collective semantics, and measurable performance on the target fabric.
-
-The broader pattern is a standardized front-end API with hardware-specific backends underneath it. PyTorch's `torch.distributed`\index{PyTorch!torch.distributed backends} module routes collective calls to NCCL, RCCL, oneCCL, or Gloo based on the configured process group and available backend. In practice, teams often mix backends rather than choosing one globally. A GPU process group may use NCCL for gradient AllReduce while a CPU-side coordination group uses Gloo for barriers, scalar broadcasts, or sampler state. The chapter's algorithms remain universal, but the efficient execution plan is hardware-specific. When that plan underperforms, the communication backend also becomes the diagnostic starting point.
-
-### Library selection guide {#sec-communication-library-selection}
-
-The selection matrix in @tbl-library-selection applies those criteria to common scenarios. The point is not to memorize library names; it is to choose the backend whose memory path, topology model, portability constraints, and debugging visibility match the job.
+Portability is the strength of Gloo\index{Gloo}, a PyTorch backend for CPU tensors, development, and testing whose TCP transport\index{Gloo!TCP transport} exercises collective semantics on one machine before a job reaches an accelerator cluster. Whether a faster shared-memory transport\index{Gloo!shared-memory transport} is active must be measured rather than assumed. Other accelerators have their own backends, AMD's RCCL\index{RCCL}\index{RCCL!ROCm stack} for the ROCm stack and Intel's oneCCL\index{oneCCL}\index{oneCCL!oneAPI architecture}, because the same algorithm has different effective $\MessageStartupLatency$, $\LinkBandwidth$, and topology constraints on each platform. PyTorch's `torch.distributed`\index{PyTorch!torch.distributed backends} routes each call to the backend its process group names, so teams often mix them, with NCCL reducing gradients in a GPU group while a CPU group uses Gloo for barriers, scalar broadcasts, or sampler state. @Tbl-library-selection applies the four properties to common scenarios.
 
 | **Scenario**                      |              **Recommended Library**              | **Rationale**                                |
 |:----------------------------------|:-------------------------------------------------:|:---------------------------------------------|
@@ -4122,13 +3806,13 @@ The selection matrix in @tbl-library-selection applies those criteria to common 
 
 : **Communication Library Selection**: Choose based on hardware and workload requirements. Many NVIDIA GPU training deployments use NCCL; Gloo serves as a portable fallback. {#tbl-library-selection}
 
-The table follows directly from the chapter's cost model. A backend's memory path and topology choices determine how it uses the fabric, while diagnostic signals help identify the part of $\MessageStartupLatency$, $\LinkBandwidth$, or processor overhead that limits the job. Observability supports tuning; the resulting performance still has to be measured with the workload's collective and placement.
+The table follows from the chapter's cost model. A backend's memory path and topology choices determine how it uses the fabric, and its diagnostic signals help identify whether $\MessageStartupLatency$, $\LinkBandwidth$, or processor overhead limits the job, but the resulting performance must still be measured with the workload's collective and placement.
 
 ### Calibrating collective communication models {#sec-communication-nccl-reality}
 
 The bandwidth-latency trade-off (principle \ref{pri-alpha-beta-model}) provides useful first-order predictions, but a valid comparison must model the same collective that the benchmark executes. For a ring AllReduce over $\DeviceCount$ ranks and an $\CollectivePayloadSize$-byte tensor, the first-order cost is $2(\DeviceCount-1)\MessageStartupLatency+ 2(\DeviceCount-1)\CollectivePayloadSize/(\DeviceCount\LinkBandwidth)$, not the point-to-point expression $\MessageStartupLatency+\CollectivePayloadSize/\LinkBandwidth$. A tree, a hierarchical schedule, and a switch-assisted reduction have different step counts and traffic factors. NCCL also selects protocols, channels, and algorithms according to message size and detected topology, so those choices become part of the experimental condition [@jeaugey2017nccl; @nvidiaNcclUserGuide].
 
-A calibrated collective model\index{Performance modeling!collective calibration} therefore records the operation, reduction datatype, rank count, tensor size, algorithm and protocol, topology, rank placement, and achieved bus bandwidth. It then fits effective $\MessageStartupLatency$ and $\LinkBandwidth$ to measurements from that same configuration. Comparing predicted and observed time under this contract reveals software overhead or topology loss without mistaking a collective's algorithmic traffic factor for library inefficiency. The resulting parameters apply only to the measured regime; changing the collective, process group, topology, or library version requires recalibration. A calibrated model selects a collective schedule and sizes its overlap window; attributing an observed training-step regression to kernels, memory, communication, or contention is a broader measurement task, and the system-profiling workflow in @sec-performance-engineering-profiling supplies the discipline it requires.
+A calibrated collective model\index{Performance modeling!collective calibration} therefore records the operation, reduction datatype, rank count, tensor size, algorithm and protocol, topology, rank placement, and achieved bus bandwidth. It then fits effective $\MessageStartupLatency$ and $\LinkBandwidth$ to measurements from that same configuration, as @sec-network-fabrics-performance-model does for one measured NCCL AllReduce. Comparing predicted and observed time under this contract reveals software overhead or topology loss without mistaking a collective's algorithmic traffic factor for library inefficiency. The resulting parameters apply only to the measured regime; changing the collective, process group, topology, or library version requires recalibration. A calibrated model selects a collective schedule and sizes its overlap window; attributing an observed training-step regression to kernels, memory, communication, or contention is a broader measurement task, which the program goodput analysis of @sec-performance-engineering-profiling develops.
 
 Communication diagnosis begins by comparing the workload against a matched bare-collective baseline and recording the selected algorithm, protocol, rank placement, and achieved bandwidth. A healthy baseline with a slow training step points to invocation granularity, contention, stragglers, or insufficient overlap rather than the fabric alone. Profiler traces and the attribution workflow separate those causes; the output needed here is the calibrated $\MessageStartupLatency$, $\LinkBandwidth$, and overlap window that select a collective schedule.
 
@@ -4278,27 +3962,19 @@ NVSwitch\index{NVSwitch!intra-node algorithm selection} provides high-radix, non
 
 **Fallacy**: *Rank-to-GPU mapping does not affect collective performance.*
 
-If the job scheduler assigns ranks to GPUs without considering the physical topology\index{Rank assignment!topology alignment}, hierarchical AllReduce and rail-optimized routing may route traffic suboptimally. A common symptom is that `nccl-tests` reaches full bandwidth on the cluster while the training job achieves only a fraction of it, because the job's ranks were placed so that corresponding shards cannot stay on one rail; message sizes, overlap, and competing traffic can produce a similar gap. Before benchmarking, record each rank's GPU, NIC binding, node, and rail and confirm the intended layout (for example, ranks 0--7 on node 0 and ranks 8--15 on node 1, with local rank $\LocalRankIndex$ on each node bound to rail $\LocalRankIndex$). Contiguous rank numbers on a node alone do not establish that corresponding shards use the intended physical rails.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Benchmarking collectives without recording placement context.*
-
-A collective benchmark is not reusable evidence unless it records rank order, NIC rail binding, NCCL topology configuration, and node allocation\index{Benchmarking!placement context}. Without that context, teams compare results from different physical layouts and mistake placement differences for library or hardware regressions.
+If the job scheduler assigns ranks to GPUs without considering the physical topology\index{Rank assignment!topology alignment}, hierarchical AllReduce and rail-optimized routing may route traffic suboptimally. A common symptom is that `nccl-tests` reaches full bandwidth on the cluster while the training job achieves only a fraction of it, because the job's ranks were placed so that corresponding shards cannot stay on one rail; message sizes, overlap, and competing traffic can produce a similar gap. Before benchmarking, record each rank's GPU, NIC binding, node, and rail and confirm the intended layout (for example, ranks 0--7 on node 0 and ranks 8--15 on node 1, with local rank $\LocalRankIndex$ on each node bound to rail $\LocalRankIndex$). Contiguous rank numbers on a node alone do not establish that corresponding shards use the intended physical rails. A benchmark that omits this record and the NCCL topology configuration is not reusable evidence\index{Benchmarking!placement context}, because a placement difference then reads as a library or hardware regression.
 
 :::
 
 ## Summary {#sec-communication-collective-operations-summary}
 
-Communication is the friction of scale. Every mechanism in this chapter works on the communication term $\CommunicationTime(\DeviceCount)$ of the Fleet Law (@eq-fleet-law), either shrinking it through better schedules, placement, and smaller payloads or enlarging $\OverlappedTime$ so that less of it is exposed, and each spends effort on the Communication axis of C³ so that added compute does not sit waiting.
+Every mechanism in this chapter works on the communication term $\CommunicationTime(\DeviceCount)$ of the Fleet Law (@eq-fleet-law), either shrinking it through better schedules, placement, and smaller payloads or enlarging $\OverlappedTime$ so that less of it is exposed, and each spends effort on the Communication axis of C³ so that added compute does not sit waiting.
 
-The mechanisms compose into one ordered judgment. The contract comes first. The primitive whose output the next computation consumes fixes who must exchange data and what each rank must hold, and no faster schedule can recover the bytes spent delivering a broader result than the model needs. The price comes second. The $\MessageStartupLatency$-$\LinkBandwidth$ model, the critical size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, and the ring-tree crossover $\RingTreeCrossoverPayload$ say which term binds for a given message, group, and fabric, and LogP says how much of that price can be hidden. Placement comes third, because a schedule priced on a flat network realizes its cost only when hierarchy, rails, and rank order match the logical exchange to the physical links. Compression and overlap then decide how much of the remaining transfer reaches the critical path, and each must win in time to the same quality target rather than in isolated collective time. A model calibrated against the same collective, process group, and topology closes the loop by separating a schedule's inherent traffic from library or placement loss.
+The mechanisms compose into one ordered judgment. The contract comes first. The primitive whose output the next computation consumes fixes who must exchange data and what each rank must hold, and no faster schedule can recover the bytes spent delivering a broader result than the model needs. The price comes second. The $\MessageStartupLatency$-$\LinkBandwidth$ model, the critical size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, and the ring-tree crossover $\RingTreeCrossoverPayload$ say which term binds for a given message, group, and fabric, with the price charged per round on a chunk rather than on the whole tensor. Placement comes third, because a schedule priced on a flat network realizes its cost only when hierarchy, rails, and rank order match the logical exchange to the physical links. Compression and overlap then decide how much of the remaining transfer reaches the critical path, with LogP separating the network time that overlap can hide from the processor overhead it cannot, and each must win in time to the same quality target rather than in isolated collective time. A model calibrated against the same collective, process group, and topology closes the loop by separating a schedule's inherent traffic from library or placement loss.
 
 ::: {.callout-takeaways title="Every byte has a travel cost"}
 
-* **The $\MessageStartupLatency$-$\LinkBandwidth$ model reveals the bottleneck**: The critical message size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$ separates startup-dominated from bandwidth-dominated transfers (principle \ref{pri-alpha-beta-model}). Collective duration also depends on round count and traffic volume; fit parameters with a benchmark that matches the workload's collective and topology.
+* **Contract first, then price per round**: Choose the narrowest primitive whose output the next computation consumes, then price its schedule round by round. Each round pays the startup cost on a chunk, so the critical size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$ (principle \ref{pri-alpha-beta-model}) classifies the chunk rather than the tensor. Collective duration also depends on round count and traffic volume; fit parameters with a benchmark that matches the workload's collective and topology.
 * **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $\mathcal{O}(\DeviceCount)$ latency; the simple full-message Tree model uses fewer rounds ($\mathcal{O}(\log \DeviceCount)$) but more bandwidth work. Use the log-aware crossover estimate $\RingTreeCrossoverPayload \approx \DeviceCount\MessageStartupLatency\LinkBandwidth/ \log_2 \DeviceCount$ to reason about the switch point.
 * **Hierarchy exposes parallel network capacity**: Local reductions over fast NVLink leave smaller shards for the slow InfiniBand tier. The effective bandwidth gain requires independent port capacity for concurrent shard exchanges; splitting a payload cannot multiply the capacity of a shared uplink.
 * **AllToAll schedule selection follows the active bound**: Direct exchange preserves simplicity for balanced coarse chunks, hierarchy amortizes startup across scarce inter-node links, and variable-size exchange removes padding under skew. Injection bandwidth, bisection capacity, oversubscription, message granularity, and the hottest receiver determine which schedule wins.
