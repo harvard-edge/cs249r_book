@@ -180,7 +180,9 @@ from mlsysim.fmt import fmt, fmt_bandwidth, fmt_params, fmt_percent, fmt_percent
 
 class FleetQuickRef:
     nvlink_ib = int((Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to("").magnitude)
-    goodput_ratio = 1.0 - (
+    # Share of wall time left after the four overheads; it mixes a program
+    # goodput loss (pipeline bubbles) with losses outside the steps, so it is no single factor.
+    retained_share = 1.0 - (
         Ops.TrainingRunOverheads.PipelineBubble
         + Ops.TrainingRunOverheads.Checkpoint
         + Ops.TrainingRunOverheads.FailureRecovery
@@ -200,7 +202,7 @@ class FleetQuickRef:
     mtbf_8k_min_str = fmt_time(mtbf_8192_min, 'minute', precision=1, commas=False)
     mtbf_100k_min_str = fmt_time(mtbf_100k_min, 'minute', precision=0, commas=False)
     ckpt_175_gb_str = fmt_qty_int(ckpt_175b, GB, commas=True)
-    goodput_str = fmt_percent(goodput_ratio, precision=0, commas=False, style='symbol')
+    retained_str = fmt_percent(retained_share, precision=0, commas=False, style='symbol')
     mfu_range_str = fmt_percent_range(Literature.Training.MfuLow, Literature.Training.MfuHigh, precision=0, commas=False, style='symbol')
     rack_ai_kw_str = fmt_power(Infrastructure.Racks.AI_Standard.power_kw * kilowatt, unit=kilowatt, precision=0, commas=False)
     air_limit_kw_str = fmt_power(Infrastructure.AIR_COOLING_LIMIT_KW * kilowatt, unit=kilowatt, precision=0, commas=False)
@@ -218,7 +220,7 @@ class FleetQuickRef:
 | **Compute**                | MFU `{python} FleetQuickRef.mfu_range_str`, $\ScalingEfficiency$ ~`{python} FleetQuickRef.eff_1024_str` @ 1K, ~`{python} FleetQuickRef.eff_8192_str` @ 8K                                                                                                     | Effective FLOP/s and scaling sanity checks                                                                 |
 | **Coordination**           | MTBF 8K: ~`{python} FleetQuickRef.mtbf_8k_min_str`; 100K: ~`{python} FleetQuickRef.mtbf_100k_min_str`                                                                                                                                                         | Failure expectation and checkpoint cadence                                                                 |
 | **Coordination**           | `{python} FleetQuickRef.gpt3_b_str` checkpoint ~`{python} FleetQuickRef.ckpt_175_gb_str` (`{python} FleetStateRule.ckpt_bpp_str` B/param common Adam state)                                                                                                   | Recovery and storage sizing                                                                                |
-| **Coordination**           | Goodput ~`{python} FleetQuickRef.goodput_str` after overheads                                                                                                                                                                                                 | Wall-clock utilization                                                                                     |
+| **Coordination**           | ~`{python} FleetQuickRef.retained_str` of wall time left after overheads                                                                                                                                                                                      | Wall-clock utilization                                                                                     |
 | **Power & sustainability** | AI rack ~`{python} FleetQuickRef.rack_ai_kw_str`; air limit ~`{python} FleetQuickRef.air_limit_kw_str`                                                                                                                                                        | Cooling feasibility for the installed configuration                                                        |
 | **Power & sustainability** | PUE liquid ~`{python} FleetQuickRef.pue_liq_str`, typical ~`{python} FleetQuickRef.pue_typ_str`; H100 `{python} FleetQuickRef.h100_tdp_w_str` -> `{python} FleetQuickRef.tenk_gpus_str` ≈ `{python} FleetQuickRef.tenk_it_mw_str` GPU-only proxy $\times$ PUE | GPU-only proxy; add other IT loads before facility sizing (see @sec-appdx-fleet-foundations-thermal-power) |
 
@@ -514,10 +516,10 @@ Failure recovery and checkpointing are only part of the wall-clock budget. At fl
 # │ Context: @tbl-fleet-overhead-budgets cells and caption; also the Amdahl
 # │          serial-fraction prose in the comm-comp ratio section.
 # │
-# │ Goal: Format FF.oh_* overheads and FF.goodput_ratio as percent strings (and
+# │ Goal: Format FF.oh_* overheads and the retained wall-time share as percent strings (and
 # │       a math-mode breakdown for the caption) so the table and prose stay
 # │       in sync with the underlying constants.
-# │ Show: Per-category overhead %, goodput %, and the additive caption math.
+# │ Show: Per-category overhead %, retained share %, and the additive caption math.
 # │ How:  fmt_percent() on each FF.oh_* attribute; fmt_math() to assemble the
 # │       additive breakdown expression for the caption.
 # │
@@ -526,7 +528,7 @@ Failure recovery and checkpointing are only part of the wall-clock budget. At fl
 from mlsysim.fmt import fmt, fmt_math, fmt_percent
 
 class FleetOverheadBudget:
-    goodput_ratio = 1.0 - (
+    retained_share = 1.0 - (
         Ops.TrainingRunOverheads.PipelineBubble
         + Ops.TrainingRunOverheads.Checkpoint
         + Ops.TrainingRunOverheads.FailureRecovery
@@ -536,14 +538,14 @@ class FleetOverheadBudget:
     checkpoint_pct_str = fmt_percent(Ops.TrainingRunOverheads.Checkpoint, precision=0, commas=False, style='symbol')
     failure_pct_str = fmt_percent(Ops.TrainingRunOverheads.FailureRecovery, precision=0, commas=False, style='symbol')
     maintenance_pct_str = fmt_percent(Ops.TrainingRunOverheads.Maintenance, precision=0, commas=False, style='symbol')
-    goodput_pct_str = fmt_percent(goodput_ratio, precision=0, commas=False)
+    retained_pct_str = fmt_percent(retained_share, precision=0, commas=False)
     breakdown_math = fmt_math(
         rf"\approx 1.0 - ({fmt(Ops.TrainingRunOverheads.PipelineBubble, precision=2, commas=False)} "
         f"+ {fmt(Ops.TrainingRunOverheads.Checkpoint, precision=2, commas=False)} "
         f"+ {fmt(Ops.TrainingRunOverheads.FailureRecovery, precision=2, commas=False)} "
         f"+ {fmt(Ops.TrainingRunOverheads.Maintenance, precision=2, commas=False)}) "
-        f"= {fmt(goodput_ratio, precision=2, commas=False)} "
-        rf"\approx {fmt_percent(goodput_ratio, precision=0, commas=False)}\%"
+        f"= {fmt(retained_share, precision=2, commas=False)} "
+        rf"\approx {fmt_percent(retained_share, precision=0, commas=False)}\%"
     )
 ```
 
@@ -554,7 +556,7 @@ class FleetOverheadBudget:
 | **Failure recovery**    |   ~`{python} FleetOverheadBudget.failure_pct_str`   | Faster detection, elastic rescheduling   |
 | **Maintenance windows** | ~`{python} FleetOverheadBudget.maintenance_pct_str` | Rolling upgrades, live migration         |
 
-: **Overhead Budgets for Fleet-Scale Training**: These are fractions of wall-clock time. At 10,000+ GPUs, failure recovery dominates. The compound effect is additive: total goodput ratio `{python} FleetOverheadBudget.breakdown_math`. {#tbl-fleet-overhead-budgets}
+: **Overhead Budgets for Fleet-Scale Training**: These are fractions of wall-clock time. At 10,000+ GPUs, failure recovery dominates. The compound effect is additive: the share of wall time left is `{python} FleetOverheadBudget.breakdown_math`. Pipeline bubbles lie inside retained steps and are a program goodput loss, while the other three fall outside the steps, so this share is not a single goodput factor. {#tbl-fleet-overhead-budgets}
 
 ```{python}
 #| echo: false
@@ -966,7 +968,7 @@ class FleetEffectiveFlops:
 
 A `{python} FleetEffectiveFlops.n_gpus_str`-GPU H100 cluster has a peak aggregate throughput of `{python} FleetEffectiveFlops.peak_tflop_per_s_str`. This illustrative decomposition keeps the factors disjoint: MFU represents per-device kernel and memory efficiency, scaling efficiency represents distributed communication and pipeline losses, and operational goodput represents checkpointing, failure recovery, and maintenance. The effective throughput is:
 
-$$\EffectiveFleetThroughput = \DeviceCount\PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency \times \GoodputRatio$$
+$$\EffectiveFleetThroughput = \DeviceCount\PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency \times \RuntimeGoodput$$
 
 `{python} FleetEffectiveFlops.effective_eq_math`
 

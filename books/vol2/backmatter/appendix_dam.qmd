@@ -8,7 +8,7 @@ format:
 
 # Single-Machine Foundations {#sec-appdx-dam-taxonomy}
 
-Every fleet is built from single machines, and this book assumes that the reader already reasons fluently about one of them. This appendix restates that single-machine foundation in reference form so that a reader who meets the prerequisites only loosely can work every calculation in the book without another text. It collects the Data, Algorithm, and Machine (D·A·M) diagnostic framework and the iron law it rests on, arithmetic intensity and the roofline bound, the accelerator memory hierarchy, the byte accounting of mixed-precision training, and the arithmetic of transformer training and inference. The chapters build the fleet-scale Compute, Communication, and Coordination (C$^3$) framework on this base.
+Every fleet is built from single machines, and this book assumes that the reader already reasons fluently about one of them. This appendix restates that single-machine foundation in reference form so that a reader who meets the prerequisites only loosely can work every calculation in the book without another text. It collects the Data, Algorithm, and Machine (D·A·M) diagnostic framework and the iron law it rests on, arithmetic intensity and the roofline bound, the accelerator memory hierarchy, the kernel-level levers that shorten a single device's step, the byte accounting of mixed-precision training, and the arithmetic of transformer training and inference. The chapters build the fleet-scale Compute, Communication, and Coordination (C$^3$) framework on this base.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -33,6 +33,7 @@ This appendix is a reference for single-node performance and for the single-mach
 - **When a single accelerator is slow**: Use the iron law mapping (@sec-appdx-dam-taxonomy-iron-law-mapping) and the bottleneck diagnostic (@sec-appdx-dam-taxonomy-bottleneck-diagnostic) to decide which term binds.
 - **When deciding whether a kernel is memory bound or compute bound**: Use the roofline bound (@sec-appdx-dam-taxonomy-roofline).
 - **When a byte must cross a memory boundary**: Use the memory hierarchy (@sec-appdx-dam-taxonomy-memory-hierarchy) to see which tier sets its cost.
+- **When a trace shows many short kernels, launch gaps, or attention intermediates written to device memory**: Use the kernel-level levers (@sec-appdx-dam-taxonomy-kernel-levers).
 - **When sizing model state**: Use the training memory accounting (@sec-appdx-dam-taxonomy-training-memory) for bytes per parameter.
 - **When estimating training compute or decode cost**: Use transformer arithmetic (@sec-appdx-dam-taxonomy-transformer-arithmetic).
 
@@ -272,6 +273,37 @@ class SingleMachineRecap:
 An accelerator is a fast arithmetic engine surrounded by memories that trade bandwidth for capacity, and most performance arguments in this book reduce to the question of which boundary a byte must cross. Registers and on-chip shared memory (SRAM) hold the operands of the kernel that is executing. A shared on-chip L2 cache (`{python} SingleMachineRecap.l2_str` on an H100) sits behind them. HBM holds the model's working state, `{python} SingleMachineRecap.hbm_cap_str` at `{python} SingleMachineRecap.hbm_bw_str` on an H100. Host memory is reached over PCIe at `{python} SingleMachineRecap.pcie_bw_str` per direction, roughly `{python} SingleMachineRecap.hbm_pcie_ratio_mult_str` less than HBM, and local NVMe storage sits below host memory.
 
 A kernel whose working set stays on chip runs near arithmetic speed; one that streams operands from HBM is bounded by the roofline above; one that must reach host memory or storage is slower still. The **memory wall**\index{Memory wall!appendix refresher}, the widening gap between arithmetic throughput and the bandwidth that feeds it, is the single-machine form of the constraint that reappears at fleet scale as the network wall. A multi-accelerator node adds a scale-up fabric between devices (NVLink, at `{python} SingleMachineRecap.nvlink_dir_str` per direction on an H100), and the scale-out network adds tiers beyond the node; @sec-appdx-fleet-foundations-numbers-to-know tabulates those tiers.
+
+## Kernel-Level Levers {#sec-appdx-dam-taxonomy-kernel-levers}
+
+Four techniques shorten one device's step without changing the model's mathematics. Each removes a different cost in the iron law of @sec-appdx-dam-taxonomy-iron-law-mapping, and each counts as a gain only when a measured trace confirms it. @Tbl-appdx-dam-kernel-levers summarizes them.
+
+### Fusion {#sec-appdx-dam-taxonomy-kernel-levers-fusion}
+
+**Operator fusion**\index{Operator Fusion!appendix refresher} combines consecutive operations into one kernel, so an intermediate result stays in registers or shared memory instead of being written to HBM and read back by the next kernel. It shrinks the data volume $\DataVolume$ of the data term and removes one launch per fused operation from the overhead term $\Latency$. The common kinds are chains of element-wise operations, an element-wise operation fused with a reduction such as a normalization, and operator-specific fusions such as a matrix multiply that applies its bias and activation before writing its output. Fusion stops paying when the live values of the combined kernel exceed the registers and shared memory available, which lowers occupancy or spills to memory, and when a reduction needs results from every thread block. A trace confirms it with fewer kernels and fewer HBM bytes before the step time falls.
+
+### Tiling and IO-aware attention {#sec-appdx-dam-taxonomy-kernel-levers-tiling}
+
+**Tiling**\index{Tiling!appendix refresher} sizes blocks of a computation to fit on-chip memory, so each operand fetched from HBM feeds many operations and arithmetic intensity rises. IO-aware attention such as FlashAttention\index{FlashAttention!appendix refresher} applies the idea to attention. It computes the scores block by block, keeping a running maximum and sum for the softmax, so the full matrix of scores between every pair of positions is never written to HBM and the workspace grows linearly with sequence length rather than quadratically. The price is extra rescaling arithmetic and, in training, recomputing the scores in the backward pass. Decode processes one query row per step and has no quadratic intermediate, so its fused attention kernel is a single pass over the KV cache. Tiling reduces $\DataVolume$ and frees HBM capacity for the KV cache and larger batches.
+
+### Graph replay {#sec-appdx-dam-taxonomy-kernel-levers-replay}
+
+**Graph replay**\index{CUDA Graphs!appendix refresher}, offered on NVIDIA GPUs as CUDA Graphs, records a stable sequence of kernels and memory copies once and then submits the whole sequence with one request in later steps. It removes the host-dispatch part of $\Latency$, which matters when many short kernels leave launch gaps between them, as in batch-one decode. A captured graph replays only the shapes, memory addresses, and control flow it recorded, so a server keeps one graph per shape bucket, and decode captures more easily than prefill, whose shapes vary with prompt length. Replay fuses nothing. The same kernels run with the gaps between them removed, which a timeline shows directly.
+
+### Compilation {#sec-appdx-dam-taxonomy-kernel-levers-compilation}
+
+**Graph compilation**\index{Graph Compilation!appendix refresher} automates the three levers above. A compiler captures the program as a graph, rewrites and decomposes its operations, fuses them, selects or generates a kernel for each fused group (often by timing candidates, which is called autotuning), and plans memory. Just-in-time compilers keep the eager programming model, ahead-of-time inference engines specialize the program to a declared range of shapes, and tile-level kernel languages let an engineer write a fusion the compiler missed. Compilation reduces both $\DataVolume$ and $\Latency$, at the cost of build and warmup time, regions split at graph breaks where the compiler cannot capture the program, and recompilation when a new shape arrives. @Sec-performance-engineering-compilation-overhead prices that cost across a fleet and finds when it pays back.
+
+| **Lever**                         | **Removes**                                         | **Iron-Law Term**        | **Main Limit**                            | **Trace Evidence**                        |
+|:----------------------------------|:----------------------------------------------------|:-------------------------|:------------------------------------------|:------------------------------------------|
+| **Fusion**                        | HBM round-trips of intermediates; kernel launches   | Data volume; overhead    | Register and shared-memory pressure       | Fewer kernels and fewer HBM bytes         |
+| **Tiling and IO-aware attention** | Repeated HBM fetches; materialized attention scores | Data volume              | Rescaling arithmetic; recomputation       | Fewer HBM bytes; smaller attention memory |
+| **Graph replay**                  | Host dispatch of each kernel                        | Overhead                 | Fixed shapes, addresses, and control flow | Launch gaps disappear from the timeline   |
+| **Compilation**                   | All three, applied automatically                    | Data volume and overhead | Build time; graph breaks; recompilation   | Fewer, fused kernels after warmup         |
+
+: **Kernel-Level Levers**: Each lever shortens a different term of one device's step, so a trace must show that term moving before a step-time gain counts. {#tbl-appdx-dam-kernel-levers}
+
+*Introduction to Machine Learning Systems* develops these mechanisms in full, for a reader who wants more than this recap.
 
 ## Numeric Precision and Training Memory {#sec-appdx-dam-taxonomy-training-memory}
 
