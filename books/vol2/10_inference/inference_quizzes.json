@@ -3,11 +3,101 @@
     "source_file": "books/vol2/10_inference/10_inference.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 14,
-    "sections_with_quizzes": 13,
+    "total_sections": 17,
+    "sections_with_quizzes": 16,
     "sections_without_quizzes": 1
   },
   "sections": [
+    {
+      "section_id": "#sec-inference-scale-scaling-inference-beyond-single-machines-54e6",
+      "section_title": "The Economics and Architecture of Inference",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Offered versus admitted load and the service contract",
+            "Capacity comparison at a fixed request mix and SLO",
+            "TTFT and TPOT as the budgets consumed before prefill and during decode",
+            "Serving policy decisions that a faster decode step does not settle"
+          ],
+          "question_strategy": "A TF on offered versus admitted load, an MCQ on comparing capacity at a fixed request mix and SLO, and a SHORT that maps queueing and decode contention onto the two latency budgets.",
+          "difficulty_progression": "Contract vocabulary -> capacity comparison -> latency-budget reasoning across the request lifecycle.",
+          "integration": "Builds on the replica-level efficiency and bandwidth floor of the performance engineering chapter and frames the policy questions that batching, routing, and autoscaling answer later.",
+          "ranking_explanation": "Tier 2 minimal quiz: an opening section that sets the service contract and the request lifecycle the rest of the chapter measures against."
+        },
+        "questions": [
+          {
+            "question_type": "TF",
+            "question": "True or False: A service that meets its latency SLO on every admitted request is serving all of its offered load.",
+            "answer": "False. Offered load counts all arriving work, including requests the service rejects or sheds, while admitted load counts only the work it accepts. A service can meet its latency target on admitted requests by refusing others, so capacity must be judged by how much offered work completes within the targets.",
+            "learning_objective": "Distinguish offered load from admitted load when judging whether a service meets its contract."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Configuration X reports 900 requests per second on a benchmark of short prompts, and configuration Y reports 700 requests per second on the production prompt and output mix, both at the same TTFT and TPOT targets. Which conclusion is justified?",
+            "choices": [
+              "X has more capacity, because request rate is the capacity metric for a serving system.",
+              "Neither can be ranked yet, because prompt and output lengths change the work per request, so capacity must be compared at the same request mix and SLO by counting offered work that completes within the targets.",
+              "Y has more capacity, because production traffic always contains longer requests than a benchmark.",
+              "The two are equivalent, because both meet the same latency targets."
+            ],
+            "answer": "The correct answer is B. For language models, request rate alone is insufficient because prompt and output lengths determine how much work each request carries, so a benchmark of short prompts inflates the rate. Ranking by raw rate repeats that error, and assuming production traffic is always longer replaces measurement with a guess. Meeting the same targets on different mixes does not make the configurations equivalent.",
+            "learning_objective": "Justify why serving capacity must be compared at a fixed request mix and SLO rather than by raw request rate."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "In a streaming language-model service, explain which latency budget is consumed by waiting before prefill and which by contention during decode, and why a faster decode kernel alone cannot settle either problem.",
+            "answer": "Everything up to the end of prefill, including routing, admission, tokenization, queueing, and the prefill pass, counts against time to first token, while contention among sequences sharing decode steps stretches the gaps between streamed tokens and so consumes the TPOT budget. A faster decode step raises the service rate, but it does not decide how long a request waits to join a batch, which replica receives it, which requests get scarce KV-cache space, or when the fleet adds a replica. A request queued 400 ms behind a burst misses a 300 ms TTFT target however fast decode runs, so the scheduler must budget waiting and contention alongside execution time.",
+            "learning_objective": "Analyze how queueing before prefill and contention during decode consume the TTFT and TPOT budgets independently of kernel speed."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-inference-scale-singlemachine-serving-insufficient-3f13",
+      "section_title": "Limits of Single-Machine Serving",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Memory, throughput, and latency as distinct triggers for distribution",
+            "Replication for throughput versus sharding for memory and latency",
+            "Per-phase measurement of sharding's latency benefit",
+            "TPOT as an average versus TBT as a per-gap target"
+          ],
+          "question_strategy": "An MCQ that matches a throughput trigger to replication, a SHORT on when a latency target still motivates sharding after quantization makes the model fit, and a TF on the TPOT and TBT distinction.",
+          "difficulty_progression": "Trigger classification -> sharding trade-off under a latency target -> streaming latency metrics.",
+          "integration": "Connects single-device HBM capacity and bandwidth limits to the replication and sharding mechanisms developed later in the chapter.",
+          "ranking_explanation": "Tier 2 minimal quiz: a short section, but it owns the decision of when and how a serving system must leave one machine."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A recommendation service must answer 100,000 queries per second within 10 ms. Its model fits comfortably on one machine, which peaks at 10,000 queries per second with optimal batching. Which strategy addresses the binding constraint?",
+            "choices": [
+              "Shard the model with tensor parallelism across machines, because sharding is the general remedy whenever one machine is insufficient.",
+              "Quantize the weights so a single machine runs ten times faster.",
+              "Replicate the full model across at least ten machines and route requests among them, because the binding constraint is throughput rather than memory or per-request latency.",
+              "Raise the batch size on one machine until it reaches 100,000 queries per second."
+            ],
+            "answer": "The correct answer is C. The model fits and a single request meets its budget, so the shortfall is aggregate throughput, which horizontal replication solves by multiplying independent replicas. Sharding addresses memory or per-request latency and adds communication without multiplying throughput. Larger batches cannot help because the 10,000-query peak already assumes optimal batching, and quantization does not reliably deliver a tenfold gain.",
+            "learning_objective": "Classify a serving shortfall as a memory, throughput, or latency trigger and select replication or sharding accordingly."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A 70B-parameter model needs roughly 140 GB of FP16 weights, more than one 80 GB accelerator holds, and quantization can make it fit on one device. Explain why the team might still shard it, and how they should decide.",
+            "answer": "Fitting in memory removes the memory trigger, but the single-device execution time may still exceed the request latency budget. Sharding across several GPUs divides computation and weight traffic, yet it adds communication and synchronization, and it shortens compute-bound prefill and bandwidth-bound decode by different amounts. The team should measure the sharded configuration's prefill latency against the TTFT target and its decode latency against the TPOT target separately, and shard only if both phases gain more than the added communication costs.",
+            "learning_objective": "Evaluate when a latency target justifies sharding a model that already fits on one device, measuring each phase against its own target."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A stream that meets its TPOT target cannot stall the reader, because TPOT bounds the gap between successive tokens.",
+            "answer": "False. TPOT is the average of the gaps between tokens, so one long gap can stall the reader while the average still meets its target. Per-gap tail targets are stated as time between tokens (TBT), which must be monitored separately from average cadence.",
+            "learning_objective": "Distinguish average token cadence (TPOT) from per-gap time between tokens (TBT) when setting streaming latency targets."
+          }
+        ]
+      }
+    },
     {
       "section_id": "#sec-inference-scale-serving-tax-overhead-distribution-5ef3",
       "section_title": "SLO Goodput and the Serving Tax",
@@ -15,15 +105,28 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
+            "SLO goodput as the serving capacity metric",
             "The serving tax breakdown within a request latency budget",
             "Training vs inference operational inversion"
           ],
-          "question_strategy": "Check the latency-budget decomposition and the contract that separates serving from training.",
-          "difficulty_progression": "Begins with economic cost calculations and hierarchy mapping, progresses to distributed distribution overhead analysis, and concludes with architectural inversion principles.",
-          "integration": "Links single-replica hardware constraints directly to fleet-wide economics, queuing theory, and distributed systems taxes.",
-          "ranking_explanation": "Critical opening section establishing why inference economics fundamentally invert training priorities."
+          "question_strategy": "Compute SLO goodput for two configurations, then check the latency-budget decomposition and the contract that separates serving from training.",
+          "difficulty_progression": "Begins with SLO goodput as the capacity metric, decomposes the serving tax, and concludes with the training-to-serving inversion of recovery contracts.",
+          "integration": "Links the request contract to the ML goodput of the performance engineering chapter and to the latency budget that distribution consumes.",
+          "ranking_explanation": "Tier 2 minimal quiz: the section owns SLO goodput and the serving tax, both first-order concepts of the chapter."
         },
         "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Two configurations serve the same request mix under the same TTFT and TPOT targets. Configuration X completes 1,200 requests per second, of which 70 percent meet both targets; configuration Y completes 1,000 requests per second, of which 95 percent meet both. Which has more serving capacity?",
+            "choices": [
+              "X, because it completes more requests per second and keeps its accelerators busier.",
+              "The two are equal, because both process the same request mix.",
+              "X, because requests that miss their targets still return results to users.",
+              "Y, because SLO goodput counts only requests that meet their targets, about 950 per second against about 840 for X."
+            ],
+            "answer": "The correct answer is D. SLO goodput is the rate of completed requests that meet the stated TTFT and TPOT targets for a fixed request mix, so X delivers about 840 useful requests per second and Y about 950. A request that misses its contract counts for nothing however busy the accelerators were, so higher raw throughput or a returned result does not add useful capacity.",
+            "learning_objective": "Calculate SLO goodput from completion rate and target attainment, and use it to compare serving configurations."
+          },
           {
             "question_type": "SHORT",
             "question": "Explain the composition of the distributed 'serving tax' ($T_{\\text{total}} = T_{\\text{compute}} + T_{\\text{network}} + T_{\\text{serialization}} + T_{\\text{coordination}} + T_{\\text{queuing}}$) and describe how zero-copy serialization formats mitigate serialization overhead.",
@@ -40,24 +143,26 @@
       }
     },
     {
-      "section_id": "#sec-inference-scale-serving-hierarchy-fe8c",
-      "section_title": "Serving Workloads and the Serving Hierarchy",
+      "section_id": "#sec-inference-scale-serving-cost-dominates-training-cost-576a",
+      "section_title": "Serving Cost Dominance in Production",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Serving cost dominance (one-time vs. recurring expense)",
-            "The four-level serving hierarchy"
+            "Serving cost dominance: one-time training expense versus recurring serving expense",
+            "Lifetime cost as training cost plus cost per query times duration times query rate",
+            "Consistent accounting boundary for unit serving cost",
+            "Conditions under which a unit-cost reduction yields recurring savings"
           ],
-          "question_strategy": "Quantify lifetime cost, then place optimizations at the hierarchy level that owns their bottleneck.",
-          "difficulty_progression": "Begins with economic cost calculations and hierarchy mapping, progresses to distributed distribution overhead analysis, and concludes with architectural inversion principles.",
-          "integration": "Links single-replica hardware constraints directly to fleet-wide economics, queuing theory, and distributed systems taxes.",
-          "ranking_explanation": "Critical opening section establishing why inference economics fundamentally invert training priorities."
+          "question_strategy": "A quantitative MCQ on lifetime leverage, a TF that targets the belief that serving always dominates, an MCQ on the accounting boundary of unit cost, and a SHORT on when cost-per-request reductions pay.",
+          "difficulty_progression": "Lifetime cost calculation -> scope of the principle -> accounting boundary -> engineering consequence.",
+          "integration": "Turns the per-request serving tax into a lifetime cost and motivates the batching, memory, and routing mechanisms that reduce cost per completed request.",
+          "ranking_explanation": "Tier 1: the section owns the serving cost dominance principle, a first-order concept of the chapter."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A production recommendation model costs $50,000 to train (a one-time expense) and serves 10,000 QPS continuously for 2 years (730 days) at an operational cost of $10 per million queries. According to the serving cost dominance principle, what is the ratio of lifetime serving cost to training cost?",
+            "question": "A production recommendation model costs \\$50,000 to train (a one-time expense) and serves 10,000 QPS continuously for 2 years (730 days) at an operational cost of \\$10 per million queries. What is the ratio of lifetime serving cost to training cost?",
             "choices": [
               "Approximately $1.3\\times$",
               "Approximately $126.1\\times$",
@@ -67,6 +172,48 @@
             "answer": "The correct answer is B. The model serves $10{,}000 \\times 86{,}400 \\times 730 = 6.3072 \\times 10^{11}$ queries. At $10^{-5}$ dollars per query, serving costs 6,307,200 dollars, or approximately 126.1 times the 50,000-dollar training cost. The other ratios miscount accumulated queries or unit cost. This result depends on the specified sustained traffic, lifetime, and price rather than a universal cost ratio.",
             "learning_objective": "Calculate the lifetime economic leverage of recurring inference expense relative to one-time training expense."
           },
+          {
+            "question_type": "TF",
+            "question": "True or False: Serving cost always exceeds training cost once a model is large enough, because larger models cost more per query.",
+            "answer": "False. Whether serving dominates depends on traffic, unit serving cost, deployment duration, and the training expense, not on model size alone. A low-traffic deployment or a short lifetime can leave training as the larger cost over the whole deployment.",
+            "learning_objective": "Identify the inputs that decide whether serving or training dominates a model's lifetime cost."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team estimates its cost per query from GPU time on fully loaded replicas, but its fleet also bills for reserved replicas that sit idle overnight to absorb the daytime peak. What does the lifetime cost model require?",
+            "choices": [
+              "Nothing more, because idle replicas do no work and therefore add no cost per query.",
+              "Doubling the query rate to account for the peak, because peaks set the cost.",
+              "Replacing cost per query with training cost, because idle capacity is a one-time expense.",
+              "Charging the billed idle and reserved capacity inside the unit cost, and counting the same served queries in the rate that was used to estimate that cost."
+            ],
+            "answer": "The correct answer is D. Unit serving cost must include the chosen serving boundary, including idle or reserved capacity whenever it is billed, and the query rate must count the same served queries. Treating idle replicas as free understates the bill, and inflating the query rate double-counts traffic rather than fixing the cost boundary. Reserved capacity recurs with every billing period, so it is not a one-time expense.",
+            "learning_objective": "Apply a consistent accounting boundary when estimating unit serving cost for the lifetime cost model."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A model costs \\$2M to train, and its first year of serving costs about \\$18M. Explain why a 10 percent reduction in cost per request can be worth nearly as much as the original training run, and state the conditions under which that saving is real.",
+            "answer": "Serving expense recurs with traffic, so a 10 percent reduction in cost per request saves about \\$1.8M in the first year alone and keeps saving every year after, while training was paid once. The saving is real only if request volume and service quality stay fixed, because the reduction must lower billed capacity for the same useful work. A change that only lowers latency does not reduce billed capacity, so engineering effort on a deployed model should target cost per completed request at the SLO.",
+            "learning_objective": "Justify why recurring serving savings can rival training cost, and identify the conditions under which a unit-cost reduction yields real savings."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-inference-scale-serving-hierarchy-fe8c",
+      "section_title": "Serving Workloads and the Serving Hierarchy",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "The four-level serving hierarchy"
+          ],
+          "question_strategy": "Place optimizations at the hierarchy level that owns their bottleneck, then order the levels by scope.",
+          "difficulty_progression": "Classification of levers by level -> ordering of levels by scope.",
+          "integration": "Organizes the batching, memory, routing, and platform mechanisms of the chapter by the scope they act on.",
+          "ranking_explanation": "Tier 2 minimal quiz: the lifetime-cost item moved to the serving cost dominance section it tests."
+        },
+        "questions": [
           {
             "question_type": "MCQ",
             "question": "In the four-level Serving Hierarchy (Request, Replica, Service, Platform), which level and primary optimization lever are correctly matched to their target bottleneck?",
@@ -97,7 +244,7 @@
           "focus_areas": [
             "The physics of the batching efficiency curve and knee point",
             "Traditional vs continuous batching waste ratio",
-            "Little's Law for inference capacity planning",
+            "Little's law for inference capacity planning",
             "Feature-parallel batching in recommendation systems",
             "Streaming inference and adaptive batching",
             "Per-request compute budgets for test-time compute"
@@ -141,7 +288,7 @@
               "Required concurrency $Q_{\\text{req}} = 80$; minimum SLO-sized fleet $= 10$ replicas",
               "Required concurrency $Q_{\\text{req}} = 100$; minimum SLO-sized fleet $= 10$ replicas"
             ],
-            "answer": "The correct answer is A. Little's Law gives 1,000 × 0.1 = 100 requests in flight on average, including waiting work. Fleet sizing instead uses the separate utilization target: ceil(1,000/(0.8 × 100)) = 13 replicas, running at about 76.9% utilization. Their 104 executing positions exclude queues. Under the idealized assumption that all other latency is waiting or batch formation, the fixed 80 ms service time gives 80 requests executing on average and leaves 20 waiting or accumulating. Ten replicas are the throughput-only saturation boundary. The assumed mean and tail SLO both require validation; dividing in-flight work by batch slots does not establish the fleet size.",
+            "answer": "The correct answer is A. Little's law gives 1,000 × 0.1 = 100 requests in flight on average, including waiting work. Fleet sizing instead uses the separate utilization target: ceil(1,000/(0.8 × 100)) = 13 replicas, running at about 76.9% utilization. Their 104 executing positions exclude queues. Under the idealized assumption that all other latency is waiting or batch formation, the fixed 80 ms service time gives 80 requests executing on average and leaves 20 waiting or accumulating. Ten replicas are the throughput-only saturation boundary. The assumed mean and tail SLO both require validation; dividing in-flight work by batch slots does not establish the fleet size.",
             "learning_objective": "Separate mean in-flight occupancy from executing capacity and size a candidate fleet with an explicit service-utilization target."
           },
           {
