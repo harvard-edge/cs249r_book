@@ -4,15 +4,36 @@ format:
     number-sections: false
 ---
 
-# Deployment-at-Scale Principles {.unnumbered}
+# Fleet-in-Production Principles {.unnumbered}
 
 Parts I and II built the fleet, coordinated its distributed state, and executed the training run. Training, however, opens a model's lifecycle rather than completing it, and production deployment is where the model must repay its cost under real demand. Part III shifts the focus from the single, massive training run orchestrated across a dedicated cluster to the deployed fleet: the thousands of geographically distributed servers that answer requests in real time, the billions of edge devices that run and adapt models locally, and the operational machinery that keeps every deployed version accountable. The transition changes the engineering constraints. A training run must finish a coordinated workload; a deployed fleet must sustain useful throughput on a dynamic request stream while meeting latency targets, keep models current as data and devices change, and govern how each change reaches production.
 
-A serving fleet depends on the runtime behavior of each replica, whose execution time and memory footprint determine how many requests it can accept and how much capacity the fleet must provision. Part III therefore begins with performance engineering, returning to the roofline of @sec-compute-roofline, precision choices, and kernel execution to explain their consequences for fleet capacity and latency. Inference at scale uses that runtime foundation to coordinate request queues, batching, and distributed model state. Edge intelligence extends the argument to heterogeneous fleets with intermittent connectivity, including federated learning that coordinates training while data remains on participating devices. Production operations then governs rollout, monitoring, and recovery across the deployed fleet.
+A serving fleet depends on the runtime behavior of each replica, whose execution time and memory footprint determine how many requests it can accept and how much capacity the fleet must provision. Part III therefore begins with fleet efficiency, which follows the fleet's capacity through scheduling, runtime, and execution to measure how much of it becomes useful work. Inference at scale uses that measured capacity to coordinate request queues, batching, serving precision, and distributed model state. Edge intelligence extends the argument to heterogeneous fleets with intermittent connectivity, including federated learning that coordinates training while data remains on participating devices. Production operations then governs rollout, monitoring, and recovery across the deployed fleet.
 
-The principles below preview the constraints that each chapter of Part III makes quantitative, from the single serving replica through the edge fleet to the release process that governs them all. Autoregressive generation produces each new token from the preceding tokens; a key-value cache retains intermediate attention state so the system can reuse it. A serving replica is one deployed copy of the model, potentially spread across devices. The chapters turn these concepts into capacity and latency models rather than assuming that local efficiency alone guarantees an efficient fleet.
+The principles below preview the constraints that each chapter of Part III makes quantitative, from the measured fleet through the serving replica and the edge fleet to the release process that governs them all. Autoregressive generation produces each new token from the preceding tokens; a key-value cache retains intermediate attention state so the system can reuse it. A serving replica is one deployed copy of the model, potentially spread across devices. The chapters turn these concepts into capacity and latency models rather than assuming that local efficiency alone guarantees an efficient fleet.
 
-The first constraint is imposed by the mechanics of generation itself.
+Before any serving mechanism, the part needs a measure of how much of a fleet's capacity becomes useful work.
+
+::: {#pri-ml-goodput .callout-principle title="The ML goodput decomposition"}
+
+**Invariant**: A fleet's ML productivity goodput, the fraction of its capacity-time that becomes useful work, is the product of three factors, each counted at a stated boundary so that every loss belongs to exactly one. Scheduling goodput $\SchedulingGoodput$ is the share of capacity held by complete allocations; runtime goodput $\RuntimeGoodput$ is the share of allocated time retained as progress after startup, input stalls, checkpoint pauses, restarts, and rework; and program goodput $\ProgramGoodput$ is the fraction of the ideal rate that retained steps achieve, measured as MFU.
+$$ \MlProductivityGoodput = \SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput $$
+
+**Implication**: Lost capacity must be located before it is recovered, because each factor has a different owner. A faster kernel recovers nothing that a job loses waiting for a complete gang, and a better scheduler recovers nothing that a job loses running below its hardware's rate. A change that moves a loss from one factor to another helps only if the product rises. The decomposition applies to a training step and to a serving replica alike; serving adds the latency targets that each completed request must meet.
+
+:::
+
+Over a deployed model's lifetime, serving can consume more of that capacity than training did, and serving also carries the volume's scaling thesis into the request path. When quality is bought with test-time compute, by spending more computation on each query, the scaling curve that drove the training fleet moves into serving, and its cost recurs with every request.
+
+::: {#pri-serving-cost-dominance .callout-principle title="Serving cost dominance"}
+
+**Invariant**: For high-traffic production models, cumulative inference cost can exceed the one-time training cost over the model's lifetime.
+
+**Implication**: Inference efficiency often becomes the dominant lifecycle optimization target. Optimization efforts (quantization, distillation, sparsity) should be focused on the inference path when traffic volume, product lifetime, and retraining cadence make serving cost dominate. The quantity to reduce is the cost per completed request at a fixed quality and latency target, not the cost of an individual operation.
+
+:::
+
+Within each request, the mechanics of generation impose the first limit.
 
 ::: {#pri-autoregressive-bottleneck .callout-principle title="The autoregressive bottleneck"}
 
@@ -22,23 +43,13 @@ The first constraint is imposed by the mechanics of generation itself.
 
 :::
 
-The same accounting extends from device bandwidth to fleet economics. It also carries the volume's scaling thesis into serving. When quality is bought with test-time compute, by spending more computation on each query, the scaling curve that drove the training fleet moves into the request path, and its cost recurs with every request.
-
-::: {#pri-serving-cost-dominance .callout-principle title="The serving cost dominance law"}
-
-**Invariant**: For high-traffic production models, cumulative inference cost can exceed the one-time training cost over the model's lifetime.
-
-**Implication**: Inference efficiency often becomes the dominant lifecycle optimization target. Optimization efforts (quantization, distillation, sparsity) should be focused on the inference path when traffic volume, product lifetime, and retraining cadence make serving cost dominate.
-
-:::
-
 At scale, routing policy becomes another lever for protecting latency.
 
 ::: {#pri-power-two-choices .callout-principle title="The power of two choices (P2C)"}
 
 **Invariant**: In the idealized process that sequentially places $\ReplicaCount$ independent requests into $\ReplicaCount$ replicas, with each request sampling replicas independently and uniformly at random, querying two replicas and selecting the least-loaded one reduces the maximum load from the one-choice bound $\AsymptoticTightBound(\log \ReplicaCount/ \log \log \ReplicaCount)$ to $\AsymptoticTightBound(\log \log \ReplicaCount)$ with high probability.
 
-**Implication**: Simple randomized load-balancing algorithms produce dramatically lower maximum-load bounds with $\mathcal{O}(1)$ coordination overhead. Under serving queueing assumptions, the lower maximum load translates into reduced tail latency at scale.
+**Implication**: Simple randomized load-balancing algorithms produce dramatically lower maximum-load bounds with $\mathcal{O}(1)$ coordination overhead. Under serving queueing assumptions, the lower maximum load translates into reduced tail latency at scale. Serving requests differ widely in remaining work and load probes go stale, so the two probes must read a work signal, such as active tokens or KV-cache pressure, rather than a request count.
 
 :::
 
@@ -63,4 +74,4 @@ $$ \max_i \ErrorBudgetConsumption_i \le 1 . $$
 
 :::
 
-Part III takes the trained model from the cluster to the world. The path begins with performance engineering, which diagnoses where a replica's time goes before choosing among precision, kernel, and compilation changes, and so determines how much of the hardware's theoretical capacity the system can actually use. It then moves to inference at scale, where request batching, cache management, routing, and sharding turn single-device efficiency into fleet-level latency control. Edge intelligence extends this discipline to phone-class devices that adapt models locally and coordinate through federated learning under unequal memory, power, and connectivity budgets, while operations at scale closes the loop by monitoring the deployed fleet, coordinating platform ownership, and responding when production behavior diverges from design assumptions. Measured against the Fleet Law, these chapters shift from the training step to the serving request. Performance engineering shrinks the per-replica compute term and exposes the memory traffic hidden inside it, inference at scale trades batching against the queueing and routing delays that play the role of $\SynchronizationTime(\DeviceCount)$, edge intelligence faces communication costs set by intermittent wireless links rather than a data-center fabric, and operations bounds the coordination cost of every rollout and rollback. Together, these chapters develop the operational discipline that turns a trained model into a durable production system.
+Part III takes the trained model from the cluster to the world. The path begins with fleet efficiency, which charges every lost hour of capacity to scheduling, runtime, or the program and so determines how much of the fleet's capacity becomes useful work. It then moves to serving at scale, where request batching, cache management, serving precision, routing, and sharding turn single-device efficiency into fleet-level latency control. Edge intelligence extends this discipline to phone-class devices that adapt models locally and coordinate through federated learning under unequal memory, power, and connectivity budgets, while operations at scale closes the loop by monitoring the deployed fleet, coordinating platform ownership, and responding when production behavior diverges from design assumptions. Measured against the Fleet Law, these chapters shift from the training step to the serving request. Fleet efficiency charges each term of a step to the factor that loses it and shrinks the exposed ones, serving at scale trades batching against the queueing and routing delays that play the role of $\SynchronizationTime(\DeviceCount)$, edge intelligence faces communication costs set by intermittent wireless links rather than a data-center fabric, and operations bounds the coordination cost of every rollout and rollback. Together, these chapters develop the operational discipline that turns a trained model into a durable production system.

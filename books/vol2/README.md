@@ -37,9 +37,9 @@ The assumed foundation is local model execution, memory hierarchy, training and 
       <td>How to partition workloads with 3D parallelism, coordinate collective communication primitives, survive inevitable hardware failures, and orchestrate shared clusters</td>
     </tr>
     <tr>
-      <td><b>III. Deployment at Scale</b></td>
+      <td><b>III. The Fleet in Production</b></td>
       <td>Serving and operations</td>
-      <td>How to diagnose bottlenecks and improve runtime performance, serve models under tail-latency SLOs, deploy to edge devices, and manage production MLOps lifecycles</td>
+      <td>How to measure how much of the fleet becomes useful work, serve models under tail-latency SLOs, deploy to edge devices, and manage production MLOps lifecycles</td>
     </tr>
     <tr>
       <td><b>IV. The Responsible Fleet</b></td>
@@ -111,13 +111,13 @@ The assumed foundation is local model execution, memory hierarchy, training and 
     </tr>
     <tr>
       <td>9</td>
-      <td><b>Performance Engineering</b></td>
+      <td><b>Fleet Efficiency</b></td>
       <td><code>09_performance_engineering/</code></td>
-      <td>How do you close the gap between hardware peak and serving throughput?</td>
+      <td>How much of an allocated fleet becomes training progress and served work, and how is the lost share recovered?</td>
     </tr>
     <tr>
       <td>10</td>
-      <td><b>Inference at Scale</b></td>
+      <td><b>Serving at Scale</b></td>
       <td><code>10_inference/</code></td>
       <td>How do you serve models to millions of concurrent requests under latency SLOs?</td>
     </tr>
