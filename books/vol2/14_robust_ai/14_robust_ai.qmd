@@ -54,12 +54,12 @@ A model service can maintain stable latency and uptime while its predictions bec
 
 ::: {.callout-learning-objectives}
 
-- Classify robustness challenges into environmental shifts, input-level attacks, and system-level faults
-- Diagnose apparent model failures using input replay, deployment history, and correlated system evidence
+- Classify a silent failure by robustness pillar and diagnose its source using input replay, deployment history, and system telemetry
 - Distinguish covariate shift, label shift, and concept drift, and judge when drift evidence justifies a model update
 - Distinguish calibration, selective prediction, and conformal coverage, including the assumptions and operational costs of each
-- Evaluate adversarial attacks on classifiers and generative models, and select defenses such as adversarial training, certification, input sanitization, and output guardrails
-- Select layered poisoning defenses that combine source controls, anomaly detection, and robust training
+- Evaluate adversarial attacks by attacker access, and select defenses such as adversarial training, certification, and input detection
+- Select layered poisoning defenses that combine source controls, anomaly detection, robust training, and post-training checks
+- Evaluate generative-model reliability against a named evidence source, treating entropy, self-consistency, and output guardrails as priced routing signals
 - Evaluate robustness designs against clean accuracy, compute, latency, and fallback-capacity budgets
 
 :::
@@ -168,7 +168,51 @@ Across these settings, robustness depends on connecting the failure signal to a 
 
 ## A Unified Framework for Robust AI {#sec-robust-ai-unified-framework-robust-ai-b25d}
 
-One flipped exponent bit in accelerator memory can turn a trained weight of 0.042 into a finite value near $10^{37}$ that passes every NaN check (@sec-robust-ai-behavioral-fault-checks). A gradual change in user demographics can erode recommendation quality while latency and uptime stay flat. Production ML systems cannot treat these as isolated bugs. A unified framework must map how low-level hardware faults, software bugs, data drift, and adversarial inputs propagate upward into the model's output.
+```{python}
+#| echo: false
+#| label: bit-flip-weight-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EXPONENT BIT FLIP IN AN FP32 WEIGHT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Opening of @sec-robust-ai-unified-framework-robust-ai-b25d and
+# │          @sec-robust-ai-behavioral-fault-checks (@fig-weight-corruption).
+# │
+# │ Goal: Show that one flipped exponent bit turns a modest weight into a
+# │       finite outlier that NaN and infinity checks never see.
+# │ Show: w = 0.042 -> w' ~ 1.4e37 after flipping bit 30 (factor 2^128).
+# │ How: Flip bit 30 of the IEEE-754 FP32 encoding with struct; the weight
+# │      value is an illustrative scenario input.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+import struct
+from mlsysim.fmt import check, fmt, fmt_math, sci_latex
+
+class BitFlipWeight:
+    """One exponent-bit flip in an FP32 weight."""
+
+    # ┌── 1. LOAD (scenario input, illustrative) ───────────────────────────
+    weight = 0.042
+    flipped_bit = 30  # most significant exponent bit of the FP32 word
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    _bits = struct.unpack(">I", struct.pack(">f", weight))[0]
+    stored = struct.unpack(">f", struct.pack(">I", _bits))[0]
+    corrupted = struct.unpack(">f", struct.pack(">I", _bits ^ (1 << flipped_bit)))[0]
+    scale_log2 = round(math.log2(corrupted / stored))
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(math.isfinite(corrupted), "Flipped weight must stay finite (evades NaN/inf checks)")
+    check(scale_log2 == 128, f"Bit 30 flip should scale by 2^128, got 2^{scale_log2}")
+    check(1.3e37 < corrupted < 1.5e37, "Prose quotes about 1.4e37")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    weight_str = fmt(weight, precision=3, commas=False)
+    corrupted_math = fmt_math(sci_latex(corrupted, precision=1))
+    scale_math = fmt_math(rf"2^{{{scale_log2}}}")
+```
+
+One flipped exponent bit in accelerator memory can turn a trained weight of `{python} BitFlipWeight.weight_str` into a finite value near `{python} BitFlipWeight.corrupted_math` that passes every NaN check (@sec-robust-ai-behavioral-fault-checks). A gradual change in user demographics can erode recommendation quality while latency and uptime stay flat. Production ML systems cannot treat these as isolated bugs. A unified framework must map how low-level hardware faults, software bugs, data drift, and adversarial inputs propagate upward into the model's output.
 
 ### Cross-cutting robustness dependencies in the fleet stack {#sec-robust-ai-building-previous-concepts-ef4a}
 
@@ -207,11 +251,11 @@ from mlsysim.core.units import *
 # │          in @sec-robust-ai-diagnosing-the-masquerade-9f21.
 # │
 # │ Goal: Surface model scale, weight memory footprint, and hardware specs.
-# │ Show: ~175B params, 350 GB weight footprint > 80 GB accelerator HBM, and ~900 GB/s V100 memory bandwidth.
+# │ Show: ~175B params and a 350 GB weight footprint > 80 GB accelerator HBM.
 # │ How: .to(unit).magnitude from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_params
+from mlsysim.fmt import check, fmt_memory, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RobustAISetup:
@@ -221,7 +265,6 @@ class RobustAISetup:
     from mlsysim import Models, Hardware
 
     m = Models.Language.GPT3
-    h = Hardware.Cloud.V100
     h_a100 = Hardware.Cloud.A100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -231,7 +274,6 @@ class RobustAISetup:
     # Branded hardware label: capacity is stored as 80 GiB; the vendor label is
     # "80 GB" (lego-units.md, Branded Hardware Labels), so read the binary magnitude.
     a100_hbm_gb = int(h_a100.memory.capacity.to(GiB).magnitude)  # 80 GB (branded)
-    v100_bw_gbs_val = h.memory.bandwidth.to(GB / second).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gpt3_params_b_val == 175, f"Expected 175B params, got {gpt3_params_b_val}")
@@ -252,7 +294,7 @@ The pressure that shards a model across devices also compresses it. Efficiency t
 
 Checking that evidence draws on reliability engineering:[^fn-reliability-eng-ml] fault models that describe how failures occur, error detection mechanisms that identify problems before they impact results, and recovery strategies that restore system operation. Compression meets these concepts through the model's **robustness margin**\index{Robustness Margin!definition}\index{Robustness Margin!quantization impact}, the amount of input perturbation, numerical error, or representation change the model can absorb before its prediction changes. INT8 quantization, pruning, and knowledge distillation change the deployed computation, and each can shrink that headroom, so a compressed model that matches the original's clean-data accuracy has not thereby shown that its margin survived. An optimized system therefore needs evidence that its detection and recovery mechanisms cover the faults in its operating model and that the resulting predictions still meet the service contract.
 
-[^fn-reliability-eng-ml]: **Reliability Engineering**\index{Reliability!engineering, ml extension}: Uses fault models and failure-mode analysis to connect component behavior to system outcomes. A series model gives system reliability\index{Reliability Engineering!exponential failure law} as $\SystemReliability(\TimeInstant)=e^{-\SeriesComponentCount\ComponentFailureRate \TimeInstant}$ when all $\SeriesComponentCount$ components must survive, failures are independent, and each has the same constant exponential failure rate. ML deployments also need behavioral evidence for drift, crafted inputs, and uncertainty; the component-survival model alone does not cover these failure modes.
+[^fn-reliability-eng-ml]: **Reliability Engineering**\index{Reliability!engineering, ml extension}: Uses fault models and failure-mode analysis to connect component behavior to system outcomes. A series model gives system reliability\index{Reliability Engineering!exponential series model} as $\SystemReliability(\TimeInstant)=e^{-\SeriesComponentCount\ComponentFailureRate \TimeInstant}$ when all $\SeriesComponentCount$ components must survive, failures are independent, and each has the same constant exponential failure rate. ML deployments also need behavioral evidence for drift, crafted inputs, and uncertainty; the component-survival model alone does not cover these failure modes.
 
 Scale also compounds the chance that silent corruption occurs somewhere in the fleet. Under the fleet model of @sec-ft-sdc-verification-fleet-scale, $\DeviceCount$ devices\index{Silent data corruption!cluster-scale probability}, each with independent residual-error probability $\DeviceSilentCorruptionProbability$ over the same interval, see at least one silent error with probability $\Pr(\geq 1) = 1 - (1 - \DeviceSilentCorruptionProbability)^\DeviceCount$, so a per-device rate that is negligible on one machine becomes a routine event on a fleet of tens of thousands of accelerators.
 
@@ -357,7 +399,7 @@ These shifts occur naturally as environments evolve. User preferences change sea
 **Covariate shift**\index{Covariate Shift!definition}\index{Covariate Shift!importance weighting}\index{Covariate Drift!importance weighting} changes the input distribution while the relationship between inputs and outputs stays fixed [@quinonero2009dataset]. A vehicle perception model trained mostly on daytime images may encounter unfamiliar inputs at night\index{Covariate Shift!day-night illumination}, or in rain, snow, and fog. Treating this as covariate shift requires assuming that the conditional labeling relationship stays fixed; an unchanged task name alone does not establish that assumption. Any accuracy loss depends on the luminance shift, the sensor, and how much adverse-condition data the training set contained, so each deployment must measure it on held-out night and weather slices rather than assume a published figure. Under the covariate-shift assumption, the changed population can place more probability in regions the model learned poorly, as illustrated in panel (a) of @fig-shift-types. Aggregate accuracy can then decline even though the labeling rule remains fixed. This is a change in the distribution of errors, not a claim that every affected request becomes incorrect.
 
 ::: {.column-margin .margin-pointer}
-↩ A fleet drift monitor that must tell input-distribution change from input-output change is established in @sec-ml-operations-scale-drift-detection-793f; this section defines the shift types it separates.
+↩ A fleet drift monitor that must tell input-distribution change from input-output change is established in @sec-ml-operations-scale-drift-detection-793f; the covariate, label, and concept shifts it separates are defined here.
 :::
 
 ```{python}
@@ -861,7 +903,7 @@ class CountryPSIDecomposition:
     )
 ```
 
-@Tbl-psi-country-example compares the baseline (training) distribution and current (production) distribution for four named countries plus the Other bucket.
+The user-country feature has four named countries and an Other bucket, and decomposing its PSI bucket by bucket shows which part of the traffic moved (@tbl-psi-country-example).
 
 | **Country** |      **Baseline ($\ReferenceBinProportion_i$)**     |       **Current ($\CurrentBinProportion_i$)**       | **$\ReferenceBinProportion_i - \CurrentBinProportion_i$** | **$\ln(\ReferenceBinProportion_i/\CurrentBinProportion_i)$** |                    **Contribution**                    |
 |:------------|:---------------------------------------------------:|:---------------------------------------------------:|:---------------------------------------------------------:|:------------------------------------------------------------:|:------------------------------------------------------:|
@@ -986,7 +1028,7 @@ The observed statistic is several times that critical value. Tightening the leve
 
 ##### Step 4 decision framework application {.unnumbered}
 
-@Tbl-retraining-decision-matrix combines the quantitative evidence.
+Set against the team's configured triggers, the three results split into one signal to monitor and two to investigate (@tbl-retraining-decision-matrix).
 
 | **Metric**                   |                    **Value**                     |                     **Threshold**                      | **Action Level** |
 |:-----------------------------|:------------------------------------------------:|:------------------------------------------------------:|:----------------:|
@@ -1018,7 +1060,7 @@ Comparing scenario-calibrated alerts with observed performance yields three case
 
 ##### Level 3 retraining vs. investigation {#sec-robust-ai-level-3-retraining-vs-investigation-4338}
 
-Not all drift requires retraining. @Tbl-robust-ai-retraining-decision-rules separates immediate remediation from investigation and continued monitoring.
+Not all drift requires retraining. The evidence decides among three responses (a model update, investigation first, or continued monitoring), and each demands a different combination of statistical signal, observed performance, and external context (@tbl-robust-ai-retraining-decision-rules).
 
 | **Action**              | **Trigger conditions**                                                                                                                                                                     | **Response logic**                                                                                                               |
 |:------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
@@ -1102,7 +1144,7 @@ When the drifted data cannot leave the devices or regions that produce it, the s
 
 Population monitoring asks whether traffic has changed in aggregate. A serving system faces a different decision on every request: whether this particular input lies within the model's demonstrated competence and whether the system should act on its prediction. A stable daily PSI can coexist with a rare, dangerous OOD request, while a large population shift can leave individual predictions well supported. Fleet robustness therefore needs both population monitors and a per-request decision contract.
 
-The contract combines three signals. Calibration\index{Calibration!selective prediction}\index{Calibration!expected calibration error}\index{Calibration!temperature scaling} tests whether a score of 0.8 corresponds to approximately 80 percent correctness on a defined validation population [@guo2017calibration]. Out-of-distribution detection\index{Out-of-distribution detection!per-request}\index{Out-of-Distribution Detection!energy-based scores} scores how unlike the request is from the model's validated input distribution [@hendrycks2017]. Selective prediction\index{Selective prediction!risk-coverage} converts those signals into an action policy: answer above the acceptance threshold, route uncertain cases to a stronger model or reviewer, and abstain when neither path can satisfy the risk bound. None of the three substitutes for the others. A calibrated classifier can remain confidently wrong on OOD inputs, and an OOD detector can flag novelty without estimating task error.
+The contract combines three signals. Calibration\index{Calibration!selective prediction}\index{Calibration!expected calibration error}\index{Calibration!temperature scaling} tests whether a score of 0.8 corresponds to approximately 80 percent correctness on a defined validation population [@guo2017calibration]. Out-of-distribution detection\index{Out-of-distribution detection!per-request}\index{Out-of-Distribution Detection!energy-based scores} scores how unlike the request is from the model's validated input distribution [@hendrycks2017]. Selective prediction\index{Selective prediction!risk-coverage} converts those signals into an action policy: answer above the acceptance threshold, route uncertain cases to a stronger model or reviewer, and abstain when neither path can satisfy the risk bound (@fig-selective-prediction-routing). None of the three substitutes for the others. A calibrated classifier can remain confidently wrong on OOD inputs, and an OOD detector can flag novelty without estimating task error.
 
 Let $\SelectiveAcceptanceScore(\ModelInput)$ be an acceptance score whose larger values indicate stronger evidence for answering, $\ResponseThreshold$ its threshold, $\ModelPredictor(\ModelInput)$ the prediction, and $\LossFunction(\ModelPredictor(\ModelInput),\ExampleLabel)$ its loss against the observed outcome. For accepted set $\AcceptedInputSet = \{\ModelInput: \SelectiveAcceptanceScore(\ModelInput) \ge \ResponseThreshold\}$ at threshold $\ResponseThreshold$, coverage is $\Pr(\ModelInput\in \AcceptedInputSet)$ and selective risk is the mean loss conditioned on acceptance:
 
@@ -1112,6 +1154,10 @@ $$
 $$
 
 Sweeping $\ResponseThreshold$ produces a risk-coverage curve\index{Selective Prediction!risk-coverage curve} rather than one accuracy number. Raising the threshold reduces coverage, but lowers accepted-request risk only when the score orders requests by error risk well enough. That relationship must be measured on the deployment population, and the rejected traffic does not disappear. The fallback path needs enough queue, reviewer, or secondary-model capacity to absorb the abstention rate within the original latency and safety budget. If labels arrive days later, the system can monitor scores and fallback load immediately but cannot confirm selective risk until outcomes return. During that delay, rate limits and conservative thresholds can limit exposure, while the default response still requires validation against the application's hazards.
+
+::: {#fig-selective-prediction-routing fig-env="figure" fig-pos="htb" fig-cap="**Per-Request Competence Routing**: An acceptance gate compares each request's score with threshold $\ResponseThreshold$ and sends it to one of three paths. Accepted requests are answered from the model's prediction; the rest are routed to a stronger model or reviewer or receive a validated safe default. Raising $\ResponseThreshold$ moves the operating point down the risk-coverage curve, lowering selective risk only if the score orders errors well, and every point of coverage given up becomes fallback load that those paths must serve within the latency budget. The curve's shape is illustrative." fig-alt="Left to right: a request box labeled input x feeds a model box listing prediction f of x, calibrated confidence, and OOD score, which feeds a violet acceptance gate labeled score s of x versus tau. Three arrows leave the gate: green to an Answer box reading s of x at least tau, act on f of x; violet to a Route box reading stronger model or reviewer; red to an Abstain box reading validated safe default. A bracket groups Route and Abstain above the label fallback load, one minus coverage times arrival rate, served within the latency budget. Lower left, an inset plots selective risk rising with coverage, with a dot marking tau and an arrow labeled raise tau pointing toward lower coverage."}
+![](images/svg/selective-prediction-routing.svg)
+:::
 
 #### Finite-sample coverage with conformal prediction {#sec-robust-ai-conformal-coverage}
 
@@ -1736,7 +1782,7 @@ If poisoned samples survive sourcing and sanitization, the training objective of
 
 [^fn-minimax-adversarial-formulation]: **Minimax**\index{Minimax!adversarial training}: Game-theoretic strategy from @vonneumann1928theorie that minimizes the maximum possible loss. In adversarial robustness, @madry2018towards formulate training as $\min_\ModelParameters\max_{\|\AdversarialPerturbation\| \leq \AdversarialPerturbationBudget} \LossFunction(\ParameterizedPredictor(\ModelInput+ \AdversarialPerturbation), \ExampleLabel)$: the model learns to minimize loss under a worst-case perturbation\index{Minimax!robust optimization formulation} within the chosen norm ball. The inner maximization is computationally expensive because it is usually approximated with iterative attacks such as PGD, so PGD-adversarial training is a budgeted robustness choice rather than a free objective change [@bai2021; @shafahi2019adversarial].
 
-The image transformations displayed in @fig-data-augmentation demonstrate how data augmentation\index{Data Augmentation!techniques} expands training diversity: applying horizontal flips, rotations, and crops creates variants that preserve the label when the transform respects the class (a horizontally flipped digit need not) and can disrupt some localized poison patterns. Other transformations preserve an attack's trigger, so augmentation does not guarantee dilution. Random subsampling or bootstrap aggregating changes which poisoned records each model encounters; whether combining those models reduces the attack's effect requires evaluation against coordinated poisoning.
+Data augmentation\index{Data Augmentation!techniques} expands training diversity by applying horizontal flips, rotations, and crops (@fig-data-augmentation), creating variants that preserve the label when the transform respects the class (a horizontally flipped digit need not) and can disrupt some localized poison patterns. Other transformations preserve an attack's trigger, so augmentation does not guarantee dilution. Random subsampling or bootstrap aggregating changes which poisoned records each model encounters; whether combining those models reduces the attack's effect requires evaluation against coordinated poisoning.
 
 ::: {#fig-data-augmentation fig-env="figure" fig-pos="htb" fig-cap="**Data Augmentation Techniques**: Applying transformations like horizontal flips, rotations, and cropping creates variants of existing training examples. When the transformations preserve the task label, they can improve robustness to the represented variations and reduce overfitting. Their effect on generalization and poisoning resistance requires evaluation." fig-alt="Grid showing original image and augmented variants: horizontal flip, rotation, and cropping transformations applied to same source."}
 
@@ -1794,7 +1840,7 @@ Language interfaces also carry the input-level attacker into text. Prompt inject
 
 A common deployment pattern adds **output guardrails**\index{Output Guardrail!definition}, lightweight classifiers that scan generated text for policy violations\index{Output Guardrail!policy enforcement} or toxicity before the response returns to the user. A guardrail threshold trades the same two quantities as a selective-prediction threshold. Each false positive refuses or escalates a legitimate response, so the false-positive rate multiplied by the legitimate-request rate estimates false refusals or escalations; each false negative is residual risk that reaches the user. Total diverted load also includes correctly flagged harmful responses. The arrival rate at each refusal, retrieval, or human path is the incoming request rate multiplied by the fraction routed to that path under the policy, counting both true and false flags. Choosing the threshold from a curve measured on representative traffic, rather than from the classifier's default, allows the team to compare that load with the path's capacity. The guardrail also adds a model inference to every response, so its latency counts against the serving deadline. Finally, a guardrail is itself a model with its own decision boundary, so it carries the same obligation as any other defense and must pass the adaptive evaluation of @sec-robust-ai-evaluation-testing-4b54 against an attacker who knows it is there.
 
-Every routing signal in this section, from token entropy to a guardrail score, is computed by the same serving system that the remaining pillar can corrupt.
+Every routing signal for generative models, from token entropy to a guardrail score, is computed by the same serving system that the remaining pillar can corrupt.
 
 ## System-Level Faults {#sec-robust-ai-diagnosing-the-masquerade-9f21}
 
@@ -1802,7 +1848,7 @@ Every defense in the two preceding pillars reads evidence produced by the system
 
 ### Behavioral checks for silent faults {#sec-robust-ai-behavioral-fault-checks}
 
-@Fig-weight-corruption traces how a physical bit flip cascades through neural inference. In panel (b), flipping bit 30 of an FP32 weight scales its magnitude by $2^{128}$, transforming a modest weight ($\ModelWeight= 0.042$) into an extreme outlier ($\CorruptedModelWeight\approx 1.4 \times 10^{37}$). Panel (a) traces the affected path through hidden unit $\HiddenUnitOutput_2$ to output logits ($\NetworkOutput_1, \NetworkOutput_2$). The corrupted weight is finite and can evade NaN or infinity checks; whether it dominates those outputs depends on the input, activation function, and downstream weights. Targeted bit-flip attacks deliberately select vulnerable weight bits, so their results should not be interpreted as the effect of one random hardware upset. Memory subsystem failures during training can likewise corrupt gradient updates and prevent model convergence. Scale turns one corrupted value into a persistent exposure. Every forward pass of a dense GPT-3-class model reads all `{python} RobustAISetup.gpt3_params_b_str` of its parameters, so a corrupted weight resident in memory participates in every request that replica serves until something detects it.
+@Fig-weight-corruption traces how a physical bit flip cascades through neural inference. In panel (b), flipping bit 30 of an FP32 weight scales its magnitude by `{python} BitFlipWeight.scale_math`, transforming a modest weight $\ModelWeight$ of `{python} BitFlipWeight.weight_str` into an extreme outlier $\CorruptedModelWeight$ of about `{python} BitFlipWeight.corrupted_math`. Panel (a) traces the affected path through hidden unit $\HiddenUnitOutput_2$ to output logits ($\NetworkOutput_1, \NetworkOutput_2$). The corrupted weight is finite and can evade NaN or infinity checks; whether it dominates those outputs depends on the input, activation function, and downstream weights. Targeted bit-flip attacks deliberately select vulnerable weight bits, so their results should not be interpreted as the effect of one random hardware upset. Memory subsystem failures during training can likewise corrupt gradient updates and prevent model convergence. Scale turns one corrupted value into a persistent exposure. Every forward pass of a dense GPT-3-class model reads all `{python} RobustAISetup.gpt3_params_b_str` of its parameters, so a corrupted weight resident in memory participates in every request that replica serves until something detects it.
 
 ::: {#fig-weight-corruption fig-env="figure" fig-pos="htb" fig-cap="**Weight Corruption via Bit Flip**: (a) One corrupted weight $\CorruptedModelWeight$ drives hidden unit $\HiddenUnitOutput_2$, whose output feeds every downstream logit. (b) For an illustrative trained weight $\ModelWeight = 0.042 \approx 1.34 \times 2^{-5}$, flipping bit 30, the most significant exponent bit of the FP32 word, raises the stored exponent from $2^{-5}$ to $2^{123}$. In general, flipping an exponent bit with place value $2^{\ExponentBitIndex}$ scales the value by $2^{\pm 2^{\ExponentBitIndex}}$; here the factor is $2^{128}$, giving $\CorruptedModelWeight \approx 1.4 \times 10^{37}$. The result is still finite, so NaN and infinity checks never fire, yet it can produce extreme downstream activations, depending on the input, activation function, and downstream weights. A range check $|\ModelWeight| \le \WeightRangeBound$ against the trained weight distribution catches it cheaply." fig-alt="Left: a small network with four inputs, three hidden units, and two outputs; one input-to-hidden weight is drawn thick and red, and dashed red arrows run from the affected hidden unit to both outputs. Right: two FP32 bit rows showing sign, eight exponent bits, and a collapsed mantissa. The top row encodes w = 0.042 with exponent bits 01111010; an arrow labeled bit 30 flips 0 to 1, value times 2 to the 128 leads to the bottom row, whose first exponent bit is red and set to 1, labeled w prime approximately 1.4 times 10 to the 37."}
 ![](images/svg/weight-corruption.svg)
@@ -1894,7 +1940,7 @@ Adversarial training does not establish universal robustness. A model trained ag
 
 **Fallacy**: *Software faults do not matter when the model is correct.*
 
-Focusing solely on algorithmic robustness ignores the reality that software bugs in data pipelines\index{Pipeline Validation!software fault prevention} and serving infrastructure are a major cause of ML failures. Incident analyses often find pipeline and data issues, not model architecture or adversarial attacks alone, at the center of failures. Checksums can detect changed bytes, while behavioral validation must also catch incorrect transformations of intact data. A model hardened against adversarial perturbations can still fail when a preprocessing bug supplies validly stored but wrongly computed inputs.
+Focusing solely on algorithmic robustness ignores the reality that software bugs in data pipelines\index{Pipeline Validation!software fault prevention} and serving infrastructure cause many ML failures. A review of a decade of outages in one large production ML pipeline found that most were not ML-centric and arose instead from the distributed system around the model [@papasian2020how]. Checksums can detect changed bytes, while behavioral validation must also catch incorrect transformations of intact data. A model hardened against adversarial perturbations can still fail when a preprocessing bug supplies validly stored but wrongly computed inputs.
 
 :::
 
@@ -1919,6 +1965,7 @@ Outside the training step the same C$^3$ axes set the price. Randomized smoothin
 * **Silence is the failure mode**: Robustness exists because drift, adversarial perturbations, poisoning, and numerical faults often preserve uptime and latency while corrupting predictions. Production systems need monitors that surface competence loss\index{Silent Failure Mode!production detection} before user complaints or downstream business metrics reveal it.
 * **Diagnose before defending**: A software fault can look like concept drift, a poisoned sample like a rare outlier, and an adversarial input like natural variation. Read the release timing, fixed-input replay, and infrastructure telemetry before spending a defense budget on the hypothesis the surface symptom suggests, then combine ingress validation, training defenses, uncertainty signals, and output verification.
 * **Robustness is bought explicitly**: Strong adversarial training (principle \ref{pri-robustness-compute-penalty}) can reduce clean accuracy and multiply training compute, while certified defenses and uncertainty sampling add serving cost. Price each effect against a like-for-like baseline before deciding how much resilience the failure consequence justifies.
+* **Poisoning defense follows the data path**: Poisoned records can leave clean aggregate accuracy intact, so no single detector suffices. Layer source controls, sanitization, robust objectives, and post-training behavioral checks, and keep lineage so every admission decision can be traced and reversed.
 * **Drift alerts begin an investigation**: Calibrated distance measures identify changes that need review. Outcome evidence and root-cause analysis determine whether the response should be continued monitoring, data repair, recalibration, retraining, or fallback.
 * **Coverage guarantees have operating conditions**: Conformal prediction provides finite-sample marginal coverage under exchangeability, not per-input or per-subgroup certainty. Version and refresh the calibration evidence, and provision fallback capacity for large prediction sets.
 * **Generative reliability is semantic**: Large language model hallucinations are confidently fluent failures rather than simple label mistakes. Entropy and self-consistency are routing signals, not factuality guarantees; grounding checks, external verification, and escalation policies must bound what the system is allowed to assert.
