@@ -101,14 +101,9 @@ class NetworkRunningExampleCluster:
 *One slow link stalls every peer that waits on it.*
 :::
 
-@Sec-compute-infrastructure ended at the node boundary, where each GPU's NVLink bandwidth narrows to a single external network port. How much that narrowing costs depends on what the training job must push through the port, and how often. Consider the running instance of Archetype A (GPT-4/Llama-3), a `{python} NetworkRunningExampleCluster.params_str`-parameter GPT-3-class dense transformer partitioned across the `{python} NetworkRunningExampleCluster.n_gpus_str` of the reference cluster. Each training step must combine gradient contributions so that corresponding model replicas apply the same update. This operation, called AllReduce, returns the combined result to every participating worker. The model has `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient data at two bytes per parameter, the 16-bit gradients of mixed-precision training that this chapter assumes throughout (FP32 gradients would double the figure). That model-wide figure is not what any one GPU sends. When a reduction partitions the gradient across all `{python} NetworkRunningExampleCluster.n_gpus_value_str` ranks, each rank owns a 1/`{python} NetworkRunningExampleCluster.n_gpus_value_str` share, a few hundred megabytes, which is the gradient-shard size the transport examples below use; the job's tensor, pipeline, and data-parallel split (@sec-distributed-training-systems) sets each GPU's actual payload. Worked examples that switch to another model, precision, or payload state their parameters explicitly. A delayed transfer on the step's critical path can leave the other `{python} NetworkRunningExampleCluster.peer_gpus_str` GPUs waiting at a job-wide synchronization boundary. The fabric's contribution to training time therefore depends on which transfers the next computation needs and how much of their cost remains exposed. In that role the fabric is not auxiliary infrastructure; it is the synchronization backbone that decides whether the cluster trains as one machine.
+@Sec-compute-infrastructure traced the bandwidth hierarchy down to the node boundary, where each GPU's NVLink bandwidth narrows to a single external network port. How much that narrowing costs depends on what the training job must push through the port, and how often. Consider the running instance of Archetype A (GPT-4/Llama-3), a `{python} NetworkRunningExampleCluster.params_str`-parameter GPT-3-class dense transformer partitioned across the `{python} NetworkRunningExampleCluster.n_gpus_str` of the reference cluster. Each training step must combine gradient contributions so that corresponding model replicas apply the same update. This operation, called AllReduce, returns the combined result to every participating worker. The model has `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient data at two bytes per parameter, the 16-bit gradients of mixed-precision training that this chapter assumes throughout (FP32 gradients would double the figure). That model-wide figure is not what any one GPU sends. When a reduction partitions the gradient across all `{python} NetworkRunningExampleCluster.n_gpus_value_str` ranks, each rank owns a 1/`{python} NetworkRunningExampleCluster.n_gpus_value_str` share, a few hundred megabytes, which is the gradient-shard size the transport examples below use; the job's tensor, pipeline, and data-parallel split (@sec-distributed-training-systems) sets each GPU's actual payload. Worked examples that switch to another model, precision, or payload state their parameters explicitly. A delayed transfer on the step's critical path can leave the other `{python} NetworkRunningExampleCluster.peer_gpus_str` GPUs waiting at a job-wide synchronization boundary. The fabric's contribution to training time therefore depends on which transfers the next computation needs and how much of their cost remains exposed. In that role the fabric is not auxiliary infrastructure; it is the synchronization backbone that decides whether the cluster trains as one machine.
 
-Within the multi-tier fleet hierarchy framed by @fig-fleet-stack, the fabric turns isolated accelerator nodes into a coherent training system. Accelerators, power delivery, cooling, racks, and pods define what each node can compute in isolation; the fabric determines whether the nodes can act together before communication cost overwhelms computation. This chapter organizes that design space as a **five-level model**\index{Five-level model!definition} of co-dependent tiers (@fig-network-five-level-model), climbing from serializer/deserializer (SerDes) signaling and copper or optical reach at Level 1 to the integration of a production cluster at Level 5. Each level is developed at the point where its physical or protocol limit becomes the binding constraint.
-
-::: {#fig-network-five-level-model fig-env="figure" fig-pos="htb" fig-cap="**The five-level network model for ML training**: Read from the bottom up, each level builds on the one below and becomes more abstract. Level 1 moves bits over wires and optics; Level 2 turns links into reliable, low-overhead transfers between accelerators; Level 3 arranges switches into a topology; Level 4 governs how the fabric behaves under load and congestion; and Level 5 integrates all of them into a production cluster." fig-alt="Five stacked horizontal bands, labeled L1 at the bottom to L5 at the top, with an upward arrow labeled more abstract. L1, wire and link: PAM4 SerDes, copper DAC, AOC, optics. L2, transport: RDMA, RoCEv2, GPUDirect, alpha-beta cost model. L3, switch and topology: fat-tree, rail-optimized, Dragonfly, torus. L4, fabric behavior: PFC, ECN and DCQCN, incast, adaptive routing. L5, cluster design: pod integration, job placement, failure domains. Beside each band a small schematic shows the level's concrete form: L1, a four-level stepped waveform between two transceivers labeled SerDes; L2, a GPU and its NIC, both labeled, sending to a remote NIC and GPU; L3, two switches linked to all four switches below them; L4, three converging inputs feeding a nearly full queue, with a dashed red arrow labeled PAUSE leaving the queue and pointing back over the inputs; L5, a row of six racks joined by a common bar."}
-![](images/svg/five-level-model.svg)
-
-:::
+Within the multi-tier fleet hierarchy framed by @fig-fleet-stack, the fabric turns isolated accelerator nodes into a coherent training system. Accelerators, power delivery, cooling, racks, and pods define what each node can compute in isolation; the fabric determines whether the nodes can act together before communication cost overwhelms computation. This chapter organizes that design space as a **five-level model**\index{Five-level model!definition} of co-dependent tiers, developed in @sec-network-fabrics-five-level-model.
 
 At scale, communication cost can dominate computation cost. The fleet-law decomposition in @sec-vol2-introduction-fleet-law makes this explicit: the nonoverlapped communication term $\CommunicationTime(\DeviceCount) - \OverlappedTime$ determines how much of each training step is exposed to the network fabric. The fabric influences the layers above it by determining whether communication can run while independent computation continues, which collective algorithms are viable, and how network partitions interact with node failures. That concurrency, communication-computation overlap\index{Communication-computation overlap!fabric role}, is what the $\OverlappedTime$ term credits, because transfer time that proceeds behind useful arithmetic does not lengthen the step.
 
@@ -171,8 +166,7 @@ data = _bandwidth_trend(Literature.Series.InterconnectGenerations.entries)
 
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(6.2, 4.2))
 _groups = list(dict.fromkeys(data["Technology"]))
-# Network links use the book's network hue (violet), matching
-# @fig-bandwidth-hierarchy: NVLink solid, InfiniBand dashed with hollow markers;
+# Network links use the book's network hue (violet): NVLink solid, InfiniBand dashed with hollow markers;
 # Ethernet in neutral slate and the PCIe host bus in dotted gray. Each series is
 # labeled at its last point instead of in a legend.
 _colors = {"NVLink": COLORS["VioletLine"], "InfiniBand": COLORS["VioletLine"], "Ethernet": SLATE_TIME, "PCIe (x16)": COLORS["secondary"]}
@@ -318,154 +312,13 @@ class NetworkFabricsContextScenario:
     h100_mem_bw_tb_per_s_str = fmt_bandwidth(h100_mem_bw_raw, unit=TB / second, precision=2, commas=False)
 ```
 
-The reference hardware gives the gradient bus analogy a concrete scale. A single H100 has a precision-specific FP16 peak of `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` and memory bandwidth of `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str`. Each GPU's NVLink ports together provide `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of bidirectional bandwidth to its peers within the node. The comparison that matters is per GPU and per direction. In the reference node each GPU has its own network interface card (NIC) with one NDR InfiniBand port, so a tensor leaving the node through that GPU drops from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink bandwidth to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` at the port, the `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str` gap that the bandwidth hierarchy of @sec-compute-bandwidth-hierarchy already identified as the node boundary's cliff. The model-wide `{python} NetworkRunningExampleCluster.grad_gb_str` gradient state does not all pass through every `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` port; partitioning and the collective schedule determine each port's traffic. @Fig-bandwidth-hierarchy compares these resource budgets across four GPU generations (V100 through B200). Converting the budgets into a step-time estimate requires the workload's local payloads and communication dependencies.
-
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
-
-```{python}
-#| echo: false
-#| label: network-fabrics-bandwidth-hierarchy-data
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ BANDWIDTH HIERARCHY BY GENERATION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-bandwidth-hierarchy bars and cliff ratio labels.
-# │
-# │ Goal: Pull HBM, NVLink, per-port InfiniBand, and PCIe bandwidth for four
-# │       GPU generations from the registry instead of hand-typed lists.
-# │ Show: IB grows 4x (EDR -> NDR); per-direction NVLink-to-port cliff
-# │       12x, 12x, 9x, 18x.
-# │ How: HBM = memory.bandwidth; NVLink = per direction per GPU; IB = one
-# │      port of the NIC generation shipped with each DGX system; PCIe =
-# │      host interconnect per direction.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check
-
-class BandwidthHierarchyData:
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    _gpus = [Hardware.Cloud.V100, Hardware.Cloud.A100, Hardware.Cloud.H100, Hardware.Cloud.B200]
-    # scenario assumption: NIC generation paired with each DGX system (DGX-1 V100 EDR,
-    # DGX A100 HDR, DGX H100 NDR, DGX B200 ConnectX-7 NDR)
-    _ib = [
-        Systems.Fabrics.InfiniBand_EDR,
-        Systems.Fabrics.InfiniBand_HDR,
-        Systems.Fabrics.InfiniBand_NDR,
-        Systems.Fabrics.InfiniBand_NDR,
-    ]
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    hbm = [g.memory.bandwidth.to(GB / second).magnitude for g in _gpus]
-    nvlink = [g.nvlink.bandwidth_per_direction.to(GB / second).magnitude for g in _gpus]
-    ib = [f.bandwidth.to(GB / second).magnitude for f in _ib]
-    pcie = [g.interconnect.bandwidth.to(GB / second).magnitude for g in _gpus]
-    cliff = [nv / port for nv, port in zip(nvlink, ib)]
-    hbm_growth = hbm[-1] / hbm[0]
-    ib_growth = ib[-1] / ib[0]
-    pcie_growth = pcie[-1] / pcie[0]
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(round(cliff[2]) == 9, "Caption and text cite a ~9x H100 per-direction cliff")
-    check(round(ib_growth) == 4, "Caption says InfiniBand per-port bandwidth grew only 4x")
-    check(round(nvlink[-1] / nvlink[0]) == 6, "Caption says NVLink grew about 6x")
-    check(round(hbm_growth) == 9, "Caption says HBM grew about 9x")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    _cliff_labels = [f"{round(c)}×" for c in cliff]
-
-BandwidthHierarchyData.cliff_labels = BandwidthHierarchyData._cliff_labels
-```
-
-::: {#fig-bandwidth-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The bandwidth hierarchy**: Bandwidth at four levels of the communication hierarchy across four GPU generations, on a logarithmic scale. While HBM and NVLink bandwidth have grown roughly 9$\times$ and 6$\times$ respectively from V100 to B200, InfiniBand has grown only 4$\times$. All link rates are per direction. The annotations show the ratio of a GPU's NVLink bandwidth to one InfiniBand port (about 9$\times$ for the H100 with NDR), illustrating the budget gap for exchanges that cross the node boundary." fig-alt="Grouped bar chart with log-scale y-axis showing per-direction bandwidth in GB per second for HBM, NVLink, one InfiniBand port, and PCIe across four GPU generations from V100 to B200. Red arrows between the NVLink and InfiniBand bars mark cliffs of 12, 12, 9, and 18 times."}
-```{python}
-#| echo: false
-import numpy as np
-from binder.tools.figures import style as book_style
-
-book_style.set_book_style()
-COLORS = book_style.COLORS
-
-fig, ax = plt.subplots(figsize=(6, 3.9))
-
-generations = ['V100\n(2017)', 'A100\n(2020)', 'H100\n(2022)', 'B200\n(2024)']
-x = np.arange(len(generations)) * 1.05
-width = 0.17
-
-# Data in GB/s (registry-backed, see BandwidthHierarchyData)
-hbm = BandwidthHierarchyData.hbm
-nvlink = BandwidthHierarchyData.nvlink
-ib = BandwidthHierarchyData.ib
-pcie = BandwidthHierarchyData.pcie
-
-r1 = x - 1.5 * width
-r2 = x - 0.5 * width
-r3 = x + 0.5 * width
-r4 = x + 1.5 * width
-
-ax.bar(r1, hbm, width=width, color=COLORS['BlueLine'], edgecolor=COLORS['BlueLine'], linewidth=0.8, label='HBM (on package)')
-ax.bar(r2, nvlink, width=width, color=COLORS['VioletLine'], edgecolor=COLORS['VioletLine'], linewidth=0.8, label='NVLink (intra-node)')
-ax.bar(r3, ib, width=width, color=COLORS['VioletL'], edgecolor=COLORS['VioletLine'], linewidth=0.8, hatch='////', label='InfiniBand port')
-ax.bar(r4, pcie, width=width, color=COLORS['grid'], edgecolor=COLORS['secondary'], linewidth=0.8, label='PCIe host bus')
-
-ax.set_yscale('log')
-ax.set_ylim(5, 60000)
-ax.set_ylabel('Bandwidth per direction (GB/s)', fontsize=11)
-ax.set_xticks(x)
-ax.set_xticklabels(generations)
-ax.tick_params(labelsize=11)
-
-# Cliff ratio annotations between NVLink (r2) and IB (r3)
-cliff_ratios = BandwidthHierarchyData.cliff_labels
-for i in range(len(generations)):
-    x_arrow = r3[i]
-    y_nv = nvlink[i]
-    y_ib = ib[i]
-
-    # Dashed line from NVLink top to arrow line
-    ax.plot([r2[i], x_arrow], [y_nv, y_nv], color=COLORS['RedLine'], linestyle='--', linewidth=0.7, alpha=0.7)
-
-    # Arrow between y_ib and y_nv
-    ax.annotate('', xy=(x_arrow, y_nv), xytext=(x_arrow, y_ib), arrowprops=dict(arrowstyle='<->', color=COLORS['RedLine'], lw=1.2))
-    # Ratio as plain text just right of the arrow's midpoint (no badge box)
-    y_mid = np.sqrt(y_nv * y_ib)
-    ax.annotate(
-        cliff_ratios[i],
-        (x_arrow, y_mid),
-        xytext=(4, 0),
-        textcoords='offset points',
-        ha='left',
-        va='center',
-        fontsize=11,
-        fontweight='bold',
-        color=COLORS['RedLine'],
-    )
-
-# Legend at top
-ax.legend(
-    loc='upper left',
-    ncol=2,
-    frameon=False,
-    fontsize=11,
-    columnspacing=1.2,
-    handlelength=1.2,
-    handletextpad=0.4,
-)
-for _s in ('top', 'right'):
-    ax.spines[_s].set_visible(False)
-
-plt.tight_layout()
-plt.show()
-plt.close()
-```
-:::
-
-Across the four generations charted in @fig-bandwidth-hierarchy, the per-direction bandwidth ratios are roughly 9$\times$ for the H100 generation and 12--18$\times$ in the others. Each compares one GPU's NVLink bandwidth with the one external network port that serves it. Intra-node NVLink connects accelerator packages through board-level links and, in switched systems, NVSwitch; it is not an on-package memory path. External fabrics must additionally satisfy cable reach, port-count, and multi-node routing constraints. The provisioned links determine the size of the gap, while the workload's transfers determine whether crossing it limits performance.
+The reference hardware gives the gradient bus analogy a concrete scale. A single H100 has a precision-specific FP16 peak of `{python} NetworkFabricsContextScenario.h100_fp16_tflop_per_s_str` and memory bandwidth of `{python} NetworkFabricsContextScenario.h100_mem_bw_tb_per_s_str`. Each GPU's NVLink ports together provide `{python} NetworkFabricsContextScenario.nvlink_h100_gb_per_s_str` of bidirectional bandwidth to its peers within the node. The comparison that matters is per GPU and per direction. In the reference node each GPU has its own network interface card (NIC) with one NDR InfiniBand port, so a tensor leaving the node through that GPU drops from `{python} NetworkFabricsContextScenario.nvlink_h100_perdir_gb_per_s_str` of NVLink bandwidth to `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` at the port, the `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio_mult_str` gap that the bandwidth hierarchy of @sec-compute-bandwidth-hierarchy already identified as the node boundary's cliff. The model-wide `{python} NetworkRunningExampleCluster.grad_gb_str` gradient state does not all pass through every `{python} NetworkFabricsContextScenario.ib_ndr_gb_per_s_str` port; partitioning and the collective schedule determine each port's traffic. Converting that gap into a step-time estimate requires the workload's local payloads and communication dependencies.
 
 ::: {.column-margin .margin-pointer}
 ↪ The network hierarchy ratio between intra-node and inter-node bandwidth, with the reference NVLink and InfiniBand values behind it, is developed in @sec-appdx-fleet-foundations-numbers-to-know.
 :::
 
-Which traffic must cross that gap depends on how the job is partitioned. The placement that follows from the same hierarchy keeps tensor parallelism, with its per-layer exchanges, inside the NVLink domain and lets pipeline stages and data-parallel replicas span nodes. The fabric adds one lever to that picture. Each data-parallel replica can sum gradients over several microbatches before an exchange (gradient accumulation\index{Gradient accumulation!communication frequency}), reducing how often it must cross the node boundary at the cost of changing the batch and update schedule. Pipeline and data parallelism can therefore cross slower node boundaries when their transfer sizes and computation leave enough time for the required exchanges. Combining these three strategies is called 3D parallelism; their execution schedules are developed in @sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop, while their traffic requirements already constrain the fabric.
+Which traffic must cross that gap depends on how the job is partitioned. The same hierarchy keeps tensor parallelism, with its per-layer exchanges, inside the NVLink domain and lets pipeline stages and data-parallel replicas span nodes, the combination called 3D parallelism whose schedules are developed in @sec-distributed-training-systems-systems-hybrid-parallelism-3d-loop. The fabric adds one lever to that placement. Each data-parallel replica can sum gradients over several microbatches before an exchange (gradient accumulation\index{Gradient accumulation!communication frequency}), reducing how often it must cross the node boundary at the cost of changing the batch and update schedule.
 
 Exposed communication leaves gaps between dependent compute phases. @Fig-bandwidth-cliff-gantt illustrates that cost with two assumed training schedules on a common 230 ms axis, each containing 100 ms forward and backward compute phases. The 8-GPU intra-node case assumes a 1 ms AllReduce and spends 99.5 percent of the step in those compute phases; the 64-GPU inter-node case assumes a 30 ms AllReduce and spends 87 percent in computation. The two AllReduce durations are illustrative inputs chosen to show the effect, not values derived from the link rates above, and the percentages are shares of the schedule rather than measured arithmetic utilization.
 
@@ -531,7 +384,14 @@ Correlated demand also makes **oversubscription**\index{Oversubscription!definit
 
 ### The five-level model {#sec-network-fabrics-five-level-model}
 
-Each of these inversions traces back to a specific physical or protocol constraint, and the five levels of @fig-network-five-level-model locate where each one is paid:
+The five-level model climbs from serializer/deserializer (SerDes) signaling and copper or optical reach at Level 1 to the integration of a production cluster at Level 5 (@fig-network-five-level-model). Each level is developed at the point where its physical or protocol limit becomes the binding constraint.
+
+::: {#fig-network-five-level-model fig-env="figure" fig-pos="htb" fig-cap="**The five-level network model for ML training**: Read from the bottom up, each level builds on the one below and becomes more abstract. Level 1 moves bits over wires and optics; Level 2 turns links into reliable, low-overhead transfers between accelerators; Level 3 arranges switches into a topology; Level 4 governs how the fabric behaves under load and congestion; and Level 5 integrates all of them into a production cluster." fig-alt="Five stacked horizontal bands, labeled L1 at the bottom to L5 at the top, with an upward arrow labeled more abstract. L1, wire and link: PAM4 SerDes, copper DAC, AOC, optics. L2, transport: RDMA, RoCEv2, GPUDirect, alpha-beta cost model. L3, switch and topology: fat-tree, rail-optimized, Dragonfly, torus. L4, fabric behavior: PFC, ECN and DCQCN, incast, adaptive routing. L5, cluster design: pod integration, job placement, failure domains. Beside each band a small schematic shows the level's concrete form: L1, a four-level stepped waveform between two transceivers labeled SerDes; L2, a GPU and its NIC, both labeled, sending to a remote NIC and GPU; L3, two switches linked to all four switches below them; L4, three converging inputs feeding a nearly full queue, with a dashed red arrow labeled PAUSE leaving the queue and pointing back over the inputs; L5, a row of six racks joined by a common bar."}
+![](images/svg/five-level-model.svg)
+
+:::
+
+Each inversion of @tbl-network-assumptions traces back to a specific physical or protocol constraint, and the five levels locate where each one is paid:
 
 - **Level 1: wire and link** (@sec-network-fabrics-wire-link). Signal integrity (PAM4, SerDes), forward error correction, and the reach of copper and optics impose hard constraints on per-hop latency and cluster geometry.
 - **Level 2: transport** (@sec-network-fabrics-transport). InfiniBand and RDMA over Converged Ethernet (RoCE) provide RDMA primitives; the $\MessageStartupLatency$-$\LinkBandwidth$ model quantifies the latency-vs.-bandwidth trade-off for different message sizes.
@@ -586,7 +446,7 @@ Achieving `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` and higher line rates 
 
 1.  **Significance**: PAM4 increases the raw $\Bandwidth$ available at a given symbol rate. The reduced separation between levels makes error-control design part of that gain. High-speed Ethernet uses forward error correction (FEC)\index{Forward Error Correction!Reed-Solomon RS(544,514)}, including Reed-Solomon RS(544,514), with processing latency that depends on the physical-layer (PHY) design and implementation [@anslow2016rsFec; @yin2022fecRequirements]. FEC contributes to the fixed path budget modeled by the $\MessageStartupLatency$ term in @sec-network-fabrics-performance-model; it is one component alongside propagation, switching, and endpoint processing.
 2.  **Distinction**: At equal symbol rate and voltage swing, NRZ (Non-Return-to-Zero) binary signaling carries one bit per symbol with greater separation between levels. PAM4\index{PAM4 signaling!noise margin trade-off} carries two bits per symbol with smaller level spacing; the link must compensate through its signal-quality and error-correction design.
-3.  **Common pitfall**: Doubling bits per symbol does not guarantee twice the usable payload throughput or a fixed latency penalty. Coding overhead, channel quality, and the chosen PHY implementation determine delivered performance. FEC processing contributes to the startup budget, which matters most when messages are small or a collective pays startup repeatedly.
+3.  **Common pitfall**: Doubling bits per symbol does not guarantee twice the usable payload throughput or a fixed latency penalty. Coding overhead, channel quality, and the chosen PHY implementation determine delivered performance.
 
 :::
 
@@ -875,7 +735,7 @@ Recovery granularity therefore matters. On an RNIC with **Go-Back-N**\index{Go-B
 Protocol choice determines how the fabric provides reliable completion and bounds loss-recovery time; performance modeling then asks how fast it can carry a given message. The $\MessageStartupLatency$-$\LinkBandwidth$ model\index{Alpha-Beta Model!message transfer time} (principle \ref{pri-alpha-beta-model}) decomposes message transfer time as $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$, where $\PointToPointMessageSize$ is the message size in bytes, $\MessageStartupLatency$ is the fixed startup latency, and $\LinkBandwidth$ is the sustained bandwidth in bytes per unit time [@hockney1994]. The physical topology influences both parameters through path length and available capacity. A collective built from many sequential rounds of messages pays $\MessageStartupLatency$ once per round, so its startup cost can grow with the number of participants even when the underlying fabric provides short physical paths.
 
 ::: {.column-margin .margin-pointer}
-↪ The same decomposition, multiplied by each schedule's round count and traffic factor, is developed for collective algorithms in @sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4.
+↪ The same decomposition, multiplied by each schedule's round count and traffic factor, is developed for collective algorithms in @sec-communication-collective-operations-collective-operations-network-performance-modeling-0d8e.
 :::
 
 ```{python}
@@ -1300,144 +1160,10 @@ Consider the 175B job on the `{python} NetworkRunningExampleCluster.n_gpus_value
 
 :::
 
-```{python}
-#| echo: false
-#| label: allreduce-bottleneck
-from mlsysim import (
-    Models,
-    Hardware,
-    Systems,
-    flop,
-    byte,
-    param,
-    second,
-    ms,
-    millisecond,
-    microsecond,
-    GB,
-)
-from mlsysim.fmt import (
-    fmt,
-    fmt_count,
-    fmt_display_math,
-    fmt_int,
-    fmt_magnitude,
-    fmt_math,
-    fmt_memory,
-    fmt_params,
-    fmt_percent,
-    fmt_time,
-    sci_latex,
-)
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ALLREDUCE BOTTLENECK ANALYSIS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Network Performance Modeling - Alpha-Beta Model.
-# │
-# │ Goal: Identify when communication intensity overwhelms computation.
-# │ Show: Growth of comm overhead from GPT-2-scale to 70B parameter models.
-# │ How: Calculate T_compute vs T_ring_allreduce using Alpha-Beta parameters.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-class AllReduceBottleneck:
-    """
-    Scenario: Cluster of 1024 H100 GPUs training models of varying scale.
-    Alpha-Beta parameters for NDR InfiniBand.
-    """
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import calc_ring_allreduce_time
-
-    FABRIC_ALPHA_NDR = Systems.SwitchFabric.AlphaNdr
-    num_gpus = Systems.Clusters.Training_1K.total_accelerators
-    h_h100 = Hardware.Cloud.H100
-    ib_ndr = Systems.Fabrics.InfiniBand_NDR
-
-    peak_flops = h_h100.compute.peak_flops
-    gpu_util = 0.50
-    flops_per_sample_base = 5e13 * flop  # scenario assumption: realistic per-GPU compute for ~100ms iteration
-    grad_bytes_per_param = 4 * byte / param  # scenario assumption: FP32 gradients
-
-    m_small = Models.Language.GPT2  # GPT-2-scale model from the registry
-    m_70b = Models.Language.Llama2_70B
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Compute time per GPU
-    t_comp = flops_per_sample_base / (peak_flops * gpu_util)
-
-    # Use library formula for Ring AllReduce
-    # Model A: GPT-2-scale params (FP32 = 4 bytes/param)
-    grad_small = m_small.parameters * grad_bytes_per_param
-    t_comm_small = calc_ring_allreduce_time(grad_small, num_gpus, ib_ndr.bandwidth, FABRIC_ALPHA_NDR)
-
-    # Model B: 70B params (FP32 = 4 bytes/param)
-    grad_70b = m_70b.parameters * grad_bytes_per_param
-    t_comm_70b = calc_ring_allreduce_time(grad_70b, num_gpus, ib_ndr.bandwidth, FABRIC_ALPHA_NDR)
-
-    comm_frac_small = (t_comm_small / (t_comp + t_comm_small)).to_base_units().magnitude
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(t_comp.to(second).magnitude - 0.10) < 0.02, f"Expected 0.10s compute time, got {t_comp.to(second).magnitude:.2f}s")
-    check(t_comm_70b > t_comm_small * 40, "70B comm should be >40x GPT-2-scale comm")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    compute_phase_ms_str = fmt_time(round(t_comp.to(ms).magnitude) * ms, millisecond, precision=0, commas=False)
-    t_comm_small_ms_value_str = fmt_magnitude(t_comm_small, unit=ms, precision=None, commas=False)
-    t_comm_70b_ms_value_str = fmt_magnitude(t_comm_70b, unit=ms, precision=None, commas=False)
-    comm_frac_small_pct_value_str = fmt_percent(comm_frac_small, precision=1, style="number")
-    alpha_us_value_str = fmt_magnitude(FABRIC_ALPHA_NDR, unit=microsecond, precision=1, commas=False)
-    beta_gb_per_s_value_str = fmt_magnitude(ib_ndr.bandwidth, unit=GB / second, precision=0, commas=False)
-
-    # Math strings
-    alpha_math = fmt_math(f"\\MessageStartupLatency = {alpha_us_value_str} \\;\\MicroUnitPrefix\\text{{s}}")
-    beta_math = fmt_math(f"\\LinkBandwidth = {beta_gb_per_s_value_str} \\;\\text{{GB/s}}")
-    t_ring_small_math = fmt_math(f"\\RingAllReduceCompletionTime \\approx {t_comm_small_ms_value_str} \\text{{ ms}}")
-    comm_frac_display_math = fmt_display_math(f" \\text{{Comm. fraction}} = {comm_frac_small_pct_value_str} \\% ")
-    t_ring_70b_display_math = fmt_display_math(f" T_{{\\text{{ring}}}} \\approx {t_comm_70b_ms_value_str} \\text{{ ms}} ")
-
-    num_gpus_str = fmt_int(num_gpus, commas=False)
-    grad_small_gb_str = fmt_memory(grad_small, unit=GB, precision=0, commas=False)
-    gpu_util_pct_str = fmt_percent(gpu_util, precision=0, commas=False, style='prose')
-    params_70b_billion_str = fmt_params(
-        m_70b.parameters,
-        scale="B",
-        commas=False,
-        scale_style="word",
-    )
-    grad_70b_gb_str = fmt_memory(grad_70b, unit=GB, precision=0, commas=False)
-```
-
-Beyond classifying individual transfers, the same model identifies when communication overtakes computation. That question sharpens as models grow, because the scaling laws that push training toward more parameters (@sec-vol2-intro-ai-scaling-laws-a043) enlarge, in direct proportion, the gradient that every data-parallel step must reduce. The $\MessageStartupLatency$-$\LinkBandwidth$ analysis in this section focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
-
-A ring AllReduce passes chunks around a logical cycle of participants, in a ReduceScatter phase and then an AllGather phase, with no requirement that the physical switches form a ring.
+Beyond classifying individual transfers, the same model identifies when communication overtakes computation. A ring AllReduce passes chunks around a logical cycle of participants, in a ReduceScatter phase and then an AllGather phase, with no requirement that the physical switches form a ring. The scaling laws that push training toward more parameters (@sec-vol2-intro-ai-scaling-laws-a043) enlarge, in direct proportion, the gradient that every data-parallel step must reduce, and the $\MessageStartupLatency$-$\LinkBandwidth$ cost of each transfer, multiplied by the ring's round count and traffic factor, decides when that collective outlasts the step's computation and the network becomes the pacing constraint for the entire job.
 
 ::: {.column-margin .margin-pointer}
 ↪ The ring AllReduce derivation, and the schedules that compete with it, are developed in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce.
-:::
-
-::: {#nbk-allreduce-bottleneck .callout-notebook title="AllReduce cost as gradients grow"}
-
-**Problem**: How does the communication share of a training step change as the gradient grows from GPT-2 scale to `{python} AllReduceBottleneck.params_70b_billion_str` parameters on a `{python} AllReduceBottleneck.num_gpus_str`-GPU H100 cluster that reduces the full gradient with a ring AllReduce?
-
-**Setup**: This is a separate scenario from the running 175B job. Its two models step toward the running example, one at GPT-2 scale and one approaching the running example's size. It holds each GPU's work per step fixed, sized so that the compute phase takes `{python} AllReduceBottleneck.compute_phase_ms_str` at `{python} AllReduceBottleneck.gpu_util_pct_str` accelerator utilization, and assumes an NDR path modeled by `{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math`. For a GPT-2-scale model, each worker contributes `{python} AllReduceBottleneck.grad_small_gb_str` of gradients. The notebook reduces in FP32, as some recipes do for numerical safety, so its payloads are twice the 16-bit figure used elsewhere in this chapter.
-
-Here $\DeviceCount$ is the number of participating workers, or ranks, and $\CollectivePayloadSize$ is the gradient payload contributed by each rank.
-
-**Math**: Applying the ring cost $\RingAllReduceCompletionTime \approx \frac{2(\DeviceCount-1)}{\DeviceCount}\frac{\CollectivePayloadSize}{\LinkBandwidth} + 2(\DeviceCount-1)\MessageStartupLatency$ gives `{python} AllReduceBottleneck.t_ring_small_math`. The modeled communication fraction is:
-
-`{python} AllReduceBottleneck.comm_frac_display_math`
-
-Each phase takes $\DeviceCount-1$ rounds and transfers a total of $(\DeviceCount-1)/\DeviceCount$ of that payload per rank. The expression therefore counts both the bytes transmitted and the startup cost paid across the two phases. This estimate assumes a uniform path bandwidth and no overlap with computation; it tests whether the fabric can keep pace without requiring the full scheduling derivation developed in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce.
-
-**Systems insight**: Increasing the payload to the `{python} AllReduceBottleneck.params_70b_billion_str` case (`{python} AllReduceBottleneck.grad_70b_gb_str`) raises the modeled ring time to:
-
-`{python} AllReduceBottleneck.t_ring_70b_display_math`
-
-Holding the compute phase fixed isolates the effect of payload size; a real 70B step would also compute longer per sample, so its true communication fraction depends on the per-GPU batch. The running example's `{python} NetworkRunningExampleCluster.grad_gb_str` FP16 gradient is larger still than this `{python} AllReduceBottleneck.grad_70b_gb_str` payload, so a full-gradient ring for the 175B job would sit beyond the right end of this comparison. A ring time of this size shows why such models are not trained with pure data parallelism over this fabric. The conclusion is conditional rather than a universal model-size threshold: parallelism, gradient precision, bucketing, overlap, topology, and delivered bandwidth all move the boundary.
-
 :::
 
 ```{python}
@@ -1609,7 +1335,7 @@ Fat-trees build on Clos-style non-blocking network principles to supply full $\B
 
 ### Top-of-rack (ToR) and the failure domain {#sec-network-fabrics-tor}
 
-The top-of-rack (ToR)\index{Top-of-rack switch!failure domain}\index{ToR switch|see{Top-of-rack switch}} switch aggregates traffic and creates a shared **failure domain**\index{Failure domain!definition}, a set of resources affected by the same outage. Consider a rack containing four nodes with eight GPUs each. If all 32 accelerators depend on one ToR with no alternate path, losing that switch disconnects them from the rest of the job. Recovery then depends on available paths, surviving state, and the job's recovery policy. Individual links and nodes remain smaller failure domains, while rack power can create a broader shared outage. This one-switch-per-rack wiring is the simpler baseline used here to teach radix and failure domains; the reference cluster itself wires each GPU to a rail switch, a layout developed in @sec-network-fabrics-rail-optimized that reshapes the failure domain, because losing one rail switch cuts one GPU in each of many nodes rather than every GPU in one rack.
+The top-of-rack (ToR)\index{Top-of-rack switch!failure domain}\index{ToR switch|see{Top-of-rack switch}} switch aggregates traffic and so becomes a shared failure domain\index{Failure domain!top-of-rack switch}, one level of the physical hierarchy defined in @sec-compute-infrastructure-node-health-reliability-56a6. Consider a rack containing four nodes with eight GPUs each. If all 32 accelerators depend on one ToR with no alternate path, losing that switch disconnects them from the rest of the job, and recovery then depends on available paths, surviving state, and the job's recovery policy. This one-switch-per-rack wiring is the simpler baseline used here to teach radix and failure domains; the reference cluster itself wires each GPU to a rail switch, a layout developed in @sec-network-fabrics-rail-optimized that reshapes the failure domain, because losing one rail switch cuts one GPU in each of many nodes rather than every GPU in one rack.
 
 The switch **radix**\index{Radix!definition},[^fn-radix-switch-density] its number of ports, determines how many endpoints and uplinks it can connect. In the reference allocation, a `{python} NetworkTopologyRadixRecap.radix_str`-port switch assigns `{python} NetworkTopologyRadixRecap.downlinks_str` ports to servers, one for each of `{python} NetworkTopologyRadixRecap.downlinks_str` GPUs, and `{python} NetworkTopologyRadixRecap.uplinks_str` ports to the spine. With equal port rates, the 1:1 ratio avoids oversubscription at that boundary; delivered throughput still depends on forwarding and the paths beyond it. The `{python} NetworkTopologyRadixRecap.n_gpus_str`-GPU cluster requires approximately `{python} NetworkTopologyRadixRecap.n_leaf_groups_str` such endpoint groups. Physical rack count also depends on node density and the cabling layout.
 
@@ -1623,7 +1349,7 @@ The same boundary shapes state placement. To survive a rack-wide outage, a job n
 
 ### Fat-tree (Clos) networks {#sec-network-fabrics-fat-tree}
 
-The ToR provides non-blocking bandwidth within a single rack, but connecting the reference cluster's `{python} NetworkTopologyRadixRecap.n_leaf_groups_str` endpoint groups into a cluster that preserves full $\BisectionBandwidth$ across every possible communication pair requires a topology that scales cross-sectional capacity with cluster size. The fat-tree (also called a Clos network) achieves this by adding parallel spine switches at each tier, so the aggregate uplink capacity always matches the total edge bandwidth feeding into it. In this vocabulary, leaf switches attach servers or racks, spine switches connect leaves within a pod\index{Pod!fat-tree domain}, and core switches connect multiple pods when a third tier is needed; other sources call the leaf and spine tiers edge and aggregation. A pod here is a switching domain, the group of leaves that one set of spines joins, which can be narrower than the multi-rack pod of @sec-compute-pod, where the fat-tree and the torus were introduced as the two dominant ways to wire one. A multi-rack pod in that sense can contain several fat-tree pods.
+The ToR provides non-blocking bandwidth within a single rack, but connecting the reference cluster's `{python} NetworkTopologyRadixRecap.n_leaf_groups_str` endpoint groups into a cluster that preserves full $\BisectionBandwidth$ across every possible communication pair requires a topology that scales cross-sectional capacity with cluster size. The fat-tree (also called a Clos network) achieves this by adding parallel spine switches at each tier, so the aggregate uplink capacity always matches the total edge bandwidth feeding into it. In this vocabulary, leaf switches attach servers or racks, spine switches connect leaves within a pod\index{Pod!fat-tree domain}, and core switches connect multiple pods when a third tier is needed; other sources call the leaf and spine tiers edge and aggregation. A pod here is a switching domain, the group of leaves that one set of spines joins, which can be narrower than the multi-rack pod of @sec-compute-pod. A multi-rack pod in that sense can contain several fat-tree pods.
 
 ::: {#dfn-network-fabrics-fat-tree .callout-definition title="Fat-tree"}
 
@@ -1838,10 +1564,6 @@ These questions check whether hierarchical switch-fabric trade-offs are clear:
 ### Rail-optimized topology {#sec-network-fabrics-rail-optimized}
 
 Rail-optimized topology\index{Rail-optimized topology!cabling architecture} begins from the communication pattern rather than from a generic switch hierarchy. Dense accelerator nodes partition GPUs by local slot position into independent horizontal rails (@fig-rail-optimized-cabling). In this physical cabling scheme, high-bandwidth internal NVSwitch planes bind the GPUs within each node, while external network ports route by slot position: GPU 0 in every node connects strictly to the Rail 0 switch, GPU 1 connects to Rail 1, and so on across the cluster.
-
-::: {.column-margin .margin-pointer}
-↩ Assigning each GPU in a node to its own rail switch, rather than one shared top-of-rack switch, is established in @sec-compute-rack-design.
-:::
 
 ::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-optimized physical wiring**: In dense accelerator nodes such as the DGX H100, each GPU's network port is cabled by local slot position: GPU 0 in every node connects to the rail 0 switch, GPU 1 to the rail 1 switch, and so on. Three nodes and four of each node's eight GPUs are drawn, with the rail 0 cables emphasized; further nodes attach to the same rail switches. Tensor-parallel traffic stays on each node's NVSwitch, same-rank data-parallel traffic stays on its own rail, and a spine layer (not drawn) bridges the rails for cross-rank traffic." fig-alt="A row of four rail switches across the top, each with a short dashed stub upward, the last labeled to spine (not drawn), and a row of three node boxes, Node 0 to Node 2, across the bottom. Each node holds GPU 0 through GPU 3 in a row above a horizontal NVSwitch bar that connects all four. Each GPU has a port on the top edge of its node, and a cable runs from that port up to the switch for its slot: GPU 0 of every node to the rail 0 switch, GPU 1 to rail 1, and so on. The three rail 0 cables and the rail 0 switch are drawn thick and dark; the other cables are thin and light."}
 ![](images/svg/rail-optimized.svg)
@@ -2176,6 +1898,30 @@ plt.show()
 plt.close()
 ```
 :::
+
+### Optical circuit switching and reconfigurable topology {#sec-network-fabrics-ocs}
+
+Every topology so far is fixed when the fabric is cabled, and its switching is electrical. In clusters spanning tens of thousands of accelerators, multi-tier Clos networks, the switched leaf-and-spine family whose full-bisection form is the fat-tree of @sec-network-fabrics-fat-tree, connect groups of endpoints through successive tiers of electrical packet switches. These switches inspect each packet and choose an outgoing link; the alternative considered here changes the physical connections between groups for a longer-lived workload allocation. Every network hop incurs an Optical-Electrical-Optical (OEO) conversion\index{Optical-electrical-optical conversion!power overhead}: incoming photons hit a photodiode, high-speed SerDes circuits deserialize the electrical signal, switch ASICs buffer and route packets across crossbars, and output SerDes drive lasers to re-transmit light over optical fiber.
+
+At 800 Gb/s and 1.6 Tb/s per-port data rates, SerDes and transceiver electronics consume significant energy (@sec-network-fabrics-serdes), and every additional switch tier repeats that conversion cost for each bit that crosses it. Fixed electrical Clos topologies are also cabled statically, locking the facility into a single oversubscription ratio and rigid bisection pattern regardless of whether the running workload is pipeline-dominated, data-parallel, or all-to-all expert-routed. A statically cabled torus is equally fixed. It suits the dimension-ordered rings described in @sec-network-fabrics-dragonfly but congests under MoE AllToAll traffic, and its wiring cannot change to match the job.
+
+::: {#dfn-network-fabrics-optical-circuit-switching .callout-definition title="Optical circuit switching"}
+
+***Optical circuit switching (OCS)***\index{Optical Circuit Switching!definition}\index{OCS!reconfigurable topology} is a physical networking architecture that routes optical signals directly using Micro-Electro-Mechanical Systems (MEMS) mirror arrays without Optical-Electrical-Optical (OEO) conversion, enabling dynamic, software-defined topology reconfiguration and high energy efficiency at warehouse scale.
+
+1.  **Significance**: An optical circuit bypasses packet-by-packet electronic processing in the switching path. The complete system still consumes power for actuators, control, and transceivers. Its compatibility across line rates depends on optical loss, wavelengths, and endpoint budgets, so protocol transparency does not imply unrestricted upgrades.
+2.  **Distinction**: Unlike electrical packet switches (which inspect headers, buffer packets in SRAM, and make nanosecond routing decisions per packet), an OCS establishes semi-static physical optical circuits with millisecond-scale switching latency ($10$--$30$ ms), making it suitable for topology-level reconfiguration rather than dynamic packet routing.
+3.  **Common pitfall**: Assuming OCS replaces packet switching entirely. OCS operates at circuit granularity: it configures cluster-scale topologies (such as 3D tori or job-specific sub-clusters) and routes around hardware faults, while packet switching or accelerator-native interconnects handle fine-grained, intra-step message routing.
+
+:::
+
+Google's TPU v4 supercomputer [@jouppi2023] deployed optical circuit switching in production. Instead of wiring 4,096 chips into an inflexible electrical fat-tree, the system groups accelerators into $4{\times}4{\times}4$ node cubes and routes the inter-cube links through an array of 3D MEMS optical circuit switches (codenamed Palomar)\index{Optical circuit switching!MEMS mirror array}.
+
+The optical layer serves two purposes, adapting the topology to the workload and recovering from faults. For workload adaptation, the physical interconnect can be reconfigured\index{Optical circuit switching!topology reconfiguration} to match the communication structure of the running model. A training run using 1D pipeline parallelism can configure its slice as an elongated cylinder to streamline stage-to-stage transfers. Conversely, a 2D or 3D tensor-parallel partition can configure a compact cubic 3D torus that minimizes average hop count, while an MoE workload can maximize bisection bandwidth across specific expert groups.
+
+Optical switching also supports fault isolation\index{Optical circuit switching!fault isolation} by changing connections around unavailable hardware where spare connectivity permits. The capability matters because in a statically cabled torus, a single failed link or node can break a ring along an entire dimension and degrade every job that spans it. With optical circuit switching, the mirrors can be redirected to bypass the failed cube or fiber and splice healthy cubes into a complete, smaller torus slice without manual recabling. The manager must first detect the fault, choose a feasible allocation, and establish the new circuits. Circuit-switching time is only one part of that process. A training job may also need to rebuild its process groups and restore state before computation resumes, so optical reconfiguration latency alone does not specify recovery time.
+
+The trade-off is switching latency. Because MEMS mirrors physically rotate to steer collimated light beams, reconfiguration occurs on a mechanical timescale that is much longer than packet forwarding in an established electrical path. Circuit setup changes connectivity, while packet forwarding uses connectivity already in place. Consequently, OCS raises the power and protocol ceiling of the switching layer while leaving reconfiguration latency as the binding constraint, so it is deployed for job-level topology allocation and fault isolation, not for per-message dynamic routing. Within that limit, OCS turns the choice of topology from a decision fixed when the fabric is cabled into one made for each job.
 
 Each topology comparison so far has considered one traffic pattern at a time. In practice, clusters serve multiple workloads with different communication patterns, and topology selection must balance their competing demands.
 
@@ -2576,39 +2322,9 @@ class NetworkFabricsClusterRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
-```{python}
-#| echo: false
-#| label: calc-vol2-overlap-example
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMMUNICATION-COMPUTATION OVERLAP EXAMPLE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: §The GPU-to-GPU gradient bus
-# │ Goal: Demonstrate ideal AllReduce latency hiding behind backward-pass compute.
-# │ Show: Backward time, AllReduce time, exposed overhead math.
-# │ How: max(0, allreduce - backward) with check() invariant.
-# └─────────────────────────────────────────────────────────────────────────────
-class OverlapExample:
-    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    backward = 500 * millisecond  # scenario assumption: backward-pass compute per step
-    allreduce = 300 * millisecond  # scenario assumption: gradient AllReduce per step
+In a well-designed cluster, the network fabric acts as a scheduler-aware extension of the system bus, not a passive pipe. The ~`{python} NetworkFabricsClusterRecap.nvlink_to_ib_ratio_mult_str` per-direction cliff between NVLink and one external port, measured at the start of this chapter, is the gap the cluster must hide. Communication-computation overlap\index{Communication-computation overlap!latency hiding}, which the Fleet Law credits as $\OverlappedTime$, is the first mechanism for hiding it, through the same layer-staggered AllReduce launch that spreads incast bursts in @sec-network-fabrics-incast. Overlap cannot hide the last mile of the exchange, because the gradients computed at the end of backpropagation have little computation left behind which to hide their transfer (@sec-communication-overlap).
 
-    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    exposed = max(0 * millisecond, allreduce - backward)
-    _b = int(backward.to(millisecond).magnitude)
-    _a = int(allreduce.to(millisecond).magnitude)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(exposed.magnitude == 0, "Ideal overlap should hide the whole AllReduce in this scenario")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    backward_ms_str = MarkdownStr(f"{_b} ms")
-    allreduce_ms_str = MarkdownStr(f"{_a} ms")
-    exposed_math = fmt_math(f"\\max(0, {_a} - {_b}) = {int(exposed.to(millisecond).magnitude)}")
-```
-
-In a well-designed cluster, the network fabric acts as a scheduler-aware extension of the system bus, not a passive pipe. The ~`{python} NetworkFabricsClusterRecap.nvlink_to_ib_ratio_mult_str` per-direction cliff between NVLink and one external port, measured at the start of this chapter, is the gap the cluster must hide. Communication-computation overlap\index{Communication-computation overlap!latency hiding}, which the Fleet Law credits as $\OverlappedTime$, is the first mechanism for hiding it; it is the same layer-staggered AllReduce launch that spreads incast bursts in @sec-network-fabrics-incast. If the backward pass requires `{python} OverlapExample.backward_ms_str` of computation and the AllReduce takes `{python} OverlapExample.allreduce_ms_str`, ideal overlap could hide the communication cost behind computation, reducing the exposed overhead to `{python} OverlapExample.exposed_math`. In practice, dependency chains and resource contention limit overlap, leaving a **last-mile problem**\index{Last-mile problem!definition}: gradients computed near the end of backpropagation have little subsequent computation behind which to hide their transfer time.
-
-Placement is the second mechanism, because it decides which communication crosses each boundary. The placement from the opening of this chapter, tensor parallelism inside the NVLink domain with pipeline stages and data-parallel replicas spanning nodes, becomes a wiring rule at cluster scale, because each fabric tier must be provisioned for the traffic placed on it. The links between nodes must meet the pipeline's\index{Pipeline parallelism!network hierarchy} activation-transfer budget, which physical adjacency alone does not guarantee. The full fabric carries the data-parallel\index{Data parallelism!network hierarchy} exchanges, which gradient accumulation makes less frequent and overlap partly hides. Production designs therefore differ mainly in how they provision that outermost tier, as the two that follow show.
+Placement is the second mechanism, because it decides which communication crosses each boundary. The placement that the bandwidth hierarchy of @sec-compute-bandwidth-hierarchy sets, tensor parallelism inside the NVLink domain with pipeline stages and data-parallel replicas spanning nodes, becomes a wiring rule at cluster scale, because each fabric tier must be provisioned for the traffic placed on it. The links between nodes must meet the pipeline's\index{Pipeline parallelism!network hierarchy} activation-transfer budget, which physical adjacency alone does not guarantee. The full fabric carries the data-parallel\index{Data parallelism!network hierarchy} exchanges, which gradient accumulation makes less frequent and overlap partly hides. Production designs therefore differ mainly in how they provision that outermost tier, as the two that follow show.
 
 ### NVIDIA DGX SuperPOD architecture {#sec-network-fabrics-dgx-superpod}
 
@@ -2647,13 +2363,7 @@ class GrandTetonClusters:
 
 Meta's Grand Teton clusters take the opposite approach, accepting Ethernet's congestion-tuning burden in exchange for multi-vendor supply and shared operations. Meta disclosed two Grand Teton-based `{python} GrandTetonClusters.n_gpus_value_str`-H100 clusters: one using RoCE over an Arista/OCP Ethernet fabric and one using NVIDIA Quantum-2 InfiniBand, both with `{python} GrandTetonClusters.endpoint_gbit_per_s_str` endpoints. Meta used both for Llama 3 training and reported ongoing Llama 3 training on the RoCE cluster [@meta2024genaiInfrastructure]. Ethernet lets Meta source switches from multiple vendors and reuse the optical infrastructure and management tooling of its front-end serving fleet, avoiding the operational silo of a dedicated InfiniBand island.
 
-Meta's RoCE study shows how Level 4 choices affect the complete fabric. It describes PFC watchdogs for long-duration pause events, iterative routing designs beyond plain ECMP, future-oriented flowlet switching experiments, and a 400G deployment in which DCQCN tuning proved difficult enough that Meta proceeded without DCQCN while relying on PFC plus higher-layer collective controls [@gangidi2024rdma]. The lesson is to validate the combination of endpoint behavior, routing, and flow control under the intended collective traffic. Large-transfer throughput alone does not establish small-message latency or recovery tails, and those results cannot be inferred from the Ethernet or InfiniBand label.
-
-::: {#psp-network-fabrics-infiniband-vs-roce-industry-verdict .callout-perspective title="InfiniBand vs. RoCE: The industry verdict"}
-
-The InfiniBand and RoCE deployments demonstrate different ways to meet a workload's communication contract. Their equipment, routing, recovery mechanisms, and operational requirements must be compared as complete configurations. InfiniBand's native credit-based flow control can simplify lossless configuration and tighten small-message tails, while RoCE inherits Ethernet's multi-vendor switching and shared operational tooling at the cost of tuning buffering, PFC, ECN, and routing policy. For *training runs*, frequent small exchanges can expose startup latency even when a full step lasts seconds. For *inference serving*, the importance of fabric latency depends on model partitioning, request shape, and service-level objectives (SLOs). In both cases, delivered performance and operating cost decide the trade-off.
-
-:::
+Meta's RoCE study shows how Level 4 choices affect the complete fabric. It describes PFC watchdogs for long-duration pause events, iterative routing designs beyond plain ECMP, future-oriented flowlet switching experiments, and a 400G deployment in which DCQCN tuning proved difficult enough that Meta proceeded without DCQCN while relying on PFC plus higher-layer collective controls [@gangidi2024rdma]. The lesson is to validate the combination of endpoint behavior, routing, and flow control under the intended collective traffic. Large-transfer throughput alone does not establish small-message latency or recovery tails, and those results cannot be inferred from the Ethernet or InfiniBand label. Small-message latency matters in training through frequent small exchanges, which expose startup cost even when a full step lasts seconds, and in serving to a degree set by model partitioning, request shape, and service-level objectives (SLOs).
 
 These case studies close the five-level stack by showing how the physical wire, transport protocol, topology, and congestion controls become one production fabric. The remaining operational problem is not how to build a single fast cluster, but how to share that expensive substrate across teams and workloads without sacrificing the predictable performance that training demands.
 
@@ -2663,38 +2373,31 @@ These case studies close the five-level stack by showing how the physical wire, 
 #| echo: false
 #| label: network-virtualization-idle-cost
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ MULTI-TENANCY IDLE-CAPITAL COST (LEGO)
+# │ MULTI-TENANCY SHARING SCENARIO (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-network-fabrics-virtualization opening paragraph.
-# │ Goal: Price the capital stranded by a cluster that cannot isolate tenants.
-# │ How: stranded capital = cluster capex × idle fraction. Capex is the same
-# │      NetworkEconomicsProfile anchor the bisection notebook uses.
+# │ Context: @sec-network-fabrics-virtualization opening paragraph, SR-IOV
+# │          rate split, and the checkpoint-burst contention scenario.
+# │ Goal: Size the bandwidth policy, VF rate, and neighbor checkpoint burst.
+# │ How: VF rate = NIC line rate / VF count; burst time = write size / line rate.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_percent, fmt_usd
+from mlsysim.fmt import check, fmt_percent
 
 class VirtualizationIdleCost:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    cluster_cost = ReferenceStats.NetworkEconomicsProfile.ClusterCapex
-    idle_fraction = 0.30  # scenario assumption: share of cluster idle without tenant isolation
     training_share = 0.80  # scenario assumption: bisection share reserved for the training job
     n_vfs = 8  # scenario assumption: SR-IOV virtual functions carved from one NIC
     nic_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
     ckpt_write = 100 * GB  # scenario assumption: neighboring job's checkpoint burst
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    stranded = cluster_cost * idle_fraction
     vf_rate = nic_bw / n_vfs
     ckpt_time = ckpt_write / nic_bw
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
-    check(0 < idle_fraction < 1, "Idle fraction must be a fraction")
     check(n_vfs == 8, "Prose spells the VF count as 'eight'")
     check(abs(ckpt_time.to(second).magnitude - 2) < 1e-9, "100 GB at 50 GB/s should take 2 s")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    cluster_cost_str = fmt_usd(cluster_cost, precision=0, commas=False, scale="million")
-    idle_pct_str = fmt_percent(idle_fraction, precision=0, commas=False, style="prose")
-    stranded_str = fmt_usd(stranded, precision=0, commas=False, scale="million")
     training_share_pct_str = fmt_percent(training_share, precision=0, commas=False, style="prose")
     other_share_pct_str = fmt_percent(1 - training_share, precision=0, commas=False, style="prose")
     n_vfs_word_str = MarkdownStr("eight")  # guarded above
@@ -2703,7 +2406,7 @@ class VirtualizationIdleCost:
     ckpt_s_str = fmt_time(ckpt_time, second, precision=0, commas=False)
 ```
 
-Sharing a cluster can recover capacity that a single workload leaves unused. In the scenario of a `{python} VirtualizationIdleCost.cluster_cost_str` system with `{python} VirtualizationIdleCost.idle_pct_str` unused capacity, the idle fraction corresponds to `{python} VirtualizationIdleCost.stranded_str` of the equipment budget. Network virtualization\index{Network virtualization!multi-tenancy} must make sharing compatible with bandwidth allocations, latency targets, and access isolation. These requirements interact because tenants still share physical links and buffers. A proposed policy might reserve `{python} VirtualizationIdleCost.training_share_pct_str` of the cluster's $\BisectionBandwidth$ for training and allocate the remaining `{python} VirtualizationIdleCost.other_share_pct_str` to inference and preprocessing. Enforcing that policy requires admission control and compatible scheduling along the relevant paths; a virtual NIC or separate traffic class alone does not guarantee the end-to-end share.
+Sharing a cluster can recover capacity that a single workload leaves unused. Network virtualization\index{Network virtualization!multi-tenancy} must make sharing compatible with bandwidth allocations, latency targets, and access isolation. These requirements interact because tenants still share physical links and buffers. A proposed policy might reserve `{python} VirtualizationIdleCost.training_share_pct_str` of the cluster's $\BisectionBandwidth$ for training and allocate the remaining `{python} VirtualizationIdleCost.other_share_pct_str` to inference and preprocessing. Enforcing that policy requires admission control and compatible scheduling along the relevant paths; a virtual NIC or separate traffic class alone does not guarantee the end-to-end share.
 
 ### Hardware NIC virtualization with SR-IOV {#sec-network-fabrics-sriov}
 
@@ -2794,7 +2497,7 @@ Network performance problems in ML clusters are insidious because they manifest 
 
 ### Link-level telemetry {#sec-network-fabrics-link-telemetry}
 
-Hardware counters test whether the deployed path still behaves as assumed. On InfiniBand, the `perfquery` utility reads supported port counters; Ethernet/RoCE devices expose telemetry through their own management interfaces [@linuxManpages2026perfquery]. **PortXmitData**\index{PortXmitData!definition} and **PortRcvData**\index{PortRcvData!definition} count data in units of four octets, so utilization calculations multiply each counter delta by four to recover bytes. **PortXmitDiscards**\index{PortXmitDiscards!definition} records transmit discards that warrant investigation against the port's traffic and recovery policy. The **SymbolErrorCounter**\index{SymbolErrorCounter!definition} and **LinkDownedCounter**\index{LinkDownedCounter!definition} provide evidence of signaling errors and link-down events. Correlating those counters with link rate, lane state, and transport behavior narrows the cause; a counter alone does not identify a defective cable or transceiver.
+Hardware counters test whether the deployed path still behaves as assumed. Switch and NIC port counters\index{Port counters!fabric telemetry} report transmitted and received data, transmit discards, symbol errors, and link-down events; on InfiniBand a utility such as `perfquery` reads them, and Ethernet/RoCE devices expose the equivalent telemetry through their own management interfaces [@linuxManpages2026perfquery]. Data counters measure utilization, discards warrant investigation against the port's traffic and recovery policy, and symbol errors and link-down events are evidence of a degrading signal. Correlating those counters with link rate, lane state, and transport behavior narrows the cause; a counter alone does not identify a defective cable or transceiver.
 
 ```{python}
 #| echo: false
@@ -2851,9 +2554,9 @@ For latency-sensitive synchronization, `ib_write_lat` runs a ping-pong test with
 
 When a training job reports lower-than-expected throughput, the diagnostic order should preserve the layer model rather than starting with cables. The following sequence moves from application symptoms toward physical causes:
 
-1. **Check GPU utilization**\index{GPU utilization!check}: Rule out compute bottlenecks using `dcgmi` or `nvidia-smi`. High SM utilization alone does not rule out a network bottleneck, because communication kernels can also keep SMs active. Correlate utilization with the compute and collective portions of the step timeline. Low utilization does not automatically implicate the fabric, however. A starved input pipeline (data loading or storage) produces the same symptom, so confirm the data path is keeping the accelerators fed before investigating the network.
-2. **Inspect NCCL logs**\index{NCCL!debug logs}: Set `NCCL_DEBUG=INFO` to reveal which network transport was selected, the detected bandwidth between nodes, and any fallbacks to slower protocols.
-3. **Run point-to-point tests**\index{Perftest!point-to-point bandwidth tests}: Use `ib_write_bw` between specific nodes in the job. A single degraded link can bottleneck the entire ring in a ring AllReduce.
+1. **Check GPU utilization**\index{GPU utilization!check}: Rule out compute bottlenecks with accelerator telemetry (`nvidia-smi`, for example). High SM utilization alone does not rule out a network bottleneck, because communication kernels can also keep SMs active. Correlate utilization with the compute and collective portions of the step timeline. Low utilization does not automatically implicate the fabric, however. A starved input pipeline (data loading or storage) produces the same symptom, so confirm the data path is keeping the accelerators fed before investigating the network.
+2. **Inspect collective-library logs**\index{NCCL!debug logs}: Enable the library's debug output (`NCCL_DEBUG=INFO` in NCCL, for example) to reveal which network transport was selected, the detected bandwidth between nodes, and any fallbacks to slower protocols.
+3. **Run point-to-point tests**\index{Perftest!point-to-point bandwidth tests}: Run a pairwise bandwidth test (such as `ib_write_bw`) between specific nodes in the job. A single degraded link can bottleneck the entire ring in a ring AllReduce.
 4. **Check PFC/ECN counters**\index{Congestion control!PFC and ECN counters}: Inspect switch counters along the path. Sustained PFC activity indicates persistent congestion that should be investigated at the scheduler or routing level.
 5. **Validate physical layer**\index{Physical layer!validation}: Check symbol errors and CRC counts to identify failing transceivers or cables.
 
@@ -3032,30 +2735,6 @@ For ML infrastructure, CPO\index{Co-packaged optics!bandwidth hierarchy flatteni
 
 However, CPO\index{Co-packaged optics!thermal sensitivity} introduces new challenges. Optical components are sensitive to temperature (laser wavelength shifts with temperature, requiring active thermal management), and integrating photonics on the same package as a 1,000 W GPU creates a hostile thermal environment for the optical components. The manufacturing processes for silicon photonics and CMOS transistors are similar but not identical, requiring separate fabrication steps that increase package cost and complexity. Hybrid integration, which places the photonics chiplet on a cooler region of the package substrate and thermally isolates it from the GPU die, is one way to manage that environment, at the cost of a longer electrical path than full co-location.
 
-### Optical circuit switching and reconfigurable topology {#sec-network-fabrics-ocs}
-
-Co-packaged optics shortens the electrical path at each port, but it leaves the switching itself electrical. In clusters spanning tens of thousands of accelerators, multi-tier Clos networks, the switched leaf-and-spine family whose full-bisection form is the fat-tree of @sec-network-fabrics-fat-tree, connect groups of endpoints through successive tiers of electrical packet switches. These switches inspect each packet and choose an outgoing link; the alternative considered here changes the physical connections between groups for a longer-lived workload allocation. Every network hop incurs an Optical-Electrical-Optical (OEO) conversion\index{Optical-electrical-optical conversion!power overhead}: incoming photons hit a photodiode, high-speed SerDes circuits deserialize the electrical signal, switch ASICs buffer and route packets across crossbars, and output SerDes drive lasers to re-transmit light over optical fiber.
-
-At 800 Gb/s and 1.6 Tb/s per-port data rates, SerDes and transceiver electronics consume significant energy (@sec-network-fabrics-serdes), and every additional switch tier repeats that conversion cost for each bit that crosses it. Fixed electrical Clos topologies are also cabled statically, locking the facility into a single oversubscription ratio and rigid bisection pattern regardless of whether the running workload is pipeline-dominated, data-parallel, or all-to-all expert-routed. A statically cabled torus is equally fixed. It suits the dimension-ordered rings described in @sec-network-fabrics-dragonfly but congests under MoE AllToAll traffic, and its wiring cannot change to match the job.
-
-::: {#dfn-network-fabrics-optical-circuit-switching .callout-definition title="Optical circuit switching"}
-
-***Optical circuit switching (OCS)***\index{Optical Circuit Switching!definition}\index{OCS!reconfigurable topology} is a physical networking architecture that routes optical signals directly using Micro-Electro-Mechanical Systems (MEMS) mirror arrays without Optical-Electrical-Optical (OEO) conversion, enabling dynamic, software-defined topology reconfiguration and high energy efficiency at warehouse scale.
-
-1.  **Significance**: An optical circuit bypasses packet-by-packet electronic processing in the switching path. The complete system still consumes power for actuators, control, and transceivers. Its compatibility across line rates depends on optical loss, wavelengths, and endpoint budgets, so protocol transparency does not imply unrestricted upgrades.
-2.  **Distinction**: Unlike electrical packet switches (which inspect headers, buffer packets in SRAM, and make nanosecond routing decisions per packet), an OCS establishes semi-static physical optical circuits with millisecond-scale switching latency ($10$--$30$ ms), making it suitable for topology-level reconfiguration rather than dynamic packet routing.
-3.  **Common pitfall**: Assuming OCS replaces packet switching entirely. OCS operates at circuit granularity: it configures cluster-scale topologies (such as 3D tori or job-specific sub-clusters) and routes around hardware faults, while packet switching or accelerator-native interconnects handle fine-grained, intra-step message routing.
-
-:::
-
-Google's TPU v4 supercomputer [@jouppi2023] deployed optical circuit switching in production. Instead of wiring 4,096 chips into an inflexible electrical fat-tree, the system groups accelerators into $4 \times 4 \times 4$ node cubes and routes the inter-cube links through an array of 3D MEMS optical circuit switches (codenamed Palomar)\index{Optical circuit switching!MEMS mirror array}.
-
-The optical layer serves two purposes, adapting the topology to the workload and recovering from faults. For workload adaptation, the physical interconnect can be reconfigured\index{Optical circuit switching!topology reconfiguration} to match the communication structure of the running model. A training run using 1D pipeline parallelism can configure its slice as an elongated cylinder to streamline stage-to-stage transfers. Conversely, a 2D or 3D tensor-parallel partition can configure a compact cubic 3D torus that minimizes average hop count, while an MoE workload can maximize bisection bandwidth across specific expert groups.
-
-Optical switching also supports fault isolation\index{Optical circuit switching!fault isolation} by changing connections around unavailable hardware where spare connectivity permits. The capability matters because in a statically cabled torus, a single failed link or node can break a ring along an entire dimension and degrade every job that spans it. With optical circuit switching, the mirrors can be redirected to bypass the failed cube or fiber and splice healthy cubes into a complete, smaller torus slice without manual recabling. The manager must first detect the fault, choose a feasible allocation, and establish the new circuits. Circuit-switching time is only one part of that process. A training job may also need to rebuild its process groups and restore state before computation resumes, so optical reconfiguration latency alone does not specify recovery time.
-
-The trade-off is switching latency. Because MEMS mirrors physically rotate to steer collimated light beams, reconfiguration occurs on a mechanical timescale that is much longer than packet forwarding in an established electrical path. Circuit setup changes connectivity, while packet forwarding uses connectivity already in place. Consequently, OCS raises the power and protocol ceiling of the switching layer while leaving reconfiguration latency as the binding constraint, so it is deployed for job-level topology allocation and fault isolation, not for per-message dynamic routing. Within that limit, OCS turns the choice of topology from a decision fixed when the fabric is cabled into one made for each job.
-
 ### Disaggregated and composable architectures {#sec-network-fabrics-disaggregated}
 
 A fixed node configuration can leave compute or memory underused when workloads need different resource ratios. Compute Express Link (CXL) memory pooling allows supported hosts to access assigned memory capacity through a CXL path, while disaggregated designs\index{Architecture!disaggregated} make some resource allocations independent of the chassis boundary. This changes which links lie on the workload's critical path. It does not merge CXL memory access, NVLink communication, and InfiniBand transport into one interchangeable service; each path retains its own supported operations, bandwidth, and latency.
@@ -3155,17 +2834,9 @@ Consider a `{python} BandwidthFallacy.msg_kb_str` message (typical for control s
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Treating InfiniBand as merely fast Ethernet.*
-
-Procurement teams compare InfiniBand and high-speed Ethernet on link rate alone and conclude they are equivalent at the same Gb/s. The relevant comparison is between complete transport stacks, not between InfiniBand and TCP. InfiniBand provides kernel-bypass RDMA over a credit-based fabric; RoCE also provides kernel-bypass RDMA, but carries it over Ethernet and places more of the reliable-delivery, congestion-control, and routing contract in NIC behavior and fabric configuration. PFC and ECN are common parts of that contract. Conventional kernel TCP is a third design point with different CPU and recovery costs. The architecture decision therefore determines where flow-control state and operational risk reside, even when nominal link rates match.
-
-:::
-
-::: {.fallacy-pitfall}
-
 **Fallacy**: *Lossless Ethernet is as reliable as InfiniBand.*
 
-RoCE over Ethernet can achieve throughput comparable to InfiniBand for large transfers, but lossless operation depends on the configuration and interaction of PFC, ECN, routing, buffers, and NIC behavior (@sec-network-fabrics-pfc). A forwarding loop, cyclic buffer dependency, or firmware defect can trigger a PFC storm\index{PFC storm!cascading pause}, where PAUSE frames spread beyond the original queue. InfiniBand's per-hop credit mechanism avoids this specific reactive PAUSE-frame cascade, but the fabric still requires deadlock-free routing, sound virtual-lane configuration, and congestion management [@infiniband2000spec]. Both fabrics require validation and telemetry; RoCE adds particular sensitivity to the configuration of Ethernet losslessness.
+RoCE over Ethernet can achieve throughput comparable to InfiniBand for large transfers, but lossless operation depends on the configuration and interaction of PFC, ECN, routing, buffers, and NIC behavior (@sec-network-fabrics-pfc). A forwarding loop, cyclic buffer dependency, or firmware defect can trigger a PFC storm\index{PFC storm!cascading pause}, where PAUSE frames spread beyond the original queue. InfiniBand's per-hop credit mechanism avoids this specific reactive PAUSE-frame cascade, but the fabric still requires deadlock-free routing, sound virtual-lane configuration, and congestion management [@infiniband2000spec]. Both fabrics require validation and telemetry; RoCE adds particular sensitivity to the configuration of Ethernet losslessness. Procurement should therefore compare complete transport stacks rather than link rates, because the stack determines where flow-control state and operational risk reside even when nominal rates match.
 
 ```{python}
 #| echo: false
@@ -3222,7 +2893,7 @@ Adaptive routing can distribute traffic across available paths, but it cannot in
 
 **Fallacy**: *Network fabric problems always appear as hard failures.*
 
-Network performance issues in ML clusters often manifest as subtle training slowdowns rather than errors, because jobs continue to run while gradients arrive late. The silent-waste estimate in @sec-network-fabrics-monitoring shows the scale. A `{python} SilentWaste.bw_loss_pct_str` bandwidth loss that stretches each iteration by only `{python} SilentWaste.slowdown_pct_range_str` costs `{python} SilentWaste.waste_gpu_hours_range_str` GPU-hours over a `{python} SilentWaste.run_days_str`-day run on `{python} SilentWaste.n_gpus_str` without raising a single alarm. Detection therefore depends on comparing delivered throughput with a baseline, not on waiting for an error.
+Network performance issues in ML clusters often manifest as subtle training slowdowns rather than errors, because jobs continue to run while gradients arrive late. The silent-waste estimate in @sec-network-fabrics-monitoring shows how a small bandwidth loss accumulates into wasted GPU-hours over a long run without raising a single alarm. Detection therefore depends on comparing delivered throughput with a baseline, not on waiting for an error.
 
 :::
 
