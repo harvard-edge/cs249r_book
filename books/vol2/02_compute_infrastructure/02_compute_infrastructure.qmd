@@ -495,11 +495,19 @@ from mlsysim.fmt import fmt_bandwidth
 
 # ┌── LEGO ───────────────────────────────────────────────
 class B200NvlinkRecap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    # NVIDIA does not say whether 10 TB/s is per direction or bidirectional; quote it only as a link rate.
+    die_to_die = Hardware.Cloud.B200.die_to_die_bandwidth
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(die_to_die > Hardware.Cloud.B200.nvlink.bandwidth, "B200 die-to-die link should exceed its NVLink total")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.B200.nvlink.bandwidth, unit=GB / second, precision=0, commas=False)
+    die_to_die_tb_per_s_str = fmt_bandwidth(die_to_die, unit=TB / second, precision=0, commas=False)
 ```
 
-The Blackwell architecture (2024) takes the chiplet route of @sec-compute-chiplet-accelerators past the `{python} ReticleLimitRecap.reticle_limit_mm2_str` reticle limit\index{Chiplet!dual-die packaging}. The B200 pairs two GPU dies in one package over a 10 TB/s die-to-die link\index{Die-to-die interconnect!bandwidth}, fast enough that the two dies appear to software as a single logical GPU for many operations, and its fifth-generation NVLink\index{NVLink!fifth-generation} doubles intra-node bandwidth again to `{python} B200NvlinkRecap.nvlink_gb_per_s_str` per GPU. Its FP8 rating in @tbl-gpu-evolution is not an FP16/BF16 figure; those comparisons should use the lower precision-specific vendor rate.
+The Blackwell architecture (2024) takes the chiplet route of @sec-compute-chiplet-accelerators past the `{python} ReticleLimitRecap.reticle_limit_mm2_str` reticle limit\index{Chiplet!dual-die packaging}. The B200 pairs two GPU dies in one package over a `{python} B200NvlinkRecap.die_to_die_tb_per_s_str` die-to-die link\index{Die-to-die interconnect!bandwidth}, fast enough that the two dies appear to software as a single logical GPU for many operations, and its fifth-generation NVLink\index{NVLink!fifth-generation} doubles intra-node bandwidth again to `{python} B200NvlinkRecap.nvlink_gb_per_s_str` per GPU. Its FP8 rating in @tbl-gpu-evolution is not an FP16/BF16 figure; those comparisons should use the lower precision-specific vendor rate.
 
 Each generation thus targeted the bottleneck its predecessor exposed. Volta added dedicated matrix hardware, Ampere widened mixed-precision support, Hopper added FP8 for Transformer workloads, and Blackwell worked around the die-size limit with two dies in one package. Because architects choose those targets by profiling the workloads of their era, accelerator design follows model architecture, which is why Transformer workloads have shaped accelerator design since 2017.
 
@@ -734,7 +742,7 @@ class TensorCoreEfficiencyRecap:
     h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=True)
 ```
 
-| **Generation**  |                       **Dense FP16 peak TFLOP/s**                        |                    **TDP (W)**                    |                           **TFLOP/s per watt**                           |                  **Relative Efficiency**                  |
+| **Generation**  |                       **Dense FP16 peak TFLOP/s**                        |                    **TDP (W)**                    |                           **TFLOP/s per watt**                           |                  **Relative efficiency**                  |
 |:----------------|:------------------------------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------------------:|:---------------------------------------------------------:|
 | **V100 (2017)** |     `{python} V100EfficiencyRecap.flops_fp16_tflop_per_s_str` (FP16)     |      `{python} V100EfficiencyRecap.tdp_w_str`     | `{python} GpuEfficiencyTableRecap.v100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.v100_relative_mult_str` |
 | **A100 (2020)** |   `{python} A100EfficiencyRowRecap.flops_fp16_tflop_per_s_str` (FP16)    |    `{python} A100EfficiencyRowRecap.tdp_w_str`    | `{python} GpuEfficiencyTableRecap.a100_efficiency_tflop_per_s_per_w_str` | `{python} GpuEfficiencyTableRecap.a100_relative_mult_str` |
@@ -967,7 +975,7 @@ The TPU v5p\index{TPU!v5p} (2023) continued this pod-scale design for high-end t
 
 : **Google TPU Architecture Evolution**: The TPU's development highlights a "pod-first" design philosophy where inter-chip interconnect bandwidth and compiler-level optimization (XLA) are as important as peak per-chip arithmetic. Note: TPU v1 was INT8 only. {#tbl-tpu-evolution}
 
-Set side by side, @tbl-gpu-evolution and @tbl-tpu-evolution show two design philosophies. GPU evolution packs more arithmetic, in ever lower-precision Tensor Core formats, onto one package, and turns to chiplets once a single die reaches its size limit. TPU evolution treats the pod as the product. Per-chip arithmetic matters, but inter-chip bandwidth and reconfigurability decide how much of it a large training job can use. Both lines combine local computation with memory and interconnect improvements; they place those resources differently. The warehouse-scale perspective of @sec-introduction-shift-warehousescale-computer-2ccd treats chip throughput, collective bandwidth, and reconfigurability as parts of one system [@barroso2019], so the useful comparison is how each candidate sustains the intended workload across that complete system.
+The GPU and TPU lines follow two design philosophies (@tbl-gpu-evolution, @tbl-tpu-evolution). GPU evolution packs more arithmetic, in ever lower-precision Tensor Core formats, onto one package, and turns to chiplets once a single die reaches its size limit. TPU evolution treats the pod as the product. Per-chip arithmetic matters, but inter-chip bandwidth and reconfigurability decide how much of it a large training job can use. Both lines combine local computation with memory and interconnect improvements; they place those resources differently. The warehouse-scale perspective of @sec-introduction-shift-warehousescale-computer-2ccd treats chip throughput, collective bandwidth, and reconfigurability as parts of one system [@barroso2019], so the useful comparison is how each candidate sustains the intended workload across that complete system.
 
 ### Matrix units {#sec-compute-matrix-units}
 
@@ -1066,7 +1074,7 @@ class MemoryBandwidthIntroRecap:
 
 The implications are concrete in our running example. Our `{python} InfraSetup.frontier_params_b_str` model's weights occupy `{python} MemoryBandwidthIntroRecap.weights_fp16_gb_str` in FP16. In dense autoregressive decode at batch size 1, each generated token uses all of those weights, whose footprint far exceeds on-chip storage, so every token must stream them in from memory. Suppose, hypothetically, that one H100 could hold them. Streaming the whole `{python} MemoryBandwidthIntroRecap.weights_fp16_gb_str` through that device's HBM at about `{python} MemoryBandwidthIntroRecap.h100_bw_tb_per_s_str` takes over 100 ms per token, long enough to be a perceptible pause between generated words. No real H100 holds the model, so the figure is a floor on bandwidth demand rather than a prediction of deployed latency, but it shows that the memory wall is a delay a user can notice, not an abstract architectural ratio.
 
-Three levers lower that floor. Sharding spreads the weights across more memory paths, so each path streams fewer bytes. Quantization shrinks the bytes themselves. Reuse lets each fetched byte feed more arithmetic, which HBM's bandwidth and on-chip tiling make possible. The roofline model, recapped for one machine in @sec-appdx-dam-taxonomy-roofline, tests whether the resulting data supply can feed the arithmetic units. Its ridge point, peak arithmetic divided by memory bandwidth, is the number of operations a kernel must perform per byte fetched before arithmetic rather than memory becomes the limit. The ridge point recurs throughout the analysis below, and @sec-compute-roofline evaluates it for the H100. Where each architecture places its bytes sets how much bandwidth those levers can draw on (@fig-accelerator-memory-tier-map), because moving the active working set closer to arithmetic increases available bandwidth while reducing the capacity that can reside there.
+Three levers lower that floor. Sharding spreads the weights across more memory paths, so each path streams fewer bytes. Quantization shrinks the bytes themselves. Reuse lets each fetched byte feed more arithmetic, which HBM's bandwidth and on-chip tiling make possible. The Roofline Model, recapped for one machine in @sec-appdx-dam-taxonomy-roofline, tests whether the resulting data supply can feed the arithmetic units. Its ridge point, peak arithmetic divided by memory bandwidth, is the number of operations a kernel must perform per byte fetched before arithmetic rather than memory becomes the limit. The ridge point recurs throughout the analysis below, and @sec-compute-roofline evaluates it for the H100. Where each architecture places its bytes sets how much bandwidth those levers can draw on (@fig-accelerator-memory-tier-map), because moving the active working set closer to arithmetic increases available bandwidth while reducing the capacity that can reside there.
 
 ::: {#fig-accelerator-memory-tier-map fig-env="figure" fig-pos="htb" fig-cap="**Accelerator Memory Tiers**: Peak memory bandwidth and capacity separate local-SRAM designs (solid stars), HBM accelerators (half-tone filled circles), and edge and shared-LPDDR devices (hollow squares); all three are memory, so they share one hue and differ by marker. The dotted arrow marks the design trade-off: moving data closer to compute raises bandwidth but reduces capacity." fig-alt="Log-log scatter plot of memory capacity vs. peak memory bandwidth. All markers use one blue memory hue, and a shaded region encloses each cluster in three clearly stepped tints, darkest for the tier nearest compute: solid stars for local-SRAM designs at low capacity and very high bandwidth, with the outlying WSE-3 wafer in its own small region near 44 GB, half-tone filled circles for HBM accelerators at tens to hundreds of gigabytes and lower bandwidth, and hollow squares for edge and shared-LPDDR devices at the lowest bandwidth. A dotted arrow points from the HBM cluster toward the SRAM cluster, labeled closer to compute: more bandwidth, less capacity."}
 
@@ -1960,11 +1968,11 @@ class TokenLatencyDominanceRecap:
 
 The modeled memory-time share, `{python} TokenLatencyDominanceRecap.dominance_str` in this example, indicates the memory-boundedness\index{Memory-boundedness!inference} of this workload under the stated assumptions. A workload this memory-bound gains almost nothing from more TFLOP/s and nearly proportionally from more TB/s, which is what the H200 comparison shows, so bandwidth per dollar rather than peak arithmetic is the useful procurement metric for this regime. A measured execution timeline is still needed to determine how much transfer overlaps computation and which delays remain exposed, which keeps a hardware-screening calculation separate from a performance forecast.
 
-For training workloads, reusing weights across more tokens can shift the constraint toward arithmetic throughput. The roofline model tests the compute and bandwidth ceilings for the actual operation and batch shape before either specification becomes a procurement metric.
+For training workloads, reusing weights across more tokens can shift the constraint toward arithmetic throughput. The Roofline Model tests the compute and bandwidth ceilings for the actual operation and batch shape before either specification becomes a procurement metric.
 
 ### Roofline model {#sec-compute-roofline}
 
-The token latency calculation in notebook \ref{nbk-token-latency} makes memory bandwidth the relevant procurement metric for the batch-1 workload. The roofline model\index{Roofline model!arithmetic intensity} of Williams, Waterman, and Patterson [@williams2009] tests whether that diagnosis survives a change in batch shape, precision, or accelerator by relating the workload's arithmetic intensity to the candidate accelerator's compute and bandwidth ceilings.
+The token latency calculation in notebook \ref{nbk-token-latency} makes memory bandwidth the relevant procurement metric for the batch-1 workload. The Roofline Model\index{Roofline model!arithmetic intensity} of Williams, Waterman, and Patterson [@williams2009] tests whether that diagnosis survives a change in batch shape, precision, or accelerator by relating the workload's arithmetic intensity to the candidate accelerator's compute and bandwidth ceilings.
 
 ```{python}
 #| echo: false
@@ -1993,7 +2001,7 @@ For an H100 (`{python} MemoryBandwidthRooflineFnRecap.h100_flops_fp16_tflop_per_
 *Decode sits deep in the memory-bound regime, far below the ridge.*
 :::
 
-As the single-machine recap in @sec-appdx-dam-taxonomy-roofline derives, the roofline model expresses the maximum achievable performance of a workload as the lesser of two ceilings:
+As the single-machine recap in @sec-appdx-dam-taxonomy-roofline derives, the Roofline Model expresses the maximum achievable performance of a workload as the lesser of two ceilings:
 
 $$ \text{Achievable FLOP/s} = \min\left(\PeakRate,\ \Bandwidth \times \ArithmeticIntensity\right) $$ {#eq-compute-roofline}
 
@@ -2595,7 +2603,7 @@ The defining characteristic of multi-accelerator systems is not the *number of c
 
 The hierarchy reflects the physical cost of distance. Shorter signal paths over denser wiring achieve higher throughput at lower energy per bit, so at each boundary the effective bandwidth $(\Bandwidth)$ drops by roughly an order of magnitude while latency $(\Latency)$ rises. The exact size of each gap depends on link count, signaling, and the measurement boundary, but the gradient itself sets a scaling ceiling for distributed training. The common mistake is to treat all cluster communication as equal. Parallelism placement must be hierarchy-aware, because putting high-frequency synchronization such as tensor parallelism on a slow tier leaves the arithmetic units $(\PeakRate)$ waiting and collapses scaling efficiency $(\ScalingEfficiency)$.
 
-The bandwidth hierarchy can be read as concentric zones around each accelerator. The innermost zone is the HBM on the same package, with terabytes per second of bandwidth and sub-microsecond access latency\index{Latency!bandwidth hierarchy}. The next zone holds the other accelerators in the node's NVLink domain, reachable at hundreds of gigabytes per second per GPU with microsecond-scale transfer latency. The outermost zone spans the other nodes in the cluster, reached through InfiniBand ports that each supply tens of gigabytes per second per direction, with point-to-point latency measured in single-digit microseconds. Latency figures are comparable only when they measure the same thing (a memory access, a link transfer, or a complete collective), and bandwidth ratios only when they compare matching endpoints and directions. The representative paths in @tbl-bandwidth-hierarchy-compute are compared on that basis.
+The bandwidth hierarchy can be read as concentric zones around each accelerator. The innermost zone is the HBM on the same package, with terabytes per second of bandwidth and sub-microsecond access latency\index{Latency!bandwidth hierarchy}. The next zone holds the other accelerators in the node's NVLink domain, reachable at hundreds of gigabytes per second per GPU with microsecond-scale transfer latency. The outermost zone spans the other nodes in the cluster, reached through InfiniBand ports that each supply tens of gigabytes per second per direction, with point-to-point latency measured in single-digit microseconds. Latency figures are comparable only when they measure the same thing (a memory access, a link transfer, or a complete collective), and bandwidth ratios only when they compare matching endpoints and directions, as the representative paths of @tbl-bandwidth-hierarchy-compute do.
 
 ```{python}
 #| echo: false
@@ -4438,7 +4446,7 @@ class CoolingDesignPoints:
     pue_liquid_str = fmt(pue_liquid, precision=2, commas=False)
 ```
 
-| **Design Question**      | **Air Cooling**                                                                                                                                           | **Direct-to-Chip Liquid Cooling**                                                                                                                       |
+| **Design question**      | **Air cooling**                                                                                                                                           | **Direct-to-chip liquid cooling**                                                                                                                       |
 |:-------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Heat path**            | Chip to heat sink to moving air                                                                                                                           | Chip to cold plate to coolant loop                                                                                                                      |
 | **Binding limits**       | Airflow, pressure drop, inlet temperature, and allowable component temperature                                                                            | Cold-plate resistance, flow, coolant temperature, and heat-rejection capacity                                                                           |
@@ -4516,8 +4524,8 @@ Serviceability also changes the failure budget. Leaks can damage equipment and d
 # │
 # │ Goal: Quantify the synchronous blast radius of a cooling failure that idles
 # │       a full synchronous training cluster for the CDU repair window.
-# │ Show: $4,096 direct (256 GPUs) vs $160,000 full-cluster idle (10,000 GPUs);
-# │       $180,000 to $200,000 with a 30 to 60 minute checkpoint rollback.
+# │ Show: $2,048 direct (256 GPUs) vs $80,000 full-cluster idle (10,000 GPUs);
+# │       $90,000 to $100,000 with a 30 to 60 minute checkpoint rollback ($2 fleet GPU-hour).
 # │ How: direct = failed_gpus·rate·hours; cluster = total_gpus·rate·hours;
 # │      total = total_gpus·rate·(repair + rollback).
 # │
@@ -4532,7 +4540,7 @@ class StragglerFailureCost:
     cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
     repair_duration = 4 * hour  # scenario: CDU pump repair window
     rollback_low, rollback_high = 0.5 * hour, 1.0 * hour  # scenario: work lost to the last checkpoint
-    gpu_hour_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
+    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate  # fleet in-service GPU-hour (reference canon)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     idle_gpus = cluster_gpus - failed_gpus
@@ -4544,8 +4552,8 @@ class StragglerFailureCost:
     total_high = cluster_gpus * rate * (repair_hours + rollback_high.to(hour).magnitude)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(direct_cost - 4096) < 1, f"Direct straggler cost drifted: {direct_cost}")
-    check(abs(cluster_cost - 160000) < 1, f"Cluster straggler cost drifted: {cluster_cost}")
+    check(abs(direct_cost - 2048) < 1, f"Direct straggler cost drifted: {direct_cost}")
+    check(abs(cluster_cost - 80000) < 1, f"Cluster straggler cost drifted: {cluster_cost}")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     failed_gpus_str = fmt(failed_gpus, precision=0, commas=False)
@@ -4561,7 +4569,7 @@ class StragglerFailureCost:
     total_high_str = fmt_usd(total_high, precision=0, commas=True)
 ```
 
-The economics of cooling reliability shift when moving from independent inference servers to tightly coupled training clusters. In a distributed training run using synchronous parallelism, a cooling-loop failure that idles one slice of the cluster can halt the entire job. Consider a cooling failure that triggers a thermal shutdown of the `{python} StragglerFailureCost.failed_gpus_str` GPUs served by one coolant distribution unit within a `{python} StragglerFailureCost.cluster_gpus_str`-GPU cluster, about ten times the `{python} RackPowerRackRecap.cluster_gpus_str`-GPU reference cluster. The example counts lost compute capacity, excluding repair and replacement costs. If the repair time for a CDU pump is `{python} StragglerFailureCost.repair_hours_str`, the immediate loss of `{python} StragglerFailureCost.failed_gpus_str` GPUs at `{python} StragglerFailureCost.gpu_hour_rate_str` per GPU-hour is `{python} StragglerFailureCost.direct_cost_str`. Assuming the job cannot continue elastically and the remaining `{python} StragglerFailureCost.idle_gpus_str` GPUs remain unavailable for other work, the synchronous blast radius inflates the cost to `{python} StragglerFailureCost.cluster_cost_str` in lost compute time. Adding checkpoint retrieval and rollback of `{python} StragglerFailureCost.rollback_low_min_str` to `{python} StragglerFailureCost.rollback_high_min_str` minutes of lost computation brings the illustrative lost-compute total to `{python} StragglerFailureCost.total_low_str`--`{python} StragglerFailureCost.total_high_str` before any additional recovery delay. Whether N+1 cooling redundancy is worth its price follows from comparing these expected outage losses and recovery behavior with that price, rather than from treating redundancy as an unconditional requirement. The energy the rollback repeats belongs to the facility energy account of @sec-sustainable-ai-cooling.
+The economics of cooling reliability shift when moving from independent inference servers to tightly coupled training clusters. In a distributed training run using synchronous parallelism, a cooling-loop failure that idles one slice of the cluster can halt the entire job. Consider a cooling failure that triggers a thermal shutdown of the `{python} StragglerFailureCost.failed_gpus_str` GPUs served by one coolant distribution unit within a `{python} StragglerFailureCost.cluster_gpus_str`-GPU cluster, about ten times the `{python} RackPowerRackRecap.cluster_gpus_str`-GPU reference cluster. The example counts lost compute capacity, excluding repair and replacement costs. If the repair time for a CDU pump is `{python} StragglerFailureCost.repair_hours_str`, the immediate loss of `{python} StragglerFailureCost.failed_gpus_str` GPUs at the fleet's reference in-service rate of `{python} StragglerFailureCost.gpu_hour_rate_str` per GPU-hour is `{python} StragglerFailureCost.direct_cost_str`. Assuming the job cannot continue elastically and the remaining `{python} StragglerFailureCost.idle_gpus_str` GPUs remain unavailable for other work, the synchronous blast radius inflates the cost to `{python} StragglerFailureCost.cluster_cost_str` in lost compute time. Adding checkpoint retrieval and rollback of `{python} StragglerFailureCost.rollback_low_min_str` to `{python} StragglerFailureCost.rollback_high_min_str` minutes of lost computation brings the illustrative lost-compute total to `{python} StragglerFailureCost.total_low_str`--`{python} StragglerFailureCost.total_high_str` before any additional recovery delay. Whether N+1 cooling redundancy is worth its price follows from comparing these expected outage losses and recovery behavior with that price, rather than from treating redundancy as an unconditional requirement. The energy the rollback repeats belongs to the facility energy account of @sec-sustainable-ai-cooling.
 
 ::: {.column-margin}
 ![](images/svg/compute_infrastructure_cooling_failure_blast.svg){width="100%" fig-alt="Blast-radius fan: one red square labeled CDU sends gray arrows to six identical blue dots."}
@@ -4911,7 +4919,7 @@ Treating the building as one computer means that a server assigned to a distribu
 
 The first physical consequence concerns communication. The network can set the scaling ceiling. Within a single node NVLink supplies enough bandwidth for tensor parallelism, but across nodes the fabric must carry gradient tensors, activation checkpoints, and pipeline stage outputs, so a building-scale machine is only as fast as the wires that bind its cores. The WSC reframing makes the interconnect a first-class architectural component rather than a peripheral.
 
-The second consequence is that *failure is a physical certainty, not an exceptional event*. The arithmetic is the one behind @fig-three-walls-grid. Under the scenario assumption of independent failures and a per-GPU MTTF\index{MTTF!cluster scale degradation} of approximately `{python} WscThroughput.gpu_mtbf_hours_str`, a cluster of `{python} WscThroughput.n_gpus_str` GPUs has a mean interval of roughly five hours between GPU failures, and the 25K-GPU fleet of that figure about two. That is an expectation, not a periodic schedule, and shared power or cooling faults add correlated exposure. The node failure estimate of @sec-compute-infrastructure-node-health-reliability-56a6 and the facility controls of @sec-compute-infrastructure-physical-security-environmental-controls-7132 are the same exposure at smaller scope. Redundant infrastructure, such as dual-path power feeds and redundant switch fabrics, can prevent some interruptions; checkpoint storage and recovery capacity limit lost progress when a running job must stop. Both belong in the physical design. Redundancy keeps many component failures from halting the job, and checkpoints bound the work lost when one does.
+The second consequence is that *failure is a physical certainty, not an exceptional event*. Under the scenario assumption of independent failures and a per-GPU MTTF\index{MTTF!cluster scale degradation} of approximately `{python} WscThroughput.gpu_mtbf_hours_str`, a cluster of `{python} WscThroughput.n_gpus_str` GPUs has a mean interval of roughly five hours between GPU failures, and the 25K-GPU fleet of @fig-three-walls-grid about two. That is an expectation, not a periodic schedule, and shared power or cooling faults add correlated exposure. The node failure estimate of @sec-compute-infrastructure-node-health-reliability-56a6 and the facility controls of @sec-compute-infrastructure-physical-security-environmental-controls-7132 are the same exposure at smaller scope. Redundant infrastructure, such as dual-path power feeds and redundant switch fabrics, can prevent some interruptions; checkpoint storage and recovery capacity limit lost progress when a running job must stop. Both belong in the physical design. Redundancy keeps many component failures from halting the job, and checkpoints bound the work lost when one does.
 
 The third consequence is that the building blocks combine differently depending on the workload they must carry. A pod is not assembled from a single canonical part list; the interconnect, the switching, and the memory placement are each chosen against the communication and capacity pattern the dominant workload imposes. Three pod designs show the range (@tbl-pod-comparison). An NVIDIA SuperPOD wires GPUs through an InfiniBand fat-tree for any-to-any flexibility, a Google TPU pod hard-wires chips into a torus for dataflow throughput, and a recommendation pod built for Archetype B arranges the same class of accelerators around embedding memory rather than raw compute.
 
@@ -5083,7 +5091,7 @@ Serving trained models\index{Inference!infrastructure} changes the planning obje
 
 Serving infrastructure must meet *latency* targets at an acceptable *cost per query* under a variable request load. Independent requests can be assigned to separate replicas, but a replica that shards a model across devices still communicates within each request. Prompt processing, successive decode steps, and complete responses also have different latency budgets. Capacity planning must therefore specify the request mix, model placement, and service targets before concluding that serving needs less network capacity than training.
 
-The differing requirements drive distinct hardware and architecture choices, summarized in @tbl-training-serving-infrastructure.
+Training and serving part ways on utilization, model placement, network traffic, and the cost metric that judges them (@tbl-training-serving-infrastructure).
 
 | **Dimension**                                                        | **Training infrastructure**                                                                                        | **Serving infrastructure**                                                                                                                   |
 |:---------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------|
@@ -5193,7 +5201,7 @@ A practical decision framework starts with the workload's likely limiting resour
 | **Fine-tuning ($<13\text{B}$)**   | Memory capacity (state near HBM limit) |                             HBM capacity                            |           A100-class capacity candidate           |
 | **Research/prototyping**          |              Flexibility               |                          Software ecosystem                         | GPU or accelerator with required operator support |
 
-: **The Accelerator Decision Matrix**: The optimal accelerator depends not on peak specifications but on which physical resource (compute, bandwidth, or capacity) is the binding constraint for the target workload. The roofline model screens the compute and bandwidth ceilings at the intended precision and shape. Among candidates that clear capacity and facility constraints, measured sustained useful work at the required quality and latency determines value. {#tbl-accelerator-decision}
+: **The Accelerator Decision Matrix**: The optimal accelerator depends not on peak specifications but on which physical resource (compute, bandwidth, or capacity) is the binding constraint for the target workload. The Roofline Model screens the compute and bandwidth ceilings at the intended precision and shape. Among candidates that clear capacity and facility constraints, measured sustained useful work at the required quality and latency determines value. {#tbl-accelerator-decision}
 
 ```{python}
 #| echo: false
@@ -5201,15 +5209,15 @@ A practical decision framework starts with the workload's likely limiting resour
 class InfraFrontierTdpDecisionRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
     h100_hour = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate  # current-generation cloud GPU-hour
-    a100_hour = Infrastructure.Pricing.Fleet.GpuHourRef.rate  # reference fleet GPU-hour
+    fleet_ref_hour = Infrastructure.Pricing.Fleet.GpuHourRef.rate  # fleet in-service GPU-hour (not an A100 list price)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(a100_hour < h100_hour, "The previous-generation GPU-hour should be the cheaper option")
+    check(fleet_ref_hour < h100_hour, "The in-fleet GPU-hour should be the cheaper option")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
     h100_hour_usd_str = fmt_usd(h100_hour.to(USD / hour).magnitude, precision=0, commas=False)
-    a100_hour_usd_str = fmt_usd(a100_hour.to(USD / hour).magnitude, precision=0, commas=False)
+    fleet_ref_hour_usd_str = fmt_usd(fleet_ref_hour.to(USD / hour).magnitude, precision=0, commas=False)
 ```
 
 For our `{python} InfraFrontierTdpDecisionRecap.frontier_params_b_str` running example, @tbl-accelerator-decision separates the training purchase from the serving purchase. The workload constraint comes first; software support, deployment lifetime, and measured sustained throughput are compared only among candidates that clear it. A cheaper accelerator-hour is useful only if it supplies the required throughput within the capacity, latency, and facility budgets.
@@ -5220,7 +5228,7 @@ An engineering team needs to deploy a 70B-parameter model for both training and 
 
 - [ ] **Training intensity**: identify the local microbatch, sequence length, and partitioning information needed to estimate training intensity; compare it with batch-1 decode under the chapter's weight-traffic approximation.
 - [ ] **Hardware split**: identify which measurements are needed to determine whether training and inference should use the same hardware or different hardware.
-- [ ] **Two-year cost**: formulate the 2-year inference-cost comparison between H100s (`{python} InfraFrontierTdpDecisionRecap.h100_hour_usd_str`/GPU-hour) and A100s (`{python} InfraFrontierTdpDecisionRecap.a100_hour_usd_str`/GPU-hour), and identify the prompt and output lengths, replica placement, sustained throughput, and capacity assumptions required to evaluate it.
+- [ ] **Two-year cost**: formulate the 2-year inference-cost comparison between H100s rented at a cloud rate of `{python} InfraFrontierTdpDecisionRecap.h100_hour_usd_str`/GPU-hour and A100s already in the fleet, charged at its reference in-service rate of `{python} InfraFrontierTdpDecisionRecap.fleet_ref_hour_usd_str`/GPU-hour, and identify the prompt and output lengths, replica placement, sustained throughput, and capacity assumptions required to evaluate it.
 
 :::
 
