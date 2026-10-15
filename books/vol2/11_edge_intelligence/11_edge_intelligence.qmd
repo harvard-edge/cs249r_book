@@ -433,7 +433,64 @@ These constraints define eligibility for a federated round. Model footprint and 
 
 ### Quantifying training overhead on edge devices {#sec-edge-intelligence-quantifying-training-overhead-edge-devices-3e4c}
 
-Training changes memory footprint\index{Memory footprint!on-device training}, memory bandwidth\index{Memory bandwidth!training amplification}, and hardware utilization\index{Hardware utilization!edge constraints} through additional live state and backward operations. @Tbl-training-amplification lists illustrative increases, and its rows count different things, so each multiplier carries its own denominator. The 4--12$\times$ memory range compares a training working set with the inference weights alone, leaving inference activations and workspace out of the denominator. The 2--3$\times$ compute range compares one update (forward plus a backward pass of one to two times the forward work) with one inference. The 10--50$\times$ energy range compares a converged adaptation, which takes many gradient steps, with a single inference, so it is not a per-sample multiplier.
+```{python}
+#| echo: false
+#| label: edge-training-memory-stack
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING MEMORY STACK (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-training-memory-amplifier prose, peak-memory paragraph, the
+# │          smartwatch opener of Model Adaptation, fallacy, and takeaways.
+# │
+# │ Goal: Back every number quoted for the chapter's 10M-parameter FP32 stack.
+# │ Scope: chapter-anchor — the 10M-parameter example recurs across sections.
+# │ Show: weights, gradients, Adam moments, activations, total, amplification;
+# │       the 4x floor and the 12x top of the stated activation range.
+# │ How: FP32 bytes per parameter; gradients = weights; Adam keeps two moments;
+# │      activations = 5x weights (the figure's stated illustrative assumption),
+# │      with 5x to 8x spanning the chapter's quoted range.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_multiple_range
+
+class EdgeTrainingMemoryStack:
+    """The chapter's 10M-parameter FP32 training-memory example."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    params = 10 * MILLION  # scenario assumption: compact on-device model
+    adam_moments = 2  # Adam keeps first and second moment arrays
+    activation_factor = 5  # scenario assumption: saved activations = 5x weight bytes
+    activation_factor_high = 8  # scenario assumption: upper end of the quoted range
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    weights = (params * BYTES_FP32).to(MB)
+    gradients = weights
+    optimizer_state = adam_moments * weights
+    activations = activation_factor * weights
+    total = (weights + gradients + optimizer_state + activations).to(MB)
+    amplification = (total / weights).to("").magnitude
+    floor = ((weights + gradients + optimizer_state) / weights).to("").magnitude
+    ceiling = floor + activation_factor_high
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(abs(weights.magnitude - 40) < 1e-6, f"10M FP32 weights drifted: {weights}")
+    check(abs(total.magnitude - 360) < 1e-6, f"Training stack drifted: {total}")
+    check(abs(amplification - 9) < 1e-9, f"Amplification drifted: {amplification}")
+    check(floor == 4 and ceiling == 12, f"Range drifted: {floor}-{ceiling}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    weights_mb_str = fmt_memory(weights, unit=MB, precision=0, commas=False)
+    gradients_mb_str = fmt_memory(gradients, unit=MB, precision=0, commas=False)
+    optimizer_mb_str = fmt_memory(optimizer_state, unit=MB, precision=0, commas=False)
+    activations_mb_str = fmt_memory(activations, unit=MB, precision=0, commas=False)
+    total_mb_str = fmt_memory(total, unit=MB, precision=0, commas=False)
+    amplification_mult_str = fmt_multiple(amplification, precision=0)
+    floor_mult_str = fmt_multiple(floor, precision=0)
+    ceiling_mult_str = fmt_multiple(ceiling, precision=0)
+    range_mult_str = fmt_multiple_range(floor, ceiling, precision=0)
+```
+
+Training changes memory footprint\index{Memory footprint!on-device training}, memory bandwidth\index{Memory bandwidth!training amplification}, and hardware utilization\index{Hardware utilization!edge constraints} through additional live state and backward operations. @Tbl-training-amplification lists illustrative increases, and its rows count different things, so each multiplier carries its own denominator. The `{python} EdgeTrainingMemoryStack.range_mult_str` memory range compares a training working set with the inference weights alone, leaving inference activations and workspace out of the denominator. The 2--3$\times$ compute range compares one update (forward plus a backward pass of one to two times the forward work) with one inference. The 10--50$\times$ energy range compares a converged adaptation, which takes many gradient steps, with a single inference, so it is not a per-sample multiplier.
 
 | **Constraint Dimension**  | **Inference**                               | **Training Amplification**                                    | **Impact on Design**                                                                      |
 |:--------------------------|:--------------------------------------------|:--------------------------------------------------------------|:------------------------------------------------------------------------------------------|
@@ -446,7 +503,7 @@ Training changes memory footprint\index{Memory footprint!on-device training}, me
 
 : **Training Amplifies Inference Constraints**: On-device learning operates under the same efficiency constraints as inference but with training-specific amplifications that make optimization dramatically more challenging. This table quantifies how each constraint dimension intensifies when transitioning from running pretrained models to adapting them locally. The factors are illustrative: memory and compute compare an update with inference, while the energy row includes repeated optimization steps toward convergence. These different counting units must not be treated as one universal per-sample multiplier. {#tbl-training-amplification}
 
-@Fig-training-memory-amplifier breaks down the memory row. Panel (a) starts with 40 MB of FP32 weights for a 10M-parameter model and adds 40 MB of gradients, 80 MB of Adaptive Moment Estimation (Adam) state for its two moment arrays, and 200 MB of assumed activation state to reach 360 MB, a $9\times$ amplification over the weights. The same accounting spans the table's range. Weights, gradients, and Adam's two moments alone are four weight-sized arrays, the 4$\times$ floor reached when saved activations are negligible, and activations between five and eight times the weight bytes carry the total from 9$\times$ to 12$\times$. Panel (b) holds the 9$\times$ proportions fixed across model scales from 1M to 100M parameters, so its constant ratio is an assumption rather than a finding. What it shows is the absolute cost of that ratio. The gap between weights and training stack grows from tens of megabytes at 1M parameters to gigabytes at 100M, so a model whose weights fit comfortably can still have a training stack that does not. Actual peak memory depends on optimizer choice, batch size, activation checkpointing, and how many layers are updated, and the 4--12$\times$ range describes these configurations rather than predicting any particular device.
+The memory row decomposes into four arrays (@fig-training-memory-amplifier). Panel (a) starts with `{python} EdgeTrainingMemoryStack.weights_mb_str` of FP32 weights for a 10M-parameter model and adds `{python} EdgeTrainingMemoryStack.gradients_mb_str` of gradients, `{python} EdgeTrainingMemoryStack.optimizer_mb_str` of Adaptive Moment Estimation (Adam) state for its two moment arrays, and `{python} EdgeTrainingMemoryStack.activations_mb_str` of assumed activation state to reach `{python} EdgeTrainingMemoryStack.total_mb_str`, a `{python} EdgeTrainingMemoryStack.amplification_mult_str` amplification over the weights. The same accounting spans the table's range. Weights, gradients, and Adam's two moments alone are four weight-sized arrays, the `{python} EdgeTrainingMemoryStack.floor_mult_str` floor reached when saved activations are negligible, and activations between five and eight times the weight bytes carry the total from `{python} EdgeTrainingMemoryStack.amplification_mult_str` to `{python} EdgeTrainingMemoryStack.ceiling_mult_str`. Panel (b) holds the `{python} EdgeTrainingMemoryStack.amplification_mult_str` proportions fixed across model scales from 1M to 100M parameters, so its constant ratio is an assumption rather than a finding. What it shows is the absolute cost of that ratio. The gap between weights and training stack grows from tens of megabytes at 1M parameters to gigabytes at 100M, so a model whose weights fit comfortably can still have a training stack that does not. Actual peak memory depends on optimizer choice, batch size, activation checkpointing, and how many layers are updated, and the `{python} EdgeTrainingMemoryStack.range_mult_str` range describes these configurations rather than predicting any particular device.
 
 ::: {.column-margin .margin-pointer}
 ↪ The bytes per parameter that weights, gradients, and optimizer state occupy in mixed-precision Adam training are developed in @sec-appdx-dam-taxonomy-training-memory.
@@ -585,7 +642,7 @@ class EdgeSmartphoneRamRecap:
 
 Consider a smartphone keyboard that uses local gradient updates to adapt to a user's vocabulary and typing patterns. In the illustrative device profile, an update requires `{python} EdgeAdaptationTierProfile.keyboard_gradient_memory_low_mb_str`--`{python} EdgeAdaptationTierProfile.keyboard_gradient_memory_high_mb_str` for activations and optimizer state, against a background-memory allowance of `{python} EdgeAdaptationTierProfile.keyboard_background_budget_low_mb_str`--`{python} EdgeAdaptationTierProfile.keyboard_background_budget_high_mb_str`. The actual allowance depends on the operating system, device, and foreground workload. At the selected operating point, the update consumes `{python} EdgeAdaptationTierProfile.keyboard_memory_share_pct_str` of that allowance before other application state is counted. The design decision is how much learning can fit in the remaining budget while preserving responsive typing; the device's total installed RAM does not answer it.
 
-Memory consumption changes over an update as tensors are allocated and released. The peak depends on when weights, saved activations, gradients, optimizer state, and temporary workspace coexist; it need not occur at the same operation in every implementation. For the 10M-parameter model of @fig-training-memory-amplifier, 40 MB of FP32 weights belong to a 360 MB training working set, of which 200 MB is saved activations. Set against a smartphone's `{python} EdgeSmartphoneRamRecap.smartphone_ram_gb_str` of installed RAM, that working set looks small, but installed RAM is not the budget. A background task receives only the allowance the operating system grants after itself and the foreground applications, `{python} EdgeAdaptationTierProfile.keyboard_background_budget_low_mb_str`--`{python} EdgeAdaptationTierProfile.keyboard_background_budget_high_mb_str` in the keyboard profile above, and 360 MB exceeds even the top of that range. Activation checkpointing\index{Activation checkpointing!edge memory} (also called gradient checkpointing) discards selected intermediate activations and recomputes them during the backward pass [@chen2016training], the same trade that cuts activation memory in data-center training. It trades extra computation for lower activation storage, so its value depends on both the peak it removes and the additional time and energy the device can afford.
+Memory consumption changes over an update as tensors are allocated and released. The peak depends on when weights, saved activations, gradients, optimizer state, and temporary workspace coexist; it need not occur at the same operation in every implementation. For the 10M-parameter model of @fig-training-memory-amplifier, `{python} EdgeTrainingMemoryStack.weights_mb_str` of FP32 weights belong to a `{python} EdgeTrainingMemoryStack.total_mb_str` training working set, of which `{python} EdgeTrainingMemoryStack.activations_mb_str` is saved activations. Set against a smartphone's `{python} EdgeSmartphoneRamRecap.smartphone_ram_gb_str` of installed RAM, that working set looks small, but installed RAM is not the budget. A background task receives only the allowance the operating system grants after itself and the foreground applications, `{python} EdgeAdaptationTierProfile.keyboard_background_budget_low_mb_str`--`{python} EdgeAdaptationTierProfile.keyboard_background_budget_high_mb_str` in the keyboard profile above, and `{python} EdgeTrainingMemoryStack.total_mb_str` exceeds even the top of that range. Activation checkpointing\index{Activation checkpointing!edge memory} (also called gradient checkpointing) discards selected intermediate activations and recomputes them during the backward pass [@chen2016training], the same trade that cuts activation memory in data-center training. It trades extra computation for lower activation storage, so its value depends on both the peak it removes and the additional time and energy the device can afford.
 
 ::: {.column-margin .margin-pointer}
 ↩ Activation checkpointing, which recomputes selected activations in the backward pass to cut activation memory at the cost of extra FLOPs, is established in @sec-distributed-training-systems-systems-compute-phase-forward-backward.
@@ -609,7 +666,7 @@ An inference optimization therefore needs a second feasibility check before it i
 
 Verify understanding of how training amplifies edge constraints:
 
-- [ ] Training memory blowup: Explain where the 4$\times$ floor of the chapter's 4$\times$ to 12$\times$ training-memory range comes from, and which term pushes a configuration toward the upper end.
+- [ ] Training memory blowup: Explain where the `{python} EdgeTrainingMemoryStack.floor_mult_str` floor of the chapter's `{python} EdgeTrainingMemoryStack.range_mult_str` training-memory range comes from, and which term pushes a configuration toward the upper end.
 - [ ] Timing of the peak: Explain why peak training memory depends on when weights, saved activations, gradients, optimizer state, and workspace coexist, rather than on the sum of every tensor the update ever touches.
 - [ ] Backward-pass OOM: Explain why a 10M parameter model can still trigger out-of-memory errors during the backward pass on a smartphone with `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` of RAM.
 - [ ] Checkpointing energy: Evaluate the claim that activation checkpointing reduces the total energy consumed by on-device training.
@@ -669,6 +726,19 @@ class EdgeMobilenetSizing:
     stm32_hidden_outputs_str = fmt_int(stm32_hidden_outputs, commas=False)
     stm32_sram_kb_str = fmt_memory_capacity(stm32_sram, unit=KiB, precision=0, commas=False)
     stm32_clock_mhz_str = fmt_qty_int(stm32_clock, MHz, commas=False)
+
+class EdgeFeatureMapBytes:
+    """One FP32 channel of a retained 64x64 feature map."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    side_px = 64  # scenario assumption: 64x64 input kept at full resolution
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    channel = (side_px * side_px * BYTES_FP32).to(byte)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(channel.magnitude == 16_384, f"Feature-map channel bytes drifted: {channel}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    channel_bytes_str = fmt_int(channel.magnitude, commas=True)
+    channel_kb_str = fmt_qty_int(channel, KB, commas=False)
 ```
 
 The structure and size of the machine learning model directly determine whether on-device training is possible. Cloud-deployed models can span billions of parameters and rely on multi-gigabyte memory budgets; models intended for on-device learning must conform to tight constraints on memory, storage, and computational complexity. Training tightens each of them by the factors of @tbl-training-amplification.
@@ -677,7 +747,7 @@ The scale of these constraints becomes concrete across the device spectrum. Mobi
 
 [^fn-arduino-memory-wall]: **Arduino Nano 33 BLE Sense**\index{Arduino Nano 33 BLE Sense!definition}\index{Arduino!memory constraint}: With `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` SRAM, roughly `{python} EdgeDeviceSpectrum.memory_ratio_mult_str` smaller than a flagship smartphone's `{python} EdgeDeviceSpectrum.flagship_ram_gb_str`, a single `{python} EdgeMobilenetSizing.imagenet_rgb_shape_math` RGB image occupies `{python} EdgeMobilenetSizing.imagenet_rgb_image_kb_str` and consumes roughly `{python} EdgeMobilenetSizing.imagenet_rgb_sram_pct_str` of available memory; activation and gradient storage add several more live tensors, and optimizer state can push the training footprint far beyond the inference footprint. A convolutional neural network (CNN) layer can therefore exceed SRAM during backpropagation even when its weights fit. Quantization can reduce this footprint, but feasibility also depends on input size, saved activations, and which parameters are updated.
 
-Training adds state whose size cannot be inferred from layer count alone. Backpropagation retains or recomputes intermediate activations, with storage determined by tensor shapes, precision, batch size, and the update schedule. The arithmetic grows quickly. A 10-layer convolutional model processing $64{\times}64$ images saves feature maps of $64{\times}64$ values per channel when its layers keep the input resolution, so at FP32 every channel of every retained map costs 16,384 bytes, about 16 KB. Ten layers of even a few channels each therefore outgrow the `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` of microcontroller SRAM before a single gradient or optimizer value is stored. The relevant comparison is that peak against the memory available to learning after runtime and application reserves, which is why the techniques later in this chapter attack saved activations as well as trainable parameters.
+Training adds state whose size cannot be inferred from layer count alone. Backpropagation retains or recomputes intermediate activations, with storage determined by tensor shapes, precision, batch size, and the update schedule. The arithmetic grows quickly. A 10-layer convolutional model processing $64{\times}64$ images saves feature maps of $64{\times}64$ values per channel when its layers keep the input resolution, so at FP32 every channel of every retained map costs `{python} EdgeFeatureMapBytes.channel_bytes_str` bytes, about `{python} EdgeFeatureMapBytes.channel_kb_str`. Ten layers of even a few channels each therefore outgrow the `{python} EdgeDeviceSpectrum.mcu_sram_kb_str` of microcontroller SRAM before a single gradient or optimizer value is stored. The relevant comparison is that peak against the memory available to learning after runtime and application reserves, which is why the techniques later in this chapter attack saved activations as well as trainable parameters.
 
 Model complexity also affects runtime energy consumption and thermal limits. In smartwatches or battery-powered wearables, sustained training can deplete the energy allowance or trigger thermal throttling even when its tensors fit in memory. Arithmetic precision alone does not determine feasibility; the update duration and measured power determine its energy cost. Benchmarks such as MLPerf Tiny provide small quantized inference targets for constrained devices [@banbury2021mlperftiny]. On-device adaptation techniques\index{TinyML!on-device adaptation} address the additional training cost by freezing most parameters, reducing activation storage, or selecting sparse update sets [@cai2020tinytl; @kwon2024tinytrain].
 
@@ -1098,7 +1168,7 @@ Rising NPU ratings tempt designers to read device capability from TOPS, but ever
 ::: {.column-margin}
 ![](images/svg/edge_intelligence_bandwidth_ladder.svg){width="100%" fig-alt="Two-rung violet bandwidth ladder on a log scale. Top rung, data-center HBM3 at 3,350 GB/s. Bottom rung, mobile memory at 77 GB/s."}
 
-*Datacenter high-bandwidth memory (HBM) outruns flagship mobile memory bandwidth by about `{python} EdgeH100BwRecap.ratio_low_str` times.*
+*Data-center high-bandwidth memory (HBM) outruns flagship mobile memory bandwidth by about `{python} EdgeH100BwRecap.ratio_low_str` times.*
 :::
 
 A bandwidth gap of this size gives a corresponding gap in a bandwidth-only time ceiling only when both devices stream the same bytes and sustain the same fraction of their peak bandwidth; precision, batching, cache reuse, and runtime overhead all move the measured ratio. Low-precision weights attack that ceiling when weight traffic is what binds\index{Quantization!bandwidth relief}. Storing FP32 weights at 4 bits, for example, reduces weight bytes by 8$\times$ and reduces that component of traffic by the same factor if the runtime consumes the compressed representation efficiently. It does not increase physical bandwidth or remove cache-state traffic and decoding overhead, and the precision choice must satisfy both quality and measured latency requirements. For an on-device update the relief is smaller still. In the count above, the three weight reads are only about `{python} EdgeUpdateTraffic.weight_read_share_pct_str` of the step's traffic, and a quantized base leaves the saved activations, gradients, and optimizer state that make up the rest untouched.
@@ -1220,9 +1290,7 @@ The same test also decides who teaches a shared model. Passing it correlates wit
 
 ### Holistic resource management strategies {#sec-edge-intelligence-holistic-resource-management-strategies-9e4b}
 
-The constraint analysis yields three linked design decisions. The training amplification of @tbl-training-amplification motivates measuring the update footprint against @eq-edge-background-admission and choosing which parameters to adapt. Information scarcity, including limited local datasets, non-IID distributions, restrictions on data sharing, and minimal supervision, motivates data efficiency\index{Data efficiency!edge constraints} methods that reuse available evidence. When shared learning is useful, device heterogeneity and intermittent availability motivate federated coordination\index{Federated coordination!edge constraints} with explicit validation and privacy controls. Each pillar addresses a different constraint within the same deployment budget.
-
-@Tbl-constraint-solution-mapping pairs each constraint category with the pillar that answers it\index{On-device learning!constraint-solution mapping}, and the techniques each pillar contributes.
+The constraint analysis yields three linked design decisions. The training amplification of @tbl-training-amplification motivates measuring the update footprint against @eq-edge-background-admission and choosing which parameters to adapt. Information scarcity, including limited local datasets, non-IID distributions, restrictions on data sharing, and minimal supervision, motivates data efficiency\index{Data efficiency!edge constraints} methods that reuse available evidence. When shared learning is useful, device heterogeneity and intermittent availability motivate federated coordination\index{Federated coordination!edge constraints} with explicit validation and privacy controls. Each pillar answers a different constraint within the same deployment budget and brings its own techniques to that answer (@tbl-constraint-solution-mapping)\index{On-device learning!constraint-solution mapping}.
 
 | **Constraint Category**     | **Key Challenges**                                                                                                         | **Solution Approach**                                                                                                                                                          |
 |:----------------------------|:---------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1234,7 +1302,7 @@ The constraint analysis yields three linked design decisions. The training ampli
 
 ## Model Adaptation {#sec-edge-intelligence-model-adaptation-6a82}
 
-The 10M-parameter model of @fig-training-memory-amplifier is an inference candidate for a smartwatch with `{python} EdgeAdaptationTierProfile.wearable_system_memory_mb_str` of total system memory, because its FP32 weights occupy 40 MB. Training every parameter would need the full 360 MB stack, most of the watch's memory before its operating system and foreground application take their share. The weight footprint alone does not establish inference fit; activation buffers, runtime workspace, and foreground reserve must also fit. Full-model training leaves much less room for that remaining state. Freezing parameters removes their gradients and optimizer state but not the storage or execution cost of the frozen network, so the system trains only a compact, strategically placed parameter set and, where it can, also shrinks the activations that the backward pass must keep. Resource-efficient model adaptation\index{On-device adaptation!parameter-efficient strategies} then determines both the local work a device can complete and the shared update format the fleet can aggregate.
+The 10M-parameter model of @fig-training-memory-amplifier is an inference candidate for a smartwatch with `{python} EdgeAdaptationTierProfile.wearable_system_memory_mb_str` of total system memory, because its FP32 weights occupy `{python} EdgeTrainingMemoryStack.weights_mb_str`. Training every parameter would need the full `{python} EdgeTrainingMemoryStack.total_mb_str` stack, most of the watch's memory before its operating system and foreground application take their share. The weight footprint alone does not establish inference fit; activation buffers, runtime workspace, and foreground reserve must also fit. Full-model training leaves much less room for that remaining state. Freezing parameters removes their gradients and optimizer state but not the storage or execution cost of the frozen network, so the system trains only a compact, strategically placed parameter set and, where it can, also shrinks the activations that the backward pass must keep. Resource-efficient model adaptation\index{On-device adaptation!parameter-efficient strategies} then determines both the local work a device can complete and the shared update format the fleet can aggregate.
 
 The engineering choice balances adaptation expressivity against resource consumption. Full fine-tuning exposes all parameters to learning and can fit sufficiently small models; retaining a fixed model can be adequate when local context already supplies the needed personalization. Between these choices, selective updates offer smaller training state. The device resource envelope determines which candidates fit: a wearable-class device with `{python} EdgeAdaptationTierProfile.tiny_wearable_ram_mb_str` RAM has a different budget from a smartphone with `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str`. The local variation then determines how much trainable capacity is useful. Bias updates may capture calibration changes, while shifts requiring new features need a richer update space. Runtime support, inference cost, shared-update compatibility, and rollback determine whether the candidate can enter the deployed system.
 
@@ -1864,7 +1932,7 @@ Non-IID data\index{Non-IID data!convergence impact} is where federated averaging
 When statistical heterogeneity causes FedAvg to diverge or stall, two foundational algorithmic extensions address the root cause of client drift:
 
 1. **FedProx**\index{FedProx!proximal regularization} [@li2020] adds a proximal regularization term $\frac{\mu}{2}\|\ModelParameters - \GlobalModelParameters^{\FederatedRoundIndex}\|^2$ to each client's local loss function. This penalty constrains local updates to remain in the neighborhood of the current global model $\GlobalModelParameters^{\FederatedRoundIndex}$, stabilizing convergence under statistical heterogeneity and permitting devices to execute variable numbers of local epochs without destabilizing the server aggregate.
-2. **SCAFFOLD**\index{SCAFFOLD!control variates} [@kairouz2021] corrects the local update direction directly using control variates. By maintaining a server control variate and per-client control variates that estimate the difference between client-local and global gradient directions, SCAFFOLD applies an additive correction to each local SGD step. This correction counters client drift under heterogeneous local data, although it roughly doubles the communication volume per round by transmitting control variates alongside model parameters.
+2. **SCAFFOLD**\index{SCAFFOLD!control variates} [@karimireddy2020scaffold] corrects the local update direction directly using control variates. By maintaining a server control variate and per-client control variates that estimate the difference between client-local and global gradient directions, SCAFFOLD applies an additive correction to each local SGD step. This correction counters client drift under heterogeneous local data, although it roughly doubles the communication volume per round by transmitting control variates alongside model parameters.
 
 ##### Measuring the local-work trade-off {#sec-edge-intelligence-quantifying-heterogeneity-practice-eece}
 
@@ -1881,7 +1949,7 @@ $$
 # │ Scope: local — reference adapter payload over a constrained mobile uplink.
 from mlsysim import ReferenceStats
 from mlsysim.core.units import minute, second, megabit
-from mlsysim.fmt import check, fmt_time
+from mlsysim.fmt import check, fmt_qty_range, fmt_time
 
 class EdgeRoundUploadTime:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -1895,11 +1963,12 @@ class EdgeRoundUploadTime:
     check(6 < upload_slow.to(minute).magnitude < 8, f"Slow upload drifted: {upload_slow}")
     check(35 < upload_fast.magnitude < 50, f"Fast upload drifted: {upload_fast}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
+    uplink_range_str = fmt_qty_range(uplink_low, uplink_high, megabit / second, precision=0)
     upload_slow_min_str = fmt_time(round(upload_slow.to(minute).magnitude) * minute, minute, precision=0, commas=False, style="word")
     upload_fast_s_str = fmt_time(round(upload_fast.magnitude) * second, second, precision=0, commas=False, style="word")
 ```
 
-Each $\RoundDuration(\LocalEpochCount)$ is one instance of the round budget sketched at the opening of the chapter. Read through the Fleet Law, it is the local training on the slowest client the round still awaits, plus the upload, plus the wait for enough reports, less whatever overlaps. The communication piece is easy to estimate. Over a constrained mobile uplink of 1 to 10 Mbps, the chapter's reference adapter update of `{python} EdgeAdaptationTierProfile.federated_lora_update_mb_str` takes about `{python} EdgeRoundUploadTime.upload_slow_min_str` to upload at the low end and about `{python} EdgeRoundUploadTime.upload_fast_s_str` at the high end, and that cost recurs in every one of the $\FederatedRoundCount(\LocalEpochCount)$ rounds. A setting of $\LocalEpochCount$ that halves $\FederatedRoundCount(\LocalEpochCount)$ therefore removes half of the cumulative upload time, and it pays off only if the extra local training it adds to each round, on the slowest awaited client, costs less than the uploads it removes. Client drift keeps that comparison from being settled on paper, because more local steps can also raise $\FederatedRoundCount(\LocalEpochCount)$, and only measured runs can rank the settings.
+Each $\RoundDuration(\LocalEpochCount)$ is one instance of the round budget sketched at the opening of the chapter. Read through the Fleet Law, it is the local training on the slowest client the round still awaits, plus the upload, plus the wait for enough reports, less whatever overlaps. The communication piece is easy to estimate. Over a constrained mobile uplink of `{python} EdgeRoundUploadTime.uplink_range_str`, the chapter's reference adapter update of `{python} EdgeAdaptationTierProfile.federated_lora_update_mb_str` takes about `{python} EdgeRoundUploadTime.upload_slow_min_str` to upload at the low end and about `{python} EdgeRoundUploadTime.upload_fast_s_str` at the high end, and that cost recurs in every one of the $\FederatedRoundCount(\LocalEpochCount)$ rounds. A setting of $\LocalEpochCount$ that halves $\FederatedRoundCount(\LocalEpochCount)$ therefore removes half of the cumulative upload time, and it pays off only if the extra local training it adds to each round, on the slowest awaited client, costs less than the uploads it removes. Client drift keeps that comparison from being settled on paper, because more local steps can also raise $\FederatedRoundCount(\LocalEpochCount)$, and only measured runs can rank the settings.
 
 A useful experiment log records local epochs, completed clients, rounds to target, elapsed time, transmitted bytes, and device energy. If a run never reaches the quality target within the budget, report that outcome rather than extrapolating an invented convergence curve. Repeated runs and cohort-level validation distinguish a stable improvement from a fortunate sample of participating devices.
 
@@ -2058,7 +2127,11 @@ Beyond these operational filters, devices also differ in their hardware capabili
 
 Availability-driven selection introduces participation bias\index{Participation Bias!federated learning}, the fleet-level consequence of the admission test in @eq-edge-background-admission (principle \ref{pri-participation-selects-population}). Clients with favorable conditions, such as frequent charging, high-end hardware, and consistent connectivity, pass admission and participate repeatedly, while others are systematically underrepresented. This can skew the resulting model toward behaviors and preferences of a privileged subset of the population, raising both fairness and generalization concerns.
 
-Participation bias becomes severe when a small eligible cohort supplies most completed updates while other cohorts rarely participate. The skew is measured per cohort as a coverage ratio\index{Participation Bias!coverage ratio}, the cohort's share of completed updates divided by its share of the deployed population. A ratio near one means the cohort is represented in proportion to its size, and a ratio well below one means the shared model learns that cohort's behavior at less than its population weight. Completion logs supply the numerator and the deployment inventory the denominator, so the ratio can be computed without inspecting any update. Low coverage also feeds itself, because models become more strongly optimized for users with high-end devices and stable connectivity, potentially degrading performance for resource-constrained users who need adaptation the most. A keyboard prediction model might become biased toward the typing patterns of users with flagship phones who charge overnight, missing important linguistic variations from users with budget devices or irregular charging patterns.
+Participation bias becomes severe when a small eligible cohort supplies most completed updates while other cohorts rarely participate. The skew is measured per cohort as a coverage ratio\index{Participation Bias!coverage ratio}, the cohort's share of completed updates divided by its share of the deployed population. A ratio near one means the cohort is represented in proportion to its size, and a ratio well below one means the shared model learns that cohort's behavior at less than its population weight. Completion logs supply the numerator and the deployment inventory the denominator, so the ratio can be computed without inspecting any update. The admission test and the round deadline both remove constrained devices faster than capable ones, and uniform selection among admitted devices passes the resulting skew through unchanged, so a budget cohort can fall from a fifth of the fleet to a sliver of the completed updates (@fig-participation-coverage-funnel). Low coverage also feeds itself, because models become more strongly optimized for users with high-end devices and stable connectivity, potentially degrading performance for resource-constrained users who need adaptation the most. A keyboard prediction model might become biased toward the typing patterns of users with flagship phones who charge overnight, missing important linguistic variations from users with budget devices or irregular charging patterns.
+
+::: {#fig-participation-coverage-funnel fig-env="figure" fig-pos="htb" fig-cap="**From Deployed Fleet to Aggregate**: Each stage between the deployed fleet and the aggregate filters devices, and the admission test and round deadline fall hardest on constrained cohorts. The admission test removes most budget phones, uniform selection among admitted devices preserves the skew it inherits, and the round deadline drops the slowest survivors. The coverage ratio, each cohort's share of completed updates divided by its share of the deployed fleet, sizes the result: above 1 for flagship phones, below 1 for budget phones. Cohort shares and stage sizes are illustrative, not measured." fig-alt="Top: four stacked columns on a common baseline, labeled deployed, admitted, selected, and completed, each shorter than the one before. Each column stacks a red-tinted budget segment at the bottom, a gray mid-tier segment, and a blue flagship segment on top. The budget segment shrinks from a fifth of the deployed column to a thin sliver of the completed column while the flagship segment keeps most of its height. Gray arrows labeled admission test and selection, and a red arrow labeled round deadline, connect the columns. Bottom: horizontal bars of coverage ratio for flagship, mid-tier, and budget phones on an axis from 0 to 2, with a green dashed reference line at 1 labeled represented in proportion to its size; the flagship bar reaches 2, the mid-tier bar stops just short of 1, and the budget bar stops near 0.3."}
+![](images/svg/participation-coverage-funnel.svg)
+:::
 
 The order of these decisions limits what any remedy can do. Fleet orchestration admits only feasible allocations before a fairness policy divides them (principle \ref{pri-feasibility-before-fairness}), and a federated scheduler inherits the same order with a sharper consequence. Its eligibility filter fixes the candidate pool, so a fairness policy can redistribute rounds only among devices the admission test already accepted; a device that never qualifies is invisible to it.
 
@@ -2175,7 +2248,7 @@ The local-work schedule and update encoding jointly determine communication cost
 
 :::
 
-The quantization panel's "Zero client state" means no persistent error-feedback residual; encoding buffers, scales, and temporary workspace still enter the device budget. Compression is useful when its reduction in total communication outweighs encoding work and any extra rounds needed to reach the quality target. A smaller upload helps a round only if transfer was what made clients miss the deadline or excluded a cohort, and the round's completion logs show which. Smaller payloads can let clients on slow or congested uplinks finish before their resource window closes\index{Communication efficiency!client participation rate}, so compression is judged by completed participation and cohort outcomes, not by bytes saved alone. Even when transfer becomes feasible, the shared model may still fail to capture local variation.
+The quantization panel's "zero client state" means no persistent error-feedback residual; encoding buffers, scales, and temporary workspace still enter the device budget. Compression is useful when its reduction in total communication outweighs encoding work and any extra rounds needed to reach the quality target. A smaller upload helps a round only if transfer was what made clients miss the deadline or excluded a cohort, and the round's completion logs show which. Smaller payloads can let clients on slow or congested uplinks finish before their resource window closes\index{Communication efficiency!client participation rate}, so compression is judged by completed participation and cohort outcomes, not by bytes saved alone. Even when transfer becomes feasible, the shared model may still fail to capture local variation.
 
 ### Federated personalization {#sec-edge-intelligence-federated-personalization-3c73}
 
@@ -2259,7 +2332,7 @@ Secure aggregation and differential privacy\index{Differential Privacy!compositi
 
 ::: {#chk-edge-intelligence-federated-system-design .callout-checkpoint title="Federated system design"}
 
-Consider architecting a federated learning system for a fleet of 10 million mobile devices. The data is highly non-IID (users have distinct, clustered typing patterns), and the network environment is constrained (1-10 Mbps). Before choosing optimizations for this scenario, classify the local bottlenecks and state which system constraint dominates each decision.
+Consider architecting a federated learning system for a fleet of 10 million mobile devices. The data is highly non-IID (users have distinct, clustered typing patterns), and the network environment is constrained (`{python} EdgeRoundUploadTime.uplink_range_str`). Before choosing optimizations for this scenario, classify the local bottlenecks and state which system constraint dominates each decision.
 
 Consider three design decisions:
 
@@ -2275,7 +2348,7 @@ A round that selects a million phones overnight will see some fraction overheat,
 
 #### Asynchronous device synchronization {#sec-edge-intelligence-asynchronous-device-synchronization-348e}
 
-Federated learning inherits failures from distributed systems and machine learning, but its coordination objective is not consensus, the problem of making replicated servers agree on one ordered log of operations. Federated clients agree on no such log. A coordinator instead decides which stochastic client updates are eligible, how stale updates are weighted, and which aggregation rule can tolerate faulty participants without letting them steer the model. Devices crash, lose power, or disconnect during rounds, while compromised clients can submit poisoned updates. Robust aggregation can reduce the influence of some faulty participants, but its assumptions, compute cost, and compatibility with secure aggregation must be explicit.
+Federated learning inherits failures from distributed systems and machine learning, but its coordination objective is not consensus, the problem of making replicated servers agree on one ordered log of operations. Federated clients agree on no such log. A coordinator instead decides which stochastic client updates are eligible, how stale updates are weighted, and which aggregation rule can tolerate faulty participants without letting them steer the model. Devices crash, lose power, or disconnect during rounds, while compromised clients can submit poisoned updates crafted to push the shared model toward an attacker's goal. Robust aggregation can reduce the influence of some faulty participants, but its assumptions, compute cost, and compatibility with secure aggregation must be explicit.
 
 The trust chain begins before aggregation. A production coordinator authenticates the device and application instance, verifies the signed model and training-policy version, checks eligibility and freshness, binds the returned update to that version and round nonce, and records whether the update passed protocol-level bounds. Hardware-backed attestation can strengthen claims about code identity on supported devices, but it cannot prove that local examples are benign or representative. The resulting update-integrity record supports rejection, rollback, and incident analysis without treating device identity as evidence that the gradient is correct.
 
@@ -2491,7 +2564,32 @@ The mechanisms that keep this trajectory stable are the ones already introduced,
 
 ### Unlabeled data exploitation strategies {#sec-edge-intelligence-unlabeled-data-exploitation-strategies-cded}
 
-Unlabeled sensor streams turn continual learning into a storage and scheduling decision. Cameras, accelerometers, location sensors, and touch interaction all produce data that can support self-supervised learning\index{Self-Supervised Learning!sensor data}, and the potential volume is large. A hypothetical camera stream running continuously at 30 frames per second produces approximately 2.6 million frames daily before retention filtering, and an accelerometer sampling at 100 Hz generates 8.6 million readings. The engineering question is which traces encode stable structure worth learning from and which should expire before they crowd out model state, replay buffers, or user-facing storage.
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: Unlabeled data exploitation — daily sensor-stream volume.
+# │ Scope: local — hypothetical always-on camera and accelerometer.
+from mlsysim.core.units import SEC_PER_DAY
+from mlsysim.fmt import check, fmt_count, fmt_int
+
+class EdgeSensorStreamVolume:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    camera_fps = 30  # scenario assumption: continuous video frame rate
+    accel_hz = 100  # scenario assumption: accelerometer sampling rate
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    frames_per_day = camera_fps * SEC_PER_DAY
+    readings_per_day = accel_hz * SEC_PER_DAY
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(2.5e6 < frames_per_day < 2.7e6, f"Daily frames drifted: {frames_per_day}")
+    check(8.5e6 < readings_per_day < 8.7e6, f"Daily readings drifted: {readings_per_day}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    camera_fps_str = fmt_int(camera_fps, commas=False)
+    accel_hz_str = fmt_int(accel_hz, commas=False)
+    frames_per_day_str = fmt_count(frames_per_day, scale="million", scale_style="word", precision=1)
+    readings_per_day_str = fmt_count(readings_per_day, scale="million", scale_style="word", precision=1)
+```
+
+Unlabeled sensor streams turn continual learning into a storage and scheduling decision. Cameras, accelerometers, location sensors, and touch interaction all produce data that can support self-supervised learning\index{Self-Supervised Learning!sensor data}, and the potential volume is large. A hypothetical camera stream running continuously at `{python} EdgeSensorStreamVolume.camera_fps_str` frames per second produces approximately `{python} EdgeSensorStreamVolume.frames_per_day_str` frames daily before retention filtering, and an accelerometer sampling at `{python} EdgeSensorStreamVolume.accel_hz_str` Hz generates `{python} EdgeSensorStreamVolume.readings_per_day_str` readings. The engineering question is which traces encode stable structure worth learning from and which should expire before they crowd out model state, replay buffers, or user-facing storage.
 
 Learning from such traces without labels requires the supervision to come from the data's own structure. Contrastive learning\index{Contrastive Learning!definition} is the common way to manufacture it on a sensor stream, training a representation to bring designated positive pairs closer and distinguish them from designated negative pairs. Nearby camera frames or augmented views of one frame can supply positives when they preserve the task-relevant content; scene changes can invalidate that assumption. Different frames or replay entries can supply negatives, but may depict the same underlying event. The pair-selection policy therefore defines a learning signal that needs validation. Other devices' samples are not automatically available under a federated data-locality policy, and stored pairs or representations compete with replay and model state for memory.
 
@@ -2603,6 +2701,10 @@ Fleet telemetry for edge devices, including federated analytics\index{Federated 
 
 Drift detection\index{Drift Detection!on-device models} presents additional challenges without access to ground truth labels. While traditional monitoring compares model predictions against labeled validation sets maintained on centralized infrastructure, on-device systems must detect drift using only the indirect local signals available during deployment. Confidence calibration\index{Confidence Calibration!drift detection} compares output probabilities with eventual outcomes whenever labels exist; without verified outcomes, confidence shifts merely flag an altered score distribution. In parallel, input distribution monitoring applies statistical tests to detect when runtime feature distributions diverge from pretraining data without requiring labels. Task performance proxies use implicit feedback such as user corrections or session abandonment, though only after validating the causal link to task quality and accounting for how model suggestions alter subsequent user behavior. Finally, shadow baseline comparisons run a frozen base model alongside the adapted one; @sec-edge-intelligence-validation-strategy-adaptation-ab3d develops why that comparison measures divergence rather than quality.
 
+::: {.column-margin .margin-pointer}
+↪ Covariate shift, label shift, and concept drift, and why input monitors can stay silent under pure concept drift, are developed in @sec-robust-ai-distribution-shift-concept-drift-55e2.
+:::
+
 Cohort evaluation must separate contribution from benefit. A device that never trains can still download an improved shared model, but its users' data may be poorly represented among the completed updates. Participation metrics reveal that coverage gap; per-cohort quality measurements establish whether it harms those users. A favorable global average cannot substitute for either measurement.
 
 #### Validation strategy adaptation {#sec-edge-intelligence-validation-strategy-adaptation-ab3d}
@@ -2698,7 +2800,7 @@ These controls extend established MLOps practice to distributed, heterogeneous l
 
 ## Engineering Challenges and Mitigations {#sec-edge-intelligence-systems-integration-production-deployment-c6bb}
 
-A billion-user predictive text model that learns from live keyboard inputs can be poisoned if a coordinated group of malicious users repeatedly types a specific slur and those local updates enter the global federated aggregate. The tiered integration policy bounds where each pillar may act, but it does not erase the failure surfaces that exposing an adapting model to the real world creates: device and data heterogeneity, non-IID distributions, silent failures, and the security and compliance risks of post-release adaptation. These surfaces are coupled. Hardware variation changes who can participate, participation changes the observed data distribution, limited feedback weakens validation, and post-release adaptation complicates audit and rollback. Observability and runtime resource contention already have their controls in @sec-edge-intelligence-production-integration-beb5; the remainder of this section works through the other challenges and the mitigations each one demands, beginning with the variation that is present from the first rollout. The poisoned keyboard returns in @sec-edge-intelligence-foundations-robust-ai-systems-3fde once the quieter failure surfaces that let it go unnoticed are in view.
+A billion-user predictive text model that learns from live keyboard inputs can be poisoned if a coordinated group of malicious users repeatedly types a specific slur and those local updates enter the global federated aggregate. The tiered integration policy bounds where each pillar may act, but it does not erase the failure surfaces that exposing an adapting model to the real world creates: device and data heterogeneity, non-IID distributions, silent failures, and the security and compliance risks of post-release adaptation. These surfaces are coupled. Hardware variation changes who can participate, participation changes the observed data distribution, limited feedback weakens validation, and post-release adaptation complicates audit and rollback. Observability and runtime resource contention already have their controls in @sec-edge-intelligence-production-integration-beb5. Of the challenges that remain, device and data variation comes first, because it is present from the first rollout. The poisoned keyboard returns in @sec-edge-intelligence-foundations-robust-ai-systems-3fde once the quieter failure surfaces that let it go unnoticed are in view.
 
 ### Device and data heterogeneity management {#sec-edge-intelligence-device-data-heterogeneity-management-a789}
 
@@ -2716,7 +2818,7 @@ The consequence is visible in a mobile-keyboard deployment. One device might pro
 
 In production, non-IID data becomes an evaluation and control problem, because no shuffle can restore the i.i.d. sample that centralized training assumes. Evaluation must cover the intended deployment population, through a representative central test set or distributed held-out data, and aggregate quality needs cohort-level checks because a population average can conceal a persistent local failure.
 
-The mitigation should follow the observed failure rather than the generic label "non-IID." @Tbl-edge-noniid-control maps four common observations to bounded decisions.
+The mitigation should follow the observed failure rather than the generic label "non-IID," and each of four common observations points to a bounded control and a release criterion (@tbl-edge-noniid-control).
 
 | **Observed evidence**                                              | **Likely failure**             | **Control to test**                                                                                                               | **Release criterion**                                                  |
 |:-------------------------------------------------------------------|:-------------------------------|:----------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|
@@ -2797,7 +2899,7 @@ A team ports a cloud-trained recommendation model to a mobile app and assumes th
 
 **Fallacy**: *On-device learning provides the same adaptation capabilities as cloud-based training.*
 
-Teams expect local learning to match centralized training's model improvements, ignoring the device's resource constraints. Full-model training adds activations, gradients, and optimizer state to the weights; the configurations in @sec-edge-intelligence-quantifying-training-overhead-edge-devices-3e4c require 4--12$\times$ the inference weights alone, depending on the model and execution schedule. Local datasets are typically small, biased, and nonrepresentative, while compute budgets remain orders of magnitude below cloud GPUs. A smartphone with `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` RAM and a sustained power budget of `{python} EdgeMobilePowerEnvelope.sustained_range_str` cannot replicate the adaptation achieved by data center systems with terabytes of memory and kilowatts of power. Effective on-device learning requires designing adaptation strategies that provide meaningful improvements within these constraints rather than attempting to replicate cloud-scale learning capabilities.
+Teams expect local learning to match centralized training's model improvements, ignoring the device's resource constraints. Full-model training adds activations, gradients, and optimizer state to the weights; the configurations in @sec-edge-intelligence-quantifying-training-overhead-edge-devices-3e4c require `{python} EdgeTrainingMemoryStack.range_mult_str` the inference weights alone, depending on the model and execution schedule. Local datasets are typically small, biased, and nonrepresentative, while compute budgets remain orders of magnitude below cloud GPUs. A smartphone with `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` RAM and a sustained power budget of `{python} EdgeMobilePowerEnvelope.sustained_range_str` cannot replicate the adaptation achieved by data center systems with terabytes of memory and kilowatts of power. Effective on-device learning requires designing adaptation strategies that provide meaningful improvements within these constraints rather than attempting to replicate cloud-scale learning capabilities.
 
 :::
 
@@ -2847,11 +2949,11 @@ Local execution can meet latency, data-locality, and offline requirements, but t
 
 * **The edge reverses the fleet**: Data centers fight to keep many accelerators busy; edge devices fight to learn under batteries, kilobytes, thermal throttling (the device-scale counterpart of principle \ref{pri-power-density-wall}), and intermittent links. The same Compute, Communication, Coordination constraints must account for device eligibility as well as aggregate throughput.
 * **Bandwidth beats advertised TOPS**: One update step of the chapter's 10M-parameter example moves about `{python} EdgeUpdateTraffic.step_traffic_mb_str`, `{python} EdgeUpdateTraffic.traffic_ratio_mult_str` the weight bytes read by an inference, across a phone memory interface roughly `{python} EdgeH100BwRecap.ratio_low_str`--`{python} EdgeH100BwRecap.ratio_high_mult_str` narrower than data-center HBM, the same ceiling that bounds memory-bound decode (principle \ref{pri-autoregressive-bottleneck}). Quantization and locality help, but measured update speed depends on bytes moved and sustained bandwidth.
-* **Learning multiplies the footprint**: Full-model backpropagation can require 4--12$\times$ the memory occupied by inference weights alone in the chapter's configurations, depending on optimizer state, activations, and precision. Reducing trainable state helps only when the frozen model and remaining execution state also fit.
+* **Learning multiplies the footprint**: Full-model backpropagation can require `{python} EdgeTrainingMemoryStack.range_mult_str` the memory occupied by inference weights alone in the chapter's configurations, depending on optimizer state, activations, and precision. Reducing trainable state helps only when the frozen model and remaining execution state also fit.
 * **Background learning is conditional work**: Admit an adaptation window only when @eq-edge-background-admission preserves energy, thermal, and foreground-latency budgets under worst-case measured interference. Charging alone is not sufficient.
 * **Admission selects the population**: Passing the admission test correlates with hardware, charging habits, and connectivity, so the shared model learns from the admitted devices rather than the deployed fleet (principle \ref{pri-participation-selects-population}). Per-cohort participation and quality must be measured and corrected; loosening admission spends the budgets it exists to protect.
-* **Adaptation needs three levers**: Bias-only updates, LoRA, sparse layers, few-shot data reuse, and experience replay each spend different memory, energy, and privacy budgets. Federated coordination adds population learning only when protocols preserve compatible shared state, control disclosure, and handle non-IID data and dropout.
-* **Heterogeneity is normal operation**: Edge fleets span microcontrollers, phones, gateways, and NPUs with uneven availability and performance. Federated systems must treat stragglers, participation bias, rollback, and privacy-preserving observability as protocol design constraints, not deployment cleanup.
+* **Adaptation needs three levers**: Bias-only updates, LoRA, sparse layers, few-shot data reuse, and experience replay each spend different memory, energy, and privacy budgets. Federated coordination adds population learning only when cumulative uploads stay below the data they replace, enough clients survive to clear secure aggregation's participation floor so individual updates stay hidden, and shared state stays version-compatible.
+* **Heterogeneity is normal operation**: Edge fleets span microcontrollers, phones, gateways, and NPUs with uneven availability, performance, and non-IID data. Stragglers, client drift, participation bias, and privacy-preserving observability are protocol design constraints, not deployment cleanup, and once models learn after release the release artifact is the adaptation policy, versioned against a base model that rollback can restore.
 
 :::
 
