@@ -2,598 +2,647 @@
   "metadata": {
     "source_file": "books/vol2/09_performance_engineering/09_performance_engineering.qmd",
     "schema_version": 2,
-    "generated_on": "2026-09-01",
-    "total_sections": 12,
-    "sections_with_quizzes": 12,
-    "sections_without_quizzes": 0
+    "generated_on": "2026-10-15",
+    "total_sections": 11,
+    "sections_with_quizzes": 10,
+    "sections_without_quizzes": 1
   },
   "sections": [
     {
       "section_id": "#sec-performance-engineering-memory-wall",
-      "section_title": "The Memory Wall and Roofline Diagnosis",
+      "section_title": "Where Fleet Capacity Goes",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Iron law of ML performance and Amdahl speedup limits",
-            "Physics of the GPU memory hierarchy and the cost of off-chip traffic",
-            "Generational shifts in roofline ridge points from V100 to B200",
-            "Arithmetic intensity classification of ML workloads (GEMM, GELU, LLM decode)"
+            "Held capacity versus progress in the Llama 3 405B run",
+            "The three places a job loses capacity, in the order it meets them",
+            "Allocated capacity as the start of the accounting, not evidence of use",
+            "The serving replica's boundary test (a loss that remains with requests switched off)"
           ],
-          "question_strategy": "Begin with an iron law decomposition calculation, follow with generational ridge point analysis, test memory hierarchy physics with an ordering and an energy scenario, and clarify arithmetic intensity as an algorithmic property.",
-          "difficulty_progression": "Amdahl math application -> generational system reasoning -> memory hierarchy ordering -> conceptual definition check -> thermodynamic energy evaluation.",
-          "integration": "Connects foundational hardware acceleration and memory hierarchy concepts from earlier chapters to the performance engineering diagnostic equation.",
-          "ranking_explanation": "Foundational section establishing the governing performance equation, memory wall physics, and roofline diagnosis."
+          "question_strategy": "Estimate the Llama 3 held-to-progress fraction in an MCQ, name the three loss places in a SHORT question, apply the serving boundary test in an MCQ, correct the allocation-equals-use misconception in a TF question, and sequence a job's life against the boundaries in an ORDER question.",
+          "difficulty_progression": "Quantitative estimate -> conceptual decomposition -> boundary classification -> misconception check -> sequencing.",
+          "integration": "Opens the chapter's accounting by contrasting what orchestration dashboards report with what becomes useful work, using the running Llama 2 70B job and its serving twin.",
+          "ranking_explanation": "Framing section that motivates the goodput accounting used in every later section."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A training step's wall-clock time is decomposed via the iron law of ML performance ($T = D_{\\text{vol}}/\\text{BW} + O/(R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}) + L_{\\text{lat}}$) into 60% memory traffic ($D_{\\text{vol}}/\\text{BW}$), 30% compute execution ($O/(R_{\\text{peak}} \\cdot \\eta_{\\text{hw}})$), and 10% dispatch and latency overhead ($L_{\\text{lat}}$). A hardware upgrade doubles the GPU's peak dense FP16 compute ($R_{\\text{peak}}$) while leaving memory bandwidth ($\\text{BW}$) and software latency ($L_{\\text{lat}}$) unchanged. What is the maximum theoretical speedup this upgrade can achieve on this workload?",
+            "question": "Meta's Llama 3 405B run kept more than 90% of its elapsed time as effective training time and ran its kept steps at about 41% MFU. What does multiplying the two figures show about where its held capacity went?",
             "choices": [
-              "Approximately $1.18\\times$ speedup (a 15% reduction in step time), because doubling compute only reduces the 30% compute slice to 15% while the 70% non-compute time remains unchanged",
-              "$2.00\\times$ speedup, because doubling peak compute throughput halves the overall execution time of matrix multiplication operations",
-              "$1.67\\times$ speedup, because the 30% compute fraction and 10% latency fraction are both accelerated by the faster clock frequency",
-              "$1.43\\times$ speedup, because the memory-bound portion is compressed by the faster arithmetic execution units"
+              "Roughly 90% became progress, because MFU describes kernel quality and does not reduce useful output",
+              "Roughly 41% became progress, because effective training time already includes the MFU loss",
+              "Roughly 37% became progress, and most of the loss came from the hundreds of unexpected interruptions the job survived",
+              "Roughly 37% of the peak-rate capacity it held became training progress, and most of the loss came from kept steps running below the hardware's rate rather than from interruptions"
             ],
-            "answer": "The correct answer is A. Approximately $1.18\\times$ speedup (a 15% reduction in step time), because doubling compute only reduces the 30% compute slice to 15% while the 70% non-compute time remains unchanged. Under the iron law ($T = D_{\\text{vol}}/\\text{BW} + O/(R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}) + L_{\\text{lat}}$), doubling $R_{\\text{peak}}$ only affects the compute term, halving it from 0.30 to 0.15 of the baseline time. The new normalized time is $0.60 + 0.15 + 0.10 = 0.85$, yielding a speedup of $1.0 / 0.85 \\approx 1.18\\times$. Expecting a $2.0\\times$ speedup commits the classic Amdahl's law fallacy by ignoring that 70% of execution is governed by memory bandwidth and latency, while the other choices incorrectly assume compute hardware improvements accelerate memory transfers or fixed software dispatch overhead.",
-            "learning_objective": "Apply the iron law of ML performance to calculate the theoretical speedup of targeted hardware upgrades under Amdahl's law constraints"
+            "answer": "The correct answer is D. The product $0.90 \\times 0.41 \\approx 0.37$ is the share of held peak-rate capacity that became progress. Interruptions cost at most a tenth of held time, while the kept steps left more than half of their capacity unused, so one of the most carefully engineered runs on record lost most of its gap to steps that ran below the hardware's rate. The product is only an estimate, because the two figures come from different measurement windows.",
+            "learning_objective": "Estimate the share of held capacity that becomes progress from effective training time and MFU, and identify where most of the loss lies."
           },
           {
             "question_type": "SHORT",
-            "question": "An operation has an arithmetic intensity of 200 FLOP/byte. On an NVIDIA V100 (ridge point $\\approx 139\\text{ FLOP/byte}$) and an H100 (ridge point $\\approx 295\\text{ FLOP/byte}$), how does the tighter roofline ceiling change across generations, and what is the primary systems implication for performance optimization?",
-            "answer": "At fixed intensity, the tighter ideal ceiling changes from compute on V100 (200 > 139 FLOP/byte) to bandwidth on H100 (200 < 295 FLOP/byte). This identifies candidate limits, not an observed bottleneck. Measure kernel traffic and execution first; fusion, tiling, or precision reduction can raise the bandwidth ceiling, while dependencies, launch costs, or inefficient scheduling can keep either implementation below its roofline.",
-            "learning_objective": "Analyze how generational hardware balance changes a workload’s tighter ideal ceiling and the evidence needed to diagnose execution."
+            "question": "Name the three places a fleet job can lose capacity, in the order the job meets them, and explain why a dashboard that counts allocated accelerators as used cannot see most of them.",
+            "answer": "First, before the job holds a complete allocation: capacity that sits unallocated, is fragmented where no queued group fits, or is held by a group still waiting for its remaining members produces nothing. Second, while it holds devices without keeping progress: startup, input waits, checkpoint pauses, recovery, and rework leave no retained step. Third, inside kept steps that run below the hardware's rate because of exposed communication, stragglers, memory stalls, or long chains of small kernels. An allocation dashboard counts a partial group as allocated and every held hour as used, so it misses the partial-group loss and all of the second and third losses.",
+            "learning_objective": "Explain the three places fleet capacity is lost and why allocation accounting cannot see them."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "The chapter counts a serving replica's loss in its accounting only if the loss would remain with the request stream switched off. Which loss belongs to the serving analysis instead?",
+            "choices": [
+              "Time the replica spends loading weights and warming up before it serves",
+              "A decode step that streams weights more slowly than the node's memory bandwidth allows",
+              "A request that waits behind a long batch because requests arrive unevenly",
+              "Capacity the replica holds in reserve for bursts, running below its ideal rate"
+            ],
+            "answer": "The correct answer is C. A request waiting behind a long batch exists only because arrivals are uneven, so it fails the boundary test and belongs to serving. Weight loading and warmup, a decode step below its bandwidth limit, and reserved headroom all remain with requests switched off, so they are counted here, averaged over windows of hours to weeks. How much headroom a latency target requires is still a serving decision.",
+            "learning_objective": "Apply the boundary test that separates fleet-efficiency losses from serving losses."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A shared fleet whose accelerators are fully allocated is, by that fact, using its capacity well, so fleet efficiency accounting can start from the busy count.",
+            "answer": "False. Allocated capacity is where the accounting of fleet efficiency starts, not evidence that the capacity was used well. Devices can be held by a group still waiting for its remaining members, held by a job that is starting up or recovering, or busy in steps that run far below the hardware's rate. The orchestrator's accounting separates allocated from productive capacity but cannot say where inside a job the missing work went.",
+            "learning_objective": "Distinguish allocated capacity from capacity that becomes useful work."
           },
           {
             "question_type": "ORDER",
-            "question": "Order the following levels of the GPU memory hierarchy from nearest to the streaming multiprocessor arithmetic units to farthest: (1) L2 Cache, (2) Registers, (3) High-Bandwidth Memory (HBM), (4) Shared Memory (SRAM).",
-            "answer": "The correct order is (2) Registers -> (4) Shared Memory (SRAM) -> (1) L2 Cache -> (3) High-Bandwidth Memory (HBM). Registers and shared memory provide local working storage, L2 serves reuse across SMs, and off-chip HBM supplies bulk capacity. Keeping reusable intermediates near compute avoids costly off-chip transfers; numerical energy comparisons additionally require a common transaction size and measurement boundary.",
-            "learning_objective": "Order GPU storage tiers by proximity to compute and explain the cost of off-chip traffic."
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: Arithmetic intensity is a fixed, intrinsic property of a neural network architecture that remains invariant regardless of batch size or kernel implementation choices.",
-            "answer": "False. Arithmetic intensity ($I = \\text{FLOPs} / \\text{bytes}$) is an algorithmic and implementation-dependent property, not an invariant model constant. For instance, increasing the serving batch size amortizes model weight loading across more requests, raising arithmetic intensity linearly with batch size, while operator fusion increases arithmetic intensity by keeping intermediate activations in on-chip SRAM instead of round-tripping through HBM.",
-            "learning_objective": "Evaluate the relationship between workload arithmetic intensity, implementation strategies, and batch dimensions"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "What is the primary energy and performance consequence of repeatedly streaming intermediate tensors through off-chip HBM rather than retaining them in on-chip SRAM?",
-            "choices": [
-              "Off-chip transfers bypass the L2 cache entirely, preventing the GPU memory management unit from performing virtual address translation",
-              "Off-chip transfers consume memory-interface energy and can limit throughput through bandwidth and latency, whereas retaining reusable intermediates in SRAM reduces HBM traffic",
-              "Streaming through HBM causes numerical drift and precision loss because DRAM capacitors lose charge over multi-nanosecond round-trips",
-              "SRAM access draws higher total power because operating at higher clock frequencies increases dynamic capacitance dissipation beyond HBM interface PHYs"
-            ],
-            "answer": "The correct answer is B. Repeated off-chip transfers consume energy and bandwidth without adding useful arithmetic. Fusion and tiling can retain intermediates in SRAM and reduce that traffic, subject to local capacity and occupancy constraints. Neither numerical precision drift in DRAM nor failed address translation explains this bottleneck; transaction-size conventions are needed before comparing access energies quantitatively.",
-            "learning_objective": "Evaluate the thermodynamic and latency consequences of off-chip HBM data movement versus on-chip SRAM caching"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-performance-engineering-serving-regimes-9f2c",
-      "section_title": "Serving Regimes, Batch Size, and Prefill-Decode",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Arithmetic intensity scaling with batch size",
-            "Prefill compute-bound vs decode memory-bound characteristics",
-            "PagedAttention eliminating internal KV cache fragmentation",
-            "Roofline analysis of 70B LLM decode on H100 clusters"
-          ],
-          "question_strategy": "Contrast the computational profiles of prefill and decode in an MCQ, probe PagedAttention memory mechanics in a SHORT question, test disaggregated serving terminology in a FILL question, and compute bandwidth-bound decode limits in a multi-GPU scenario MCQ.",
-          "difficulty_progression": "Phase classification -> memory fragmentation mechanics -> terminology recall -> quantitative roofline decode calculation.",
-          "integration": "Bridges single-node roofline physics to serving systems, showing how batch dimensions and phase separation alter operational bottlenecks.",
-          "ranking_explanation": "Key serving architecture section establishing the trade-offs of batching and the prefill-decode split."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "In modern Large Language Model (LLM) serving systems, why do the prompt prefill phase and the token decode phase exhibit fundamentally different performance bottlenecks on GPU hardware?",
-            "choices": [
-              "Prefill generates tokens sequentially one by one, making it memory-bound by weight reads, whereas decode processes all prompt tokens in parallel, making it compute-bound by Tensor Cores",
-              "Prefill relies exclusively on integer arithmetic units, whereas decode requires floating-point matrix multiplication units",
-              "Long-prompt prefill GEMMs reuse weights across prompt tokens and can have a compute ceiling, whereas weight-dominated single-request decode has low intensity and a bandwidth ceiling",
-              "Prefill requires continuous network AllToAll collective exchanges between GPUs, whereas decode requires no inter-GPU communication"
-            ],
-            "answer": "The correct answer is C. Long-prompt prefill GEMMs can reuse weights across many prompt tokens, while single-request decode streams weights for one token. The simplified FP16 estimates place those components above and below the ridge, respectively. Neither estimate proves saturation or classifies every operator: actual traffic, kernel shapes, cache reads, dispatch, and communication require profiling. The phases use compatible arithmetic rather than exclusively different number types.",
-            "learning_objective": "Compare the computational characteristics and primary hardware bottlenecks of the prefill and decode serving phases"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain how PagedAttention reduces KV-cache allocation waste compared with contiguous preallocation. What measurements determine whether the recovered capacity improves serving throughput?",
-            "answer": "Contiguous preallocation reserves capacity for each request's maximum length, leaving unused slots when sequences are shorter. PagedAttention allocates fixed-size blocks as sequences grow and reuses free blocks across requests, sharply reducing allocation waste, though a final partly filled block can remain. The recovered capacity permits larger batches; reported 2–4-fold throughput gains depend on the workload and latency constraint rather than following automatically from paging.",
-            "learning_objective": "Explain how paged allocation reduces KV fragmentation and can expand batch capacity."
-          },
-          {
-            "question_type": "FILL",
-            "question": "The architectural pattern that decouples LLM inference by executing the compute-bound prompt prefill phase and the bandwidth-bound autoregressive token decode phase on separate, specialized hardware pools is known as ____ serving.",
-            "answer": "disaggregated. Separate pools specialize for prompt processing and token generation; transferring the KV cache between them adds a communication cost that the specialization must repay.",
-            "learning_objective": "Identify the architectural term for separating prefill and decode workloads across specialized hardware pools"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "A 70B parameter LLM (140 GB FP16 weights) is served across an 8-GPU NVIDIA H100 node with tensor parallelism (TP=8). Each GPU holds 17.5 GB of weights and provides 3.35 TB/s of HBM bandwidth and 989 TFLOP/s peak FP16 compute. At batch size 1, what is the theoretical bandwidth-limited decode step time per token, and why is achieved compute utilization below 0.4%?",
-            "choices": [
-              "Decode takes approximately 120 ms per token because NVLink latency serializes the 8 GPUs, consuming 99.6% of time in network barriers",
-              "Decode takes approximately 0.5 ms per token because the 8 GPUs execute in parallel at peak FP16 compute throughput",
-              "Decode takes approximately 24.0 ms per token because the GPU must reread the entire 140 GB model across the PCI-e bus on each step",
-              "Decode takes approximately 5.2 ms per token ($17.5\\text{ GB} / 3.35\\text{ TB/s}$), and compute utilization is below 0.4% because the arithmetic intensity is only 1.0 FLOP/byte compared to the H100 ridge point of ~295 FLOP/byte"
-            ],
-            "answer": "The correct answer is D. Decode takes approximately 5.2 ms per token ($17.5\\text{ GB} / 3.35\\text{ TB/s}$), and compute utilization is below 0.4% because the arithmetic intensity is only 1.0 FLOP/byte compared to the H100 ridge point of ~295 FLOP/byte. At batch size 1 with TP=8, each GPU reads its 17.5 GB weight shard once per token: $T_{\\text{decode}} = 17.5\\text{ GB} / 3.35\\text{ TB/s} \\approx 5.2\\text{ ms}$. Each GPU executes $2 \\times 8.75 \\times 10^9 = 1.75 \\times 10^{10}\\text{ FLOP}$, giving an arithmetic intensity of $\\frac{1.75 \\times 10^{10}\\text{ FLOP}}{1.75 \\times 10^{10}\\text{ bytes}} = 1.0\\text{ FLOP/byte}$. The achieved compute rate is $1.75 \\times 10^{10} / 0.00522 \\approx 3.35\\text{ TFLOP/s}$, which is only $3.35 / 989 \\approx 0.34\\%$ of the H100's peak compute. The other options miscalculate memory transfer times, confuse single-GPU shards with full model weights, or postulate unrealistic PCIe and NVLink stalls.",
-            "learning_objective": "Calculate the theoretical decode step time and hardware utilization of a tensor-parallel LLM deployment using roofline principles"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-performance-engineering-profiling",
-      "section_title": "System Profiling",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "The Heisenberg effect of profiling and allocator interference",
-            "4-level profiling hierarchy (Application to Hardware Counters)",
-            "MFU vs MBU metric selection for training vs decode",
-            "Nsight Systems timeline pattern recognition (CUDA HW, CUDA API, NCCL, NVTX)",
-            "Tensor Core alignment and silent fallback to CUDA Cores"
-          ],
-          "question_strategy": "Contrast MFU vs MBU for decode inference in an MCQ, outline the 4-level diagnostic sequence in a SHORT question, test Tensor Core alignment terminology in a FILL question, examine profiler memory inflation in an MCQ, and correct CUDA API timeline misconceptions in a TF question.",
-          "difficulty_progression": "Metric disambiguation -> diagnostic protocol synthesis -> hardware counter recall -> observer effect analysis -> timeline pattern evaluation.",
-          "integration": "Provides the empirical diagnostic framework required to identify bottlenecks across all system layers.",
-          "ranking_explanation": "Foundational methodology section teaching systematic measurement over intuitive guesswork."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "A production LLM serving decode step on an NVIDIA H100 reports a Model FLOPs Utilization (MFU) of only 2.5%, but a Model Bandwidth Utilization (MBU) of 86%. How should the performance engineer interpret these diagnostic metrics?",
-            "choices": [
-              "The GPU hardware is malfunctioning and must be power-cycled to clear thermal throttling",
-              "The measurements are consistent with a bandwidth-limited path; low MFU alone is not evidence of poor implementation when MBU is high",
-              "The low MFU indicates severe kernel launch latency on the CPU dispatcher that requires rewriting into CUDA Graphs",
-              "The high MBU indicates excessive gradient checkpointing overhead that is saturating the PCIe bus"
-            ],
-            "answer": "The correct answer is B. High MBU and low MFU can be consistent with a memory-bound decode path rather than defective hardware or dominant launch gaps. Check FLOPs and bytes at the same boundary: 2.5% of 989 TFLOP/s divided by 86% of 3.35 TB/s implies about 8.6 FLOP/byte, not one. Further diagnosis should test redundant traffic and the request critical path before declaring the entire service optimal.",
-            "learning_objective": "Evaluate the diagnostic roles of Model FLOPs Utilization (MFU) and Model Bandwidth Utilization (MBU) across training and inference regimes"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Using the application-to-hardware profiling hierarchy, describe the drill-down an engineer should use to diagnose an LLM serving pipeline that misses its p99 latency objective. Explain where synchronized traces across ranks enter the investigation.",
-            "answer": "Start with application metrics such as P99 first-token and inter-token latency. Use framework traces across ranks to localize scheduling, data-transfer, or collective delays. Inspect kernel timelines to distinguish launch gaps, late arrival, and serialized work. Finally, use hardware counters on the implicated kernel to test memory bandwidth, occupancy, and instruction mix. Distributed scope cuts across this application-to-hardware hierarchy; it is not a separate fixed level.",
-            "learning_objective": "Synthesize a structured multi-level profiling diagnostic protocol to isolate performance bottlenecks"
-          },
-          {
-            "question_type": "FILL",
-            "question": "If profiling confirms that a matrix operation uses scalar GPU arithmetic rather than Tensor Core instructions, the scalar units are called ____ Cores; tensor dimensions alone do not establish that execution path.",
-            "answer": "CUDA. Kernel selection depends on datatype, shape, library, and hardware. Misalignment may reduce efficiency without universally forcing a scalar fallback; inspect the executed instruction mix.",
-            "learning_objective": "Distinguish scalar CUDA execution from Tensor Core execution using profiling evidence."
-          },
-          {
-            "question_type": "MCQ",
-            "question": "Why can enabling shape recording in a high-fidelity PyTorch profiler perturb tensor lifetimes and increase memory demand in a workload that runs stably without profiling?",
-            "choices": [
-              "The profiler increases GPU clock frequency beyond thermal limits, triggering emergency memory shutdowns",
-              "The profiler converts all FP16 tensors to FP64 double-precision matrices during recording",
-              "Shape recording can retain tensor references, inhibit reference-count-dependent optimizations, and introduce extra copies",
-              "The profiler overwrites the CUDA driver's virtual memory page tables with TensorBoard logs"
-            ],
-            "answer": "The correct answer is C. Shape recording can retain tensor references and affect optimizations or copies, so the instrumented run may require more memory. Allocation-history recording instead records allocator events and has metadata overhead; it should not be assumed to keep every activation alive. Compare matched instrumented and uninstrumented runs rather than attributing the change to clock rates or automatic precision conversion.",
-            "learning_objective": "Analyze the observer effect (Heisenberg effect) of profiling tools on memory allocation and system behavior"
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: In an NVIDIA Nsight Systems trace, observing that the CUDA API row on the CPU thread displays wide bars significantly larger than the corresponding CUDA HW kernel bars indicates that the GPU kernels are executing too slowly.",
-            "answer": "False. Wide CPU API bars do not show that GPU kernels themselves are slow. They may reflect host launch overhead, synchronization, or blocking calls. Correlate them with GPU idle gaps and dependencies before diagnosing a host-submission bottleneck; graph replay helps only the overhead it actually removes.",
-            "learning_objective": "Evaluate CPU-GPU interaction patterns and launch bottlenecks on Nsight Systems timeline traces"
+            "question": "Order the following events in the life of the running example's training job, from first to last: (1) its kept steps run below the hardware's rate because collectives are exposed, (2) its group of 16 nodes becomes a complete allocation, (3) it waits in the queue while other teams' jobs hold the capacity, (4) it starts up, compiles, and loads its initial state before the first step.",
+            "answer": "The correct order is (3) -> (2) -> (4) -> (1). The queue wait comes first and, while other jobs hold the capacity, costs only time to result. Formation of the complete allocation is the first boundary, after which startup and compilation consume held time without retained steps, a runtime loss. Only then do kept steps run, and their exposed collectives are a program loss. The order matters because each factor divides by what the previous boundary passed.",
+            "learning_objective": "Sequence a job's life against the scheduling, runtime, and program boundaries."
           }
         ]
       }
     },
     {
       "section_id": "#sec-performance-engineering-measurement-scale",
-      "section_title": "Measurement at Scale",
+      "section_title": "ML Goodput",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Fleet MFU vs Local MFU and the Scaling Tax",
-            "Small-scale canaries, fleet baselines, and gray failure detection",
-            "Straggler amplification in synchronous distributed systems",
-            "Aligned-rank evidence distinguishing late arrival from prolonged collective completion"
+            "ML productivity goodput as the product of scheduling, runtime, and program goodput",
+            "Loss shares weighted by what earlier boundaries passed",
+            "MFU as program goodput only over retained steps; MBU for bandwidth-bound decode",
+            "Charging each loss at the first boundary it fails to cross"
           ],
-          "question_strategy": "Calculate the Scaling Tax across a 128-GPU cluster in an MCQ, explain straggler amplification from a single gray failure node in a SHORT question, interpret synchronized rank arrival and completion times in a SHORT question, and evaluate regression testing tiers in an MCQ.",
-          "difficulty_progression": "Quantitative scaling tax calculation -> distributed straggler mechanics -> causal trace interpretation -> regression testing strategy.",
-          "integration": "Scales node-level profiling to thousands of accelerators, addressing network jitter, multi-node stragglers, and fleet telemetry.",
-          "ranking_explanation": "Crucial section bridging single-node engineering to fleet-scale distributed infrastructure."
+          "question_strategy": "Compute the Llama 3 loss split in an MCQ, interpret MFU against MBU for decode in an MCQ, explain the double-counting trap of run-averaged MFU in a SHORT question, correct the straggler-charging misconception in a TF question, recall the named ideal in a FILL question, and classify checkpoint and compilation losses in an MCQ.",
+          "difficulty_progression": "Quantitative decomposition -> metric selection -> denominator reasoning -> boundary rule -> definition recall -> classification.",
+          "integration": "Turns the three loss places into one accounting whose factors multiply, and connects MFU and MBU to program goodput.",
+          "ranking_explanation": "Core definitional section; every later section measures, attributes, or trades the factors defined here."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A 70B parameter model achieves 65% MFU on an isolated 8-GPU node. When scaled across a 128-GPU cluster connected via InfiniBand, the training step time increases such that cluster-wide MFU drops to 48%. What is the Scaling Tax incurred by this distributed deployment?",
+            "question": "Applying the loss-share decomposition to Llama 3 405B on its dedicated cluster (scheduling goodput 1, runtime goodput about 0.90, program goodput about 0.41), which split of its held capacity is correct?",
             "choices": [
-              "17.0% Scaling Tax, calculated as the direct difference ($65\\% - 48\\%$)",
-              "35.4% Scaling Tax, calculated as the ratio of unutilized compute ($1 - 0.48 / 0.65$)",
-              "52.0% Scaling Tax, representing the unutilized fraction of the 128 GPUs",
-              "Approximately 26.2% Scaling Tax ($1 - \\text{Fleet MFU} / \\text{Local MFU} = 1 - 0.48 / 0.65$), representing the relative efficiency loss compared with the single-node baseline"
+              "About 10% lost at the runtime boundary, 53% at the program boundary, and 37% becoming progress at the ideal rate",
+              "About 10% lost at the runtime boundary, 59% at the program boundary, and 31% becoming progress, because each factor's loss is charged against full capacity",
+              "About 59% lost at the runtime boundary and 10% at the program boundary, because the program factor is measured first",
+              "About 37% lost at the runtime boundary, 41% at the program boundary, and 22% becoming progress"
             ],
-            "answer": "The correct answer is D. The relative MFU loss is 1 - 0.48/0.65 ≈ 26.2%; the 17-point difference is an absolute percentage-point change. The ratio measures efficiency loss under the stated workload and accounting assumptions. It does not isolate communication or barriers: matched traces must distinguish those costs from workload shape, offload, kernel efficiency, and rank imbalance.",
-            "learning_objective": "Calculate and interpret the distributed Scaling Tax from single-node and fleet-wide MFU metrics"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "In a synchronous data-parallel cluster of 1,000 GPUs, explain why one gray-failure node that delivers 10% less processing throughput can reduce the entire fleet's useful throughput by roughly 10% when its work determines every step's critical path.",
-            "answer": "All ranks must complete their required work before a synchronized step can advance. A rank delivering 90% of normal throughput takes 1/0.9 ≈ 1.111 times as long for the same work, so the fleet can be limited to 90% of its original throughput. The result assumes that this delay is exposed and dominates the critical path. A 10% increase in duration would instead imply about a 9.1% throughput loss.",
-            "learning_objective": "Analyze how barrier synchronization amplifies single-node gray failures and stragglers into cluster-wide throughput collapses"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Synchronized clocks record the same collective in otherwise matched runs. In the baseline, every rank enters at 8 ms and all finish at 10 ms. In case A, all but one rank enter at 8 ms, the last enters at 12 ms, and all finish at 14 ms. In case B, every rank enters at 8 ms and all finish at 14 ms. What interval accounts for the extra completion time in each case, and what measurement and targeted experiment would help distinguish the causes?",
-            "answer": "Case A adds 4 ms before the last rank enters; completion remains 2 ms after that entry. Trace the delayed rank’s preceding computation, input, and host work, then test the implicated delay with the collective configuration held fixed. Case B extends the interval after all ranks enter from 2 ms to 6 ms. Inspect collective progress and contention, then repeat with competing traffic isolated. The trace localizes the exposed delay but does not alone prove a network fault.",
-            "learning_objective": "Diagnose supplied aligned-rank traces and justify measurements that distinguish late arrival from prolonged collective completion."
+            "answer": "The correct answer is A. With scheduling goodput of one, the runtime share is $1 - 0.90 = 0.10$, the program share is the program loss weighted by what the runtime boundary passed, $0.90 \\times 0.59 \\approx 0.53$, and useful work is $0.90 \\times 0.41 \\approx 0.37$; the three parts add to one. Charging the program's 59% loss against full capacity subtracts the runtime loss twice. Removing every interruption could therefore recover at most a tenth of the held capacity, while the program boundary held most of the gap.",
+            "learning_objective": "Apply the loss-share decomposition to split a gap in useful work among the goodput factors."
           },
           {
             "question_type": "MCQ",
-            "question": "Which tiered testing strategy is specifically designed to catch nonlinear scaling collapses (such as exhausted InfiniBand credit buffers or garbage collection pauses) before deploying a code change to a 1,000-GPU cluster?",
+            "question": "A serving replica's batch-one decode step reports an MFU of 2.5% and a model bandwidth utilization (MBU) of 86%. How should these figures be read when assigning the replica's program goodput?",
             "choices": [
-              "Small-scale canaries on 8 and 64 GPUs to map the scaling efficiency curve and identify curve-bending regressions before full-fleet deployment",
-              "Single-GPU unit tests running with Python debug assertions enabled",
-              "Synthetic micro-benchmarks that test only CPU RAM bandwidth",
-              "Static code linting to count the number of matrix multiplications in the model"
+              "The accelerators are faulty, because an MFU this low cannot occur on a healthy device",
+              "The step is memory-saturated rather than inefficient; for bandwidth-bound decode the named ideal is the bandwidth floor, so program goodput is MBU, and the low MFU reflects a batch size that serving sets",
+              "Program goodput is 2.5%, because MFU is the only measure of program goodput that composes across workloads",
+              "Program goodput is about 44%, the average of the two, so training and decode can share one program factor"
             ],
-            "answer": "The correct answer is A. Small-scale canaries on 8 and 64 GPUs to map the scaling efficiency curve and identify curve-bending regressions before full-fleet deployment. Scaling regressions are inherently distributed and nonlinear; changes that introduce negligible overhead on 1 GPU can trigger severe network buffer exhaustion or synchronization stalls at scale. Testing on intermediate multi-node canaries (8 and 64 GPUs) maps the scaling slope, catching efficiency anomalies before committing full-fleet resources. Single-GPU tests, static linters, and CPU micro-benchmarks cannot observe distributed collective and interconnect behaviors.",
-            "learning_objective": "Design a tiered regression testing protocol to detect distributed scaling anomalies prior to full-fleet deployment"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-performance-engineering-fusion",
-      "section_title": "Operator Fusion and Kernel Engineering",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Intermediate HBM traffic reduction from fusion",
-            "Categories of fusion (element-wise, reduction, operator-specific)",
-            "CUDA Graph replay reducing repeated submission under capture and storage constraints",
-            "FlashAttention online softmax tiling and algorithmic FLOP trade-offs"
-          ],
-          "question_strategy": "Order the steps of online softmax, examine CUDA Graph execution constraints, probe FlashAttention's I/O-aware FLOP vs memory trade-off, clarify CUDA Graph fusion misconceptions, and evaluate HBM traffic savings in an operator fusion chain.",
-          "difficulty_progression": "Algorithmic step ordering -> runtime constraint evaluation -> deep systems trade-off analysis -> mechanism distinction -> quantitative traffic calculation.",
-          "integration": "Demonstrates how kernel engineering and compiler techniques operationalize memory hierarchy principles to defeat the memory wall.",
-          "ranking_explanation": "Core kernel engineering section covering the primary techniques for reclaiming bandwidth and dispatch overhead."
-        },
-        "questions": [
-          {
-            "question_type": "ORDER",
-            "question": "In FlashAttention's online softmax algorithm, arrange the following steps in the exact order executed when processing tile $t$ of key-value blocks in fast on-chip SRAM:\n\n(1) Rescale previous running sum and output accumulator by multiplying by $e^{m_{\\text{old}} - m_{\\text{new}}}$\n(2) Compute local block of attention scores $A_t = Q_{\\text{block}} K_t^T$\n(3) Compute local softmax probabilities with $m_{\\text{new}}$ and accumulate into running output\n(4) Update the running maximum: $m_{\\text{new}} = \\max(m_{\\text{old}}, \\max(A_t))$",
-            "answer": "The correct order is (2) Compute local block of attention scores $A_t = Q_{\\text{block}} K_t^T$ -> (4) Update the running maximum: $m_{\\text{new}} = \\max(m_{\\text{old}}, \\max(A_t))$ -> (1) Rescale previous running sum and output accumulator by multiplying by $e^{m_{\\text{old}} - m_{\\text{new}}}$ -> (3) Compute local softmax probabilities with $m_{\\text{new}}$ and accumulate into running output. The algorithm first computes the local tile scores, updates the running maximum to incorporate the new tile's peak, rescales previous partial accumulators using the difference between old and new maxima, and finally accumulates the new tile's softmax contribution.",
-            "learning_objective": "Apply the algorithmic sequence of online softmax tiling in FlashAttention to maintain numerical exactness in on-chip SRAM"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "Why are CUDA Graphs highly effective at accelerating the autoregressive decode phase of Large Language Models, but significantly more difficult to apply to the prompt prefill phase?",
-            "choices": [
-              "CUDA Graph replay requires capture-compatible work and valid referenced storage; repetitive decode shapes often allow more reuse than variable-length prefill shapes",
-              "CUDA Graphs only support integer quantization kernels and cannot record floating-point matrix multiplications used during prefill",
-              "CUDA Graphs execute exclusively on CPU cores and cannot capture GPU kernels that exceed 1000 TFLOP/s",
-              "CUDA Graphs require disaggregated serving network fabrics to replay kernel dispatches across multiple nodes"
-            ],
-            "answer": "The correct answer is A. Stable captured work lets graph replay reduce repeated host launch overhead. Decode often admits such a repetitive execution region, while varying prefill shapes require bucketing, padding, updates, or separate captures. Capture also depends on memory-address and operation constraints; variable prompts do not make graph use universally impossible. Integer-only or CPU-only execution is not the explanation.",
-            "learning_objective": "Evaluate the operational constraints and execution prerequisites of CUDA Graphs in LLM serving pipelines"
+            "answer": "The correct answer is B. Small-batch decode must read every weight to perform a few operations per weight, so memory bandwidth sets its time and the arithmetic units run far below peak. Charging that gap to the program would assign it a loss no program change can recover, since only a larger batch, a serving decision, raises the work done per byte. Against the bandwidth floor, program goodput is MBU, and high MBU with low MFU marks a memory-saturated program. Ideals that measure different resources cannot be averaged; a fleet report carries program goodput per workload class or converts every class to the arithmetic ideal and attributes decode's loss to batch size.",
+            "learning_objective": "Select the named ideal for program goodput and interpret MFU and MBU for bandwidth-bound decode."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how tiled attention can improve runtime even when online softmax rescaling or backward recomputation adds arithmetic. Why do removed HBM transfers alone not establish a fixed wall-clock speedup?",
-            "answer": "Standard unfused attention materializes score and probability matrices in HBM. FlashAttention tiles the computation so these intermediates remain on chip. Extra rescaling arithmetic can be cheaper than the removed HBM traffic when data movement is the bottleneck. The additional work is not literally free or necessarily executed on Tensor Cores; the net gain depends on sequence length, kernel implementation, and the resulting resource limits.",
-            "learning_objective": "Analyze the I/O-aware systems trade-off of trading extra arithmetic operations in SRAM to eliminate off-chip HBM traffic"
+            "question": "A team multiplies a published MFU averaged over a whole run by a runtime goodput computed from the same run's restart and checkpoint logs. Why does this product understate the job's goodput, and over what must MFU be measured for it to equal program goodput?",
+            "answer": "A run-averaged MFU divides by elapsed time that already includes restarts and checkpoint pauses, so those losses sit inside the MFU and the runtime factor charges them again. The product is valid only when each factor divides by exactly what the previous one passed, so that each numerator cancels the next denominator. MFU equals program goodput when it is measured over the steps that runtime goodput retained, with input waits already removed, against the time the required operations would take at peak.",
+            "learning_objective": "Explain how overlapping denominators double-count losses and when MFU equals program goodput."
           },
           {
             "question_type": "TF",
-            "question": "True or False: Wrapping an unfused PyTorch layer in a CUDA Graph automatically fuses adjacent element-wise kernels into a single GPU kernel to eliminate intermediate high-bandwidth memory (HBM) writes.",
-            "answer": "False. Graph replay reduces repeated host submission for a captured kernel sequence; it does not itself fuse kernels or eliminate every launch and synchronization cost. Removing intermediate HBM transfers requires a supported fusion transformation or a custom kernel. The measured end-to-end saving depends on how much submission overhead was exposed.",
-            "learning_objective": "Distinguish between launch-overhead elimination via CUDA Graphs and memory-traffic reduction via operator fusion"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "Consider a bias-GELU-dropout chain applied to a tensor with hidden dimension 4096 and batch size 2048 in FP16. The unfused path launches three kernels and materializes two intermediate tensors of approximately 16.8 MB each. If a fused kernel can retain their values in registers or SRAM, how does fusion change memory traffic and execution?",
-            "choices": [
-              "It increases total HBM traffic to 128 MB because the fused kernel must write debug checkpoints after each sub-operation",
-              "It removes four intermediate transfers totaling approximately 67.1 MB and reduces three launches to one, while preserving the input read and final output write",
-              "It converts the operation into a pure CPU task to bypass GPU shared memory allocation limits",
-              "It eliminates the need to load the weight matrix $W$ from HBM by synthesizing weights dynamically in registers"
-            ],
-            "answer": "The correct answer is B. Each of two intermediates contains 2048 × 4096 × 2 bytes, or about 16.8 MB. Writing and rereading both costs four such transfers, about 67.1 MB (64 MiB). Fusion removes those transfers when the intermediate values remain on chip. It does not eliminate required input reads or create model weights; register pressure and occupancy still constrain the implementation.",
-            "learning_objective": "Calculate intermediate memory traffic savings and launch overhead reduction achieved through operator fusion"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-performance-engineering-precision",
-      "section_title": "Precision Engineering",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Outlier features in LLMs and mitigation strategies (LLM.int8, AWQ, SmoothQuant)",
-            "Block-wise quantization metadata trade-offs",
-            "PTQ calibration vs QAT training-time costs",
-            "Weight-only vs weight-activation quantization regimes and KV cache precision dividends"
-          ],
-          "question_strategy": "Compare outlier mitigation strategies in an MCQ, contrast weight-only vs weight-activation regimes in a SHORT question, evaluate block-wise quantization metadata scaling in a TF question, and analyze the batch-capacity precision dividend in an MCQ.",
-          "difficulty_progression": "Outlier mechanism comparison -> operational regime trade-offs -> metadata scaling analysis -> multi-GPU capacity synthesis.",
-          "integration": "Links numerical representations to hardware throughput and serving memory capacity.",
-          "ranking_explanation": "Crucial precision engineering section balancing numerical fidelity, memory bandwidth, and batch capacity."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "Large Language Models exhibit emergent activation outlier features where $\\sim 0.1\\%$ of channels have magnitudes $3–20\\times$ larger than normal. How does SmoothQuant enable efficient uniform INT8 quantization (W8A8) across both weights and activations without suffering catastrophic quality loss?",
-            "choices": [
-              "SmoothQuant drops all outlier channels from the model entirely, using low-rank distillation to compensate for removed hidden dimensions",
-              "SmoothQuant splits the matrix multiplication at runtime into an FP16 branch for outliers and an INT8 branch for standard features",
-              "SmoothQuant applies a per-channel scaling factor that divides activations by $s$ and multiplies weights by $s$, migrating quantization difficulty from dynamic activations to static weights prior to inference",
-              "SmoothQuant computes an exact Hessian inverse across all layers during training using the straight-through estimator"
-            ],
-            "answer": "The correct answer is C. SmoothQuant applies a per-channel scaling factor that divides activations by $s$ and multiplies weights by $s$, migrating quantization difficulty from dynamic activations to static weights prior to inference. Because activation outliers are concentrated in specific channels across all tokens, multiplying the weights by the per-channel scale and dividing the inputs by the same scale is mathematically equivalent. This smooths activation peaks at the cost of slightly increasing weight dynamic range, enabling uniform INT8 quantization on both weights and activations (W8A8) to leverage INT8 Tensor Cores. The runtime branch approach describes LLM.int8(), the Hessian inverse refers to GPTQ, and dropping channels is a destructive heuristic.",
-            "learning_objective": "Compare mathematical strategies for mitigating activation outlier channels during low-bit quantization"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Contrast weight-only quantization (e.g. AWQ INT4) with weight-activation quantization (e.g. SmoothQuant W8A8 or FP8) in terms of target serving operational regime (batch size) and hardware execution units used.",
-            "answer": "Weight-only INT4 quantization targets memory-bound inference at small batch sizes (e.g. batch size 1 decode), where the primary bottleneck is streaming weights from HBM; weights are dequantized on-the-fly to FP16 and executed on standard FP16 Tensor Cores. Weight-activation quantization (W8A8 or FP8) quantizes both operands, targeting compute-bound inference at large batch sizes or training, executing directly on INT8 or FP8 Tensor Cores to double arithmetic compute throughput in addition to reducing memory traffic.",
-            "learning_objective": "Analyze the operational trade-offs and hardware utilization differences between weight-only and weight-activation quantization"
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: In block-wise INT4 quantization, reducing the group block size $G_{\\text{block}}$ from 64 to 16 can improve local range resolution but quadruples the scale-factor metadata overhead from 0.25 bits/weight (6.25% overhead on INT4) to 1.0 bit/weight (25% overhead on INT4).",
-            "answer": "True. With block-wise quantization, each group of $G_{\\text{block}}$ weights shares one 16-bit FP16 scale factor. For $G_{\\text{block}} = 64$, the scale adds $16/64 = 0.25$ bits per weight (a $0.25/4 = 6.25\\%$ overhead relative to 4-bit payload). For $G_{\\text{block}} = 16$, the scale adds $16/16 = 1.0$ bit per weight (a $1.0/4 = 25\\%$ overhead relative to 4-bit payload), yielding an effective bit-width of 5.0 bits/weight.",
-            "learning_objective": "Calculate the metadata overhead and effective bit-width scaling of block-wise quantization group sizes"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "A 70B model uses 17.5 GB of weights per GPU on eight 80 GB GPUs. Ignoring runtime reserves and quantization metadata, INT4 weights use approximately 4.4 GB per GPU and INT8 KV cache halves the per-token cache footprint. Why does the KV capacity gain combine two distinct effects rather than equal the fourfold weight reduction?",
-            "choices": [
-              "Because INT4 weights bypass the GPU memory hierarchy and execute directly from CPU system RAM",
-              "Because quantizing the KV cache converts autoregressive decoding into non-autoregressive parallel generation",
-              "Because INT8 KV cache pages eliminate the need for GPU virtual address translation tables in PagedAttention",
-              "Because reducing weights from 17.5 GB to 4.4 GB expands available KV cache space from 62.5 GB to 75.6 GB per GPU, which, when multiplied by halving the per-request INT8 KV cache footprint, multiplicatively expands total admitted batch capacity"
-            ],
-            "answer": "The correct answer is D. The ideal KV budget grows from 62.5 GB to 75.6 GB, a factor of 75.6/62.5 ≈ 1.21. Halving bytes per cached token multiplies capacity by another two, yielding approximately 2.42 times the original token capacity, not more than four times. Runtime reserves, metadata, sequence lengths, and scheduler policy reduce the deployable batch limit; quantization does not remove autoregressive dependencies or page tables.",
-            "learning_objective": "Synthesize how weight and KV-cache quantization interact multiplicatively to expand serving batch capacity"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-performance-engineering-compilation",
-      "section_title": "Graph Compilation",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Multi-stage graph compilation pipeline (capture, optimize, fuse, plan, codegen)",
-            "TorchDynamo bytecode tracing and graph breaks",
-            "XLA whole-program compilation vs eager PyTorch",
-            "TensorRT inference specialization and kernel autotuning",
-            "Triton block-level programming abstraction"
-          ],
-          "question_strategy": "Order the stages of the compilation pipeline, examine TorchDynamo bytecode interception and graph breaks, calculate compilation speedup dividends in a SHORT question, test compiler mode terminology in a FILL question, and contrast XLA whole-program compilation with PyTorch.",
-          "difficulty_progression": "Pipeline sequencing -> bytecode mechanism analysis -> worked speedup calculation -> terminology recall -> compiler paradigm comparison.",
-          "integration": "Explains how modern compiler stacks automate fusion and memory planning across diverse accelerator architectures.",
-          "ranking_explanation": "Essential systems section on compiler technology and automated optimization frameworks."
-        },
-        "questions": [
-          {
-            "question_type": "ORDER",
-            "question": "Arrange the following stages of the deep learning graph compilation pipeline in their standard logical order of execution:\n\n(1) Operator Fusion Pass (identifying fusible subgraphs to eliminate intermediate HBM round-trips)\n(2) Graph Capture (tracing Python code to construct a Directed Acyclic Graph of tensor operations)\n(3) Kernel Selection and Code Generation (generating and autotuning backend Triton/CUDA machine code)\n(4) Memory Planning Pass (analyzing tensor lifetimes and scheduling physical buffer reuse)\n(5) Graph-Level Optimization (applying algebraic simplifications and constant folding)",
-            "answer": "The correct order is (2) Graph Capture -> (5) Graph-Level Optimization -> (1) Operator Fusion Pass -> (4) Memory Planning Pass -> (3) Kernel Selection and Code Generation. The compiler first captures the computation into a DAG, performs device-agnostic algebraic simplifications, identifies adjacent operations to fuse, plans memory allocations across the simplified and fused graph, and finally lowers the optimized subgraphs into specialized machine code.",
-            "learning_objective": "Order the core transformation stages of a deep learning graph compilation pipeline"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "How does TorchDynamo in PyTorch 2.0 capture computation graphs from standard Python code, and what is the systems impact when it encounters an unsupported dynamic construct (such as data-dependent Python control flow)?",
-            "choices": [
-              "TorchDynamo intercepts CPython frame evaluation at the bytecode level (via PEP 523); when encountering untraceable Python constructs, it inserts a Graph Break that splits the trace into separate subgraphs, preventing fusion across the break boundary",
-              "TorchDynamo compiles Python source text into static C++ before execution; when encountering dynamic control flow, it aborts the process with a fatal runtime exception",
-              "TorchDynamo executes an abstract syntax tree rewriter that replaces all Python loops with CUDA thread blocks, ignoring data-dependent conditions",
-              "TorchDynamo runs exclusively ahead-of-time, forcing all dynamic variables to fixed constants during model export"
-            ],
-            "answer": "The correct answer is A. TorchDynamo intercepts CPython frame evaluation at the bytecode level (via PEP 523); when encountering untraceable Python constructs, it inserts a Graph Break that splits the trace into separate subgraphs, preventing fusion across the break boundary. By hooking frame evaluation at the bytecode interpreter level, TorchDynamo captures graphs without requiring model code modifications. However, graph breaks divide execution into smaller compiled fragments separated by Python interpreter overhead, reducing the scope for cross-operator fusion and memory planning. The other choices incorrectly describe fatal exceptions, AST loop rewriting, or forced ahead-of-time constant evaluation.",
-            "learning_objective": "Explain the bytecode interception mechanism of TorchDynamo and analyze the performance impact of graph breaks"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "A constructed batch-one budget for a 13B model stored in INT4 with FP16 arithmetic after dequantization assigns 50% of step time to GEMMs (4.17 ms), 35% to element-wise operations (2.92 ms), and 15% to launch overhead (1.25 ms), approximately 8.33 ms per token (120 tokens/s). Assume compilation removes 80% of launch overhead and reduces element-wise time by 70%, leaving GEMM time unchanged. Calculate the new time and throughput, and identify the next interval to inspect.",
-            "answer": "The remaining intervals are 4.17 ms GEMM, about 0.88 ms element-wise work, and 0.25 ms launch overhead, totaling approximately 5.30 ms, or 189 tokens/s. Rounded inputs account for the small difference in the displayed baseline sum. GEMM now occupies about 79% of the budget, making it the next interval to inspect; counters and traces must determine whether its exposed cost is compute, memory traffic, or implementation inefficiency.",
-            "learning_objective": "Calculate a constructed compilation dividend and identify the next interval requiring diagnosis."
+            "question": "True or False: A straggling rank that slows every synchronous step should be charged to runtime goodput, because the reliability layer is the one that decides whether to replace the node.",
+            "answer": "False. The boundary decides where a loss is counted, and the cause decides who fixes it. The job holds a complete allocation and keeps every step, but those steps run below their ideal, so the straggler is a program goodput loss. Charging it there makes program goodput fall when the straggler appears and recover when the node is replaced, while the replacement decision stays with the reliability layer, which weighs that gain against the runtime goodput a restart costs.",
+            "learning_objective": "Apply the first-boundary rule to charge a straggler's cost to the correct factor."
           },
           {
             "question_type": "FILL",
-            "question": "In `torch.compile`, the compilation mode that expands the search over supported kernel implementations, trading additional build work for potential warmed-execution gains, is called ____.",
-            "answer": "max-autotune. This mode benchmarks candidate implementations and retains a fast choice for the target workload and hardware, trading compilation work for subsequent execution efficiency.",
-            "learning_objective": "Identify the torch.compile configuration mode responsible for hardware kernel autotuning"
+            "question": "Program goodput is the ratio of the retained steps' ____ execution time to their actual execution time, so code, compiler, and communication inefficiency are charged against a named reference.",
+            "answer": "ideal. For arithmetic-bound training and prefill steps, the ideal is the time to perform the model's required operations at peak rate, which makes program goodput equal to MFU; for bandwidth-bound decode it is the bandwidth floor, which makes it MBU.",
+            "learning_objective": "Recall the definition of program goodput and its named ideal."
           },
           {
             "question_type": "MCQ",
-            "question": "How does XLA optimization within a selected compiled region differ from eager execution boundaries, and what specialization trade-off must a deployment account for?",
+            "question": "Which assignment of losses to goodput factors follows the chapter's accounting boundaries?",
             "choices": [
-              "XLA generates Python bytecode on every forward pass, trading compilation speed for execution latency",
-              "XLA optimizes across a selected compiled region and can insert GSPMD communication; new signatures can require specialization, while cached signatures can reuse executables",
-              "XLA executes only on CPU hosts, whereas TorchDynamo compiles directly to TPU hardware",
-              "XLA requires dynamic shapes and cannot optimize static tensor dimensions"
+              "Synchronous checkpoint pause: program; asynchronous checkpoint writes that contend with the step: runtime; compilation before the first step: program",
+              "Synchronous checkpoint pause: scheduling; asynchronous checkpoint writes: runtime; compilation before the first step: scheduling",
+              "All three: runtime, because the fault-tolerance and compiler layers rather than the model cause them",
+              "Synchronous checkpoint pause: runtime; asynchronous checkpoint writes that contend with the step: program; compilation before the first step: runtime"
             ],
-            "answer": "The correct answer is B. XLA can optimize across operations within a selected region and derive communication from sharding annotations. Compilation and specialization costs depend on that region and its signatures; previously compiled signatures can reuse cached executables. It need not capture all host activity, and it supports accelerator backends as well as CPUs. Measure build cost and reuse rather than assuming every shape change recompiles the entire application.",
-            "learning_objective": "Analyze compiled-region scope, specialization cost, and artifact reuse."
+            "answer": "The correct answer is D. A synchronous pause stops the step while the job holds its devices, so the interval produces no retained step and is a runtime loss. Asynchronous writes let steps continue but contend with them for memory and network bandwidth, lengthening retained steps, a program loss. Compiling before the first step is startup, a runtime loss, while the speed of the compiled code is program goodput. Preemption follows the same logic: the orchestrator decides it, yet the lost work and the reload are runtime losses because the job held its allocation when they occurred.",
+            "learning_objective": "Classify checkpoint and compilation losses by the first accounting boundary they fail to cross."
           }
         ]
       }
     },
     {
-      "section_id": "#sec-performance-engineering-algorithmic-transformations",
-      "section_title": "Algorithmic Performance Transformations",
+      "section_id": "#sec-performance-engineering-measuring-goodput",
+      "section_title": "Measuring Goodput",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Speculative decoding mechanics, acceptance math, and roofline shifts",
-            "Correctness guarantees via residual resampling",
-            "Batching limits and diminishing returns of speculation",
-            "Mixture of Experts sparse routing, AllToAll communication, and load imbalance"
+            "The measurement contract and its per-factor window",
+            "Localizing a loss with scheduler records, job timelines, and step traces",
+            "Fleet profiling by always-on metrics, targeted traces, and stratified sampling",
+            "Regression tiers by goodput factor"
           ],
-          "question_strategy": "Probe speculative decoding correctness guarantees and roofline impact in an MCQ, explain batch-size sensitivity in a SHORT question, address MoE scaling misconceptions in a TF question, and evaluate effective ITL speedup in a scenario MCQ.",
-          "difficulty_progression": "Distributional correctness -> batch dynamics analysis -> distributed MoE trade-offs -> quantitative latency calculation.",
-          "integration": "Shows how algorithmic restructuring changes the work term $O$ in the iron law while preserving model output contracts.",
-          "ranking_explanation": "High-leverage section introducing algorithmic modifications that move the roofline operating point."
+          "question_strategy": "Order the localization records, test the per-factor window in an MCQ, identify the canary tier in an MCQ, analyze gray-failure amplification and trace-volume scaling in SHORT questions, and check the software-version field of the contract in a TF question.",
+          "difficulty_progression": "Evidence ordering -> window reasoning -> regression tier selection -> straggler mechanics -> sampling design -> contract field check.",
+          "integration": "Makes the factors measurable and comparable across time, versions, and jobs on a shared fleet.",
+          "ranking_explanation": "Methodology section that every later attribution and lever decision depends on."
         },
         "questions": [
           {
+            "question_type": "ORDER",
+            "question": "Order the three records used to localize a goodput shortfall, from first consulted to last: (1) step traces from selected ranks over a short window, (2) the job timeline from the gang-complete timestamp to release, (3) scheduler records of allocation intervals and gang-complete times.",
+            "answer": "The correct order is (3) -> (2) -> (1). Scheduler records cover every job at no extra cost and settle scheduling goodput, but cannot see inside a held allocation. The job timeline settles runtime goodput and detects, without explaining, retained steps that run slower than planned. Step traces are costly, perturb the step, and cover only their window, so they are collected only after the cheaper records show that the retained steps themselves are slow. A trace taken first can call a job healthy while it loses a third of its held time to restarts that no trace window contained.",
+            "learning_objective": "Order the localization records and explain what each can and cannot establish."
+          },
+          {
             "question_type": "MCQ",
-            "question": "Why does speculative decoding accelerate autoregressive generation on modern GPUs without altering the target model's output probability distribution?",
+            "question": "A team measures runtime goodput over one day in which no failure occurs and reports a value near one. Why does the measurement contract reject this as the job's runtime goodput?",
             "choices": [
-              "It forces the draft model to use the exact same weights as the target model through FP8 weight quantizing",
-              "It skips attention computation for all tokens where the draft model confidence exceeds 50%",
-              "It accepts candidate draft tokens with probability $\\min(1, p_\\theta / q_\\phi)$ and resamples rejected tokens from the positive residual $(p_\\theta - q_\\phi)_+$, ensuring strict mathematical equivalence while verifying $K$ tokens in a single parallel target pass to amortize weight-streaming bandwidth",
-              "It runs the draft model and target model on separate GPUs connected via PCIe, bypassing HBM bandwidth limits entirely"
+              "Runtime goodput can be measured only on a dedicated allocation, so any shared-fleet measurement is invalid",
+              "Runtime goodput is defined only over warmed steady-state steps, so a one-day window contains too much startup",
+              "Runtime goodput charges rare, costly events such as failures that discard the steps since the last checkpoint, so its window must span many interruptions, which at fleet scale means days to weeks",
+              "Runtime goodput follows the daily demand cycle, so it must be measured overnight when queues drain"
             ],
-            "answer": "The correct answer is C. It accepts candidate draft tokens with probability $\\min(1, p_\\theta / q_\\phi)$ and resamples rejected tokens from the positive residual $(p_\\theta - q_\\phi)_+$, ensuring strict mathematical equivalence while verifying $K$ tokens in a single parallel target pass to amortize weight-streaming bandwidth. In memory-bound decode, loading target model weights from HBM once can verify $K$ candidate tokens simultaneously in a single compute pass ($[K, d_{\\text{model}}] \\times [d_{\\text{model}}, d_{\\text{model}}]$), effectively shifting the arithmetic intensity $K\\times$ rightward toward the roofline ridge. The acceptance-rejection math guarantees that the emitted token sequence matches the target model distribution $p_\\theta$ exactly. The other choices describe non-existent confidence thresholds, weight quantization confusion, or PCIe offloading.",
-            "learning_objective": "Analyze how speculative decoding achieves latency speedups while preserving exact target model output distributions"
+            "answer": "The correct answer is C. A window shorter than the interval between failures can show almost no runtime loss; the running example on 128 GPUs meets a hardware failure only about once every 13 days. Program goodput loses time in every step, so warmed steady-state windows estimate it well, and scheduling goodput follows demand, so its window must span whole demand cycles. The three factors multiply into the job's MPG only when they describe the same calendar window.",
+            "learning_objective": "Choose a measurement window that matches the rate at which each goodput factor loses time."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which regression tier is designed to catch a code change that looks harmless on one GPU but bends the scaling efficiency curve before a full-fleet launch?",
+            "choices": [
+              "Small-scale canaries that measure step time and MFU on one node and on a small multi-node allocation",
+              "Startup and recovery baselines kept in the job timelines",
+              "Allocation baselines kept in the scheduler records over whole demand cycles",
+              "Single-GPU unit tests run with debug assertions enabled"
+            ],
+            "answer": "The correct answer is A. A program regression slows every step, so it shows up on a small allocation within minutes. Startup and recovery baselines watch runtime goodput, such as a compiler upgrade that adds minutes to every startup while leaving step time unchanged, and allocation baselines watch scheduling goodput across whole demand cycles. A single-GPU test cannot observe the collectives and synchronization that change with scale.",
+            "learning_objective": "Match a regression to the testing tier and record that can detect it."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why speculative decoding provides substantial speedup at batch size 1 but exhibits diminishing or even negative returns as serving batch size increases (e.g. batch size 64).",
-            "answer": "At small batches, target verification can reuse one weight pass across several candidate positions while arithmetic units have spare capacity. Larger batches already amortize weight reads, so additional verification and draft work can erase that benefit. The crossover is workload-dependent: batch size 64 alone does not establish compute saturation. Measure accepted output per round, draft and verification costs, and loaded throughput before enabling speculation.",
-            "learning_objective": "Evaluate the interaction between speculative decoding efficiency and serving batch size dynamics"
+            "question": "In a synchronous data-parallel job on 1,000 GPUs, explain why one gray-failure node that delivers 10% less throughput can lower the whole job's MFU by about 10%, which goodput factor the loss is charged to, and what always-on evidence exposes it.",
+            "answer": "Every rank must finish before a synchronized step advances, so a rank running at 90% of its normal throughput sets the step time of every rank that waits for it, and the job runs near 90% of its former rate when that rank lies on the critical path. The job still holds a complete allocation and keeps every step, so the loss is charged to program goodput, in the Fleet Law's synchronization term. Per-rank step timers and the fleet-wide step-time distribution expose the slow rank, and a timer past its threshold triggers a trace of that rank beside a healthy peer.",
+            "learning_objective": "Analyze how barrier synchronization turns one slow node into a job-wide program goodput loss and how it is detected."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A 5-second Nsight Systems trace of one GPU occupies about 500 MB. Using the scaling of that trace to 1,024 GPUs, explain why production fleets pair always-on metrics with targeted or sampled traces, and name one coverage rule a sampling policy must follow.",
+            "answer": "The same window across 1,024 GPUs produces about 512 GB, a rate no fleet can store or read continuously, and recording every launch perturbs the step it measures. Fleets therefore keep cheap always-on measures for every job, such as step time, MFU of retained steps, per-rank step timers, and device telemetry, to detect that a factor moved, then capture short traces from ranks chosen to test a hypothesis. Samples must be stratified across jobs, parallel groups, pipeline stages, step phases, and hours of the day rather than drawn only from rank 0 or a job's first minutes, and rare events need threshold-triggered capture.",
+            "learning_objective": "Justify hierarchical fleet profiling from trace-volume scaling and state a sampling coverage rule."
           },
           {
             "question_type": "TF",
-            "question": "True or False: In a Mixture of Experts (MoE) architecture, scaling the number of experts from 8 to 256 is a cost-free capacity scaling knob because each token only activates top-$k$ experts during inference.",
-            "answer": "False. More experts increase total weight capacity even when each token activates a fixed number. Distributing them can add communication, routing imbalance, and latency, but transferred activation bytes do not necessarily grow with total expert count when token count, top-k, and representation size are fixed. Placement and the number of destinations determine the actual network cost.",
-            "learning_objective": "Analyze the system-level memory, communication, and load balancing costs of scaling expert counts in MoE models"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "In a speculative decoding deployment, draft generation takes 4 ms and target verification takes 32 ms. Measurements show a mean of 3.5 emitted tokens per round, including correction or bonus tokens. What is the amortized time per emitted token and speedup over a 32 ms autoregressive baseline?",
-            "choices": [
-              "Effective ITL is 36.0 ms/token, representing a $0.89\\times$ slowdown due to draft model overhead",
-              "Effective ITL is 7.2 ms/token, representing a $4.4\\times$ speedup",
-              "Effective ITL is 20.5 ms/token, representing a $1.56\\times$ speedup",
-              "Approximately 10.3 ms per emitted token and a 3.1-fold amortized speedup"
-            ],
-            "answer": "The correct answer is D. A round takes 4 + 32 = 36 ms and emits 3.5 tokens on average, so amortized time is 36/3.5 ≈ 10.29 ms per token and speedup is 32/10.29 ≈ 3.11. Dividing by all five candidate tokens would wrongly assume full acceptance. This average does not establish an inter-token latency percentile because outputs can arrive in blocks.",
-            "learning_objective": "Calculate amortized time per emitted token from measured round cost and output yield."
+            "question": "True or False: Because a before-and-after measurement of one job runs on identical hardware, it isolates the effect of the change under test even if a framework or compiler upgrade occurred between the two runs.",
+            "answer": "False. Software alone can move delivered performance by a large multiple on unchanged hardware. Across four MLPerf Inference rounds on the same eight-GPU DGX H100 system, GPT-J throughput rose 2.7$\\times$ and Llama 2 70B 1.4$\\times$ as the inference software moved from TensorRT 9.0 to 10.8. The contract therefore records software, compiler, and driver versions as part of the system state, and a measurement that spans an upgrade measures the upgrade along with the change.",
+            "learning_objective": "Explain why the measurement contract fixes software version as part of system state."
           }
         ]
       }
     },
     {
-      "section_id": "#sec-performance-engineering-overlap",
-      "section_title": "Overlap on the Device: Streams, Contention, and Tensor-Parallel Collectives",
+      "section_id": "#sec-performance-engineering-scheduling-goodput",
+      "section_title": "Scheduling Goodput",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Exposed-time test and overlap condition ($T_{\\text{comm}} \\leq T_{\\text{compute}}$)",
-            "CUDA streams, asynchronous execution, and event synchronization",
-            "Physical SM partitioning and interference penalties",
-            "DDP bucket backward hooks and multi-node scaling degradation"
+            "Complete allocations and the in-service denominator",
+            "Queue wait versus scheduling loss",
+            "Attributing orchestration losses by first boundary missed versus the layer that removes them",
+            "The shared-pool snapshot and the ceiling of group admission"
           ],
-          "question_strategy": "Formulate the exposed-time overlap condition in an MCQ, analyze SM partitioning penalties in a SHORT question, order the sequence of DDP gradient overlap, and verify multi-stream synchronization hazards in a TF question.",
-          "difficulty_progression": "Mathematical condition check -> physical hardware contention -> runtime execution ordering -> synchronization hazard analysis.",
-          "integration": "Connects single-device execution with multi-GPU distributed collectives, grounding communication hiding in CUDA stream mechanics.",
-          "ranking_explanation": "Core distributed performance engineering section addressing inter-device communication bottlenecks."
+          "question_strategy": "Compute the snapshot's scheduling goodput and admission ceiling in an MCQ, analyze reserved-block reclamation in a SHORT question, correct the queue-wait misconception in a TF question, read scheduler records for two causes of free capacity in an MCQ, recall the availability report in a FILL question, and justify scheduler-logged completion in a SHORT question.",
+          "difficulty_progression": "Quantitative calculation -> loss movement between factors -> misconception check -> diagnostic reading -> denominator recall -> evidence design.",
+          "integration": "Separates the losses scheduling goodput counts from the orchestrator's broader utilization diagnosis, leaving the levers with fleet orchestration.",
+          "ranking_explanation": "First factor section; it sizes the boundary a job meets before any step runs."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Under the exposed-time formulation of communication-computation overlap ($T_{\\text{step}} = \\max(T_{\\text{compute}}, T_{\\text{comm}}) + T_{\\text{sync}}$), what physical condition is required to achieve 100% communication hiding (zero exposed communication time)?",
+            "question": "In a shared pool's snapshot, 80% of in-service capacity is assigned to jobs, 15% is held by groups still waiting for their remaining members, and 5% sits in complete allocations waiting for input. What is the pool's scheduling goodput, and how far can atomic group admission alone raise it?",
             "choices": [
-              "$T_{\\text{comm}} \\leq T_{\\text{compute}}$, a necessary duration condition; full hiding additionally requires timely independent work and tolerable resource interference",
-              "$T_{\\text{comm}} = 0$, requiring all distributed GPUs to share a single physical HBM memory controller",
-              "$T_{\\text{compute}} = 0$, requiring the GPU to execute collective operations without running backward pass gradients",
-              "$T_{\\text{comm}} \\ge 2 \\times T_{\\text{compute}}$, ensuring communication has priority over SM scheduling"
+              "0.80, rising to 0.95, because every assigned device counts as held and admission removes the input waits",
+              "0.60, rising to 0.80, because both the incomplete groups and the input waits are scheduling losses",
+              "0.65, rising at most to 0.80, and only if other jobs' complete allocations take every freed device",
+              "0.65, rising to 1.0, because group admission eliminates every interval of unheld capacity"
             ],
-            "answer": "The correct answer is A. Communication duration must fit within the available independent-compute window. This duration condition is necessary, not sufficient: dependencies must make that work ready in time, and resource contention must not erase the gain. If communication outlasts the window, some remains exposed. Neither zero-time communication nor giving collectives scheduling priority establishes useful overlap.",
-            "learning_objective": "Apply the exposed-time test to determine whether inter-device communication is fully hidden behind concurrent computation"
+            "answer": "The correct answer is C. Scheduling goodput counts only capacity held by complete allocations, $0.80 - 0.15 = 0.65$, so the 35% loss is the 20% no job holds plus the 15% held by incomplete groups. The 5% input wait lies inside complete allocations, so it is a runtime loss. Group admission returns the 15% to the pool as free capacity, giving a ceiling of $0.65 + 0.15 = 0.80$ that is reached only if backfill and packing refill every freed device.",
+            "learning_objective": "Calculate a pool's scheduling goodput and the ceiling a single lever can reach."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how concurrent GEMM and NCCL streams can contend for an accelerator’s SMs and memory bandwidth. Under what measured condition is a reduction in local compute throughput worthwhile?",
-            "answer": "Communication kernels can consume execution, cache, and bandwidth resources that the GEMM also needs. Temporal overlap can therefore slow local computation. The trade-off is worthwhile only when the communication time removed from the critical path exceeds the added slowdown and the end-to-end workload improves. A fixed SM reservation or universal percentage penalty cannot establish that condition.",
-            "learning_objective": "Explain the physical resource contention mechanism of SM partitioning during concurrent compute and communication execution"
+            "question": "A team's reserved block is granted as an allocation and refused to everyone else while no job takes steps on it. Which goodput factor is charged, and why does reclaiming the block move part of the loss rather than recover all of it?",
+            "answer": "The block crosses the first boundary because it is held as an allocation, then fails the second because no retained step runs, so it is a runtime goodput loss. Reclaiming it recovers only the share a borrower actually uses; the share no borrower takes becomes free capacity outside any complete allocation, now a scheduling loss. A lever can move a loss between factors without removing it, and only the product shows whether the fleet gained.",
+            "learning_objective": "Analyze how a scheduling lever can move a loss between goodput factors."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A job's own wait in the queue always lowers its pool's scheduling goodput.",
+            "answer": "False. The wait lowers scheduling goodput only while capacity sat unheld during it. If other jobs held that capacity in complete allocations, the pool lost nothing, and the wait costs the job only time to result, which is weighed against goodput when factors are traded. Pushing scheduling goodput toward one lengthens such waits steeply.",
+            "learning_objective": "Distinguish a job's queue wait from a pool's scheduling loss."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Two pools report the same low scheduling goodput. In pool X, capacity sat free while the queue was empty; in pool Y, capacity sat free while gangs waited. Which reading of the scheduler records is correct?",
+            "choices": [
+              "Both pools need a better placement policy, because scheduling goodput measures the competence of the scheduler",
+              "Pool X is larger than its demand, a capacity planning question, while pool Y has capacity stranded by placement, quota, or fragmentation, a policy question",
+              "Pool X has a fragmentation problem and pool Y has more capacity than its demand",
+              "Neither value can be interpreted without step traces from the jobs in each pool"
+            ],
+            "answer": "The correct answer is B. A low scheduling goodput describes the pool, not its scheduler, and the same value calls for opposite remedies, so queue depth is recorded beside every interval of free capacity. Scheduler records, not step traces, settle this factor, because nothing that happens inside an allocation enters it.",
+            "learning_objective": "Interpret scheduler records to separate a capacity planning loss from a policy loss."
+          },
+          {
+            "question_type": "FILL",
+            "question": "Scheduling goodput divides by in-service capacity. Accelerators out of service for repair or maintenance are left out of the denominator, and their downtime is reported beside the product as the pool's ____.",
+            "answer": "availability. Dividing by installed capacity instead would fold hardware reliability into scheduling goodput, so the measurement contract records which denominator was used, and two reports that differ on it cannot be compared.",
+            "learning_objective": "Recall how out-of-service capacity is reported in scheduling goodput accounting."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why must the moment an allocation becomes complete be logged by the scheduler as an event rather than inferred from the job's first training step, and why does a serving replica make whole-node fragmentation a scheduling concern?",
+            "answer": "Inferring completion from the first step would move startup, a runtime loss, into the scheduling factor, so the two factors would no longer divide cleanly; startup is measured between the scheduler's gang-complete event and the timeline's first step. A serving replica is one indivisible gang, a whole node across which tensor parallelism splits the weights, so a pool can hold many free GPUs and no free node. A replica waiting for a node is a scheduling loss, while loading and warmup after placement are runtime losses.",
+            "learning_objective": "Justify the evidence that dates a complete allocation and apply scheduling goodput to a serving replica."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-runtime-goodput",
+      "section_title": "Runtime Goodput",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Retained steps at the job's fault-free step time over held time",
+            "Composing runtime loss from five owners' terms without double counting",
+            "The running example's runtime loss and which term dominates",
+            "The coupling between preemption budget and checkpoint interval; serving replica readiness"
+          ],
+          "question_strategy": "Read the running example's composition in an MCQ, explain the fault-free normalization in a SHORT question, apply a double-counting rule in an MCQ, correct the same-value-same-owner misconception in a TF question, recall the preemption-adjusted checkpoint interval in a FILL question, and size a serving replica's loading loss in an MCQ.",
+          "difficulty_progression": "Quantitative composition -> boundary normalization -> composition rules -> interpretation -> coupled decision -> serving application.",
+          "integration": "Places the losses priced by the storage, fault-tolerance, and orchestration chapters on one boundary so they can be compared.",
+          "ranking_explanation": "Second factor section; it shows that the largest runtime lever depends on the job's size, fleet, and priority."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "The Llama 2 70B running example holds 128 GPUs for a week under a budget of one forced preemption a day. Its runtime loss terms are about 0.05% startup, 7.7% input waits, 0.4% checkpoint waste, 0.03% recovery, and 1.4% preemption. Which conclusion follows?",
+            "choices": [
+              "Runtime goodput is about 0.90, and the input pipeline reaches far more held time than faster checkpoint writes and warm restart could",
+              "Runtime goodput is about 0.90, and the reliability layer owns the largest lever because checkpoint waste and recovery grow with device count",
+              "Runtime goodput is about 0.97, because preemption is charged to scheduling goodput",
+              "Runtime goodput is about 0.92, because input waits are a program loss"
+            ],
+            "answer": "The correct answer is A. The five terms add to a loss of about 10%, so runtime goodput is about 0.90, with input waits and preemption accounting for 9.1% of it. Checkpoint waste and recovery together are under half a percent, so the input pipeline reaches about 17$\\times$ as much held time as recovery. Checkpoint waste and recovery grow with device count and pass input waits only near 13,000 GPUs. Preemption is a runtime loss because the job held its allocation, and input waits are carved out of the step and charged here.",
+            "learning_objective": "Compose a job's runtime loss from its owners' terms and identify the lever that reaches the most held time."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Runtime goodput's numerator is the number of retained steps multiplied by the job's fault-free step time. Explain why this normalization charges a straggler that slows every step for days to program goodput, but charges the same slowdown confined to the minutes after a restart to runtime goodput.",
+            "answer": "The fault-free step time is the job's steady-state step time with the input batch ready and no recovery in progress, so it already contains exposed communication, pipeline bubbles, memory stalls, and a persistent straggler; those losses pass through the runtime boundary and are charged to program goodput. Steps just after a relaunch run slower because caches are cold, kernels are compiling, and the input pipeline is refilling, so their excess over the fault-free time belongs to the recovery that caused it and is a runtime loss.",
+            "learning_objective": "Explain how normalizing to the fault-free step time separates runtime from program losses."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "The five runtime loss terms can be added only if no interval enters two of them. Which rule keeps a failure's lost work from being counted twice?",
+            "choices": [
+              "Rework is charged to both the checkpoint and failure terms, and the sum is halved",
+              "All rework is charged to the preemption term, because preemptions and failures discard work the same way",
+              "Rework is excluded entirely, because steps after the last checkpoint are neither retained nor lost",
+              "The checkpoint waste term already counts the steps a failure erases, so the failure term uses the recovery budget without rework"
+            ],
+            "answer": "The correct answer is D. Each interval is charged once. Checkpoint waste counts synchronous writes plus the expected rework after failures; a forced preemption's lost work sits in the preemption tax; warmup belongs to the event that caused it, so the startup term counts only launches no interruption caused; the data stall ratio is a steady-state quantity; and only synchronous checkpoint pauses are runtime losses. Steps after the last commit in a window are handled by closing the window at a commit, not by excluding rework.",
+            "learning_objective": "Apply the composition rules that prevent an interval from entering two runtime loss terms."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Because the running example's runtime goodput of about 0.90 matches the at least 0.90 implied for Llama 3 405B, the two jobs should call on the same owners to improve it.",
+            "answer": "False. The agreement hides a difference in kind. The Llama 3 run, dedicated and spread over 128$\\times$ as many devices, had to hold its loss down in the failure-driven terms that grow with device count. The running example loses almost nothing there and nearly all of its loss to input waits and preemption. The same value of a factor can point to different owners, so the report carries the terms, not only their sum.",
+            "learning_objective": "Interpret a runtime goodput value through its composition rather than its sum."
+          },
+          {
+            "question_type": "FILL",
+            "question": "The running example's Young-Daly checkpoint interval of about 77 minutes was computed from hardware failures alone. Counting its budgeted preemptions as interruptions too shortens the interval to about ____ minutes.",
+            "answer": "21. A forced preemption discards the work since the last checkpoint exactly as a failure does, so for choosing an interval it is another interruption. The interval belongs to the fault-tolerance layer and the preemption budget to orchestration, and only the composition shows that the two decisions are one.",
+            "learning_objective": "Recognize the coupling between the preemption budget and the checkpoint interval."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A serving replica needs about 5.7 minutes to fetch, load, and warm up after it is placed. How does the replica's lifetime change this runtime loss, and what does a warm pool of loaded, idle replicas do to it?",
+            "choices": [
+              "The loss is a scheduling loss because the replica cannot serve yet, so lifetime does not affect it",
+              "The loss is about 0.4% of held time for a replica released once a day and about 9% for one added for a single burst hour; a warm pool moves it to program goodput as headroom rather than removing it",
+              "The loss is the same share of held time regardless of lifetime, and a warm pool removes it entirely",
+              "The loss is charged to serving latency, so it never enters runtime goodput"
+            ],
+            "answer": "The correct answer is B. Once placed, the replica holds a complete allocation even though it cannot yet serve, so loading and warmup are runtime losses read from its lifecycle log, while provisioning precedes the complete allocation and is not charged here. Lifetime sets the share, so the capacity a fleet adds for short bursts pays the largest fraction. A warm pool keeps replicas ready but idle, which converts the loss into headroom, a program goodput loss.",
+            "learning_objective": "Size a serving replica's readiness loss against its lifetime and classify the effect of a warm pool."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-profiling",
+      "section_title": "Program Goodput",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Iron law terms and their mapping onto the Fleet Law",
+            "Exposed communication from one node to 128 GPUs and the scaling efficiency split",
+            "Straggler versus exposed-communication evidence in a step trace",
+            "Top-down drill-down, trace perturbation, and roofline placement by measured arithmetic intensity"
+          ],
+          "question_strategy": "Apply the iron law to a targeted upgrade in an MCQ, compute the scale loss and its reporting rule in an MCQ, interpret synchronized rank traces in a SHORT question, describe the drill-down in a SHORT question, place a LayerNorm kernel on the roofline in an MCQ, and distinguish measured from algorithmic intensity in a TF question.",
+          "difficulty_progression": "Iron law calculation -> fleet scaling calculation -> trace interpretation -> diagnostic protocol -> roofline placement -> definition check.",
+          "integration": "Connects single-device iron-law reasoning to the Fleet Law terms that decide whether a local saving reaches the fleet.",
+          "ranking_explanation": "Locates the largest loss inside the time the running job holds and names the term a fix must shorten."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A training step's wall-clock time is decomposed with the iron law ($T = D_{\\text{vol}}/\\text{BW} + O/(R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}) + L_{\\text{lat}}$) into 60% memory traffic, 30% compute, and 10% dispatch and latency overhead. A hardware upgrade doubles peak compute $R_{\\text{peak}}$ while leaving memory bandwidth and overhead unchanged. What is the maximum speedup this upgrade can achieve on this workload?",
+            "choices": [
+              "$2.00\\times$, because doubling peak compute halves the execution time of the matrix multiplications",
+              "$1.67\\times$, because the compute and overhead fractions are both accelerated by the faster arithmetic",
+              "About $1.18\\times$, because doubling compute only reduces the 30% compute slice to 15% while the 70% non-compute time remains",
+              "$1.43\\times$, because the memory-bound portion is compressed by the faster arithmetic units"
+            ],
+            "answer": "The correct answer is C. Doubling $R_{\\text{peak}}$ affects only the compute term, halving it from 0.30 to 0.15 of the baseline time. The new normalized time is $0.60 + 0.15 + 0.10 = 0.85$, a speedup of $1/0.85 \\approx 1.18\\times$. A local change helps only through the term it shortens, and only by the part of that term that was exposed; expecting $2\\times$ ignores that 70% of the step is governed by memory traffic and overhead.",
+            "learning_objective": "Apply the iron law to bound the speedup of a hardware change that shortens one term."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "The running example reaches 65% MFU on one 8-GPU node and 48% fleet MFU on 128 GPUs with the same work on each device, its step time rising from 180 ms to 245 ms. How much of the node's efficiency does scale cost, and how should a report state the job's program goodput?",
+            "choices": [
+              "17%, the direct difference in MFU points, and program goodput is $0.65 \\times 0.74$ multiplied again by the fleet MFU",
+              "About 26% (a scaling efficiency of about 74%), and program goodput is either the fleet MFU of 0.48 or the node MFU times the scaling efficiency, never the fleet MFU times the scaling efficiency",
+              "About 52%, the unused share of peak, all of which is exposed communication",
+              "About 26%, and program goodput is $0.48 \\times 0.74 \\approx 0.36$ because the scale loss must be charged separately"
+            ],
+            "answer": "The correct answer is B. Because each device does the same work, the MFU ratio equals the step-time ratio, $180/245 \\approx 0.74$, so scale costs about 26% of the node's efficiency; 17 points is an absolute difference. The fleet MFU already contains the exposed time, so multiplying it by the scaling efficiency would charge that time twice. The 65 ms added per step, about 27% of the fleet step, bounds what exposed communication and synchronization can claim, but only a step trace attributes it, since offload, kernel shapes, and barrier waits can also change between the two configurations.",
+            "learning_objective": "Calculate the efficiency cost of scale from node and fleet MFU and report program goodput without double counting."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Synchronized per-rank traces record the same collective in otherwise matched steps. In the baseline, every rank enters at 8 ms and all finish at 10 ms. In case A, all ranks but one enter at 8 ms, the last enters at 12 ms, and all finish at 14 ms. In case B, every rank enters at 8 ms and all finish at 14 ms. Which Fleet Law term does each case lengthen, and why do both lower the same goodput factor while pointing to different lever owners?",
+            "answer": "Case A adds 4 ms of waiting for one late rank while the others wait at the barrier, the signature of a straggler in the synchronization term; the next step is to trace that rank's preceding computation, input, and host work beside a healthy peer. Case B stretches the collective itself from 2 ms to 6 ms with every rank present, exposed communication in the communication term not covered by overlap. Both occur inside retained steps on a complete allocation, so both are program goodput losses. The straggler may be fixed by node replacement in the reliability layer, while exposed communication is addressed by layout and overlap. The trace localizes the interval but does not by itself prove a network fault.",
+            "learning_objective": "Diagnose aligned-rank traces to separate a straggler from exposed communication."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Describe the top-down drill-down from a fleet measure to a hardware root cause for a program goodput loss, and explain why the step's duration is read from the untraced job timeline rather than from the trace.",
+            "answer": "Fleet measures such as step time against plan, MFU of retained steps, and per-rank step timers detect the loss. Framework and distributed traces associate step time with model operations across ranks, where a lagging rank or exposed collective first appears. Kernel timelines on one rank show launch gaps and the overlap of compute and communication streams, and hardware counters report achieved bandwidth, occupancy, and instruction mix for one kernel. Each level is taken only for the ranks and window the level above selected, and the descent stops at the level that names the term. Tracing adds host work, memory, and synchronization, so a traced step can run slower or overlap differently; the trace is evidence about structure, and the duration comes from the untraced timeline.",
+            "learning_objective": "Synthesize the profiling hierarchy for a program goodput loss and account for trace perturbation."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Counters for a LayerNorm kernel on an H100 report 5 TFLOP/s of achieved arithmetic and 2.8 TB/s of achieved memory bandwidth, against a peak bandwidth of 3.35 TB/s and an FP16 ridge of about 295 FLOP/byte. Which lever can deliver a material gain?",
+            "choices": [
+              "Faster arithmetic units, because the kernel achieves only a tiny fraction of peak FLOP/s",
+              "A better memory schedule inside the kernel, because achieved bandwidth is far below peak",
+              "Graph replay, because a low FLOP rate always indicates host dispatch overhead",
+              "Moving fewer bytes, by fusing the normalization with the operation that produces its input or by a supported smaller representation"
+            ],
+            "answer": "The correct answer is D. Measured intensity is $5 / 2.8 \\approx 1.8$ FLOP/byte, far below the ridge, so the kernel's bound lies on the bandwidth slope, and it already achieves about 83.6% of peak bandwidth. Faster arithmetic cannot raise a bandwidth ceiling, and a better schedule recovers only the small remaining gap. Fusion keeps the intermediate out of HBM. A low FLOP rate alone does not indicate dispatch, which appears instead as idle gaps between short kernels.",
+            "learning_objective": "Place a profiled kernel on the roofline from counter data and select the lever that can move it."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A profiled kernel's measured arithmetic intensity always equals the algorithmic intensity of its operation, so the kernel can be placed on the roofline from the model's FLOP and byte counts alone.",
+            "answer": "False. Measured intensity divides the operations a kernel actually executes by the bytes observed crossing a named memory boundary, so it includes tiling, cache behavior, fusion, padding, and redundant transfers. A measured value below the algorithmic estimate exposes traffic the algorithm did not require, and a roofline point is interpretable only when its FLOP convention and memory boundary match the ceilings on the same plot.",
+            "learning_objective": "Distinguish measured from algorithmic arithmetic intensity in roofline diagnosis."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-program-goodput",
+      "section_title": "Recovering Program Goodput",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Compiler-derived partitioning: annotations, propagation, and resharding collectives",
+            "Overlap of gradient exchange and contention between compute and communication streams",
+            "Readiness and lifetime obligations for multi-stream execution",
+            "Kernel-level levers by the term they shorten, and why program fixes do not add"
+          ],
+          "question_strategy": "Diagnose an unexpected collective after an annotation change in an MCQ, order DDP bucketed overlap, explain stream contention in a SHORT question, check producer-consumer ordering in a TF question, analyze graph replay against the decode floor in an MCQ, and reason about non-additive fixes in a SHORT question.",
+          "difficulty_progression": "Compiler mechanism -> runtime sequencing -> resource contention -> synchronization hazard -> lever reach -> composition.",
+          "integration": "Recovers the program goodput loss located in the previous section through partitioning, overlap, and kernel-level levers, each judged by the Fleet Law term it shortens.",
+          "ranking_explanation": "Lever section; it shows why the running job's largest program loss lies beyond the reach of kernel levers."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "In the running example, the programmer annotates the input's batch dimension along the data axis and splits the feed-forward and attention projections along the model axis. After an annotation change, a step trace shows an AllGather in every layer that the layout does not predict. What does this most likely indicate?",
+            "choices": [
+              "A conflict in sharding propagation, such as a reshape or a tensor whose annotation disagrees with its neighbors, causing the compiler to insert resharding collectives that no line of the program names",
+              "The compiler has correctly added the data-parallel gradient reduction",
+              "The NVLink links are failing, so collectives are being retried",
+              "The model code contains an explicit AllGather that the annotations cannot override"
+            ],
+            "answer": "The correct answer is A. With compiler-derived partitioning, the programmer annotates a few tensors and the compiler propagates layouts and inserts the collectives they require, such as the model-axis AllReduce after the row-split output projection. Wherever two derived layouts disagree, it inserts resharding collectives. The annotations decide which collectives exist, the mapping of the mesh onto the allocation decides how long each takes, and the overlap schedule decides how much is exposed. Counting the trace's collectives by type and mesh axis against the layout's prediction checks the propagation; the model code itself contains no collective.",
+            "learning_objective": "Diagnose compiler-derived partitioning from the collectives a step trace shows."
           },
           {
             "question_type": "ORDER",
-            "question": "In PyTorch DistributedDataParallel (DDP), arrange the following events in the exact sequence that implements asynchronous gradient communication overlap during training:\n\n(1) Main compute stream continues backward pass execution on earlier layers concurrently with network transfer\n(2) Autograd backward pass computes parameter gradients for a layer\n(3) Event barrier synchronizes the communication stream with the compute stream before optimizer step\n(4) Autograd backward hook triggers asynchronous AllReduce on the parameter bucket in a dedicated NCCL stream",
-            "answer": "The correct order is (2) Autograd backward pass computes parameter gradients for a layer -> (4) Autograd backward hook triggers asynchronous AllReduce on the parameter bucket in a dedicated NCCL stream -> (1) Main compute stream continues backward pass execution on earlier layers concurrently with network transfer -> (3) Event barrier synchronizes the communication stream with the compute stream before optimizer step. As gradients are computed, hooks dispatch non-blocking AllReduces on a side stream while backward propagation continues on the main stream, synchronizing only at the end of the backward pass.",
-            "learning_objective": "Order the runtime sequence of PyTorch DDP bucketed gradient communication and backward computation overlap"
+            "question": "In PyTorch DistributedDataParallel, arrange the following events in the sequence that overlaps gradient communication with the backward pass: (1) the compute stream continues the backward pass on earlier layers while the bucket is transferred, (2) the backward pass computes the gradients that fill a bucket, (3) the communication stream is synchronized with the compute stream before the optimizer step, (4) a backward hook launches an asynchronous AllReduce of the bucket on a communication stream.",
+            "answer": "The correct order is (2) -> (4) -> (1) -> (3). A gradient bucket can be reduced as soon as the backward pass has produced it, so a hook dispatches a non-blocking AllReduce on a side stream while backward propagation continues on the main stream, and the two streams synchronize only before the optimizer step. These loose dependencies are why the data-axis exchange can be hidden, unlike model-axis AllReduce operations whose result the next operation needs.",
+            "learning_objective": "Order the runtime sequence of bucketed gradient overlap and explain why its dependencies allow hiding."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain how a collective on a communication stream can contend with matrix multiplications on a compute stream, and state the measured condition under which overlap raises program goodput.",
+            "answer": "Separate streams make concurrent execution possible but do not reserve independent hardware. The collective library runs its own kernels on the same streaming multiprocessors to move and reduce data, so it competes with the matrix multiplications for those processors, memory bandwidth, and cache. On a timeline, successful overlap moves the collective's interval under computation while the compute kernels beside it grow longer. Overlap raises program goodput only if the communication time it removes from the critical path exceeds the time it adds to the computation, which only an end-to-end measurement of the step establishes.",
+            "learning_objective": "Explain the resource contention of concurrent compute and communication and the condition for a net gain."
           },
           {
             "question_type": "TF",
             "question": "True or False: If a side-stream collective reads a tensor before its producing kernel completes, missing producer-consumer ordering can cause a data race even though each stream executes its own operations in order.",
-            "answer": "True. Per-stream order does not establish order between a producer and consumer on different streams. An event wait, an appropriate stream wait, or equivalent ordering must establish readiness; storage lifetime must also remain valid. Concurrency is safe only after both obligations hold.",
-            "learning_objective": "Analyze multi-stream CUDA synchronization hazards and data race conditions"
+            "answer": "True. Per-stream order does not establish order between a producer on one stream and a consumer on another. Overlap that a program arranges for itself must meet two obligations a data-parallel wrapper otherwise meets for it: readiness, so that no consumer reads a tensor before its producer finishes, and lifetime, so that no tensor's storage is reused while a side stream still uses it. Both must hold before a shorter step is credited to overlap rather than to a race that skipped work.",
+            "learning_objective": "Analyze the readiness and lifetime obligations of multi-stream execution."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Eager submission of one forward pass of the 70B model costs roughly 12–24 ms of host time, while the serving replica's batch-one decode floor is about 5.2 ms per token. What does graph replay change, and what limits it?",
+            "choices": [
+              "It fuses the pass's element-wise kernels, removing intermediate HBM traffic, and works for any input shape",
+              "It lowers the bandwidth floor of decode by keeping the weights in on-chip memory",
+              "It shortens only the host-dispatch part of the latency term by resubmitting a captured kernel sequence in one request; shapes, memory addresses, and control flow must match the capture, so varying shapes need one captured variant per shape bucket",
+              "It hides the per-layer tensor-parallel AllReduce behind computation, removing the communication term"
+            ],
+            "answer": "The correct answer is C. Because eager dispatch can exceed the bandwidth floor, eager decode can be dispatch-bound before it is bandwidth-bound, and graph replay targets exactly that interval. It does not fuse kernels or reduce bytes; fusion and tiling shorten the data term. The evidence of success is that launch gaps disappear from the kernel timeline. The replica's per-layer AllReduce, about 32.8 KB at batch one, is latency-bound and cannot be hidden because the next operation needs its result, so fewer exchanges or cheaper launches are what shorten it.",
+            "learning_objective": "Evaluate graph replay by the term it shortens and the capture constraints that limit it."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Two program fixes each shorten the node step when measured alone. Explain one way applying both can save less than the sum of their savings, one way it can save more, and why a fix that worked on the node baseline is measured again on the fleet configuration.",
+            "answer": "A lever shortens only the exposed part of its term, so after one lever runs, every term's share of the step changes. Combinations can overlap or conflict: a compiler that already fuses an element-wise chain leaves nothing for a hand-written fusion of the same chain, and a kernel speedup that shortens the backward pass shrinks the window that hid the gradient exchange, exposing communication that was free before. Combinations can reinforce: fusion and tiling free activation memory, which allows a larger microbatch that lengthens the computation available to hide each collective. On the fleet, the data-axis exchange holds most of the loss that scale adds, so only an end-to-end measurement under the contract on the fleet configuration classifies a combination.",
+            "learning_objective": "Explain why program fixes do not add and why each is re-measured on the fleet configuration."
           }
         ]
       }
     },
     {
-      "section_id": "#sec-performance-engineering-playbook",
-      "section_title": "Optimization Playbook for Large Language Models",
+      "section_id": "#sec-performance-engineering-whole-fleet",
+      "section_title": "The Whole Fleet",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Diagnostic sequencing: Precision -> Fusion -> Speculation",
-            "Bottleneck displacement across optimization rounds",
-            "Compounding effects of INT4 weights, INT8 KV cache, FlashAttention-2, and CUDA Graphs",
-            "Adaptive speculative decoding policy under varying load"
+            "Job product versus pool product and their loss shares",
+            "The value of one point of a factor as the product of the other two",
+            "Ranking levers by relative gain at the owners' ceilings",
+            "Cost per useful accelerator-hour and the Archetype B goodput profile"
           ],
-          "question_strategy": "Order the optimization rounds in the 70B case study, explain why precision engineering precedes fusion and speculation in an MCQ, analyze adaptive speculation batch thresholds in a SHORT question, and diagnose intermediate bottleneck displacement in an MCQ.",
-          "difficulty_progression": "Optimization round sequencing -> architectural dependency reasoning -> load-dependent policy analysis -> bottleneck displacement diagnosis.",
-          "integration": "Synthesizes all individual techniques into a cohesive, production-grade optimization case study on a 70B model.",
-          "ranking_explanation": "Capstone case study section showing how disparate optimizations compound sequentially."
+          "question_strategy": "Compute the products and loss shares in an MCQ, value a point of program goodput in an MCQ, rank levers by ceiling in a SHORT question, price useful work in an MCQ, correct the scheduling-speeds-the-job misconception in a TF question, and apply the accounting to a recommendation fleet in a SHORT question.",
+          "difficulty_progression": "Product calculation -> marginal value -> lever ranking -> cost translation -> ownership reasoning -> archetype transfer.",
+          "integration": "Composes the three sized factors into one decomposition, turns it into a lever ranking and a price, and shows the ranking is workload specific.",
+          "ranking_explanation": "Synthesis section where the chapter's accounting produces decisions and costs."
         },
         "questions": [
           {
-            "question_type": "ORDER",
-            "question": "In the constructed batch-one 70B decode budget, order the three optimization experiments: (1) Operator fusion and graph replay, (2) Weight precision reduction, (3) Speculative decoding.",
-            "answer": "The correct order is (2) Weight precision reduction -> (1) Operator fusion and graph replay -> (3) Speculative decoding. Precision first reduces the exposed GEMM interval. Fusion and replay then reduce attention, element-wise, and launch intervals. Speculation finally changes output per target pass. Each round uses explicit assumptions and a shared timing boundary; the sequence is not a universal optimization order.",
-            "learning_objective": "Order the experiments in a constructed decode budget and explain their shared accounting boundary."
+            "question_type": "MCQ",
+            "question": "The running example has scheduling goodput 0.65, runtime goodput 0.90, and program goodput 0.48. Which statement of its products and loss shares is correct?",
+            "choices": [
+              "The job product is about 0.43 and the pool's MPG about 0.28; of fleet capacity, 35% is lost to scheduling, 10% to runtime, and 52% to the program",
+              "The job product is about 0.58 and the pool's MPG about 0.43; of fleet capacity, 35%, 6%, and 15% are lost at the three boundaries",
+              "The pool's MPG is about 0.67, the average of the three factors, so a third of fleet capacity is lost",
+              "The job product is about 0.43 and the pool's MPG about 0.28; of fleet capacity, 35% is lost to scheduling, 6% to runtime, and 31% to the program"
+            ],
+            "answer": "The correct answer is D. The job product is $0.90 \\times 0.48 \\approx 0.43$ and the pool product is $0.65 \\times 0.43 \\approx 0.28$. Loss shares weight each factor's loss by what earlier boundaries passed: scheduling $1 - 0.65 = 0.35$, runtime $0.65 \\times 0.10 \\approx 0.06$, and program $0.59 \\times 0.52 \\approx 0.31$, where 0.59 is scheduling times runtime goodput. With the 0.28 that became progress, the four parts add to one. Charging the runtime and program losses against full capacity counts earlier losses again.",
+            "learning_objective": "Compute job and pool goodput products and the share of fleet capacity lost at each boundary."
           },
           {
             "question_type": "MCQ",
-            "question": "Why does the constructed batch-one 70B decode example test INT4 weights before speculative decoding or operator fusion?",
+            "question": "For the running example, what is one percentage point of program goodput worth in MPG, and why is it worth more than a point of runtime goodput?",
             "choices": [
-              "Because the GPU driver disables CUDA Graphs and compiler optimizations unless weights are formatted in INT4",
-              "The assumed profile identifies weight traffic as the first target; reducing its exposed GEMM interval provides a consistent baseline for subsequent experiments",
-              "Because speculative decoding cannot mathematically operate on FP16 models",
-              "Because operator fusion only works on models with fewer than 10 billion parameters"
+              "About 0.48 of a point, equal to program goodput itself",
+              "About 0.59 of a point, the product of the other two factors, $0.65 \\times 0.90$; a point of runtime goodput is worth only $0.65 \\times 0.48 \\approx 0.31$",
+              "One full point, because MPG is the sum of the three factors",
+              "About 0.43 of a point, the job product, because scheduling goodput does not affect the program's value"
             ],
-            "answer": "The correct answer is B. The example assumes weight streaming is the first target and tests a 45% reduction in its exposed GEMM interval while leaving other intervals unchanged. It does not infer a batch expansion or simultaneous throughput gain from freed memory. Compiler restrictions, model-size limits, and an inability to speculate in FP16 are not the reason for this order.",
-            "learning_objective": "Justify the architectural sequencing of optimization interventions in a production LLM serving pipeline"
+            "answer": "The correct answer is B. Raising one factor by a small amount raises the product by that amount times the other two. A point of program goodput is worth the most because its value is the product of the two highest factors, and a point of runtime goodput the least because its value is the product of the two lowest. Every factor's lever is worth more on a fleet whose other factors are high.",
+            "learning_objective": "Calculate the marginal value of a goodput point as the product of the other factors."
           },
           {
             "question_type": "SHORT",
-            "question": "Why must a serving controller measure the batch-size crossover for speculative decoding rather than infer a universal cutoff from a batch-one decode budget?",
-            "answer": "Batching already shares weight reads across requests, reducing the spare compute that makes verification economical. Draft overhead, acceptance, cache capacity, and verification kernels determine where speculation stops improving useful service. The batch-one budget establishes no cutoff at 16 or any other batch size. Measure latency and loaded throughput for the draft-target pair under the intended request mix before selecting a policy.",
-            "learning_objective": "Analyze the systems rationale for load-dependent adaptive speculative decoding policies"
+            "question": "Scheduling loses the largest share of the running example's pool capacity, yet the chapter ranks the program lever first. Using the owners' ceilings (scheduling 0.80, runtime 0.98 with input waits removed, program 0.65 at the node baseline), explain the ranking.",
+            "answer": "A loss share says where capacity went, not what a lever returns, because capacity recovered at an early boundary must still cross the later ones. Each lever multiplies MPG by its factor's own relative gain: scheduling to 0.80 raises MPG about 23% to 0.35, removing input waits about 9% to 0.31, and the program to the node's 0.65 about 35% to 0.38. The program lever is worth the most because its factor has the most relative room to its ceiling. The ceilings are optimistic for every owner, but the ranking holds unless one owner's practical reach falls far below the others'.",
+            "learning_objective": "Rank goodput levers by relative gain at their owners' ceilings rather than by loss share."
           },
           {
             "question_type": "MCQ",
-            "question": "An 85 ms decode step has exposed intervals of 34 ms GEMM, 20.4 ms attention, 10.2 ms element-wise work, 10.2 ms AllReduce, and 10.2 ms launch/runtime overhead. Reducing only GEMM time by 45% leaves 69.7 ms. Why does this still miss a 50 ms objective?",
+            "question": "At an internal fleet rate of \\$2 per in-service accelerator-hour, what does the running example's pool pay for one accelerator-hour of ideal-rate progress, and what does a chargeback that bills each team only for the hours it holds charge this job?",
             "choices": [
-              "The InfiniBand network cable was disconnected during the benchmark run",
-              "The GPU ran out of power and throttled clock frequency to zero",
-              "The unchanged non-GEMM intervals still total 51 ms, so reducing GEMM alone by the assumed amount cannot reach the objective",
-              "INT4 quantization caused the model to produce infinite repetitive token loops"
+              "About \\$7.09, or 3.5$\\times$ the capacity price; billing held hours charges about 2.3$\\times$ the rate and leaves the scheduling loss unbilled",
+              "About \\$4.17, because only program goodput divides the capacity price",
+              "About \\$2.25, because only runtime losses raise the price of useful work",
+              "About \\$7.09, and billing held hours charges the same 3.5$\\times$, because every loss lies inside the job's allocation"
             ],
-            "answer": "The correct answer is C. GEMM becomes 34 × 0.55 = 18.7 ms, while all other exposed intervals remain 51 ms; the sum is 69.7 ms. The next experiment must address other critical-path costs. With attention at 15.3 ms, element-wise work at 3.4 ms, and launch/runtime overhead at 2 ms, the later constructed budget totals 49.6 ms; these are assumptions, not benchmark claims.",
-            "learning_objective": "Analyze bottleneck displacement across iterative optimization rounds using timeline breakdown data"
+            "answer": "The correct answer is A. The cost of a useful accelerator-hour is the capacity price divided by MPG, about \\$2 divided by 0.28, so every factor acts as a cost multiplier. A chargeback per held hour divides only by the job product of about 0.43, so the scheduling loss is billed to no one unless the cost-attribution policy assigns it. Lifting program goodput to its ceiling would cut the price of useful work by about 26% without buying an accelerator.",
+            "learning_objective": "Translate goodput factors into the cost of a useful accelerator-hour and evaluate a chargeback policy."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Raising the pool's scheduling goodput is the most direct way to shorten the running example's time to result, because scheduling loses the largest share of pool capacity.",
+            "answer": "False. The job already holds its allocation, so the pool's unheld capacity does not slow it; capacity that a better scheduler recovers becomes complete allocations for other queued jobs. The job's product, runtime times program goodput, is what its team can change. An accounting that reports only the job's product hides the pool's largest loss from its owners, and one that reports only the pool's charges the job a loss its team cannot touch.",
+            "learning_objective": "Distinguish what the job product and the pool product each measure and who can change them."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "For an Archetype B (DLRM at Scale) recommendation fleet, explain where a wait for embedding rows fetched from host memory and an exposed AllToAll exchange of the gathered vectors are charged, and why the running example's lever ranking cannot be reused.",
+            "answer": "Rows fetched ahead of the step belong to the input path, so when that path cannot keep pace with the step rate the accelerators wait for their batch, a runtime loss sized by the data stall ratio and recovered by prefetching and caching hot rows. Inside the retained step, the AllToAll's completion is set by the slowest destination under shard skew or a congested fabric, and the part the dense computation does not hide is a program loss recovered by shard balancing and message coalescing. Because such a step is bounded more by bytes moved than by arithmetic, its program goodput must name its ideal with care. The value of a point is still the product of the other two factors, but the ranking must be recomputed from that fleet's own measured factors.",
+            "learning_objective": "Apply the goodput accounting to a recommendation workload and justify recomputing the lever ranking."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-frontier-objective",
+      "section_title": "Trading Between Factors",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "The product rule for changes that touch several factors",
+            "Whose product and which window judge a trade",
+            "Compilation builds: where builds and recompilations are charged, and amortization over executions",
+            "Time to result and the efficiency frontier"
+          ],
+          "question_strategy": "Apply the product rule in an MCQ, calculate a compilation break-even in a SHORT question, order the compilation pipeline, classify steady-state recompilation in an MCQ, correct the job-product judgment of preemption in a TF question, and reason about time to result versus fleet goodput in a SHORT question.",
+          "difficulty_progression": "Ratio calculation -> amortization calculation -> pipeline sequencing -> boundary classification -> scope of judgment -> frontier reasoning.",
+          "integration": "Turns the displacement of overhead into one decision rule across factors, then adds time to result and price to place configurations on the efficiency frontier.",
+          "ranking_explanation": "Decision section that judges levers which raise one factor while lowering another."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A change raises a job's program goodput by a tenth of its value and lowers its runtime goodput by a twelfth of its value, both measured over the same window. Does the product rise, and is scheduling goodput needed to decide?",
+            "choices": [
+              "Yes; the product is multiplied by about $1.10 \\times 11/12 \\approx 1.008$, and scheduling goodput is not needed because an unchanged factor's ratio is one",
+              "No, because a loss in runtime goodput always outweighs an equal or larger gain in program goodput",
+              "It cannot be decided without the absolute values of scheduling and runtime goodput",
+              "Yes, by about 18%, the sum of the two percentage changes"
+            ],
+            "answer": "The correct answer is A. A change that touches several factors multiplies MPG by the product of each factor's ratio, its value after the change divided by its value before, measured on the same boundary and window; it is worth making only when that product exceeds one. Ratios let separate owners apply the rule from their own records. The rule is asymmetric because factors start at different heights: lifting the running example's program goodput to its ceiling would still pay at up to 26% of runtime goodput, while removing every runtime loss could raise runtime goodput by only about 13%.",
+            "learning_objective": "Apply the product rule to decide whether a cross-factor trade raises goodput."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A constructed 13B decode budget on one H100 runs at 120 tokens/s (8.33 ms per token): 50% matrix multiplications, 35% element-wise kernels, and 15% exposed launch overhead. Compilation leaves the matrix multiplications unchanged, removes 70% of the element-wise time and 80% of the launch overhead, and an autotuning build takes about 15 minutes. Calculate the compiled step time and speedup and the tokens needed to repay the build on one replica, and explain how sharing the artifact across 128 replicas changes the answer.",
+            "answer": "The compiled step is $0.50 + 0.35 \\times 0.30 + 0.15 \\times 0.20 = 0.635$ of the uncompiled step, about 5.3 ms per token, a 1.58$\\times$ speedup that saves about 3.0 ms per token. Repaying 15 minutes takes about 300,000 tokens, roughly 26 minutes of single-stream generation. A shared artifact is repaid in about 12 seconds of the pool's generation, while per-replica builds cost about 32 GPU-hours per rollout, a quarter of the held time of a replica added for one burst hour. A build is amortized over executions, not over time.",
+            "learning_objective": "Calculate a compilation dividend and the executions needed to repay its build."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Arrange the following stages of graph compilation in the order a compiler applies them: (1) fuse operations into groups whose intermediates stay on chip, (2) capture a region of the program as a graph, (3) select or generate a kernel for each fused group, (4) plan memory for the fused graph's tensors, (5) rewrite the graph with simplifications.",
+            "answer": "The correct order is (2) -> (5) -> (1) -> (4) -> (3). The compiler captures a region as a graph, rewrites it, fuses its operations, plans its memory across the fused graph, and finally selects or generates a kernel for each fused group. This work is paid before the first step it improves and again at every recompilation, a runtime goodput cost, while the speed of the compiled steps is program goodput.",
+            "learning_objective": "Order the stages of graph compilation and relate them to the two factors a build touches."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A job's input shapes vary so much that its compiled graph recompiles every few hundred steps during steady operation. Where is that recompilation charged, and what is the remedy?",
+            "choices": [
+              "Runtime goodput, as startup; the remedy is a faster compiler",
+              "Program goodput, because it recurs inside the job's own fault-free step rate and shows up as slow steps; the remedy is a compilation that accepts the shape distribution",
+              "Scheduling goodput, because the job cannot take steps while it recompiles",
+              "Nowhere, because compilation is a one-time cost paid before the first step"
+            ],
+            "answer": "The correct answer is B. A build at a job's start, after a restart, or after a resize to a new mesh happens once per launch and is charged to runtime goodput with that launch's startup. A recompilation triggered repeatedly during steady operation lowers program goodput instead. A narrow shape range runs faster but rebuilds on new shapes, while symbolic dimensions accept varied batches and sequence lengths without rebuilding; graph breaks also split the regions a compiler can fuse and can force recompilation.",
+            "learning_objective": "Charge a compilation cost to the correct factor and choose the matching remedy."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A priority preemption that lets an urgent gang form without draining capacity for it should be judged by the product of the urgent job's factors, since that job is the one the policy serves.",
+            "answer": "False. A lever that moves capacity between jobs also changes other jobs' factors. The urgent job gains scheduling goodput while every victim loses runtime goodput, multiplied by any cascade, so only the pool's product contains both the gain and the cost. The preemption budget sets the rate at which one is exchanged for the other.",
+            "learning_objective": "Determine whose product judges a lever that moves capacity between jobs."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Time to result is the queue wait plus the job's ideal-rate accelerator-time divided by its device count times its runtime and program goodput. Explain why scheduling goodput does not appear in this relation, why holding a job to fewer devices can raise the fleet's goodput while lengthening that job's time to result, and why the product rule alone cannot choose between such configurations.",
+            "answer": "The pool's unallocated capacity does not slow a job that already holds its allocation, so the pool enters only through the queue wait. Program goodput falls as the device count grows, by the scaling efficiency of the layout, so adding devices shortens held time only while device count times program goodput keeps rising, and each added device lowers the pool's goodput; in the elastic example, efficiency relative to 128 GPUs is 90% at 256 and 80% at 512. The product contains no time, so two configurations with the same product can finish days apart. A deadline-driven job buys time with more devices at lower program goodput, and a fleet with a deep queue buys goodput by holding the job to fewer, points on the efficiency frontier where none dominates.",
+            "learning_objective": "Use the time-to-result relation to explain the trade between a job's deadline and fleet goodput on the efficiency frontier."
           }
         ]
       }
@@ -605,54 +654,70 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Peak FLOP/s vs memory bandwidth for inference",
-            "FP8 adoption vs communication/launch overheads",
-            "The long tail of small kernels vs GEMM optimization",
-            "Speculative decoding under batching",
-            "MoE expert scaling limits",
-            "Average latency vs tail latency protection"
+            "High MFU versus fleet-level goodput",
+            "Peak FLOP/s versus the exposed term of a step",
+            "Mean step time versus the step-time distribution",
+            "Compilation as hypothesis; largest loss versus largest recoverable gain"
           ],
-          "question_strategy": "Expose the peak FLOP/s inference fallacy in an MCQ, analyze tail latency vs average latency protection in a SHORT question, evaluate FP8 training halving claims in a TF question, and address compiler limits vs algorithmic innovations in an MCQ.",
-          "difficulty_progression": "Inference hardware fallacy -> tail latency systems diagnostics -> precision scaling nuance -> compiler boundary evaluation.",
-          "integration": "Directly counters pervasive engineering misconceptions regarding hardware specs, compilers, and scaling knobs.",
-          "ranking_explanation": "Critical synthesis section exposing common architectural traps and operational failures."
+          "question_strategy": "Expose the high-MFU fallacy in an MCQ, apply the iron law to a peak-FLOP/s upgrade in an MCQ, refute the precision-halves-the-step claim in a TF question, explain intermittent stragglers in a SHORT question, check compilation claims in an MCQ, and correct the fix-the-largest-loss fallacy in a SHORT question.",
+          "difficulty_progression": "Single-factor fallacy -> term reasoning -> precision nuance -> distribution reasoning -> verification discipline -> lever valuation.",
+          "integration": "Each misconception reads one factor, window, or kernel as the whole product; the questions return each to the chapter's accounting.",
+          "ranking_explanation": "Synthesis section exposing common traps in fleet efficiency claims."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team upgrades their LLM serving cluster from NVIDIA A100 to H100 GPUs, expecting a $3\\times$ reduction in generation latency based on the H100's $3\\times$ higher peak FP16 TFLOP/s rating. However, batch-1 autoregressive decode latency improves by only ~15%. What fundamental performance engineering fallacy explains this result?",
+            "question": "A team reports that its job's retained steps run at 48% MFU, above the 41% of Llama 3 405B, and concludes that the job uses the fleet well. Why is the conclusion unsupported?",
             "choices": [
-              "The fallacy that H100 GPUs cannot execute FP16 operations without INT4 emulation",
-              "The fallacy that Python cannot run on Hopper-architecture accelerators",
-              "The fallacy that PyTorch profiler traces disable GPU Tensor Cores during inference",
-              "The fallacy that peak arithmetic alone predicts decode latency; low-intensity weight streaming has a bandwidth ceiling, and other exposed costs can limit the observed gain"
+              "MFU above 45% is not achievable on these accelerators, so the measurement must be wrong",
+              "MFU overstates program goodput because it counts recomputation as useful work",
+              "MFU measures only program goodput; with the pool's scheduling goodput of 0.65 and the job's runtime goodput of 0.90, MPG is about 0.28",
+              "MFU must first be multiplied by the job's scaling efficiency before it can be compared with Llama 3"
             ],
-            "answer": "The correct answer is D. Peak arithmetic does not predict weight-dominated decode: its low intensity gives a bandwidth ceiling. A higher advertised bandwidth raises that ideal ceiling but does not establish the supplied 15% observed latency improvement. Matched traces must check achieved bandwidth, cache behavior, launch overhead, and communication; these unchanged or inefficient intervals can limit the realized gain.",
-            "learning_objective": "Analyze the fallacy of using peak arithmetic FLOP/s ratings to project memory-bandwidth-bound inference performance"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain why evaluating LLM serving performance purely on average inter-token latency can mask severe production failures, and describe two specific systems engineering techniques used to optimize P99 tail latency.",
-            "answer": "A mean of 30 ms can coexist with p99 of 500 ms for the same request mix; p99 is a percentile, not a worst-case bound. Traces must locate the slow intervals. Preallocated buffers can reduce allocation stalls, while graph replay can reduce exposed host-submission variation. Either helps only when it targets the measured cause; repeat latency measurements at the same offered load to confirm the benefit.",
-            "learning_objective": "Explain the operational divergence between average latency and tail latency in serving systems and identify mitigation techniques"
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: Upgrading a distributed training workload from FP16 to FP8 precision automatically halves total step time across any multi-node GPU cluster.",
-            "answer": "False. Higher FP8 peak throughput applies to supported arithmetic, not automatically to the entire step. Uncompressed collectives, host dispatch, and unaffected kernels can remain unchanged, while lower precision may also reduce some memory traffic. End-to-end speedup depends on which exposed intervals change and whether model quality remains acceptable.",
-            "learning_objective": "Evaluate the limitations of low-precision arithmetic adoption under Amdahl's law in distributed training"
+            "answer": "The correct answer is C. MFU divides by the time spent on retained steps, so it cannot see capacity the job never held or held time that kept no progress. Only the product of the three factors states how much of the fleet becomes useful work. MFU excludes recomputation, which hardware FLOPs utilization counts, and multiplying fleet MFU by scaling efficiency would charge exposed time twice.",
+            "learning_objective": "Evaluate why a high MFU does not establish efficient use of the fleet."
           },
           {
             "question_type": "MCQ",
-            "question": "Why does successful graph compilation not establish that a workload has exploited algorithmic choices such as tiled online attention or draft-and-verify speculative decoding?",
+            "question": "A serving replica's batch-one decode step runs at about 0.3% of its FP16 peak against a bandwidth floor of about 5.2 ms per token. A new accelerator doubles peak FP16 arithmetic at the same memory bandwidth. What does the iron law predict for this step?",
             "choices": [
-              "Graph compilers apply implemented transformations and supported kernels; compilation alone does not settle algorithm selection, draft-verification correctness, or performance",
-              "Graph compilers are restricted by hardware law to only optimize CPU assembly code",
-              "Graph compilers only support models with fewer than 100,000 parameters",
-              "Graph compilers disable shared memory allocations on NVIDIA GPUs"
+              "Decode time halves to about 2.6 ms per token",
+              "Decode time falls by about 0.3%, the share of peak the step uses",
+              "MBU halves, because more arithmetic capacity lowers bandwidth efficiency",
+              "The 5.2 ms floor is unchanged and MFU halves, because faster arithmetic shortens only the compute term, which is not exposed in this step"
             ],
-            "answer": "The correct answer is A. A compiler applies transformations it implements and evaluates with its cost model. It can select or generate a known fused attention kernel when supported, but successful capture alone does not establish that choice. Draft-and-verify execution also needs an explicit algorithmic and correctness contract. Inspect generated execution and measure the workload rather than treating compilation as proof of optimality.",
-            "learning_objective": "Distinguish between the automated optimization scope of graph compilers and the algorithmic innovations required of performance engineers"
+            "answer": "The correct answer is D. A higher peak arithmetic rate shortens only the compute term of the iron law, and only where that term is exposed. At the bandwidth floor, the step's time is set by streaming the weight shard, so doubling the peak leaves the time and MBU unchanged and halves MFU. Placing the step's time against the roofline and the Fleet Law terms predicts what a faster device will buy.",
+            "learning_objective": "Analyze the fallacy that more peak FLOP/s proportionally shortens a step."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Moving the running example's training to a lower-precision format with twice the arithmetic throughput would roughly halve its 245 ms fleet step.",
+            "answer": "False. Faster arithmetic shortens only the local compute work it applies to. About 65 ms of each 245 ms fleet step lies beyond the node baseline, mostly in the exposed data-axis gradient exchange, which faster arithmetic does not touch, and matrix multiplications are only part of local execution. Lower precision can also shrink the bytes each value moves, but the end-to-end gain depends on which exposed intervals change, and the speed counts only if the contract's quality check still passes.",
+            "learning_objective": "Evaluate the limits of lower-precision arithmetic on a communication-heavy fleet step."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain how a job's mean step time can match its plan while intermittent stragglers lower its program goodput, and describe how the chapter's measurement approach exposes them.",
+            "answer": "A synchronous step ends when its slowest rank finishes, so a rank that falls behind in short episodes, through thermal throttling, a degrading link, or a host pause, delays its whole communication group each time. The mean spreads those episodes into what looks like a small, uniform slowdown, and a trace taken between episodes shows nothing. Continuous per-rank step timers expose the episodes as outliers and trigger a trace of the slow rank beside a healthy peer, while the gray-failure regression tier watches the step-time distribution fleet-wide. Each wait lowers program goodput, whoever decides to replace the node.",
+            "learning_objective": "Explain why the step-time distribution, not the mean, reveals intermittent straggler losses."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does a successful compilation not establish that a program is well optimized?",
+            "choices": [
+              "A compiler applies the transformations it implements under its own cost model; derived layouts can insert resharding collectives in every layer, and a shape distribution that forces recompilation shows up as slow retained steps",
+              "Compilers optimize only host code, so accelerator kernels are left unchanged",
+              "A completed build disables fusion to guarantee numerical safety",
+              "Compilation removes all communication, so any remaining loss must come from faulty hardware"
+            ],
+            "answer": "The correct answer is A. A completed build does not say which transformations applied. Compiler-derived partitioning inserts a resharding collective wherever two derived layouts disagree, and frequent recompilation in steady operation is a program goodput loss rather than startup. A compiled step is therefore a hypothesis, checked by counting the trace's collectives against the layout's prediction and by measuring program goodput before and after under the contract.",
+            "learning_objective": "Distinguish a successful compilation from verified program goodput."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "In the running example, scheduling loses 35% of fleet capacity and the program 31%. Explain why a perfect scheduler would add only about 15% of fleet capacity as useful work, and what should decide which lever comes first.",
+            "answer": "Capacity recovered at the first boundary must still cross the runtime and program boundaries at their current rates, so recovering all 35% yields about $0.35 \\times 0.43 \\approx 0.15$ of fleet capacity as useful work. At the owners' ceilings, the scheduling lever raises MPG from 0.28 to 0.35 and the program lever to 0.38. The value of one point of each factor, the product of the other two, together with each owner's reachable ceiling, decides the order, not the size of the loss.",
+            "learning_objective": "Explain why the largest loss share is not the largest recoverable gain."
           }
         ]
       }
@@ -661,44 +726,8 @@
       "section_id": "#sec-performance-engineering-summary",
       "section_title": "Summary",
       "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Three levers of the iron law ($D_{\\text{vol}}/\\text{BW}$, $L_{\\text{lat}}$, $O/R_{\\text{peak}}$)",
-            "Optimization as continuous bottleneck displacement",
-            "Locality, precision, and algorithmic roofline movement"
-          ],
-          "question_strategy": "Analyze regime-specific changes to the iron-law budget, synthesize bottleneck displacement in a SHORT question, and evaluate the primacy of memory hierarchy optimization on modern accelerators in an MCQ.",
-          "difficulty_progression": "Regime-specific budget analysis -> holistic methodology synthesis -> architectural primacy evaluation.",
-          "integration": "Unifies the entire chapter's technical argument into the governing physical equation of ML performance.",
-          "ranking_explanation": "Executive summary distilling the core principles of performance engineering."
-        },
-        "questions": [
-          {
-            "question_type": "SHORT",
-            "question": "For memory-bound decode, identify how operator fusion, CUDA Graph replay, and speculative decoding change the execution budget. Contrast speculative decoding with MoE routing in a compute-bound regime. Why does each intervention still require end-to-end measurement?",
-            "answer": "Fusion can remove intermediate HBM transfers and launches; graph replay reduces repeated host submission. In memory-bound decode, speculation amortizes target weight bytes over emitted tokens while adding draft and verification work. In compute-bound execution, MoE can reduce active arithmetic but adds routing and communication. None has a universal one-to-one mapping to a single cost term. Dependencies, quality, resource contention, and remaining exposed intervals determine the measured gain.",
-            "learning_objective": "Analyze which execution costs an optimization changes under a stated regime and justify end-to-end verification."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Summarize the concept of 'optimization as bottleneck displacement' (the waterbed problem) in performance engineering, and explain why continuous reprofiling is required after every optimization stage.",
-            "answer": "Accelerating the dominant bottleneck in an ML system does not produce infinite speedup; once that term shrinks, non-optimized secondary operations (such as launch overhead, memory-bound LayerNorms, or communication) become the new binding limit. Continuous reprofiling after each intervention is required to verify that the targeted bottleneck actually decreased, measure the newly exposed limiting factor, and ensure engineering effort is directed only at the active bottleneck.",
-            "learning_objective": "Synthesize the principle of bottleneck displacement and justify the iterative profiling feedback loop"
-          },
-          {
-            "question_type": "MCQ",
-            "question": "For weight-dominated, small-batch LLM decode below the H100 FP16 ridge point, what does the roofline bandwidth ceiling establish about optimization priorities?",
-            "choices": [
-              "Because Tensor Cores are physically disabled during inference workloads",
-              "Low arithmetic intensity makes bandwidth the tighter ideal ceiling; measurements must still identify the exposed cost before choosing fusion, precision, or launch-overhead reduction",
-              "Because memory bandwidth is free and unlimited in modern cloud data centers",
-              "Because compiler graph optimizations only work on memory access instructions"
-            ],
-            "answer": "The correct answer is B. Low intensity places the ideal ceiling on the bandwidth slope, so faster arithmetic alone does not raise that ceiling. It does not establish the observed critical-path cause: launch gaps, dependencies, occupancy, and communication can keep execution below it. Traces and counters determine whether bytes, dispatch, or another exposed interval should be targeted first.",
-            "learning_objective": "Distinguish a roofline bandwidth ceiling from an observed critical-path bottleneck."
-          }
-        ]
+        "quiz_needed": false,
+        "rationale": "Summary sections recap the chapter; the body and fallacy quizzes already test this material, and a quiz here would render after the chapter connection."
       }
     }
   ]
