@@ -26,6 +26,26 @@ class ComputeCore(BaseModel):
     # (e.g. a wafer-scale engine's processing elements). Absent (None) where the
     # vendor does not state a core count or where sm_count is the unit.
     core_count: Optional[int] = None
+    # Per-SM execution units of a GPU (added 2026-10-15): FP32 (CUDA) cores and
+    # Tensor Cores per streaming multiprocessor. Absent (None) for device classes
+    # without SMs. Chip totals are derived (fp32_core_count, tensor_core_count),
+    # so a total can never disagree with sm_count.
+    fp32_cores_per_sm: Optional[int] = None
+    tensor_cores_per_sm: Optional[int] = None
+
+    @property
+    def fp32_core_count(self) -> Optional[int]:
+        """FP32 (CUDA) cores on the chip: sm_count x fp32_cores_per_sm."""
+        if self.sm_count is None or self.fp32_cores_per_sm is None:
+            return None
+        return self.sm_count * self.fp32_cores_per_sm
+
+    @property
+    def tensor_core_count(self) -> Optional[int]:
+        """Tensor Cores on the chip: sm_count x tensor_cores_per_sm."""
+        if self.sm_count is None or self.tensor_cores_per_sm is None:
+            return None
+        return self.sm_count * self.tensor_cores_per_sm
 
     @field_validator("peak_flops", mode="after")
     @classmethod

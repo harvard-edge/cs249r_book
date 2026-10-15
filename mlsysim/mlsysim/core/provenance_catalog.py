@@ -164,6 +164,13 @@ EDGE_ADAPTATION_TIER_PROFILE = _est(
 )
 
 # --- Hardware technology-class facts (Hardware.Tech) ---
+OCONNOR_FGDRAM_2017 = _lit(
+    "prov:oconnor-fgdram-2017",
+    "O'Connor et al. (2017), Fine-Grained DRAM: Energy-Efficient DRAM for Extreme Bandwidth Systems, MICRO-50 (Section 1, Figure 1b)",
+    url="https://research.nvidia.com/publication/2017-10_fine-grained-dram-energy-efficient-dram-extreme-bandwidth-systems",
+    verified="2026-10-15",
+    notes="'The energy to access a bit in HBM2 is approximately 3.97 pJ/bit' (activation + on-die data movement + I/O).",
+)
 HOROWITZ_ENERGY = _lit(
     "prov:horowitz-2014",
     "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
