@@ -99,7 +99,7 @@ class CommAlphaBeta:
 
 ::: {#psp-appendix-communication-alpha-beta-model-matters .callout-perspective title="Why this matters"}
 
-Estimating how long a gradient synchronization will take across `{python} CommAlphaBeta.ring_n_str` must happen before committing to a cluster topology. The $\MessageStartupLatency$-$\LinkBandwidth$ model is the "roofline for networks": it gives a first-order prediction of transfer time from just two hardware parameters and the message size.
+The time a gradient synchronization takes across `{python} CommAlphaBeta.ring_n_str` must be estimated before a cluster topology is chosen. The $\MessageStartupLatency$-$\LinkBandwidth$ model plays the role of a roofline for networks, giving a first-order prediction of transfer time from two hardware parameters and the message size.
 
 :::
 
@@ -111,9 +111,9 @@ $$ \PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+
 
 where:
 
-- $\MessageStartupLatency$ is the **Startup Latency**\index{Alpha-Beta Model!startup latency} (seconds), the fixed cost of initiating a message, including software overhead, network interface card (NIC) processing, and routing setup
-- $\LinkBandwidth$ is the **Link Bandwidth**\index{Alpha-Beta Model!link bandwidth} (bytes/s), the sustained data rate after startup
-- $\PointToPointMessageSize$ is the **Message Size**\index{Alpha-Beta Model!message size} (bytes)
+- $\MessageStartupLatency$ is the **startup latency**\index{Alpha-Beta Model!startup latency} (seconds), the fixed cost of initiating a message, including software overhead, network interface card (NIC) processing, and routing setup
+- $\LinkBandwidth$ is the **link bandwidth**\index{Alpha-Beta Model!link bandwidth} (bytes/s), the sustained data rate after startup
+- $\PointToPointMessageSize$ is the **message size**\index{Alpha-Beta Model!message size} (bytes)
 
 The model decomposes every transfer into exactly two costs: a per-message cost ($\MessageStartupLatency$) paid regardless of size, and a per-byte cost ($\PointToPointMessageSize/\LinkBandwidth$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-appdx-comm-foundations-algorithm-selection.
 
@@ -134,11 +134,11 @@ Parameterizing physical interconnects (@tbl-alpha-beta-params) provides the base
 
 The $\MessageStartupLatency$-$\LinkBandwidth$ model reveals two distinct operating regimes. For small messages, the startup latency $\MessageStartupLatency$ dominates, and the link spends most of its time starting transfers rather than sustaining them. For large messages, the bandwidth term $\PointToPointMessageSize/\LinkBandwidth$ dominates, and the startup cost becomes negligible.
 
-The **Crossover Message Size**\index{Alpha-Beta Model!crossover message size} $\LatencyBandwidthCrossoverSize$, defined by @eq-crossover, is the point where both terms contribute equally:
+The **crossover message size**\index{Alpha-Beta Model!crossover message size} $\LatencyBandwidthCrossoverSize$, defined by @eq-crossover, is the point where both terms contribute equally:
 
 $$ \LatencyBandwidthCrossoverSize = \MessageStartupLatency\times \LinkBandwidth$$ {#eq-crossover}
 
-Below $\LatencyBandwidthCrossoverSize$, communication is **Latency-Dominated**\index{Latency-dominated communication}: sending more small messages wastes time on repeated startups. Above $\LatencyBandwidthCrossoverSize$, communication is **Bandwidth-Dominated**\index{Bandwidth-dominated communication}: payload transfer dominates; reducing bytes or increasing effective bandwidth can lower its cost.
+Below $\LatencyBandwidthCrossoverSize$, communication is **latency dominated**\index{Latency-dominated communication}: sending more small messages wastes time on repeated startups. Above $\LatencyBandwidthCrossoverSize$, communication is **bandwidth dominated**\index{Bandwidth-dominated communication}: payload transfer dominates; reducing bytes or increasing effective bandwidth can lower its cost.
 
 ::: {#nbk-appendix-communication-crossover-infiniband-ndr .callout-notebook title="Worked example: Crossover on InfiniBand NDR"}
 
@@ -150,7 +150,7 @@ Below $\LatencyBandwidthCrossoverSize$, communication is **Latency-Dominated**\i
 
 $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\times \LinkBandwidth=$ `{python} CommAlphaBeta.ib_ndr_alpha_us_str` $\times$ `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` $=$ `{python} CommAlphaBeta.crossover_kb_str`
 
-**Analysis**: Messages smaller than `{python} CommAlphaBeta.crossover_kb_str` are latency-dominated on IB NDR. Gradient tensors from a single layer of a large model are typically `{python} CommAlphaBeta.grad_layer_mb_range_str`, well above this threshold. Control messages, heartbeats, and barrier synchronizations, however, are well below it.
+**Analysis**: Messages smaller than `{python} CommAlphaBeta.crossover_kb_str` are latency dominated on IB NDR. Gradient tensors from a single layer of a large model are typically `{python} CommAlphaBeta.grad_layer_mb_range_str`, well above this threshold. Control messages, heartbeats, and barrier synchronizations, however, are well below it.
 
 **Systems insight**: This is why NCCL and Gloo batch small gradient tensors into larger "buckets" before launching AllReduce. Sending each tensor individually would pay the `{python} CommAlphaBeta.ib_ndr_alpha_us_str` startup cost hundreds of times per iteration instead of a handful.
 
@@ -158,7 +158,7 @@ $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\times \LinkBandwidth=$ 
 
 ### The LogGP model extension {#sec-appdx-comm-foundations-loggp}
 
-The $\MessageStartupLatency$-$\LinkBandwidth$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP Model**\index{LogGP model} [@alexandrov1995] extends LogP with a long-message gap parameter:
+The $\MessageStartupLatency$-$\LinkBandwidth$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP model**\index{LogGP model} [@alexandrov1995] extends LogP with a long-message gap parameter:
 
 - **$\MessageInjectionGap$ (gap)**: The minimum interval between consecutive message injections at the sender. This models the NIC's injection rate limit.
 - **$\SenderOverhead$, $\ReceiverOverhead$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
@@ -180,7 +180,7 @@ Every distributed training step ends with a collective synchronization. The cost
 
 :::
 
-Collective operations move data between all $\DeviceCount$ GPUs simultaneously. Each collective has a characteristic bandwidth term (how much data flows) and latency term (how many sequential message steps are required). The formulas below use the **Bandwidth-Optimal Ring Algorithm**\index{Ring algorithm!bandwidth optimal} unless otherwise noted; @sec-appdx-comm-foundations-algorithm-selection discusses when other algorithms are preferable.
+Collective operations move data between all $\DeviceCount$ GPUs simultaneously. Each collective has a characteristic bandwidth term (how much data flows) and latency term (how many sequential message steps are required). The formulas below use the **bandwidth-optimal ring algorithm**\index{Ring algorithm!bandwidth optimal} unless otherwise noted; @sec-appdx-comm-foundations-algorithm-selection discusses when other algorithms are preferable.
 
 ### AllReduce {#sec-appdx-comm-foundations-allreduce}
 
@@ -379,7 +379,7 @@ class CommAlgorithmSelection:
 Modern clusters have a two-level topology: GPUs within a node are connected by NVLink (`{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str`), while nodes are connected by InfiniBand (`{python} CommAlgorithmSelection.ib_ndr_beta_gb_per_s_str`). Hierarchical AllReduce exploits this asymmetry in three phases:
 
 1. **Intra-node reduce** (NVLink): Each node reduces its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs to a single result using NVLink's `{python} CommAlgorithmSelection.nvlink_bw_gb_per_s_str` bandwidth. This is fast because NVLink's per-direction rate is `{python} CommAlgorithmSelection.nvlink_to_ndr_ratio_mult_str` that of an InfiniBand NDR port.
-2. **Inter-node AllReduce** (InfiniBand): The per-node results are all-reduced across nodes. Only one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs participates, so the inter-node ring has one-eighth as many participants as a flat GPU-level ring.
+2. **Inter-node AllReduce** (InfiniBand): An AllReduce combines the per-node results across nodes. Only one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs participates, so the inter-node ring has one-eighth as many participants as a flat GPU-level ring.
 3. **Intra-node broadcast** (NVLink): Each node broadcasts the global result to its `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs.
 
 The hierarchical approach reduces the inter-node ring size from all GPUs to one representative per `{python} CommAlgorithmSelection.gpus_per_host_str` local GPUs, cutting the latency-step term by about `{python} CommAlgorithmSelection.gpus_per_host_str`$\times$ while keeping local aggregation on fast intra-node links. The inter-node representative still exchanges the full reduced tensor; the gain is not a universal reduction of payload bytes by the number of local GPUs. NCCL selects among topology-aware algorithms such as Ring, Tree, CollNet variants, NVLS/NVLSTree, and PAT based on the collective, message size, topology, architecture, and version; hierarchical communication is common on multi-node systems but is not a universal default.
@@ -390,13 +390,13 @@ Understanding the cost structure of collectives enables reasoning about data-par
 
 ::: {#psp-appendix-communication-pipeline-arithmetic-matters .callout-perspective title="Why this matters"}
 
-Pipeline parallelism splits a model across multiple GPUs so that each GPU holds only a fraction of the layers. The trade-off is **Bubble Time**\index{Pipeline!bubble time}: idle cycles where GPUs wait for activations or gradients from upstream or downstream stages. Quantifying the bubble fraction reveals whether pipeline parallelism is worth the complexity at a given scale.
+Pipeline parallelism splits a model across multiple GPUs so that each GPU holds only a fraction of the layers. The trade-off is **bubble time**\index{Pipeline!bubble time}: idle cycles where GPUs wait for activations or gradients from upstream or downstream stages. Quantifying the bubble fraction reveals whether pipeline parallelism is worth the complexity at a given scale.
 
 :::
 
 ### Bubble fraction {#sec-appdx-comm-foundations-bubble-fraction}
 
-In a pipeline with $\PipelineParallelDegree$ stages and $\MicrobatchCount$ microbatches, @eq-pipeline-bubble defines the **Bubble Fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
+In a pipeline with $\PipelineParallelDegree$ stages and $\MicrobatchCount$ microbatches, @eq-pipeline-bubble defines the **bubble fraction**\index{Pipeline!bubble fraction} as the proportion of total GPU-time spent idle:
 
 $$ \PipelineBubbleFraction = \frac{\PipelineParallelDegree - 1}{\PipelineParallelDegree - 1 + \MicrobatchCount} $$ {#eq-pipeline-bubble}
 
@@ -457,7 +457,7 @@ class CommPipeline:
 
 : **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. The conservative choice $\MicrobatchCount\geq 4\PipelineParallelDegree$ keeps the modeled fraction below 20 percent. {#tbl-pipeline-bubble}
 
-As the table demonstrates, scaling to deeper pipelines requires proportionally more microbatches to maintain high accelerator utilization. When activation memory bounds limit the microbatch count, systems must adopt alternative scheduling strategies to mitigate bubble overhead.
+Deeper pipelines require proportionally more microbatches to maintain high accelerator utilization. When activation memory bounds limit the microbatch count, systems must adopt alternative scheduling strategies to mitigate bubble overhead.
 
 ### Interleaved scheduling {#sec-appdx-comm-foundations-interleaved}
 
