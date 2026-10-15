@@ -375,7 +375,7 @@ for n_gpus in R.cluster_sizes:
 
 : **Cluster MTBF by Scale**: As cluster size grows, the aggregate MTBF shrinks proportionally. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, failures occur every few hours; at `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, they occur continuously. Node configuration (DGX H100): `{python} ReliabilityFoundations.gpus_per_node_str` GPUs and `{python} ReliabilityFoundations.nics_per_node_str` NICs per node in the series sum; its `{python} ReliabilityFoundations.psus_per_node_str` PSUs are `{python} ReliabilityFoundations.psus_required_str`+`{python} ReliabilityFoundations.psus_redundant_str` redundant and add no term. {#tbl-mtbf-cluster}
 
-The transition from hundreds of GPUs to tens of thousands is a qualitative regime shift. At `{python} ReliabilityFoundations.research_cluster_gpus_str` GPUs, about `{python} ReliabilityFoundations.mtbf_256_days_str` days pass between failures. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, the cluster expects multiple failures per shift. At `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, failures are a continuous background condition, and the system is never fully healthy.
+The transition from hundreds of GPUs to tens of thousands is a qualitative regime shift: while about `{python} ReliabilityFoundations.mtbf_256_days_str` days pass between failures at `{python} ReliabilityFoundations.research_cluster_gpus_str` GPUs, a `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster expects multiple failures per shift, and at `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs failures become a continuous background condition in which the system is never fully healthy.
 
 ### Probability of failure during a job {#sec-appdx-reliability-foundations-job-failure}
 
@@ -438,7 +438,7 @@ for n_gpus in R.cluster_sizes:
 
 For any cluster above a few thousand GPUs running jobs longer than a day, the probability of experiencing at least one failure is effectively 100 percent. This is why @sec-fault-tolerance-reliability treats fault tolerance not as a defensive measure but as a fundamental architectural requirement.
 
-The exponential failure model assumes a constant failure rate, which holds during the steady-state useful-life phase. During burn-in (first few hundred hours) and wear-out (approaching end-of-life), failure rates are higher. In practice, fleet operators observe that newly deployed nodes exhibit 2--3$\times$ higher failure rates in their first week, making burn-in testing essential before admitting nodes to production clusters.
+The exponential failure model assumes a constant failure rate, which holds during the steady-state useful-life phase. During burn-in (first few hundred hours) and wear-out (approaching end-of-life), failure rates are higher. In practice, fleet operators observe that newly deployed nodes show 2--3$\times$ higher failure rates in their first week, making burn-in testing essential before admitting nodes to production clusters.
 
 The inevitability of failure during long training jobs raises a practical question: given that failures will interrupt execution, how is the lost progress minimized?
 
@@ -446,7 +446,7 @@ The inevitability of failure during long training jobs raises a practical questi
 
 ## Checkpoint Optimization {#sec-appdx-reliability-foundations-checkpoint-optimization}
 
-Every checkpoint saves progress but costs time. Checkpoint too rarely and a failure destroys hours of training. Checkpoint too frequently and the overhead of writing checkpoints itself becomes the bottleneck. The Young-Daly formula gives the first-order optimal balance point, and it depends on just two measurable quantities: how long a checkpoint takes to write and how often failures occur [@young1974; @daly2006].
+Every checkpoint saves progress at the cost of execution time: checkpointing too rarely lets a single failure destroy hours of training, whereas checkpointing too frequently turns checkpoint writing itself into the bottleneck. The Young-Daly formula gives the first-order optimal balance point between those two losses, and it depends on just two measurable quantities: how long a checkpoint takes to write and how often failures occur [@young1974; @daly2006].
 
 ### The Young-Daly model {#sec-appdx-reliability-foundations-young-daly}
 
@@ -456,7 +456,7 @@ $$ \OptimalCheckpointInterval = \sqrt{2 \times \CheckpointWriteTime \times \Syst
 
 where $\CheckpointWriteTime$ is the checkpoint write time in seconds and $\SystemMtbf$ is the cluster or job-level system MTBF in seconds.
 
-The intuition behind @eq-young-daly is geometric-mean-like. When checkpoints are cheap relative to the MTBF ($\CheckpointWriteTime \ll \SystemMtbf$, the common case), the optimal interval sits between the two time scales. If checkpoints took zero time, the optimal cadence would be every step. If the system never failed, no checkpoints would be required. The square root interpolates between these extremes.
+The intuition behind @eq-young-daly is geometric-mean-like. When checkpoints are cheap relative to the MTBF ($\CheckpointWriteTime \ll \SystemMtbf$, the common case), the optimal interval sits between the two time scales: if checkpoints took zero time, the optimal cadence would be every step, whereas if the system never failed, no checkpoints would be required, and the square root interpolates between those extremes.
 
 The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $\CheckpointWriteTime$ is small compared to $\SystemMtbf$. The examples below adopt these assumptions. Correlated outages, changing hazard rates, long writes, and asynchronous persistence can require a more detailed model.
 
@@ -673,7 +673,7 @@ class RecoveryAnatomy:
 
 Decomposing this sequence shows that replay time $\LostWorkReplayTime$ typically dominates, controlled directly by the checkpoint interval: on average, half the interval must be replayed. This creates a reinforcing loop with the Young-Daly formula. Shorter intervals mean less replay but more checkpoint overhead, and the formula finds the minimum of this sum.
 
-The other phases offer engineering optimization targets. $\FailureDetectionTime$ can be reduced with more aggressive heartbeat intervals (at the cost of false positives). $\JobRestartTime$ depends on having hot spare nodes preallocated, a fleet orchestration decision covered in @sec-fleet-orchestration. $\CheckpointLoadTime$ scales with checkpoint size and storage bandwidth, motivating the checkpoint compression and sharding techniques discussed in @sec-fault-tolerance-reliability.
+The other phases offer distinct engineering levers: more aggressive heartbeat intervals shorten $\FailureDetectionTime$ (at the cost of false positives), preallocated hot spare nodes shorten $\JobRestartTime$ through the fleet orchestration policies covered in @sec-fleet-orchestration, and higher storage bandwidth or smaller checkpoints shorten $\CheckpointLoadTime$, motivating the compression and sharding techniques discussed in @sec-fault-tolerance-reliability.
 
 ### Runtime goodput under failures {#sec-appdx-reliability-foundations-goodput}
 
@@ -708,7 +708,7 @@ A common misconception is that doubling cluster size halves training time. In pr
 
 ## Strategy Selection {#sec-appdx-reliability-foundations-strategy-selection}
 
-Checkpoint/restart is not the only fault tolerance strategy. For serving workloads where downtime is measured in lost revenue, redundancy provides a fundamentally different trade-off. Elastic training can resume on a smaller allocation when valid state and a feasible parallel decomposition remain available. Choosing the right strategy depends on the workload's tolerance for latency, cost, and complexity.
+Checkpoint/restart is not the only fault tolerance strategy. For serving workloads where downtime is measured in lost revenue, redundancy provides a different structural trade-off. Elastic training can resume on a smaller allocation when valid state and a feasible parallel decomposition remain available. Choosing the right strategy depends on the workload's tolerance for latency, cost, and complexity.
 
 ### Checkpoint/restart vs. redundancy vs. elastic training {#sec-appdx-reliability-foundations-strategies}
 
@@ -729,7 +729,7 @@ The three canonical strategies represent different points in the trade-off space
 | **State management**  |   Periodic snapshots   |  Continuous replication |     Distributed with resharding     |
 | **Failure mode**      |  Job pauses, replays   |   Transparent to user   |     Pause, restore, then resume     |
 
-: **Fault Tolerance Strategy Comparison**: The latency and overhead ranges are illustrative, not guarantees; elasticity does not inherently require spare capacity. Real-world systems often combine strategies: checkpoint/restart for training with redundancy for the metadata service and checkpoint storage layer. {#tbl-strategy-comparison}
+: **Fault Tolerance Strategy Comparison**: The latency and overhead ranges are illustrative, not guarantees; elasticity does not by itself require spare capacity. Real-world systems often combine strategies: checkpoint/restart for training with redundancy for the metadata service and checkpoint storage layer. {#tbl-strategy-comparison}
 
 ### The availability stacking formula {#sec-appdx-reliability-foundations-availability}
 

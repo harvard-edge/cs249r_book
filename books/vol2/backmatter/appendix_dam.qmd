@@ -105,13 +105,13 @@ The Data · Algorithm · Machine (D·A·M) taxonomy is the diagnostic framework 
 
 The taxonomy maps directly to the iron law of ML systems, the single-machine equation that @sec-vol2-introduction-fleet-law restates before extending it to the Fleet Law. @Tbl-v2-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
 
-| **Axis**          |          **Role**          |  **Physical Constraint**   | **High-Leverage Optimization** |
-|:------------------|:--------------------------:|:--------------------------:|:------------------------------:|
-| **Data (D)**      | **Information** (The Fuel) |  Bandwidth ($\Bandwidth$)  |   I/O Pipeline Optimization    |
-| **Algorithm (A)** | **Logic** (The Blueprint)  | Operations ($\Operations$) |       Model Compression        |
-| **Machine (M)**   |  **Physics** (The Engine)  |  Throughput ($\PeakRate$)  |     Hardware Acceleration      |
+| **Axis**          |          **Role**          |  **Physical Constraint**   | **High-Impact Optimization** |
+|:------------------|:--------------------------:|:--------------------------:|:----------------------------:|
+| **Data (D)**      | **Information** (The Fuel) |  Bandwidth ($\Bandwidth$)  |  I/O Pipeline Optimization   |
+| **Algorithm (A)** | **Logic** (The Blueprint)  | Operations ($\Operations$) |      Model Compression       |
+| **Machine (M)**   |  **Physics** (The Engine)  |  Throughput ($\PeakRate$)  |    Hardware Acceleration     |
 
-: **D·A·M Axis Reference**: Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint is binding, then follow the optimization lever. {#tbl-v2-dam-components-ref}
+: **D·A·M Axis Reference**: Each axis maps to a distinct physical constraint and a high-impact optimization strategy. Start diagnosis here: identify which constraint is binding, then follow the optimization lever. {#tbl-v2-dam-components-ref}
 
 ## Iron Law Mapping {#sec-appdx-dam-taxonomy-iron-law-mapping}
 
@@ -157,7 +157,7 @@ Arithmetic intensity is a property of the workload and its implementation, not o
 
 $$ \AttainableComputeRate(\ArithmeticIntensity) = \min\!\left(\PeakRate,\; \ArithmeticIntensity\times \Bandwidth\right) $$ {#eq-appdx-dam-roofline}
 
-On log-log axes, the bound is a bandwidth roof of slope one ($\ArithmeticIntensity\times \Bandwidth$) that meets a flat compute roof ($\PeakRate$) at the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$. Left of the ridge, a kernel is memory bound, and only more bandwidth or fewer bytes per operation raises its ceiling. Right of the ridge, it is compute bound, and only a faster or better-utilized datapath helps. In D·A·M terms, the bandwidth roof belongs to the Data axis, the compute roof to the Machine axis, and the Algorithm axis decides where on the intensity axis the kernel sits. The roofline is a ceiling, not a prediction. A kernel far below both roofs is limited by something the model omits, such as launch overhead, synchronization, or low occupancy.
+On log-log axes, the bound is a bandwidth roof of slope one ($\ArithmeticIntensity\times \Bandwidth$) that meets a flat compute roof ($\PeakRate$) at the ridge point $\RooflineRidgePoint = \PeakRate/\Bandwidth$. Left of the ridge, a kernel is memory bound, and only more bandwidth or fewer bytes per operation raises its ceiling. Right of the ridge, it is compute bound, and only a faster or better-used datapath helps. In D·A·M terms, the bandwidth roof belongs to the Data axis, the compute roof to the Machine axis, and the Algorithm axis decides where on the intensity axis the kernel sits. The roofline is a ceiling, not a prediction. A kernel far below both roofs is limited by something the model omits, such as launch overhead, synchronization, or low occupancy.
 
 For an H100, the book's hardware constants give a dense FP16 peak of `{python} DAMTaxonomy.h100_peak_tflops_str` and a high-bandwidth memory (HBM) bandwidth of `{python} DAMTaxonomy.h100_hbm_tbs_str`, which places the ridge at about `{python} DAMTaxonomy.h100_ridge_str`. Batch-1 decode of a 7-billion-parameter language model stored in 16-bit precision performs about two operations per parameter for each generated token (one multiply and one add) and must read every two-byte weight once, so its intensity is about `{python} DAMTaxonomy.roof_decode_intensity_str`. @Eq-appdx-dam-roofline then caps attainable throughput at `{python} DAMTaxonomy.roof_decode_attainable_str`, roughly `{python} DAMTaxonomy.roof_decode_pct_str` of peak, however well the kernels are written. Serving $\BatchSize$ sequences in one decode step reuses each loaded weight $\BatchSize$ times and raises the intensity to roughly $\BatchSize$ FLOP/byte, until key-value cache traffic, which grows with batch size and context length, begins to dominate the bytes moved. That arithmetic is why batching is the first lever of every serving system. @Sec-appdx-fleet-foundations-comm-compute-ratio carries the same reasoning to the network, where interconnect bandwidth takes the place of HBM bandwidth.
 
@@ -270,7 +270,7 @@ class SingleMachineRecap:
     kv_per_token_str = fmt_memory(kv_per_token_q, unit=MB, precision=2)
 ```
 
-An accelerator is a fast arithmetic engine surrounded by memories that trade bandwidth for capacity, and most performance arguments in this book reduce to the question of which boundary a byte must cross. Registers and on-chip shared memory (SRAM) hold the operands of the kernel that is executing. A shared on-chip L2 cache (`{python} SingleMachineRecap.l2_str` on an H100) sits behind them. HBM holds the model's working state, `{python} SingleMachineRecap.hbm_cap_str` at `{python} SingleMachineRecap.hbm_bw_str` on an H100. Host memory is reached over PCIe at `{python} SingleMachineRecap.pcie_bw_str` per direction, roughly `{python} SingleMachineRecap.hbm_pcie_ratio_mult_str` less than HBM, and local NVMe storage sits below host memory.
+An accelerator is a fast arithmetic engine surrounded by memories that trade bandwidth for capacity, and most performance arguments in this book reduce to the question of which boundary a byte must cross. Nearest the compute units, registers and on-chip shared memory (SRAM) hold the operands of the kernel that is executing, backed by a shared on-chip L2 cache (`{python} SingleMachineRecap.l2_str` on an H100). Beyond the die, HBM holds the model's working state (`{python} SingleMachineRecap.hbm_cap_str` at `{python} SingleMachineRecap.hbm_bw_str` on an H100), whereas host memory is reached over PCIe at `{python} SingleMachineRecap.pcie_bw_str` per direction, roughly `{python} SingleMachineRecap.hbm_pcie_ratio_mult_str` less than HBM, with local NVMe storage sitting below host memory.
 
 A kernel whose working set stays on chip runs near arithmetic speed; one that streams operands from HBM is bounded by the roofline above; one that must reach host memory or storage is slower still. The **memory wall**\index{Memory wall!appendix refresher}, the widening gap between arithmetic throughput and the bandwidth that feeds it, is the single-machine form of the constraint that reappears at fleet scale as the network wall. A multi-accelerator node adds a scale-up fabric between devices (NVLink, at `{python} SingleMachineRecap.nvlink_dir_str` per direction on an H100), and the scale-out network adds tiers beyond the node; @sec-appdx-fleet-foundations-numbers-to-know tabulates those tiers.
 
