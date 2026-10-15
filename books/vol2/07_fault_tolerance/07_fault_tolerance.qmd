@@ -3,7 +3,7 @@ number-offset: [6]
 quiz: fault_tolerance_quizzes.json
 concepts: fault_tolerance_concepts.yml
 engine: jupyter
-notation-local: [\BaseTrainingComputeCost, \BaseWorkerCount, \CheckpointExtraPauseTime, \CheckpointOverheadFraction, \CheckpointWasteFraction, \ClusterAvailability, \ComponentHazardRate, \DegradedStepTime, \FailureEventCost, \FaultToleranceCost, \FaultToleranceInvestment, \FirstRankComputeTime, \GpuAvailability, \HammingDataBitCount, \HealthyStepTime, \HeartbeatInterval, \HourlyComponentFailureRate, \LastRankComputeTime, \NetworkDelayStandardDeviation, \RecoveryWarmupTime, \RedundantComponentCount, \ResizedWorkerCount, \SecondRankComputeTime, \SlowdownPersistenceUpdateCount, \StragglerStepTime, \TimeoutSafetyMultiplier, \TotalTrainingRunCost, \TrainingFailureCount]
+notation-local: [\BaseTrainingComputeCost, \ByzantineClientCount, \CheckpointExtraPauseTime, \CheckpointOverheadFraction, \CheckpointWasteFraction, \ClusterAvailability, \ComponentHazardRate, \DegradedStepTime, \FailureEventCost, \FaultToleranceCost, \FaultToleranceInvestment, \FirstRankComputeTime, \GpuAvailability, \HammingDataBitCount, \HealthyStepTime, \HeartbeatInterval, \HourlyComponentFailureRate, \KrumClientCount, \LastRankComputeTime, \NetworkDelayStandardDeviation, \RecoveryWarmupTime, \RedundantComponentCount, \SecondRankComputeTime, \SlowdownPersistenceUpdateCount, \StragglerStepTime, \TimeoutSafetyMultiplier, \TotalTrainingRunCost, \TrainingFailureCount]
 ---
 
 # Fault Tolerance {#sec-fault-tolerance-reliability}
@@ -150,13 +150,13 @@ That fragility is the direct consequence of successful synchronization. Every co
 ↪ How the scheduler holds spare capacity for failed jobs and prepositions replacement nodes while a missed heartbeat is confirmed is developed in @sec-fleet-orchestration-failure-rates.
 :::
 
-The failures to be absorbed differ first in how long they persist, from a transient bit flip that clears on its own, through an intermittent error that returns under the load that exposed it, to a permanent component failure that repeats on every retry. That persistence decides whether the fleet retries, quarantines, or replaces a component (@sec-ft-fault-persistence-response). Failures also differ in how visibly they announce themselves. A **gray failure**\index{Gray failure!definition} is a component that stays alive but runs slowly or erratically, so it keeps answering the liveness checks that would flag a crash while every peer that waits on it slows down. **Silent data corruption (SDC)**\index{Silent data corruption!definition} goes further, producing wrong values with no error at all. Both pair low detection rates with a high blast radius, because the system keeps running on state it should no longer trust.
+Not every failure announces itself. A component can stop outright, slow down while still answering liveness checks, or keep running while it computes wrong values, and the quiet cases pair low detection rates with a high blast radius, because the system keeps running on state it should no longer trust.
 
 The recovery target here is trustworthy execution: preserving valid training progress and restoring a service after its infrastructure or software fails. A restored model can still make poor predictions on changed inputs even when every component executes correctly. Evaluating that behavioral robustness requires a separate contract for model quality under distribution shifts and adversarial inputs, developed in @sec-robust-ai. The distinction lets us use model-quality signals to diagnose a fault without treating every quality regression as evidence of failed hardware.
 
 Because failures cannot be eliminated at this scale, fault-tolerant systems verify completion rather than assume it, treat failure as a normal code path, exercise recovery continuously, and account for partial failures that naive error handling may not anticipate. These techniques draw on decades of distributed systems research, but ML workloads change the economics. Training checkpoints are large but can be sized from the model and optimizer state, while some optimization algorithms tolerate bounded numerical perturbations without requiring bitwise replay. That tolerance must be established for the training method; stochasticity does not make arbitrary corruption or inconsistent recovery safe. A recovery design can exploit approximate execution only while preserving its declared convergence and quality requirements.
 
-The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU can go years without a hardware failure. That same workload on a 1,000-GPU cluster sees GPU-only failures every couple of days, and a production cluster fails more often once PCIe, power, storage, and network domains enter the failure budget. This shift from *rare exception* to *routine occurrence* demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
+Making failure a routine part of operation starts with knowing how often failures arrive, and the mathematics that follows makes the shift from *rare exception* to *routine occurrence* precise.
 
 ::: {.column-margin}
 ```{=latex}
@@ -199,135 +199,13 @@ $$ \SystemMtbf = \frac{1}{\RequiredComponentCount\ComponentFailureRate} = \frac{
 
 The consequence is a gap between failure cadence and job length. At `{python} FleetReliabilityRates.fleet_gpus_str`, the GPU-only calculation gives an expected interval of `{python} FleetReliabilityRates.hours_between_str`, so a training run measured in weeks accumulates dozens of expected failures and one measured in months accumulates hundreds. These are planning averages, not a schedule of incidents; a shorter job can finish without failure even when its expected failure count exceeds one. Once the expected time between failures falls below the length of the job, fault tolerance becomes part of the execution budget for long-running fleet work.
 
-Scale and reliability diverge sharply across training generations. By pairing accelerator counts (left axis, log scale) with modeled system MTBF (opposing right axis), @fig-cluster-scaling-trend tracks how training fleets expanded by four orders of magnitude from 2012 (AlexNet on two GPUs) to 2024 (Llama 3 on over 16,000 GPUs), driven by the compute budgets that scaling laws reward (@sec-vol2-intro-ai-scaling-laws-a043). Applying the same per-device planning rate across those sizes compresses system MTBF from tens of thousands of hours to under ten hours. The opposing axis illustrates the scaling model rather than a history of measured failure rates, showing why recovery becomes an active scheduling constraint.
-
-::: {#fig-cluster-scaling-trend fig-env="figure" fig-pos="htb" fig-cap="**The rise of fleet-scale training**: Accelerator count for state-of-the-art training runs from 2012 to 2024, with system mean time between failures on the opposing axis. Cluster size rises about four orders of magnitude and system MTBF falls correspondingly, which is what turns fault tolerance from a reliability feature into a scheduling constraint. Counts are published values except the hollow marker, an estimate of the 2020 Microsoft/OpenAI machine size; MTBF applies one per-device planning rate." fig-alt="Log-scale scatter of training cluster accelerator count from 2012 (AlexNet, 2 GPUs) through Megatron-LM, an estimated GPT-3-era machine (hollow marker), PaLM, LLaMA, and DeepSeek-V3 to 2024 (Llama 3, 16,384 GPUs), with a second axis for system mean time between failures. A red-shaded band with a dashed boundary marks the region where system MTBF falls under 10 hours; PaLM, the GPT-3-era machine, and Llama 3 sit inside it. A double-headed arrow at the right spans AlexNet to Llama 3 and is labeled about 10 to the 4th times."}
-
-```{python}
-#| echo: false
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-
-from binder.tools.figures import style as book_style
-
-fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(6.1, 4.1))
-color_accel = COLORS['BlueLine']
-color_mtbf = COLORS['RedLine']
-
-from mlsysim import Literature, Models
-
-# Same registry-backed landmark runs as the cluster-size figure in the
-# introduction; the GPT-3-era count is the 2020 Microsoft/OpenAI machine size.
-_runs = Literature.TrainingRuns
-df = pd.DataFrame(
-    [
-        ("AlexNet", 2012, float(_runs.AlexNetGpus), False),
-        ("Megatron-LM", 2019, float(_runs.MegatronLm2019Gpus), False),
-        ("GPT-3 machine (est.)", 2020, float(_runs.MicrosoftOpenAI2020Gpus), True),
-        ("PaLM", 2022, Models.Language.PaLM_540B.training_accelerators_ref.magnitude, False),
-        ("LLaMA", 2023, float(_runs.Llama1_65B_Gpus), False),
-        ("DeepSeek-V3", 2024, float(_runs.DeepSeekV3Gpus), False),
-        ("Llama 3", 2024, Models.Language.Llama3_405B.training_accelerators_ref.magnitude, False),
-    ],
-    columns=["model", "year", "accelerators", "estimated"],
-)
-df_sorted = df.sort_values(['year', 'accelerators'])
-
-# Plot Accelerator count (hollow marker = estimate, not a published count)
-_known, _est = df[~df['estimated']], df[df['estimated']]
-ax1.scatter(_known['year'], _known['accelerators'], s=60, color=color_accel, edgecolor='white', linewidth=0.8, zorder=3)
-ax1.scatter(_est['year'], _est['accelerators'], s=60, facecolors='white', edgecolors=color_accel, linewidth=1.6, zorder=3)
-
-# Annotate models
-_off = {
-    "AlexNet": (0, 10, 'center'),
-    "Megatron-LM": (0, 10, 'center'),
-    "GPT-3 machine (est.)": (-8, 6, 'right'),
-    "PaLM": (0, 10, 'center'),
-    "LLaMA": (-8, -4, 'right'),
-    "DeepSeek-V3": (-16, -16, 'center'),
-    "Llama 3": (-8, 4, 'right'),
-}
-for _, row in df.iterrows():
-    x_offset, y_offset, ha = _off[row['model']]
-    ax1.annotate(
-        row['model'], (row['year'], row['accelerators']), xytext=(x_offset, y_offset), textcoords='offset points', ha=ha, fontsize=9, alpha=0.9
-    )
-
-ax1.set_yscale('log')
-ax1.set_xlabel('Year')
-ax1.set_ylabel('Accelerators (GPUs/TPUs)', color=color_accel)
-ax1.tick_params(axis='y', labelcolor=color_accel)
-
-def format_accel(x, pos):
-    if x >= 1000:
-        return f'{int(x/1000)}k'
-    return f'{int(x)}'
-
-ax1.yaxis.set_major_formatter(FuncFormatter(format_accel))
-
-# MTBF axis: a secondary axis locked to the accelerator axis through
-# System MTBF = per-GPU MTTF / N, so every tick reads exactly off its point.
-ax1.margins(x=0.14, y=0.14)
-from mlsysim import Systems
-
-gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
-import numpy as np
-
-_inv = lambda v: gpu_mttf_h / np.clip(v, 1e-9, None)  # self-inverse; clip avoids 1/0 at the axis limit
-ax2 = ax1.secondary_yaxis('right', functions=(_inv, _inv))
-ax2.set_ylabel(f'System MTBF (hours, {gpu_mttf_h / 1000:.0f}k h per device)', color=color_mtbf)
-ax2.tick_params(axis='y', labelcolor=color_mtbf)
-
-def format_mtbf(x, pos):
-    if x >= 1000:
-        return f'{int(round(x/1000))}k'
-    if x >= 1:
-        return f'{int(round(x))}'
-    return f'{x:.1f}'
-
-ax2.yaxis.set_major_formatter(FuncFormatter(format_mtbf))
-
-# Regime the prose names: system MTBF under ten hours, i.e. N above MTTF / 10.
-n_10h = gpu_mttf_h / 10
-ytop = ax1.get_ylim()[1]
-ax1.axhspan(n_10h, ytop, color=COLORS['RedL'], alpha=0.45, zorder=0, lw=0)
-ax1.axhline(n_10h, color=color_mtbf, lw=0.8, ls='--', zorder=1)
-ax1.text(2010.75, n_10h * 1.25, 'system MTBF under 10 h', color=color_mtbf, fontsize=9, fontweight='bold', ha='left', va='bottom')
-ax1.set_ylim(top=ytop)
-
-# Span of the trend: AlexNet (2012) to Llama 3 (2024), about four orders of magnitude.
-first, last = df_sorted.iloc[0], df_sorted.iloc[-1]
-x_span = last['year'] + 0.9
-ax1.annotate(
-    '', xy=(x_span, last['accelerators']), xytext=(x_span, first['accelerators']), arrowprops=dict(arrowstyle='<->', color=COLORS['primary'], lw=1.0)
-)
-ax1.text(
-    x_span - 0.2,
-    (first['accelerators'] * last['accelerators']) ** 0.5,
-    r"$\sim\!10^{4}\times$",
-    ha='right',
-    va='center',
-    fontsize=10,
-    color=COLORS['primary'],
-)
-
-fig.tight_layout()
-
-plt.show()
-plt.close()
-```
-
-:::
+Applied to the landmark training runs of @sec-vol2-introduction-scale-moment, whose accelerator counts grew by about four orders of magnitude between 2012 and 2024, the same per-device planning rate puts the largest of them, with more than ten thousand GPUs, below a 10-hour system MTBF, which is why recovery becomes an active scheduling constraint rather than a reliability feature.
 
 ### Composing component reliability {#sec-fault-tolerance-reliability-quantitative-analysis}
 
 The GPU-only calculation of @eq-system-mtbf supplies the scale intuition; a real training system then composes GPUs, HBM, links, power supplies, storage paths, and redundancy into one failure budget. Component rates are usually quoted in the FIT units introduced with the failure rate, so the `{python} FleetReliabilityRates.gpu_mttf_attr_str` GPU contributes `{python} FleetReliabilityRates.gpu_fit_str` FIT to whatever system contains it. The new question is how different component rates compose, and the composition rule depends on the redundancy structure and the independence assumptions. For series systems\index{Reliability!series system}\index{Series system!reliability calculation} (for example, a node where all `{python} FleetReliabilityRates.node_gpus_str` GPUs must work), failure of any component fails the whole. With independent constant-rate failures, the reliabilities multiply as in @eq-system-reliability-product, so the rates add even when the components differ:
 $$\SystemMtbf = \frac{1}{\sum \ComponentFailureRate_i}$$
 which is why the system failure rate grows linearly with component count while system MTBF falls in inverse proportion.
-
-The same product governs instantaneous availability, a different quantity from the survival function $\ComponentReliability(\TimeInstant)$. Availability $\SteadyStateAvailability$ is the probability that a component is up at a randomly chosen instant, counting repairs, whereas $\ComponentReliability(\TimeInstant)$ is the probability that it has not yet failed by time $\TimeInstant$. If each GPU is independently up with probability $\GpuAvailability$, all $\RequiredComponentCount$ are up together with probability $(\GpuAvailability)^\RequiredComponentCount$, which is the reliability gap of @eq-reliability-gap evaluated for the chapter's 10,000-GPU cluster in notebook \ref{nbk-fault-tolerance-9s-reliability}. That power erodes even highly reliable hardware once $\RequiredComponentCount$ reaches fleet scale.
 
 ```{python}
 #| echo: false
@@ -358,8 +236,6 @@ class NinesReliability:
     n_gpus_str = fmt(n_gpus, precision=0)
     availability_str = fmt_percent(availability_pct / 100, precision=2, commas=False, style='prose')
     downtime_min_str = fmt_time(downtime_min_year, 'minute', precision=1, commas=False, style='word')
-    survival_str = fmt(single_gpu_success, precision=4, commas=False)
-    cluster_prob_str = fmt(cluster_prob, precision=2, commas=False)
     cluster_pct_str = fmt_percent(round(cluster_prob * 100) / 100, precision=0, commas=False, style='prose')
     fleet_mtbf_str = fmt_time(fleet_mtbf, hour, precision=0, commas=False, style="word")
     fast_mttr_str = fmt_time(fast_mttr, minute, precision=0, commas=False, style="word")
@@ -368,19 +244,7 @@ class NinesReliability:
     slow_availability_str = fmt_percent(slow_availability, precision=2, commas=False, style="prose")
 ```
 
-::: {#nbk-fault-tolerance-9s-reliability .callout-notebook title="The 9s of availability"}
-
-**Problem**: A cluster of `{python} NinesReliability.n_gpus_str` GPUs runs with each GPU at `{python} NinesReliability.availability_str` availability (only `{python} NinesReliability.downtime_min_str` of downtime per year). Assuming independent up/down states, what is the probability that the entire cluster is up at the same instant?
-
-**Math**:
-
-1.  Single GPU availability probability $(\GpuAvailability)$: A GPU with `{python} NinesReliability.availability_str` availability has an all-up probability $\GpuAvailability=$ `{python} NinesReliability.survival_str` at a randomly chosen instant.
-2.  Cluster availability probability $(\ClusterAvailability)$: $\ClusterAvailability= (\GpuAvailability)^{\RequiredComponentCount}$.
-3.  **Result**: $(\GpuAvailability)^{\RequiredComponentCount} \approx$ `{python} NinesReliability.cluster_prob_str`.
-
-**Systems insight**: Even when each GPU is available `{python} NinesReliability.availability_str` of the time, a `{python} NinesReliability.n_gpus_str`-GPU cluster has only a `{python} NinesReliability.cluster_pct_str` chance that every GPU is simultaneously available. Hardware reliability alone is insufficient; software must handle failures automatically.
-
-:::
+The same product governs instantaneous availability, a different quantity from the survival function $\ComponentReliability(\TimeInstant)$. Availability $\SteadyStateAvailability$ is the probability that a component is up at a randomly chosen instant, counting repairs, whereas $\ComponentReliability(\TimeInstant)$ is the probability that it has not yet failed by time $\TimeInstant$. If each GPU is independently up with probability $\GpuAvailability$, all $\RequiredComponentCount$ are up together with probability $(\GpuAvailability)^\RequiredComponentCount$, which is the reliability gap of @eq-reliability-gap. For the chapter's `{python} NinesReliability.n_gpus_str`-GPU cluster, a per-GPU availability of `{python} NinesReliability.availability_str` (only `{python} NinesReliability.downtime_min_str` of downtime per year) leaves about a `{python} NinesReliability.cluster_pct_str` chance that every GPU is up at the same instant. That power erodes even highly reliable hardware once $\RequiredComponentCount$ reaches fleet scale, so software must handle failures automatically.
 
 ::: {#psp-fault-tolerance-scale-transforms-failure .callout-perspective title="Scale transforms failure"}
 
@@ -684,7 +548,7 @@ class PublishedFailureRates:
     llama_days_str = fmt(llama_days, precision=0)
 ```
 
-Production measurements confirm the $1/\AcceleratorCount$ trend of @tbl-cluster-mtbf-scaling and show that the GPU-only line is optimistic. Plotted on log-log axes, measured MTTF values and fitted projections from Meta's clusters follow the slope of the $50{,}000\,\text{h}/\AcceleratorCount$ line across more than three orders of magnitude in job size but sit below it, because a job can be interrupted by far more than its GPUs (@fig-published-failure-rates). The @kokolis2025 study of Meta's Research SuperCluster reported measured MTTF values for observed RSC job sizes and projected a `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` MTTF for `{python} PublishedFailureRates.llama_gpus_str`-GPU jobs. That projection lands next to the Llama 3\index{Llama-3!failure report} run recounted in @sec-vol2-introduction-scale-moment, whose `{python} PublishedFailureRates.llama_interruptions_str` unexpected interruptions across a `{python} PublishedFailureRates.llama_days_str`-day snapshot on `{python} PublishedFailureRates.llama_gpus_str` H100 GPUs give an observed MTTF of about `{python} PublishedFailureRates.llama_mttf_str`. Together, the measured Llama run and Kokolis projection put `{python} PublishedFailureRates.llama_gpus_str`-GPU training on a failure cadence of roughly two to three hours, bracketed by the `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` projection and the `{python} PublishedFailureRates.llama_mttf_attr_str` measurement. This evidence turns the idealized $1/\AcceleratorCount$ relation into an engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
+Production measurements confirm the $1/\AcceleratorCount$ trend of @tbl-cluster-mtbf-scaling and show that the GPU-only line is optimistic. Plotted on log-log axes, measured MTTF values and fitted projections from Meta's clusters follow the slope of the $50{,}000\,\text{h}/\AcceleratorCount$ line across more than three orders of magnitude in job size but sit below it, because a job can be interrupted by far more than its GPUs (@fig-published-failure-rates). The @kokolis2025 study of Meta's Research SuperCluster reported measured MTTF values for observed RSC job sizes and projected a `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` MTTF for `{python} PublishedFailureRates.llama_gpus_str`-GPU jobs. That projection lands next to the Llama 3\index{Llama-3!failure report} run previewed in @sec-vol2-introduction-scale-moment (war story \ref{ws-fault-tolerance-llama3-failure-cadence} follows its recovery), whose `{python} PublishedFailureRates.llama_interruptions_str` unexpected interruptions across a `{python} PublishedFailureRates.llama_days_str`-day snapshot on `{python} PublishedFailureRates.llama_gpus_str` H100 GPUs give an observed MTTF of about `{python} PublishedFailureRates.llama_mttf_str`. Together, the measured Llama run and Kokolis projection put `{python} PublishedFailureRates.llama_gpus_str`-GPU training on a failure cadence of roughly two to three hours, bracketed by the `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` projection and the `{python} PublishedFailureRates.llama_mttf_attr_str` measurement. This evidence turns the idealized $1/\AcceleratorCount$ relation into an engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
 
 ::: {#fig-published-failure-rates fig-env="figure" fig-pos="htb" fig-cap="**Published failure rates from production clusters**: Measured MTTF values and fitted projections from Meta's RSC clusters [@kokolis2025] plotted with Llama 3 training measurements [@dubey2024llama] against the theoretical 1/N curve. At 16,384 GPUs, the Kokolis projection and the Llama 3 empirical measurement bracket a failure cadence of roughly two to three hours (the `{python} PublishedFailureRates.kokolis_16k_mttf_attr_str` projection and the `{python} PublishedFailureRates.llama_mttf_attr_str` measurement), confirming that fault tolerance is a mathematical necessity, not an edge case. Data sources: Kokolis et al., arXiv:2410.21680; Meta, arXiv:2407.21783." fig-alt="Log-log scatter plot of mean time to failure in hours versus GPU count with a dashed theoretical 50,000 hours over N line. Filled blue dots mark measured Meta RSC values at 8 and 1,024 GPUs, hollow blue dots mark projections at 16,384 and 131K GPUs, and a dark diamond marks the Llama 3 measurement of 3.1 hours. A short light red band at 16,384 GPUs spans 1.8 to 3.1 hours, labeled failure every 2 to 3 h. Dotted gray reference lines mark 1 day, 1 week, and 3 months."}
 
@@ -863,7 +727,7 @@ plt.close()
 
 The MTBF calculations in the reliability analysis quantify how often failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. Designing effective fault tolerance also requires understanding what kind of failures occur, which depends on precise vocabulary. A fault is the underlying defect or event, an error is the corrupted state it produces, and a failure is the externally visible behavior the training system must handle [@avizienis2004basic]. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely.
 
-No single label captures all of these differences. Reliability decisions require three orthogonal axes: persistence (transient, intermittent, or permanent), manifestation (fail-stop, degraded, or value-corrupting), and failure scope (one device, one node, a rack or power domain, or the whole job). A transient fault can therefore manifest as either a detected crash or silent corruption, while a permanent switch failure can remain confined to one rack or partition an entire job. The four subsections that follow are therefore not four parallel classes or mutually exclusive buckets [@constantinescu2008; @lamport1982byzantine]. Each takes the value of one axis that most changes recovery. Transient failures come from the persistence axis, because they show why a fault that clears can still leave state to repair. Fail-stop and Byzantine (value-corrupting) failures come from the manifestation axis, and correlated failures come from the scope axis. Two parts of the space are developed where they drive decisions. The intermittent and permanent persistence classes return with hardware faults (@sec-ft-fault-persistence-response), where persistence selects retry, quarantine, or replacement. The degraded manifestation, a gray failure that slows a worker without stopping it, returns with stragglers (@sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d).
+No single label captures all of these differences. Reliability decisions require three orthogonal axes: persistence (transient, intermittent, or permanent), manifestation (fail-stop, degraded, or value-corrupting), and failure scope (one device, one node, a rack or power domain, or the whole job). Two manifestations need names because liveness checks cannot see them. A **gray failure**\index{Gray failure!definition} is a component that stays alive but runs slowly or erratically, so it keeps answering the liveness checks that would flag a crash while every peer that waits on it slows down. **Silent data corruption (SDC)**\index{Silent data corruption!definition} goes further, producing wrong values with no error at all. A transient fault can therefore manifest as either a detected crash or silent corruption, while a permanent switch failure can remain confined to one rack or partition an entire job. The four subsections that follow are therefore not four parallel classes or mutually exclusive buckets [@constantinescu2008; @lamport1982byzantine]. Each takes the value of one axis that most changes recovery. Transient failures come from the persistence axis, because they show why a fault that clears can still leave state to repair. Fail-stop and Byzantine (value-corrupting) failures come from the manifestation axis, and correlated failures come from the scope axis. Two parts of the space are developed where they drive decisions. The intermittent and permanent persistence classes return with hardware faults (@sec-ft-fault-persistence-response), where persistence selects retry, quarantine, or replacement. The degraded manifestation returns with stragglers (@sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d).
 
 ```{python}
 #| echo: false
@@ -1016,7 +880,7 @@ Redundant computation supplies one form of evidence against Byzantine failures. 
 
 Byzantine-resilient distributed training algorithms exist but impose significant overhead. Krum [@blanchard2017machine] keeps the single worker gradient whose nearest neighbors lie closest to it and discards the rest, while coordinate-wise trimmed mean [@yin2018byzantine] drops the largest and smallest values in each coordinate before averaging what remains. Both compute aggregates that stay robust to a bounded number of Byzantine workers, but they require more communication and computation than simple averaging. Without such protection, corrupted gradients can push the optimizer toward an unreliable model state while the training job appears healthy. Reliability must therefore protect semantic correctness rather than process liveness alone.[^fn-byzantine-consensus-overhead]
 
-[^fn-byzantine-consensus-overhead]: **Byzantine-resilient ML**\index{Byzantine-resilient ML!algorithmic overhead}\index{Byzantine fault tolerance!ML overhead}: Named after Lamport's 1982 "Byzantine Generals Problem," these algorithms (Krum\index{Byzantine fault tolerance!Krum algorithm}, trimmed mean\index{Byzantine fault tolerance!trimmed mean}, and signSGD, which aggregates only the signs of gradient coordinates by majority vote) tolerate a bounded fraction of corrupted workers, with the exact bound depending on the algorithm and assumptions. For $\AcceleratorCount$ workers, Krum requires pairwise distance computations over worker gradients, so overhead grows quadratically with worker count and directly competes with the throughput gains of data parallelism [@blanchard2017machine].
+[^fn-byzantine-consensus-overhead]: **Byzantine-resilient ML**\index{Byzantine-resilient ML!algorithmic overhead}\index{Byzantine fault tolerance!ML overhead}: Named after Lamport's 1982 "Byzantine Generals Problem," these algorithms (Krum\index{Byzantine fault tolerance!Krum algorithm}, trimmed mean\index{Byzantine fault tolerance!trimmed mean}, and signSGD, which aggregates only the signs of gradient coordinates by majority vote) tolerate a bounded fraction of corrupted workers, with the exact bound depending on the rule and its assumptions. Krum's original analysis requires $2\ByzantineClientCount + 2 < \KrumClientCount$ for $\ByzantineClientCount$ Byzantine workers among $\KrumClientCount$, while coordinate-wise median and trimmed mean rest on different robustness assumptions, so the tolerated fraction depends on the aggregation rule, dimensionality, and statistical model. For $\AcceleratorCount$ workers, Krum requires pairwise distance computations over worker gradients, so overhead grows quadratically with worker count and directly competes with the throughput gains of data parallelism [@blanchard2017machine].
 
 ### Correlated failures {#sec-fault-tolerance-reliability-reliability-correlated-failures-95e8}
 
@@ -1024,7 +888,7 @@ The reliability calculations in @sec-fault-tolerance-reliability-reliability-mat
 
 Correlated failures violate the independence assumption underlying @eq-system-reliability-n-components. A model that counts only independent device failures omits shared hazards and their potentially larger blast radius; incident frequency and the number of affected devices must be modeled separately. Correlated failures can also defeat redundancy strategies. Three replicas of a model provide no protection against a shared power failure if all three run on the same power domain.
 
-Defending against correlated failures\index{Correlated failure!failure domain protection} requires understanding failure domains\index{Failure domain!ML infrastructure} and ensuring redundancy spans independent failure domains. @Tbl-failure-domains catalogs common failure domains in ML infrastructure, from single GPUs to entire data center regions, each requiring distinct mitigation strategies. @Fig-failure-domains diagrams these nested containment boundaries, framing how physical disruptions scale upward from individual eight-GPU nodes to multi-rack power and network envelopes.
+Defending against correlated failures\index{Correlated failure!failure domain protection} requires classifying each failure by its scope, the failure domain\index{Failure domain!ML infrastructure} it takes down, and ensuring that redundancy spans independent domains. @Tbl-failure-domains catalogs common failure domains in ML infrastructure, from single GPUs to entire data center regions, each requiring distinct mitigation strategies. @Fig-failure-domains diagrams these nested containment boundaries, framing how physical disruptions scale upward from individual eight-GPU nodes to multi-rack power and network envelopes.
 
 | **Failure Domain**     |                   **Impact Scope**                  | **Typical Recovery Time** |   **Mitigation Strategy**    |
 |:-----------------------|:---------------------------------------------------:|:-------------------------:|:----------------------------:|
@@ -1047,7 +911,7 @@ The nesting of failure domains in @tbl-failure-domains has direct consequences f
 This containment hierarchy explains why replica placement must match the fault being tolerated. The highlighted rack in @fig-failure-domains contains nodes that share a top-of-rack (ToR) switch, so that switch's loss can disconnect every attached node from the job. A neighboring rack with a separate switch can remain reachable during that event even if both racks share a power domain. The same placement does not protect against loss of their shared power source. Redundancy must therefore cross the relevant failure boundary, not merely occupy different devices.
 
 ::: {.column-margin .margin-pointer}
-↩ Top-of-rack aggregation and the physical rack failure domain are established in @sec-network-fabrics-tor.
+↩ The failure domain and its physical nesting from node to rack to building are established in @sec-compute-infrastructure-node-health-reliability-56a6.
 :::
 
 ::: {#chk-fault-tolerance-mapping-failure-domains .callout-checkpoint title="Mapping failure domains"}
@@ -1099,9 +963,46 @@ class TpuV4WarStoryScale:
 
 :::
 
-## The Bathtub Curve and Hardware Lifecycle {#sec-fault-tolerance-reliability-reliability-bathtub-curve-hardware-lifecycle-7d8a}
+## Hardware Faults at Fleet Scale {#sec-fault-tolerance-hardware-fault-taxonomy}
 
-The failure taxonomy classifies failure types and domains, answering what kind of failures occur. Equally critical for fault tolerance design is determining *when* over an accelerator's operating lifespan those failures strike. @Fig-bathtub-curve plots the hazard function $\ComponentHazardRate(\TimeInstant)$ across component lifecycles, partitioning operational longevity into three distinct reliability regimes.
+A cosmic ray that flips one bit in a GPU's high-bandwidth memory and a solder joint that cracks under thermal cycling are physical events, but the recovery system never observes them directly. It observes symptoms: a gradient spike with no process crash, a rank that disappears from the collective, or a node that fails only after it heats under sustained load. The failure taxonomy of @sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c already classifies such events by persistence, manifestation, and scope. For hardware, persistence carries most of the operational weight because it decides whether the fleet should retry, quarantine, or replace a component, while manifestation decides whether the fleet notices the fault at all.
+
+ML workloads raise the stakes of each fault. A training step performs trillions of arithmetic operations on state that persists into later steps, so a wrong value can survive beyond the computation that produced it. The damage depends on the affected value and its later use. Under the IEEE 754 format,[^fn-ieee754-fp-vulnerability] a sign-bit flip inverts a weight, while an exponent-bit flip can move a small gradient by many orders of magnitude. Fault-injection studies show that network resilience varies with model, layer, and bit position, so a few faults in vulnerable locations can cost disproportionate accuracy [@reagen2018]. A valid-looking corrupted value can enter learned state without triggering the process failure that would otherwise initiate recovery.
+
+::: {.column-margin .margin-pointer}
+↪ How an FP16 exponent-bit flip rescales a value by $2^{16}$ and can saturate an attention softmax is developed in @sec-appdx-reliability-sdc-perturbation.
+:::
+
+[^fn-ieee754-fp-vulnerability]: **IEEE 754**\index{IEEE 754!bit-flip vulnerability}: The IEEE 754 floating-point standard defines the binary32 format with 1 sign bit, 8 exponent bits, and 23 fraction bits [@ieee_754_2019]. Because bit positions differ so much in consequence, resilience mechanisms often prioritize the sign and exponent bits rather than treating all bits as equally important.
+
+Fleet scale turns these rare device events into routine operating conditions. Smaller geometries and lower operating voltages can reduce the charge needed to disturb a stored value [@baumann2005], and fleet studies at Google and Meta found that a small but persistent population of processors, on the order of a few per several thousand machines, computes wrong results without raising any error [@hochschild2021; @dixit2021silent]. Studies of accelerator training fleets reach the same conclusion: rare hardware faults appear often enough that software-level detection and recovery become part of the training system design [@he2023]. ML system architects must therefore treat hardware as an unreliable substrate\index{Hardware!unreliable substrate} and budget for end-to-end integrity checks, replayed computation on high-value paths, and periodic consistency checks as system requirements rather than high-performance computing specialties.
+
+### Fault persistence and the fleet response {#sec-ft-fault-persistence-response}
+
+Each persistence class from the taxonomy maps to a different fleet action, from retry for a fault that leaves nothing to repair, through quarantine for one that returns under load, to replacement for one that repeats on every attempt (@fig-fault-tolerance-failure-spectrum). A transient fault\index{Transient fault!fleet response}, as @sec-fault-tolerance-reliability-reliability-transient-failures-57b4 established, leaves no lasting defect from that event, so the fleet's question is only whether its effect escaped. A single-event upset, a voltage droop on an unstable power path [@reddi2013], a timing violation, or a soft error in combinational logic [@mukherjee2005] can corrupt a tensor, packet, or instruction. Detection and correction can prevent propagation; affected state may otherwise require rollback. During training, an undetected error in weights or gradients can compromise convergence and contaminate subsequent checkpoints [@he2023]. During stateless inference, an activation error can remain confined to one request [@mahmoud2020]. If that activation enters retained state such as a KV cache, later outputs can also depend on it.
+
+::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Hardware faults ordered by how long they persist. A transient fault leaves nothing to repair, an intermittent fault returns under the load that exposed it, and a permanent fault repeats on every retry. Persistence decides the fleet response, from retry through quarantine to replacement, and fault tolerance engineering must handle all three to keep a fleet making progress." fig-alt="An arrow labeled fault persistence runs from clears on its own to lasts until repaired above three panels: transient, intermittent, and permanent. Each panel shows a row of eight attempt squares over time, green when an attempt completes and red when it faults. Transient: one red square among greens. Intermittent: gray load bars above the row, and the two attempts under the tallest load bars are red. Permanent: two green squares then all red. Below each row are a typical cause (particle strike, cracked solder joint, stuck-at fault or wear-out) and a response box (retry or roll back, drain and stress-test, replace and restore)."}
+![](images/svg/failure-spectrum.svg)
+
+:::
+
+A permanent fault\index{Permanent fault!fleet response} announces itself through repeatability. The same accelerator, memory cell, or link fails again after retry, often at the same address or in the same workload phase. Manufacturing defects and wear-out mechanisms such as electromigration[^fn-electromigration-silicon-wearout] and oxide breakdown produce this signature, and the stuck-at fault, in which a signal remains fixed at 0 or 1 regardless of input, is its standard abstract model [@seong2010]. Repeatability helps locate the defect but does not make the result trustworthy. A permanent datapath fault keeps producing wrong gradients until the device is drained from the cluster [@he2023], and rerunning the computation on the same device reproduces the error instead of exposing it. The fleet must stop trusting the component, quarantine it, and restore from a checkpoint that predates its first bad write.
+
+[^fn-electromigration-silicon-wearout]: **Electromigration**\index{Electromigration!wear-out mechanism}: Gradual displacement of metal atoms in conductors by electron momentum transfer, first characterized in early electromigration studies and later modeled in Black's reliability equation [@black1969electromigration]. Mean time to failure decreases with higher current density and higher temperature, so sustained high-power accelerator workloads make thermal management a direct determinant of fleet lifespan.
+
+Intermittent faults\index{Intermittent fault!fleet response} create the most operational ambiguity because they produce evidence and then disappear. A node may pass a reboot test, rejoin the fleet, and fail again only when the next job drives the package into the same thermal, voltage, or communication regime. Cracked solder joints, aging packages, and contamination between contacts create these load-dependent conditions [@constantinescu2008; @rashid2015], and reduced voltage margins cause timing errors that are hard to reproduce [@zhang2018thundervolt]. Sporadic errors of this kind can accumulate across iterations and degrade convergence without any explicit failure [@rashid2015]. An intermittent node should therefore remain suspect until evidence clears it. The fleet drains it from long jobs, correlates its error logs, and readmits it only after it passes stress tests under the load that exposed the fault; otherwise one marginal component can make validation and recovery untrustworthy for every job that lands on it. @Tbl-fault_types summarizes the three responses.
+
+| **Persistence**  | **Fleet signature**                                       | **Detection evidence**                                         | **Fleet response**                                                |
+|:-----------------|:----------------------------------------------------------|:---------------------------------------------------------------|:------------------------------------------------------------------|
+| **Transient**    | One-time wrong value or lost message; retry succeeds      | Corrected-error counters, checksum mismatches, gradient spikes | Correct or retry; roll back if durable state was contaminated     |
+| **Intermittent** | Recurring errors under specific load, heat, or voltage    | Correlated error logs and repeated anomalies on one node       | Drain and quarantine; readmit only after screening under load     |
+| **Permanent**    | Reproducible failure at the same device, address, or link | Failed self-test or replay mismatch on the same device         | Replace the component; restore from a checkpoint before the fault |
+
+: **Hardware Fault Persistence and Fleet Response**: The persistence class of a hardware fault determines the evidence that exposes it and the action the fleet takes. Manifestation is a separate axis: any of the three classes can surface as a crash or as silent corruption [@constantinescu2008]. {#tbl-fault_types}
+
+### Hardware lifecycle and the hazard rate {#sec-fault-tolerance-reliability-reliability-bathtub-curve-hardware-lifecycle-7d8a}
+
+Persistence classifies a fault once it has occurred; the hazard rate describes *when* over an accelerator's operating lifespan faults are most likely to strike. @Fig-bathtub-curve plots the hazard function $\ComponentHazardRate(\TimeInstant)$ across component lifecycles, partitioning operational longevity into three distinct reliability regimes.
 
 The first phase, infant mortality\index{Bathtub curve!infant mortality}, exhibits elevated failure rates from manufacturing defects, improper installation, and early-life failure of marginal components. This phase typically lasts days to weeks for electronic components. Burn-in testing[^fn-burnin-screening-hardware] operates components under stress conditions before deployment to precipitate infant mortality failures before production use.
 
@@ -1109,9 +1010,7 @@ The first phase, infant mortality\index{Bathtub curve!infant mortality}, exhibit
 
 After surviving infant mortality, components enter the useful-life\index{Bathtub curve!useful life} phase, where they exhibit relatively constant failure rates under the standard reliability-engineering model [@birolini2017; @klutke2003]. This phase represents the longest portion of component lifetime and is the period where the exponential reliability model in @eq-single-component-reliability applies most accurately. For data center GPUs, the useful-life window is an operational planning concept shaped by refresh cycles, cooling, utilization, and observed fleet health rather than a fixed physical duration.
 
-As components age, they enter the wear-out\index{Bathtub curve!wear-out} phase, where failure rates increase due to accumulated wear. For GPUs, wear mechanisms include electromigration[^fn-electromigration-silicon-wearout] in circuits, thermal cycling stress on solder joints, and degradation of thermal interface materials. The onset of wear-out depends heavily on operating conditions; components operated at high temperatures or with frequent thermal cycling enter wear-out earlier.
-
-[^fn-electromigration-silicon-wearout]: **Electromigration**\index{Electromigration!wear-out mechanism}: Gradual displacement of metal atoms in conductors by electron momentum transfer, first characterized in early electromigration studies and later modeled in Black's reliability equation [@black1969electromigration]. Mean time to failure decreases with higher current density and higher temperature, so sustained high-power accelerator workloads make thermal management a direct determinant of fleet lifespan.
+As components age, they enter the wear-out\index{Bathtub curve!wear-out} phase, where failure rates increase due to accumulated wear. For GPUs, wear mechanisms include electromigration in circuits, thermal cycling stress on solder joints, and degradation of thermal interface materials. The onset of wear-out depends heavily on operating conditions; components operated at high temperatures or with frequent thermal cycling enter wear-out earlier.
 
 The practical implication for ML systems is that fleet-wide failure rates can depend on age distribution. Under the bathtub model, a new cohort passes through elevated early-life risk, a relatively stable period, and eventual wear-out. Screening, operating conditions, and replacement policy determine how much of that pattern appears in field data. Mixed-age fleets combine cohorts at different stages, so their aggregate hazard need not follow the curve of a single cohort.
 
@@ -1193,190 +1092,17 @@ plt.close()
 
 These three hazard regimes in @fig-bathtub-curve translate directly into admission control and maintenance policies. Before assigning new or repaired nodes to a long training run, operators use matrix-multiply, memory, and communication stress tests to expose marginal components. During service, temperature trends, error counts, and performance degradation help identify devices for scheduled replacement. Screening moves failures out of expensive production runs. An infant-mortality failure caught during a few hours of stress testing costs only idle time, while the same failure weeks into a pretraining run forces a checkpoint rollback, which is why operators often route fresh or repaired nodes to short jobs first. Monitoring then checks whether the constant-rate model remains appropriate as the fleet ages.
 
-## Model-Type Diversity in Failure Impact {#sec-fault-tolerance-reliability-reliability-modeltype-diversity-failure-impact-8ec0}
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: LLM failure-impact prose below (@tbl-failure-impact-by-model).
-# │ Goal: Format GPT-3 checkpoint size for the 175B running example.
-# │ Note: resumable checkpoint = 14 B/param (bf16 weights, fp32 master
-# │       weights, fp32 Adam moments; no gradients or activations).
-from mlsysim.physics import calc_checkpoint_size
-from mlsysim import Models, Hardware, ReferenceStats
-from mlsysim.fmt import check, fmt, fmt_memory, fmt_text
-
-class FaultToleranceIntroRecap:
-    m = Models.Language.GPT3
-    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
-    gpt3_ckpt_bytes = calc_checkpoint_size(m.parameters)  # 14 B/param default
-    gpus_example = Systems.Clusters.Training_10K.total_accelerators  # the chapter's 10,000-GPU running cluster
-    rate = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
-    daily_cost = gpus_example * rate * 24
-    vit_ckpt = ReferenceStats.CheckpointArchetypes.MediumVisionTransformerCheckpointSize
-    recsys_table = ReferenceStats.RecommenderAtScaleProfile.EmbeddingTableSize
-    check(
-        abs((gpt3_ckpt_bytes / (m.parameters * ckpt_bpp)).to("").magnitude - 1) < 1e-9, "calc_checkpoint_size must use the registry 14 B/param anchor"
-    )
-    check(2.3e12 < gpt3_ckpt_bytes.to(byte).magnitude < 2.6e12, "175B resumable checkpoint must be about 2.45 TB")
-    check(1.0 < vit_ckpt.to(GB).magnitude < 2.0, "ViT-Large checkpoint row is a single-digit-GB 'middle ground'")
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
-    gpt3_ckpt_tb_str = fmt_memory(gpt3_ckpt_bytes, unit=TB, precision=2, commas=False)
-    gpus_example_str = fmt(gpus_example, precision=0, commas=True)
-    rate_str = fmt_usd(rate, precision=0, commas=False, per="GPU-hour")
-    daily_cost_str = fmt_usd(daily_cost, scale="M", precision=1, commas=False)
-    vit_ckpt_str = fmt_memory(vit_ckpt, unit=GB, precision=1, commas=False)
-    recsys_table_str = fmt_text(fmt_memory(recsys_table, unit=TB, precision=0, commas=False), "+")
-```
-
-While the mathematics of failure rates apply universally, the failure impact by model type differs dramatically. The impact of losing an hour of training depends on what that training costs, how much state must be recovered, and how long recovery takes. @Tbl-failure-impact-by-model quantifies these factors across model architectures, revealing orders-of-magnitude variation from large language models (LLMs), where a lost day of progress costs hundreds of thousands of dollars in compute, to vision models losing modest amounts of progress.
-
-| **Model Type**                  | **Typical Training Duration** |                        **Checkpoint Size**                        |      **State Sensitivity**      |                              **Failure Cost**                             |
-|:--------------------------------|:-----------------------------:|:-----------------------------------------------------------------:|:-------------------------------:|:-------------------------------------------------------------------------:|
-| **Archetype A (GPT-4/Llama-3)** |        Weeks to months        |    `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` (175B)    |  High (position in data order)  | `{python} FaultToleranceIntroRecap.daily_cost_str` compute per 24 hr loss |
-| **Vision (ViT-Large)**          |           1--3 days           |          `{python} FaultToleranceIntroRecap.vit_ckpt_str`         |   Medium (augmentation state)   |                           \$10--50K per day loss                          |
-| **Archetype B (DLRM at Scale)** |           Continuous          | `{python} FaultToleranceIntroRecap.recsys_table_str` (embeddings) | Very High (embedding freshness) |                          Revenue impact per hour                          |
-| **Speech (Whisper-scale)**      |           3--7 days           |                              5--10 GB                             |              Medium             |                          \$50--200K per day loss                          |
-| **Scientific (AlphaFold)**      |         Days to weeks         |                             10--50 GB                             |     High (exploration state)    |                               Research delay                              |
-
-: **Failure Impact by Model Type**: The cost of training failures varies dramatically by model type, driven by training duration, checkpoint overhead, and the value of accumulated training state. The Archetype A cost is one lost day on the chapter's 10,000-GPU cluster; the vision, speech, and scientific rows give illustrative ranges rather than measured values. These differences demand model-specific fault tolerance strategies. {#tbl-failure-impact-by-model}
-
-Large language model training illustrates how a costly allocation magnifies each hour of lost progress. The chapter's `{python} FaultToleranceIntroRecap.gpus_example_str`-GPU cluster at approximately `{python} FaultToleranceIntroRecap.rate_str` incurs `{python} FaultToleranceIntroRecap.daily_cost_str` in compute costs per day. A job checkpointed only once a day can lose up to a full day of progress to one failure, which costs `{python} FaultToleranceIntroRecap.daily_cost_str` in wasted compute plus schedule delay. At the checkpoint interval derived in @sec-fault-tolerance-young-daly, the same failure costs minutes of rework instead of a day. The checkpoint overhead is correspondingly large. At the `{python} FaultToleranceIntroRecap.ckpt_bpp_str`-byte-per-parameter resumable format that the checkpointing analysis uses (BF16 weights, FP32 master weights, and two FP32 Adaptive Moment Estimation (Adam) moments), the 175B-parameter running example writes `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` at every save.
-
-Recommendation systems such as Archetype B (DLRM at Scale) present a different challenge when training updates models continuously rather than episodically. For a workload whose useful signals change rapidly, delayed embedding updates can reduce recommendation quality even if serving remains available. A failure that loses recent updates therefore has a freshness cost as well as a replay cost. The recovery budget must reflect the workload's measured sensitivity to stale state.[^fn-recsys-model-freshness]
-
-[^fn-recsys-model-freshness]: **RecSys freshness**\index{Recommendation system!freshness fault tolerance}: Freshness makes recovery delay part of the model-quality budget. Its importance depends on how quickly useful user and item signals change and how strongly predictions depend on them. Comparing quality at different state ages establishes the permitted staleness; that measured limit determines how much checkpoint and replication overhead is justified.
-
-Vision models illustrate how a smaller state budget can permit more frequent saves on the same storage path. The vision transformer (ViT)-Large example has a checkpoint of about `{python} FaultToleranceIntroRecap.vit_ckpt_str`, smaller than the large language and embedding-heavy examples here; actual overhead still depends on sustained write bandwidth and training step time. Recovery must preserve optimizer and schedule state as well as weights. Reproducible data processing also requires the augmentation configuration, random-number generator state, and data position, rather than only the initial shuffling seed.
-
-Scientific workflows can require state beyond the model and optimizer. An iterative molecular-search pipeline, for example, must retain which configurations have been evaluated if those results determine its next candidates. A training pipeline that samples scientific datasets must preserve the sampling state needed by its own recovery contract. The governing question is which prior decisions affect future work; the checkpoint boundary must include that state wherever it resides.
-
-## Economic Framework for Fault Tolerance Investment {#sec-fault-tolerance-reliability-reliability-economic-framework-fault-tolerance-investment-e032}
-
-Fault tolerance mechanisms consume resources: storage for checkpoints, bandwidth for checkpoint writes, compute cycles for redundant calculations, and engineering time for implementation and maintenance. Rational investment in fault tolerance requires quantifying both the cost of failures and the cost of prevention.
-
-Failure costs include wasted compute, schedule delay, opportunity cost, and engineering time. Wasted compute measures GPU-hours expended on training steps that must be repeated. Schedule delay captures how extended time to a trained model impacts business timelines. Opportunity cost recognizes that compute consumed by recovery cannot be used for other training. Engineering cost accounts for time spent debugging failures and manually recovering.
-
-Prevention costs include storage, throughput overhead, recovery infrastructure, and complexity. Storage cost scales with model size and checkpoint frequency. Checkpoint writes consume memory bandwidth and may stall training. Recovery infrastructure requires spare capacity and automated recovery systems. Fault tolerant systems are harder to develop and debug.
-
-Optimal investment in fault tolerance balances these costs. For small-scale training on a few GPUs where failures are rare, minimal fault tolerance may be cost-optimal. Infrequent checkpoints and manual recovery suffice. For large-scale training on thousands of GPUs where failures occur multiple times daily, extensive fault tolerance provides positive return on investment. Frequent checkpoints, automatic recovery, and elastic training become essential. The checkpoint interval derived in @sec-fault-tolerance-young-daly is the same balance applied to one decision variable, chosen where the marginal cost of one more save equals the marginal rework it prevents.
-
-@Eq-ft-total-cost presents a simplified economic model for expected cost per training run:
-
-$$ \TotalTrainingRunCost= \BaseTrainingComputeCost+ \mathbb{E}[\TrainingFailureCount] \times \FailureEventCost+ \FaultToleranceCost$$ {#eq-ft-total-cost}
-
-where $\BaseTrainingComputeCost$ is the base compute cost, $\mathbb{E}[\TrainingFailureCount]$ is the expected number of failures during training, $\FailureEventCost$ is the cost per failure, and $\FaultToleranceCost$ is the cost of fault tolerance mechanisms. The cost per failure includes wasted compute plus overhead.
-
-@Eq-ft-investment-criterion formalizes when fault tolerance investment is justified:
-
-$$ \frac{\partial \FaultToleranceCost}{\partial \FaultToleranceInvestment} < -\frac{\partial (\mathbb{E}[\TrainingFailureCount] \times \FailureEventCost)}{\partial \FaultToleranceInvestment} $$ {#eq-ft-investment-criterion}
-
-where $\FaultToleranceInvestment$ represents investment in fault tolerance mechanisms and the base compute cost is held fixed. The negative derivative on the right is the marginal reduction in expected failure cost. Additional protection reduces total expected cost while this reduction exceeds its marginal cost; an interior optimum equates the two when the cost functions have a suitable minimum.
-
-```{python}
-#| echo: false
-#| label: hot-spare-breakeven
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ HOT-SPARE BREAK-EVEN (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fault-tolerance-reliability-reliability-economic-framework-
-# │          fault-tolerance-investment-e032, worked instance of
-# │          @eq-ft-investment-criterion.
-# │
-# │ Goal: Price one idle hot-spare node against the recovery time it must save
-# │       on the chapter's 10,000-GPU cluster.
-# │ Show: ~$576/day idle node; ~$3,100/day per minute shaved from each
-# │       recovery at 6.2 failures/day; break-even ~11 s saved per failure.
-# │ How:  spare cost = GPUs/node x 24 h x price; benefit per second saved =
-# │       failures/day x fleet GPUs x price / 3600; break-even = cost / benefit.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, Systems
-from mlsysim.fmt import check, fmt, fmt_time, fmt_usd
-
-class HotSpareBreakeven:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    fleet_gpus = FailureCascadeExample.fleet_gpus
-    failures_per_day = FailureCascadeExample.per_day  # full-system cascade cadence
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    price = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    spare_cost_day = gpus_per_node * 24 * price  # one node held idle all day
-    value_per_min_day = failures_per_day * fleet_gpus * price / 60  # one minute shaved per failure
-    breakeven_s = spare_cost_day / (value_per_min_day / 60)
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(breakeven_s < 60, "at fleet scale a spare should pay back within a minute saved per failure")
-    check(value_per_min_day > spare_cost_day, "one minute saved per failure must outweigh one idle node")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    gpus_per_node_str = fmt(gpus_per_node, precision=0)
-    spare_cost_day_str = fmt_usd(round(spare_cost_day), precision=0)
-    value_per_min_day_str = fmt_usd(round(value_per_min_day, -2), precision=0)
-    breakeven_s_str = fmt_time(round(breakeven_s), "second", precision=0, commas=False, style="word")
-```
-
-One investment worked through the criterion shows what it decides. Let $\FaultToleranceInvestment$ be a hot-spare node held idle beside the chapter's `{python} FailureCascadeExample.fleet_gpus_str`-GPU cluster, so that a failed node's replacement no longer waits for the scheduler to find capacity. Its marginal cost is `{python} HotSpareBreakeven.gpus_per_node_str` GPUs idling all day, about `{python} HotSpareBreakeven.spare_cost_day_str` per day. Its marginal benefit is the recovery time it removes from each failure while every other GPU waits. At the cascade's `{python} FailureCascadeExample.failures_per_day_str`, each minute removed from every recovery is worth about `{python} HotSpareBreakeven.value_per_min_day_str` per day, so the spare pays for itself once it shortens each recovery by about `{python} HotSpareBreakeven.breakeven_s_str`, provided it is refilled before the next failure arrives some `{python} FailureCascadeExample.mtbf_hours_str` later. The same node beside an eight-GPU job, whose GPU-only MTBF in @tbl-cluster-mtbf-scaling is `{python} ClusterMtbfScaling.mtbf0_str`, would sit idle far longer than it could ever save. Scale reverses the verdict on the same hardware.
-
-Three foundational principles guide every design decision in this domain.
-
-::: {#psp-fault-tolerance-three-rules-failure-at-scale .callout-perspective title="Three rules of failure at scale"}
-
-1. *At scale, failures are continuous, not exceptional.* A 10,000-GPU cluster experiences failures every few hours. Systems must be designed expecting failure as normal operation.
-2. *Checkpoint intervals have an optimum.* The Young-Daly interval (developed in @sec-fault-tolerance-young-daly) sets checkpoint frequency from write time and system MTBF under its stated assumptions, and it shrinks only with the square root of a falling MTBF.
-3. *Training and serving have fundamentally different fault tolerance requirements.* A long training job can budget minutes for recovery while preserving accumulated progress; an interactive serving request may have only milliseconds left before its deadline. Those budgets motivate checkpoint recovery for training and ready alternate capacity for serving.
-
-:::
-
-The rest of the chapter follows from these rules. Before any recovery mechanism can act, the fleet must recognize what failed, so the next sections examine where faults come from (hardware, silent corruption, and software) and how fault injection tests the detectors. Training recovery (checkpointing, detection and restart, elastic resizing) then puts rules 1 and 2 to work, and serving fault tolerance and graceful degradation answer rule 3. The first question is how the physical faults behind these failures look once they reach a fleet.
-
-## Hardware Faults at Fleet Scale {#sec-fault-tolerance-hardware-fault-taxonomy}
-
-A cosmic ray that flips one bit in a GPU's high-bandwidth memory and a solder joint that cracks under thermal cycling are physical events, but the recovery system never observes them directly. It observes symptoms: a gradient spike with no process crash, a rank that disappears from the collective, or a node that fails only after it heats under sustained load. The failure taxonomy of @sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c already classifies such events by persistence, manifestation, and scope. For hardware, persistence carries most of the operational weight because it decides whether the fleet should retry, quarantine, or replace a component, while manifestation decides whether the fleet notices the fault at all.
-
-ML workloads raise the stakes of each fault. A training step performs trillions of arithmetic operations on state that persists into later steps, so a wrong value can survive beyond the computation that produced it. The damage depends on the affected value and its later use. Under the IEEE 754 format,[^fn-ieee754-fp-vulnerability] a sign-bit flip inverts a weight, while an exponent-bit flip can move a small gradient by many orders of magnitude. Fault-injection studies show that network resilience varies with model, layer, and bit position, so a few faults in vulnerable locations can cost disproportionate accuracy [@reagen2018]. A valid-looking corrupted value can enter learned state without triggering the process failure that would otherwise initiate recovery.
-
-::: {.column-margin .margin-pointer}
-↪ How an FP16 exponent-bit flip rescales a value by $2^{16}$ and can saturate an attention softmax is developed in @sec-appdx-reliability-sdc-perturbation.
-:::
-
-[^fn-ieee754-fp-vulnerability]: **IEEE 754**\index{IEEE 754!bit-flip vulnerability}: The IEEE 754 floating-point standard defines the binary32 format with 1 sign bit, 8 exponent bits, and 23 fraction bits [@ieee_754_2019]. Because bit positions differ so much in consequence, resilience mechanisms often prioritize the sign and exponent bits rather than treating all bits as equally important.
-
-Fleet scale turns these rare device events into routine operating conditions. Smaller geometries and lower operating voltages can reduce the charge needed to disturb a stored value [@baumann2005], and fleet studies at Google and Meta found that a small but persistent population of processors, on the order of a few per several thousand machines, computes wrong results without raising any error [@hochschild2021; @dixit2021silent]. Studies of accelerator training fleets reach the same conclusion: rare hardware faults appear often enough that software-level detection and recovery become part of the training system design [@he2023]. ML system architects must therefore treat hardware as an unreliable substrate\index{Hardware!unreliable substrate} and budget for end-to-end integrity checks, replayed computation on high-value paths, and periodic consistency checks as system requirements rather than high-performance computing specialties.
-
-### Fault persistence and the fleet response {#sec-ft-fault-persistence-response}
-
-Each persistence class from the taxonomy maps to a different fleet action, from retry for a fault that leaves nothing to repair, through quarantine for one that returns under load, to replacement for one that repeats on every attempt (@fig-fault-tolerance-failure-spectrum). A transient fault\index{Transient fault!fleet response}, as @sec-fault-tolerance-reliability-reliability-transient-failures-57b4 established, leaves no lasting defect from that event, so the fleet's question is only whether its effect escaped. A single-event upset, a voltage droop on an unstable power path [@reddi2013], a timing violation, or a soft error in combinational logic [@mukherjee2005] can corrupt a tensor, packet, or instruction. Detection and correction can prevent propagation; affected state may otherwise require rollback. During training, an undetected error in weights or gradients can compromise convergence and contaminate subsequent checkpoints [@he2023]. During stateless inference, an activation error can remain confined to one request [@mahmoud2020]. If that activation enters retained state such as a KV cache, later outputs can also depend on it.
-
-::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Hardware faults ordered by how long they persist. A transient fault leaves nothing to repair, an intermittent fault returns under the load that exposed it, and a permanent fault repeats on every retry. Persistence decides the fleet response, from retry through quarantine to replacement, and fault tolerance engineering must handle all three to keep a fleet making progress." fig-alt="An arrow labeled fault persistence runs from clears on its own to lasts until repaired above three panels: transient, intermittent, and permanent. Each panel shows a row of eight attempt squares over time, green when an attempt completes and red when it faults. Transient: one red square among greens. Intermittent: gray load bars above the row, and the two attempts under the tallest load bars are red. Permanent: two green squares then all red. Below each row are a typical cause (particle strike, cracked solder joint, stuck-at fault or wear-out) and a response box (retry or roll back, drain and stress-test, replace and restore)."}
-![](images/svg/failure-spectrum.svg)
-
-:::
-
-A permanent fault\index{Permanent fault!fleet response} announces itself through repeatability. The same accelerator, memory cell, or link fails again after retry, often at the same address or in the same workload phase. Manufacturing defects and wear-out mechanisms such as electromigration and oxide breakdown produce this signature, and the stuck-at fault, in which a signal remains fixed at 0 or 1 regardless of input, is its standard abstract model [@seong2010]. Repeatability helps locate the defect but does not make the result trustworthy. A permanent datapath fault keeps producing wrong gradients until the device is drained from the cluster [@he2023], and rerunning the computation on the same device reproduces the error instead of exposing it. The fleet must stop trusting the component, quarantine it, and restore from a checkpoint that predates its first bad write.
-
-Intermittent faults\index{Intermittent fault!fleet response} create the most operational ambiguity because they produce evidence and then disappear. A node may pass a reboot test, rejoin the fleet, and fail again only when the next job drives the package into the same thermal, voltage, or communication regime. Cracked solder joints, aging packages, and contamination between contacts create these load-dependent conditions [@constantinescu2008; @rashid2015], and reduced voltage margins cause timing errors that are hard to reproduce [@zhang2018thundervolt]. Sporadic errors of this kind can accumulate across iterations and degrade convergence without any explicit failure [@rashid2015]. An intermittent node should therefore remain suspect until evidence clears it. The fleet drains it from long jobs, correlates its error logs, and readmits it only after it passes stress tests under the load that exposed the fault; otherwise one marginal component can make validation and recovery untrustworthy for every job that lands on it. @Tbl-fault_types summarizes the three responses.
-
-| **Persistence**  | **Fleet signature**                                       | **Detection evidence**                                         | **Fleet response**                                                |
-|:-----------------|:----------------------------------------------------------|:---------------------------------------------------------------|:------------------------------------------------------------------|
-| **Transient**    | One-time wrong value or lost message; retry succeeds      | Corrected-error counters, checksum mismatches, gradient spikes | Correct or retry; roll back if durable state was contaminated     |
-| **Intermittent** | Recurring errors under specific load, heat, or voltage    | Correlated error logs and repeated anomalies on one node       | Drain and quarantine; readmit only after screening under load     |
-| **Permanent**    | Reproducible failure at the same device, address, or link | Failed self-test or replay mismatch on the same device         | Replace the component; restore from a checkpoint before the fault |
-
-: **Hardware Fault Persistence and Fleet Response**: The persistence class of a hardware fault determines the evidence that exposes it and the action the fleet takes. Manifestation is a separate axis: any of the three classes can surface as a crash or as silent corruption [@constantinescu2008]. {#tbl-fault_types}
-
 ### Fleet-scale detection and mitigation {#sec-ft-hardware-fault-detection-mitigation-8f7f}
 
 Fault rates drive fleet decisions through compounding. The analysis in @sec-fault-tolerance-reliability-reliability-mathematics-inevitable-failure-93ef shows how per-device failure rates become fleet interruption rates, and memory errors compound in the same way. Field studies of DRAM in large data centers found errors frequent enough that error-correcting memory, background scrubbing, and error-rate monitoring are standard fleet practice rather than optional hardening [@schroeder2009; @sridharan2015]. Protection consumes some capacity and bandwidth for check bits and scrubbing, but that cost is small compared with a corrupted multi-week run.
 
-Detection works in layers with different coverage and cost. At the hardware layer, error-correcting codes\index{ECC!error detection and correction}\index{Error correction code|see{ECC}}[^fn-hamming-ecc-memory] [@hamming1950] correct and detect the memory-error patterns covered by the implemented code, and link-level CRCs[^fn-crc-packet-validation] check corruption in transit. These protections operate within their enabled storage and transport boundaries; they do not validate an incorrect arithmetic result merely because its bytes arrive intact. Before deployment, built-in self-test and burn-in screening expose manufacturing defects and permanent faults [@bushnell2002]. During service, operators periodically pull nodes from production and run known-answer stress tests on arithmetic, memory, and interconnect, because defective processors often fail only on particular instruction mixes, data patterns, or operating points [@hochschild2021; @dixit2021silent].
+Detection works in layers with different coverage and cost. At the hardware layer, error-correcting codes\index{ECC!error detection and correction}\index{Error correction code|see{ECC}}[^fn-hamming-ecc-memory] [@hamming1950] correct and detect the memory-error patterns covered by the implemented code, and link-level CRCs[^fn-crc-packet-validation] check corruption in transit. These protections operate within their enabled storage and transport boundaries; they do not validate an incorrect arithmetic result merely because its bytes arrive intact. Before deployment, built-in self-test and the burn-in screening of the hardware lifecycle expose manufacturing defects and permanent faults [@bushnell2002]. During service, operators periodically pull nodes from production and run known-answer stress tests on arithmetic, memory, and interconnect, because defective processors often fail only on particular instruction mixes, data patterns, or operating points [@hochschild2021; @dixit2021silent].
 
 [^fn-hamming-ecc-memory]: **Hamming codes (1950)**\index{Hamming code!ECC origin}: Richard Hamming developed error-correcting codes at Bell Labs after relay computers repeatedly detected errors in his unattended weekend jobs and abandoned them rather than repairing them. A Hamming code uses parity checks to locate a single-bit error with $\mathcal{O}(\log \HammingDataBitCount)$ check-bit overhead; adding an overall parity bit yields the extended single-error-correcting, double-error-detecting form. Memory ECC implementations vary in code and coverage, so the system must account for both corrected errors and residual faults outside that coverage.
 
 [^fn-crc-packet-validation]: **CRC (Cyclic Redundancy Check)**\index{CRC!gradient validation}: Polynomial checksum family introduced by @peterson1961. CRC coverage depends on the polynomial, frame length, and error model; it is best understood as a low-cost detection layer rather than a universal guarantee. In distributed ML training, checksums or hashes can validate gradient payloads exchanged during collectives; without a verification layer, a corrupted gradient packet can silently poison the parameter update for every worker in the collective.
 
-The software layer draws its cheapest evidence from metrics the training loop already emits. Statistical checks on loss, gradient norms, and activations flag silent drift [@chandola2009], missed heartbeats identify suspected failures [@kawazoe_aguilera1997], and watchdog timers catch tasks that stall without crashing [@pont2002using]. A node that stays alive but runs slowly or erratically, the gray failure of the chapter opening, can degrade progress while still meeting a liveness timeout, so @sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d treats it through straggler detection. Redundant computation adds stronger evidence on selected paths, either periodically or in response to an anomaly, by replaying a step on another device or comparing independently computed results. Its frequency depends on the residual corruption risk, the value of the protected state, and the cost of detecting an error late.
+The software layer draws its cheapest evidence from metrics the training loop already emits. Statistical checks on loss, gradient norms, and activations flag silent drift [@chandola2009], missed heartbeats identify suspected failures [@kawazoe_aguilera1997], and watchdog timers catch tasks that stall without crashing [@pont2002using]. A node that stays alive but runs slowly or erratically, the gray failure of the failure taxonomy, can degrade progress while still meeting a liveness timeout, so @sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d treats it through straggler detection. Redundant computation adds stronger evidence on selected paths, either periodically or in response to an anomaly, by replaying a step on another device or comparing independently computed results. Its frequency depends on the residual corruption risk, the value of the protected state, and the cost of detecting an error late.
 
 ::: {#chk-fault-tolerance-classifying-hardware-faults .callout-checkpoint title="Classifying a hardware fault"}
 
@@ -1550,7 +1276,7 @@ These checks reduce the risk of an unreliable substrate, but they do not protect
 
 ## Software Faults {#sec-ft-software-faults}
 
-A team spends three months testing an LLM against complex prompt-level failure cases, only to realize that its preprocessing script kept only the last 512 tokens of each input, silently discarding the system prompt on long requests. The example exposes an ordinary source of ML failure that algorithmic testing can miss. A logic error in a data loader or prompt assembler can preserve valid tensor shapes while changing the computation's meaning, allowing the pipeline to continue without a crash.
+A team spends three months testing a large language model (LLM) against complex prompt-level failure cases, only to realize that its preprocessing script kept only the last 512 tokens of each input, silently discarding the system prompt on long requests. The example exposes an ordinary source of ML failure that algorithmic testing can miss. A logic error in a data loader or prompt assembler can preserve valid tensor shapes while changing the computation's meaning, allowing the pipeline to continue without a crash.
 
 Software faults require a different recovery lens from hardware failures. Hardware faults enter from silicon, electrons, and physical wear; software faults enter through design choices, dependency versions, and pipeline glue. The fault-tolerance problem shifts from replacing a failed component to identifying which valid-looking transformation corrupted data, gradients, or predictions, and every boundary between framework, library, runtime, and distributed system is a place where such a transformation can hide.
 
@@ -1579,43 +1305,141 @@ The prompt-truncation bug from the opening example should never survive until ru
 
 These safeguards matter only when each gate targets a concrete corruption path. A test that checks only whether the tokenizer runs is too weak; it must assert that system prompts, labels, masks, and sequence-length metadata survive preprocessing with the intended semantics. Integration replay then follows one recorded batch through loading, sharding, collation, and model input construction. Fault injection tests whether the detector fires before the protected commit and whether recovery stays within the named bounds on lost work and recovery time for the injected fault. A passing case supports that tested contract, not complete coverage of every possible corruption. Restore drills, stale-writer rejection, and corrupted-shard rejection therefore provide evidence that generic build success cannot supply.
 
-Several rows of @tbl-software-faults-summary-ft claim more than a passing test. They claim that a detector fires and a recovery path holds when something breaks, and a claim of that kind can be checked only by breaking something on purpose.
+Several rows of @tbl-software-faults-summary-ft claim more than a passing test. They claim that a detector fires and a recovery path holds when something breaks, and @sec-ft-fault-injection-tools-frameworks tests claims of that kind once the recovery paths they exercise have been built. Before building those paths, a fleet must decide how much protection each workload is worth.
 
-## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
+## The Cost of Failure {#sec-fault-tolerance-reliability-reliability-economic-framework-fault-tolerance-investment-e032}
 
-An injected failure is useful evidence only when it resembles the production failure the system must survive. A multi-node training cluster that claims to tolerate network partitions should have that connection severed in a staging environment so engineers can observe what the orchestration layer does. Fault injection\index{Fault injection!testing discipline}\index{Fault injection!tools and frameworks} is the engineering discipline of deliberately perturbing a system to empirically verify that robustness mechanisms work before production traffic discovers the gap. Fault-injection tools for tensors and accelerators cover bit flips, corrupted tensor values, and accelerator-oriented failures [@chen2020tensorfi; @tsai2021; @grafe2023], while network partitions, latency injection, dependency termination, and API-response faults belong to chaos and distributed-systems testing practice [@basiri2016].
+Hardware, silent corruption, and software together set how often a fleet fails and in what ways. What each failure costs depends on the work it destroys, and a defense is worth buying only where it removes more of that cost than it adds. The price of a single failure already varies by orders of magnitude across workloads.
 
-### Fault and error models {#sec-ft-fault-error-models}
+### Failure cost by workload {#sec-fault-tolerance-reliability-reliability-modeltype-diversity-failure-impact-8ec0}
 
-A fault-injection experiment must specify duration, location, granularity, and propagation path. Its fault model\index{Fault model!abstraction} describes the originating disturbance, such as a transient single-bit upset or a permanent multi-bit defect. Its error model\index{Error model!propagation} describes the resulting corrupted state or computation. Results for transient single-bit faults do not establish resilience to permanent multi-bit defects [@sangchoolie2017].
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: LLM failure-impact prose below (@tbl-failure-impact-by-model).
+# │ Goal: Format GPT-3 checkpoint size for the 175B running example.
+# │ Note: resumable checkpoint = 14 B/param (bf16 weights, fp32 master
+# │       weights, fp32 Adam moments; no gradients or activations).
+from mlsysim.physics import calc_checkpoint_size
+from mlsysim import Models, Hardware, ReferenceStats
+from mlsysim.fmt import check, fmt, fmt_memory, fmt_text
 
-The injection level determines which propagation paths the experiment includes. A register-level bit flip in a simulator such as gem5 [@binkert2011] can expose effects that a mutation of a PyTorch weight tensor omits. Conversely, hardware may mask an injected fault before software observes it. Location and propagation therefore matter when comparing results across fault models [@sangchoolie2017; @papadimitriou2021].
+class FaultToleranceIntroRecap:
+    m = Models.Language.GPT3
+    ckpt_bpp = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
+    gpt3_ckpt_bytes = calc_checkpoint_size(m.parameters)  # 14 B/param default
+    gpus_example = Systems.Clusters.Training_10K.total_accelerators  # the chapter's 10,000-GPU running cluster
+    rate = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
+    daily_cost = gpus_example * rate * 24
+    vit_ckpt = ReferenceStats.CheckpointArchetypes.MediumVisionTransformerCheckpointSize
+    recsys_table = ReferenceStats.RecommenderAtScaleProfile.EmbeddingTableSize
+    check(
+        abs((gpt3_ckpt_bytes / (m.parameters * ckpt_bpp)).to("").magnitude - 1) < 1e-9, "calc_checkpoint_size must use the registry 14 B/param anchor"
+    )
+    check(2.3e12 < gpt3_ckpt_bytes.to(byte).magnitude < 2.6e12, "175B resumable checkpoint must be about 2.45 TB")
+    check(1.0 < vit_ckpt.to(GB).magnitude < 2.0, "ViT-Large checkpoint row is a single-digit-GB 'middle ground'")
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    ckpt_bpp_str = fmt(ckpt_bpp.magnitude, precision=0)
+    gpt3_ckpt_tb_str = fmt_memory(gpt3_ckpt_bytes, unit=TB, precision=2, commas=False)
+    gpus_example_str = fmt(gpus_example, precision=0, commas=True)
+    rate_str = fmt_usd(rate, precision=0, commas=False, per="GPU-hour")
+    daily_cost_str = fmt_usd(daily_cost, scale="M", precision=1, commas=False)
+    vit_ckpt_str = fmt_memory(vit_ckpt, unit=GB, precision=1, commas=False)
+    recsys_table_str = fmt_text(fmt_memory(recsys_table, unit=TB, precision=0, commas=False), "+")
+```
 
-This divergence comes from the multi-tier filtering formalized as error masking [@mohanram2003]. A physical soft error becomes an observable failure only if it passes two screens in turn (@fig-error-masking-ft). The corrupted data must first be read, and the value read must then produce incorrect output or a crash. A hardware disturbance that hits an unused functional unit, is overwritten prior to use, or lands in dynamically dead instructions is silently absorbed within the microarchitecture or runtime [@ko2021]. Because tensor-level mutations inject perturbations downstream of these architectural filters, their empirical error rates must be evaluated at that higher abstraction level.
+While the mathematics of failure rates apply universally, the failure impact by model type differs dramatically. The impact of losing an hour of training depends on what that training costs, how much state must be recovered, and how long recovery takes. @Tbl-failure-impact-by-model quantifies these factors across model architectures, revealing orders-of-magnitude variation from LLMs, where a lost day of progress costs hundreds of thousands of dollars in compute, to vision models losing modest amounts of progress.
 
-::: {#fig-error-masking-ft fig-env="figure" fig-pos="htb" fig-cap="**Error masking**: Follow a soft error from the top. It becomes a failure only if the corrupted data is read and then also produces incorrect output; at each No branch it is masked, first by microarchitectural effects (unused components, overwritten values, squashed speculative instructions) and then by software effects (dead instructions, logical and compare operations, uninfluential branches). Because software-level fault injection sees only the second filter, it can misestimate a system's true resilience to transient errors." fig-alt="Flowchart starting at a soft error. A decision diamond asks whether corrupted data is read; No leads to masked in the microarchitecture. Yes leads to a second diamond asking whether output is incorrect or the system crashes; No leads to masked in software, Yes leads to failure. Beside each masked outcome, three masking causes are listed: unused component, overwritten value, and squashed speculation for the microarchitecture; dead instruction, logical or compare op, and uninfluential branch for software. The failure path, Yes and then Yes from soft error to failure, is drawn as a heavy red spine; the No exits are thin gray arrows. A dashed arrow labeled software fault injection enters the spine after the first diamond, and a shaded region below that point, labeled view of software fault injection, encloses only the second diamond, its masked exit, and the failure."}
+| **Model Type**                  | **Typical Training Duration** |                        **Checkpoint Size**                        |      **State Sensitivity**      |                              **Failure Cost**                             |
+|:--------------------------------|:-----------------------------:|:-----------------------------------------------------------------:|:-------------------------------:|:-------------------------------------------------------------------------:|
+| **Archetype A (GPT-4/Llama-3)** |        Weeks to months        |    `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` (175B)    |  High (position in data order)  | `{python} FaultToleranceIntroRecap.daily_cost_str` compute per 24 hr loss |
+| **Vision (ViT-Large)**          |           1--3 days           |          `{python} FaultToleranceIntroRecap.vit_ckpt_str`         |   Medium (augmentation state)   |                           \$10--50K per day loss                          |
+| **Archetype B (DLRM at Scale)** |           Continuous          | `{python} FaultToleranceIntroRecap.recsys_table_str` (embeddings) | Very High (embedding freshness) |                          Revenue impact per hour                          |
+| **Speech (Whisper-scale)**      |           3--7 days           |                              5--10 GB                             |              Medium             |                          \$50--200K per day loss                          |
+| **Scientific (AlphaFold)**      |         Days to weeks         |                             10--50 GB                             |     High (exploration state)    |                               Research delay                              |
 
-![](images/svg/error-masking.svg){width="88%"}
+: **Failure Impact by Model Type**: The cost of training failures varies dramatically by model type, driven by training duration, checkpoint overhead, and the value of accumulated training state. The Archetype A cost is one lost day on the chapter's 10,000-GPU cluster; the vision, speech, and scientific rows give illustrative ranges rather than measured values. These differences demand model-specific fault tolerance strategies. {#tbl-failure-impact-by-model}
+
+Large language model training illustrates how a costly allocation magnifies each hour of lost progress. The chapter's `{python} FaultToleranceIntroRecap.gpus_example_str`-GPU cluster at approximately `{python} FaultToleranceIntroRecap.rate_str` incurs `{python} FaultToleranceIntroRecap.daily_cost_str` in compute costs per day. A job checkpointed only once a day can lose up to a full day of progress to one failure, which costs `{python} FaultToleranceIntroRecap.daily_cost_str` in wasted compute plus schedule delay. At the checkpoint interval derived in @sec-fault-tolerance-young-daly, the same failure costs minutes of rework instead of a day. The checkpoint overhead is correspondingly large. At the `{python} FaultToleranceIntroRecap.ckpt_bpp_str`-byte-per-parameter resumable format that the checkpointing analysis uses (BF16 weights, FP32 master weights, and two FP32 Adaptive Moment Estimation (Adam) moments), the 175B-parameter running example writes `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` at every save.
+
+### Investing in protection {#sec-fault-tolerance-investing-protection}
+
+Fault tolerance mechanisms consume resources: storage for checkpoints, bandwidth for checkpoint writes, compute cycles for redundant calculations, and engineering time for implementation and maintenance. Rational investment in fault tolerance requires quantifying both the cost of failures and the cost of prevention.
+
+Failure costs include wasted compute, schedule delay, opportunity cost, and engineering time. Wasted compute measures GPU-hours expended on training steps that must be repeated. Schedule delay captures how extended time to a trained model impacts business timelines. Opportunity cost recognizes that compute consumed by recovery cannot be used for other training. Engineering cost accounts for time spent debugging failures and manually recovering.
+
+Prevention costs include storage, throughput overhead, recovery infrastructure, and complexity. Storage cost scales with model size and checkpoint frequency. Checkpoint writes consume memory bandwidth and may stall training. Recovery infrastructure requires spare capacity and automated recovery systems. Fault tolerant systems are harder to develop and debug.
+
+Optimal investment in fault tolerance balances these costs. For small-scale training on a few GPUs where failures are rare, minimal fault tolerance may be cost-optimal. Infrequent checkpoints and manual recovery suffice. For large-scale training on thousands of GPUs where failures occur multiple times daily, extensive fault tolerance provides positive return on investment. Frequent checkpoints, automatic recovery, and elastic training become essential. The checkpoint interval derived in @sec-fault-tolerance-young-daly is the same balance applied to one decision variable, chosen where the marginal cost of one more save equals the marginal rework it prevents.
+
+@Eq-ft-total-cost presents a simplified economic model for expected cost per training run:
+
+$$ \TotalTrainingRunCost= \BaseTrainingComputeCost+ \mathbb{E}[\TrainingFailureCount] \times \FailureEventCost+ \FaultToleranceCost$$ {#eq-ft-total-cost}
+
+where $\BaseTrainingComputeCost$ is the base compute cost, $\mathbb{E}[\TrainingFailureCount]$ is the expected number of failures during training, $\FailureEventCost$ is the cost per failure, and $\FaultToleranceCost$ is the cost of fault tolerance mechanisms. The cost per failure includes wasted compute plus overhead.
+
+@Eq-ft-investment-criterion formalizes when fault tolerance investment is justified:
+
+$$ \frac{\partial \FaultToleranceCost}{\partial \FaultToleranceInvestment} < -\frac{\partial (\mathbb{E}[\TrainingFailureCount] \times \FailureEventCost)}{\partial \FaultToleranceInvestment} $$ {#eq-ft-investment-criterion}
+
+where $\FaultToleranceInvestment$ represents investment in fault tolerance mechanisms and the base compute cost is held fixed. The negative derivative on the right is the marginal reduction in expected failure cost. Additional protection reduces total expected cost while this reduction exceeds its marginal cost; an interior optimum equates the two when the cost functions have a suitable minimum.
+
+```{python}
+#| echo: false
+#| label: hot-spare-breakeven
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HOT-SPARE BREAK-EVEN (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fault-tolerance-reliability-reliability-economic-framework-
+# │          fault-tolerance-investment-e032, worked instance of
+# │          @eq-ft-investment-criterion.
+# │
+# │ Goal: Price one idle hot-spare node against the recovery time it must save
+# │       on the chapter's 10,000-GPU cluster.
+# │ Show: ~$576/day idle node; ~$3,100/day per minute shaved from each
+# │       recovery at 6.2 failures/day; break-even ~11 s saved per failure.
+# │ How:  spare cost = GPUs/node x 24 h x price; benefit per second saved =
+# │       failures/day x fleet GPUs x price / 3600; break-even = cost / benefit.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure, Systems
+from mlsysim.fmt import check, fmt, fmt_time, fmt_usd
+
+class HotSpareBreakeven:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    fleet_gpus = FailureCascadeExample.fleet_gpus
+    failures_per_day = FailureCascadeExample.per_day  # full-system cascade cadence
+    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    price = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    spare_cost_day = gpus_per_node * 24 * price  # one node held idle all day
+    value_per_min_day = failures_per_day * fleet_gpus * price / 60  # one minute shaved per failure
+    breakeven_s = spare_cost_day / (value_per_min_day / 60)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(breakeven_s < 60, "at fleet scale a spare should pay back within a minute saved per failure")
+    check(value_per_min_day > spare_cost_day, "one minute saved per failure must outweigh one idle node")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    gpus_per_node_str = fmt(gpus_per_node, precision=0)
+    spare_cost_day_str = fmt_usd(round(spare_cost_day), precision=0)
+    value_per_min_day_str = fmt_usd(round(value_per_min_day, -2), precision=0)
+    breakeven_s_str = fmt_time(round(breakeven_s), "second", precision=0, commas=False, style="word")
+```
+
+One investment worked through the criterion shows what it decides. Let $\FaultToleranceInvestment$ be a hot-spare node held idle beside the chapter's `{python} FailureCascadeExample.fleet_gpus_str`-GPU cluster, so that a failed node's replacement no longer waits for the scheduler to find capacity. Its marginal cost is `{python} HotSpareBreakeven.gpus_per_node_str` GPUs idling all day, about `{python} HotSpareBreakeven.spare_cost_day_str` per day. Its marginal benefit is the recovery time it removes from each failure while every other GPU waits. At the cascade's `{python} FailureCascadeExample.failures_per_day_str`, each minute removed from every recovery is worth about `{python} HotSpareBreakeven.value_per_min_day_str` per day, so the spare pays for itself once it shortens each recovery by about `{python} HotSpareBreakeven.breakeven_s_str`, provided it is refilled before the next failure arrives some `{python} FailureCascadeExample.mtbf_hours_str` later. The same node beside an eight-GPU job, whose GPU-only MTBF in @tbl-cluster-mtbf-scaling is `{python} ClusterMtbfScaling.mtbf0_str`, would sit idle far longer than it could ever save. Scale reverses the verdict on the same hardware.
+
+Three foundational principles guide every design decision in this domain.
+
+::: {#psp-fault-tolerance-three-rules-failure-at-scale .callout-perspective title="Three rules of failure at scale"}
+
+1. *At scale, failures are continuous, not exceptional.* A 10,000-GPU cluster experiences failures every few hours. Systems must be designed expecting failure as normal operation.
+2. *Checkpoint intervals have an optimum.* The Young-Daly interval (developed in @sec-fault-tolerance-young-daly) sets checkpoint frequency from write time and system MTBF under its stated assumptions, and it shrinks only with the square root of a falling MTBF.
+3. *Training and serving have fundamentally different fault tolerance requirements.* A long training job can budget minutes for recovery while preserving accumulated progress; an interactive serving request may have only milliseconds left before its deadline. Those budgets motivate checkpoint recovery for training and ready alternate capacity for serving.
 
 :::
 
-These masking effects determine which abstraction level an experiment should target.
-
-### Fault injection methods {#sec-ft-fault-injection-methods}
-
-Fault injection methods trade realism against experimental scale. Hardware-based injection, through field-programmable gate array (FPGA) emulation or accelerated particle-beam exposure of a running accelerator [@velazco2010], supplies the calibration point because its faults pass through the same circuit-level masking as production faults. Software-based injection\index{Fault injection!software-based} is the scalable counterpart. Tools such as PyTorchFI\index{PyTorchFI!fault injection} [@mahmoud2020] perturb weights, activations, and gradients directly, covering many model states quickly without special hardware, and have shown that single bit-level faults can produce severe misclassifications, including "phantom" objects in detection models. The cost is an abstraction gap\index{Fault injection!abstraction gap}. A software tool that mutates a tensor skips the hardware masking that would have absorbed many of the same disturbances. Frameworks such as Fidelity\index{Fidelity!fault injection framework} [@he2020fidelity] narrow that gap by mapping how faults in registers, memory hierarchies, and numerical units become software-visible errors, so that injected faults resemble what physical hardware would produce.
-
-::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
-
-**Scenario**: An engineering team validates a distributed training pipeline using software fault injection, concluding that tensor bit-flips always corrupt model gradient updates.
-
-**Diagnosis**: Hardware-calibrated experiments reveal that software injection bypasses low-level hardware masking effects (such as ECC memory correction and gate-level masking) that prevent many register-level bit-flips from ever mutating software variables.
-
-**Systems lesson**: In this experiment, bypassing hardware masking overstates the effect of the modeled physical faults. Tensor mutation still tests the software response to corrupted values; estimating production vulnerability additionally requires a calibrated model of which physical faults reach those values. The result must be interpreted at the injection level actually tested.
-
-:::
-
-For fleet recovery, the most valuable experiments inject faults at the level where recovery decisions are made. Killing a rank in the middle of a collective, partitioning a node from the rendezvous service, delaying a heartbeat past its timeout, and corrupting one checkpoint shard each exercise one row of @tbl-software-faults-summary-ft. Running these experiments continuously in staging, and in controlled form in production, keeps rarely executed recovery code from decaying between real incidents [@basiri2016]. A detection mechanism can identify corrupted or missing state, but only a recovery mechanism can replace it. Fault persistence determines whether to retry, quarantine, or replace a component, and checkpointing supplies the known-good training state from which any of those paths can resume.
+The rest of the chapter puts these rules to work. Training recovery comes first: checkpointing, detection and restart, and elastic resizing apply rules 1 and 2. Serving fault tolerance and graceful degradation then answer rule 3, and distributed debugging and fault injection supply the evidence that each recovery path works. The first mechanism is the saved state that every training recovery falls back on.
 
 ## Checkpointing and Progress Preservation {#sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2}
 
@@ -1720,7 +1544,7 @@ To see the balance, consider an interval between saves. Doubling that interval a
 
 $$ \CheckpointWasteFraction(\CheckpointInterval) \approx \frac{\CheckpointWriteTime}{\CheckpointInterval} + \frac{\CheckpointInterval}{2 \cdot \SystemMtbf} $$ {#eq-ft-checkpoint-waste}
 
-Setting the first derivative to zero ($\frac{d\CheckpointWasteFraction}{d\CheckpointInterval} = -\frac{\CheckpointWriteTime}{\CheckpointInterval^2} + \frac{1}{2 \cdot \SystemMtbf} = 0$) directly yields the square-root minimum of @eq-ft-young-daly-interval. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $\CheckpointWriteTime$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth when checkpoint size and the other assumptions stay fixed.
+Setting the first derivative to zero ($\frac{d\CheckpointWasteFraction}{d\CheckpointInterval} = -\frac{\CheckpointWriteTime}{\CheckpointInterval^2} + \frac{1}{2 \cdot \SystemMtbf} = 0$) directly yields the square-root minimum of @eq-ft-young-daly-interval. As clusters grow, system MTBF drops, so the optimal interval shrinks, demanding higher-bandwidth storage to keep $\CheckpointWriteTime$ small before the "checkpoint tax" consumes the cluster's compute capacity. Because the relationship is a square root, halving MTBF tightens the interval by only $\sqrt{2}\approx 1.4\times$, so doubling cluster size does not demand doubling checkpoint I/O bandwidth when checkpoint size and the other assumptions stay fixed. Substituting the optimum back into @eq-ft-checkpoint-waste gives a minimum waste of $\sqrt{2\CheckpointWriteTime/\SystemMtbf}$. Because $\SystemMtbf$ falls as $1/\DeviceCount$ under independent failures, that optimized overhead grows as $\sqrt{\DeviceCount}$, and doubling the cluster raises it by a factor of $\sqrt{2}$ even though the interval itself adapts.
 
 ::: {.column-margin .margin-pointer}
 ↩ The per-tier storage bandwidths that bound how quickly a checkpoint can be written are established in @sec-storage-hierarchy.
@@ -1984,61 +1808,9 @@ Here, $\CheckpointOverheadFraction$ is the dimensionless fraction of time lost t
 
 #### Synchronous vs. asynchronous checkpointing {#sec-fault-tolerance-reliability-reliability-synchronous-vs-asynchronous-checkpointing-ecc1}
 
-The synchronous and asynchronous checkpointing approaches differ in when training waits for durable storage. Synchronous checkpointing\index{Checkpointing!synchronous} resumes training only after every worker's portion is written; asynchronous checkpointing\index{Checkpointing!asynchronous}\index{Asynchronous checkpointing|see{Checkpointing}} captures a protected snapshot in CPU memory\index{Checkpointing!in-memory staging} or local staging and lets a background process flush it while training continues.[^fn-asyncckpt-storage-pipeline] The write path behind both, from pinned snapshot buffers and tiered staging to the pause budget and the memory a retained snapshot costs, is developed in @sec-storage-distributed-checkpoint. For recovery, blocking alone does not establish consistency, so the protocol must ensure that every shard belongs to the same recoverable training state. Recovery can use an asynchronous generation only after all required shards reach the storage tier that survives the modeled failure and the coordinator publishes completion.
+Synchronous checkpointing\index{Checkpointing!synchronous} resumes training only after every worker's portion is written, while asynchronous checkpointing\index{Checkpointing!asynchronous}\index{Asynchronous checkpointing|see{Checkpointing}} captures a snapshot in host memory\index{Checkpointing!in-memory staging} or local staging and flushes it in the background; the write path behind both is developed in @sec-storage-distributed-checkpoint. For recovery, blocking alone does not establish consistency, so the protocol must ensure that every shard belongs to the same recoverable training state. Recovery can use an asynchronous generation only after all required shards reach the storage tier that survives the modeled failure and the coordinator publishes completion.
 
-[^fn-asyncckpt-storage-pipeline]: **Asynchronous checkpointing**\index{Checkpointing!asynchronous, pipeline overhead}: Pipelines durable writes behind training by first capturing a consistent snapshot in staging memory or storage. Training must not mutate values still being captured. After capture, background flushing can overlap independent computation, subject to staging capacity and sustained drain bandwidth. Exposed capture time and resource contention remain overhead even when the durable write finishes off the training critical path.
-
-#### The "stop-the-world" cost {#sec-fault-tolerance-reliability-stoptheworld-cost-beaa}
-
-```{python}
-#| echo: false
-#| label: stop-the-world-checkpoint-cost
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ STOP-THE-WORLD CHECKPOINT COST (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-fault-tolerance-reliability-stoptheworld-cost-beaa prose below.
-# │
-# │ Goal: Price one synchronous checkpoint pause for the 175B running example on
-# │       the 10,000-GPU cluster, then the daily cost at an hourly cadence.
-# │ Show: ~2-minute pause, ~333 idle GPU-hours, ~$1,000 per checkpoint, ~$24,000/day.
-# │ How:  GPT-3 resumable checkpoint / shared-storage rate -> pause (rounded to
-# │       the displayed minutes); GPU-hours x utility-scenario GPU-hour price.
-# │ Note: 20 GB/s is a slower shared-storage tier than the registry's
-# │       Systems.Reliability.Recovery.checkpoint_write_bw_gbs (100 GB/s).
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, Models, ReferenceStats, Systems
-from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_usd
-
-class CheckpointStopTheWorld:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    n_gpus = Systems.Clusters.Training_10K.total_accelerators
-    ckpt_bytes = Models.Language.GPT3.parameters * ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
-    shared_storage_bw_gbs = 20  # scenario assumption: shared-storage tier delivering ~20 GB/s
-    gpu_hour_usd = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
-    ckpts_per_day = 24  # scenario assumption: hourly checkpoints
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    pause_s = ckpt_bytes.to(GB).magnitude / shared_storage_bw_gbs
-    pause_min = round(pause_s / 60)  # display-consistent minutes
-    idle_gpu_h = n_gpus * pause_min / 60
-    ckpt_cost = idle_gpu_h * gpu_hour_usd
-    daily_cost = ckpt_cost * ckpts_per_day
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(90 < pause_s < 150, "multi-TB checkpoint at ~20 GB/s must take about 2 minutes")
-    check(900 < ckpt_cost < 1100 and 22_000 < daily_cost < 26_000, "prose claims ~$1,000 per checkpoint and ~$24,000/day")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    n_gpus_str = fmt(n_gpus, precision=0)
-    pause_min_str = fmt(pause_min, precision=0)
-    storage_bw_str = fmt(shared_storage_bw_gbs, precision=0)
-    idle_eq_math = fmt_math(rf"{n_gpus_str.replace(',', '{,}')} \times \frac{{{pause_min}}}{{60}} \approx {fmt_int(round(idle_gpu_h))}")
-    gpu_hour_str = fmt_usd(gpu_hour_usd, precision=0)
-    ckpt_cost_str = fmt_usd(round(ckpt_cost, -2), precision=0)
-    daily_cost_str = fmt_usd(round(daily_cost, -3), precision=0)
-```
-
-The financial impact of synchronous checkpointing at scale is severe when the storage path is slow. Suppose the same 175B checkpoint on the same cluster goes to a slower shared tier than the one assumed in the interval notebook, delivering about `{python} CheckpointStopTheWorld.storage_bw_str` GB/s instead, under a common hourly policy and with no staging to hide the write. A `{python} CheckpointStopTheWorld.n_gpus_str`-GPU cluster then pauses for `{python} CheckpointStopTheWorld.pause_min_str` minutes per save and burns `{python} CheckpointStopTheWorld.idle_eq_math` idle GPU-hours, which at roughly `{python} CheckpointStopTheWorld.gpu_hour_str` per GPU-hour costs about `{python} CheckpointStopTheWorld.ckpt_cost_str` in wasted compute for a single checkpoint. Hourly, that idle time compounds to `{python} CheckpointStopTheWorld.daily_cost_str` per day spent waiting for storage I/O. This is the cost that asynchronous capture removes from the critical path, which is why production systems stage checkpoints rather than block on the shared tier. Write time also varies widely across model types, because larger models require longer writes but also earn longer optimal intervals (@tbl-checkpoint-overhead-by-model).
+A synchronous save pauses every accelerator in the job for the full write, and @sec-storage-checkpointing prices that exposed pause on a slow shared tier; asynchronous capture removes it from the critical path, which is why production systems stage checkpoints rather than block on the shared tier. Write time also varies widely across model types, because larger models require longer writes but also earn longer optimal intervals (@tbl-checkpoint-overhead-by-model).
 
 ```{python}
 #| echo: false
@@ -2175,144 +1947,7 @@ The Archetype A row in @tbl-checkpoint-overhead-by-model uses the same `{python}
 
 These per-model overheads assume the write path is uncontended. When thousands of workers save at the same step, their combined burst becomes the checkpoint storm that @sec-storage-checkpointing defines and sizes; for recovery, the burst matters because a stalled write delays the generation that a failure would fall back on.
 
-::: {#exmp-fault-tolerance-checkpoint-storm .callout-example title="The checkpoint storm"}
-
-```{python}
-#| echo: false
-#| label: checkpoint-storm-payload
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT STORM AGGREGATE PAYLOAD (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @exmp-fault-tolerance-checkpoint-storm — the embedding-heavy
-# │          recommendation / MoE storm illustration in the Mechanism paragraph.
-# │
-# │ Goal: Compute the aggregate simultaneous-write payload when every worker in a
-# │       fleet flushes a per-worker shard at the same instant, so the headline
-# │       payload tracks the worker count and shard size.
-# │ Show: Worker count, per-worker shard, and the aggregate payload (TB).
-# │ How:  payload = n_workers * shard_size.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt_count, fmt_memory
-
-class CheckpointStorm:
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    n_workers = Systems.Clusters.Training_10K.total_accelerators
-    shard_size = 10 * GB  # scenario assumption: per-worker embedding/model shard
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    payload = n_workers * shard_size
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(payload.to(TB).magnitude > 0, "aggregate payload must be positive")
-    check(abs(payload.to(TB).magnitude - 100.0) < 1e-6, "10k workers x 10 GB must total 100 TB")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    storm_workers_str = fmt_count(n_workers, label="GPU")
-    storm_shard_gb_str = fmt_memory(shard_size, unit=GB, precision=0, commas=False)
-    storm_payload_tb_str = fmt_memory(payload, unit=TB, precision=0, commas=False)
-```
-
-**Scenario**: A `{python} CheckpointStorm.storm_workers_str` distributed training cluster runs an embedding-heavy job whose per-worker model and embedding shard (`{python} CheckpointStorm.storm_shard_gb_str`) is several times the `{python} FaultToleranceCheckpointRecap.gpt3_shard_gb_str` per-GPU shard of the 175B running example. Every worker flushes its shard to shared storage at the same step instant.
-
-**Diagnosis**: Simultaneous uncoordinated writes\index{Checkpointing!uncoordinated}\index{Uncoordinated checkpointing|see{Checkpointing}} offer `{python} CheckpointStorm.storm_payload_tb_str` to shared network and storage paths in one burst, the checkpoint storm of definition \ref{dfn-data-storage-checkpoint-storm}. When that arrival rate exceeds sustained service capacity, queues grow and writers stall; finite buffering can also lead to drops or timeouts. The total byte count alone does not establish which resource fails first.
-
-**Systems lesson**: A consistent capture need not become an uncontrolled storage burst. Staggered flushes, rate limits, and bounded staging keep the write burst within sustained service capacity, and the system still publishes a generation only after it reaches the required durability tier.
-
-:::
-
-Theoretical models project modest overhead percentages under uncontended conditions, yet real deployments often encounter checkpoint times far exceeding these estimates. Diagnosing such discrepancies requires examining the full system stack.
-
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_bandwidth, fmt_count, fmt_int, fmt_params, fmt_qty_int, fmt_time, fmt_usd
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT DEBUG CALCULATION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Debugging Checkpoint Overhead" callout in §Checkpoint Overhead.
-# │
-# │ Goal: Diagnose why a 70B model checkpoint takes 10 minutes instead of
-# │   2 minutes on an NFS-backed cluster, by computing theoretical bandwidth
-# │   limits and contention-induced effective throughput per node.
-# │ Show: total_ckpt_gb_str="700" GB, nfs_gb_per_s_str="1.25" GB/s,
-# │   min_write_min_str="9.3" min, per_node_mb_per_s_str="20" MB/s,
-# │   per_node_shard_gb_str="10.9" GB—inline in the fleet stack diagnosis.
-# │ How: Compute weights + optimizer state size in GB; derive NFS bandwidth in
-# │   GB/s (10 Gbps / 8); calculate min write time and per-node bandwidth
-# │   under contention from 64 concurrent nodes.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-class CheckpointDebug:
-    """
-    Namespace for 70B checkpoint overhead diagnosis.
-    Scenario: 64-node cluster with 10 Gbps shared storage.
-    """
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-
-    from mlsysim import Models, Hardware, Systems, ReferenceStats
-
-    m = Models.Language.Llama2_70B
-    nfs_bw = 10 * Gbps
-    pcie_bw = Hardware.Cloud.A100.interconnect.bandwidth
-    nvme_bw = Systems.Storage.LocalNvmeGen3.bandwidth
-    n_nodes = 64
-    n_gpus_ckpt = 512
-    observed_write_min = 15  # hypothetical observed synchronous pause
-    target_write_min = 2
-    compute_interval_min = 45  # useful computation between checkpoint pauses
-    overhead_pct = observed_write_min / (compute_interval_min + observed_write_min) * 100
-    base_weeks = 2
-    extra_cost_k = 500
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # 14 bytes/param: BF16 weights + separate FP32 master + two FP32 Adam moments.
-    # Checkpoint is at an update boundary; no live gradients. Metadata is omitted.
-    bytes_per_param = ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter
-    params_count = m.parameters.to(param).magnitude
-    total_ckpt_qty = memory_from_params(params_count * param, bytes_per_param)
-    total_ckpt_gb_val = total_ckpt_qty.to(GB).magnitude
-
-    # Use library formula for transfer time
-    t_write = total_ckpt_qty / nfs_bw
-    per_node_shard_qty = total_ckpt_qty / n_nodes
-
-    # Staging over PCIe
-    t_stage = per_node_shard_qty / pcie_bw
-    t_stage_single = total_ckpt_qty / pcie_bw
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(abs(total_ckpt_gb_val - 980) < 1e-9, f"Expected 980 GB checkpoint, got {total_ckpt_gb_val}")
-
-    check(t_write.to(minute).magnitude < observed_write_min, "Observed pause must exceed ideal drain time")
-    check(t_write.to(minute).magnitude < compute_interval_min, "Storage can drain one checkpoint before the next in this scenario")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    total_checkpoint_gb_str = fmt_memory(total_ckpt_qty, unit=GB, precision=0, commas=False)
-    drain_min_str = fmt_time(t_write, unit=minute, precision=1, commas=False)
-    compute_interval_min_str = fmt_time(compute_interval_min, minute, precision=0, style="word")
-    params_b_str = fmt_params(m.parameters, precision=0)
-    n_nodes_str = fmt_count(n_nodes, commas=False, label="node")
-    nfs_gb_per_s_str = fmt_bandwidth(nfs_bw, unit=GB / second, precision=2, commas=False)
-    observed_write_min_str = fmt_time(observed_write_min, 'minute', precision=0, commas=False, style='word')
-    target_write_min_str = fmt_time(target_write_min, minute, precision=0, commas=False, style='word')
-    overhead_pct_str = fmt_percent(round(overhead_pct) / 100, precision=0, commas=False, style='prose')
-```
-
-::: {#exmp-fault-tolerance-debugging-checkpoint-overhead .callout-example title="Debugging checkpoint overhead"}
-
-**Scenario**: In a hypothetical trace, a cluster with `{python} CheckpointDebug.n_nodes_str` training a `{python} CheckpointDebug.params_b_str` model pauses for `{python} CheckpointDebug.observed_write_min_str` per checkpoint after each `{python} CheckpointDebug.compute_interval_min_str` of useful computation. This is a `{python} CheckpointDebug.overhead_pct_str` share of wall time, exceeding a `{python} CheckpointDebug.target_write_min_str` pause target.
-
-**Diagnosis**: An update-boundary snapshot stores BF16 weights, separate FP32 master weights, and both FP32 Adam moments: `{python} CheckpointDebug.total_checkpoint_gb_str` before metadata. A single shared 10 Gbps NFS path (`{python} CheckpointDebug.nfs_gb_per_s_str`) needs at least `{python} CheckpointDebug.drain_min_str` to transfer those bytes. The longer observed pause is consistent with this bandwidth floor but does not identify every source of overhead.
-
-**Systems lesson**: Local NVMe staging can move the remote transfer out of the training pause, provided snapshot copies and local writes fit their own budgets. It cannot accelerate the shared path's sustained drain rate. Here the ideal drain time is shorter than the interval between snapshots; production must verify the effective rate, staging capacity, and contention. A snapshot on local staging alone does not survive loss of that node unless the recovery contract provides another copy.
-
-:::
-
-That last caveat moves the question from what a save costs to what it survives. Staging hides the write from training, but where each copy lives decides which failures the saved state outlasts and how quickly it returns.
+Staging hides the write from training, but a snapshot held only on local staging does not survive loss of its node. Where each copy lives decides which failures the saved state outlasts and how quickly it returns.
 
 ### Checkpoint storage and recovery {#sec-fault-tolerance-reliability-reliability-checkpoint-storage-recovery-6634}
 
@@ -2476,7 +2111,7 @@ Verify your understanding of how failure rate and checkpoint cost set the optima
 
 ## Failure Detection and Recovery {#sec-fault-tolerance-reliability-reliability-failure-detection-recovery-0f54}
 
-A GPU silently hangs, dropping its utilization to zero while its peer GPUs wait indefinitely at an AllReduce barrier. Every minute the system takes to notice this hung rank and reboot the node costs thousands of dollars in idle cluster time. Checkpoints preserve state, but the recovery process itself determines how much compute a failure wastes. In the accounting of the Fleet Law (@eq-fleet-law), that waiting belongs to the synchronization term $\SynchronizationTime(\DeviceCount)$. Every surviving rank idles at the barrier until the group is whole again, so detection, restart, and reload add directly to step time averaged over the run.
+A GPU silently hangs, dropping its utilization to zero while its peer GPUs wait indefinitely at an AllReduce barrier. Every minute the system takes to notice this hung rank and reboot the node costs thousands of dollars in idle cluster time. Checkpoints preserve state, but the recovery process itself determines how much compute a failure wastes. In the accounting of the Fleet Law (@eq-fleet-law), that waiting belongs to the synchronization term $\SynchronizationTime(\DeviceCount)$. Every surviving rank idles at the barrier until the group is whole again, so detection, restart, and reload add directly to step time averaged over the run, and the goodput accounting of @sec-performance-engineering-goodput-boundaries charges the same time to runtime goodput.
 
 @Eq-recovery-time decomposes recovery time into four primary components:
 
@@ -2509,7 +2144,116 @@ Collective communication timeouts provide a second detection layer. During synch
 
 Container orchestration health checks\index{Health check!orchestration layer} provide a third layer. Kubernetes, the container orchestration system, offers liveness probes\index{Liveness probe!container orchestration} (verifying that a process still responds and makes progress) and readiness probes\index{Readiness probe!container orchestration} (verifying that a process is ready to handle requests). Slurm, the batch scheduler common on HPC-style training clusters, instead runs a periodic node health-check program that can drain a node whose GPUs, links, or file systems fail their tests. Both operate independently of the training framework, catching failures that application-level heartbeats might miss; a liveness probe that tests forward progress rather than mere process existence can catch a process that is alive but deadlocked.
 
-Loss spike\index{Loss spike!failure anomaly} detection exposes an anomaly, not its cause. Silent hardware corruption can produce an abrupt loss or gradient-norm spike, but so can a bad batch, an optimizer instability, a data-ordering defect, or a distributed-state mismatch. Robust systems therefore pause before the suspect update commits, preserve the input and worker evidence, and replay the step on known-good hardware. The system drains hardware only after that evidence implicates the device; otherwise, it repairs the data, optimizer, or synchronization path that produced the same symptom.
+Loss spike\index{Loss spike!failure anomaly} detection exposes an anomaly, not its cause. @Fig-training-failure-signatures contrasts an idealized healthy loss trend with gradient explosion, a premature plateau, and NaN divergence. Real stochastic training need not decrease monotonically, so a transient rise alone does not establish failure, and nonfinite values need not crash the process. Silent hardware corruption can produce an abrupt loss or gradient-norm spike, but so can a bad batch, an optimizer instability, a data-ordering defect, or a distributed-state mismatch. Robust systems therefore pause before the suspect update commits, preserve the input and worker evidence, and replay the step on known-good hardware. The system drains hardware only after that evidence implicates the device; otherwise, it repairs the data, optimizer, or synchronization path that produced the same symptom.
+
+::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines. The curves are synthetic illustrations of each pattern, not logs from a training run." fig-alt="Four loss-versus-steps panels in a two-by-two grid on a shared loss axis. (A) Normal training: a green curve descending smoothly. Panels B to D repeat that healthy curve as a faint green reference line behind each pathology. (B) Gradient explosion: a descending curve with a red spike segment midway that then rejoins the healthy reference, labeled healthy. (C) Loss plateau: a curve that flattens early, with the gap between it and the healthy reference shaded red and labeled gap to healthy. (D) NaN divergence: a curve that pulls away above the healthy reference, oscillating with growing amplitude, then climbs steeply to a red X labeled NaN check halts run."}
+```{python}
+#| echo: false
+from binder.tools.figures import style as book_style
+import numpy as np
+
+book_style.set_book_style()
+COLORS = book_style.COLORS
+
+# Four small multiples on one shared loss axis; the healthy curve is green, the
+# pathological curves are neutral with only the failure itself marked in red.
+# Laid out 2x2 at book width so every label prints at or above the floor.
+fig, axes2d = plt.subplots(2, 2, figsize=(6.2, 4.5), sharey=True, sharex=True)
+axes = axes2d.ravel()
+
+steps = np.linspace(0, 100, 200)
+np.random.seed(42)
+
+# PANEL A: Normal Training
+noise = np.random.normal(0, 0.02, len(steps))
+loss_a = 2.4 * np.exp(-0.035 * steps) + 0.35 + noise
+
+# PANEL B: Gradient Explosion
+loss_b = 2.4 * np.exp(-0.035 * steps) + 0.35 + np.random.normal(0, 0.02, len(steps))
+spike_idx = 90
+loss_b[spike_idx : spike_idx + 15] += np.linspace(0, 1.7, 15)
+# Recovery: the excess decays smoothly back onto the healthy baseline and carries
+# the same measurement noise as the rest of the trace.
+decay_k = np.arange(1, 21)
+loss_b[spike_idx + 15 : spike_idx + 35] += 1.7 * np.exp(-decay_k / 4.5)
+
+# PANEL C: Loss Plateau
+loss_c = np.copy(loss_a)
+plateau_idx = 40
+loss_c[plateau_idx:] = loss_c[plateau_idx] + np.random.normal(0, 0.015, len(steps) - plateau_idx)
+
+# PANEL D: NaN Divergence
+nan_steps = steps[:140]
+# The run tracks healthy training at first, then its baseline drifts upward and a
+# one-sided oscillation of growing amplitude rides on top, so even its troughs sit
+# above the healthy curve. The last few steps climb steeply before the halt.
+healthy_d = 2.4 * np.exp(-0.035 * nan_steps) + 0.35
+drift = 1.25 * (nan_steps / nan_steps[-1]) ** 1.6
+amp = 0.06 * np.exp(0.034 * nan_steps)
+osc = amp * (0.5 + 0.5 * np.sin(nan_steps * 0.4))
+loss_d = healthy_d + drift + osc + np.random.normal(0, 0.012, len(nan_steps)).clip(0)
+n_ramp = 12
+loss_d[-n_ramp:] += np.linspace(0, 1, n_ramp) ** 2.2 * (2.85 - loss_d[-1])
+
+ax_a, ax_b, ax_c, ax_d = axes
+lw = 1.8
+
+ax_a.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=lw)
+
+# Healthy reference: the panel-A curve, drawn faintly behind each pathology so
+# the deviation itself is what the eye reads.
+for ax_ref in (ax_b, ax_c, ax_d):
+    ax_ref.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=1.0, alpha=0.45, zorder=1)
+ax_b.text(54, 0.55, 'healthy', fontsize=10, color=COLORS['GreenLine'], ha='center', va='top')
+
+ax_b.plot(steps, loss_b, color=COLORS['primary'], linewidth=lw)
+seg = slice(spike_idx - 1, spike_idx + 35)
+ax_b.plot(steps[seg], loss_b[seg], color=COLORS['RedLine'], linewidth=lw + 0.4)
+peak = spike_idx + 14
+ax_b.text(steps[peak] + 4, loss_b[peak] + 0.05, 'spike', fontsize=10.5, color=COLORS['RedLine'], ha='left', va='bottom')
+
+ax_c.fill_between(steps[plateau_idx:], loss_a[plateau_idx:], loss_c[plateau_idx:], color=COLORS['RedL'], alpha=0.8, lw=0, zorder=0)
+ax_c.plot(steps, loss_c, color=COLORS['primary'], linewidth=lw)
+ax_c.text(70, loss_c[plateau_idx] + 0.3, 'plateau', fontsize=10.5, color=COLORS['RedLine'], ha='center', va='bottom')
+ax_c.text(70, 0.98, 'gap to healthy', fontsize=10.5, color=COLORS['RedLine'], ha='center', va='center')
+
+ax_d.plot(nan_steps, loss_d, color=COLORS['primary'], linewidth=lw)
+ax_d.scatter([nan_steps[-1]], [loss_d[-1]], marker='X', color=COLORS['RedLine'], edgecolor='white', linewidth=0.8, s=70, zorder=6)
+ax_d.text(
+    nan_steps[-1] - 5, loss_d[-1] - 0.4, 'NaN check\nhalts run', fontsize=10.5, linespacing=1.1, color=COLORS['RedLine'], ha='right', va='center'
+)
+
+titles = ['(A) Normal training', '(B) Gradient explosion', '(C) Loss plateau', '(D) NaN divergence']
+for ax, title in zip(axes, titles):
+    ax.set_title(title, fontsize=11.5, fontweight='bold', color=COLORS['primary'], loc='left', pad=6)
+    ax.set_xlim(-2, 102)
+    ax.set_ylim(0, 3.1)
+    ax.set_xticks([0, 50, 100])
+    ax.set_yticks([0, 1, 2, 3])
+    ax.tick_params(labelsize=10.5)
+    ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
+for ax in (ax_c, ax_d):
+    ax.set_xlabel('Steps', fontsize=11)
+for ax in (ax_a, ax_c):
+    ax.set_ylabel('Loss', fontsize=11)
+
+plt.tight_layout()
+fig.subplots_adjust(wspace=0.08, hspace=0.32)
+plt.show()
+plt.close()
+```
+:::
+
+@Tbl-training-failure-response-map pairs each signature, plus the silent hang that a loss curve cannot show, with a candidate cause and a first response. The pairing guides investigation without treating the curve as a unique diagnosis.
+
+| **Signature**              | **Likely Interpretation**                                                         | **Recovery Response**                                                                                |
+|:---------------------------|:----------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
+| Spike followed by recovery | Transient input or numerical anomaly; the curve alone does not identify the cause | Preserve the suspect batch and step evidence, then replay before deciding whether to continue.       |
+| Spike followed by plateau  | Optimizer instability, corrupted state, or a persistent data-path defect          | Pause, replay from a known-good checkpoint, and compare input, optimizer, and worker evidence.       |
+| Gradual divergence         | Data drift, numerical instability, corrupted state, or worker desynchronization   | Compare per-rank telemetry and evaluation evidence; isolate hardware only when replay implicates it. |
+| Hang without an error      | Collective deadlock or crashed worker blocking synchronization                    | Use timeout detection and restart or reconstruct the worker group.                                   |
+
+: **Training Failure Response Map**: Training-loss curves are operational evidence only when they lead to different recovery actions. The response map ties each signature to the failure class most likely to explain it and to the first action operators should take. {#tbl-training-failure-response-map}
 
 The operational question is therefore how long detection really takes once these layers interact.
 
@@ -2573,7 +2317,9 @@ class RecoveryBudget:
     failures_per_day_10k = (24 * hour / mtbf_10k).to("").magnitude
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_total = t_detect + t_restart + t_load + t_warmup
+    # One source for the four-term budget: the preemption tax in fleet
+    # orchestration and the runtime-goodput composition call the same helper.
+    t_total = recovery.cold_restart_time(ckpt_bytes)
     daily_loss_1k = failures_per_day_1k * t_total
     daily_loss_10k = failures_per_day_10k * t_total
     overhead_pct_1k = (daily_loss_1k / (24 * hour)).to("").magnitude * 100
@@ -2583,6 +2329,10 @@ class RecoveryBudget:
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(t_total.to(minute).magnitude - 6.6) < 1.0, f"Expected ~6.6 min total recovery time, got {t_total.to(minute).magnitude:.1f}")
     check(t_total < 30 * minute, "Recovery time should be under 30 min")
+    check(
+        abs((t_detect + t_restart + t_load + t_warmup - t_total).to(second).magnitude) < 1e-9,
+        "Notebook terms must sum to the registry's cold_restart_time",
+    )
     check(abs(daily_loss_1k.to(minute).magnitude - 3.0) < 0.5, f"1k daily loss ({daily_loss_1k.to(minute).magnitude:.1f} min)")
     check(22 < t_load.to(second).magnitude < 27, f"Aggregate checkpoint load should be ~24.5 s, got {t_load.to(second).magnitude:.1f}")
     check(abs(daily_loss_10k.to(minute).magnitude - 31.0) < 2.0, f"10k daily loss ({daily_loss_10k.to(minute).magnitude:.1f} min)")
@@ -2652,7 +2402,7 @@ A warm restart\index{Warm restart!survivor preservation} preserves the state of 
 
 When the missing state can be reconstructed at the survivors' current step, warm restart avoids a full-cluster reload and repeated warmup. For the `{python} FaultToleranceRecoveryRecap.n_workers_str` example, that fast path avoids rereading the full `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` checkpoint through shared storage, whose cold-path $\CheckpointLoadTime$ is `{python} RecoveryBudget.t_load_s_str`. The replacement still needs state transfer and initialization, and all ranks wait until it is ready. If consistency instead requires a rollback, the recovery budget must include the corresponding survivor-state restoration and lost work.
 
-The trade-off is software complexity. Survivor-preserving warm restarts require specialized application and runtime support for dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. PyTorch's elastic framework (TorchElastic) does not preserve worker processes across membership changes; it stops the surviving workers and starts a new worker group. DeepSpeed's documented recovery path is checkpoint-centered rather than a survivor-preserving warm restart. A deployment that implements a warm-restart fast path still needs cold restart as a safety net. The cold-restart range in @tbl-cold-vs-warm-restart brackets the `{python} RecoveryBudget.t_total_min_str` budget computed above. The warm-restart range is a planning range for the fast path, which avoids the full-cluster reload and warmup; its actual duration depends on how quickly the replacement receives its state and the communicator is rebuilt.
+The trade-off is software complexity. Survivor-preserving warm restarts require specialized application and runtime support for dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Common training frameworks restart the worker group or reload a checkpoint rather than preserve survivors (@sec-fault-tolerance-reliability-reliability-framework-support-elastic-training-8b75). A deployment that implements a warm-restart fast path still needs cold restart as a safety net. The cold-restart range in @tbl-cold-vs-warm-restart brackets the `{python} RecoveryBudget.t_total_min_str` budget computed above. The warm-restart range is a planning range for the fast path, which avoids the full-cluster reload and warmup; its actual duration depends on how quickly the replacement receives its state and the communicator is rebuilt.
 
 | **Aspect**                  | **Cold Restart**                 | **Warm Restart**                       |
 |:----------------------------|:---------------------------------|:---------------------------------------|
@@ -2675,17 +2425,62 @@ The pipeline operates in four ordered stages:
 3.  Action selector\index{Recovery automation!action selector}: Chooses the cheapest response consistent with the affected state and communication group. A process hang on one rank usually requires restarting the whole communication group rather than one container, because every surviving rank still holds a communicator that includes the hung rank. A confirmed hardware fault requires draining the node and drawing a replacement from the spare pool, which is slower and consumes standby capacity. A network partition can justify a bounded wait that preserves in-memory state, but if the wait expires, replacement must fence the old ownership before accepting new writes.
 4.  Validation stage\index{Recovery automation!validation stage}: Runs a recorded "canary batch" or validation workload under the expected numerical tolerance. Unexpected loss or gradient behavior triggers investigation of restored state and execution configuration, with fallback to an earlier validated snapshot when the new state cannot be trusted.
 
-This automation shortens mean time to recovery from the tens of minutes that a page-diagnose-repair cycle takes when a human is in the loop to minutes for the common failure types. The Llama 3 team reports that automated tooling handled nearly all of the `{python} PublishedFailureRates.llama_interruptions_str` interruptions in its `{python} PublishedFailureRates.llama_days_str`-day snapshot [@dubey2024llama]. The classification stage is critical. Treating every failure as a cold restart wastes compute on transient issues, while treating a hardware failure as transient allows corrupted computation to continue.
+This automation shortens mean time to recovery from the tens of minutes that a page-diagnose-repair cycle takes when a human is in the loop to minutes for the common failure types. The classification stage is critical. Treating every failure as a cold restart wastes compute on transient issues, while treating a hardware failure as transient allows corrupted computation to continue. The Llama 3 pretraining run shows what such a pipeline buys at fleet scale.
+
+```{python}
+#| echo: false
+#| label: llama3-recovery-record
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LLAMA 3 RECOVERY RECORD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: war story ws-fault-tolerance-llama3-failure-cadence.
+# │
+# │ Goal: Pin Meta's reported effective training time and manual-intervention
+# │       count for the Llama 3 405B pretraining snapshot to MLSysIM.
+# │ Show: >90 percent effective training time; three manual interventions.
+# │ How: Literature.TrainingRuns (Dubey 2024).
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_percent
+
+class Llama3RecoveryRecord:
+    """Recovery outcome of the Llama 3 405B pretraining snapshot (Dubey et al. 2024)."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    effective_time_fraction = float(Literature.TrainingRuns.Llama3_405B_EffectiveTrainingTimeFraction)
+    manual_interventions = float(Literature.TrainingRuns.Llama3_405B_ManualInterventions)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # (no derived values; both figures are quoted directly)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(manual_interventions == 3, "Prose spells out 'only three times'")
+    check(effective_time_fraction >= 0.9, f"Prose says more than 90 percent effective time, got {effective_time_fraction}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    effective_time_pct_str = fmt_percent(effective_time_fraction, precision=0, style='prose')
+```
+
+::: {#ws-fault-tolerance-llama3-failure-cadence .callout-war-story title="The training run that failed every few hours (2024)"}
+
+**Context**: Meta reports training Llama 3\index{Llama-3!training failure cadence} 405B on `{python} InterruptionCauses.gpus_str` H100 GPUs during a `{python} InterruptionCauses.days_str`-day snapshot of pretraining [@dubey2024llama].
+
+**Mechanism**: The snapshot recorded `{python} InterruptionCauses.total_str` unexpected interruptions, about one every `{python} PublishedFailureRates.llama_mttf_str`, with the root causes shown in @fig-llama3-interruptions.
+
+**Impact**: Meta nevertheless reported more than `{python} Llama3RecoveryRecord.effective_time_pct_str` effective training time, measured as useful training time divided by elapsed time. Significant manual intervention was required only three times.
+
+**Fix**: Meta reduced job startup and checkpointing\index{Checkpointing!automated recovery} time and developed automated diagnosis and recovery tools. Communication traces helped locate stalled collectives and slow workers before restarting useful work.
+
+**Systems lesson**: At fleet scale, reliability is a property of the recovery system rather than of the hardware. Effective training time stayed high because automation, not operators, handled nearly every interruption.
+
+:::
 
 ### Stragglers versus fail-stop failures {#sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d}
 
-::: {#dfn-fault-tolerance-straggler .callout-definition title="Straggler"}
+::: {#psp-fault-tolerance-straggler-or-failure .callout-perspective title="Straggler or failure"}
 
-***Straggler***\index{Straggler!definition} is a worker in a distributed training job that processes tasks significantly slower than its peers, creating a synchronization bottleneck.
-
-1.  **Significance**: In a bulk synchronous parallel system, cluster throughput is bounded by the speed of the slowest rank. A single 10 percent performance drop on one node can reduce the effective compute capacity of thousands of nodes by 10 percent.
-2.  **Distinction**: The synchronization models of @sec-distributed-training-systems-systems-synchronization-models-396f treat a straggler as a throughput problem; fault tolerance must also separate slow progress from a stopped participant. A straggler can produce correct results while delaying its peers. Slowness alone establishes neither incorrect values nor a failed process.
-3.  **Common pitfall**: A frequent misconception is that stragglers are caused only by "bad hardware." In reality, they are often caused by system jitter\index{Straggler!system jitter cause} from background OS processes, network congestion, or thermal throttling that varies across the data center floor.
+A straggler, the slow rank of a synchronous step (@sec-distributed-training-systems-systems-synchronization-models-396f), bounds the throughput of every peer that waits on it, so one node running 10 percent slow can cost thousands of nodes 10 percent of their capacity. Fault tolerance must decide what that slowness means. A straggler can still produce correct results, so slowness alone establishes neither incorrect values nor a failed process, and its cause is often system jitter\index{Straggler!system jitter cause} from background OS processes, network congestion, or thermal throttling rather than bad hardware. The decision is between mitigation, which keeps the job running and removes the slowdown, and recovery, which treats the rank as failed and pays for a restart.
 
 :::
 
@@ -2694,9 +2489,9 @@ In synchronous training, a straggler sets the pace of the entire cluster, becaus
 For the simplified no-overlap straggler model, the step time becomes:
 $$ \StragglerStepTime(\DeviceCount) = \max(\FirstRankComputeTime, \SecondRankComputeTime, \dots, \LastRankComputeTime) + \CommunicationTime(\DeviceCount) $$
 
-Many stragglers are gray failures\index{Gray failure!silent degradation}\index{Gray failure!straggler cause}\index{Straggler!gray failure cause}, the silent degradations of the chapter opening, seen from inside a synchronous job, and none of their common causes raises an explicit error. Thermal throttling reduces clock speed, degrading interconnect cables increase communication latency, OS background processes (memory scrubbing, log rotation) consume CPU cycles, and data loading from a congested network filesystem introduces variable I/O delays. A slow worker can continue meeting a liveness timeout while reducing training throughput, or become slow enough to trigger the same timeout as a failed worker. Progress measurements are therefore needed alongside liveness checks.
+Many stragglers are gray failures\index{Gray failure!silent degradation}\index{Gray failure!straggler cause}\index{Straggler!gray failure cause}, the silent degradations named in the failure taxonomy, seen from inside a synchronous job, and none of their common causes raises an explicit error. Thermal throttling reduces clock speed, degrading interconnect cables increase communication latency, OS background processes (memory scrubbing, log rotation) consume CPU cycles, and data loading from a congested network filesystem introduces variable I/O delays. A slow worker can continue meeting a liveness timeout while reducing training throughput, or become slow enough to trigger the same timeout as a failed worker. Progress measurements are therefore needed alongside liveness checks.
 
-The challenge is distinguishing stragglers from failures. Stragglers should trigger *mitigation* (redistribute work, replace the slow node). Failures should trigger *recovery* (checkpoint-restart). Aggressive timeouts treat stragglers as failures, causing unnecessary job restarts that waste more compute than the straggler itself. Conservative timeouts waste compute waiting for stragglers that will never speed up.
+The challenge is distinguishing stragglers from failures. Stragglers should trigger *mitigation* (redistribute work, replace the slow node). Failures should trigger *recovery* (checkpoint-restart). Aggressive timeouts treat stragglers as failures, causing unnecessary job restarts that waste more compute than the straggler itself. Conservative timeouts waste compute waiting for stragglers that will never speed up. The two responses also land in different places in the goodput accounting of @sec-performance-engineering-goodput-boundaries: a slow rank that stays in the job lowers program goodput, while replacing it spends runtime goodput on the restart, so the replacement decision weighs one loss against the other.
 
 Straggler mitigation strategies\index{Straggler!mitigation strategies}\index{Straggler mitigation|see{Straggler}} change either the work assignment or the execution resources. Dynamic load balancing\index{Straggler!dynamic load balancing} moves work away from slow workers while preserving the intended update, whereas bounded staleness\index{Straggler!bounded staleness} allows delayed gradients under an algorithm that tolerates them; its convergence cost depends on the workload and delay bound. Backup workers\index{Straggler!backup worker} replicate selected tasks and accept one result per logical contribution, trading extra GPU cycles for a shorter wait without double-counting gradients. At the infrastructure boundary, proactive replacement\index{Straggler!proactive replacement} uses hardware telemetry, such as rising operating temperatures or growing correctable-ECC error counts, to identify suspect components and replace them when the expected benefit exceeds migration and recovery costs.
 
@@ -3011,11 +2806,7 @@ Shedding a lost node narrows the active ring instead of idling the whole allocat
 
 Batch size adjustment is the first concern. With fewer workers, each worker must process more samples to maintain the global batch size, or the global batch size must be reduced. Reducing global batch size during recovery may require learning rate adjustment to preserve convergence properties.
 
-Changing the global batch size changes the optimization regime as well as the amount of work per step. The linear scaling rule of @sec-distributed-training-systems-systems-learning-rate-scaling-rules-fa26 multiplies the learning rate by the same factor as the batch size [@goyal2017accurate], but its validation with warmup for growing batches does not establish a universal recovery rule. The same section's square-root rule offers another candidate policy, and @eq-lr-scaling restates it for a resized job, with learning rate $\LearningRate$ and the batch ratio written as a worker-count ratio:
-
-$$ \ScaledLearningRate= \BaseLearningRate\times \sqrt{\frac{\ResizedWorkerCount}{\BaseWorkerCount}} $$ {#eq-lr-scaling}
-
-where $\ResizedWorkerCount$ and $\BaseWorkerCount$ represent the resized and base counts of data-parallel workers, with per-worker microbatch size and accumulation count held fixed so global batch size scales directly with worker count. For a shrink, the square-root rule reduces the learning rate less than linear scaling does; that arithmetic does not establish which policy is more stable. Either policy requires validation for the optimizer, schedule, and workload. Preserving the global batch instead can avoid introducing this change in optimization regime.
+Changing the global batch size changes the optimization regime as well as the amount of work per step. The linear and square-root learning-rate rules of @sec-distributed-training-systems-systems-learning-rate-scaling-rules-fa26 are candidate policies for a resized job, with the worker-count ratio standing in for the batch ratio when per-worker microbatch size and accumulation count stay fixed [@goyal2017accurate]. For a shrink, the square-root rule reduces the learning rate less than linear scaling does; that arithmetic does not establish which policy is more stable, and either policy requires validation for the optimizer, schedule, and workload. Preserving the global batch instead can avoid introducing this change in optimization regime.
 
 Gradient accumulation offers that alternative. Each surviving worker processes additional micro-batches before synchronization to maintain the original effective batch size. If worker count drops by half, doubling the accumulation steps preserves the number of examples per update and can retain the existing learning-rate schedule. Each worker then performs twice as much micro-batch computation per update, although communication and overlap determine the wall-time increase. Equal batch size does not imply bitwise-identical updates or identical behavior from operations that depend on micro-batch statistics.
 
@@ -3075,7 +2866,9 @@ The checkpoint and recovery strategies developed in @sec-fault-tolerance-reliabi
 
 : **Training Recovery State Invariants**: Workloads require different checkpoint contents because they make different state variables quality-bearing. The correct recovery policy starts from the state that would make a restart wrong, then chooses sharding, incrementality, or domain-state capture accordingly. {#tbl-training-recovery-state-invariants}
 
-The common pattern is that recovery correctness is broader than weight restoration. LLMs can reload weights but resume with the wrong curriculum position; recommendation models can reload dense parameters but serve stale embeddings; vision models can reload weights but alter augmentation or normalization state; and scientific models can reload a neural network while losing the simulator state that made the data meaningful.
+The common pattern is that recovery correctness is broader than weight restoration. LLMs can reload weights but resume with the wrong curriculum position. Recommendation models that train continuously can reload dense parameters but serve stale embeddings, so a failure that loses recent updates carries a freshness cost as well as a replay cost, and the recovery budget must reflect the workload's measured sensitivity to stale state.[^fn-recsys-model-freshness] Vision models have smaller checkpoints, about `{python} FaultToleranceIntroRecap.vit_ckpt_str` for the ViT-Large example, which permit more frequent saves on the same storage path, yet reproducing their input stream requires the augmentation configuration, random-number generator state, and data position rather than only the initial shuffling seed. Scientific models can reload a neural network while losing the simulator state that made the data meaningful, and an iterative search must also retain which configurations it has evaluated when those results choose its next candidates. In every case the checkpoint boundary must include whatever prior decisions affect future work, wherever that state resides.
+
+[^fn-recsys-model-freshness]: **RecSys freshness**\index{Recommendation system!freshness fault tolerance}: Freshness makes recovery delay part of the model-quality budget. Its importance depends on how quickly useful user and item signals change and how strongly predictions depend on them. Comparing quality at different state ages establishes the permitted staleness; that measured limit determines how much checkpoint and replication overhead is justified.
 
 Elasticity and checkpointing provide the necessary resilience for long-running batch training jobs, but the operational calculus changes completely once the model is deployed to users. The challenge shifts from protecting *weeks of batch computation* to protecting *milliseconds of real-time latency*.
 
@@ -3156,7 +2949,7 @@ When a replica fails, traffic must be redirected to healthy replicas, and the sp
 
 #### Health checking {#sec-fault-tolerance-reliability-reliability-health-checking-a604}
 
-Health checks\index{Health check!liveness vs. readiness}\index{Health check!inference correctness probe} decide when traffic should move, so they must evaluate liveness, readiness, and inference correctness. A liveness check confirms that the process responds and triggers a restart when it does not. A readiness check confirms that the replica can serve: its weights are loaded, its accelerator is initialized, warmup has completed, and dependencies such as feature stores (the services that supply precomputed model input features) are reachable. An inference check runs a known input through the model and compares the output with the expected result, catching the silent failure in which the process is healthy but its answers are wrong. The load balancer acts on these signals.
+Health checks\index{Health check!liveness vs. readiness}\index{Health check!inference correctness probe} decide when traffic should move. The liveness and readiness probes of @sec-fault-tolerance-reliability-reliability-failure-detection-mechanisms-efed apply to a serving replica, where readiness means that its weights are loaded, its accelerator is initialized, warmup has completed, and dependencies such as feature stores (the services that supply precomputed model input features) are reachable. Serving adds an inference check, which runs a known input through the model and compares the output with the expected result, catching the silent failure in which the process is healthy but its answers are wrong. The load balancer acts on these signals.
 
 ::: {.column-margin .margin-pointer}
 ↪ What each probe must test on an accelerator replica, from process liveness to a fixed-prompt inference check, is developed in @sec-inference-scale-health-checking-failover-070e.
@@ -3250,14 +3043,13 @@ Model-specific serving differences follow from what state is expensive to lose a
 # │ Context: [^fn-kv-cache-resilience] below (serving fault tolerance).
 # │
 # │ Goal: Size one full-context conversation's KV cache for a Llama-family 70B
-# │       model, with grouped-query attention and with one KV head per query head.
-# │ Show: 80 layers, 8 KV heads, 128K context, 128-dim heads; ~43 GB vs ~344 GB.
+# │       model with grouped-query attention.
+# │ Show: 128K context; ~43 GB per conversation.
 # │ How:  Models.Language.Llama3_70B.get_kv_cache_size at its context_length,
-# │       BF16 (2 bytes); counterfactual via calc_kv_cache_size with .heads.
+# │       BF16 (2 bytes). The sizing equation itself is owned by the inference chapter.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.physics.memory import calc_kv_cache_size
-from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_text
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_text
 
 class KvCacheLiveState:
     # ┌── 1. LOAD (Constants) ──────────────────────
@@ -3265,30 +3057,19 @@ class KvCacheLiveState:
     kv_bytes = BYTES_FP16  # BF16 and FP16 are both 2 bytes per element
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    head_dim = m.hidden_dim // m.heads
     kv_gqa = m.get_kv_cache_size(seq_len=m.context_length, batch_size=1, precision=kv_bytes)
-    kv_mha = calc_kv_cache_size(
-        n_layers=m.layers, n_heads=m.heads, head_dim=head_dim, seq_len=m.context_length, batch_size=1, bytes_per_elem=kv_bytes
-    )
-    ratio = (kv_mha / kv_gqa).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(40 < kv_gqa.to(GB).magnitude < 45, "footnote quotes about 43 GB per conversation")
-    check(abs(ratio - m.heads / m.kv_heads) < 1e-9, "MHA/GQA ratio must equal heads/kv_heads")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
-    layers_str = fmt(m.layers, precision=0)
-    kv_heads_str = fmt(m.kv_heads, precision=0)
-    heads_str = fmt(m.heads, precision=0)
     context_k_str = fmt_text(fmt_int(m.context_length // 1024), "K")
-    head_dim_str = fmt(head_dim, precision=0)
     kv_gqa_str = fmt_memory(round(kv_gqa.to(GB).magnitude) * GB, unit=GB, precision=0)
-    kv_mha_str = fmt_memory(round(kv_mha.to(GB).magnitude) * GB, unit=GB, precision=0)
 ```
 
 The KV cache[^fn-kv-cache-resilience] can be substantial (gigabytes for long contexts across attention layers). Losing it requires recomputing attention state from the retained token history, which can take seconds to minutes; previously delivered text need not be generated again. During an in-flight response, recovery must also know which output tokens the client has already received so a retry does not silently duplicate or replace part of the response.
 
-[^fn-kv-cache-resilience]: [offset=-34mm] **KV Cache**\index{KV Cache!serving fault tolerance}: Stores key and value projections for all previous tokens across all attention layers, scaling as $2 \times \LayerCount \times \KvHeadCount \times \SequenceLength\times \AttentionHeadDimension \times \ElementStorageSize$. For a Llama-family 70B model with `{python} KvCacheLiveState.layers_str` layers, `{python} KvCacheLiveState.kv_heads_str` key-value heads, `{python} KvCacheLiveState.context_k_str` context, `{python} KvCacheLiveState.head_dim_str`-dimension heads, and BF16 storage, the KV cache is about `{python} KvCacheLiveState.kv_gqa_str` per conversation; using `{python} KvCacheLiveState.heads_str` independent key-value heads would be about `{python} KvCacheLiveState.kv_mha_str`. Reconstruction can exceed serving latency service level agreements (SLAs) even when a replacement replica is already available.
+[^fn-kv-cache-resilience]: [offset=-34mm] **KV Cache**\index{KV Cache!serving fault tolerance}: Stores key and value projections for all previous tokens across all attention layers, with a per-token size derived in @sec-inference-scale-kv-cache-wall. For a Llama-family 70B model at its `{python} KvCacheLiveState.context_k_str` context in BF16, the KV cache is about `{python} KvCacheLiveState.kv_gqa_str` per conversation. Reconstruction can exceed serving latency service level agreements (SLAs) even when a replacement replica is already available.
 
 ::: {.column-margin}
 ![](images/svg/fault_tolerance_kv_live_state_ladder.svg){width="100%" fig-alt="Two rows. An image retry shows only a thin baseline mark labeled no state lost. An LLM conversation shows a full-width blue bar labeled 43 GB."}
@@ -3475,7 +3256,7 @@ Observability supports both immediate mitigation and investigation of the cause.
 
 :::
 
-Metrics are the first evidence because they compress fleet behavior into time series that can trigger action. In ML fleets, useful metrics span infrastructure signals such as CPU and GPU utilization, memory allocation, network bandwidth, and storage I/O; application signals such as request rate, latency percentiles, error counts, queue depths, and cache hit rates; and ML-specific signals such as inference latency by model, batch utilization, feature retrieval latency, feature freshness, and prediction distributions for drift detection. A metric stream becomes fault-tolerance infrastructure only when an alert maps to a recovery decision. High p99 latency may trigger load shedding, a falling cache hit rate may trigger fallback features, and a sudden prediction-distribution shift may block a rollout before it corrupts user-facing decisions.
+Metrics are the first evidence because they compress fleet behavior into time series that can trigger action. A metric stream becomes fault-tolerance infrastructure only when an alert maps to a recovery decision. High p99 latency may trigger load shedding, a falling cache hit rate may trigger fallback features, and a sudden prediction-distribution shift may block a rollout before it corrupts user-facing decisions.
 
 Logs provide the event context that a metric intentionally discards. Structured logging\index{Structured logging!JSON format} uses formats such as JavaScript Object Notation (JSON) with consistent fields, so incident tooling can search by service, request, model version, GPU, feature store, or trace identifier. @Lst-structured-log-entry shows a GPU memory allocation failure that records both the local failure context and the trace identifiers needed to connect the event to distributed metrics and spans.
 
@@ -3558,7 +3339,7 @@ Once the input passes those static checks, the system needs evidence about behav
 
 #### Straggler detection and analysis {#sec-fault-tolerance-reliability-reliability-straggler-detection-analysis-6925}
 
-Definition \ref{dfn-fault-tolerance-straggler} framed a straggler as a slow training rank that holds up a synchronous step. The same idea extends to serving once "peer" means any component on a request's path, so straggler diagnosis there asks which replica or service stage is slow enough to become a failure-equivalent bottleneck. A slow serving replica delays requests routed to it and can trigger retries under load; its effect on the service's tail percentile depends on its traffic share and the routing policy. A request that waits for several required parallel branches is instead bounded by the last required completion. Operation-level timing\index{Straggler!timing instrumentation} instrumentation measures time for each operation, enabling latency attribution across pipeline stages. @Lst-timing-instrumentation wraps operations in context managers that emit per-span timing metrics, making it straightforward to compare performance across replicas.
+Perspective \ref{psp-fault-tolerance-straggler-or-failure} treated a straggler as a slow training rank that holds up a synchronous step. The same idea extends to serving once "peer" means any component on a request's path, so straggler diagnosis there asks which replica or service stage is slow enough to become a failure-equivalent bottleneck. A slow serving replica delays requests routed to it and can trigger retries under load; its effect on the service's tail percentile depends on its traffic share and the routing policy. A request that waits for several required parallel branches is instead bounded by the last required completion. Operation-level timing\index{Straggler!timing instrumentation} instrumentation measures time for each operation, enabling latency attribution across pipeline stages. @Lst-timing-instrumentation wraps operations in context managers that emit per-span timing metrics, making it straightforward to compare performance across replicas.
 
 ::: {#lst-timing-instrumentation lst-cap="**Operation-Level Timing**: Context manager instrumentation attributes latency to individual pipeline stages, enabling straggler detection by comparing the same span across replicas."}
 
@@ -3576,128 +3357,11 @@ with timer("model_inference"):
 
 For asynchronous GPU execution, the host span above measures submission time, not completed device work; GPU elapsed time comes from device events recorded around the relevant stream and read only after they complete. Like-for-like component timing is then compared across replicas with percentile analysis. p50 shows typical performance, while p99 shows tail latency. Comparing p99 across replicas identifies workers whose slow path has become a fleet-wide bottleneck.
 
-The diagnosis must then separate the root causes that produce the same slow-worker symptom. Hardware issues include thermal throttling and memory errors, data skew means some inputs are slower to process, resource contention occurs when other processes consume resources, and network issues create slow connections to data stores.
+The diagnosis must then separate the causes that share this slow-worker symptom, which include the gray-failure causes of @sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d and data skew, in which some inputs are simply slower to process.
 
-### Common failure patterns {#sec-fault-tolerance-reliability-reliability-common-failure-patterns-3306}
+### Serving failure patterns {#sec-fault-tolerance-reliability-reliability-common-failure-patterns-3306}
 
-Combining these observability streams helps detect recurring optimization pathologies. @Fig-training-failure-signatures contrasts an idealized healthy loss trend with gradient explosion, premature plateaus, and NaN divergence. Real stochastic training need not decrease monotonically, so a transient rise alone does not establish failure. The useful diagnostic compares the observed change with expected variation and corroborating signals.
-
-#### Training failures {#sec-fault-tolerance-reliability-reliability-training-failures-bc3a}
-
-A training-loss signature is useful because it narrows the hypotheses that recovery must test. The trajectories in @fig-training-failure-signatures illustrate symptoms, including nonfinite values that need not crash the process. @Tbl-training-failure-response-map pairs spike, plateau, and divergence patterns, plus the silent hang a loss curve cannot show, with a candidate cause and a first response. That pairing guides investigation without treating the curve as a unique diagnosis.
-
-::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training failure signatures**: Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Normal training. (B) Gradient explosion. (C) Loss plateau. (D) NaN divergence, ending where a nonfinite-value check halts the run; without such a check the process can keep running on NaN values rather than crash. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines. The curves are synthetic illustrations of each pattern, not logs from a training run." fig-alt="Four loss-versus-steps panels in a two-by-two grid on a shared loss axis. (A) Normal training: a green curve descending smoothly. Panels B to D repeat that healthy curve as a faint green reference line behind each pathology. (B) Gradient explosion: a descending curve with a red spike segment midway that then rejoins the healthy reference, labeled healthy. (C) Loss plateau: a curve that flattens early, with the gap between it and the healthy reference shaded red and labeled gap to healthy. (D) NaN divergence: a curve that pulls away above the healthy reference, oscillating with growing amplitude, then climbs steeply to a red X labeled NaN check halts run."}
-```{python}
-#| echo: false
-from binder.tools.figures import style as book_style
-import numpy as np
-
-book_style.set_book_style()
-COLORS = book_style.COLORS
-
-# Four small multiples on one shared loss axis; the healthy curve is green, the
-# pathological curves are neutral with only the failure itself marked in red.
-# Laid out 2x2 at book width so every label prints at or above the floor.
-fig, axes2d = plt.subplots(2, 2, figsize=(6.2, 4.5), sharey=True, sharex=True)
-axes = axes2d.ravel()
-
-steps = np.linspace(0, 100, 200)
-np.random.seed(42)
-
-# PANEL A: Normal Training
-noise = np.random.normal(0, 0.02, len(steps))
-loss_a = 2.4 * np.exp(-0.035 * steps) + 0.35 + noise
-
-# PANEL B: Gradient Explosion
-loss_b = 2.4 * np.exp(-0.035 * steps) + 0.35 + np.random.normal(0, 0.02, len(steps))
-spike_idx = 90
-loss_b[spike_idx : spike_idx + 15] += np.linspace(0, 1.7, 15)
-# Recovery: the excess decays smoothly back onto the healthy baseline and carries
-# the same measurement noise as the rest of the trace.
-decay_k = np.arange(1, 21)
-loss_b[spike_idx + 15 : spike_idx + 35] += 1.7 * np.exp(-decay_k / 4.5)
-
-# PANEL C: Loss Plateau
-loss_c = np.copy(loss_a)
-plateau_idx = 40
-loss_c[plateau_idx:] = loss_c[plateau_idx] + np.random.normal(0, 0.015, len(steps) - plateau_idx)
-
-# PANEL D: NaN Divergence
-nan_steps = steps[:140]
-# The run tracks healthy training at first, then its baseline drifts upward and a
-# one-sided oscillation of growing amplitude rides on top, so even its troughs sit
-# above the healthy curve. The last few steps climb steeply before the halt.
-healthy_d = 2.4 * np.exp(-0.035 * nan_steps) + 0.35
-drift = 1.25 * (nan_steps / nan_steps[-1]) ** 1.6
-amp = 0.06 * np.exp(0.034 * nan_steps)
-osc = amp * (0.5 + 0.5 * np.sin(nan_steps * 0.4))
-loss_d = healthy_d + drift + osc + np.random.normal(0, 0.012, len(nan_steps)).clip(0)
-n_ramp = 12
-loss_d[-n_ramp:] += np.linspace(0, 1, n_ramp) ** 2.2 * (2.85 - loss_d[-1])
-
-ax_a, ax_b, ax_c, ax_d = axes
-lw = 1.8
-
-ax_a.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=lw)
-
-# Healthy reference: the panel-A curve, drawn faintly behind each pathology so
-# the deviation itself is what the eye reads.
-for ax_ref in (ax_b, ax_c, ax_d):
-    ax_ref.plot(steps, loss_a, color=COLORS['GreenLine'], linewidth=1.0, alpha=0.45, zorder=1)
-ax_b.text(54, 0.55, 'healthy', fontsize=10, color=COLORS['GreenLine'], ha='center', va='top')
-
-ax_b.plot(steps, loss_b, color=COLORS['primary'], linewidth=lw)
-seg = slice(spike_idx - 1, spike_idx + 35)
-ax_b.plot(steps[seg], loss_b[seg], color=COLORS['RedLine'], linewidth=lw + 0.4)
-peak = spike_idx + 14
-ax_b.text(steps[peak] + 4, loss_b[peak] + 0.05, 'spike', fontsize=10.5, color=COLORS['RedLine'], ha='left', va='bottom')
-
-ax_c.fill_between(steps[plateau_idx:], loss_a[plateau_idx:], loss_c[plateau_idx:], color=COLORS['RedL'], alpha=0.8, lw=0, zorder=0)
-ax_c.plot(steps, loss_c, color=COLORS['primary'], linewidth=lw)
-ax_c.text(70, loss_c[plateau_idx] + 0.3, 'plateau', fontsize=10.5, color=COLORS['RedLine'], ha='center', va='bottom')
-ax_c.text(70, 0.98, 'gap to healthy', fontsize=10.5, color=COLORS['RedLine'], ha='center', va='center')
-
-ax_d.plot(nan_steps, loss_d, color=COLORS['primary'], linewidth=lw)
-ax_d.scatter([nan_steps[-1]], [loss_d[-1]], marker='X', color=COLORS['RedLine'], edgecolor='white', linewidth=0.8, s=70, zorder=6)
-ax_d.text(
-    nan_steps[-1] - 5, loss_d[-1] - 0.4, 'NaN check\nhalts run', fontsize=10.5, linespacing=1.1, color=COLORS['RedLine'], ha='right', va='center'
-)
-
-titles = ['(A) Normal training', '(B) Gradient explosion', '(C) Loss plateau', '(D) NaN divergence']
-for ax, title in zip(axes, titles):
-    ax.set_title(title, fontsize=11.5, fontweight='bold', color=COLORS['primary'], loc='left', pad=6)
-    ax.set_xlim(-2, 102)
-    ax.set_ylim(0, 3.1)
-    ax.set_xticks([0, 50, 100])
-    ax.set_yticks([0, 1, 2, 3])
-    ax.tick_params(labelsize=10.5)
-    ax.grid(True, linestyle='--', color=COLORS['grid'], linewidth=0.5, alpha=0.6)
-for ax in (ax_c, ax_d):
-    ax.set_xlabel('Steps', fontsize=11)
-for ax in (ax_a, ax_c):
-    ax.set_ylabel('Loss', fontsize=11)
-
-plt.tight_layout()
-fig.subplots_adjust(wspace=0.08, hspace=0.32)
-plt.show()
-plt.close()
-```
-:::
-
-| **Signature**              | **Likely Interpretation**                                                         | **Recovery Response**                                                                                |
-|:---------------------------|:----------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
-| Spike followed by recovery | Transient input or numerical anomaly; the curve alone does not identify the cause | Preserve the suspect batch and step evidence, then replay before deciding whether to continue.       |
-| Spike followed by plateau  | Optimizer instability, corrupted state, or a persistent data-path defect          | Pause, replay from a known-good checkpoint, and compare input, optimizer, and worker evidence.       |
-| Gradual divergence         | Data drift, numerical instability, corrupted state, or worker desynchronization   | Compare per-rank telemetry and evaluation evidence; isolate hardware only when replay implicates it. |
-| Hang without an error      | Collective deadlock or crashed worker blocking synchronization                    | Use timeout detection and restart or reconstruct the worker group.                                   |
-
-: **Training Failure Response Map**: Training-loss curves are operational evidence only when they lead to different recovery actions. The response map ties each signature to the failure class most likely to explain it and to the first action operators should take. {#tbl-training-failure-response-map}
-
-These diagnostic responses protect long-running batch workloads, but identifying failures in real-time user-facing systems demands an entirely different latency budget.
-
-#### Serving failures {#sec-fault-tolerance-reliability-reliability-serving-failures-3322}
-
-Serving failures require the same symptom-to-action mapping under much tighter latency constraints. @Tbl-serving-failure-response-map separates the common symptoms by what they reveal and what the serving system must do first.
+Serving failures require a symptom-to-action mapping under much tighter latency constraints than the training-loss signatures of @sec-fault-tolerance-reliability-reliability-failure-detection-mechanisms-efed. @Tbl-serving-failure-response-map separates the common symptoms by what they reveal and what the serving system must do first.
 
 | **Symptom**                | **Likely Interpretation**                                                               | **Immediate Response**                                                                         |
 |:---------------------------|:----------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------|
@@ -3720,7 +3384,15 @@ Cascade failures are hard to diagnose because the root cause is obscured by the 
 
 :::
 
-Correlating metrics, logs, and traces allows operators to isolate failures and trigger automated remediations before an entire cluster is compromised. How these observability pipelines and fault tolerance strategies operate in practice, however, is best understood through real deployments. Production clusters running frontier models and global services illustrate how organizations translate theoretical reliability models into operational systems.
+Correlating metrics, logs, and traces lets operators isolate a failure after it happens. Whether the detectors and recovery paths will hold when it happens is a separate question, and it can be answered only by causing failures on purpose.
+
+## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
+
+An injected failure is useful evidence only when it resembles the production failure the system must survive. A multi-node training cluster that claims to tolerate network partitions should have that connection severed in a staging environment so engineers can observe what the orchestration layer does. Fault injection\index{Fault injection!testing discipline}\index{Fault injection!tools and frameworks} is the engineering discipline of deliberately perturbing a system to empirically verify that robustness mechanisms work before production traffic discovers the gap. Fault-injection tools for tensors and accelerators cover bit flips, corrupted tensor values, and accelerator-oriented failures [@chen2020tensorfi; @tsai2021; @grafe2023], while network partitions, latency injection, dependency termination, and API-response faults belong to chaos and distributed-systems testing practice [@basiri2016].
+
+An injection experiment is evidence only at the level where it injects. Its fault model\index{Fault model!abstraction} names the originating disturbance, such as a transient single-bit upset or a permanent multi-bit defect, and its error model\index{Error model!propagation} names the corrupted state that results, so results for transient single-bit faults do not establish resilience to permanent multi-bit defects [@sangchoolie2017]. The injection level also decides which masking the experiment includes. Hardware absorbs many physical disturbances before software sees them, in unused units, overwritten values, and dead instructions [@mohanram2003; @ko2021]. Hardware-based injection through field-programmable gate array (FPGA) emulation or particle-beam exposure [@velazco2010] passes through that masking, while software tools such as PyTorchFI\index{PyTorchFI!fault injection} [@mahmoud2020] perturb weights, activations, and gradients directly. They cover many model states quickly, but by skipping the masking they can overstate how often a physical fault corrupts the model. Frameworks such as Fidelity\index{Fidelity!fault injection framework} [@he2020fidelity] narrow that abstraction gap\index{Fault injection!abstraction gap} by mapping hardware faults to the software-visible errors they produce. A tensor mutation still tests how the software responds to a corrupted value; on its own, it does not estimate production vulnerability.
+
+For fleet recovery, the most valuable experiments inject faults at the level where recovery decisions are made. Killing a rank in the middle of a collective or delaying its heartbeat past the timeout exercises the detection layers of @sec-fault-tolerance-reliability-reliability-failure-detection-mechanisms-efed, partitioning a node from the rendezvous service exercises the membership and fencing rules of @sec-fault-tolerance-reliability-reliability-recovery-procedures-002d, and corrupting one checkpoint shard exercises the manifest check of @sec-fault-tolerance-reliability-reliability-distributed-checkpointing-5dcc; each tests one row of @tbl-software-faults-summary-ft. Running these experiments continuously in staging, and in controlled form in production, keeps rarely executed recovery code from decaying between real incidents [@basiri2016]. A recovery path is trustworthy only for the fault model it has been exercised against, which is why the case studies that follow report both the failures production fleets met and the machinery that absorbed them.
 
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 
@@ -3767,7 +3439,7 @@ class Opt175BCaseStudy:
     peak_fraction_str = fmt_percent(round(peak_fraction * 100) / 100, precision=0, style="prose")
 ```
 
-Published production systems make the chapter's scale lesson concrete, with failure detection, state preservation, and observability reappearing as checkpoint tax, topology reconfiguration, chaos testing, and elastic recovery. Public operational reports from Meta, Google, Netflix, and Microsoft reveal how organizations navigate these trade-offs when operating at fleet scale. The operational numbers are reported magnitudes that reveal the design pressure, not universal constants. Meta's Open Pre-trained Transformer (OPT-175B) training run on a `{python} Opt175BCaseStudy.gpus_str`-GPU cluster provides the first example, a run that had to absorb dozens of hardware failures without aborting.
+Published production systems make the chapter's scale lesson concrete, with failure detection, state preservation, and observability reappearing as checkpoint tax, topology reconfiguration, chaos testing, and elastic recovery. Public operational reports from Meta, Google, and Netflix reveal how organizations navigate these trade-offs when operating at fleet scale. The operational numbers are reported magnitudes that reveal the design pressure, not universal constants. Meta's Open Pre-trained Transformer (OPT-175B) training run on a `{python} Opt175BCaseStudy.gpus_str`-GPU cluster provides the first example, a run that had to absorb dozens of hardware failures without aborting.
 
 ### Large-scale LLM training at Meta {#sec-fault-tolerance-reliability-reliability-largescale-llm-training-fault-tolerance-f4aa}
 
@@ -3826,13 +3498,7 @@ For ML serving, the same discipline applies to feature stores, model-serving dep
 
 The recovery procedure for these injected faults centers on fallback hierarchies. If the primary deep learning model fails or times out, the serving system can switch to a lighter model, cached response, or simple popularity-based default. The systems lesson is that resilience in ML serving is not a static property but a continuous practice of active verification. A fallback path that is never exercised is documentation, not fault tolerance.
 
-### Microsoft DeepSpeed fault tolerance {#sec-fault-tolerance-reliability-reliability-deepspeed-fault-tolerance}
-
-Microsoft's DeepSpeed\index{DeepSpeed!checkpointing fault tolerance}, already compared with other frameworks in @tbl-elastic-training-comparison, illustrates the boundary between a training framework and the recovery control plane. Its ZeRO-based training and checkpointing primitives partition large-model state across workers [@rasley2020; @deepspeedCheckpointingDocs; @rajbhandari2020]. Losing a worker can strand its shard, so framework support must be paired with durable checkpoints and an orchestrator that restores a valid worker group.
-
-This checkpoint-centered path does not imply in-memory repair\index{Checkpointing!in-memory replication}. Universal Checkpointing supports selected parallelism and topology changes [@deepspeedUniversalCheckpointingDocs], but the launcher chooses the replacement allocation and the training script preserves data coverage, batch size, and optimizer invariants. The end-to-end guarantee belongs to that combination, rather than to the framework alone.
-
-Across these production case studies, three architectural patterns recur. First, detection speed\index{Fault tolerance!detection speed} belongs in the recovery budget. Meta's log-freshness threshold and Google's health monitors determine when recovery can begin, while Netflix's chaos experiments test detection and fallback for selected dependency failures. Checkpoint age and replication lag separately govern recoverable state. Second, the atomic unit of failure\index{Failure domain!atomic unit of failure} shapes the architecture. Google combines cube replacement with fault-tolerant routing, DeepSpeed-based jobs restore parameter shards from durable checkpoints, and Netflix validates service-dependency fallbacks. Third, fault tolerance is a spectrum\index{Fault tolerance!spectrum} rather than a switch. Exact state recovery trades normal-operation overhead against lost work and recovery time; graceful degradation additionally trades service capability against continued availability. Those distinct trade-offs help identify the misconceptions that follow.
+Across these production case studies, three architectural patterns recur. First, detection speed\index{Fault tolerance!detection speed} belongs in the recovery budget. Meta's log-freshness threshold and Google's health monitors determine when recovery can begin, while Netflix's chaos experiments test detection and fallback for selected dependency failures. Checkpoint age and replication lag separately govern recoverable state. Second, the atomic unit of failure\index{Failure domain!atomic unit of failure} shapes the architecture. Google combines cube replacement with fault-tolerant routing, the OPT run restarted from durable checkpoints and kept their history for numerical rollback, and Netflix validates service-dependency fallbacks. Third, fault tolerance is a spectrum\index{Fault tolerance!spectrum} rather than a switch. Exact state recovery trades normal-operation overhead against lost work and recovery time; graceful degradation additionally trades service capability against continued availability. Those distinct trade-offs help identify the misconceptions that follow.
 
 ## Fallacies and Pitfalls {#sec-fault-tolerance-reliability-reliability-fallacies-pitfalls-74b8}
 
@@ -3945,7 +3611,7 @@ Engineers read a GPU MTTF of `{python} FleetReliabilityFallacyRates.gpu_mttf_str
 
 **Pitfall**: *Using MTBF calculations as if failures were independent.*
 
-The reliability equation $\SystemMtbf = \ComponentMttf/\RequiredComponentCount$ assumes component failures are statistically independent. In production, however, failures correlate across common physical and operational dependencies. A shared power domain\index{Correlated failure!shared power domain} can fail an entire rack when an uninterruptible power supply faults, a shared top-of-rack switch\index{Correlated failure!shared switch} isolates all attached accelerators, shared software\index{Correlated failure!shared software} bugs triggered by specific inputs crash all replicas simultaneously, and cooling failures induce clustered thermal throttling\index{Correlated failure!thermal correlation} across adjacent chassis.
+The reliability equation $\SystemMtbf = \ComponentMttf/\RequiredComponentCount$ assumes component failures are statistically independent, while production failures correlate through the shared power, switches, software, and cooling of @sec-fault-tolerance-reliability-reliability-correlated-failures-95e8.
 
 ```{python}
 #| echo: false
@@ -4008,7 +3674,7 @@ Production systems must implement checkpoint validation: verify all shards exist
 
 **Fallacy**: *Overhead budgets are fixed fractions of training time.*
 
-Reference tables that show "pipeline bubble: 10 percent, checkpoint overhead: 5 percent, failure recovery: 3 percent" are easy to read as physical laws and pass through as line items in capacity plans. They are engineering targets, not constants. Pipeline bubble overhead depends on the number of microbatches and the interleaved schedule; elastic recovery can reduce waiting for replacement capacity while still restarting workers and restoring state; checkpoint overhead is a function of model size, storage bandwidth, and whether checkpointing is synchronous or asynchronous. Treating these numbers as fixed percentages leads to passive acceptance of avoidable inefficiency. The Young-Daly formula already shows that checkpoint cadence is a decision; the same is true of every other overhead listed in the reference tables.
+Reference tables that show "pipeline bubble: 10 percent, checkpoint overhead: 5 percent, failure recovery: 3 percent" are easy to read as physical laws and pass through as line items in capacity plans. They are engineering targets, not constants. Pipeline bubble overhead depends on the number of microbatches and the interleaved schedule, as its bubble fraction shows (@sec-distributed-training-systems-systems-pipeline-parallelism-8748); elastic recovery can reduce waiting for replacement capacity while still restarting workers and restoring state; checkpoint overhead is a function of model size, storage bandwidth, and whether checkpointing is synchronous or asynchronous. Treating these numbers as fixed percentages leads to passive acceptance of avoidable inefficiency, because each one is set by a design choice.
 
 :::
 
@@ -4032,7 +3698,7 @@ GPUs and memory systems include extensive error correction\index{ECC!end-to-end 
 
 **Pitfall**: *Adding GPUs without accounting for communication and recovery overhead.*
 
-Capacity plans typically account for Amdahl's Law and AllReduce overhead but treat reliability as a fixed background condition. At extreme scale, each additional GPU increases the aggregate failure rate, which inflates the expected recovery and replay time per job. There exists a cluster size beyond which the time lost to failures and recovery exceeds the time saved by additional parallelism, and wall-clock training time increases rather than decreasing with $\AcceleratorCount$. This is the reliability version of diminishing returns and it applies on top of the Amdahl ceiling. The two effects must be modeled together. Starting from a single-node useful-compute rate, scaling efficiency accounts for distributed execution losses; a further retained-progress fraction can account for recovery and replay excluded from that measurement. Measured distributed model FLOPs utilization (MFU) already includes scaling losses over its measurement window, so multiplying it by scaling efficiency again counts those losses twice. Whole-run useful goodput must count only retained progress and include recovery time in the denominator; its reliability penalty generally grows with $\AcceleratorCount$ under the independent-failure model.
+Capacity plans typically account for Amdahl's Law and AllReduce overhead but treat reliability as a fixed background condition. At extreme scale, each additional GPU increases the aggregate failure rate, which inflates the expected recovery and replay time per job. There exists a cluster size beyond which the time lost to failures and recovery exceeds the time saved by additional parallelism, and wall-clock training time increases rather than decreasing with $\AcceleratorCount$. This is the reliability version of diminishing returns, and it applies on top of the Amdahl ceiling, so the two effects must be modeled together. Whole-run useful goodput must count only retained progress and include recovery time in the denominator, and its reliability penalty generally grows with $\AcceleratorCount$ under the independent-failure model. @Sec-performance-engineering-goodput-factors composes that runtime loss with the scheduling and program losses without counting any of them twice.
 
 :::
 
@@ -4061,7 +3727,7 @@ Recovery depends on evidence about both the failure and the state being restored
 
 :::
 
-Fault tolerance makes the coordination tax a deliberate part of the execution budget. @Sec-appdx-c3-taxonomy-case-3 works a complete coordination-bound diagnosis, attributing a large run's lost wall time to checkpoints, failures, pipeline bubbles, and scheduling. In the Fleet Law (@eq-fleet-law), checkpoint pauses, detection timeouts, and restarts all land in the synchronization term $\SynchronizationTime(\DeviceCount)$. The chapter's mechanisms spend Coordination ($\OperationalTaxonomyDimension_3$) so that a failure does not erase completed Compute, and asynchronous checkpointing and warm restart earn their complexity by moving part of that synchronization cost into $\OverlappedTime$ or shrinking it outright. The useful comparison is between time spent preserving and validating state during normal operation and time lost reconstructing trustworthy execution after a failure. A cheaper recovery mechanism is valuable only when it still meets the workload's limits on lost progress, response delay, and degraded quality.
+Fault tolerance makes the coordination tax a deliberate part of the execution budget. @Sec-appdx-c3-taxonomy-case-3 works a complete coordination-bound diagnosis, attributing a large run's lost wall time to checkpoints, failures, pipeline bubbles, and scheduling. In the Fleet Law (@eq-fleet-law), checkpoint pauses, detection timeouts, and restarts all land in the synchronization term $\SynchronizationTime(\DeviceCount)$, and in goodput accounting they are runtime losses. The chapter's mechanisms spend Coordination ($\OperationalTaxonomyDimension_3$) so that a failure does not erase completed Compute, and asynchronous checkpointing and warm restart earn their complexity by moving part of that synchronization cost into $\OverlappedTime$ or shrinking it outright. The useful comparison is between time spent preserving and validating state during normal operation and time lost reconstructing trustworthy execution after a failure. A cheaper recovery mechanism is valuable only when it still meets the workload's limits on lost progress, response delay, and degraded quality.
 
 ::: {.callout-chapter-connection title="From resilience to resource management"}
 
