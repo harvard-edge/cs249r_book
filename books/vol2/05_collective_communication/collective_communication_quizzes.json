@@ -3,8 +3,8 @@
     "source_file": "books/vol2/05_collective_communication/05_collective_communication.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 11,
-    "sections_with_quizzes": 10,
+    "total_sections": 13,
+    "sections_with_quizzes": 12,
     "sections_without_quizzes": 1
   },
   "sections": [
@@ -16,15 +16,13 @@
         "rationale": {
           "focus_areas": [
             "Local-versus-global scaling asymmetry in distributed training",
-            "Mapping parallelism strategies to collective primitives and constraints",
             "Per-node communication volume invariance in Ring AllReduce",
-            "Physical data movement energy hierarchy across silicon, board, and fabric",
-            "GPUDirect RDMA and zero-copy kernel bypass"
+            "Ring AllReduce neighbor exchange versus all-pairs exchange"
           ],
-          "question_strategy": "Open with an applied diagnostic MCQ on why GPU utilization drops when scaling cluster size, follow with an architectural classification MCQ mapping parallelism strategies to collective primitives and constraints, probe per-node volume scaling in a SHORT question, test the misconception of quadratic socket connections in a TF question, and reinforce GPUDirect RDMA in a FILL question.",
-          "difficulty_progression": "Foundational scaling intuition (Amdahl / local vs global asymmetry) -> Architectural classification (parallelism-to-collective mapping) -> Quantitative scaling analysis (Ring volume invariant) -> Misconception test (AllReduce vs AllToAll topology) -> Physical mechanism recall (GPUDirect RDMA).",
+          "question_strategy": "Open with an applied diagnostic MCQ on why GPU utilization drops when scaling cluster size, probe per-node volume scaling in a SHORT question, and test the misconception of quadratic per-rank traffic in a TF question.",
+          "difficulty_progression": "Foundational scaling intuition (local vs global asymmetry) -> Quantitative scaling analysis (Ring volume invariant) -> Misconception test (AllReduce vs AllToAll traffic).",
           "integration": "Builds on single-node hardware acceleration and the fabric and storage chapters that precede it, framing collective communication as the physical realization of the Distribution Layer in the Fleet Stack that the following distributed training chapter builds on.",
-          "ranking_explanation": "This introductory section establishes the chapter governing physical frame and scaling laws, warranting a comprehensive 5-question foundational quiz."
+          "ranking_explanation": "This opening section defines gradient synchronization and the ring budget; three questions test those ideas, and the mapping and GPUDirect items moved to the section that teaches them."
         },
         "questions": [
           {
@@ -40,18 +38,6 @@
             "learning_objective": "Analyze why per-GPU compute utilization drops as distributed training scales using the local-compute versus global-communication asymmetry."
           },
           {
-            "question_type": "MCQ",
-            "question": "A machine learning engineer evaluates the communication traffic induced by different model parallelism strategies. According to the chapter's parallelism-to-collective mapping, which mapping correctly pairs a parallelism strategy with its primary collective primitive and primary physical constraint?",
-            "choices": [
-              "Fully Sharded Data Parallel (FSDP) -> Broadcast primitive -> Memory capacity constraint.",
-              "Mixture-of-Experts (MoE) Routing -> AllToAll primitive -> Latency and bisection network contention constraint.",
-              "Tensor Parallelism within a node -> Point-to-Point Send/Recv -> Inter-node bisection bandwidth constraint.",
-              "Data Parallelism -> Reduce primitive -> Host-to-device PCIe bandwidth constraint."
-            ],
-            "answer": "The correct answer is B. MoE routing exchanges token payloads with the ranks hosting selected experts. Its all-to-all pattern can create many peer messages, skewed destinations, and bisection contention. The $N(N-1)$ potential directed peer relationships do not imply quadratic bytes at fixed per-rank payload. FSDP uses AllGather and ReduceScatter, while dense data-parallel training uses AllReduce rather than root-only Reduce.",
-            "learning_objective": "Classify distributed parallelism strategies by their corresponding collective communication primitives and governing physical constraints."
-          },
-          {
             "question_type": "SHORT",
             "question": "A logical Ring AllReduce cost model uses a 140 GB input per rank, corresponding to the model-wide BF16 gradient size of a 70B-parameter model. Holding that input fixed, a team expects per-rank sent volume to grow over 100 times when the group grows from 8 to 1,000 ranks. Explain why the expectation is false and why time can still increase. Treat this as transfer arithmetic, not a claim that a full replicated training state fits on one GPU.",
             "answer": "The expectation is false because Ring AllReduce decouples per-node byte volume from cluster size: each participant transfers exactly $2 \\cdot \\frac{N-1}{N} \\cdot M$ bytes sent, and the same volume received, across the scatter-reduce and all-gather phases. For $N=8$, each GPU transfers $2 \\cdot (7/8) \\cdot 140\\text{ GB} = 245\\text{ GB}$; for $N=1{,}000$, each GPU transfers $2 \\cdot (999/1000) \\cdot 140\\text{ GB} = 279.72\\text{ GB}$, an increase of only 14%, approaching the asymptotic $2M = 280\\text{ GB}$ ceiling. What actually causes synchronization time to increase at large scale is not per-node volume, but: (1) the linear growth in sequential latency hops ($2(N-1)\\alpha$), which adds barrier overhead; (2) the physical transition from high-bandwidth intra-node NVLink (450 GB/s one-way) to lower-bandwidth inter-node InfiniBand (50 GB/s per port); and (3) network switch hops and straggler delays that amplify across thousands of participants.",
@@ -62,6 +48,81 @@
             "question": "True or False: In synchronous data-parallel distributed training, using Ring AllReduce causes each GPU network bandwidth requirement to scale quadratically with the number of GPUs $N$ because every worker must open a direct communication socket to every other worker in the cluster.",
             "answer": "False. A ring exchanges chunks with neighbors. Each rank sends $2(N-1)M/N$ bytes and receives the same amount; this approaches $2M$ in each direction. AllToAll has $N(N-1)$ directed peer relationships, but quadratic peer count does not imply quadratic bytes or bisection demand when the total per-rank payload is fixed.",
             "learning_objective": "Distinguish the linear ring neighbor topology of Ring AllReduce from the quadratic connection pattern of AllToAll."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-communication-collective-operations-physics-data-movement",
+      "section_title": "The Physics of Data Movement",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Latency floor, bandwidth, and per-message protocol overhead as separate terms of a communication budget",
+            "Communication energy as bytes sent times the energy per bit of every boundary crossed",
+            "Accounting boundaries for energy-per-bit comparisons"
+          ],
+          "question_strategy": "A classification MCQ on which physical term governs small versus large transfers, a SHORT that sets up the energy of one ring reduction from the section's 1 GB buffer and 35 pJ/bit fabric figure, and a TF that targets the belief that energy per bit follows distance.",
+          "difficulty_progression": "Classification of budget terms -> quantitative energy setup -> misconception about distance and accounting boundaries.",
+          "integration": "Applies the kernel-bypass transports and link limits of the network fabrics chapter to collective traffic, and prepares the per-step energy and time pricing used by the collective algorithms that follow.",
+          "ranking_explanation": "Tier 2 minimal quiz: a short section, but it owns the communication energy rule and the boundary discipline that later energy comparisons rely on."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "On the same fabric, one collective exchanges thousands of 4 KB messages per step while another moves a single 1 GB fused buffer. Which term governs each cost, and which lever addresses it?",
+            "choices": [
+              "Both are bandwidth-bound, so a faster link shortens both by the same factor.",
+              "The small messages pay per-message latency and protocol overhead on every send, so fusing messages or using a kernel-bypass transport helps; the 1 GB buffer is governed by per-byte transfer, so moving fewer bytes or adding bandwidth helps.",
+              "The small messages are bandwidth-bound because there are many of them, while the 1 GB buffer is latency-bound because a large transfer takes the longest path.",
+              "Both are latency-bound, because the speed of light sets a floor on every message regardless of its size."
+            ],
+            "answer": "The correct answer is B. Latency and protocol overhead are paid once per message, so thousands of small sends accumulate fixed costs that fusion and kernel-bypass transports such as RDMA reduce, while a 1 GB buffer spends nearly all its time on per-byte transfer. Treating both as bandwidth-bound misses the fixed per-message cost that a faster link cannot remove, and treating both as latency-bound ignores that the propagation floor is microseconds while the large transfer takes far longer.",
+            "learning_objective": "Classify a collective's cost as dominated by per-message overhead or per-byte transfer and select the lever that addresses it."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A 10,000-rank ring AllReduce reduces a 1 GB gradient buffer over a fabric path that costs about 35 pJ per bit. Set up the energy of one reduction and explain what the result implies for algorithm and placement choices.",
+            "answer": "Each rank sends about twice the payload, so the ring moves roughly 20 TB, or about $1.6 \\times 10^{14}$ bits, and at 35 pJ per bit one reduction costs about 5.6 kJ, paid again at every synchronous step. Communication energy is the bytes an algorithm sends multiplied by the energy per bit of every boundary those bytes cross, so an algorithm that sends fewer bytes, or a placement that keeps more traffic inside the node, saves energy as directly as it saves time. The 35 pJ figure charges only the fabric path, so it must not be compared with a whole-system estimate until both use the same boundary.",
+            "learning_objective": "Calculate the transfer energy of a collective from bytes sent and energy per bit, and explain why fewer bytes or more local placement reduces it."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Energy per transferred bit grows in proportion to physical distance, so a transfer that travels twice as far costs about twice the energy.",
+            "answer": "False. Each broader path activates different components, such as on-package links, intra-node crossbars, serializers, optical transceivers, and switches, so distance alone does not set energy per bit. Two energy estimates can be compared only after their endpoints, interfaces, switches, and utilization match.",
+            "learning_objective": "Explain why energy per bit depends on the components inside an accounting boundary rather than on distance alone."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-communication-parallelism-patterns",
+      "section_title": "Parallelism Strategies and Their Traffic",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Mapping parallelism strategies to collective primitives and constraints",
+            "GPUDirect RDMA and zero-copy kernel bypass"
+          ],
+          "question_strategy": "An architectural classification MCQ on the parallelism-to-collective mapping, then a FILL item recalling the kernel-bypass path from the preceding physics section.",
+          "difficulty_progression": "Architectural classification -> Physical mechanism recall.",
+          "integration": "Connects the traffic map to the primitives and pricing sections that follow, and recalls the transport path that carries every exchange.",
+          "ranking_explanation": "A minimal 2-question quiz moved here from the opening section after the reorder."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A machine learning engineer evaluates the communication traffic induced by different model parallelism strategies. According to the chapter's parallelism-to-collective mapping, which mapping correctly pairs a parallelism strategy with its primary collective primitive and primary physical constraint?",
+            "choices": [
+              "Fully Sharded Data Parallel (FSDP) -> Broadcast primitive -> Memory capacity constraint.",
+              "Mixture-of-Experts (MoE) Routing -> AllToAll primitive -> Latency and bisection network contention constraint.",
+              "Tensor Parallelism within a node -> Point-to-Point Send/Recv -> Inter-node bisection bandwidth constraint.",
+              "Data Parallelism -> Reduce primitive -> Host-to-device PCIe bandwidth constraint."
+            ],
+            "answer": "The correct answer is B. MoE routing exchanges token payloads with the ranks hosting selected experts. Its AllToAll pattern can create many peer messages, skewed destinations, and bisection contention. The $N(N-1)$ potential directed peer relationships do not imply quadratic bytes at fixed per-rank payload. FSDP uses AllGather and ReduceScatter, while dense data-parallel training uses AllReduce rather than root-only Reduce.",
+            "learning_objective": "Classify distributed parallelism strategies by their corresponding collective communication primitives and governing physical constraints."
           },
           {
             "question_type": "FILL",
@@ -131,7 +192,7 @@
           "question_strategy": "Open with an applied MCQ on the critical message size guiding optimization choices, probe the gap between bare-wire predictions and measured small collectives in a SHORT reflection, and test model sequencing in an ORDER question.",
           "difficulty_progression": "Analytical regime classification (critical message size) -> Empirical gap analysis -> Diagnostic workflow sequencing.",
           "integration": "Prices the contracts defined in the primitives section per round and per chunk, laying the quantitative foundation for the AllReduce algorithms and their crossover points.",
-          "ranking_explanation": "The overlap model moved to the overlap section, so this section keeps a minimal 3-question quiz on the pricing model it owns."
+          "ranking_explanation": "The overlap model moved to the overlap section, so this section keeps a minimal 3-question quiz on the pricing model it owns. The ordering item on alpha-beta, LogP, and benchmarks moved to the libraries section, after LogP and calibration are taught."
         },
         "questions": [
           {
@@ -151,12 +212,6 @@
             "question": "Explain why small-message collective timings can exceed a bare-wire prediction by a much larger relative factor than large-message timings. Which measurements are needed before using this difference in a cluster capacity plan?",
             "answer": "Small transfers can spend most of their time in launch, descriptor preparation, registration, proxy processing, and synchronization rather than serialization. For large transfers, the payload-over-bandwidth term can dominate those fixed costs. Benchmark effective startup latency and sustained bandwidth for the intended message sizes, placement, and concurrent traffic. The discrepancy is configuration-dependent, so an illustrative overhead ratio is not a measured hardware guarantee.",
             "learning_objective": "Explain the NCCL reality gap by contrasting software stack launch overheads in small messages with wire saturation in large payloads."
-          },
-          {
-            "question_type": "ORDER",
-            "question": "Sequence the hierarchy of communication cost models and diagnostic analyses in order from the simplest zero-overlap first-order sizing to real-world cluster validation: (1) empirically benchmark bare collectives with nccl-tests to capture cluster-specific reality gaps and contention, (2) compute critical message size $n^* = \\alpha \\cdot \\beta$ using the $\\alpha$-$\\beta$ model to classify latency vs bandwidth regimes, (3) profile processor overhead $o$ and overlappable latency $L_{\\text{lat}}$ using the LogP model to assess overlap feasibility with the backward pass.",
-            "answer": "The correct order is: (2) compute critical message size $n^* = \\alpha \\cdot \\beta$ using the $\\alpha$-$\\beta$ model to classify latency vs bandwidth regimes, (3) profile processor overhead $o$ and overlappable latency $L_{\\text{lat}}$ using the LogP model to assess overlap feasibility with the backward pass, (1) empirically benchmark bare collectives with nccl-tests to capture cluster-specific reality gaps and contention. Engineers start with the analytical $\\alpha$-$\\beta$ model for initial sizing and regime classification; refine with the LogP model when designing compute-communication overlap to distinguish nonoverlappable processor overhead from overlappable wire transit; and finally validate against actual cluster behavior using bare collective benchmarks (`nccl-tests`) to expose hardware topology, network contention, and software runtime overheads.",
-            "learning_objective": "Order the progression of communication modeling techniques from analytical sizing to empirical cluster benchmarking."
           }
         ]
       }
@@ -481,7 +536,8 @@
             "MPI: HPC foundation, persistent collectives, non-blocking collectives, CPU coordination, host memory copies",
             "Gloo: cross-platform portability, development and CI testing, CPU fallback, shared memory transport",
             "Library selection matrix: mapping hardware and deployment constraints to communication runtimes",
-            "Performance debugging workflow: NCCL_DEBUG, nccl-tests baseline, straggler detection, Nsight Systems"
+            "Performance debugging workflow: NCCL_DEBUG, nccl-tests baseline, straggler detection, Nsight Systems",
+            "Ordering analytical sizing, overlap analysis, and matched benchmarks"
           ],
           "question_strategy": "Open with an architectural MCQ on GPU-specific optimizations that differentiate NCCL from general MPI/Gloo, follow with a scenario-based MCQ on the communication library selection guide, probe nccl-tests diagnostic isolation in a SHORT question, and evaluate NCCL_DEBUG functionality in a TF question.",
           "difficulty_progression": "Architectural optimization analysis -> Multi-environment library selection -> Diagnostic benchmarking reflection -> Runtime observability evaluation.",
@@ -524,6 +580,12 @@
             "question": "True or False: Setting the environment variable NCCL_DEBUG=INFO modifies the mathematical reduction operator in NCCL from floating-point summation to exact integer bitwise addition to guarantee deterministic gradient aggregation across runs.",
             "answer": "False. `NCCL_DEBUG=INFO` is strictly an observability and diagnostic logging flag. It outputs runtime metadata to standard error, including detected physical hardware topology, GPU-to-NIC affinities, selected collective algorithms (e.g., Ring vs. Tree), channel counts, and communication protocols (e.g., Simple vs. LL/LL128). It does not alter the mathematical semantics, reduction operators, or numerical precision of collective operations.",
             "learning_objective": "Identify the diagnostic and logging purpose of the `NCCL_DEBUG` environment variable."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Sequence the hierarchy of communication cost models and diagnostic analyses in order from the simplest zero-overlap first-order sizing to real-world cluster validation: (1) empirically benchmark bare collectives with nccl-tests to capture cluster-specific reality gaps and contention, (2) compute critical message size $n^* = \\alpha \\cdot \\beta$ using the $\\alpha$-$\\beta$ model to classify latency vs bandwidth regimes, (3) profile processor overhead $o$ and overlappable latency $L_{\\text{lat}}$ using the LogP model to assess overlap feasibility with the backward pass.",
+            "answer": "The correct order is: (2) compute critical message size $n^* = \\alpha \\cdot \\beta$ using the $\\alpha$-$\\beta$ model to classify latency vs bandwidth regimes, (3) profile processor overhead $o$ and overlappable latency $L_{\\text{lat}}$ using the LogP model to assess overlap feasibility with the backward pass, (1) empirically benchmark bare collectives with nccl-tests to capture cluster-specific reality gaps and contention. Engineers start with the analytical $\\alpha$-$\\beta$ model for initial sizing and regime classification; refine with the LogP model when designing compute-communication overlap to distinguish nonoverlappable processor overhead from overlappable wire transit; and finally validate against actual cluster behavior using bare collective benchmarks (`nccl-tests`) to expose hardware topology, network contention, and software runtime overheads.",
+            "learning_objective": "Order the progression of communication modeling techniques from analytical sizing to empirical cluster benchmarking."
           }
         ]
       }
