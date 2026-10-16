@@ -228,10 +228,10 @@ def machine(accent, step=4, hl=None):
         # host link (violet, a transfer between components)
         out.append(f'<line x1="230" y1="170" x2="330" y2="170" '
                    f'stroke="{C["VioletLine"]}" stroke-width="8"/>\n')
-        out.append(text(280, 140, "Link", size=19, weight=700,
+        out.append(text(280, 128, "Link", size=19, weight=700,
                         fill=C["VioletLine"], anchor="middle"))
     boxes = {"compute": (cx, cy, cw, chh), "sram": (sx, sy, sw_, sh),
-             "hbm": (hx, hy, hw, hh), "link": (232, 150, 96, 40),
+             "hbm": (hx, hy, hw, hh), "link": (236, 156, 88, 28),
              "host": (30, 110, 200, 290)}
     if hl:
         x, y, w, h = boxes[hl]
