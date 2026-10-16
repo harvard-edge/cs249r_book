@@ -72,7 +72,7 @@ def get(title, outdir, name):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=60) as r:
         dest.write_bytes(r.read())
-    kind = subprocess.run(["file", "-b", str(dest)], capture_output=True, text=True).stdout
+    kind = subprocess.run(["file", "-b", str(dest)], capture_output=True).stdout.decode("utf-8", "replace")
     page = ii.get("descriptionurl", "")
     credit = f"{author}, {lic}, Wikimedia Commons"
     entry = (f"- file: {dest.name}\n  title: \"{title}\"\n  source: {page}\n"
