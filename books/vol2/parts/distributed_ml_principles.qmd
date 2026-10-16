@@ -6,7 +6,7 @@ format:
 
 # Distributed ML Principles {.unnumbered}
 
-Coordinating the fleet requires solving problems that a single machine does not. If Part I built the physical substrate, Part II establishes the logic of distribution: the algorithms, protocols, and coordination strategies that make a collection of independent accelerators behave as one machine. The same physics that set the rates in Part I explains why adding accelerators does not always yield linear speedups, and why communication, not computation, is often the hidden bottleneck.
+Wiring thousands of accelerators together with high-speed switches and parallel storage does not by itself make them train one model; without distributed coordination, replicas diverge, partitioned layers stall on missing activations, and a single failed GPU halts the entire cluster. If Part I built the physical substrate, Part II establishes the logic of distribution: the algorithms, protocols, and coordination strategies that make a collection of independent accelerators behave as one machine. The same physics that set the rates in Part I explains why adding accelerators does not always yield linear speedups, and why communication, not computation, is often the hidden bottleneck.
 
 At this scale, the engineering challenge is a trade-off between parallelization and coordination. Partitioning a model reduces per-device memory pressure but requires exchanging intermediate results across partitions. Replicating a model across workers instead requires coordinating their updates. Adding nodes can reduce training time while exposing a job to more component failures, decreasing its mean time between failures (MTBF) when an individual failure interrupts the job. Fault tolerance therefore becomes part of the execution design. These principles decompose the communication cost that the Fleet Law exposes (@sec-vol2-introduction-fleet-law) and add the reliability cost of scale.
 
@@ -29,7 +29,7 @@ $$ \ScalingLawLoss(\ScaledResource) \propto \ScaledResource^{-\ScalingExponent} 
 \end{minipage}
 ```
 
-That demand for scale turns each training step into a negotiation between faster local work and slower global coordination.
+That demand for scale turns each training step into a negotiation between faster local work and slower global coordination. Splitting a batch or a model across more workers shrinks the arithmetic each device performs, but it also introduces network transfers and barrier waits that grow with cluster size.
 
 ::: {#pri-distributed-step-time .callout-principle title="The fleet law (distributed step-time model)"}
 
@@ -40,7 +40,7 @@ $$ \DistributedStepTime(\DeviceCount) = \frac{\IronLawComputeTime}{\DeviceCount}
 
 :::
 
-For data parallelism, the AllReduce that combines every worker's gradients sets the size of the Fleet Law's communication term.
+For data parallelism, the AllReduce that combines every worker's gradients sets the size of the Fleet Law's communication term. Because every replica must receive the full sum of gradients before advancing its weights, the volume moved per rank approaches a constant floor even as more workers join the job.
 
 ::: {#pri-allreduce-bandwidth-bound .callout-principle title="The AllReduce bandwidth bound"}
 
@@ -51,7 +51,7 @@ $$ \RingAllReduceCompletionTime = 2(\DeviceCount-1)\MessageStartupLatency + 2\fr
 
 :::
 
-The Fleet Law and the AllReduce bound predict the time of one step; the scaling efficiency bound measures how far the resulting speedup falls short of ideal.
+The Fleet Law and the AllReduce bound predict the time of one step; the scaling efficiency bound measures how far the resulting speedup falls short of ideal. Comparing multi-device runtime against a single-device baseline turns those exposed communication and synchronization terms into a direct measure of cluster return on investment.
 
 ::: {#pri-scaling-efficiency .callout-principle title="The scaling efficiency bound"}
 
@@ -63,7 +63,7 @@ Here, $\SingleDeviceRunTime$ and $\MultiDeviceRunTime$ are the times to complete
 
 :::
 
-Even when communication and coordination are tuned, a larger fleet fails often enough that progress itself must be protected.
+Even when communication and coordination are tuned, a larger fleet fails often enough that progress itself must be protected. Without periodic state snapshots, a single device or link failure discards every step completed since the run began.
 
 ::: {#pri-young-daly .callout-principle title="The Young-Daly checkpoint interval"}
 
@@ -80,11 +80,11 @@ Fault tolerance illustrates why reducing one cost requires checking the others. 
 
 **Invariant**: Distributed ML optimizations often relocate overhead among Compute, Communication, and Coordination (the C$^3$ taxonomy). Reducing one term can increase another, so designs must evaluate all three.
 
-**Implication**: Asynchronous training can eliminate global coordination barriers ($\SynchronizationTime(\DeviceCount) \to 0$) but may introduce gradient staleness that manifests as additional training iterations ($\IronLawComputeTime \uparrow$). Pipeline parallelism can reduce communication volume relative to finer-grained model partitioning but adds pipeline bubble time ($\SynchronizationTime(\DeviceCount) \uparrow$). The C$^3$ taxonomy reveals where each design pays its overhead.
+**Implication**: Asynchronous training can eliminate global coordination barriers ($\SynchronizationTime(\DeviceCount) \to 0$) but may introduce gradient staleness that shows up as additional training iterations ($\IronLawComputeTime \uparrow$). Pipeline parallelism can reduce communication volume relative to finer-grained model partitioning but adds pipeline bubble time ($\SynchronizationTime(\DeviceCount) \uparrow$). The C$^3$ taxonomy reveals where each design pays its overhead.
 
 :::
 
-Accounting for overhead inside one job leaves a fleet-level question open, because many jobs compete for the same machines and a share of the fleet is worth something only if the job can run on it.
+Accounting for overhead inside one job leaves a fleet-level question open, because many jobs compete for the same machines and a share of the fleet is worth something only if the job can run on it. Granting accelerators without the interconnect topology, power, or storage bandwidth a synchronous workload requires only strands those devices in an unusable allocation.
 
 ::: {#pri-feasibility-before-fairness .callout-principle title="The feasibility-before-fairness principle"}
 
