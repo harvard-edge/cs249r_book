@@ -444,7 +444,7 @@ class Racks(Registry):
 
 class SwitchFabric(Registry):
     """Switch-ASIC capacity, 400G optics power, and α-β / FEC / hop latency reference
-    figures for datacenter network-fabric models."""
+    figures for datacenter network-fabric and interconnect models."""
 
     NdrSwitchPorts = sourced(64, pc.NVIDIA_QUANTUM2_QM97XX_SWITCH,
         name="NDR switch ports", description="Reference 64-port NDR switch used for two-tier fabric sizing.")
@@ -468,6 +468,29 @@ class SwitchFabric(Registry):
         name="α (NDR base latency)", description="Per-message base latency for the NDR α-β model.")
     AlphaRoce = sourced_qty(5.0 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="α (RoCE base latency)", description="Per-message base latency for the RoCE α-β model.")
+    # Effective collective-launch α ranges (software stack included), one Low/High pair per
+    # interconnect. The single source for every α range table; AlphaNdr and AlphaRoce above
+    # are the point anchors and must sit inside the NDR and RoCE ranges (tested).
+    EffectiveAlphaNvlinkLow = sourced_qty(1 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (NVLink, low)", description="Low end of the effective per-message collective-launch latency over NVLink.")
+    EffectiveAlphaNvlinkHigh = sourced_qty(2 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (NVLink, high)", description="High end of the effective per-message collective-launch latency over NVLink.")
+    EffectiveAlphaPcieGen5Low = sourced_qty(2 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (PCIe Gen5, low)", description="Low end of the effective per-message collective-launch latency over PCIe Gen5.")
+    EffectiveAlphaPcieGen5High = sourced_qty(5 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (PCIe Gen5, high)", description="High end of the effective per-message collective-launch latency over PCIe Gen5.")
+    EffectiveAlphaNdrLow = sourced_qty(1 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand NDR, low)", description="Low end of the effective per-message collective-launch latency over InfiniBand NDR.")
+    EffectiveAlphaNdrHigh = sourced_qty(3 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand NDR, high)", description="High end of the effective per-message collective-launch latency over InfiniBand NDR.")
+    EffectiveAlphaHdrLow = sourced_qty(2 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand HDR, low)", description="Low end of the effective per-message collective-launch latency over InfiniBand HDR.")
+    EffectiveAlphaHdrHigh = sourced_qty(5 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (InfiniBand HDR, high)", description="High end of the effective per-message collective-launch latency over InfiniBand HDR.")
+    EffectiveAlphaRoceLow = sourced_qty(5 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (100G RoCE, low)", description="Low end of the effective per-message collective-launch latency over 100G RoCE.")
+    EffectiveAlphaRoceHigh = sourced_qty(10 * ureg.microsecond, pc.EFFECTIVE_COLLECTIVE_ALPHA_RANGES,
+        name="Effective α (100G RoCE, high)", description="High end of the effective per-message collective-launch latency over 100G RoCE.")
     HopLatency = sourced_qty(0.6 * ureg.microsecond, pc.FABRIC_LATENCY_ASSUMPTIONS,
         name="Per-hop switch latency", description="Approximate per-hop store-and-forward switch latency.")
     FecLatencyLow = sourced_qty(100 * ureg.nanosecond, pc.FABRIC_LATENCY_ASSUMPTIONS,

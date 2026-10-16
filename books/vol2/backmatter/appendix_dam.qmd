@@ -8,7 +8,7 @@ format:
 
 # Single-Machine Foundations {#sec-appdx-dam-taxonomy}
 
-Every fleet is built from single machines, and this book assumes that the reader already reasons fluently about one of them. This appendix restates that single-machine foundation in reference form so that a reader who meets the prerequisites only loosely can work every calculation in the book without another text. It collects the Data, Algorithm, and Machine (D·A·M) diagnostic framework and the iron law it rests on, arithmetic intensity and the roofline bound, the accelerator memory hierarchy, the byte accounting of mixed-precision training, and the arithmetic of transformer training and inference. The chapters build the fleet-scale Compute, Communication, and Coordination (C$^3$) framework on this base.
+Every fleet is built from single machines, and this book assumes that the reader already reasons fluently about one of them. This appendix restates that single-machine foundation in reference form so that a reader who meets the prerequisites only loosely can work every calculation in the book without another text. It collects the Data, Algorithm, and Machine (D·A·M) diagnostic framework and the iron law it rests on, arithmetic intensity and the roofline bound, the accelerator memory hierarchy, the kernel-level levers that shorten a single device's step, the byte accounting of mixed-precision training, and the arithmetic of transformer training and inference. The chapters build the fleet-scale Compute, Communication, and Coordination (C$^3$) framework on this base.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -33,6 +33,7 @@ This appendix is a reference for single-node performance and for the single-mach
 - **When a single accelerator is slow**: Use the iron law mapping (@sec-appdx-dam-taxonomy-iron-law-mapping) and the bottleneck diagnostic (@sec-appdx-dam-taxonomy-bottleneck-diagnostic) to decide which term binds.
 - **When deciding whether a kernel is memory bound or compute bound**: Use the roofline bound (@sec-appdx-dam-taxonomy-roofline).
 - **When a byte must cross a memory boundary**: Use the memory hierarchy (@sec-appdx-dam-taxonomy-memory-hierarchy) to see which tier sets its cost.
+- **When a trace shows many short kernels, launch gaps, or attention intermediates written to device memory**: Use the kernel-level levers (@sec-appdx-dam-taxonomy-kernel-levers).
 - **When sizing model state**: Use the training memory accounting (@sec-appdx-dam-taxonomy-training-memory) for bytes per parameter.
 - **When estimating training compute or decode cost**: Use transformer arithmetic (@sec-appdx-dam-taxonomy-transformer-arithmetic).
 
@@ -98,13 +99,13 @@ class DAMTaxonomy:
 
 The Data · Algorithm · Machine (D·A·M) taxonomy is the diagnostic framework for single-node ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, the first diagnostic question is where the flow is blocked. This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes,[^fn-mece-v2-exclusive] while recognizing that real systems can involve mixed causes or interactions between axes.
 
-[^fn-mece-v2-exclusive]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, it is useful as an idealized decomposition, but D·A·M bottlenecks often overlap in practice: a kernel can be simultaneously memory-bound, synchronization-heavy, and poorly matched to available hardware.
+[^fn-mece-v2-exclusive]: **MECE (mutually exclusive, collectively exhaustive)**: A classification principle from management consulting requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, it is useful as an idealized decomposition, but D·A·M bottlenecks often overlap in practice. A kernel can be simultaneously memory-bound, synchronization-heavy, and poorly matched to available hardware.
 
 ## Diagnostic Summary {#sec-appdx-dam-taxonomy-diagnostic-summary}
 
-The taxonomy maps directly to the iron law of ML systems, introduced in @sec-vol2-introduction-fleet-law. @Tbl-v2-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
+The taxonomy maps directly to the iron law of ML systems, the single-machine equation that @sec-vol2-introduction-fleet-law restates before extending it to the Fleet Law. Each axis plays a distinct role, binds on a distinct physical quantity (bandwidth, operations, or peak throughput), and answers to its own high-leverage optimization (@tbl-v2-dam-components-ref).
 
-| **Axis**          |          **Role**          |  **Physical Constraint**   | **High-Leverage Optimization** |
+| **Axis**          |          **Role**          |  **Physical constraint**   | **High-leverage optimization** |
 |:------------------|:--------------------------:|:--------------------------:|:------------------------------:|
 | **Data (D)**      | **Information** (The Fuel) |  Bandwidth ($\Bandwidth$)  |   I/O Pipeline Optimization    |
 | **Algorithm (A)** | **Logic** (The Blueprint)  | Operations ($\Operations$) |       Model Compression        |
@@ -122,13 +123,13 @@ Algorithm and Machine share the compute term and are separated by which variable
 
 ### D·A·M coordination from sum to max {#sec-appdx-dam-taxonomy-dam-coordination-sum-max}
 
-The additive iron law represents **Sequential Execution**\index{Sequential execution!D·A·M coordination}, the worst case where Data, Algorithm, and Machine take turns. Overlap can move the sum toward a max, with perfect overlap defining the ideal lower bound:
+The additive iron law represents **sequential execution**\index{Sequential execution!D·A·M coordination}, the worst case where Data, Algorithm, and Machine take turns. Overlap can move the sum toward a max, with perfect overlap defining the ideal lower bound:
 
 $$ \SequentialExecutionTime= \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency \quad \xrightarrow{\text{overlap}} \quad \PipelinedExecutionTime\geq \max\left(\frac{\DataVolume}{\Bandwidth},\; \frac{\Operations}{\PeakRate \cdot \EfficiencyHw}\right) + \Latency $$
 
-The systems engineer's job is to make these components run in parallel, not in series. @Tbl-v2-dam-overlap summarizes key D·A·M coordination techniques:
+The systems engineer's job is to make these components run in parallel, not in series. Prefetching, separate CUDA streams, asynchronous gradient synchronization, and double buffering each let one axis proceed while another is in flight (@tbl-v2-dam-overlap).
 
-| **Technique**           |  **D·A·M Axes Overlapped**   | **Implementation**                                                                              |
+| **Technique**           |  **D·A·M axes overlapped**   | **Implementation**                                                                              |
 |:------------------------|:----------------------------:|:------------------------------------------------------------------------------------------------|
 | **Prefetching**         |         D overlaps M         | DataLoader with `prefetch_factor`, `pin_memory=True`                                            |
 | **CUDA Streams**        |         D overlaps M         | Separate streams for H2D transfer and compute                                                   |
@@ -139,9 +140,9 @@ The systems engineer's job is to make these components run in parallel, not in s
 
 ## Arithmetic Intensity Boundary {#sec-appdx-dam-taxonomy-arithmetic-intensity-boundary}
 
-This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by arithmetic intensity[^fn-intensity-v2-ratio] ($\ArithmeticIntensity$) of the workload.
+This overlap view still leaves one practical question: whether a workload is waiting on bytes or on FLOPs. The boundary between Data (memory bound) and Machine (compute bound) is not arbitrary; it is defined mathematically by the arithmetic intensity[^fn-intensity-v2-ratio] ($\ArithmeticIntensity$) of the workload.
 
-[^fn-intensity-v2-ratio]: **Arithmetic Intensity**\index{Arithmetic intensity!appendix refresher}: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($\PeakRate/\Bandwidth$).
+[^fn-intensity-v2-ratio]: **Arithmetic intensity**\index{Arithmetic intensity!appendix refresher}: The ratio of floating-point operations to bytes transferred (FLOP/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($\PeakRate/\Bandwidth$).
 
 The symptoms below are screening signals, not diagnoses. A workload whose arithmetic intensity sits left of $\PeakRate/\Bandwidth$ cannot keep the accelerator fed with enough useful work per byte, but raw utilization must be read alongside memory-bandwidth utilization, data-loader wait, kernel occupancy, and trace gaps.
 
@@ -152,7 +153,7 @@ The symptoms below are screening signals, not diagnoses. A workload whose arithm
 
 ### The roofline bound {#sec-appdx-dam-taxonomy-roofline}
 
-Arithmetic intensity is a property of the workload and its implementation, not of the hardware. A large matrix multiply reuses each weight it loads across many multiply-accumulates and so has high intensity; an element-wise operation, or the generation of a single token, uses each loaded value only once or twice. The ridge point belongs to a simple upper bound on single-device throughput, the roofline model\index{Roofline Model!single-machine recap} [@williams2009]. A kernel with arithmetic intensity $\ArithmeticIntensity$, running on a device with peak compute rate $\PeakRate$ and memory bandwidth $\Bandwidth$, can attain at most
+Arithmetic intensity is a property of the workload and its implementation, not of the hardware. A large matrix multiply reuses each weight it loads across many multiply-accumulates and so has high intensity; an element-wise operation, or the generation of a single token, uses each loaded value only once or twice. The ridge point belongs to a simple upper bound on single-device throughput, the Roofline Model\index{Roofline model!single-machine recap} [@williams2009]. A kernel with arithmetic intensity $\ArithmeticIntensity$, running on a device with peak compute rate $\PeakRate$ and memory bandwidth $\Bandwidth$, can attain at most
 
 $$ \AttainableComputeRate(\ArithmeticIntensity) = \min\!\left(\PeakRate,\; \ArithmeticIntensity\times \Bandwidth\right) $$ {#eq-appdx-dam-roofline}
 
@@ -162,9 +163,9 @@ For an H100, the book's hardware constants give a dense FP16 peak of `{python} D
 
 ### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic}
 
-Once the bottleneck is identified, @tbl-v2-bottleneck-actions shows which optimizations help and which ones are wasted:
+Each optimization shortens only one term of the iron law, so a fix aimed at a term that does not bind is wasted. @Tbl-v2-bottleneck-actions pairs each bottleneck with the optimizations that help and those that do not.
 
-| **If the workload is...** |               **Dominant Term**               | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
+| **If the workload is...** |               **Dominant term**               | **Optimization that works**                                             | **Optimization that is wasted**                    |
 |:--------------------------|:---------------------------------------------:|:------------------------------------------------------------------------|:---------------------------------------------------|
 | **Memory-Bound**          |            $\DataVolume/\Bandwidth$           | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
 | **Compute-Bound**         | $\Operations/(\PeakRate \cdot \EfficiencyHw)$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (not binding)                |
@@ -273,11 +274,42 @@ An accelerator is a fast arithmetic engine surrounded by memories that trade ban
 
 A kernel whose working set stays on chip runs near arithmetic speed; one that streams operands from HBM is bounded by the roofline above; one that must reach host memory or storage is slower still. The **memory wall**\index{Memory wall!appendix refresher}, the widening gap between arithmetic throughput and the bandwidth that feeds it, is the single-machine form of the constraint that reappears at fleet scale as the network wall. A multi-accelerator node adds a scale-up fabric between devices (NVLink, at `{python} SingleMachineRecap.nvlink_dir_str` per direction on an H100), and the scale-out network adds tiers beyond the node; @sec-appdx-fleet-foundations-numbers-to-know tabulates those tiers.
 
+## Kernel-Level Levers {#sec-appdx-dam-taxonomy-kernel-levers}
+
+Four techniques shorten one device's step without changing the model's mathematics. Each removes a different cost in the iron law of @sec-appdx-dam-taxonomy-iron-law-mapping, and each counts as a gain only when a measured trace confirms it. The four differ in which term they remove, what limits them, and what evidence a trace shows (@tbl-appdx-dam-kernel-levers).
+
+### Fusion {#sec-appdx-dam-taxonomy-kernel-levers-fusion}
+
+**Operator fusion**\index{Operator fusion!appendix refresher} combines consecutive operations into one kernel, so an intermediate result stays in registers or shared memory instead of being written to HBM and read back by the next kernel. It shrinks the data volume $\DataVolume$ of the data term and removes one launch per fused operation from the overhead term $\Latency$. The common kinds are chains of element-wise operations, an element-wise operation fused with a reduction such as a normalization, and operator-specific fusions such as a matrix multiply that applies its bias and activation before writing its output. Fusion stops paying when the live values of the combined kernel exceed the registers and shared memory available, which lowers occupancy or spills to memory, and when a reduction needs results from every thread block. A trace confirms it with fewer kernels and fewer HBM bytes before the step time falls.
+
+### Tiling and IO-aware attention {#sec-appdx-dam-taxonomy-kernel-levers-tiling}
+
+**Tiling**\index{Tiling!appendix refresher} sizes blocks of a computation to fit on-chip memory, so each operand fetched from HBM feeds many operations and arithmetic intensity rises. IO-aware attention such as FlashAttention\index{FlashAttention!appendix refresher} applies the idea to attention. It computes the scores block by block, keeping a running maximum and sum for the softmax, so the full matrix of scores between every pair of positions is never written to HBM and the workspace grows linearly with sequence length rather than quadratically. The price is extra rescaling arithmetic and, in training, recomputing the scores in the backward pass. Decode processes one query row per step and has no quadratic intermediate, so its fused attention kernel is a single pass over the KV cache. Tiling reduces $\DataVolume$ and frees HBM capacity for the KV cache and larger batches.
+
+### Graph replay {#sec-appdx-dam-taxonomy-kernel-levers-replay}
+
+**Graph replay**\index{CUDA Graphs!appendix refresher}, offered on NVIDIA GPUs as CUDA Graphs, records a stable sequence of kernels and memory copies once and then submits the whole sequence with one request in later steps. It removes the host-dispatch part of $\Latency$, which matters when many short kernels leave launch gaps between them, as in batch-one decode. A captured graph replays only the shapes, memory addresses, and control flow it recorded, so a server keeps one graph per shape bucket, and decode captures more easily than prefill, whose shapes vary with prompt length. Replay fuses nothing. The same kernels run with the gaps between them removed, which a timeline shows directly.
+
+### Compilation {#sec-appdx-dam-taxonomy-kernel-levers-compilation}
+
+**Graph compilation**\index{Graph compilation!appendix refresher} automates the three levers above. A compiler captures the program as a graph, rewrites and decomposes its operations, fuses them, selects or generates a kernel for each fused group (often by timing candidates, which is called autotuning), and plans memory. Just-in-time compilers keep the eager programming model, ahead-of-time inference engines specialize the program to a declared range of shapes, and tile-level kernel languages let an engineer write a fusion the compiler missed. Compilation reduces both $\DataVolume$ and $\Latency$, at the cost of build and warmup time, regions split at graph breaks where the compiler cannot capture the program, and recompilation when a new shape arrives. @Sec-performance-engineering-compilation-overhead prices that cost across a fleet and finds when it pays back.
+
+| **Lever**                         | **Removes**                                         | **Iron-law term**        | **Main limit**                            | **Trace evidence**                        |
+|:----------------------------------|:----------------------------------------------------|:-------------------------|:------------------------------------------|:------------------------------------------|
+| **Fusion**                        | HBM round-trips of intermediates; kernel launches   | Data volume; overhead    | Register and shared-memory pressure       | Fewer kernels and fewer HBM bytes         |
+| **Tiling and IO-aware attention** | Repeated HBM fetches; materialized attention scores | Data volume              | Rescaling arithmetic; recomputation       | Fewer HBM bytes; smaller attention memory |
+| **Graph replay**                  | Host dispatch of each kernel                        | Overhead                 | Fixed shapes, addresses, and control flow | Launch gaps disappear from the timeline   |
+| **Compilation**                   | All three, applied automatically                    | Data volume and overhead | Build time; graph breaks; recompilation   | Fewer, fused kernels after warmup         |
+
+: **Kernel-Level Levers**: Each lever shortens a different term of one device's step, so a trace must show that term moving before a step-time gain counts. {#tbl-appdx-dam-kernel-levers}
+
+*Introduction to Machine Learning Systems* develops these mechanisms in full, for a reader who wants more than this recap.
+
 ## Numeric Precision and Training Memory {#sec-appdx-dam-taxonomy-training-memory}
 
 The notation conventions at the front of the book list the number formats used throughout and their byte widths. FP32 occupies `{python} SingleMachineRecap.fp32_bytes_str` bytes, BF16 and FP16 occupy `{python} SingleMachineRecap.fp16_bytes_str`, and FP8 and INT8 occupy one. **Mixed-precision training**\index{Mixed-precision training!appendix refresher} runs the forward and backward passes in a 16-bit format for speed and memory, while it keeps an FP32 master copy of the weights so that small updates are not lost to rounding. The Adaptive Moment Estimation (Adam) optimizer adds two FP32 moment estimates per parameter. @Tbl-appdx-dam-training-state totals the resulting bytes per parameter.
 
-| **State**              | **Format** |                   **Bytes per Parameter**                    |          **In a Resumable Checkpoint**           |
+| **State**              | **Format** |                   **Bytes per parameter**                    |          **In a resumable checkpoint**           |
 |:-----------------------|:----------:|:------------------------------------------------------------:|:------------------------------------------------:|
 | **Working weights**    |    BF16    |         `{python} SingleMachineRecap.fp16_bytes_str`         |                       Yes                        |
 | **Gradients**          |    BF16    |         `{python} SingleMachineRecap.fp16_bytes_str`         |            No (recomputed on resume)             |
@@ -309,7 +341,7 @@ Serving an autoregressive model has two phases with different physics. *Prefill*
 
 After the action table narrows the likely fix, the tooling map identifies the measurements needed to verify it. Use @tbl-v2-dam-tooling to select the right profiling tool when diagnosing a bottleneck along a particular D·A·M axis:
 
-| **Axis**      |         **Key Metric**        |     **Primary Tool**     |       **Secondary Tool**      |
+| **Axis**      |         **Key metric**        |     **Primary tool**     |       **Secondary tool**      |
 |:--------------|:-----------------------------:|:------------------------:|:-----------------------------:|
 | **Data**      |    Batch Load and Wait Time   | Framework profiler trace | `iostat`, `pidstat` (I/O/CPU) |
 | **Algorithm** |       FLOPs, Model Depth      |     PyTorch Profiler     |    DeepSpeed Flops Profiler   |
@@ -323,7 +355,7 @@ The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance agai
 
 [^fn-mfu-v2-scorecard]: **MFU (model FLOPs utilization)**: Counts only *useful* model computation in the numerator. Gradient synchronization, memory management, and other overhead within the measurement window remain in elapsed time and lower the reported ratio.
 
-| **Axis**      |           **Metric**           |                                  **Definition**                                  | **Failing Grade**  | **Passing Grade**  |
+| **Axis**      |           **Metric**           |                                  **Definition**                                  | **Failing grade**  | **Passing grade**  |
 |:--------------|:------------------------------:|:--------------------------------------------------------------------------------:|:------------------:|:------------------:|
 | **Data**      |        **I/O Overhead**        |              $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$              |      $>$ 10%       |       $<$ 1%       |
 | **Algorithm** | **Compression/Sparsity Ratio** | $\frac{\text{Effective or active parameters}}{\text{Dense baseline parameters}}$ | Workload-dependent | Workload-dependent |
@@ -333,13 +365,13 @@ The efficiency ratios in @tbl-v2-dam-scorecard grade a system's performance agai
 
 ## Scaling the Taxonomy from Node to Fleet {#sec-appdx-dam-taxonomy-scaling}
 
-These single-node grades become most useful when they are carried forward into distributed design. The D·A·M taxonomy is the diagnostic baseline for a single machine, but as systems scale from a single node to the machine learning fleet, each axis undergoes a qualitative transformation. Understanding these connections is essential for transitioning from local optimization to fleet-scale engineering.
+These single-node grades become most useful when they are carried forward into distributed design. The D·A·M taxonomy is the diagnostic baseline for a single machine, but as systems scale from a single node to the machine learning fleet, each axis undergoes a qualitative transformation.
 
 ### The evolution of constraints {.unnumbered}
 
-@Tbl-appendix-dam-axis-node-to-fleet maps each axis from its node-level focus to its fleet-scale transformation:
+Scaling from one node to a fleet changes the kind of constraint on every axis, not only its size (@tbl-appendix-dam-axis-node-to-fleet).
 
-| **Axis**          | **Node-Level Focus (D·A·M)** | **Fleet-Scale Transformation**                                                                                                      |
+| **Axis**          | **Node-level focus (D·A·M)** | **Fleet-scale transformation**                                                                                                      |
 |:------------------|:----------------------------:|:------------------------------------------------------------------------------------------------------------------------------------|
 | **Data (D)**      |  I/O Bandwidth (Disk/PCIe)   | **The communication wall**: the bottleneck shifts from local storage to the bisection bandwidth of the network fabric.              |
 | **Algorithm (A)** |    Model Depth/Ops Count     | **The parallelism strategy**: the logic now includes how computation is partitioned across $\DeviceCount$ devices (3D parallelism). |
