@@ -26,6 +26,26 @@ class ComputeCore(BaseModel):
     # (e.g. a wafer-scale engine's processing elements). Absent (None) where the
     # vendor does not state a core count or where sm_count is the unit.
     core_count: Optional[int] = None
+    # Per-SM execution units of a GPU (added 2026-10-15): FP32 (CUDA) cores and
+    # Tensor Cores per streaming multiprocessor. Absent (None) for device classes
+    # without SMs. Chip totals are derived (fp32_core_count, tensor_core_count),
+    # so a total can never disagree with sm_count.
+    fp32_cores_per_sm: Optional[int] = None
+    tensor_cores_per_sm: Optional[int] = None
+
+    @property
+    def fp32_core_count(self) -> Optional[int]:
+        """FP32 (CUDA) cores on the chip: sm_count x fp32_cores_per_sm."""
+        if self.sm_count is None or self.fp32_cores_per_sm is None:
+            return None
+        return self.sm_count * self.fp32_cores_per_sm
+
+    @property
+    def tensor_core_count(self) -> Optional[int]:
+        """Tensor Cores on the chip: sm_count x tensor_cores_per_sm."""
+        if self.sm_count is None or self.tensor_cores_per_sm is None:
+            return None
+        return self.sm_count * self.tensor_cores_per_sm
 
     @field_validator("peak_flops", mode="after")
     @classmethod
@@ -210,6 +230,11 @@ class HardwareNode(BaseModel):
     tdp_min: Optional[Quantity] = None
     tdp_max: Optional[Quantity] = None
     die_area: Optional[Quantity] = None
+    # Package-internal link joining the compute dies of a multi-die (chiplet)
+    # accelerator, stored as the vendor quotes it. None for monolithic dies.
+    # Vendors do not state a per-direction convention for this figure, so it
+    # is not an IOInterconnect; do not feed it into beta terms as a one-way rate.
+    die_to_die_bandwidth: Optional[Quantity] = None
     battery_capacity: Optional[Quantity] = None
     unit_cost: Optional[Quantity] = None
     unit_cost_max: Optional[Quantity] = None
@@ -233,6 +258,11 @@ class HardwareNode(BaseModel):
     @classmethod
     def _validate_die_area(cls, v):
         return require_dimensionality(v, ureg.meter**2, "die_area")
+
+    @field_validator("die_to_die_bandwidth", mode="after")
+    @classmethod
+    def _validate_die_to_die_bandwidth(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "die_to_die_bandwidth", "data")
 
     @field_validator("battery_capacity", mode="after")
     @classmethod

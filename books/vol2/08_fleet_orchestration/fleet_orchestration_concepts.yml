@@ -15,6 +15,7 @@ concept_map:
     - Batch versus declarative orchestration
     - Quota guarantees bounded by reclaim
     - Serving envelope and accelerator sharing
+    - Waiting time versus utilization
   claims:
     Scheduler as allocation control plane: A cluster scheduler loses direct observation, atomic effect, and binary
       failure, so it separates admission, placement, and reconciliation, and reusing a suspect node's accelerators
@@ -37,23 +38,30 @@ concept_map:
     Interruption economics: Every preemption pays discarded work since the last durable checkpoint plus reload and
       warmup, one admission can cascade into many evictions, and spot capacity is cheap only by effective cost after
       checkpoint overhead, restart, and replay.
-    Utilization tiers: Utilization is worth money at fleet scale, but an unlabeled percentage conflates allocated,
-      kernel-active, and productive tiers, and a full queue beside idle accelerators is usually a policy-infrastructure
-      mismatch rather than an algorithm defect.
+    Utilization tiers: Utilization is worth money at fleet scale, but an unlabeled percentage conflates the allocated
+      tier (complete allocations only), the active tier, and the productive tier (normalized to the job's fault-free
+      step rate), and a full queue beside idle accelerators is usually a policy-infrastructure mismatch rather than
+      an algorithm defect.
     Batch versus declarative orchestration: Slurm's imperative batch allocation and Kubernetes' level-triggered
       reconciliation are different contracts for which lifecycle the platform manages, chosen by workload semantics,
       and a hybrid works only when exactly one layer owns each placement.
     Quota guarantees bounded by reclaim: Hierarchical quotas separate a team's guarantee from its maximum and borrowing
       idle guarantees lifts utilization, but concurrently honored guarantees must fit the capacity the platform
-      can reclaim in time.
+      can reclaim in time, and a noisy neighbor, one tenant whose consumption of a shared resource slows the
+      others, is what isolation and reclaim contracts must bound.
     Serving envelope and accelerator sharing: The orchestrator's serving unit is a ready replica sized by measured
       capacity at a latency target, colocation trades density against interference along an isolation spectrum (time-slicing,
       MPS, MIG, exclusive), and moving devices between training and serving is safe only on forecast.
+    Waiting time versus utilization: Mean queue wait is a load factor rho/(1-rho) times a variability factor
+      (1+C_s^2)/2, so waiting time bends sharply upward as offered load nears capacity, and a mixed ML queue whose
+      job durations vary widely pays several times more wait at the same utilization than a uniform one.
   previews:
     - concept: Phase-aware autoscaling and cold start
       owner: 10_inference
     - concept: KV cache as admission budget
       owner: 10_inference
+    - concept: ML goodput
+      owner: 09_performance_engineering
     - concept: Token-denominated tenant isolation
       owner: 10_inference
     - concept: Staged rollout exposure budget
@@ -64,7 +72,7 @@ concept_map:
       owner: 12_ops_scale
     - concept: Security controls priced on a C3 axis
       owner: 13_security_privacy
-    - concept: Fleet observability architecture
+    - concept: Hierarchical fleet alerting
       owner: 12_ops_scale
     - concept: Fleet profiling by hierarchy and sampling
       owner: 09_performance_engineering
@@ -77,7 +85,7 @@ concept_map:
       owner: 07_fault_tolerance
     - concept: Elastic recovery invariants
       owner: 07_fault_tolerance
-    - concept: Slow is not stopped
+    - concept: Gray failure detection
       owner: 07_fault_tolerance
     - concept: Checkpoint storm
       owner: 04_data_storage
@@ -90,8 +98,6 @@ concept_map:
     - concept: Naming the efficiency measure
       owner: 01_introduction
     - concept: Scaling laws as the demand curve
-      owner: 01_introduction
-    - concept: Lighthouse archetypes
       owner: 01_introduction
     - concept: Hierarchical collectives
       owner: 05_collective_communication
@@ -109,11 +115,23 @@ concept_map:
       owner: 06_distributed_training
     - concept: Synchronization models and stragglers
       owner: 06_distributed_training
+    - concept: Scaling efficiency and the scaling wall
+      owner: 06_distributed_training
+    - concept: Alignment training co-location
+      owner: 06_distributed_training
+    - concept: CAP choice under partition
+      owner: 01_introduction
+    - concept: Silent fabric waste
+      owner: 03_network_fabrics
   splits:
     - concept: Utilization tiers
       here: owns utilization as worth money and its allocated, active, and productive tiers
       with: 12_ops_scale
       there: owns utilization as the invariant that decides ownership, headroom, and refresh
+    - concept: Scheduling goodput
+      here: owns the levers and the allocated, active, and productive tiers
+      with: 09_performance_engineering
+      there: measures scheduling goodput and charges each scheduler anti-pattern to one factor
   technical_terms:
     - CAP Theorem
     - M/G/1 Queue
@@ -133,10 +151,8 @@ concept_map:
     - Reconciliation Loop
     - Deployment
     - Job
-    - StatefulSet
     - Custom Resource Definition
     - PyTorchJob
-    - MPIJob
     - Kubeflow Training Operator
     - NVIDIA Device Plugin
     - NVIDIA Network Operator
@@ -153,10 +169,8 @@ concept_map:
     - InfiniBand
     - RDMA
     - GPUDirect RDMA
-    - SR-IOV
     - Container Network Interface
     - PersistentVolumeClaim
-    - Container Storage Interface
     - Lustre
     - Prometheus
     - Grafana
@@ -175,10 +189,8 @@ concept_map:
     - Checkpoint
     - SIGTERM
     - SIGKILL
-    - QPS
     - HBM
     - TorchElastic
-    - Elastic Horovod
     - Tiresias
     - Gandiva
     - Themis
@@ -189,13 +201,9 @@ concept_map:
     - \text{Priority}_{\text{effective}} = \text{Priority}_{\text{base}} \times \frac{F_{\text{target}}}{F_{\text{actual}}
       + \epsilon}
     - \text{Cost}_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j))
+    - S_j = (W_j + T_j) / T_j
     - C_{\text{effective}} = C_{\text{spot}} \times \frac{T_{\text{total}}}{T_{\text{productive}}}
     - Q_{\text{effective}} = \min\left(Q_{\text{team}},\ Q_{\text{department}} - \sum_{\text{other teams}} U_{\text{allocated}}\right)
-    - 'At 60 percent utilization: 6,000 GPUs productive, 4,000 idle = $192,000/day wasted'
-    - 'At 80 percent utilization: 8,000 GPUs productive, 2,000 idle = $96,000/day wasted'
-    - 'Hours 0 to 2: 25 percent throughput \times 2 hours = 0.5 hours equivalent'
-    - 'Hours 2 to 4: 50 percent throughput \times 2 hours = 1.0 hours equivalent'
-    - 'Hours 4 to 8: 100 percent throughput \times 4 hours = 4.0 hours equivalent'
   methodologies:
     - Gang scheduling for atomic multi-worker allocation
     - Multi-dimensional bin packing and fragmentation analysis
@@ -212,13 +220,13 @@ concept_map:
     - Two-tier checkpointing for spot interruption handling
     - Tiered capacity planning across reserved, on-demand, and spot
     - Cost-aware scheduling policy design
-    - ML FinOps showback and chargeback
+    - Cost-policy signals consumed from fleet accounting
     - Research scheduler selection by signal and objective
     - GPU sharing strategy selection across exclusive, MIG, MPS, and time slicing
-    - Dynamic training-serving capacity sharing with prewarming
+    - Forecast-driven training-serving capacity sharing
     - Hierarchical quota design with borrowing and reclamation
-    - Over-commitment ratio calibration from telemetry
-    - Resource accounting across allocated, compute, and productive utilization
+    - Statistical multiplexing limits for shareable resources
+    - Resource accounting across allocated, active, and productive utilization
     - Preemption budget tuning
     - Fleet Stack utilization debugging
     - Capability-based workload-hardware matching

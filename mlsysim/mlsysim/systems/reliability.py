@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from ..core.provenance import Sourced, sourced, fleet_mttf_hours
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
+from ..core.units import GB, second
 
 
 class ReliabilityComponent(BaseModel):
@@ -38,6 +39,25 @@ class RecoveryProfile(BaseModel):
     restart_time_s: Sourced | float
     warmup_time_s: Sourced | float
     checkpoint_write_bw_gbs: Sourced | float
+
+    def cold_restart_time(self, checkpoint_bytes, *, include_detection: bool = True):
+        """Cold-restart time for a job whose resumable checkpoint is ``checkpoint_bytes``.
+
+        Sums failure detection (optional), restart, checkpoint load at the
+        aggregate checkpoint bandwidth, and warmup: the four-term recovery
+        budget. A scheduler-initiated stop (a forced preemption, a planned
+        relaunch) needs no failure detection, so callers pass
+        ``include_detection=False``. Work redone since the last checkpoint is
+        not included: a failure charges it to checkpoint waste, and a forced
+        preemption adds it explicitly (ReferenceStats.ForcedPreemptionProfile).
+        Added 2026-10-15 so the recovery budget and the preemption tax read one
+        source instead of hand-typed reload and warmup times.
+        """
+        load = (checkpoint_bytes / (float(self.checkpoint_write_bw_gbs) * GB / second)).to(second)
+        total = float(self.restart_time_s) * second + load + float(self.warmup_time_s) * second
+        if include_detection:
+            total = total + float(self.detection_time_s) * second
+        return total.to(second)
 
 
 class Reliability(Registry):
@@ -142,6 +162,10 @@ class Reliability(Registry):
             100,
             pc.RECOVERY_TIME_ASSUMPTIONS,
             name="Checkpoint write bandwidth",
-            description="Aggregate checkpoint write bandwidth to storage (GB/s).",
+            description=(
+                "Aggregate checkpoint write (and restore read) bandwidth available to one job (GB/s): "
+                "the per-job share of the 1 TB/s reference parallel file system "
+                "(Systems.Storage.PfsOneTbPerSecond) when ten concurrent jobs share it."
+            ),
         ),
     )

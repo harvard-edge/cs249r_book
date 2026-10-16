@@ -15,13 +15,15 @@ concept_map:
     - Physical failure domains
     - Pod sizing from the training budget
     - Arithmetic per watt at fixed precision
+    - Cooling class and heat removal
   claims:
     Infrastructure walls cascade: Memory, communication, power, and reliability walls bind at successive physical
       scales (accelerator, node, rack, pod), each level's limit becomes the next level's input, and new technologies
       relocate a wall rather than remove it.
     Capacity and bandwidth are separate tests: Memory capacity decides whether model state fits and memory bandwidth
       decides how fast low-reuse phases run, so batch-1 decode is floored at weight bytes over HBM bandwidth and
-      bandwidth per dollar becomes a procurement metric.
+      bandwidth per dollar becomes a procurement metric; the roofline and its ridge point (peak arithmetic over
+      bandwidth) are the hardware screen that tells which ceiling a phase meets before any purchase.
     Plan on sustained throughput: Peak TFLOP/s is a precision-specific ceiling that assumes every unit stays fed,
       so a run planned from peak needs 1/eta times the GPU-hours at measured utilization eta, compared only under
       matched FLOP conventions, precision, and scale.
@@ -40,15 +42,20 @@ concept_map:
     Specialization as a bet on workload stability: Moving from CPU to GPU to TPU to ASIC raises the arithmetic share
       of the die and throughput per watt, but a fixed dataflow is a multi-year bet that a shift in dominant operators
       can strand against a 15-year facility.
-    Physical failure domains: The physical hierarchy fixes failure domains (a GPU breaks its tensor-parallel group,
-      a node stalls a synchronous job, a shared power shelf or cooling loop takes a rack), and facility redundancy
-      is traded against checkpoint and recovery capacity.
+    Physical failure domains: A failure domain is the set of resources one fault takes out together, and the physical
+      hierarchy nests them (a GPU breaks its tensor-parallel group and node, a shared power shelf, ToR switch, or
+      cooling loop takes a rack, row power and coolant distribution take racks, a building's feed, plant, and fire
+      compartment take halls), so facility redundancy is traded against checkpoint and recovery capacity.
     Pod sizing from the training budget: A pod is sized by turning 6ND FLOPs over GPU count times peak times local
       efficiency into a compute-only baseline that scaling efficiency, checkpointing, failures, and maintenance
       then stretch multiplicatively to wall-clock days.
     Arithmetic per watt at fixed precision: Peak arithmetic per watt compared at one precision (dense FP16 over TDP)
       rose about 5x from V100 to B200 and about 1.2x per year across vendors, slower than raw throughput because
       device power also rose, and it bounds rather than measures what a refresh delivers.
+    Cooling class and heat removal: In steady operation cooling must remove heat at the rate the rack draws power
+      (Q = mass flow x specific heat x temperature rise), so air's low heat capacity bounds air-cooled rack density
+      while cold-plate and immersion liquid loops carry the same heat with thousands of times less flow, at a cost
+      in serviceability, leak containment, and loss-of-flow risk.
   previews:
     - concept: Alpha-beta model
       owner: 03_network_fabrics
@@ -70,16 +77,16 @@ concept_map:
       owner: 05_collective_communication
     - concept: Fleet failure rate
       owner: 07_fault_tolerance
-    - concept: Slow is not stopped
+    - concept: Gray failure detection
       owner: 07_fault_tolerance
     - concept: Recovery-time budget and fencing
       owner: 07_fault_tolerance
     - concept: Topology-aware placement
       owner: 08_fleet_orchestration
-    - concept: MFU
+    - concept: Program goodput
       owner: 09_performance_engineering
-    - concept: Prefill-decode intensity and batch operating point
-      owner: 09_performance_engineering
+    - concept: Prefill-decode interference and chunked prefill
+      owner: 10_inference
     - concept: Utilization as the economic invariant
       owner: 12_ops_scale
     - concept: Facility overhead boundary
@@ -94,8 +101,6 @@ concept_map:
     - concept: Scaling laws as the demand curve
       owner: 01_introduction
     - concept: Compute-optimal allocation
-      owner: 01_introduction
-    - concept: Lighthouse archetypes
       owner: 01_introduction
     - concept: C3 taxonomy
       owner: 01_introduction
@@ -163,7 +168,6 @@ concept_map:
     - Torus Topology
     - Rail-Optimized Topology
     - ZeRO Stage 3
-    - Fully Sharded Data Parallel
     - Activation Checkpointing
     - Tensor Parallelism
     - Pipeline Parallelism
@@ -175,15 +179,16 @@ concept_map:
     - Uninterruptible Power Supply
     - Voltage Regulator Module
     - 48 V DC Busbar
-    - Supercapacitor Bank
     - Coolant Distribution Unit
     - Direct-to-Chip Liquid Cooling
     - Immersion Cooling
     - Power Usage Effectiveness
     - Mean Time Between Failures
+    - Failure Domain
+    - Non-Uniform Memory Access
+    - Power Delivery Network
     - CXL
     - CXL Memory Pooling
-    - Co-Packaged Optics
     - Optical Circuit Switching
   formulas:
     - I = \text{FLOP}/\text{byte}
@@ -193,14 +198,11 @@ concept_map:
     - T_{\text{comp}} = \text{FLOPs} / R_{\text{peak}}
     - T_{\text{transfer}} = \text{Data} / \text{Bandwidth}
     - Y = A \times B + C
-    - \text{MFU} = C_{\text{step}} / (R_{\text{peak}} \times T_{\text{step}}), \quad C_{\text{step}} \approx 6PN_{\text{tokens}}
-    - \text{Pipeline bubble fraction} \approx (p - 1) / m
     - Q = \dot{m} \times c_p \times \Delta T
-    - \text{PUE} = P_{\text{facility}} / P_{\text{IT}}
     - \eta_{\text{scaling}} = T_1 / (N \times T_N)
-    - \tau_{\text{opt}} = \sqrt{2 \times T_{\text{write}} \times \text{MTBF}_{\text{system}}}
     - \text{Total training FLOPs} \approx 6PD
-    - k \ge \lceil T_{\text{io}} / T_{\text{compute}} + 3\sigma_{\text{io}} / T_{\text{compute}} \rceil
+    - \Delta V = L \, dI/dt
+    - T_{\text{planned}} = T_{\text{peak}} / \eta
   methodologies:
     - Workload characterization before hardware selection
     - Roofline analysis for compute-bound vs. memory-bound diagnosis
@@ -212,23 +214,12 @@ concept_map:
     - Hierarchy-aware parallelism mapping
     - Tensor parallel, pipeline parallel, and data parallel composition
     - Network topology selection by communication pattern
-    - I/O prefetch depth sizing
     - Rack power budget calculation
-    - PUE-based cooling overhead analysis
-    - Liquid cooling break-even analysis
     - Pod training time estimation from FLOPs, MFU, and overhead multipliers
     - Scaling efficiency analysis
-    - Topology-aware scheduling and placement
-    - Automated preflight diagnostics and burn-in testing
-    - Telemetry correlation across GPU, network, and facility signals
     - Checkpointing overhead as an infrastructure consequence
-    - Total Cost of Ownership modeling
-    - Total Value of Ownership assessment
-    - Build-vs-buy and hybrid cloud planning
-    - Utilization and depreciation modeling
-    - Procurement lead-time and supply-chain planning
-    - Site selection across power, cooling, networking, and regulatory constraints
-    - Phased deployment and commissioning planning
+    - Commissioning and burn-in before production
+    - Power-delivery transient screening
   applications:
     - Frontier model training
     - Large language model inference serving
@@ -244,14 +235,6 @@ concept_map:
     - Warehouse-scale AI data centers
     - High-density ML rack design
     - Liquid-cooled cluster operations
-    - Multi-tenant ML fleet scheduling
-    - Fleet observability and proactive maintenance
-    - Spot and preemptible fault-tolerant training workloads
-    - Low-carbon data center site selection
     - CXL memory pooling for optimizer state
     - Checkpointing for long-running training jobs
-    - On-premises GPU cluster ownership
-    - Cloud GPU bursting
-    - Spot and preemptible training workloads
-    - Low-carbon site selection
     - Next-generation memory-pooled infrastructure

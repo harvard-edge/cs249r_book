@@ -3,9 +3,9 @@
     "source_file": "books/vol2/02_compute_infrastructure/02_compute_infrastructure.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 9,
-    "sections_with_quizzes": 9,
-    "sections_without_quizzes": 0
+    "total_sections": 11,
+    "sections_with_quizzes": 10,
+    "sections_without_quizzes": 1
   },
   "sections": [
     {
@@ -90,7 +90,7 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Comparing the V100 and B200 at dense FP16 reveals an 'Accelerator Efficiency Wall.' Which statement correctly captures the difference between peak throughput growth and throughput per TDP watt, and its infrastructure consequence?",
+            "question": "Comparing the V100 and B200 at dense FP16 separates peak throughput growth from growth in throughput per TDP watt. Which statement correctly captures that difference and its infrastructure consequence?",
             "choices": [
               "Peak throughput per TDP watt grew faster than peak throughput, allowing higher-density clusters to ignore power delivery.",
               "Both peak throughput and power efficiency scaled linearly at exactly the same rate, confirming that Dennard scaling remains fully active in modern 4nm nodes.",
@@ -123,7 +123,7 @@
         "rationale": {
           "focus_areas": [
             "HBM 3D-stacked TSV packaging physics and energy advantages relative to DDR5",
-            "Roofline model diagnosis and ridge point behavior for memory-bound vs. compute-bound regimes",
+            "Roofline Model diagnosis and ridge point behavior for memory-bound vs. compute-bound regimes",
             "Memory capacity vs. memory bandwidth limits during autoregressive decode",
             "Memory hierarchy staging (HBM to SRAM to Registers) and kernel fusion (FlashAttention)"
           ],
@@ -149,7 +149,7 @@
             "question_type": "SHORT",
             "question": "An engineering team compares an H100 with a hypothetical successor offering twice the dense FP16 peak but the same HBM bandwidth. Hold the FP16 weight payload, partition, and batch-1 shape fixed, assume sufficient capacity, and consider a weight-streaming model whose bandwidth ceiling is lower than its compute ceiling on both devices. What changes in the modeled token-latency floor, and which levers could lower it?",
             "answer": "The weight-only FP16 model performs two FLOPs per two-byte weight, so its intensity is about 1 FLOP/byte, below the H100 FP16 ridge. Doubling the matched-precision arithmetic peak raises only the nonbinding ceiling; fixed bytes divided by unchanged bandwidth gives the same streaming floor. More bandwidth, fewer bytes through validated quantization, or more reuse can change that bound. Actual latency must also account for other traffic, communication, execution overhead, and any changed partition.",
-            "learning_objective": "Apply the roofline model to explain why compute-only upgrades cannot improve deeply memory-bound inference and identify the architectural levers that can."
+            "learning_objective": "Apply the Roofline Model to explain why compute-only upgrades cannot improve deeply memory-bound inference and identify the architectural levers that can."
           },
           {
             "question_type": "MCQ",
@@ -164,22 +164,67 @@
             "learning_objective": "Apply roofline geometry to select a change that raises the limiting ceiling and distinguish that bound from achieved throughput."
           },
           {
-            "question_type": "TF",
-            "question": "True or False: Thermal Design Power (TDP) represents the maximum instantaneous power a GPU can draw during a single clock cycle, so cooling infrastructure should be sized for the average power draw observed across an entire training step.",
-            "answer": "False. TDP is a sustained thermal design target, not an instantaneous electrical peak. Cooling must satisfy the configured sustained envelope under the intended inlet conditions; electrical delivery must separately tolerate documented transients. An average below that envelope does not establish sufficient cooling, and thermal throttling can reduce throughput without crashing the application.",
-            "learning_objective": "Distinguish between sustained TDP cooling requirements and average power draw during synchronous training."
-          },
-          {
             "question_type": "ORDER",
-            "question": "Arrange the multi-tier memory staging hierarchy in an NVIDIA H100 accelerator in order of operand flow during a tiled GEMM execution, from initial off-chip storage to final arithmetic execution: (1) Tensor Cores, (2) Streaming Multiprocessor (SM) Register File, (3) On-package HBM3, (4) Shared Memory (on-chip SRAM).",
-            "answer": "The correct sequence is: (3) On-package HBM3 $\\rightarrow$ (4) Shared Memory (on-chip SRAM) $\\rightarrow$ (2) Streaming Multiprocessor (SM) Register File $\\rightarrow$ (1) Tensor Cores. Operands are staged from high-capacity off-chip HBM3 ($\\approx 3.35\\text{ TB/s}$) into low-latency on-chip shared memory / SRAM tiles ($\\approx 19\\text{ TB/s}$) to enable data reuse across threads, then loaded into local SM registers ($>300\\text{ TB/s}$ aggregate) before feeding the Tensor Core arithmetic pipelines on every clock cycle.",
-            "learning_objective": "Order the multi-tier memory staging hierarchy that tiled algorithms use to feed accelerator arithmetic units."
+            "question": "Order the following tiers of an H100-class accelerator's memory hierarchy from the highest aggregate bandwidth to the highest capacity: (1) HBM3 on the package, (2) the streaming multiprocessors' register files, (3) the L2 cache, (4) L1 and shared memory (on-chip SRAM).",
+            "answer": "The correct order is: (2) register files, (4) L1 and shared memory, (3) the L2 cache, (1) HBM3. Each step away from the arithmetic units trades aggregate bandwidth for capacity, falling from hundreds of TB/s at the registers to a few TB/s at HBM while capacity grows from tens of megabytes to tens of gigabytes. Tiling exploits the order by staging operand blocks in the fast tiers so that each byte fetched from HBM feeds many multiply-accumulate operations.",
+            "learning_objective": "Order the accelerator memory tiers by bandwidth and capacity and connect that order to operand reuse."
           },
           {
             "question_type": "FILL",
             "question": "In the Roofline Model, the specific arithmetic intensity where the diagonal memory bandwidth slope meets the horizontal peak compute ceiling ($I = R_{\\text{peak}} / \\text{BW}$) is called the ____.",
-            "answer": "The correct answer is Ridge Point (or ridge point). It is the hardware balance threshold where the bandwidth and arithmetic ceilings meet. Below it, bandwidth supplies the lower modeled ceiling; above it, arithmetic does. A measured kernel can remain below either ceiling, so this classification does not establish its actual bottleneck.",
+            "answer": "The correct answer is ridge point. It is the hardware balance threshold where the bandwidth and arithmetic ceilings meet. Below it, bandwidth supplies the lower modeled ceiling; above it, arithmetic does. A measured kernel can remain below either ceiling, so this classification does not establish its actual bottleneck.",
             "learning_objective": "Define the ridge point and distinguish the lower roofline ceiling from a measured execution bottleneck."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-tensor-cores",
+      "section_title": "Sustained Compute and Precision",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Precision-specific peak rates and the eligibility of operations for FP8 and FP16 Tensor Core execution",
+            "Peak versus sustained throughput and planning GPU-hours from measured utilization",
+            "Device variation and its cost in synchronous training",
+            "The mixed-precision recipe and FP32 master weights"
+          ],
+          "question_strategy": "An MCQ on why an FP8 peak is a ceiling rather than a plan, a SHORT calculation of GPU-hours from MFU with its comparability conditions, a TF on how one slow device affects a synchronous group, and a FILL on master weights.",
+          "difficulty_progression": "Moves from reading a precision-specific peak, to a planning calculation, to the fleet consequence of device variation, and closes with the recipe vocabulary the node memory budget uses.",
+          "integration": "Builds on the matrix units of the accelerator section and prepares the node memory budget, which counts master weights and optimizer state.",
+          "ranking_explanation": "Owns the chapter's plan-on-sustained-throughput concept, which every later sizing calculation in the chapter applies."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "An H100 advertises twice the dense arithmetic rate in FP8 that it advertises in FP16. A team sizes a training run's GPU-hours by assuming the full FP8 rate. Which statement best describes the planning error?",
+            "choices": [
+              "FP8 halves the bytes per weight, so memory-bound phases also run exactly twice as fast and the plan is correct.",
+              "The FP8 rating is a ceiling for eligible matrix operations; ineligible operations, memory stalls, communication, and the need to validate the precision policy keep the sustained rate below it, so the plan must use a measured sustained rate.",
+              "FP8 Tensor Core rates apply only to inference, so a training plan must use the FP32 rate instead.",
+              "FP8 runs slower than FP16 on Tensor Cores because of scaling overhead, so the plan overestimates the time."
+            ],
+            "answer": "The correct answer is B. Peak FLOP/s assumes every eligible arithmetic unit stays fed at the stated precision. Operations that cannot run in FP8, memory and dependency stalls, exposed communication, and launch overhead all sit outside that ceiling, and a layer is not numerically safe in FP8 merely because the hardware supports it. Halving the bytes does not double a whole run, FP8 recipes are used in training, and FP8 is not slower than FP16 on supported operations.",
+            "learning_objective": "Distinguish a precision-specific peak rate from the sustained throughput that capacity planning must use."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A training run is estimated at 1,000 GPU-hours from peak FLOP/s. Profiling a representative window shows a model FLOPs utilization (MFU) of 0.4. How many GPU-hours should the plan budget, and what must match before this MFU can be compared with another team's figure?",
+            "answer": "The plan should budget 1,000 / 0.4 = 2,500 GPU-hours, because a run planned from peak needs 1/MFU times the peak-based estimate at the measured utilization. The comparison is meaningful only when both figures use the same model-FLOP convention, the same precision and hardware peak, and a similar system scale and workload shape; otherwise a higher MFU can reflect a different denominator rather than better execution.",
+            "learning_objective": "Apply measured utilization to a peak-based estimate and state the conditions under which MFU figures are comparable."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In synchronous training, an accelerator that sustains a clock about 2.5 percent below its peers costs the job at most 2.5 percent of that one device's throughput.",
+            "answer": "False. Every participant waits for the slowest one at each collective, so a device that finishes its dependent work late can slow every synchronous step of its whole group by up to that fraction. Fleets therefore track per-device sustained throughput and move persistent underperformers to pools, such as inference serving, where they do not gate a synchronized group, after profiling confirms the cause.",
+            "learning_objective": "Explain how device variation propagates through synchronous training."
+          },
+          {
+            "question_type": "FILL",
+            "question": "The standard mixed-precision recipe runs the forward and backward passes in BF16 or FP16 but keeps a full-precision FP32 copy of the parameters, called the ____ weights, so that updates much smaller than a weight are not lost to FP16 rounding.",
+            "answer": "The correct answer is master. The FP32 master weights are the copy the optimizer updates; they add four bytes per parameter to the training state, which the node memory budget must hold or offload.",
+            "learning_objective": "Identify the FP32 master weights in the mixed-precision recipe and their memory cost."
           }
         ]
       }
@@ -263,11 +308,11 @@
           "focus_areas": [
             "Cooling-media trade-offs and configuration-dependent selection of engineered air or liquid cooling",
             "Synchronous training electrical transients (di/dt) and peak vs. average power provisioning",
-            "PUE interpretation in the context of local grid carbon intensity",
+            "Cooling class: heat-removal physics, cold plates and CDUs, and qualified facility envelopes",
             "48V DC busbar distribution and rack failure domains"
           ],
-          "question_strategy": "Use thermodynamics MCQs for cooling media, a diagnostic SHORT on silent DVFS throttling from average-power sizing, an electrical engineering MCQ on synchronized di/dt transients, a calculation SHORT contrasting PUE with grid carbon emissions, and a TF question on 48V DC busbars.",
-          "difficulty_progression": "Opens with cooling thermodynamics, progresses through thermal provisioning and electrical transients, explores facility carbon accounting, and concludes with rack electrical distribution.",
+          "question_strategy": "Use thermodynamics MCQs for cooling media, a diagnostic SHORT on silent DVFS throttling from average-power sizing, an electrical engineering MCQ on synchronized di/dt transients, a TF question on 48V DC busbars, and cooling-class items on a qualified facility envelope and the liquid heat path through the CDU.",
+          "difficulty_progression": "Opens with cooling thermodynamics, progresses through thermal provisioning and electrical transients and rack electrical distribution, and concludes with cooling-class feasibility and the liquid heat path.",
           "integration": "Connects chip-level TDP and synchronous execution models to facility-scale electrical and thermal engineering.",
           "ranking_explanation": "Tier 1 section translating accelerator power into data center infrastructure realities."
         },
@@ -303,16 +348,28 @@
             "learning_objective": "Explain why synchronized training workloads create severe electrical power-delivery challenges ($di/dt$) that average-power analyses miss."
           },
           {
-            "question_type": "SHORT",
-            "question": "Facility A reports a Power Usage Effectiveness (PUE) of 1.08 on an electrical grid with carbon intensity of $450\\text{ g CO}_2/\\text{kWh}$. Facility B reports PUE 1.35 on a grid with $50\\text{ g CO}_2/\\text{kWh}$. For a $10\\text{ MW}$ IT compute load, calculate the total hourly electrical power drawn and carbon emissions for both facilities, and explain the limitation of using PUE as a sole environmental metric.",
-            "answer": "At $10\\text{ MW}$ IT load: Facility A draws $10\\text{ MW} \\times 1.08 = 10.8\\text{ MW}$ ($10{,}800\\text{ kW}$) total power, emitting $10{,}800\\text{ kW} \\times 450\\text{ g CO}_2/\\text{kWh} = 4{,}860\\text{ kg CO}_2/\\text{hr}$ ($4.86\\text{ tonnes/hr}$). Facility B draws $10\\text{ MW} \\times 1.35 = 13.5\\text{ MW}$ ($13{,}500\\text{ kW}$) total power, emitting $13{,}500\\text{ kW} \\times 50\\text{ g CO}_2/\\text{kWh} = 675\\text{ kg CO}_2/\\text{hr}$ ($0.675\\text{ tonnes/hr}$). Facility B emits $\\approx 7.2\\times$ less carbon than Facility A despite having a significantly worse PUE (1.35 vs. 1.08). PUE measures only facility efficiency relative to IT equipment ($P_{\\text{facility}} / P_{\\text{IT}}$), not the cleanliness of the electricity source, so optimizing PUE in isolation can mislead teams into high-carbon grid locations.",
-            "learning_objective": "Calculate facility power draw and carbon emissions using PUE and grid carbon intensity to evaluate environmental impact."
-          },
-          {
             "question_type": "TF",
             "question": "True or False: Replacing individual server AC supplies with a centralized 48V DC power shelf and busbar guarantees one fewer conversion stage and a 2--3% electrical efficiency gain.",
             "answer": "False. Rack-level distribution consolidates AC conversion and can recover chassis volume, but local DC-to-DC conversion remains. Compare the actual conversion stages and their efficiency at the intended loads rather than assume a fixed saving. Shared shelves and busbars also require redundancy and serviceability appropriate to their rack-level failure boundary.",
             "learning_objective": "Evaluate centralized 48V rack distribution using conversion efficiency, packaging volume, and shared failure boundaries."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A facility aisle is qualified to remove a sustained 25 kW of IT heat per rack with its existing air-cooling design under the specified inlet temperature and airflow. The proposed AI workload measures 60 kW per rack over its sustained operating interval. Which observation establishes the need to change the cooling design or reduce the rack load?",
+            "choices": [
+              "Web workloads have higher peak memory bandwidth requirements, causing localized thermal spikes.",
+              "AI training generates bursty, millisecond-scale CPU spikes followed by long idle periods, creating thermal cycling fatigue.",
+              "The measured 60 kW rack load exceeds this aisle's qualified 25 kW air-cooling envelope; a qualified liquid, hybrid, or redesigned air system, or a lower rack load, must restore thermal feasibility.",
+              "AI models require lower ambient operating temperatures to maintain FP16 arithmetic precision."
+            ],
+            "answer": "The correct answer is C. The proposed sustained heat load exceeds the particular facility's qualified envelope. This establishes a local feasibility problem, not a universal rack-power threshold at which air cooling fails. Liquid cooling is a candidate whose complete heat path, parasitic energy, and serviceability must be qualified. Neither memory-bandwidth comparisons nor numerical precision establishes the required heat-removal capacity.",
+            "learning_objective": "Compare a measured rack heat load with a qualified facility envelope before selecting a cooling intervention"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the thermal stages of heat removal in a direct-to-chip liquid-cooled data center, from the silicon die to the external environment: (1) heat transfers through a thin thermal interface material (TIM) into a copper cold plate, (2) the Coolant Distribution Unit (CDU) heat exchanger transfers thermal energy from the closed rack loop to the facility secondary loop, (3) external cooling towers or dry coolers reject heat into the ambient outdoor atmosphere, (4) liquid coolant absorbs heat as it flows through microchannels directly above the accelerator package, (5) active switching in transistor junctions generates heat on the silicon die.",
+            "answer": "The correct order is: (5) active switching in transistor junctions generates heat on the silicon die, (1) heat transfers through a thin thermal interface material (TIM) into a copper cold plate, (4) liquid coolant absorbs heat as it flows through microchannels directly above the accelerator package, (2) the Coolant Distribution Unit (CDU) heat exchanger transfers thermal energy from the closed rack loop to the facility secondary loop, (3) external cooling towers or dry coolers reject heat into the ambient outdoor atmosphere. Thermal conduction originates in the silicon junction, transfers across the TIM into the cold plate, is absorbed convectively by the rack liquid coolant, transfers across the CDU heat exchanger to the facility water loop, and is ultimately rejected to the ambient environment. Reversing any intermediate steps violates the physical conduction and convection path.",
+            "learning_objective": "Analyze the thermodynamic heat rejection path in direct-to-chip liquid-cooled AI infrastructure"
           }
         ]
       }
@@ -367,8 +424,8 @@
           },
           {
             "question_type": "FILL",
-            "question": "The fully provisioned switched topology illustrated in the pod section uses leaf, spine, and, at larger scale, core tiers to supply full bisection bandwidth. It is called the ____ topology.",
-            "answer": "The correct answer is Fat-Tree (or fat-tree). In the depicted fully provisioned design, uplink capacity supports the endpoint rate across an equal cut. This removes the modeled oversubscription limit at that boundary; it does not guarantee congestion-free execution or an optimal AllReduce. Collective schedule, routing, traffic placement, and competing load still determine performance.",
+            "question": "A pod fabric that uses tiers of switches to supply full bisection bandwidth across node uplinks, in contrast to a direct-connect torus, is called a ____ topology.",
+            "answer": "The correct answer is Fat-Tree (or fat-tree). In a fully provisioned design, uplink capacity supports the endpoint rate across an equal cut. This removes the modeled oversubscription limit at that boundary; it does not guarantee congestion-free execution or an optimal AllReduce. Collective schedule, routing, traffic placement, and competing load still determine performance.",
             "learning_objective": "Identify the Fat-Tree network topology and its role in delivering non-blocking full bisection bandwidth for distributed training."
           },
           {
@@ -376,6 +433,57 @@
             "question": "Arrange the stages in the worked scenario's accounting sequence: begin with the compute-only baseline, add the distributed-step losses, then checkpointing, restart, and maintenance allowances. (1) Checkpoint I/O overhead ($\\approx 3\\%$), (2) Compute-only training time ($6PD$ FLOPs divided by aggregate peak throughput times assumed local compute efficiency), (3) Hardware failure and restart overhead ($\\approx 10\\%$), (4) Scaling efficiency covering communication and pipeline bubbles ($\\approx 0.56$), (5) Maintenance overhead ($\\approx 5\\%$). Each additive percentage is relative to the preceding subtotal.",
             "answer": "The correct order is: (2) Compute-only baseline, (4) Scaling efficiency, (1) Checkpoint I/O overhead, (3) Failure and restart overhead, (5) Maintenance overhead. Starting near 12 hours gives successive subtotals near 21.4, 22.1, 24.3, and 25.5 hours. The scaling factor already includes pipeline fill and drain, so adding a separate bubble step would count that loss twice. This is an illustrative accounting convention, not a physical chronology or universal minimum. Local compute efficiency excludes the distributed losses added here; using measured distributed MFU would double-count them.",
             "learning_objective": "Sequence the worked training-time accounting model and distinguish its local efficiency and incremental overhead denominators."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-accelerator-selection",
+      "section_title": "Accelerator Selection for Fleet Workloads",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Choosing the procurement metric from the binding per-device constraint",
+            "Quantization as a change in device count for serving",
+            "Per-device versus fleet-level binding constraints",
+            "Reading benchmark results under their measurement rules"
+          ],
+          "question_strategy": "An MCQ on the serving metric for batch-1 decode, a SHORT calculation of device counts under quantization with its limits, a TF separating per-device and fleet constraints, and a FILL on the benchmark division that fixes workload and quality.",
+          "difficulty_progression": "Starts from a single-workload metric choice, adds a capacity calculation, then generalizes to the difference between device and fleet constraints and to the evidence a procurement team may trust.",
+          "integration": "Applies the roofline screen, the capacity-versus-bandwidth tests, and the sustained-throughput rule from earlier sections to hardware selection.",
+          "ranking_explanation": "Owns the chapter's workload-matched hardware selection concept, the decision the rest of the chapter equips the reader to make."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A team will serve a dense language model at batch size 1 with a strict per-token latency target. Which metric should dominate its comparison of candidate accelerators?",
+            "choices": [
+              "Peak FP8 TFLOP/s per dollar, because decode performs two floating-point operations per parameter.",
+              "Memory bandwidth per dollar, confirmed by measured throughput at the required latency, because batch-1 decode streams the weights with little reuse.",
+              "Host DRAM capacity per dollar, because the weights should be served from host memory.",
+              "Bisection bandwidth of the cluster fabric, because every request crosses the network."
+            ],
+            "answer": "The correct answer is B. Batch-1 decode sits near 1 FLOP/byte, far below the ridge point, so the weight-streaming time set by memory bandwidth dominates and more arithmetic barely changes it. Peak FLOP/s raises a nonbinding ceiling, host memory is far slower than HBM, and independent replicas need not send every request across the cluster fabric. Measured throughput at the latency target confirms the screen.",
+            "learning_objective": "Select the procurement metric that matches the binding constraint of a serving workload."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "The 175B running model needs about 350 GB for FP16 weights. Using 80 GB accelerators, how many devices are needed for the weights alone at FP16, INT8, and INT4, and why does a fourfold smaller payload not guarantee a fourfold lower token latency?",
+            "answer": "The weights need at least five devices at FP16 (350 GB), three at INT8 (175 GB), and two at INT4 (87.5 GB). These are weight-only capacity bounds; quantization metadata, key-value cache, and workspace also need memory. Reading 4-bit instead of 16-bit weights quarters the raw payload, but kernel support, dequantization work, other memory traffic, any change in device count and communication, and validation of model quality determine the realized latency gain.",
+            "learning_objective": "Calculate how quantization changes serving device counts and explain why payload reduction does not translate directly into latency."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A workload whose binding constraint on each device is arithmetic throughput cannot be communication-bound across the cluster.",
+            "answer": "False. The decision matrix names the per-device constraint, what one accelerator must supply. Whether the fleet as a whole is limited by compute, communication, or coordination is a separate question. Large-batch LLM training can be compute-bound on each device and still be communication-bound across the cluster, as Archetype A (GPT-4/Llama-3) is.",
+            "learning_objective": "Distinguish the per-device binding constraint from the constraint that binds the fleet as a whole."
+          },
+          {
+            "question_type": "FILL",
+            "question": "MLPerf results that fix the workload and the quality target so that different implementations can be compared belong to the ____ division.",
+            "answer": "The correct answer is closed. The open division permits broader changes. Neither predicts a deployment automatically, so a procurement team must compare the submission's workload, software, precision, hardware count, and quality target with the intended system.",
+            "learning_objective": "Interpret benchmark results under the measurement rules that produced them."
           }
         ]
       }
@@ -463,7 +571,7 @@
               "50% (step time remains completely unchanged at $1{,}000\\text{ ms}$).",
               "$\\approx 125\\%$ (superlinear speedup due to increased aggregate L2 cache capacity)."
             ],
-            "answer": "The correct answer is B. At 1,024 GPUs, step time is $T_1 = 700 + 300 = 1{,}000\\text{ ms}$. At 2,048 GPUs, the compute term halves to $700 / 2 = 350\\text{ ms}$, while the communication term remains $300\\text{ ms}$, yielding a new step time of $T_2 = 350 + 300 = 650\\text{ ms}$. The realized speedup is $S = 1{,}000 / 650 \\approx 1.538\\times$. Scaling efficiency is $\\eta = S / 2.0 = 1.538 / 2.0 \\approx 76.9\\%$. The team pays for $2\\times$ the hardware to achieve only a $1.54\\times$ speedup, illustrating the fallacy that doubling GPUs halves training duration when communication is non-trivial. The choice predicting 100% efficiency ignores the unscaled communication bottleneck (violating Amdahl's Law). The choice predicting 50% efficiency assumes zero compute speedup. The choice predicting superlinear speedup invents unphysical scaling for communication-limited training.",
+            "answer": "The correct answer is B. At 1,024 GPUs, step time is $T_1 = 700 + 300 = 1{,}000\\text{ ms}$. At 2,048 GPUs, the compute term halves to $700 / 2 = 350\\text{ ms}$, while the communication term remains $300\\text{ ms}$, yielding a new step time of $T_2 = 350 + 300 = 650\\text{ ms}$. The realized speedup is $S = 1{,}000 / 650 \\approx 1.538\\times$. Scaling efficiency is $\\eta = S / 2.0 = 1.538 / 2.0 \\approx 76.9\\%$. The team pays for $2\\times$ the hardware to achieve only a $1.54\\times$ speedup, illustrating the fallacy that doubling GPUs halves training duration when communication is non-trivial. The choice predicting 100% efficiency ignores the unscaled communication bottleneck (violating Amdahl's law). The choice predicting 50% efficiency assumes zero compute speedup. The choice predicting superlinear speedup invents unphysical scaling for communication-limited training.",
             "learning_objective": "Calculate the scaling efficiency of a distributed training cluster to quantify diminishing returns caused by communication bottlenecks."
           },
           {
@@ -497,43 +605,8 @@
       "section_id": "#sec-compute-summary",
       "section_title": "Summary",
       "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "The full-stack causal chain from silicon physics to data center economics",
-            "End-to-end infrastructure planning balancing workload bottlenecks, memory hierarchy, cooling, and TCO"
-          ],
-          "question_strategy": "Use a structural SHORT to trace constraint propagation up the stack, an integrative planning SHORT scenario, and a synthesis MCQ evaluating the overarching infrastructure co-design principle.",
-          "difficulty_progression": "Begins with structural stack propagation, applies it to a multi-constraint enterprise planning scenario, and concludes with a holistic infrastructure co-design synthesis.",
-          "integration": "Synthesizes all physical, architectural, and economic principles taught across the chapter.",
-          "ranking_explanation": "Tier 2 summary section providing integrative closure on the chapter's end-to-end infrastructure methodology."
-        },
-        "questions": [
-          {
-            "question_type": "SHORT",
-            "question": "Explain the recurring engineering pattern that connects the accelerator, node, rack, and pod levels of the compute infrastructure stack, and show how a 700 W accelerator TDP propagates upward to dictate facility-level decisions.",
-            "answer": "A $700\\text{ W}$ accelerator contributes $5.6\\text{ kW}$ across eight devices before host and interconnect overhead. Four complete nodes plus rack infrastructure produce the chapter's roughly $33\\text{ kW}$ IT scenario. Power distribution and cooling must be qualified for that configuration; engineered air or liquid may be suitable depending on facility design. At pod scale, aggregate demand, network traffic, and failure exposure enter the completion-time and ownership-cost budgets. A chip-level choice therefore propagates into facility decisions without determining one universal cooling or topology solution.",
-            "learning_objective": "Explain the chapter's stack-level causal pattern and trace one concrete constraint through its propagation from accelerator to economics."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Your team must train a 70B-parameter model within 4 weeks, has a 2 MW facility power envelope, and expects the trained model to serve 10,000 queries per second for 2 years. Walk through how the chapter's methodology forces joint reasoning across workload bottlenecks, memory/communication hierarchies, cooling, and TCO.",
-            "answer": "First characterize training work, target quality, and serving request shapes; model size and query rate alone do not determine capacity. Estimate training completion using sustained throughput and overheads, then separately size serving for its latency and bandwidth demands. Sum accelerators, hosts, memory, storage, and networking at the IT boundary before applying PUE to estimate facility demand against the 2 MW envelope. Choose parallelism and placement from memory and communication budgets, then compare lifetime costs for the four-week training burst and two-year serving period. Neither a fixed tensor-parallel degree nor inference cost dominance follows without those measurements.",
-            "learning_objective": "Apply the chapter's integrated methodology to a concrete infrastructure-planning scenario that couples workload bottleneck, bandwidth hierarchy, power and cooling, and TCO."
-          },
-          {
-            "question_type": "MCQ",
-            "question": "When architecting compute infrastructure for an enterprise ML platform supporting both periodic frontier model pretraining and continuous high-throughput inference serving, which principle best captures the end-to-end systems trade-off across the physical stack?",
-            "choices": [
-              "Standardize on a single homogeneous GPU tier with the highest peak FP8 TFLOP/s, because peak compute automatically maximizes efficiency across all workload types.",
-              "Treat infrastructure as an interconnected hierarchy of trade-offs, matching accelerator and memory capabilities, interconnects, qualified cooling, and sustained utilization to the measured training and serving workloads and their lifetime costs.",
-              "Optimize the network fabric exclusively for bisection bandwidth, because intra-node memory hierarchies have negligible impact on distributed training performance.",
-              "Maximize host CPU DRAM capacity and offload all matrix operations to PCIe Gen5 accelerators, because PCIe bandwidth is sufficient to saturate modern Tensor Cores."
-            ],
-            "answer": "The correct answer is B. Workload shape determines which physical constraint binds. Compute-intensive training may favor dense, fast-connected nodes, while low-batch decode often emphasizes memory bandwidth; both need cooling qualified for the chosen configuration. A peak-FLOP-only tier can waste resources when memory or communication binds. The correct comparison co-designs the stack around sustained useful work and lifetime cost rather than assuming all inference or all training has one bottleneck.",
-            "learning_objective": "Synthesize the full-stack infrastructure design principles across accelerators, nodes, racks, pods, and economics to evaluate end-to-end platform architecture trade-offs."
-          }
-        ]
+        "quiz_needed": false,
+        "rationale": "Summary sections recap the chapter; the body and fallacy quizzes already test this material, and a quiz here would render after the chapter connection."
       }
     }
   ]
