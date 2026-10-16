@@ -50,11 +50,14 @@ def save(fig, path):
 
 
 def hbars(path, rows, unit, log=True, xlabel=None, step=None, note=None,
-          value_fmt="{:,.0f}", size=SIZE):
+          value_fmt="{:,.0f}", size=SIZE, vlines=None):
     """Horizontal bars, one per row, top to bottom.
 
     rows: list of (label, value, color_key) or (label, value, color_key,
-    value_label) when the printed value needs words ("3 MW"). step: show only the first
+    value_label) when the printed value needs words ("3 MW").
+    vlines: optional reference lines, list of (x, label, color_key), such
+    as a 1 ms deadline or a budget; drawn dashed with the label at the top.
+    step: show only the first
     `step` rows (the rest keep their slot so the axes do not move).
     """
     fig, ax = plt.subplots(figsize=size)
@@ -75,6 +78,10 @@ def hbars(path, rows, unit, log=True, xlabel=None, step=None, note=None,
                     y, shown_text, va="center",
                     fontsize=13, color=C[ck], fontweight="bold")
     ax.set_yticks([])
+    for x, label, ck in (vlines or []):
+        ax.axvline(x, color=C[ck], lw=1.5, ls="--", zorder=1)
+        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=10,
+                fontweight="bold", va="bottom", ha="left")
     if log:
         ax.set_xscale("log")
         lo = min(vals) / 3
