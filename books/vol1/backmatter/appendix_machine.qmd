@@ -31,9 +31,7 @@ This appendix is designed as a reference. When diagnosing performance issues, us
 
 : **Where to Look**: Each need maps to the section of this appendix that carries the model or worked template and to the chapter that applies it to the book's workloads. {#tbl-appdx-machine-lookup tbl-colwidths="[40,32,28]"}
 
-Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ for bandwidth).
-
-The values in this appendix are ratios and orders of magnitude, which change slowly because they follow from physics and circuit design. The dated specifications of particular accelerators, links, and storage devices change with every product generation; @sec-appdx-system-assumptions tabulates them so a reader can substitute current values without disturbing the relationships here.
+Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ for bandwidth). The values in this appendix are ratios and orders of magnitude, which change slowly because they follow from physics and circuit design. The dated specifications of particular accelerators, links, and storage devices change with every product generation; @sec-appdx-system-assumptions tabulates them so a reader can substitute current values without disturbing the relationships here.
 
 ## Numbers to Know {#sec-appdx-machine-foundations-numbers-know-b531}
 
@@ -141,7 +139,7 @@ class NumbersToKnow:
     training_flops_math = fmt_math(sci_latex(training_flops, 1))
 ```
 
-Like Jeff Dean's "Latency Numbers Every Programmer Should Know,"[^fn-jeff-dean-latency] these reference numbers give the order-of-magnitude intuition that ML systems design requires. Although absolute values and ratios vary by technology and workload, the hierarchy is more durable. Memorize the relationships; use the specific values as sanity checks.
+Fetching a 32-bit weight from off-chip DRAM costs hundreds of times more energy and roughly a thousand times more latency than reading it from a register, a gap that no compiler flag can erase. Like Jeff Dean's "Latency Numbers Every Programmer Should Know,"[^fn-jeff-dean-latency] the reference numbers below give the order-of-magnitude intuition that ML systems design requires. Although absolute values and ratios vary by technology and workload, the hierarchy is more durable; memorize the relationships and use the specific values as sanity checks.
 
 ::: {#psp-appendix-machine-three-numbers .callout-perspective title="Three numbers that matter most"}
 
@@ -155,11 +153,11 @@ Like Jeff Dean's "Latency Numbers Every Programmer Should Know,"[^fn-jeff-dean-l
 
 ### Reference relationships {.unnumbered}
 
-These relationships mix physical or arithmetic bounds with technology-specific measurements; only the bounds are invariant.
+The numbers above mix two kinds of quantities: invariant physical or arithmetic bounds, such as propagation delay in fiber and bytes per parameter, and technology-specific energy ratios that shift with each process node while preserving their ordering. The three tables below separate those reference anchors into propagation latency, memory-to-compute energy cost, and model-sizing arithmetic.
 
 #### Speed of light {.unnumbered}
 
-Each approximate round trip in @tbl-speed-of-light-ref carries an irreducible propagation component.
+No network upgrade or routing optimization can deliver a cross-country round trip in 5 ms when light in fiber takes roughly 40 ms to make the journey. Each approximate round trip in @tbl-speed-of-light-ref carries that irreducible propagation component.
 
 | **Distance**           | **Round-Trip Latency** | **Implication**                      |
 |:-----------------------|:----------------------:|:-------------------------------------|
@@ -172,7 +170,7 @@ Each approximate round trip in @tbl-speed-of-light-ref carries an irreducible pr
 
 #### Energy hierarchy {.unnumbered}
 
-Moving data costs more energy than computing on it, so raising reuse per byte pays off (@tbl-energy-ratios-ref).[^fn-horowitz-energy-app]
+Moving data across wires costs far more energy than computing on it once it arrives in an arithmetic unit. Raising reuse per byte therefore pays off across every hardware generation (@tbl-energy-ratios-ref).[^fn-horowitz-energy-app]
 
 | **Relationship**                  |                   **Reference Ratio**                    | **Source and Interpretation**                                             |
 |:----------------------------------|:--------------------------------------------------------:|:--------------------------------------------------------------------------|
@@ -379,15 +377,13 @@ Latency budgets depend on application-specific safety requirements, user expecta
 
 : **Illustrative Latency Targets**: Production requirements depend on the application and its service-level objectives. {#tbl-latency-targets-ref tbl-colwidths="[34,33,33]"}
 
-@Sec-appdx-system-assumptions tabulates the dated accelerator specifications, including the NVIDIA H100 that serves as the book's reference machine.
-
 ::: {#psp-appendix-machine-gpus-and-accelerators-terminology .callout-perspective title="A note on terminology: GPUs and accelerators"}
 
 Throughout this book, "accelerator" is the general term for hardware acceleration. The principles of roofline analysis, memory hierarchies, numerical precision, and performance modeling apply to GPUs, Tensor Processing Units (TPUs), NPUs, application-specific integrated circuits, and other specialized AI accelerators. Vendor-specific features such as CUDA and NVLink are identified explicitly.
 
 :::
 
-Next, the roofline model shows which of these numbers limits a given workload by turning two hardware specifications into performance ceilings.
+@Sec-appdx-system-assumptions tabulates the dated accelerator specifications, including the NVIDIA H100 that serves as the book's reference machine. Next, the roofline model shows which of those specifications limits a given workload by turning compute throughput and memory bandwidth into performance ceilings.
 
 ## Physics of Computing {#sec-appdx-machine-foundations-physics-computing-c77f}
 
@@ -395,9 +391,9 @@ Raw hardware specifications (FLOP/s, bytes per second, watts) are necessary but 
 
 ### The Roofline model {#sec-appdx-machine-foundations-roofline-model-2529}
 
-The Roofline Model\index{Roofline model!appendix refresher} [@williams2009] bounds how fast a workload can run on a given hardware target. The answer depends on whether the workload runs out of compute or memory bandwidth first.
+A kernel that achieves 1 percent of an accelerator's peak FLOP/s may be poorly written, or it may already be saturating the memory bus at the physical limit of the chip. The Roofline Model\index{Roofline model!appendix refresher} [@williams2009] separates those two cases by bounding how fast a workload can run on a given hardware target according to whether it runs out of compute or memory bandwidth first.
 
-Every operation has an **arithmetic intensity**\index{Arithmetic intensity!appendix refresher}: the ratio of computations performed to bytes moved from memory. Matrix multiplication achieves high arithmetic intensity because each loaded element is reused across multiple multiply-accumulate steps. In contrast, element-wise operations like rectified linear unit (ReLU) exhibit low intensity because each element is fetched from memory, evaluated once, and written back. Plotting achievable performance against arithmetic intensity yields the roofline (@fig-roofline): a diagonal memory-bandwidth ceiling rises linearly from the origin until it meets the horizontal peak-compute ceiling at the ridge point. A workload's arithmetic intensity determines which ceiling governs execution, and therefore whether optimizations must target memory traffic or arithmetic throughput.
+Every operation has an **arithmetic intensity**\index{Arithmetic intensity!appendix refresher}: the ratio of computations performed to bytes moved from memory. Matrix multiplication achieves high arithmetic intensity because each loaded element is reused across multiple multiply-accumulate steps. In contrast, element-wise operations like rectified linear unit (ReLU) have low intensity because each element is fetched from memory, evaluated once, and written back. Plotting achievable performance against arithmetic intensity yields the roofline (@fig-roofline): a diagonal memory-bandwidth ceiling rises linearly from the origin until it meets the horizontal peak-compute ceiling at the ridge point. A workload's arithmetic intensity determines which ceiling governs execution, and therefore whether optimizations must target memory traffic or arithmetic throughput.
 
 ::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: The sloped memory-bandwidth ceiling and horizontal peak-compute ceiling meet at the ridge point. Plotting a workload by arithmetic intensity identifies which roofline ceiling applies." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled memory bound, and a horizontal line labeled compute bound. They meet at the ridge point."}
 ```{.tikz}
@@ -508,10 +504,10 @@ Precision moves the ridge. At INT8 the H100's peak rate doubles to `{python} H10
 
 The roofline model helps diagnose *where* a bottleneck lies. Before applying any performance equation, however, it must be verified as physically meaningful. Dimensional analysis provides this sanity check: any valid equation must be **dimensionally homogeneous**\index{Dimensional homogeneity!appendix refresher}, meaning every term must resolve to the same units. If they do not, the equation contains an error.
 
-For serialized phases, consider the iron law of ML systems\index{Iron law of ML systems!appendix refresher} (principle \ref{pri-iron-law}) introduced in @sec-introduction-iron-law-ml-systems-c32a:
-$$ \Time= \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency $$
+Consider both levels of the iron law of ML systems\index{Iron law of ML systems!appendix refresher} (principle \ref{pri-iron-law}) introduced in @sec-introduction-iron-law-ml-systems-c32a. First, in the multiplicative D·A·M form (@eq-intro-dam-iron-law), intermediate units cancel across the three factors to leave seconds per task:
+$$ \Time[\text{s}] = \frac{\text{Samples}}{\text{Task}} \times \frac{\text{FLOPs}}{\text{Sample}} \times \frac{\text{s}}{\text{FLOP}} = \frac{\text{s}}{\text{Task}} $$
 
-Correctness is verified by confirming that every term resolves to time (seconds):
+Second, for serialized execution phases (@eq-intro-iron-law), every additive term must resolve to time (seconds):
 $$ \Time[\text{s}] = \underbrace{ \frac{\DataVolume [\text{bytes}]}{\Bandwidth [\text{bytes/s}]} }_{\text{seconds}} + \underbrace{ \frac{\Operations[\text{FLOPs}]}{\PeakRate [\text{FLOP/s}] \cdot \EfficiencyHw [1]} }_{\text{seconds}} + \underbrace{ \Latency [\text{s}] }_{\text{seconds}} $$
 
 *   **Data term**: $\frac{\text{bytes}}{\text{bytes/s}} = \text{bytes} \times \frac{\text{s}}{\text{bytes}} = \text{s}$
@@ -528,7 +524,7 @@ Parallelization is the primary tool for scaling ML, but its limits depend on *ho
 
 #### Strong scaling (Amdahl's Law) {#sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2}
 
-**Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster a fixed-size problem runs as processors are added.
+Adding a thousand accelerators to a fixed training batch cannot shorten the step by more than $20\times$ if 5 percent of each step is serial host dispatch or synchronization. **Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster a fixed-size problem runs as processors are added.
 
 Amdahl's law [@amdahl1967] states that speedup is limited by the serial fraction of the task.[^fn-amdahl-scaling-appendix] Let $\Time(1) = 1$ be normalized single-processor execution time, composed of serial fraction $1-\ParallelFraction$ and parallelizable fraction $\ParallelFraction$. If $\WorkerCount$ processors execute the parallel fraction with linear scaling and zero communication overhead, execution time on $\WorkerCount$ processors is:
 $$ \Time(\WorkerCount) = (1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount} $$
@@ -536,8 +532,6 @@ The resulting theoretical speedup is:
 $$ \text{Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \frac{1}{(1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount}} $$
 
 [^fn-amdahl-scaling-appendix]: **Gene Amdahl (1922–2015)**\index{Amdahl, Gene|seealso{Amdahl's law}}: A legendary computer architect at IBM, where he was the chief architect of the System/360. He later founded Amdahl Corporation to compete with IBM in the mainframe market.
-
-As $\WorkerCount \to \infty$, the term $\frac{\ParallelFraction}{\WorkerCount} \to 0$, and the speedup converges to $1/(1-\ParallelFraction)$.
 
 ```{python}
 #| echo: false
@@ -579,7 +573,7 @@ class AmdahlSetup:
     p_str = fmt(parallel_fraction, precision=2, commas=False)
 ```
 
-To see Amdahl's Law in action, suppose `{python} AmdahlSetup.s_pct_str` of a training step is serial overhead (for example, Python global interpreter lock (GIL), kernel launch latency) and `{python} AmdahlSetup.p_pct_str` is parallelizable matrix math:
+As $\WorkerCount \to \infty$, the term $\frac{\ParallelFraction}{\WorkerCount} \to 0$, and the speedup converges to $1/(1-\ParallelFraction)$. To see Amdahl's Law in action, suppose `{python} AmdahlSetup.s_pct_str` of a training step is serial overhead (for example, Python global interpreter lock (GIL), kernel launch latency) and `{python} AmdahlSetup.p_pct_str` is parallelizable matrix math:
 
 ```{python}
 #| echo: false
@@ -628,16 +622,12 @@ No matter how many accelerators are added, this fixed workload cannot run faster
 
 #### Weak scaling (Gustafson's Law) {#sec-appdx-machine-foundations-weak-scaling-gustafsons-law-eb7e}
 
-**Weak scaling**\index{Weak scaling!appendix refresher} measures how much larger a problem can become while holding runtime fixed as processors are added.[^fn-gustafsons-law-scaling]
-
-Large language model training works in this regime. Rather than using 1,000 accelerators to train a model on a small dataset in milliseconds, they are used to train on a dataset 1,000$\times$ larger in reasonable time.
+Instead of using 1,000 accelerators to finish a small training dataset in milliseconds, large-model training uses them to process a dataset 1,000$\times$ larger in the same wall-clock time. **Weak scaling**\index{Weak scaling!appendix refresher} measures how much larger a problem can become while holding runtime fixed as processors are added.[^fn-gustafsons-law-scaling]
 
 For $\WorkerCount$ processors, let $1-\ParallelFraction$ be the serial fraction of execution time measured on those processors for the scaled workload, and $\ParallelFraction$ the parallel fraction. Gustafson's law [@gustafson1988] derives "scaled speedup" by asking how long that scaled problem would take on a single processor. On $\WorkerCount$ processors, normalized runtime is $\Time(\WorkerCount) = (1-\ParallelFraction) + \ParallelFraction = 1$. Executing the same total work on a single processor requires running the parallel fraction sequentially, taking $\Time(1) = (1-\ParallelFraction) + \WorkerCount \cdot \ParallelFraction = \WorkerCount - (1-\ParallelFraction)(\WorkerCount-1)$. The resulting scaled speedup is:
 $$ \text{Scaled Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \WorkerCount - (1-\ParallelFraction)(\WorkerCount - 1) $$
 
 [^fn-gustafsons-law-scaling]: **John Gustafson**\index{Gustafson, John|seealso{Gustafson's law}}: A computer scientist known for his work in parallel computing and for introducing the Unum (universal number) format. His law was a direct response to the perceived "limits" of Amdahl's Law when applied to massive scale.
-
-Because the parallel part grows linearly with $\WorkerCount$ while the serial fraction $1-\ParallelFraction$ remains fixed, weak scaling can keep efficiency high as the problem grows.
 
 ```{python}
 #| echo: false
@@ -673,7 +663,7 @@ class GustafsonSetup:
     s_g_str = fmt(serial_fraction, precision=2, commas=False)
 ```
 
-Using the same `{python} GustafsonSetup.s_g_pct_str` serial overhead ($1-\ParallelFraction$ = `{python} GustafsonSetup.s_g_str`), Gustafson's Law tells a very different story:
+Because the parallel part grows linearly with $\WorkerCount$ while the serial fraction $1-\ParallelFraction$ remains fixed, weak scaling can keep efficiency high as the problem grows. Using the same `{python} GustafsonSetup.s_g_pct_str` serial overhead ($1-\ParallelFraction$ = `{python} GustafsonSetup.s_g_str`), Gustafson's Law tells a very different story:
 
 ```{python}
 #| echo: false
@@ -722,7 +712,7 @@ class GustafsonExample:
 *   With $\WorkerCount=$ `{python} GustafsonExample.n_8_g_str`, Scaled Speedup is `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_8_g_minus_1_str`) = `{python} GustafsonExample.n_8_g_str` − `{python} GustafsonExample.gustafson_8_serial_str` = `{python} GustafsonExample.gustafson_8_speedup_mult_str`.
 *   With $\WorkerCount=$ `{python} GustafsonExample.n_1000_str`, Scaled Speedup is `{python} GustafsonExample.n_1000_str` − `{python} GustafsonSetup.s_g_str` $\times$ (`{python} GustafsonExample.n_1000_minus_1_str`) ≈ `{python} GustafsonExample.gustafson_1000_speedup_mult_str`.
 
-In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads.
+In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads. @Sec-model-training-singlenode-multigpu-training-c87f shows how data-parallel training uses weak scaling to keep accelerators busy as the cluster grows.
 
 ### The training-time equation {#sec-appdx-machine-foundations-training-time-equation-7c3e}
 
@@ -812,18 +802,18 @@ $$ \Time\approx \frac{6 \cdot \Parameters\cdot \DatasetSize}{\AcceleratorCount \
 `{python} TrainingTimeRef.throughput_math`.
 `{python} TrainingTimeRef.time_math`.
 
-**Systems insight**: Under these assumptions, training takes about `{python} TrainingTimeRef.T_days_str`. Doubling the token count doubles the time; doubling the accelerator count or the utilization halves it.
+**Systems insight**: Under these assumptions, training takes about `{python} TrainingTimeRef.T_days_str`. In D·A·M terms, this equation is the macroscopic product of Data ($\DatasetSize$ tokens), Algorithm ($6\Parameters\text{ FLOPs/token}$), and Machine ($(\AcceleratorCount \cdot \PeakRate \cdot \EfficiencyHw)^{-1}\text{ s/FLOP}$): doubling the token count doubles the time, while doubling the accelerator count or the utilization halves it.
 
 :::
 
 ### Little's Law {#sec-appdx-machine-foundations-littles-law-21a3}
 
-For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($\RequestConcurrency$), mean arrival rate ($\ArrivalRate$), and mean time in system ($\RequestTimeInSystem$):[^fn-littles-law-appendix]
+An inference server receiving 1,000 queries per second at a 50 ms average response time holds 50 requests in flight on average, and if each request occupies 1 GB of KV-cache state, a 24 GB accelerator runs out of memory before compute saturates. For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($\RequestConcurrency$), mean arrival rate ($\ArrivalRate$), and mean time in system ($\RequestTimeInSystem$):[^fn-littles-law-appendix]
 $$ \RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem $$
 
 The law follows from operational conservation of requests over any observation interval $[0, \ObservationIntervalLength]$. Let $\CumulativeArrivals(\TimeInstant)$ denote cumulative arrivals and $\CumulativeCompletions(\TimeInstant)$ cumulative completions, so the instantaneous in-flight queue occupancy is $\InstantaneousRequestOccupancy(\TimeInstant) = \CumulativeArrivals(\TimeInstant) - \CumulativeCompletions(\TimeInstant)$. The average number of requests in the system over $[0, \ObservationIntervalLength]$ is $\IntervalMeanOccupancy= \frac{1}{\ObservationIntervalLength}\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$. The total accumulated request-time $\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$ equals the sum of residence times $\sum_{i=1}^{\CompletedRequestCount(\ObservationIntervalLength)} \RequestResidenceTime_i$ of all $\CompletedRequestCount(\ObservationIntervalLength)$ requests completed by time $\ObservationIntervalLength$ (plus boundary terms that vanish as $\ObservationIntervalLength\to \infty$). Dividing both sides by $\ObservationIntervalLength$:
 $$ \IntervalMeanOccupancy= \frac{1}{\ObservationIntervalLength}\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant= \frac{\CompletedRequestCount(\ObservationIntervalLength)}{\ObservationIntervalLength} \cdot \frac{1}{\CompletedRequestCount(\ObservationIntervalLength)}\sum_{i=1}^{\CompletedRequestCount(\ObservationIntervalLength)} \RequestResidenceTime_i $$
-In the limit as $\ObservationIntervalLength\to \infty$ for a stable queue, $\lim_{\ObservationIntervalLength\to\infty} \frac{\CompletedRequestCount(\ObservationIntervalLength)}{\ObservationIntervalLength} = \ArrivalRate$ and $\lim_{\CompletedRequestCount\to\infty} \frac{1}{\CompletedRequestCount}\sum_{i=1}^\CompletedRequestCount \RequestResidenceTime_i = \RequestTimeInSystem$, yielding $\RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem$ regardless of arrival distribution or service-time distribution.
+In the limit as $\ObservationIntervalLength\to \infty$ for a stable queue, $\lim_{\ObservationIntervalLength\to\infty} \frac{\CompletedRequestCount(\ObservationIntervalLength)}{\ObservationIntervalLength} = \ArrivalRate$ and $\lim_{\CompletedRequestCount\to\infty} \frac{1}{\CompletedRequestCount}\sum_{i=1}^\CompletedRequestCount \RequestResidenceTime_i = \RequestTimeInSystem$, yielding $\RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem$ regardless of arrival distribution or service-time distribution. Because the identity requires no Poisson-arrival or exponential-service assumption, it applies directly to heavy-tailed large language model (LLM) generation workloads so long as the queue is stationary.
 
 [^fn-littles-law-appendix]: **John Little**\index{Little, John|seealso{Little's law}}: An Institute Professor at MIT and a pioneer in the field of operations research. His law, proved in 1961, is fundamental to queuing theory and is used across fields from manufacturing to computer network analysis.
 
@@ -883,13 +873,11 @@ To see this in practice, consider sustaining `{python} LittlesLawExample.lambda_
 
 This sizes worker pools, but memory needs another assumption. If every in-system request simultaneously holds `{python} LittlesLawExample.mem_per_req_gb_str` of device state, the average population implies `{python} LittlesLawExample.total_mem_gb_str`; queued requests may instead stay in host memory or share batched state. If `{python} LittlesLawExample.max_concurrent_str` device slots ($\DeviceRequestCapacity$, the most requests the device can hold at once) each remain occupied for `{python} LittlesLawExample.w_latency_ms_str`, their throughput proxy is `{python} LittlesLawExample.max_throughput_math`; Little's law alone does not fix a maximum; device capacity does.
 
-Serving systems use this relation to size request concurrency, and @sec-model-serving-littles-law-9352 pairs it with a queueing model to show how latency degrades as utilization nears saturation.
-
-These physics-based models (roofline, Amdahl, Gustafson, and Little) locate *where* a bottleneck lies. Acting on a diagnosis requires the hardware structures that impose the bounds: the memory hierarchy, the links that move data between tiers, and the classes of hardware that package them.
+Serving systems use this relation to size request concurrency, and @sec-model-serving-littles-law-9352 pairs it with a queueing model to show how latency degrades as utilization nears saturation. Together, these physics-based models (roofline, Amdahl, Gustafson, and Little) locate *where* a bottleneck lies; acting on that diagnosis requires the hardware structures that impose the bounds: the memory hierarchy, the links that move data between tiers, and the classes of hardware that package them.
 
 ## Computer Architecture Essentials {#sec-appdx-machine-foundations-computer-architecture-essentials-10c2}
 
-A kernel can run at a small fraction of an accelerator's advertised peak. The gap may reflect data movement, insufficient parallelism, synchronization, launch overhead, or software inefficiency. Physics sets the theoretical bounds; computer architecture defines the machinery that determines how close a real workload can get to them. Three structures decide that distance: the memory hierarchy and its energy cost, the paths that move data between tiers, and the class of hardware that packages both.
+A kernel can run at a small fraction of an accelerator's advertised peak when data movement, insufficient parallelism, synchronization, launch overhead, or software inefficiency stands in the way. Whereas physics sets the theoretical ceilings, computer architecture defines the machinery that determines how close a real workload can get to them across three structures: the memory hierarchy and its energy cost, the paths that move data between tiers, and the class of hardware that packages both.
 
 ### The memory hierarchy {#sec-appdx-machine-foundations-memory-hierarchy-2278}
 
@@ -1017,7 +1005,7 @@ Energy explains why data should stay high in the hierarchy. The table gives per-
 
 ### Bandwidth versus latency {#sec-appdx-machine-foundations-bandwidth-vs-latency-5320}
 
-Bandwidth\index{Bandwidth!latency trade-off} (throughput) and latency\index{Latency!bandwidth trade-off} (delay) are distinct constraints. For data volume $\DataVolume$ sent over effective bandwidth $\Bandwidth$ with fixed path latency $\Latency$, and assuming the latency and serialization costs do not overlap, total transfer time is:
+Upgrading a 10 Gbps network link to 100 Gbps barely changes the delivery time of a 1 KB inference request, yet it cuts the transfer of a 1 GB checkpoint tenfold. Bandwidth\index{Bandwidth!latency trade-off} (throughput) and latency\index{Latency!bandwidth trade-off} (delay) govern those two regimes as distinct constraints. For data volume $\DataVolume$ sent over effective bandwidth $\Bandwidth$ with fixed path latency $\Latency$, and assuming the latency and serialization costs do not overlap, total transfer time is:
 $$ \Time= \Latency + \frac{\DataVolume}{\Bandwidth} $$
 
 The crossover point is the transfer size where the two terms are equal:
@@ -1244,9 +1232,7 @@ The deployment paradigms of @sec-ml-systems-deployment-paradigm-framework-0d25 r
 
 : **Accelerator Classes**: Order-of-magnitude ranges across representative devices in each class, rounded to one significant figure. Peak rate is the dense rate at each device's native ML precision (FP16 or BF16 for data center accelerators, mostly INT8 for edge, mobile, and microcontroller parts), so compare rates within a class rather than across classes. The ridge point is peak rate divided by memory bandwidth. {#tbl-accelerator-classes-ref tbl-colwidths="[20,16,16,16,14,18]"}
 
-Two patterns stand out. The classes span roughly `{python} AcceleratorClasses.peak_span_orders_str` orders of magnitude in peak rate and `{python} AcceleratorClasses.power_span_orders_str` in power, so a model sized for one class rarely runs unchanged on another. Ridge points sit in the hundreds of FLOP per byte from data center to mobile, so the same low-intensity operations are bandwidth bound on all three; a microcontroller's ridge sits within a few FLOP per byte, so nearly every layer of a keyword-spotting model is compute bound there, and the binding constraint becomes the power budget. @Sec-hardware-acceleration-choosing-accelerator-6b2d applies these classes to the choice of accelerator.
-
-Moving between classes also changes which numerical formats the hardware supports natively, and numerical precision\index{Precision!numerical format trade-offs} directly controls *how much* data must move.
+Two patterns stand out across these classes: first, they span roughly `{python} AcceleratorClasses.peak_span_orders_str` orders of magnitude in peak rate and `{python} AcceleratorClasses.power_span_orders_str` in power, so a model sized for one class rarely runs unchanged on another; second, whereas ridge points sit in the hundreds of FLOP per byte from data center to mobile, leaving the same low-intensity operations bandwidth bound on all three, a microcontroller's ridge sits within a few FLOP per byte, making nearly every layer of a keyword-spotting model compute bound and shifting the binding constraint to the power budget. @Sec-hardware-acceleration-choosing-accelerator-6b2d applies these classes to the choice of accelerator, while moving between classes also changes which numerical formats the hardware supports natively, and numerical precision\index{Precision!numerical format trade-offs} directly controls *how much* data must move.
 
 ## Numerical Representations {#sec-appdx-machine-foundations-numerical-representations-c889}
 
@@ -1313,7 +1299,7 @@ IEEE 754 standards and AI-specific numerical representations trade dynamic range
 ```
 :::
 
-BF16\index{BF16!appendix refresher}[^fn-bf16-precision-appendix] [@google_bfloat16; @kalamkar2019] occupies the same 16-bit storage class as FP16 but behaves differently in training, so nominal width alone does not predict the operational burden.
+BF16\index{BF16!appendix refresher}[^fn-bf16-precision-appendix] [@google_bfloat16; @kalamkar2019] occupies the same 16-bit storage class as FP16, yet the two formats behave very differently during training. Because BF16 allocates three more bits to the exponent than FP16, nominal bit width alone does not predict whether a training run will need gradient scaling.
 
 [^fn-bf16-precision-appendix]: **BF16 (brain floating point 16)**\index{BF16!appendix refresher}: Originally introduced with Google TPUv2 and later adopted by Intel, Arm, and NVIDIA, BF16 became a common training format across accelerator ecosystems. Its adoption made format support in hardware, kernels, and distributed-training libraries a portability concern rather than a vendor-specific feature.
 
@@ -1329,13 +1315,12 @@ The choice of numerical format is a direct application of the iron law of ML sys
 
 ### Integer quantization {#sec-appdx-machine-foundations-integer-quantization-5442}
 
-Quantization\index{Quantization!appendix refresher} maps continuous floating-point values to discrete integers, typically INT8. Quantization needs a mapping from the floating-point range to 256 integer codes, and symmetric and asymmetric mappings are the two common choices.
+Storing weights and activations in 32-bit floating point spends four bytes per value and drives wide floating-point multipliers when 256 discrete levels often suffice for inference accuracy. Quantization\index{Quantization!appendix refresher} cuts that cost by mapping continuous floating-point values to discrete integers, typically INT8, using either a symmetric or an asymmetric mapping to assign the floating-point range to 256 integer codes.
 
 For symmetric quantization\index{Quantization!symmetric}, let $\SymmetricClippingThreshold= \max |\QuantizerInput|$ over the calibrated range, assume $\QuantizerInput$ is clipped to $[-\SymmetricClippingThreshold, \SymmetricClippingThreshold]$, and set the scale $\QuantizationScale= \SymmetricClippingThreshold/127$. The signed INT8 code is:
 $$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput}{\QuantizationScale}\right) $$
-This mapping works well for weight distributions centered around zero.
 
-Asymmetric quantization\index{Quantization!asymmetric} handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. Let $\ClippingRangeLowerBound$ and $\ClippingRangeUpperBound$ bound the calibrated range, clip $\QuantizerInput$ to $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$, and set the scale $\QuantizationScale= (\ClippingRangeUpperBound- \ClippingRangeLowerBound)/255$. A common unsigned 8-bit mapping is:
+This symmetric mapping works well for weight distributions centered around zero, whereas asymmetric quantization\index{Quantization!asymmetric} handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. Let $\ClippingRangeLowerBound$ and $\ClippingRangeUpperBound$ bound the calibrated range, clip $\QuantizerInput$ to $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$, and set the scale $\QuantizationScale= (\ClippingRangeUpperBound- \ClippingRangeLowerBound)/255$. A common unsigned 8-bit mapping is:
 $$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput- \ClippingRangeLowerBound}{\QuantizationScale}\right) $$
 
 The choice between symmetric and asymmetric quantization depends on the tensor's distribution and has measurable accuracy implications. @Sec-model-compression-quantization-precision-cd46 develops calibration, granularity, and the accuracy cost of each mapping on the book's workloads.

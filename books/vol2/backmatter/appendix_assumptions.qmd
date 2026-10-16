@@ -131,7 +131,7 @@ Use a cluster of `{python} FleetQuickCalc.n_small_str` and an individual GPU mea
 The GPU failure rate is `{python} FleetQuickCalc.n_small_str`/`{python} FleetQuickCalc.mttf_hours_str` $\approx$ `{python} FleetQuickCalc.fail_hr_str`, or roughly `{python} FleetQuickCalc.fail_day_str`.
 
 **Result**:
-This estimate excludes network interface card (NIC), PSU, and cable failures. At `{python} FleetQuickCalc.n_large_str`, the GPU-only rate is approximately `{python} FleetQuickCalc.fail_large_str`; adding NIC, PSU, and cable failures can roughly double the operational incident stream.
+This estimate excludes network interface card (NIC), PSU, and cable failures. At `{python} FleetQuickCalc.n_large_str`, the GPU-only rate is approximately `{python} FleetQuickCalc.fail_large_str`; adding NIC, PSU, and cable failures, whose MTTFs appear in @tbl-fleet-mttf, raises the operational incident stream further.
 
 **Systems insight**:
 At fleet scale, failure becomes a continuous background process rather than an exceptional event.
@@ -501,7 +501,7 @@ At fleet scale, component failures are not exceptional events but statistical ce
 
 ### Component MTTF {.unnumbered}
 
-@Tbl-fleet-mttf lists the MTTF for each component class. These are steady-state values that exclude the "infant mortality" period (first 30--90 days) and the "wear-out" period (beyond rated lifetime). Sources include large-GPU research-cluster analysis [@kokolis2025], TPUv4 supercomputer resiliency and operations [@zu2024tpuv4], and warehouse-scale machine design [@barroso2019].
+The component MTTFs in @tbl-fleet-mttf are steady-state values that exclude the early "infant mortality" period after deployment and the "wear-out" period (beyond rated lifetime). Sources include large-GPU research-cluster analysis [@kokolis2025], TPUv4 supercomputer resiliency and operations [@zu2024tpuv4], and warehouse-scale machine design [@barroso2019].
 
 | **Assumption**                     |                         **Value**                          |                             **Unit**                            |
 |:-----------------------------------|:----------------------------------------------------------:|:---------------------------------------------------------------:|
@@ -513,7 +513,7 @@ At fleet scale, component failures are not exceptional events but statistical ce
 | Top-of-rack switch MTTF            | `{python} ReliabilityConstants.tor_switch_mttf_hours_str`  |  `{python} ReliabilityConstants.tor_switch_mttf_hours_unit_str` |
 | Optical cable and transceiver MTTF |    `{python} ReliabilityConstants.cable_mttf_hours_str`    |    `{python} ReliabilityConstants.cable_mttf_hours_unit_str`    |
 
-: **Component Mean Time To Failure**: Steady-state MTTF anchors from [@kokolis2025; @zu2024tpuv4; @barroso2019]. Combined DGX H100 node MTBF $\approx$ `{python} ReliabilityConstants.node_mttf_hours_str` (`{python} ReliabilityConstants.node_mttf_days_str`) for `{python} ReliabilityConstants.dgx_h100_gpus_per_node_str` GPUs and `{python} ReliabilityConstants.node_nics_str` NICs in series, the same node composition as the MTBF cascade in @sec-appdx-reliability-foundations-mtbf-cascade. The node's `{python} ReliabilityConstants.node_psus_str` PSUs run `{python} ReliabilityConstants.node_psus_required_str`+`{python} ReliabilityConstants.node_psus_redundant_str` redundant, so no single PSU failure stops it and they add no term. The PCIe switch and HBM rows are node components that series model leaves out, and the top-of-rack switch and cable rows are network failures outside the node. Counting any of them would shorten the interval between interruptions a job sees. {#tbl-fleet-mttf}
+: **Component Mean Time to Failure**: Steady-state MTTF anchors from [@kokolis2025; @zu2024tpuv4; @barroso2019]. Combined DGX H100 node MTBF $\approx$ `{python} ReliabilityConstants.node_mttf_hours_str` (`{python} ReliabilityConstants.node_mttf_days_str`) for `{python} ReliabilityConstants.dgx_h100_gpus_per_node_str` GPUs and `{python} ReliabilityConstants.node_nics_str` NICs in series, the same node composition as the MTBF cascade in @sec-appdx-reliability-foundations-mtbf-cascade. The node's `{python} ReliabilityConstants.node_psus_str` PSUs run `{python} ReliabilityConstants.node_psus_required_str`+`{python} ReliabilityConstants.node_psus_redundant_str` redundant, so no single PSU failure stops it and they add no term. The PCIe switch and HBM rows are node components that series model leaves out, and the top-of-rack switch and cable rows are network failures outside the node. Counting any of them would shorten the interval between interruptions a job sees. {#tbl-fleet-mttf}
 
 ### Recovery time assumptions {.unnumbered}
 
@@ -532,7 +532,7 @@ Failure detection and recovery introduce downtime that compounds with cluster si
 #| label: appendix-comm-model-constants
 
 from mlsysim.core import units
-from mlsysim.fmt import MarkdownStr, fmt, fmt_int, fmt_power, fmt_unit, fmt_val
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_power, fmt_unit, fmt_val
 
 def _fmt_plain(val, unit_str=""):
     """Format a plain scalar with an explicit unit string. Returns (MarkdownStr, MarkdownStr)."""
@@ -541,8 +541,20 @@ def _fmt_plain(val, unit_str=""):
 class CommModelConstants:
     ib_ndr_alpha_us = Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude  # NDR per-message α anchor (editor ruling)
     IB_NDR_LATENCY_US_str, IB_NDR_LATENCY_US_unit_str = _fmt_plain(ib_ndr_alpha_us, "us")
-    IB_HDR_LATENCY_US_str, IB_HDR_LATENCY_US_unit_str = _fmt_plain(Systems.Fabrics.InfiniBand_HDR.latency_us, "us")
-    ROCE_LATENCY_US_str, ROCE_LATENCY_US_unit_str = _fmt_plain(Systems.Fabrics.RoCE_100G.latency_us, "us")
+    # α convention (release ruling D24): effective per-message launch latency including the
+    # communication library's software stack, as in @tbl-interconnect-parameters (ch05 owns it).
+    # Scenario ranges come from the registry (Systems.SwitchFabric.EffectiveAlpha*), shared with ch05 and App D.
+    _sf = Systems.SwitchFabric
+    hdr_alpha_lo_us = round(_sf.EffectiveAlphaHdrLow.to(microsecond).magnitude)
+    hdr_alpha_hi_us = round(_sf.EffectiveAlphaHdrHigh.to(microsecond).magnitude)
+    roce_alpha_lo_us = round(_sf.EffectiveAlphaRoceLow.to(microsecond).magnitude)
+    roce_alpha_hi_us = round(_sf.EffectiveAlphaRoceHigh.to(microsecond).magnitude)
+    check(
+        roce_alpha_lo_us <= Systems.SwitchFabric.AlphaRoce.to(microsecond).magnitude <= roce_alpha_hi_us,
+        "Registry RoCE α must sit inside the ch05 RoCE range",
+    )
+    IB_HDR_LATENCY_US_str, IB_HDR_LATENCY_US_unit_str = MarkdownStr(f"{hdr_alpha_lo_us}--{hdr_alpha_hi_us}"), MarkdownStr("us")
+    ROCE_LATENCY_US_str, ROCE_LATENCY_US_unit_str = MarkdownStr(f"{roce_alpha_lo_us}--{roce_alpha_hi_us}"), MarkdownStr("us")
     TCP_LATENCY_US_str, TCP_LATENCY_US_unit_str = _fmt_plain(Systems.Fabrics.Ethernet_100G.latency_us, "us")
     ib_ndr_bw_gb_per_s_value_str, ib_ndr_bw_gb_per_s_unit_str = _fmt_plain(Systems.Fabrics.InfiniBand_NDR.bandwidth_gbs, "GB/s")
     infiniband_hdr_bw_gb_per_s_value_str, infiniband_hdr_bw_gb_per_s_unit_str = _fmt_plain(Systems.Fabrics.InfiniBand_HDR.bandwidth_gbs, "GB/s")
@@ -569,7 +581,7 @@ This book models communication cost using the $\MessageStartupLatency$-$\LinkBan
 | RoCE sustained bandwidth ($\LinkBandwidth$)               |   `{python} CommModelConstants.roce_100g_bw_gb_per_s_value_str`    |    `{python} CommModelConstants.roce_100g_bw_gb_per_s_unit_str`   |
 | TCP startup latency ($\MessageStartupLatency$)            |          `{python} CommModelConstants.TCP_LATENCY_US_str`          |       `{python} CommModelConstants.TCP_LATENCY_US_unit_str`       |
 
-: **Communication Model Parameters ($\MessageStartupLatency$-$\LinkBandwidth$)**: $\MessageStartupLatency$ (startup) and $\LinkBandwidth$ (bandwidth) from fabric specifications and measured cluster studies [@infiniband2000spec; @jiang2024megascale]. The InfiniBand NDR $\MessageStartupLatency$ is the per-message base latency used in the book's collective models, which is smaller than the fabric's end-to-end one-way latency in @tbl-fleet-inter-node; the other rows are end-to-end startup latencies. The `{python} CommModelConstants.tcp_ndr_latency_ratio_mult_str` NDR-vs-TCP gap explains why RDMA fabrics dominate synchronous training. {#tbl-fleet-alpha-beta}
+: **Communication Model Parameters ($\MessageStartupLatency$-$\LinkBandwidth$)**: $\MessageStartupLatency$ (startup) and $\LinkBandwidth$ (bandwidth) from fabric specifications and measured cluster studies [@infiniband2000spec; @jiang2024megascale]. Every $\MessageStartupLatency$ is an effective per-message launch latency that includes the communication library's software stack, the convention of @tbl-interconnect-parameters, so it differs from the fabric's end-to-end one-way latency in @tbl-fleet-inter-node. The InfiniBand NDR value is the single anchor used in the book's collective models. The `{python} CommModelConstants.tcp_ndr_latency_ratio_mult_str` NDR-vs-TCP gap explains why RDMA fabrics dominate synchronous training. {#tbl-fleet-alpha-beta}
 
 ### AllReduce cost model {.unnumbered}
 
@@ -651,7 +663,7 @@ PUE is the ratio of total facility power to IT equipment power (@eq-pue). A PUE 
 
 ### Water usage effectiveness {.unnumbered}
 
-WUE measures liters of water consumed per kilowatt-hour of IT energy [@thegreengrid2011wue]. Evaporative cooling towers achieve excellent PUE but consume significant water; a closed liquid loop can limit water consumption at the rack, but facility water use still depends on the heat-rejection system outside that loop. @Tbl-fleet-wue lists the reference WUE values.
+WUE measures liters of water consumed per kilowatt-hour of IT energy [@thegreengrid2011wue]. Evaporative cooling towers achieve excellent PUE but consume significant water; a closed liquid loop can limit water consumption at the rack, but facility water use still depends on the heat-rejection system outside that loop. For that reason the reference tiers in @tbl-fleet-wue separate air-cooled, evaporative, and closed-loop liquid cooling.
 
 | **Assumption**            |                       **Value**                        |                           **Unit**                          |
 |:--------------------------|:------------------------------------------------------:|:-----------------------------------------------------------:|
@@ -701,6 +713,9 @@ def _fmt_plain(val, unit_str=""):
     return MarkdownStr(f"{val:,.10g}"), MarkdownStr(unit_str)
 
 class EconomicConstants:
+    # Volume canon for fleet cost examples (release ruling D3): price per in-service accelerator-hour.
+    fleet_gpu_hour_ref_str = fmt_val(Infrastructure.Pricing.Fleet.GpuHourRef.rate)
+    fleet_gpu_hour_ref_unit_str = fmt_unit(Infrastructure.Pricing.Fleet.GpuHourRef.rate)
     cloud_gpu_training_per_hour_str = fmt_val(Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate)
     cloud_gpu_training_per_hour_unit_str = fmt_unit(Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate)
     cloud_gpu_inference_per_hour_str = fmt_val(Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate)
@@ -734,12 +749,13 @@ Fleet-scale cost estimates depend on GPU rental rates, electricity pricing, and 
 
 | **Assumption**                  |                           **Value**                           |                              **Unit**                              |
 |:--------------------------------|:-------------------------------------------------------------:|:------------------------------------------------------------------:|
+| Fleet GPU-hour reference price  |      `{python} EconomicConstants.fleet_gpu_hour_ref_str`      |      `{python} EconomicConstants.fleet_gpu_hour_ref_unit_str`      |
 | Cloud GPU training rental rate  |  `{python} EconomicConstants.cloud_gpu_training_per_hour_str` | `{python} EconomicConstants.cloud_gpu_training_per_hour_unit_str`  |
 | Cloud GPU inference rental rate | `{python} EconomicConstants.cloud_gpu_inference_per_hour_str` | `{python} EconomicConstants.cloud_gpu_inference_per_hour_unit_str` |
 | Cloud electricity price         |   `{python} EconomicConstants.cloud_electricity_per_kwh_str`  |  `{python} EconomicConstants.cloud_electricity_per_kwh_unit_str`   |
 | Cloud egress price per GB       |      `{python} EconomicConstants.cloud_egress_per_gb_str`     |     `{python} EconomicConstants.cloud_egress_per_gb_unit_str`      |
 
-: **Fleet-Scale Economic Parameters**: Illustrative cloud GPU, electricity, and egress rates for TCO examples (substitute contract pricing for absolute budgets). {#tbl-fleet-economic}
+: **Fleet-Scale Economic Parameters**: Illustrative GPU-hour, electricity, and egress rates for TCO examples (substitute contract pricing for absolute budgets). The fleet GPU-hour reference is the price per in-service accelerator-hour used by the volume's fleet cost examples; the cloud rental rates are public list-price anchors for comparison. {#tbl-fleet-economic}
 
 ```{python}
 #| echo: false

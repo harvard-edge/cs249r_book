@@ -30,7 +30,7 @@ from mlsysim.core.units import *
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: ## The α-β Communication Model
 # │ Goal: α-β table, crossover callout, and perspective ring-N anchor.
-from mlsysim.fmt import MarkdownStr, check, fmt, fmt_bandwidth, fmt_count, fmt_int, fmt_qty_int, fmt_time
+from mlsysim.fmt import MarkdownStr, check, fmt, fmt_bandwidth, fmt_count, fmt_int, fmt_qty_int, fmt_qty_range, fmt_time
 
 from mlsysim.core.units import (
     GB,
@@ -49,15 +49,22 @@ class CommAlphaBeta:
 
     ib_ndr_alpha_us = Systems.SwitchFabric.AlphaNdr.to(microsecond).magnitude  # NDR per-message α anchor (editor ruling: SwitchFabric.AlphaNdr)
     ib_ndr_beta = ib_ndr.bandwidth
-    ib_hdr_alpha_us = Systems.Fabrics.InfiniBand_HDR.latency_us
     ib_hdr_beta = ib_hdr.bandwidth
-    roce_alpha_us = Systems.Fabrics.RoCE_100G.latency_us
     roce_beta = roce.bandwidth
-    tcp_alpha_us = Systems.Fabrics.Ethernet_100G.latency_us
+    tcp_alpha_us = Systems.Fabrics.Ethernet_100G.latency_us  # kernel TCP stack dominates; already an effective latency
     nvlink_h100_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
     pcie_gen5_bw = Hardware.Cloud.H100.interconnect.bandwidth
-    nvlink_latency = Hardware.Tech.Interconnect.NVLink.latency
-    pcie_latency = Hardware.Tech.Interconnect.PCIeGen5.latency
+    # α convention (release ruling D24): effective per-message launch latency including the
+    # communication library's software stack, as in @tbl-interconnect-parameters (ch05 owns it).
+    # Scenario ranges come from the registry (Systems.SwitchFabric.EffectiveAlpha*), shared with ch05 and App G.
+    _sf = Systems.SwitchFabric
+    nvlink_alpha_lo, nvlink_alpha_hi = _sf.EffectiveAlphaNvlinkLow, _sf.EffectiveAlphaNvlinkHigh
+    pcie_alpha_lo, pcie_alpha_hi = _sf.EffectiveAlphaPcieGen5Low, _sf.EffectiveAlphaPcieGen5High
+    ndr_alpha_lo, ndr_alpha_hi = _sf.EffectiveAlphaNdrLow, _sf.EffectiveAlphaNdrHigh
+    hdr_alpha_lo, hdr_alpha_hi = _sf.EffectiveAlphaHdrLow, _sf.EffectiveAlphaHdrHigh
+    roce_alpha_lo, roce_alpha_hi = _sf.EffectiveAlphaRoceLow, _sf.EffectiveAlphaRoceHigh
+    check(ndr_alpha_lo <= Systems.SwitchFabric.AlphaNdr <= ndr_alpha_hi, "NDR α anchor must sit inside the ch05 NDR range")
+    check(roce_alpha_lo <= Systems.SwitchFabric.AlphaRoce <= roce_alpha_hi, "Registry RoCE α must sit inside the ch05 RoCE range")
     ring_n_gpus = Systems.Clusters.Research_256.total_accelerators
     grad_layer_mb_min = 10  # scenario assumption: per-layer gradient size, low end
     grad_layer_mb_max = 100  # scenario assumption: per-layer gradient size, high end
@@ -80,15 +87,15 @@ class CommAlphaBeta:
         Hardware.Cloud.H100.nvlink.bandwidth_per_direction * 2 == Hardware.Cloud.H100.nvlink.bandwidth,
         "Caption states the per-direction rate is half the bidirectional aggregate",
     )
-    ib_hdr_alpha_us_str = fmt_time(ib_hdr_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
+    ib_hdr_alpha_range_str = fmt_qty_range(hdr_alpha_lo, hdr_alpha_hi, microsecond, precision=0, commas=False)
     ib_hdr_beta_gb_per_s_str = fmt_bandwidth(ib_hdr_beta, unit=GB / second, precision=0, commas=False)
-    roce_alpha_us_str = fmt_time(roce_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
+    roce_alpha_range_str = fmt_qty_range(roce_alpha_lo, roce_alpha_hi, microsecond, precision=0, commas=False)
     roce_beta_gb_per_s_str = fmt_bandwidth(roce_beta, unit=GB / second, precision=1, commas=False)
     tcp_alpha_us_str = fmt_time(tcp_alpha_us * microsecond, unit=microsecond, precision=0, commas=False)
     nvlink_bw_gb_per_s_str = fmt_bandwidth(nvlink_h100_bw, unit=GB / second, precision=0, commas=False)
     pcie_bw_gb_per_s_str = fmt_bandwidth(pcie_gen5_bw, unit=GB / second, precision=0, commas=False)
-    nvlink_lat_ns_str = fmt_time(nvlink_latency, unit=nanosecond, precision=0, commas=False)
-    pcie_lat_ns_str = fmt_time(pcie_latency, unit=nanosecond, precision=0, commas=False)
+    nvlink_alpha_range_str = fmt_qty_range(nvlink_alpha_lo, nvlink_alpha_hi, microsecond, precision=0, commas=False)
+    pcie_alpha_range_str = fmt_qty_range(pcie_alpha_lo, pcie_alpha_hi, microsecond, precision=0, commas=False)
     crossover_kb_str = fmt_qty_int(crossover, KB, commas=False)
     check(abs(crossover.to(KB).magnitude - round(crossover.to(KB).magnitude)) < 1e-6, "Crossover renders as an integer KB value")
     ring_n_str = fmt_count(ring_n_gpus, commas=False, label="GPU")
@@ -105,22 +112,22 @@ Every point-to-point transfer on a network follows the same fundamental pattern:
 
 $$ \PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \frac{\PointToPointMessageSize}{\LinkBandwidth} $$ {#eq-alpha-beta}
 
-Here $\MessageStartupLatency$ is the **startup latency**\index{Alpha-Beta Model!startup latency} (seconds), the fixed cost of initiating a message including software overhead, network interface card (NIC) processing, and routing setup; $\LinkBandwidth$ is the **link bandwidth**\index{Alpha-Beta Model!link bandwidth} (bytes/s), the sustained data rate after startup; and $\PointToPointMessageSize$ is the **message size**\index{Alpha-Beta Model!message size} (bytes). The model decomposes every transfer into exactly two costs: a per-message cost ($\MessageStartupLatency$) paid regardless of size, and a per-byte cost ($\PointToPointMessageSize/\LinkBandwidth$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-appdx-comm-foundations-algorithm-selection, while parameterizing physical interconnects (@tbl-alpha-beta-params) provides the baseline $\MessageStartupLatency$ and $\LinkBandwidth$ values for hardware commonly found in ML clusters.
+Here $\MessageStartupLatency$ is the **startup latency**\index{Alpha-beta model!startup latency} (seconds), the fixed cost of initiating a message including software overhead, network interface card (NIC) processing, and routing setup; $\LinkBandwidth$ is the **link bandwidth**\index{Alpha-beta model!link bandwidth} (bytes/s), the sustained data rate after startup; and $\PointToPointMessageSize$ is the **message size**\index{Alpha-beta model!message size} (bytes). The model decomposes every transfer into exactly two costs: a per-message cost ($\MessageStartupLatency$) paid regardless of size, and a per-byte cost ($\PointToPointMessageSize/\LinkBandwidth$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-appdx-comm-foundations-algorithm-selection, while parameterizing physical interconnects (@tbl-alpha-beta-params) provides the baseline $\MessageStartupLatency$ and $\LinkBandwidth$ values for hardware commonly found in ML clusters.
 
-| **Interconnect**                                              |    **$\MessageStartupLatency$ (Latency)**    |          **$\LinkBandwidth$ (Bandwidth)**         | **Typical Role**                 |
-|:--------------------------------------------------------------|:--------------------------------------------:|:-------------------------------------------------:|:---------------------------------|
-| **NVLink 4.0 (H100)**                                         |  `{python} CommAlphaBeta.nvlink_lat_ns_str`  |  `{python} CommAlphaBeta.nvlink_bw_gb_per_s_str`  | Intra-node GPU-to-GPU            |
-| **PCIe Gen5**                                                 |   `{python} CommAlphaBeta.pcie_lat_ns_str`   |   `{python} CommAlphaBeta.pcie_bw_gb_per_s_str`   | CPU-GPU, NIC-GPU                 |
-| **InfiniBand NDR (`{python} CommAlphaBeta.ib_ndr_line_str`)** | `{python} CommAlphaBeta.ib_ndr_alpha_us_str` | `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` | Inter-node (high-end clusters)   |
-| **InfiniBand HDR (`{python} CommAlphaBeta.ib_hdr_line_str`)** | `{python} CommAlphaBeta.ib_hdr_alpha_us_str` | `{python} CommAlphaBeta.ib_hdr_beta_gb_per_s_str` | Inter-node (previous generation) |
-| **RoCE v2 (`{python} CommAlphaBeta.roce_line_str`)**          |  `{python} CommAlphaBeta.roce_alpha_us_str`  |  `{python} CommAlphaBeta.roce_beta_gb_per_s_str`  | Inter-node (Ethernet clusters)   |
-| **TCP/IP (Ethernet)**                                         |  `{python} CommAlphaBeta.tcp_alpha_us_str`   |                       Varies                      | Control plane, non-RDMA fallback |
+| **Interconnect**                                              |      **$\MessageStartupLatency$ (latency)**     |          **$\LinkBandwidth$ (bandwidth)**         | **Typical role**                 |
+|:--------------------------------------------------------------|:-----------------------------------------------:|:-------------------------------------------------:|:---------------------------------|
+| **NVLink 4.0 (H100)**                                         | `{python} CommAlphaBeta.nvlink_alpha_range_str` |  `{python} CommAlphaBeta.nvlink_bw_gb_per_s_str`  | Intra-node GPU-to-GPU            |
+| **PCIe Gen5**                                                 |  `{python} CommAlphaBeta.pcie_alpha_range_str`  |   `{python} CommAlphaBeta.pcie_bw_gb_per_s_str`   | CPU-GPU, NIC-GPU                 |
+| **InfiniBand NDR (`{python} CommAlphaBeta.ib_ndr_line_str`)** |   `{python} CommAlphaBeta.ib_ndr_alpha_us_str`  | `{python} CommAlphaBeta.ib_ndr_beta_gb_per_s_str` | Inter-node (high-end clusters)   |
+| **InfiniBand HDR (`{python} CommAlphaBeta.ib_hdr_line_str`)** | `{python} CommAlphaBeta.ib_hdr_alpha_range_str` | `{python} CommAlphaBeta.ib_hdr_beta_gb_per_s_str` | Inter-node (previous generation) |
+| **RoCE v2 (`{python} CommAlphaBeta.roce_line_str`)**          |  `{python} CommAlphaBeta.roce_alpha_range_str`  |  `{python} CommAlphaBeta.roce_beta_gb_per_s_str`  | Inter-node (Ethernet clusters)   |
+| **TCP/IP (Ethernet)**                                         |    `{python} CommAlphaBeta.tcp_alpha_us_str`    |                       Varies                      | Control plane, non-RDMA fallback |
 
-: **$\MessageStartupLatency$-$\LinkBandwidth$ Parameters by Interconnect**: Startup latency and sustained bandwidth for interconnects used in ML clusters. The $\LinkBandwidth$ column uses one-way or per-direction bandwidth, so the H100 NVLink entry is half of the `{python} CommAlphaBeta.nvlink_h100_total_gb_per_s_str` bidirectional aggregate specification. The InfiniBand NDR $\MessageStartupLatency$ is the per-message base latency of the $\MessageStartupLatency$-$\LinkBandwidth$ model, which is smaller than the fabric's end-to-end one-way latency; the other rows are end-to-end startup latencies, so compare NDR with them only loosely. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. The $\MessageStartupLatency$ values here are hardware and fabric startup latencies; @tbl-interconnect-parameters in @sec-collective-communication instead quotes the effective per-message launch latency of a collective, which includes the communication library's software stack and so runs to microseconds even on NVLink. The two tables follow different conventions for $\MessageStartupLatency$, so a crossover size computed from one table should not be compared with the other. {#tbl-alpha-beta-params}
+: **$\MessageStartupLatency$-$\LinkBandwidth$ Parameters by Interconnect**: Effective startup latency and sustained bandwidth for interconnects used in ML clusters. $\MessageStartupLatency$ follows the convention of @tbl-interconnect-parameters in @sec-collective-communication, the effective per-message launch latency including the communication library's software stack, which is why it reaches microseconds even on NVLink. The InfiniBand NDR entry is the single anchor that every worked example in this appendix uses, and it lies inside that table's NDR range. The $\LinkBandwidth$ column uses one-way or per-direction bandwidth, so the H100 NVLink entry is half of the `{python} CommAlphaBeta.nvlink_h100_total_gb_per_s_str` bidirectional aggregate specification. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. {#tbl-alpha-beta-params}
 
 ### Latency-dominated vs. bandwidth-dominated regimes {#sec-appdx-comm-foundations-regimes}
 
-The $\MessageStartupLatency$-$\LinkBandwidth$ model reveals two distinct operating regimes. For small messages, the startup latency $\MessageStartupLatency$ dominates, and the link spends most of its time starting transfers rather than sustaining them. For large messages, the bandwidth term $\PointToPointMessageSize/\LinkBandwidth$ dominates, and the startup cost becomes negligible. The **crossover message size**\index{Alpha-Beta Model!crossover message size} $\LatencyBandwidthCrossoverSize$, defined by @eq-crossover, is the point where both terms contribute equally:
+The $\MessageStartupLatency$-$\LinkBandwidth$ model reveals two distinct operating regimes. For small messages, the startup latency $\MessageStartupLatency$ dominates, and the link spends most of its time starting transfers rather than sustaining them. For large messages, the bandwidth term $\PointToPointMessageSize/\LinkBandwidth$ dominates, and the startup cost becomes negligible. The **crossover message size**\index{Alpha-beta model!crossover message size} $\LatencyBandwidthCrossoverSize$, defined by @eq-crossover, is the point where both terms contribute equally:
 
 $$ \LatencyBandwidthCrossoverSize = \MessageStartupLatency\times \LinkBandwidth$$ {#eq-crossover}
 
@@ -278,7 +285,7 @@ Broadcast is structurally asymmetric (one sender, many receivers), which makes a
 
 With the individual formulas in place, @tbl-collective-summary provides a compact reference for comparing the cost structure of each collective operation. Checking the bandwidth and latency columns side by side shows how each collective scales as either payload size or device count grows.
 
-| **Operation**            |                                         **Bandwidth Term**                                        |                  **Latency Term**                  |       **Primary Use Case**       |
+| **Operation**            |                                         **Bandwidth term**                                        |                  **Latency term**                  |       **Primary use case**       |
 |:-------------------------|:-------------------------------------------------------------------------------------------------:|:--------------------------------------------------:|:--------------------------------:|
 | **AllReduce (Ring)**     | $2 \cdot \frac{\DeviceCount-1}{\DeviceCount} \cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$ |  $2(\DeviceCount-1) \cdot \MessageStartupLatency$  |   Data-parallel gradient sync    |
 | **AllReduce (Tree)**     |             $2\log_2 \DeviceCount\cdot \frac{\CollectivePayloadSize}{\LinkBandwidth}$             | $2\log_2 \DeviceCount\cdot \MessageStartupLatency$ |        Small-message sync        |
@@ -311,7 +318,7 @@ $$ \RingTreeCrossoverPayload(\DeviceCount) = \LatencyBandwidthCrossoverSize \tim
 - **$\CollectivePayloadSize< \RingTreeCrossoverPayload(\DeviceCount)$** (barriers, scalars): The tree has the lower modeled cost because its logarithmic startup term outweighs its additional bandwidth cost.
 - **$\CollectivePayloadSize\approx \RingTreeCrossoverPayload(\DeviceCount)$** (medium tensors): The two modeled costs are similar, so benchmark them alongside recursive halving-doubling on the target topology.
 
-| **Regime**                                                                  |                **Ring**               |                      **Tree**                     | **Recursive Halving-Doubling**                              |
+| **Regime**                                                                  |                **Ring**               |                      **Tree**                     | **Recursive halving-doubling**                              |
 |:----------------------------------------------------------------------------|:-------------------------------------:|:-------------------------------------------------:|:------------------------------------------------------------|
 | **$\CollectivePayloadSize> \RingTreeCrossoverPayload(\DeviceCount)$**       | Lower cost under the displayed models |               Higher bandwidth term               | Candidate with near-optimal bandwidth and logarithmic steps |
 | **$\CollectivePayloadSize< \RingTreeCrossoverPayload(\DeviceCount)$**       |       Higher linear startup term      |       Lower cost under the displayed models       | Candidate with logarithmic startup steps                    |
@@ -418,7 +425,7 @@ class CommPipeline:
     bubble_p8_m64_pct_str = fmt_percent(bubble_p8_m64, precision=1, commas=False, style='symbol')
 ```
 
-| **Pipeline Stages ($\PipelineParallelDegree$)** |          **$\MicrobatchCount$ = 8**          |          **$\MicrobatchCount$ = 16**          |          **$\MicrobatchCount$ = 32**          |          **$\MicrobatchCount$ = 64**          |
+| **Pipeline stages ($\PipelineParallelDegree$)** |          **$\MicrobatchCount$ = 8**          |          **$\MicrobatchCount$ = 16**          |          **$\MicrobatchCount$ = 32**          |          **$\MicrobatchCount$ = 64**          |
 |:------------------------------------------------|:--------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|:---------------------------------------------:|
 | **$\PipelineParallelDegree$ = 4**               | `{python} CommPipeline.bubble_p4_m8_pct_str` | `{python} CommPipeline.bubble_p4_m16_pct_str` | `{python} CommPipeline.bubble_p4_m32_pct_str` | `{python} CommPipeline.bubble_p4_m64_pct_str` |
 | **$\PipelineParallelDegree$ = 8**               | `{python} CommPipeline.bubble_p8_m8_pct_str` | `{python} CommPipeline.bubble_p8_m16_pct_str` | `{python} CommPipeline.bubble_p8_m32_pct_str` | `{python} CommPipeline.bubble_p8_m64_pct_str` |
@@ -553,7 +560,7 @@ class CommCompression:
 
 Break-even codec overhead limits (@tbl-compression-breakeven) scale with compression ratio and uncompressed AllReduce time. Higher compression ratios tolerate larger codec overheads, up to the bandwidth-dependent portion of the uncompressed collective. Ultimately, these break-even limits show that gradient compression delivers the highest net benefit on lower-bandwidth interconnects where transfer times dominate, whereas on high-speed fabrics the tolerable codec overhead budget is tightly constrained and requires lightweight quantization or sparsification algorithms.
 
-| **Compression Ratio ($\CompressionRatio$)** |    **AllReduce = 10 ms (Max Codec Overhead)**   |    **AllReduce = 40 ms (Max Codec Overhead)**   |   **AllReduce = 100 ms (Max Codec Overhead)**    |
+| **Compression ratio ($\CompressionRatio$)** |    **AllReduce = 10 ms (max codec overhead)**   |    **AllReduce = 40 ms (max codec overhead)**   |   **AllReduce = 100 ms (max codec overhead)**    |
 |:--------------------------------------------|:-----------------------------------------------:|:-----------------------------------------------:|:------------------------------------------------:|
 | **4$\times$**                               |  `{python} CommCompression.breakeven_4_10_str`  |  `{python} CommCompression.breakeven_4_40_str`  |  `{python} CommCompression.breakeven_4_100_str`  |
 | **16$\times$**                              |  `{python} CommCompression.breakeven_16_10_str` |  `{python} CommCompression.breakeven_16_40_str` | `{python} CommCompression.breakeven_16_100_str`  |

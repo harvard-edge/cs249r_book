@@ -202,9 +202,9 @@ class EdgeInferenceBenchmarks:
 # ---------------------------------------------------------------------------
 _KAPLAN_SCALING_PROVENANCE = Provenance(
     kind=ProvenanceKind.LITERATURE,
-    ref="Kaplan et al. (2020), Scaling Laws for Neural Language Models",
+    ref="Kaplan et al. (2020), Scaling Laws for Neural Language Models (Figure 1; Tables 2, 3, 5, 6)",
     url="https://arxiv.org/abs/2001.08361",
-    verified="2026-06-13",
+    verified="2026-10-15",
 )
 
 # (axis, x_c, alpha, x_min, x_max)  -- L = (X / x_c)^(-alpha) on [x_min, x_max]
@@ -229,6 +229,49 @@ class KaplanScalingLaws:
         for (k, xc, a, lo, hi) in _KAPLAN_SCALING_ROWS
     )
     list = entries  # parity with the Registry `.list` convention
+
+    # -- Added 2026-10-15: the joint fits and the compute-efficient frontier, so
+    # learning-curve and allocation figures regenerate from the published laws.
+    # Values verified against arXiv:2001.08361v1. ``entries`` above keep the
+    # constants printed on Figure 1 (C_min scale 2.3e8 PF-days); Table 5 states
+    # the same law's scale as 3.1e8 PF-days (``single_variable_fits`` below).
+
+    # Table 5 (Appendix A): single-variable power laws L = (X_c / X)^alpha.
+    # Units: params (non-embedding), tokens, PF-days, tokens, steps.
+    single_variable_fits = {
+        "params": {"alpha": 0.076, "scale": 8.8e13},
+        "data": {"alpha": 0.095, "scale": 5.4e13},
+        "compute_naive": {"alpha": 0.057, "scale": 1.6e7},
+        "compute_min": {"alpha": 0.050, "scale": 3.1e8},
+        "critical_batch": {"alpha": 0.21, "scale": 2.1e8},
+        "steps": {"alpha": 0.76, "scale": 2.1e3},
+    }
+
+    # Table 2 (Section 4.2): L(N, D) = [(N_c/N)^(alpha_N/alpha_D) + D_c/D]^alpha_D,
+    # Eq. 1.5, fit with early stopping. N in non-embedding params, D in tokens.
+    loss_vs_params_and_data = {"alpha_n": 0.076, "alpha_d": 0.103, "n_c": 6.4e13, "d_c": 1.8e13}
+
+    # Table 3 (Section 5.2): L(N, S_min) = (N_c/N)^alpha_N + (S_c/S_min)^alpha_S,
+    # Eq. 1.6 / 5.6, infinite-data learning curves. S_min = S / (1 + B_crit(L)/B)
+    # (Eq. 5.4), with B_crit(L) = B_star / L^(1/alpha_B) (Eq. 5.3, Table 5 values).
+    loss_vs_params_and_steps = {"alpha_n": 0.077, "alpha_s": 0.76, "n_c": 6.5e13, "s_c": 2.1e3}
+
+    # Table 6 (Appendix A): compute-efficient frontier X = X_e * C_min^p,
+    # C_min in PF-days. Units: params, tokens, steps, tokens.
+    compute_efficient_frontier = {
+        "params": {"p": 0.73, "scale": 1.3e9},
+        "batch_tokens": {"p": 0.24, "scale": 2.0e6},
+        "steps_min": {"p": 0.03, "scale": 5.4e3},
+        "tokens": {"p": 0.27, "scale": 2e10},
+    }
+
+    # Section 2.2: default run, 2.5e5 steps of 512 sequences x 1024 tokens
+    # (B = 2^19 tokens). Compute is C = 6NBS (Eq. 5.5; the 6 is
+    # Literature.Chinchilla.ComputeConstant); a PF-day is 1e15 FLOP/s for one
+    # day (Section 1.2), so build it with pint units rather than a constant here.
+    default_steps = 2.5e5
+    default_batch_sequences = 512
+    default_context_tokens = 1024
 
 
 from .series import Series  # noqa: E402  (dataset series behind trend figures)
