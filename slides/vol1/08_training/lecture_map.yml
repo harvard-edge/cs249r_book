@@ -1,0 +1,226 @@
+chapter: 08_training
+lecture: 8
+title: Model Training
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+layer: training
+thesis: "Training costs orders of magnitude more than inference, and memory, not arithmetic, usually decides what fits."
+hook:
+  minutes: "0-6"
+  setup: "War Story 8.1 (2022): PaLM, a 540-billion-parameter model, trained on 6,144 TPU v4 chips in two pods. The loss spiked about 20 times despite gradient clipping. Each time, engineers restarted from a checkpoint about 100 steps earlier and skipped about 200 to 500 batches. Photo of a TPU v4 board (four chips), then an illustrative loss curve with a spike and the rewind."
+  question_to_class: "What did each spike cost, and what had to be saved so the run could rewind at all?"
+  payoff: "Each rewind replays steps the cluster already paid for, which shows up as lower utilization in the training-time law. The rewind needs the full training state, 14 bytes per parameter in a checkpoint (about 7.6 TB for PaLM), and the state held during training is 16 bytes per parameter (about 8.6 TB, the memory of about 100 H100s) before any activation. The synthesis returns to the TPU board with those numbers."
+  sources: ["chapter War Story 8.1 (Chowdhery et al. 2022)", "chapter §8.4.5 (14 B/param checkpoint)", "chapter §8.3.2 (16 B/param static state)", "photo: Jouppi et al., TPU v4, CC BY 4.0, Wikimedia Commons (shared library)"]
+driving_question: "Why does training a model cost so much more than running it, and what decides whether a training step fits on one accelerator?"
+recall: "Lecture 7: reverse-mode autodiff keeps the forward values its backward rules read, so training memory is set by what the tape stores, not by the weights alone."
+running_example: "GPT-2 XL (1.5B parameters, 48 layers, hidden 1,600) at batch 32 of 1,024-token sequences on one H100 (80 GB HBM, 3.35 TB/s, 989 TFLOP/s dense 16-bit). Its run needs about 1.5e21 FLOPs, about 35 days at 50 percent utilization; its batch-32 step needs 598 GB in FP32 and is brought to 66.8 GB. ResNet-50 carries the input pipeline; Llama 3 8B carries fine-tuning."
+
+segments:
+  - name: Time
+    divider_question: "How long does a training run take, and what does it cost?"
+    read: "§8.1.1, §8.2, §8.5"
+    concept_questions: [3, 4, 5]
+    land: "Run time is 6PD FLOPs over peak rate times utilization, so every point of utilization recovered removes time, energy, and dollars in the same proportion."
+  - name: Memory
+    divider_question: "What does a training step have to hold in memory?"
+    read: "§8.3.2, §8.3.3"
+    concept_questions: [6, 7, 8, 9]
+    land: "Mixed-precision Adam holds 16 bytes per parameter before any activation, and activations grow with batch and sequence length until they, not arithmetic, decide what fits."
+  - name: Feeding
+    divider_question: "Can the host keep the accelerator fed?"
+    read: "§8.4.1, §8.4.2, §8.5, §8.6.2"
+    concept_questions: [10, 11, 12]
+    land: "Throughput is the minimum of preparation, transfer, and compute; overlap hides the faster stages behind the slowest one but cannot speed it up."
+  - name: Fitting
+    divider_question: "How do we fit GPT-2 XL's batch-32 step on one H100?"
+    read: "§8.6.3 to §8.6.6"
+    concept_questions: [13, 14, 15]
+    land: "Mixed precision, FlashAttention, and two micro-batches take the step from 598 GB to 66.8 GB; each technique relieves one memory term and costs something elsewhere."
+
+concept_questions:
+  - id: 1
+    q: "What did the PaLM loss spikes cost?"
+    picture: "Photo of a TPU v4 board; illustrative loss curve with one spike, then the rewind of about 100 steps and the skipped batches"
+    numbers: "540B parameters, 6,144 TPU v4 chips, about 20 spikes, rewind about 100 steps, skip about 200 to 500 batches (War Story 8.1)"
+    example: "PaLM, 2022"
+    read: "§8.4.5"
+  - id: 2
+    q: "How much more does training cost than one inference?"
+    picture: "Two log-scale bars: one generated GPT-2 token against one GPT-2 training run"
+    numbers: "3.0e9 FLOPs per forward token; 1.5e21 FLOPs per run; ratio 5e11, so one run equals about 500 billion generated tokens (derived from §8.1)"
+    example: "GPT-2 XL"
+    read: "§8.1"
+  - id: 3
+    q: "Why does a training token cost 6P FLOPs?"
+    picture: "Stacked bars: inference 2P (forward); training 2P forward plus 4P backward (two products per weight)"
+    numbers: "2P forward, 4P backward, 6P total per token; O = 6PD = 1.5e21 for GPT-2 (Lighthouse 8.1)"
+    example: "One linear layer: activation gradient and weight gradient"
+    read: "§8.1.1, §8.3.3"
+  - id: 4
+    q: "How long does a training run take, and how much energy does it use?"
+    picture: "Focus slide: T = O / (R_peak x eta); worked example card"
+    numbers: "1.5e21 FLOPs / (989 TFLOP/s x 0.50) = 3.0e6 s, about 35 days, 5.1 million steps of 0.60 s; 700 W gives about 590 kWh; $3,370 at $4/hour (§8.2, Napkin Math 8.7)"
+    example: "GPT-2 XL on one H100"
+    read: "§8.2"
+  - id: 5
+    q: "What is utilization, and why is a busy GPU not an efficient one?"
+    picture: "Bars of published model FLOPs utilization"
+    numbers: "PaLM 46.2 percent MFU on 6,144 TPU v4 (Chowdhery et al. 2022); Megatron-LM GPT models on A100 clusters 44 to 52 percent of peak (Narayanan et al. 2021); GPT-2 XL scenario 50 percent assumed"
+    example: "nvidia-smi near 100 percent busy for a memory-stalled job"
+    read: "§8.5"
+  - id: 6
+    q: "What state does training hold that inference does not?"
+    picture: "Stacked bar built in four steps: weights; gradients; Adam's two moments (1:1:2); activations that grow with batch"
+    numbers: "Parameters, gradients, first and second moments in a 1:1:2 ratio (§8.3.2, simplified static view)"
+    example: "SGD holds no moments, momentum one, Adam two (table 3)"
+    read: "§8.3.2"
+  - id: 7
+    q: "Why does mixed-precision Adam hold 16 bytes per parameter?"
+    picture: "Two bars: inference 2 B per parameter; training 2 + 2 + 4 + 8 = 16 B"
+    numbers: "16 B/param = 8x the FP16 weights; GPT-2 XL 24 GB, about 28 percent of the H100 (Napkin Math 8.2)"
+    example: "GPT-2 XL optimizer memory, FP32 and mixed precision both 24 GB"
+    read: "§8.3.2.3"
+  - id: 8
+    q: "What happens to activation memory at batch 32?"
+    picture: "Stacked bar: 24 GB static, about 86 GB other activations, about 201 GB attention scores, against the 85.9 GB capacity line"
+    numbers: "286.9 GB of FP16 activations, 310.9 GB in all, 3.6x the H100; attention scores about 201 GB, 70 percent; per layer 4,194 of 5,043 MB (Napkin Math 8.3, §8.6.4)"
+    example: "GPT-2 XL, batch 32, 1,024 tokens"
+    read: "§8.3.3"
+  - id: 9
+    q: "Can one H100 fine-tune Llama 3 8B?"
+    picture: "Given card, worked steps, then two stacked bars against the capacity line"
+    numbers: "Full: 16 + 16 + 32 + 64 = 128 GB static + 36.5 GB activations = about 165 GB. LoRA rank 16 on Q and V: 6.8M trainable (0.08 percent), 0.11 GB of state; 16 + 0.11 + 36.5 = about 53 GB (Napkin Math 8.4)"
+    example: "Llama 3 8B, batch 4 x 2,048 tokens"
+    read: "§8.3.3.3"
+  - id: 10
+    q: "How fast does each tier deliver bytes to the accelerator?"
+    picture: "Log-scale bandwidth ladder"
+    numbers: "NVMe 7 GB/s, host DRAM 50 GB/s, H100 HBM 3,350 GB/s, about 480x from bottom to top (§8.4.2)"
+    example: "GPT-2's 40 GB WebText fits in host memory"
+    read: "§8.4.2"
+  - id: 11
+    q: "What sets a training pipeline's throughput?"
+    picture: "Three-stage pipeline diagram with throughput = min(prepare, transfer, compute); ResNet-50 supply against demand"
+    numbers: "ResNet-50: 24.6 GFLOP per image; H100 demand about 10,100 images/s; 14 workers x 375 = 5,250 images/s; busy about 52 percent; A100 demand 3,200 images/s was fed (§8.4.2)"
+    example: "ResNet-50 moving from A100 to H100"
+    read: "§8.4.2"
+  - id: 12
+    q: "What can overlap fix, and what can it not?"
+    picture: "Serial against overlapped timeline (schematic); a profiler trace with idle gaps"
+    numbers: "GIL-locked loader: 250 ms preparation against 12 ms compute, busy 4.6 percent (Example 8.2); GPT-2 single-core tokenization 655.4 ms against a 596 ms step, busy about 48 percent serial (Example 8.1)"
+    example: "Python threads holding the GIL; fix with process workers"
+    read: "§8.5, §8.6.2"
+  - id: 13
+    q: "What does mixed precision buy, and what does it not?"
+    picture: "Run time by format; FP32, FP16, BF16 bit layouts with their smallest normal values"
+    numbers: "H100 FP32 67, TF32 494, BF16 989 TFLOP/s; GPT-2 XL 518, 70, 35 days ($49,751, $6,748, $3,370) at 50 percent (Napkin Math 8.7); FP16 smallest normal 6.1e-5, BF16 about 1e-38 (table 9); activations halve, 16 B/param unchanged"
+    example: "Loss scaling for FP16; BF16 usually without it"
+    read: "§8.6.3"
+  - id: 14
+    q: "How does FlashAttention avoid storing the attention matrix?"
+    picture: "A 4,096 x 4,096 score matrix with one 128 x 128 tile highlighted; two log bars, 67.1 MB against 65.5 KB"
+    numbers: "4,096^2 x 4 B = 67.1 MB per head; 128^2 x 4 B = 65.5 KB; stored per-head footprint 138.4 MB against 4.2 MB (32.7x); up to 3x speedups reported (Dao et al. 2022); GPT-2 XL step 311 GB to 109.6 GB (§8.6.4)"
+    example: "GPT-2 XL attention, online softmax"
+    read: "§8.6.4"
+  - id: 15
+    q: "Accumulate micro-batches or checkpoint activations?"
+    picture: "Eight-segment checkpoint diagram; two choice cards with their memory and arithmetic cost; the scoreboard"
+    numbers: "Two micro-batches of 16: 66.8 GB, same arithmetic. Eight segments of six layers: 0.84 + 10.7 = 11.5 GB of activations, 35.5 GB total, about 33 percent more arithmetic, 47 days instead of 35 (Napkin Math 8.8, 8.10); sqrt(48) about 7 checkpoints saves 71 percent (§8.6.5.2)"
+    example: "GPT-2 XL on one H100"
+    read: "§8.6.5"
+
+worked_examples:
+  - name: "Napkin Math 8.2: GPT-2 optimizer memory"
+    steps: ["given: 1.5B parameters, Adam", "FP32: 6 GB weights + 6 GB gradients + 12 GB moments = 24 GB", "mixed precision: 3 + 3 + 6 master + 12 moments = 24 GB", "result: 16 B/param either way, about 28 percent of an H100", "meaning: precision does not shrink the static state; activations decide the rest"]
+  - name: "Training-time law: GPT-2 XL on one H100"
+    steps: ["given: 1.5e21 FLOPs, 989 TFLOP/s, eta 0.50, 700 W", "T = O / (R x eta) = 3.0e6 s", "about 35 days, 5.1 million steps of 0.60 s", "E = 700 W x T = about 590 kWh", "meaning: utilization moves time and energy together"]
+  - name: "Napkin Math 8.4: fine-tuning Llama 3 8B on one H100 (student exercise)"
+    steps: ["given: 8.0B parameters, mixed-precision Adam, batch 4 x 2,048, no stored score matrix, 85.9 GB", "full static: 16 + 16 + 32 + 64 = 128 GB", "plus 36.5 GB activations = about 165 GB: does not fit", "LoRA: 16 GB frozen + 0.11 GB adapter state + 36.5 GB = about 53 GB: fits with 33 GB spare", "meaning: training scope decides which memory terms exist"]
+  - name: "Napkin Math 8.10: GPT-2 XL on one H100 (running scoreboard)"
+    steps: ["FP32 598 GB", "mixed precision 311 GB", "FlashAttention 109.6 GB", "two micro-batches of 16: 66.8 GB, fits", "then feed it: eight workers and prefetch; 35 days"]
+
+active_learning:
+  - at_minute: 4
+    type: predict
+    prompt: "How many generated GPT-2 tokens cost as much arithmetic as one GPT-2 training run? A 5 million, B 5 billion, C 500 billion, D 5e15"
+    answer: "C. 1.5e21 / 3.0e9 = 5e11, about 500 billion tokens."
+  - at_minute: 7
+    type: retrieval
+    prompt: "Close your notes: what does reverse-mode autodiff keep from the forward pass, and why?"
+    answer: "The forward values each backward rule reads (layer inputs, pre-activations, masks), held until the backward pass consumes them."
+  - at_minute: 19
+    type: concept_question
+    prompt: "Double the peak rate or double the utilization: which halves GPT-2 XL's run?"
+    answer: "Both, in the law: T = O/(R x eta). They differ in cost: utilization is recovered in software on hardware already paid for, and at constant power it halves energy too."
+  - at_minute: 33
+    type: estimate
+    prompt: "Can one H100 (85.9 GB) fine-tune Llama 3 8B, fully or with LoRA?"
+    answer: "Full: 128 GB static + 36.5 GB = about 165 GB, no. LoRA: 16 + 0.11 + 36.5 = about 53 GB, yes."
+  - at_minute: 46
+    type: diagnose
+    prompt: "A trace shows short GPU bursts between long gaps; preparation 250 ms, GPU 12 ms per batch. What binds, and what is the fix?"
+    answer: "Data: Python threads holding the GIL serialize preparation; busy 4.6 percent. Use process workers (num_workers > 0) and prefetch, or move decoding to the accelerator."
+  - at_minute: 59
+    type: predict
+    prompt: "After FlashAttention, GPT-2 XL needs 109.6 GB. Accumulate two micro-batches of 16, or checkpoint eight segments?"
+    answer: "Both fit. Accumulation: 66.8 GB, same arithmetic per update. Checkpointing: 35.5 GB, about 33 percent more arithmetic (47 days instead of 35). The walkthrough takes accumulation."
+  - at_minute: 63
+    type: concept_question
+    prompt: "True or false: mixed precision halves Adam's training state; a GPU at 100 percent busy is efficient; a faster accelerator always shortens training."
+    answer: "All false: 16 B/param either way; busy time is an upper bound on MFU; ResNet-50 on H100 is busy about 52 percent."
+
+open_questions:
+  - "PaLM's spikes had no identified cause. Should a team spend compute finding the cause, or on cheaper rewinds?"
+  - "Buy a larger accelerator, or engineer the step to fit the one you have? What would change your answer?"
+  - "Should every published model report its MFU and energy, as PaLM reported 46.2 percent?"
+
+more_examples:
+  - "OPT-175B logbook: restarts and loss spikes in a public training log (Zhang et al. 2022)"
+  - "Goyal et al. 2017: ResNet-50 at batch 8,192 with linear learning-rate scaling and warmup"
+  - "AlexNet split across two 3 GB GTX 580 GPUs because one did not fit (Krizhevsky et al. 2012)"
+  - "Chinchilla-style budgets: O = 6PD as the planning equation for frontier runs"
+
+left_to_reading:
+  - concept: "Single-node data parallelism, AllReduce cost"
+    why: "Secondary; one line in the synthesis (35 days to 4.4 days on eight GPUs with perfect scaling). The ring AllReduce derivation is better read than heard."
+  - concept: "Sharding within one node (ZeRO stages, pipeline bubble)"
+    why: "Secondary; named once in the Llama exercise as the way full fine-tuning would fit."
+  - concept: "Training checkpoints (state_dict, cadence)"
+    why: "Taught through the hook: 14 B/param and the rewind; the mechanics are in §8.4.5."
+  - concept: "Wave quantization, GELU, learning-rate schedules, time to target quality"
+    why: "Detail better read than heard; time to target is owned by Lecture 12."
+  - concept: "Energy to carbon (Napkin Math 8.11)"
+    why: "Owned by Lecture 15; energy appears here only as power times time."
+
+closing:
+  return_to_hook: "Back to the TPU v4 board. PaLM's static state at 16 B/param is about 8.6 TB, the memory of about 100 H100s, before activations; each checkpoint holds about 7.6 TB at 14 B/param; each rewind replays steps already paid for, which is lost utilization. PaLM still reported 46.2 percent MFU."
+  read_and_practice: ["§8.1 to §8.6", "self-check questions at the end of each section", "TinyTorch optimizer and autograd modules"]
+  further_reading:
+    - cite: "Model Training, §8.2 to §8.6"
+      url: "https://mlsysbook.ai"
+      why: "The law, the memory budget, the pipeline, and the GPT-2 XL walkthrough in full."
+    - cite: "Chowdhery et al., PaLM: Scaling Language Modeling with Pathways, 2022"
+      url: "https://arxiv.org/abs/2204.02311"
+      why: "The loss spikes (training instability section) and the definition of MFU."
+    - cite: "Micikevicius et al., Mixed Precision Training, ICLR 2018"
+      url: "https://arxiv.org/abs/1710.03740"
+      why: "FP32 master weights and loss scaling, from the source."
+    - cite: "Dao et al., FlashAttention, NeurIPS 2022"
+      url: "https://arxiv.org/abs/2205.14135"
+      why: "IO-aware tiling and online softmax."
+    - cite: "Chen et al., Training Deep Nets with Sublinear Memory Cost, 2016"
+      url: "https://arxiv.org/abs/1604.06174"
+      why: "The sqrt(L) checkpoint schedule."
+  bridge: "Lecture 9: the law's numerator is 6PD, and D is the one factor this lecture held fixed. Which data is worth training on?"
+
+coverage:
+  primary_taught: ["Training-time law", "Model FLOPs utilization", "Training memory at scale", "Mixed precision", "Checkpointing and accumulation", "Profile to find the binding term", "Fine-tuning scope"]
+  primary_left_to_reading: []
+  secondary: ["Training input pipeline (taught)", "IO-aware attention (taught)", "Training checkpoints (hook only)", "Single-node data parallelism (one line)", "Sharding within one node (one line)"]
+
+notes_for_author:
+  - "Capacity: the chapter compares memory totals against 85.9 GB (the H100's 80 GiB in decimal GB). The deck draws that line and labels it, so 109.6 GB is over and 66.8 GB is under."
+  - "PaLM synthesis numbers (8.6 TB static, 7.6 TB checkpoint, about 100 H100s) are derived on the slide from the chapter's 16 and 14 B/param and PaLM's 540B; they are not stated in the chapter."
+  - "The PaLM loss curve on the hook slide is an illustrative schematic, labeled as such; the PaLM paper reports the spikes in prose."
+  - "Scaling (§8.7) gets one line; a 75-minute lecture cannot also teach AllReduce and ZeRO well."
