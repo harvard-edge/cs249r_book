@@ -12,9 +12,7 @@ A profile showing low utilization is often misdiagnosed as a hardware limit when
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference. Reach for it when translating a profiler symptom ("slow matmul," "shape mismatch," "OOM during training") into a concrete computational or memory cause. Each symptom or need maps to one section (@tbl-appdx-algorithm-lookup). Every section names the chapter that teaches its concept in context; the chapter carries the argument, and this appendix carries the derivation or the reference formula.
-
-Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
+This appendix is designed as a reference. Reach for it when translating a profiler symptom ("slow matmul," "shape mismatch," "OOM during training") into a concrete computational or memory cause. Each symptom or need maps to one section (@tbl-appdx-algorithm-lookup), and conventions throughout follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ denotes bandwidth). Every section names the chapter that teaches its concept in context; the chapter carries the argument, and this appendix carries the derivation or the reference formula.
 
 | **Symptom or need**                                                   | **Section**                                                                |
 |:----------------------------------------------------------------------|:---------------------------------------------------------------------------|
@@ -204,7 +202,7 @@ Each common layer type reduces to the GEMMs and elementwise operations above, so
 \endgroup
 ```
 
-Linear algebra specifies *what* to compute; the next question is *how* to express those computations in code.
+The formulas in @tbl-tensor-op-ref specify *what* each layer computes and how many operations it performs. Expressing those computations in code raises a second question: how frameworks represent multidimensional arrays in flat memory without copying data unnecessarily.
 
 ## Tensor Programming Primitives {#sec-appdx-algorithm-foundations-tensor-programming-primitives-1400}
 
@@ -337,7 +335,7 @@ TrainingMemoryBytes.optimizer_overhead_max = TrainingMemoryBytes._optimizer_over
 *   **Optimizer State**: Adam moments require `{python} TrainingMemoryBytes.optimizer_overhead_min_str` bytes per parameter; an FP32 master copy adds another `{python} TrainingMemoryBytes.bytes_fp32_str`, giving `{python} TrainingMemoryBytes.optimizer_overhead_str` bytes per parameter.
 *   **Activations**: Activations typically dominate the dynamic memory footprint during training. A recomputation- or tiled-attention-friendly estimate scales as $\mathcal{O}(\BatchSize\times \SequenceLength\times \LayerCount \times \HiddenDimension)$; a full no-recompute attention implementation also materializes attention-score tensors that scale with $\SequenceLength^2$.
 
-To see how these components interact in practice, consider a concrete model.
+To see how these four components interact on a single accelerator, consider a concrete language model. Once the static model state is allocated, the remaining device capacity sets a hard ceiling on the batch size that can run without recomputation.
 
 ```{python}
 #| echo: false
@@ -501,11 +499,9 @@ $$ \text{Softmax}(\OutputLogit_{\ClassIndex}) = \frac{e^{\OutputLogit_{\ClassInd
 
 [^fn-logit-unnormalized-score]: **Logit**\index{Logits!logit function}: Joseph Berkson\index{Berkson, Joseph|seealso{Logits}} coined the term in 1944 by analogy with *probit*. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(\LogisticProbability) = \log(\LogisticProbability/(1-\LogisticProbability))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
 
-The problem is that if $\OutputLogit_{\ClassIndex}$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{\OutputLogit_{\ClassIndex}}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The fix is to subtract the largest logit before exponentiating, the log-sum-exp trick\index{Log-sum-exp trick!appendix refresher}. The shift leaves the result mathematically unchanged and keeps every exponent at or below zero.[^fn-logsumexp-numerical-stability]
+The problem is that if $\OutputLogit_{\ClassIndex}$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{\OutputLogit_{\ClassIndex}}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The fix is to subtract the largest logit before exponentiating, the log-sum-exp trick\index{Log-sum-exp trick!appendix refresher}. The shift leaves the result mathematically unchanged and keeps every exponent at or below zero, as the worked example below illustrates for realistic logit values.[^fn-logsumexp-numerical-stability]
 
 [^fn-logsumexp-numerical-stability]: **Log-sum-exp**\index{Log-sum-exp trick!appendix refresher}: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex}}\right) = \SoftmaxRowMaximum + \log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum}\right)$, where $\SoftmaxRowMaximum = \max(\OutputLogit_{\NormalizingClassIndex})$. Shifted values $\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum$ are $\le 0$, ensuring exponentials never overflow.
-
-A small worked example shows why this trick matters in practice, even for large but realistic logit values:
 
 ```{python}
 #| echo: false
@@ -836,7 +832,6 @@ $$ \DataScalingExponent \DataScaleCoefficient \DatasetSize^{-\DataScalingExponen
 
 Equating these expressions yields the power-law optimality condition:
 $$ \ParameterScalingExponent \ParameterScaleCoefficient \Parameters^{-\ParameterScalingExponent} = \DataScalingExponent \DataScaleCoefficient \DatasetSize^{-\DataScalingExponent}. $$
-
 This condition states that at the compute-optimal allocation, the marginal loss reduction per fractional increase in parameter count must equal the marginal loss reduction per fractional increase in dataset tokens.
 
 #### Compute-optimal exponents {#sec-appdx-algorithm-chinchilla-exponents}

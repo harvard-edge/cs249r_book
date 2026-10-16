@@ -398,11 +398,9 @@ The chapter follows GPT-2 XL's run from estimate to execution (@tbl-training-cha
 
 : **Chapter Map**: Each section answers one question about the training run and names the term of the training-time law, or the memory constraint, that its techniques move. Memory does not appear in the law; it decides whether a configuration runs at all. {#tbl-training-chapter-spine tbl-colwidths="[24,28,30,18]"}
 
-Every later estimate in the chapter starts from how long the run takes, and the training-time law fixes that first.
-
 ## Training-Time Law {#sec-model-training-iron-law-training-performance-a53f}
 
-GPT-2 XL's run needs about `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`. Converting that operation count into days on an accelerator, and every loss of time into a factor engineering can recover, requires a decomposition of training time into its physical constituents in which wasted time appears as a lower utilization factor.
+Every later estimate in the chapter starts from how long the run takes, and the training-time law fixes that first. GPT-2 XL's run needs about `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`. Converting that operation count into days on an accelerator, and every loss of time into a factor engineering can recover, requires a decomposition of training time into its physical constituents in which wasted time appears as a lower utilization factor.
 
 The iron law of ML systems (principle \ref{pri-iron-law}) supplies that decomposition directly once specialized to training.\index{Training!training-time law}\index{Training-time law!utilization gap} In its multiplicative D·A·M form, a training run processes $\DatasetSize$ tokens (Data) at roughly $6\Parameters$ forward-and-backward FLOPs per token (Algorithm), for $\Operations = 6 \cdot \Parameters \cdot \DatasetSize$ total operations, at a realized machine pace of $1/(\PeakRate \times \EfficiencyHw)$ seconds per FLOP (Machine). This training-time form of the iron law, which this chapter shortens to the training-time law, keeps that macroscopic product as the organizing equation so that every optimization technique maps to one of its factors.
 
@@ -1156,8 +1154,6 @@ Steps 1 and 2 keep two persistent moment buffers per parameter, so parameters pl
 
 #### Reducing optimizer memory {#sec-model-training-optimizer-memory-training-loop-4383}
 
-The same optimizer tensors occupy capacity between updates. Reducing their footprint can therefore make a larger micro-batch feasible even if the optimizer is not the longest phase of the step.
-
 ```{python}
 #| echo: false
 #| label: optimizer-state-recap
@@ -1192,7 +1188,7 @@ class OptimizerStateRecap:
     adam_state_gb_str = fmt_memory(adam_state, unit=GB, precision=0, commas=False)
 ```
 
-At billion-parameter scale, optimizer state becomes a first-order, batch-independent term in the memory budget. As quantified in the GPT-2 worked example (@sec-model-training-optimization-algorithm-system-implications-f9f2), a `{python} OptimizerStateRecap.model_params_b_str` model requires `{python} OptimizerStateRecap.adam_state_gb_str` for Adam optimizer state alone in FP32, in addition to parameters and gradients, before accounting for activations. This challenge has motivated memory-efficient optimizer variants: Adafactor factorizes second-moment state [@shazeer2018adafactor], 8-bit optimizers quantize optimizer statistics [@dettmers2022eightbit], and GaLore computes updates in a low-rank space [@zhao2024galorememoryefficientllmtraining].
+Because optimizer tensors remain resident between updates, reducing their footprint can make a larger micro-batch feasible even when the optimizer is not the longest phase of the step. At billion-parameter scale, optimizer state becomes a first-order, batch-independent term in the memory budget. As quantified in the GPT-2 worked example (@sec-model-training-optimization-algorithm-system-implications-f9f2), a `{python} OptimizerStateRecap.model_params_b_str` model requires `{python} OptimizerStateRecap.adam_state_gb_str` for Adam optimizer state alone in FP32, in addition to parameters and gradients, before accounting for activations. This challenge has motivated memory-efficient optimizer variants: Adafactor factorizes second-moment state [@shazeer2018adafactor], 8-bit optimizers quantize optimizer statistics [@dettmers2022eightbit], and GaLore computes updates in a low-rank space [@zhao2024galorememoryefficientllmtraining].
 
 To attribute a memory saving to the optimizer, hold the model, batch size, precision, and activation policy fixed and compare the complete memory budget. Low-rank projection buffers and other temporary state belong in that budget. A smaller optimizer-state term does not guarantee that the full training recipe fits, nor that it reaches the same validation quality in less time.
 
@@ -1266,7 +1262,7 @@ Recipe A reaches the target sooner. At its shorter step duration, Recipe B would
 
 A profile measures the cost of an update; validation measures how many updates the required quality takes. Comparing optimizers, precision, or batch schedules requires both measurements under a common acceptance criterion. A real experiment must also account for run-to-run variation and any change in evaluation frequency; an apparent crossing of the target is not evidence that a recipe reliably meets it.
 
-Parameter update rules define trajectories given gradient vectors, but assume those gradients are already materialized. For billion-parameter networks, gradient evaluation constitutes the dominant computational and memory burden of the training loop. The mechanics of gradient generation, rather than the optimizer step itself, dictate training memory budgets and runtime.
+Optimizer rules specify how parameters move once gradient vectors are in hand, yet computing those gradients dominates both arithmetic and memory in a billion-parameter network. The mechanics of gradient generation, rather than the optimizer update itself, therefore govern the training memory budget and step time.
 
 ### Backpropagation and activation memory {#sec-model-training-backpropagation-mechanics-0b64}
 
@@ -2764,9 +2760,7 @@ An NVMe\index{NVMe!storage bandwidth} device rated at `{python} StorageBandwidth
 To keep accelerators fed despite this bandwidth reduction, pipeline architectures maintain multiple data buffers simultaneously: prefetch buffers loading future batches, processing buffers holding data under transformation, and transfer buffers staging data for accelerator consumption. The total host memory required scales with the per-batch memory footprint $\BatchBufferMemory$ according to @eq-buffer-memory:
 $$\PipelineBufferMemory= (\PrefetchBufferCount+ \ProcessingBufferCount+ \TransferBufferCount) \times \BatchBufferMemory$$ {#eq-buffer-memory}
 
-To avoid starving the accelerator, the average preprocessing service time per batch, across all workers, must not exceed the compute time per batch, $\PreprocessingServiceTime\leq \IronLawComputeTime$; this is the preprocessing term of @eq-training-bottleneck restated in time.
-
-If preprocessing takes 40 ms per batch on one worker while the accelerator consumes one every 10 ms, ideal scaling requires at least four workers. Actual requirements depend on storage, CPU contention, and transformation cost; @sec-model-training-data-prefetching-pipeline-overlapping-e984 examines prefetching and parallel workers.
+To avoid starving the accelerator, the average preprocessing service time per batch across all workers must not exceed the compute time per batch ($\PreprocessingServiceTime\leq \IronLawComputeTime$), which restates the preprocessing term of @eq-training-bottleneck in time. If preprocessing takes 40 ms per batch on one worker while the accelerator consumes a batch every 10 ms, ideal scaling requires at least four workers; actual worker requirements depend on storage throughput, CPU contention, and transformation cost, which @sec-model-training-data-prefetching-pipeline-overlapping-e984 examines through prefetching and parallel workers.
 
 ```{python}
 #| echo: false
@@ -4745,9 +4739,7 @@ where $\text{dsoftmax}$ denotes the softmax Jacobian-vector product. A conventio
 
 FlashAttention eliminates the need to materialize full $\SequenceLength{\times}\SequenceLength$ attention matrices in HBM by computing attention incrementally through tiling\index{FlashAttention!tiling strategy}\index{Tiling!attention computation}. Instead of computing the entire attention matrix at once, the algorithm partitions $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatrix$ into tiles small enough to fit in fast SRAM, computes attention scores for these tiles, and incrementally accumulates results.
 
-The key algorithmic insight relies on the structure of @eq-attention. Softmax normalizes each row of scores by a sum over the entire row, which seems to require the whole row before any output can be formed.
-
-The online softmax\index{Online softmax!incremental computation} algorithm removes that requirement. Ordinary softmax, $\text{softmax}(\SoftmaxInputVector)_i = e^{\SoftmaxInputVector_i} / \sum_j e^{\SoftmaxInputVector_j}$, is computed stably by first subtracting the row maximum. The online form instead keeps two running statistics per row as blocks of scores arrive: the largest score seen so far, $\SoftmaxRunningMaximum$, and the sum of exponentials taken relative to that maximum, $\SoftmaxNormalizer$. When a new block raises the maximum from $\SoftmaxRunningMaximum$ to $\UpdatedSoftmaxRunningMaximum$, everything accumulated so far was exponentiated relative to the old maximum, and multiplying it by $e^{\SoftmaxRunningMaximum-\UpdatedSoftmaxRunningMaximum}$ re-expresses it relative to the new one. The same factor rescales the partially accumulated output. After the last block, dividing the output by $\SoftmaxNormalizer$ gives exactly the softmax-weighted result, as if the whole row had been seen at once.
+The key algorithmic insight relies on the structure of @eq-attention. Softmax normalizes each row of scores by a sum over the entire row, which seems to require the whole row before any output can be formed, yet the online softmax\index{Online softmax!incremental computation} algorithm removes that requirement. Ordinary softmax, $\text{softmax}(\SoftmaxInputVector)_i = e^{\SoftmaxInputVector_i} / \sum_j e^{\SoftmaxInputVector_j}$, is computed stably by first subtracting the row maximum. The online form instead keeps two running statistics per row as blocks of scores arrive: the largest score seen so far, $\SoftmaxRunningMaximum$, and the sum of exponentials taken relative to that maximum, $\SoftmaxNormalizer$. When a new block raises the maximum from $\SoftmaxRunningMaximum$ to $\UpdatedSoftmaxRunningMaximum$, everything accumulated so far was exponentiated relative to the old maximum, and multiplying it by $e^{\SoftmaxRunningMaximum-\UpdatedSoftmaxRunningMaximum}$ re-expresses it relative to the new one. The same factor rescales the partially accumulated output. After the last block, dividing the output by $\SoftmaxNormalizer$ gives exactly the softmax-weighted result, as if the whole row had been seen at once.
 
 @Algo-streaming-attention decomposes this computation by partitioning the queries and the keys/values into tiles small enough to fit in SRAM, then streaming over the key/value tiles while maintaining the running softmax statistics needed to assemble each output tile, without ever forming the full score matrix.
 
@@ -4916,9 +4908,7 @@ def flash_attn_2(q, k, v):
 
 :::
 
-@dao2022 reports end-to-end GPT-style training speedups and separate attention-kernel benchmarks showing that IO-aware attention reduces memory traffic and improves runtime. Runtime and memory savings depend on batch size, head count, sequence length, precision, and the kernel implementation. A capacity threshold requires the complete training memory budget, including the state outside attention.
-
-Later versions refine the same idea. FlashAttention-2\index{FlashAttention!2, improved parallelism} [@dao2023flashattention2] reports a further 1.5--2$\times$ speedup through better parallelism, and FlashAttention-3\index{FlashAttention!3, FP8 tensor cores} [@shah2024flashattention3] adds asynchronous memory operations and FP8 support on Hopper GPUs.
+@dao2022 reports end-to-end GPT-style training speedups and separate attention-kernel benchmarks showing that IO-aware attention reduces memory traffic and improves runtime. Runtime and memory savings depend on batch size, head count, sequence length, precision, and the kernel implementation, and a capacity threshold still requires the complete training memory budget, including the state outside attention. Later versions refine the same idea: FlashAttention-2\index{FlashAttention!2, improved parallelism} [@dao2023flashattention2] reports a further 1.5--2$\times$ speedup through better parallelism, and FlashAttention-3\index{FlashAttention!3, FP8 tensor cores} [@shah2024flashattention3] adds asynchronous memory operations and FP8 support on Hopper GPUs.
 
 #### When to use FlashAttention {#sec-model-training-use-flash-attention-375d}
 
@@ -4930,9 +4920,7 @@ The integration is often a single-line change, swapping a manual attention call 
 
 #### IO-aware design beyond attention {#sec-model-training-systems-implications-broader-principles-c4f0}
 
-FlashAttention is an instance of **IO-aware algorithm design**\index{I/O-aware design!algorithm optimization}\index{Memory bandwidth!bottleneck mitigation}. Many accelerators are compute-abundant relative to memory bandwidth, so for a bandwidth-bound kernel, traffic can govern runtime even when FLOPs do not change.
-
-This principle extends beyond attention. In IO-aware matrix multiplication, tiling algorithms\index{Tiling!algorithms, matrix computation} like those in CUTLASS minimize DRAM traffic by maximizing data reuse in fast caches. A naive $\SquareGemmDimension{\times}\SquareGemmDimension$ matrix multiply performs $\mathcal{O}(\SquareGemmDimension^3)$ FLOPs and, without reuse, $\mathcal{O}(\SquareGemmDimension^3)$ memory traffic; blocking keeps tiles in fast memory and moves traffic toward the $\mathcal{O}(\SquareGemmDimension^2)$ lower bound.
+FlashAttention is an instance of **IO-aware algorithm design**\index{I/O-aware design!algorithm optimization}\index{Memory bandwidth!bottleneck mitigation}: because modern accelerators are compute-abundant relative to memory bandwidth, traffic governs runtime for a bandwidth-bound kernel even when FLOPs do not change. This principle extends beyond attention. In IO-aware matrix multiplication, tiling algorithms\index{Tiling!algorithms, matrix computation} like those in CUTLASS minimize DRAM traffic by maximizing data reuse in fast caches. A naive $\SquareGemmDimension{\times}\SquareGemmDimension$ matrix multiply performs $\mathcal{O}(\SquareGemmDimension^3)$ FLOPs and, without reuse, $\mathcal{O}(\SquareGemmDimension^3)$ memory traffic; blocking keeps tiles in fast memory and moves traffic toward the $\mathcal{O}(\SquareGemmDimension^2)$ lower bound.
 
 The same byte-movement principle reappears in communication-efficient distributed training, where gradient compression\index{Gradient compression!definition} trades extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms. Trading 10 percent more arithmetic to halve memory traffic approaches a 2$\times$ energy reduction in the limit where data movement accounts for the entire budget, and falls short of that bound whenever arithmetic carries a meaningful share, because halving one additive term of a sum cannot more than halve the sum.
 
@@ -5061,9 +5049,7 @@ $$
 
 Here $\MicrobatchPassTime$ is the measured forward/backward time for micro-batch $\MicrobatchIndex$, $\AccumulatedSyncTime$ is the synchronization time paid for the accumulated update, and $\OptimizerStepTime$ is the optimizer-step time. In distributed data-parallel training, standard framework wrappers automatically fire asynchronous gradient-synchronization hooks during every backward pass. When accumulating gradients across $\AccumulationStepCount$ micro-batches, leaving these hooks active would trigger redundant AllReduce operations on every micro-batch; wrapping the first $\AccumulationStepCount-1$ micro-batches in a `model.no_sync()` context suppresses this communication, synchronizing gradients only on the final $\AccumulationStepCount$-th step. That synchronization boundary may contain several bucketed AllReduce calls.
 
-The wall-clock penalty relative to processing the effective batch at once is workload-dependent. It must be measured rather than inferred from the memory-reduction factor.
-
-When gradient accumulation is combined with distributed data parallelism across multiple machines, additional considerations arise for gradient synchronization timing and effective batch size calculation across the cluster. Advanced distributed systems texts treat these patterns in depth.
+The wall-clock penalty relative to processing the effective batch at once is workload-dependent and must be measured rather than inferred from the memory-reduction factor. When gradient accumulation is combined with distributed data parallelism across multiple machines, additional considerations arise for gradient synchronization timing and effective batch size calculation across the cluster; advanced distributed systems texts treat these patterns in depth.
 
 ##### Activation checkpointing {#sec-model-training-activation-checkpointing-2ee1}
 
@@ -5257,7 +5243,7 @@ class GPT2SegmentCheckpoint:
 
 :::
 
-Not all operations are equally expensive to recompute, which motivates selective checkpointing. @Tbl-selective-checkpoint-placement compares where activation memory is large enough to justify recomputation.
+Not all operations are equally expensive to recompute, which motivates selective checkpointing: the practical rule is to spend recomputation on high-memory layers rather than on operations whose activations are already cheap to retain. @Tbl-selective-checkpoint-placement compares where activation memory is large enough to justify recomputation.
 
 | **Layer type**          | **Memory cost**                                                         | **Recompute cost**                 | **Checkpointing strategy**                                           |
 |:------------------------|:------------------------------------------------------------------------|:-----------------------------------|:---------------------------------------------------------------------|
@@ -5266,8 +5252,6 @@ Not all operations are equally expensive to recompute, which motivates selective
 | **Normalization**       | Small standalone outputs                                                | Low                                | Usually handled within a larger checkpointed block                   |
 
 : **Selective Checkpoint Placement**: Placement compares the state saved at a block boundary with the work required to reconstruct it. Attention and feed-forward costs depend on sequence length, width, kernel implementation, and whether memory-efficient attention is already in use. {#tbl-selective-checkpoint-placement tbl-colwidths="[18,34,18,30]"}
-
-The practical rule is to spend recomputation on high-memory layers, not on operations whose activations are already cheap to retain.
 
 #### Memory and computational benefits {#sec-model-training-memory-computational-benefits-9372}
 
@@ -5772,9 +5756,7 @@ plt.close()
 
 :::
 
-The red curve's widening gap from the dashed ideal is that communication overhead made visible; shrinking that gap is what the distributed strategies in @sec-model-training-singlenode-multigpu-training-c87f exist to do.
-
-Those strategies are older than deep learning. Training platforms\index{Training!infrastructure evolution} inherit dense matrix multiplication kernels and tightly synchronized parallel execution from high-performance computing (HPC). From warehouse-scale computing\index{Warehouse-scale computing!training evolution} they inherit cluster orchestration and automated fault recovery for multi-day jobs, the lineage that matters once a run spans many machines.
+The red curve's widening gap from the dashed ideal is that communication overhead made visible, and shrinking that gap is what the distributed strategies in @sec-model-training-singlenode-multigpu-training-c87f exist to do. Those strategies are older than deep learning: training platforms\index{Training!infrastructure evolution} inherit dense matrix multiplication kernels and tightly synchronized parallel execution from high-performance computing (HPC), and from warehouse-scale computing\index{Warehouse-scale computing!training evolution} they inherit cluster orchestration and automated fault recovery for multi-day jobs, the lineage that matters once a run spans many machines.
 
 The same inheritance appears inside one training system as pressure at three scales. At data scale, large corpora require high-throughput input pipelines to avoid accelerator starvation. At model scale, billion-parameter architectures force a choice between replicating weights across devices and partitioning the model. At infrastructure scale, coordinating multiple accelerators introduces synchronization overhead that can dominate training time. The stage interfaces formalized in @sec-ml-workflow-stage-interface-specification-ae3c govern what each scale may assume of the others.
 
