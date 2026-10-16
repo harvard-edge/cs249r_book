@@ -12,9 +12,7 @@ A profile showing low utilization is often misdiagnosed as a hardware limit when
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference. Reach for it when translating a profiler symptom ("slow matmul," "shape mismatch," "OOM during training") into a concrete computational or memory cause. Each symptom or need maps to one section (@tbl-appdx-algorithm-lookup). Every section names the chapter that teaches its concept in context; the chapter carries the argument, and this appendix carries the derivation or the reference formula.
-
-Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
+This appendix is designed as a reference. Reach for it when translating a profiler symptom ("slow matmul," "shape mismatch," "OOM during training") into a concrete computational or memory cause. Each symptom or need maps to one section (@tbl-appdx-algorithm-lookup), and conventions throughout follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ denotes bandwidth). Every section names the chapter that teaches its concept in context; the chapter carries the argument, and this appendix carries the derivation or the reference formula.
 
 | **Symptom or need**                                                   | **Section**                                                                |
 |:----------------------------------------------------------------------|:---------------------------------------------------------------------------|
@@ -44,20 +42,20 @@ Neural networks turn linear algebra into learned behavior. Matrices transform ac
 
 ## Linear Algebra {#sec-appdx-algorithm-foundations-linear-algebra-c937}
 
-Most of the compute in a deep learning system is matrix multiplication. Frameworks such as PyTorch hide the raw math, but performance engineering still depends on the underlying linear algebra. Building on how numbers are stored in @sec-appdx-machine-foundations-numerical-representations-c889, this section focuses on how they are manipulated.
+Shrinking a square matrix multiply from dimension 4,096 to 64 drops its arithmetic intensity more than tenfold below an H100's ridge point, turning a compute-bound layer into a bandwidth-bound stall without changing a line of model logic. Most of the compute in a deep learning system is matrix multiplication, and although frameworks such as PyTorch hide the raw math, performance engineering still depends on the underlying linear algebra. Building on how numbers are stored in @sec-appdx-machine-foundations-numerical-representations-c889, this section focuses on how they are manipulated.
 
 ```{=latex}
 \vspace*{-1ex}
 ```
 ::: {#psp-appendix-algorithm-linear-algebra-matters .callout-perspective title="Why this matters"}
 
-Many dense neural networks, especially transformers and large convolutional neural networks, spend most compute in matrix multiplication or GEMM-like kernels. A self-attention block performs the Q, K, V, and output projection GEMMs plus two attention matrix multiplications: one for the attention scores and one for the attention-weighted values. The layer's feed-forward block adds more GEMMs. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. Reasoning about matrix dimensions and arithmetic intensity predicts whether a dense workload is compute bound or memory bound before any profiler trace runs.
+Many dense neural networks, especially transformers and large convolutional neural networks, spend most of their compute in matrix multiplication or GEMM-like kernels: a self-attention block executes query, key, value, and output projection GEMMs alongside two attention-matrix products for scores and weighted values, and the layer's feed-forward block adds two or three more. Because those kernels dominate execution, GEMM performance characteristics explain why batch size governs throughput, why aligned layer dimensions run faster than unaligned ones, and whether a dense workload will be compute bound or bandwidth bound before any profiler trace runs.
 
 :::
 
 ### Tensor operations and einsum notation {#sec-appdx-algorithm-foundations-tensor-operations-notation-2758}
 
-Einstein summation[^fn-einsum-tensor-contraction] notation makes tensor contractions explicit throughout this book (implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy). Matrix multiplication $\GemmOutputMatrix= \GemmLeftOperand\GemmRightOperand$ becomes:
+Tensor operations in deep learning contract across batch, head, sequence, and hidden dimensions at once, and Einstein summation[^fn-einsum-tensor-contraction] notation writes those contractions as a single index string rather than a chain of nested loops and transposes (implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy). Matrix multiplication $\GemmOutputMatrix= \GemmLeftOperand\GemmRightOperand$ becomes:
 $$ \GemmOutputEntry = \sum_k \GemmLeftOperandEntry \GemmRightOperandEntry $$
 
 [^fn-einsum-tensor-contraction]: **Einstein summation convention**\index{Einstein summation convention!definition}: Repeated indices in a product are implicitly summed over, eliminating explicit summation signs. ML frameworks adopted the convention because it concisely expresses arbitrary tensor contractions in a single string.
@@ -66,13 +64,13 @@ In einsum notation, this is `ik,kj->ij`. The same notation handles batched multi
 
 ### The dot product as similarity {#sec-appdx-algorithm-foundations-dot-product-similarity-7957}
 
-The dot product\index{Dot product!appendix refresher} $\InnerProductLeftVector\cdot \InnerProductRightVector= \sum \InnerProductLeftComponent_i \InnerProductRightComponent_i$ is geometrically equivalent to $\|\InnerProductLeftVector\| \|\InnerProductRightVector\| \cos \VectorAngle$, which makes it a natural measure of similarity between two vectors: for nonzero vectors, its sign distinguishes acute, right, and obtuse angles, while its magnitude also depends on both vector norms.
+Comparing two token embeddings or feature vectors requires a scalar score that grows when the vectors point in the same direction and shrinks when they are orthogonal. The dot product\index{Dot product!appendix refresher} $\InnerProductLeftVector\cdot \InnerProductRightVector= \sum \InnerProductLeftComponent_i \InnerProductRightComponent_i$ provides that score because it equals $\|\InnerProductLeftVector\| \|\InnerProductRightVector\| \cos \VectorAngle$: for nonzero vectors, its sign distinguishes acute, right, and obtuse angles, while its magnitude also depends on both vector norms.
 
 In attention mechanisms, query ($\AttentionQueryMatrix$) and key ($\AttentionKeyMatrix$) vectors are dot-produced to compute a similarity score that determines how much each token attends to every other token. The resulting attention weights are then used to form a weighted combination of value ($\AttentionValuesMatrix$) vectors, so every token can draw on every other token. @Sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df develops attention itself, including the cost of computing one score for every query-key pair.
 
 ### General matrix multiply (GEMM) {#sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d}
 
-Most training and inference FLOPs are GEMMs.[^fn-gemm-blas-routines] For matrices of size $\GemmRowDimension{\times}\GemmInnerDimension$ and $\GemmInnerDimension{\times}\GemmColumnDimension$, GEMM performs $2\GemmRowDimension \GemmColumnDimension \GemmInnerDimension$ floating-point operations (multiply-accumulate counts as two operations).
+Whether a dense layer saturates an accelerator's Tensor Cores or stalls on memory bandwidth depends on the three dimensions of its matrix multiply. Most training and inference FLOPs execute as general matrix multiplies (GEMMs):[^fn-gemm-blas-routines] for matrices of size $\GemmRowDimension{\times}\GemmInnerDimension$ and $\GemmInnerDimension{\times}\GemmColumnDimension$, a GEMM performs $2\GemmRowDimension \GemmColumnDimension \GemmInnerDimension$ floating-point operations (counting multiply-accumulate as two operations).
 
 [^fn-gemm-blas-routines]: **General matrix multiply (GEMM)**\index{GEMM!appendix refresher}: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine [@dongarra1988]. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\GemmOutputMatrix= \GemmProductScale\GemmLeftOperand\GemmRightOperand+ \GemmAccumulatorScale\GemmOutputMatrix$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
 
@@ -204,7 +202,7 @@ Each common layer type reduces to the GEMMs and elementwise operations above, so
 \endgroup
 ```
 
-Linear algebra specifies *what* to compute; the next question is *how* to express those computations in code.
+The formulas in @tbl-tensor-op-ref specify *what* each layer computes and how many operations it performs. Expressing those computations in code raises a second question: how frameworks represent multidimensional arrays in flat memory without copying data unnecessarily.
 
 ## Tensor Programming Primitives {#sec-appdx-algorithm-foundations-tensor-programming-primitives-1400}
 
@@ -212,7 +210,7 @@ A shape mismatch crash, a silently wrong broadcast, and a kernel running at 5 pe
 
 ### Shapes, strides, and memory layout {#sec-appdx-algorithm-foundations-shapes-strides-1aea}
 
-A tensor\index{Tensor!appendix refresher} is a view over an underlying storage buffer, described by shape, stride, dtype, and offset metadata. Its shape specifies the dimensions of the tensor (for example, `(3, 4)`), while its stride defines the number of elements to skip in memory to move to the next element along each dimension. Only contiguous tensors lay their logical elements out as one adjacent block.
+Frameworks represent a tensor\index{Tensor!appendix refresher} as a view over a flat storage buffer, described by shape, stride, dtype, and offset metadata rather than as a multidimensional array of pointers. Its shape specifies the logical dimensions of the tensor (for example, `(3, 4)`), while its stride defines how many elements to skip in storage to advance one step along each dimension, which means only contiguous tensors store their logical elements in a single adjacent block.
 
 Operations like `transpose()` or `view()` often just change the strides, not the data in memory. This is fast ($\mathcal{O}(1)$) but can lead to noncontiguous tensors that fail in kernels requiring contiguous data. In such cases, calling `contiguous()` on a tensor of $\TensorElementCount$ elements forces an $\mathcal{O}(\TensorElementCount)$ memory copy that can dominate runtime if triggered repeatedly inside a loop.
 
@@ -222,7 +220,7 @@ A common optimization pattern is to materialize a transposed tensor once before 
 
 ### Broadcasting {#sec-appdx-algorithm-foundations-broadcasting-ec16}
 
-**Broadcasting**\index{Broadcasting!definition} allows arithmetic operations on tensors of different shapes by comparing dimensions from right to left. Two dimensions are compatible when they are equal or when one of them is 1.
+Zero-copy stride manipulation also powers **broadcasting**\index{Broadcasting!definition}, the rule that lets arithmetic operators combine tensors of different shapes without materializing duplicate copies of the smaller input. Frameworks compare dimensions from right to left and treat two dimensions as compatible when they are equal or when one of them is 1; a singleton dimension is then stretched virtually by setting its stride to zero, though an unintended singleton alignment, such as adding a $(\BatchSize, 1)$ column vector of predictions to a $(\BatchSize,)$ row vector of targets, silently allocates a $(\BatchSize, \BatchSize)$ output matrix that can exhaust memory or corrupt a loss calculation.
 
 Adding a $(3, 1)$ column tensor ($\BroadcastColumnTensor$) to a $(1, 4)$ row tensor ($\BroadcastRowTensor$) expands both virtually across their complementary singleton dimensions and generates a $(3, 4)$ matrix of pairwise sums $\BroadcastColumnElement_i + \BroadcastRowElement_j$ (@fig-broadcasting-rules). Dashed cell boundaries mark result elements whose operands are read through stride-0 views, so neither input is copied; only the $(3, 4)$ output is allocated, and hardware repeatedly accesses identical input buffer addresses.
 
@@ -236,7 +234,7 @@ Shapes, strides, and broadcasting govern how tensors flow through a model's forw
 
 ## Mechanics of Learning {#sec-appdx-algorithm-foundations-mechanics-learning-24f6}
 
-This section follows the resulting gradient signal from the chain rule through backpropagation to the memory it holds, the graphs that compilers optimize, and the numerically stable softmax at the loss.
+Training a neural network takes roughly three times the compute of a forward pass and holds gigabytes of intermediate activations in memory until the backward sweep consumes them. This section traces how the chain rule and reverse-mode automatic differentiation create that compute and memory footprint, how compilers fuse the resulting computational graph, and how the log-sum-exp shift prevents the softmax at the loss from overflowing in reduced precision.
 
 ::: {#psp-appendix-algorithm-backpropagation-matters .callout-perspective title="Why this matters"}
 
@@ -306,7 +304,7 @@ Each backward step requires two operands: the gradient flowing in from downstrea
 
 ### Training memory {#sec-appdx-algorithm-foundations-true-cost-training-memory-e54e}
 
-A common mistake is to assume that training memory equals model size. This assumption leads to immediate OOM errors because weights are only one of four components. Training memory\index{Training!memory decomposition} comprises weights, gradients, optimizer state, and retained activations:
+Because the backward pass holds those intermediate activations alongside weights, gradients, and optimizer buffers, training memory\index{Training!memory decomposition} is the sum of four components rather than model size alone:
 $$ \TotalMemoryFootprint = \WeightMemory + \GradientMemory + \OptimizerStateMemory + \ActivationMemory $$
 
 For a standard Adaptive Moment Estimation (Adam) optimizer [@kingma2014adam] in mixed precision [@micikevicius2017mixed]:
@@ -337,7 +335,7 @@ TrainingMemoryBytes.optimizer_overhead_max = TrainingMemoryBytes._optimizer_over
 *   **Optimizer State**: Adam moments require `{python} TrainingMemoryBytes.optimizer_overhead_min_str` bytes per parameter; an FP32 master copy adds another `{python} TrainingMemoryBytes.bytes_fp32_str`, giving `{python} TrainingMemoryBytes.optimizer_overhead_str` bytes per parameter.
 *   **Activations**: Activations typically dominate the dynamic memory footprint during training. A recomputation- or tiled-attention-friendly estimate scales as $\mathcal{O}(\BatchSize\times \SequenceLength\times \LayerCount \times \HiddenDimension)$; a full no-recompute attention implementation also materializes attention-score tensors that scale with $\SequenceLength^2$.
 
-To see how these components interact in practice, consider a concrete model.
+To see how these four components interact on a single accelerator, consider a concrete language model. Once the static model state is allocated, the remaining device capacity sets a hard ceiling on the batch size that can run without recomputation.
 
 ```{python}
 #| echo: false
@@ -463,7 +461,7 @@ The dependency structure exposed by backpropagation also gives compilers somethi
 
 #### Static single assignment {#sec-appdx-algorithm-foundations-static-single-assignment-9e88}
 
-Compilers transform graphs into static single-assignment (SSA) form\index{Static single assignment!appendix refresher}, where each variable is assigned exactly once. This makes data dependencies explicit, enabling safe optimizations, most notably operator fusion\index{Operator fusion!appendix refresher}.
+To transform a DAG safely, a compiler must know which write each read depends on. Static single-assignment (SSA) form\index{Static single assignment!appendix refresher} makes those dependencies explicit by assigning each variable exactly once rather than overwriting tensor variables in place, enabling safe transformations such as operator fusion\index{Operator fusion!appendix refresher}.
 
 #### Operator fusion {#sec-appdx-algorithm-foundations-operator-fusion-5d73}
 
@@ -501,11 +499,9 @@ $$ \text{Softmax}(\OutputLogit_{\ClassIndex}) = \frac{e^{\OutputLogit_{\ClassInd
 
 [^fn-logit-unnormalized-score]: **Logit**\index{Logits!logit function}: Joseph Berkson\index{Berkson, Joseph|seealso{Logits}} coined the term in 1944 by analogy with *probit*. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(\LogisticProbability) = \log(\LogisticProbability/(1-\LogisticProbability))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
 
-The problem is that if $\OutputLogit_{\ClassIndex}$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{\OutputLogit_{\ClassIndex}}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The fix is to subtract the largest logit before exponentiating, the log-sum-exp trick\index{Log-sum-exp trick!appendix refresher}. The shift leaves the result mathematically unchanged and keeps every exponent at or below zero.[^fn-logsumexp-numerical-stability]
+The problem is that if $\OutputLogit_{\ClassIndex}$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{\OutputLogit_{\ClassIndex}}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The fix is to subtract the largest logit before exponentiating, the log-sum-exp trick\index{Log-sum-exp trick!appendix refresher}. The shift leaves the result mathematically unchanged and keeps every exponent at or below zero, as the worked example below illustrates for realistic logit values.[^fn-logsumexp-numerical-stability]
 
 [^fn-logsumexp-numerical-stability]: **Log-sum-exp**\index{Log-sum-exp trick!appendix refresher}: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex}}\right) = \SoftmaxRowMaximum + \log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum}\right)$, where $\SoftmaxRowMaximum = \max(\OutputLogit_{\NormalizingClassIndex})$. Shifted values $\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum$ are $\le 0$, ensuring exponentials never overflow.
-
-A small worked example shows why this trick matters in practice, even for large but realistic logit values:
 
 ```{python}
 #| echo: false
@@ -633,7 +629,7 @@ Softmax: `{python} LogSumExp.sm_math`
 
 ## Derivations {#sec-appdx-algorithm-foundations-derivations-4b1d}
 
-Three results recur across the book as stated facts: a full gradient costs a small constant multiple of the forward pass, tiled attention cuts memory traffic without changing its output, and a fixed compute budget has a best split between parameters and training tokens. Each subsection states one result, proves it, and closes on the systems consequence that the chapters rely on, so a reader can check the derivation without interrupting a chapter's argument.
+Without a constant-factor bound on reverse-mode differentiation, training a 175-billion-parameter model would require 175 billion forward passes per step; without an online softmax recurrence, attention would have to materialize an $\SequenceLength \times \SequenceLength$ matrix in HBM; and without a constrained-optimum derivation, a fixed compute budget could be wasted on an oversized model starved of tokens. Each subsection below states one of these three results, proves it, and closes on the systems consequence that the chapters rely on.
 
 ### Cost of reverse-mode differentiation {#sec-appdx-algorithm-baur-strassen}
 
@@ -834,9 +830,8 @@ Multiplying Equation (1) by $\Parameters$ and Equation (2) by $\DatasetSize$ giv
 $$ \ParameterScalingExponent \ParameterScaleCoefficient \Parameters^{-\ParameterScalingExponent} = 6 \ComputeConstraintMultiplier \Parameters \DatasetSize, $$
 $$ \DataScalingExponent \DataScaleCoefficient \DatasetSize^{-\DataScalingExponent} = 6 \ComputeConstraintMultiplier \Parameters \DatasetSize. $$
 
-Equating these expressions yields the fundamental power-law optimality condition:
+Equating these expressions yields the power-law optimality condition:
 $$ \ParameterScalingExponent \ParameterScaleCoefficient \Parameters^{-\ParameterScalingExponent} = \DataScalingExponent \DataScaleCoefficient \DatasetSize^{-\DataScalingExponent}. $$
-
 This condition states that at the compute-optimal allocation, the marginal loss reduction per fractional increase in parameter count must equal the marginal loss reduction per fractional increase in dataset tokens.
 
 #### Compute-optimal exponents {#sec-appdx-algorithm-chinchilla-exponents}

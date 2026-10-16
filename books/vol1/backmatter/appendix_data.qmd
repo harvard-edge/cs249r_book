@@ -12,9 +12,7 @@ Data problems rarely present as data problems; they surface as a training run th
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is a reference organized by symptom. Each section states its tool compactly and points to the chapter that teaches the concept and applies it to a lighthouse workload.
-
-@Tbl-appdx-data-lookup maps each symptom to the section that carries the tool.
+This appendix is a reference organized by symptom. Each section states its tool compactly and points to the chapter that teaches the concept and applies it to a lighthouse workload, and @tbl-appdx-data-lookup maps each symptom to the section that carries the tool.
 
 | **When the need is…**                                      | **Tool**                                       | **Section**                                                       |
 |:-----------------------------------------------------------|:-----------------------------------------------|:------------------------------------------------------------------|
@@ -101,7 +99,7 @@ class DataGravity:
     truck_1pb_str = fmt_time(truck_total_seconds / SEC_PER_DAY, day, precision=0, commas=False, style="word")
 ```
 
-Moving and Storing Data serves the data pipelines in @sec-data-engineering-data-pipeline-architecture-b527. Probability and Statistics decides whether a number can be trusted, and serves the evaluations in @sec-benchmarking-statistical-methodological-issues-7aa5 and the operational monitoring in @sec-ml-operations-model-infrastructure-monitoring-3988.
+The first half of the appendix, Moving and Storing Data, serves the data pipelines in @sec-data-engineering-data-pipeline-architecture-b527. The second half, Probability and Statistics, provides the tests that decide whether a measured number can be trusted for the evaluations in @sec-benchmarking-statistical-methodological-issues-7aa5 and the operational monitoring in @sec-ml-operations-model-infrastructure-monitoring-3988.
 
 ## Moving and Storing Data {#sec-appdx-data-foundations-data-engineering-foundations-0c20}
 
@@ -109,7 +107,7 @@ Before a model can learn from a record, the record must leave storage, cross a n
 
 ### Data gravity {#sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0}
 
-Data gravity[^fn-data-gravity-anchor] names a constraint that transfer-time arithmetic makes precise, and @sec-data-engineering-data-gravity-adcb applies it to petabyte-scale training data. Network bandwidth is finite and does not grow with compute, so moving a large dataset can cost more time and energy than moving computation to where the data already lives.
+Copying a petabyte of training data across a 1 Gbps wide-area link takes months, whereas shipping the job to the cluster that already holds the data takes minutes. Data gravity[^fn-data-gravity-anchor] names this constraint, which transfer-time arithmetic makes precise, and @sec-data-engineering-data-gravity-adcb applies it to petabyte-scale training data. Network bandwidth is finite and does not grow with compute, so moving a large dataset can cost more time and energy than moving computation to where the data already lives.
 
 [^fn-data-gravity-anchor]: **Data gravity**\index{Data gravity!appendix refresher}: Coined by Dave McCrory\index{McCrory, Dave|seealso{Data gravity}} in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics [@mccrory2010datagravity].
 
@@ -180,7 +178,7 @@ Even after data arrives at the machine, it must be decoded before the accelerato
 
 ### Row and columnar formats {#sec-appdx-data-foundations-row-vs-columnar-formats-bca2}
 
-The choice of file format determines how many bytes a query moves through the storage hierarchy. Row-oriented formats such as CSV and JSON store data record-by-record, so reading the `age` field still requires parsing every attribute in each row. This layout suits append-only logs but incurs steep overhead for feature filtering. Parquet stores compressed column chunks on disk, while Arrow provides a contiguous columnar in-memory and IPC representation. Parquet readers exploit *projection pushdown*\index{Projection pushdown} to fetch selected column chunks directly, and both formats support *vectorized processing*\index{Vectorization!columnar processing}. Where the row layout forces a wide scan across all fields (`ID`, `Age`, `Loc`), the columnar layout isolates the target `Age` chunk and avoids moving irrelevant attributes (@fig-row-vs-col). @Sec-data-engineering-formats-compression-partitioning-8b17 develops format choice as a lever on the data term of the iron law.
+Decoding speed per byte is only half of the format cost, because the storage layout also decides how many bytes a query must read from disk in the first place. Row-oriented formats such as CSV and JSON store data record-by-record, so reading the `age` field still requires parsing every attribute in each row, a layout that suits append-only logs while penalizing feature filtering. In contrast, Parquet stores compressed column chunks on disk and Arrow provides a contiguous columnar representation in memory and across inter-process communication (IPC), allowing Parquet readers to use *projection pushdown*\index{Projection pushdown} to fetch only the requested column chunks while both formats feed *vectorized processing*\index{Vectorization!columnar processing}. Where the row layout forces a wide scan across all fields (`ID`, `Age`, `Loc`), the columnar layout isolates the target `Age` chunk and avoids moving irrelevant attributes (@fig-row-vs-col). @Sec-data-engineering-formats-compression-partitioning-8b17 develops format choice as a lever on the data term of the iron law.
 
 ::: {#fig-row-vs-col fig-env="figure" fig-pos="htb" fig-cap="**Storage Layouts**: Row-oriented formats group values by record, so the illustrated scan reads every field. Column-oriented formats group values by feature, so the illustrated scan reads only Age." fig-alt="Diagram contrasting row and column stores. The row store groups ID, Age, and Loc values by record and reads every column. The column store groups values by column and reads only Age."}
 ```{.tikz}
@@ -281,8 +279,6 @@ fill=\filllcirclecolor,minimum height=6mm,anchor=north]at(PO){};
 ```
 :::
 
-Extracting a single feature from a row store reads every intervening attribute, whereas columnar chunking lets the storage subsystem skip unreferenced columns before deserialization.
-
 ::: {#psp-appendix-data-accelerator-starvation-problem .callout-perspective title="The accelerator starvation problem"}
 
 The choice of file format often determines whether a training pipeline is I/O bound or compute bound. Row-oriented formats force full-record scans, so storage layout compounds the decode cost whenever models consume a subset of tabular features, and the data-movement term of the iron law can silently become the critical path. @Sec-data-engineering-feeding-problem develops that starvation condition and the stage that binds it.
@@ -344,7 +340,7 @@ Layout fixes what a scan can skip; the operations a feature pipeline applies dec
 
 ## Probability and Statistics {#sec-appdx-data-foundations-probability-statistics-3934}
 
-This section carries four tools, in the order a system needs them: tail probabilities, which explain why averages hide user-visible failures; sampling and estimation, which decide whether a measured rate or a measured difference is real; drift divergences, which detect when production data no longer resembles training data; and information-theoretic units, which give the vocabulary for asking how much useful signal a dataset carries.
+A 10 ms mean latency can hide a 63 percent session-level tail-spike rate, a 0.5-point accuracy change on a finite validation set can sit inside binomial noise, and a feature's mean can stay constant while its tails drift enough to degrade predictions. Four statistical tools separate those failures from noise: tail probabilities for multi-request sessions, confidence intervals and paired or online sample-size formulas for finite evaluations, divergence measures for distribution shift, and information-theoretic units for the signal a dataset carries.
 
 ```{python}
 #| echo: false
@@ -542,7 +538,7 @@ Each of these tools assumes the examples come from one fixed population. When th
 
 ### Measuring drift {#sec-appdx-data-foundations-measuring-drift-divergence-a6dd}
 
-A shift in the mean is an insufficient drift signal; detection must compare the entire shape of the distribution. Detecting drift between the serving distribution ($\CurrentDistribution$) and the training distribution ($\TrainingDistribution$) therefore requires a measure of the distance between two distributions. @Sec-data-engineering-detecting-responding-data-drift-509a owns drift detection and its taxonomy, and @sec-ml-operations-production-monitoring-5e1b decides what an alert should trigger; this section collects the three divergence measures they use, with one worked example.
+Comparing means is not enough to catch that shift because a distribution's tails or bin shares can move while its average stays fixed, so comparing the serving distribution ($\CurrentDistribution$) with the training distribution ($\TrainingDistribution$) requires a distance measure across the full distribution shape. @Sec-data-engineering-detecting-responding-data-drift-509a owns drift detection and its taxonomy, and @sec-ml-operations-production-monitoring-5e1b decides what an alert should trigger; this section collects the three divergence measures they use, with one worked example.
 
 For discrete outcomes $\DiscreteOutcome$, @eq-appdx-data-kl-divergence expresses KL divergence\index{Kullback-Leibler divergence!appendix refresher}[^fn-kl-divergence-relative] as the expected extra coding cost of approximating $\CurrentDistribution$ with $\TrainingDistribution$ [@kullback1951; @cover2006]. The displayed form is finite only when $\TrainingDistribution(\DiscreteOutcome) > 0$ wherever $\CurrentDistribution(\DiscreteOutcome) > 0$; production implementations therefore need explicit smoothing or zero handling.
 $$ \KlDivergence(\CurrentDistribution \lVert \TrainingDistribution) = \sum_\DiscreteOutcome\CurrentDistribution(\DiscreteOutcome) \log \frac{\CurrentDistribution(\DiscreteOutcome)}{\TrainingDistribution(\DiscreteOutcome)} $$ {#eq-appdx-data-kl-divergence}
@@ -729,11 +725,9 @@ class PsiThreshold:
 
 :::
 
-The threshold remains illustrative: its meaning depends on sample size, binning, smoothing, and zero handling, and retraining requires model-quality evidence.
-
 [^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\KlDivergence(\CurrentDistribution \lVert \TrainingDistribution)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits.
 
-KL divergence and PSI compare binned or categorical distributions. For a continuous feature, such as the loudness of an audio window, the two-sample Kolmogorov-Smirnov statistic\index{Kolmogorov-Smirnov test!appendix refresher} avoids binning altogether: it is the largest gap between the empirical cumulative distribution functions of a training sample and a serving sample,
+Those PSI thresholds remain illustrative because their meaning depends on sample size, binning, smoothing, and zero handling, and because retraining requires model-quality evidence. Moreover, KL divergence and PSI compare binned or categorical distributions. For a continuous feature, such as the loudness of an audio window, the two-sample Kolmogorov-Smirnov statistic\index{Kolmogorov-Smirnov test!appendix refresher} avoids binning altogether: it is the largest gap between the empirical cumulative distribution functions of a training sample and a serving sample,
 
 $$\KolmogorovSmirnovStatistic= \max_{\MonitoredFeatureLevel}|\TrainingEmpiricalCdf(\MonitoredFeatureLevel) - \ServingEmpiricalCdf(\MonitoredFeatureLevel)|.$$
 
