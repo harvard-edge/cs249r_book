@@ -59,9 +59,7 @@ $$ \MechanicalPlantState_{k+1} = \DiscreteStateSpaceSystemMatrix \MechanicalPlan
 where the discrete transition operators evaluate via the continuous matrix exponential:
 $$ \DiscreteStateSpaceSystemMatrix = e^{\StateSpaceSystemMatrix \SamplingPeriod} = \IdentityMatrix + \StateSpaceSystemMatrix \SamplingPeriod + \frac{1}{2!} \StateSpaceSystemMatrix^2 \SamplingPeriod^2 + \dots $$
 $$ \DiscreteStateSpaceInputMatrix = \int_0^{\SamplingPeriod} e^{\StateSpaceSystemMatrix \IntegrationDummyTime} d\IntegrationDummyTime \, \StateSpaceInputMatrix = \left( \IdentityMatrix \SamplingPeriod + \frac{1}{2!} \StateSpaceSystemMatrix \SamplingPeriod^2 + \dots \right) \StateSpaceInputMatrix $$
-When $\StateSpaceSystemMatrix$ is non-singular, the discrete input matrix simplifies to $\DiscreteStateSpaceInputMatrix = \StateSpaceSystemMatrix^{-1}(e^{\StateSpaceSystemMatrix \SamplingPeriod} - \IdentityMatrix)\StateSpaceInputMatrix$.
-
-This recurrence is exact for the stated LTI model with a held input. A nonlinear plant generally requires numerical integration or a local linear model; its discretization error must enter the prediction bound.
+When $\StateSpaceSystemMatrix$ is non-singular, the discrete input matrix simplifies to $\DiscreteStateSpaceInputMatrix = \StateSpaceSystemMatrix^{-1}(e^{\StateSpaceSystemMatrix \SamplingPeriod} - \IdentityMatrix)\StateSpaceInputMatrix$. This recurrence is exact for the stated LTI model with a held input. A nonlinear plant generally requires numerical integration or a local linear model; its discretization error must enter the prediction bound.
 
 #### Discretization pathologies: Why forward Euler destabilizes physical models
 
@@ -71,18 +69,18 @@ Consider an undamped harmonic physical oscillator $\OscillatorAcceleration + \Os
 
 1. **Exact Zero-Order Hold (Matrix Exponential):** The discrete transition operator is $\DiscreteStateSpaceSystemMatrix = e^{\StateSpaceSystemMatrix \SamplingPeriod}$. Its eigenvalues lie on the unit circle:
    $$ |\MatrixEigenvalue(\DiscreteStateSpaceSystemMatrix)| = |e^{\pm \ImaginaryUnit \OscillatorNaturalFrequency \SamplingPeriod}| = 1 $$
-   This preserves the physical total energy $\MechanicalEnergy = \frac{1}{2}\OscillatorVelocity^2 + \frac{1}{2}\OscillatorNaturalFrequency^2 \OscillatorPosition^2$ over infinite horizons without artificial growth or decay.
+   This preserves the physical total energy $\MechanicalEnergy = \frac{1}{2}\OscillatorVelocity^2 + \frac{1}{2}\OscillatorNaturalFrequency^2 \OscillatorPosition^2$ over infinite horizons without artificial growth or decay. Phase rotates at the true angular rate $\OscillatorNaturalFrequency \SamplingPeriod$ per step.
 2. **Forward Euler Discretization:** Approximating the transition as $\ForwardEulerTransitionMatrix = \IdentityMatrix + \StateSpaceSystemMatrix \SamplingPeriod = \begin{bmatrix} 1 & \SamplingPeriod \\ -\OscillatorNaturalFrequency^2 \SamplingPeriod & 1 \end{bmatrix}$ yields eigenvalues $\ForwardEulerEigenvalue = 1 \pm \ImaginaryUnit\OscillatorNaturalFrequency \SamplingPeriod$. Their complex modulus is:
    $$ |\ForwardEulerEigenvalue| = \sqrt{1 + \OscillatorNaturalFrequency^2 \SamplingPeriod^2} > 1 \quad \forall \SamplingPeriod > 0 $$
    Because the spectral radius strictly exceeds unity, forward Euler simulation injects artificial numerical energy at every step, converting an intrinsically conservative physical oscillator into an exponentially diverging explosion. In differentiable simulation and policy learning, this causes exploding gradients during backpropagation through time.
 3. **Backward (Implicit) Euler Discretization:** Approximating transitions via $\MechanicalPlantState_{k+1} = \MechanicalPlantState_k + \SamplingPeriod \StateSpaceSystemMatrix \MechanicalPlantState_{k+1}$ yields $\BackwardEulerTransitionMatrix = (\IdentityMatrix - \StateSpaceSystemMatrix \SamplingPeriod)^{-1}$. The discrete eigenvalues evaluate to $\BackwardEulerEigenvalue = \frac{1}{1 \mp \ImaginaryUnit\OscillatorNaturalFrequency \SamplingPeriod}$, with modulus:
    $$ |\BackwardEulerEigenvalue| = \frac{1}{\sqrt{1 + \OscillatorNaturalFrequency^2 \SamplingPeriod^2}} < 1 \quad \forall \SamplingPeriod > 0 $$
-   While unconditionally stable, backward Euler introduces artificial numerical dissipation (numerical damping), bleeding energy from the physical system and causing gradient vanishing over long unrolled horizons.
+   While unconditionally stable, backward Euler introduces artificial numerical dissipation (numerical damping) that bleeds energy from the physical system. In unrolled optimization, that artificial contraction causes gradient vanishing over long horizons.
 4. **Bilinear (Tustin / Crank-Nicolson) Discretization:** Employing the trapezoidal integration operator $\LaplaceVariable \approx \frac{2}{\SamplingPeriod}\frac{\ZTransformVariable-1}{\ZTransformVariable+1}$ yields:
    $$ \TustinTransitionMatrix = \left(\IdentityMatrix - \frac{\SamplingPeriod}{2}\StateSpaceSystemMatrix\right)^{-1} \left(\IdentityMatrix + \frac{\SamplingPeriod}{2}\StateSpaceSystemMatrix\right) $$
    For purely imaginary continuous poles $\LaplaceVariable = \pm \ImaginaryUnit\OscillatorNaturalFrequency$, the discrete eigenvalues evaluate to $\TustinEigenvalue = \frac{1 \pm \ImaginaryUnit\OscillatorNaturalFrequency \SamplingPeriod / 2}{1 \mp \ImaginaryUnit\OscillatorNaturalFrequency \SamplingPeriod / 2}$. Their modulus is identically unity:
    $$ |\TustinEigenvalue| = \left| \frac{1 \pm \ImaginaryUnit\OscillatorNaturalFrequency \SamplingPeriod / 2}{1 \mp \ImaginaryUnit\OscillatorNaturalFrequency \SamplingPeriod / 2} \right| = \frac{\sqrt{1 + (\OscillatorNaturalFrequency \SamplingPeriod / 2)^2}}{\sqrt{1 + (\OscillatorNaturalFrequency \SamplingPeriod / 2)^2}} = 1 \quad \forall \SamplingPeriod > 0 $$
-   The bilinear transform maps the continuous imaginary axis directly onto the discrete unit circle, preserving energy conservation without matrix exponentials.
+   The bilinear transform maps the continuous imaginary axis directly onto the discrete unit circle, preserving energy conservation without matrix exponentials. Higher frequencies undergo frequency warping, however, because $\arctan(\OscillatorNaturalFrequency \SamplingPeriod / 2)$ compresses the phase advance per step.
 5. **Semi-Implicit (Symplectic) Euler Discretization:** Staggering state updates by updating velocity with current acceleration and then updating position with the updated velocity:
    $$ \OscillatorStepVelocity_{k+1} = \OscillatorStepVelocity_k - \OscillatorNaturalFrequency^2 \SamplingPeriod \OscillatorPosition_k, \quad \OscillatorPosition_{k+1} = \OscillatorPosition_k + \SamplingPeriod \OscillatorStepVelocity_{k+1} = (1 - \OscillatorNaturalFrequency^2 \SamplingPeriod^2) \OscillatorPosition_k + \SamplingPeriod \OscillatorStepVelocity_k $$
    yields the discrete transition matrix:
@@ -113,7 +111,7 @@ If $\operatorname{rank}([\MatrixEigenvalue \IdentityMatrix - \StateSpaceSystemMa
 
 ### Proportional-integral-derivative control as closed-loop error dissipation {#sec-appendix-control-pid}
 
-A joint-level **Proportional-Integral-Derivative (PID)** controller combines position error, accumulated error, and error rate to generate effort.\index{PID control!closed-loop error dissipation}\index{PID control!physical interpretation} For a simple mechanical plant, these terms act as a restoring spring, bias compensation, and damping. This interpretation explains their roles; PID is not generally an optimal controller, and positive gains alone do not guarantee stability.
+When an arm link sags $4\text{ mm}$ below its target height under a $3\text{ kg}$ payload, position feedback pulls the joint toward the target, velocity feedback bleeds off overshoot, and accumulated-error feedback builds the extra torque needed to hold the load at zero steady-state offset. A joint-level **Proportional-Integral-Derivative (PID)** controller combines position error, accumulated error, and error rate to generate effort.\index{PID control!closed-loop error dissipation}\index{PID control!physical interpretation} For a simple mechanical plant, these terms act as a restoring spring, bias compensation, and damping. This interpretation explains their roles; PID is not generally an optimal controller, and positive gains alone do not guarantee stability.
 
 In this subsection, let $\MechanicalPlantState^*(\TimeInstant)$ and $\MechanicalPlantState(\TimeInstant)$ denote desired and measured joint positions, rather than the full position-velocity state. Their difference defines the instantaneous tracking error:
 $$ \TrackingErrorVector(\TimeInstant) = \MechanicalPlantState^*(\TimeInstant) - \MechanicalPlantState(\TimeInstant) $$
@@ -153,7 +151,7 @@ While textbook PID assumes infinite actuator authority and continuous differenti
 
 ### Feedback linearization: Transforming nonlinear dynamics into decoupled double integrators {#sec-appendix-control-feedback-lin}
 
-Linear feedback is most direct when the plant behaves approximately linearly. In contrast, multi-body robotic plants are governed by highly coupled, configuration-dependent equations of motion (@sec-body-actuator-limits):\index{Feedback linearization!computed torque control}\index{Inverse dynamics!normalizing transformation}
+Swinging a manipulator's elbow outward changes the shoulder's effective inertia and injects centrifugal torque into the shoulder joint, so fixed linear gains tuned with the arm tucked become sluggish or oscillatory when the arm extends. Multi-body robotic plants are governed by coupled, configuration-dependent equations of motion (@sec-body-actuator-limits):\index{Feedback linearization!computed torque control}\index{Inverse dynamics!normalizing transformation}
 $$ \GeneralizedInertiaMatrix(\GeneralizedCoordinates) \GeneralizedAccelerations + \CoriolisCentrifugalMatrix(\GeneralizedCoordinates, \GeneralizedVelocities) \GeneralizedVelocities + \GravitationalTorqueVector(\GeneralizedCoordinates) = \JointTorque $$
 where $\GeneralizedInertiaMatrix(\GeneralizedCoordinates) \in \mathbb{R}^{\JointCount \times \JointCount}$ is the configuration-dependent mass matrix, $\CoriolisCentrifugalMatrix(\GeneralizedCoordinates, \GeneralizedVelocities)\GeneralizedVelocities$ collects velocity-dependent generalized forces, $\GravitationalTorqueVector(\GeneralizedCoordinates)$ is gravity, and $\JointTorque \in \mathbb{R}^\JointCount$ is the joint torque vector.
 
@@ -171,7 +169,7 @@ Over these decoupled channels, linear tracking control laws synthesize virtual a
 $$ \VirtualAccelerationCommand = \ReferenceJointAccelerations + \ProportionalGainMatrix (\ReferenceJointPositions - \GeneralizedCoordinates) + \DerivativeGainMatrix (\ReferenceJointVelocities - \GeneralizedVelocities) $$
 Substituting $\VirtualAccelerationCommand$ back into the double-integrator dynamics reveals that the tracking error $\TrackingErrorVector(\TimeInstant) = \ReferenceJointPositions(\TimeInstant) - \GeneralizedCoordinates(\TimeInstant)$ satisfies the linear error ODE:
 $$ \TrackingErrorAcceleration + \DerivativeGainMatrix \TrackingErrorRate + \ProportionalGainMatrix \TrackingErrorVector = \ZeroMatrix $$
-Choosing positive-diagonal gain matrices $\ProportionalGainMatrix$ and $\DerivativeGainMatrix$ guarantees that tracking errors in every joint coordinate decouple and decay to zero independently at the designer-specified rate.
+Choosing positive-diagonal gain matrices $\ProportionalGainMatrix$ and $\DerivativeGainMatrix$ guarantees that tracking errors in every joint coordinate decouple and decay to zero independently at the designer-specified rate. Each joint then behaves as an independent second-order oscillator whose natural frequency and damping ratio follow directly from its diagonal gain pair.
 
 #### Lie-derivative formulation for general control-affine systems
 
@@ -191,9 +189,7 @@ The baseline physics model cancels the dominant, known multi-body nonlinearities
 
 ### Linear quadratic regulator and algebraic Riccati equations {#sec-appendix-control-lqr}
 
-In reinforcement learning (@sec-training-rl-primer), policy optimization searches for an action policy $\Policy(\RobotAction \mid \DecisionProcessState)$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks $\CriticReturnEstimate(\DecisionProcessState)$ / $\CriticActionReturnEstimate(\DecisionProcessState, \RobotAction)$, frequently struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon.
-
-The following matrix compares the computational mechanics of reinforcement learning with the analytical machinery of LQR:
+In reinforcement learning (@sec-training-rl-primer), policy optimization searches for an action policy $\Policy(\RobotAction \mid \DecisionProcessState)$ that maximizes expected cumulative reward via trial-and-error sampling or learned critic networks $\CriticReturnEstimate(\DecisionProcessState)$ / $\CriticActionReturnEstimate(\DecisionProcessState, \RobotAction)$, frequently struggling with high gradient variance, non-convex loss landscapes, and empirical stability failures. In contrast, for linear-quadratic physical dynamics, the **Linear Quadratic Regulator (LQR)**\index{Linear Quadratic Regulator!optimal control}\index{Algebraic Riccati Equation!continuous-time} provides the exact, analytical solution to the continuous-state Bellman optimality equation over an infinite time horizon, as summarized against reinforcement learning below:
 
 | Dimension                   | Reinforcement Learning (Actor-Critic / Policy Gradient)                                                                                                                                                                            | Linear Quadratic Regulator (LQR)                                                                                                                                                              |
 |:----------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -225,9 +221,7 @@ Postulating a quadratic value function ansatz (the optimal continuous critic) $\
 $$ \nabla \OptimalCostToGoFunction^*(\MechanicalPlantState) = 2 \LqrCostToGoMatrix \MechanicalPlantState $$
 Differentiating the expression inside the bracket with respect to control input $\ControlInput$ and setting the derivative to zero yields the stationarity condition:
 $$ 2 \LqrControlWeightMatrix \ControlInput + 2 \StateSpaceInputMatrix^\top \LqrCostToGoMatrix \MechanicalPlantState = \ZeroMatrix \implies \ControlInput^*(\TimeInstant) = -\LqrControlWeightMatrix^{-1} \StateSpaceInputMatrix^\top \LqrCostToGoMatrix \MechanicalPlantState(\TimeInstant) = -\LqrFeedbackGain \MechanicalPlantState(\TimeInstant) $$
-The optimal state-feedback control law (the optimal actor policy) is strictly linear in the state, with constant optimal gain matrix $\LqrFeedbackGain = \LqrControlWeightMatrix^{-1} \StateSpaceInputMatrix^\top \LqrCostToGoMatrix$.
-
-Substituting this optimal control law $\ControlInput^*$ back into the HJB equation eliminates the minimization:
+The optimal state-feedback control law (the optimal actor policy) is strictly linear in the state, with constant optimal gain matrix $\LqrFeedbackGain = \LqrControlWeightMatrix^{-1} \StateSpaceInputMatrix^\top \LqrCostToGoMatrix$. Substituting this optimal control law $\ControlInput^*$ back into the HJB equation eliminates the minimization:
 $$ \MechanicalPlantState^\top \LqrStateWeightMatrix \MechanicalPlantState + \MechanicalPlantState^\top \LqrCostToGoMatrix \StateSpaceInputMatrix \LqrControlWeightMatrix^{-1} \StateSpaceInputMatrix^\top \LqrCostToGoMatrix \MechanicalPlantState + 2 \MechanicalPlantState^\top \LqrCostToGoMatrix \StateSpaceSystemMatrix \MechanicalPlantState - 2 \MechanicalPlantState^\top \LqrCostToGoMatrix \StateSpaceInputMatrix \LqrControlWeightMatrix^{-1} \StateSpaceInputMatrix^\top \LqrCostToGoMatrix \MechanicalPlantState = 0 $$
 Combining quadratic terms and using the matrix transpose identity $2 \MechanicalPlantState^\top \LqrCostToGoMatrix \StateSpaceSystemMatrix \MechanicalPlantState = \MechanicalPlantState^\top (\StateSpaceSystemMatrix^\top \LqrCostToGoMatrix + \LqrCostToGoMatrix \StateSpaceSystemMatrix) \MechanicalPlantState$ reveals:
 $$ \MechanicalPlantState^\top \left( \StateSpaceSystemMatrix^\top \LqrCostToGoMatrix + \LqrCostToGoMatrix \StateSpaceSystemMatrix - \LqrCostToGoMatrix \StateSpaceInputMatrix \LqrControlWeightMatrix^{-1} \StateSpaceInputMatrix^\top \LqrCostToGoMatrix + \LqrStateWeightMatrix \right) \MechanicalPlantState = 0 \quad \forall \MechanicalPlantState \in \mathbb{R}^\StateDimension $$
@@ -282,9 +276,7 @@ $$ \StateSpaceSystemMatrix \SteadyStateErrorCovariance + \SteadyStateErrorCovari
 
 To an ML practitioner, the Kalman filter is the exact recursive Bayesian Minimum Mean Square Error (MMSE) estimator: it continuously updates the posterior state distribution $\GaussianDistribution(\StateEstimate, \SteadyStateErrorCovariance)$ by balancing dynamic model propagation (growing uncertainty via process noise $\ProcessNoiseIntensity$) against empirical sensor evidence (contracting uncertainty via inverse continuous measurement-noise intensity $\ContinuousMeasurementNoiseIntensity^{-1}$). For discrete measurements, the analogous update uses the per-sample measurement covariance $\MeasurementNoiseCovariance$, not the continuous noise intensity. With invertible prior and measurement covariances, it evaluates as:
 $$ \UpdatedErrorCovariance^{-1} = \PredictedErrorCovariance^{-1} + \MeasurementMatrix^\top \MeasurementNoiseCovariance^{-1} \MeasurementMatrix, \quad \UpdatedErrorCovariance^{-1} \UpdatedStateEstimate = \PredictedErrorCovariance^{-1} \PredictedStateEstimate + \MeasurementMatrix^\top \MeasurementNoiseCovariance^{-1} \MeasurementVector_k $$
-In information (precision) space, the posterior precision is simply the linear addition of prior dynamic precision $\PredictedErrorCovariance^{-1}$ and measurement evidence precision $\MeasurementMatrix^\top \MeasurementNoiseCovariance^{-1} \MeasurementMatrix$. This reveals the Kalman filter as the exact recursive, online counterpart of Bayesian linear regression and Gaussian process conditioning.
-
-Notice the mathematical duality between optimal control (LQR) and optimal estimation (Kalman filter):
+In information (precision) space, the posterior precision is simply the linear addition of prior dynamic precision $\PredictedErrorCovariance^{-1}$ and measurement evidence precision $\MeasurementMatrix^\top \MeasurementNoiseCovariance^{-1} \MeasurementMatrix$. This reveals the Kalman filter as the exact recursive, online counterpart of Bayesian linear regression and Gaussian process conditioning, and highlights the mathematical duality between optimal control (LQR) and optimal estimation (Kalman filter):
 
 | Duality Attribute                | Optimal Regulator (LQR)                                                                                              | Optimal Estimator (Kalman Filter)                                                                                                       |
 |:---------------------------------|:---------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------|
@@ -297,27 +289,23 @@ Notice the mathematical duality between optimal control (LQR) and optimal estima
 
 The **Linear Quadratic Gaussian (LQG)** controller cascades this optimal estimator with the optimal LQR regulator by applying feedback directly to the estimated state:
 $$ \ControlInput(\TimeInstant) = -\LqrFeedbackGain \StateEstimate(\TimeInstant) $$
-The **Separation Principle** [@astrom2021feedback] proves that under linear-Gaussian assumptions, observer design and state-feedback controller design are completely decoupled: the poles of the closed-loop LQG system are strictly the union of the controller poles $\operatorname{eig}(\StateSpaceSystemMatrix - \StateSpaceInputMatrix\LqrFeedbackGain)$ and the observer poles $\operatorname{eig}(\StateSpaceSystemMatrix - \KalmanBucyObserverGain\MeasurementMatrix)$.
+The **Separation Principle** [@astrom2021feedback] proves that under linear-Gaussian assumptions, observer design and state-feedback controller design are completely decoupled. Specifically, the poles of the closed-loop LQG system are strictly the union of the controller poles $\operatorname{eig}(\StateSpaceSystemMatrix - \StateSpaceInputMatrix\LqrFeedbackGain)$ and the observer poles $\operatorname{eig}(\StateSpaceSystemMatrix - \KalmanBucyObserverGain\MeasurementMatrix)$.
 
 ::: {#psp-appendix-control-doyle .callout-perspective title="The Doyle warning: LQG robustness margins"}
-While full-state LQR provides guaranteed $60^\circ$ phase margins and infinite gain margins, John Doyle's classic 1978 paper demonstrated that output-feedback LQG controllers possess **no guaranteed stability margins whatsoever** [@astrom2021feedback].
-
-In Doyle's formulation, when an observer is inserted into the loop, unmodeled plant parameter variations couple estimation error $\StateEstimationError = \MechanicalPlantState - \StateEstimate$ directly back into the control actuation channel. Even infinitesimal parameter perturbations can push the closed-loop poles across the imaginary axis into the unstable right-half plane.
+While full-state LQR provides guaranteed $60^\circ$ phase margins and infinite gain margins, John Doyle's classic 1978 paper demonstrated that output-feedback LQG controllers possess **no guaranteed stability margins whatsoever** [@astrom2021feedback]. When an observer is inserted into the loop, unmodeled plant parameter variations couple estimation error $\StateEstimationError = \MechanicalPlantState - \StateEstimate$ directly back into the control actuation channel, so even infinitesimal parameter perturbations can push the closed-loop poles across the imaginary axis into the unstable right-half plane.
 
 For physical AI systems, this delivers an essential warning: cascading a high-capacity neural perception system (e.g., an end-to-end vision model estimating 6D object poses or end-effector coordinates) with an optimal tracking controller does not inherit the controller's nominal robustness. Dynamic perception lag, out-of-distribution observation errors, and high-frequency sensor noise degrade feedback phase margin rapidly. An implementation must evaluate the combined estimator-controller dynamics and its safety bounds; loop transfer recovery is one design technique, not a universal requirement (@sec-enforcement-deterministic-gatekeeper).
 :::
 
 ## Stability Theory and Model Predictive Control {#sec-appendix-control-stability-mpc}
 
-A controller can reduce tracking error and still violate a physical boundary. Stability concerns whether trajectories remain near, or converge to, an equilibrium. Set invariance concerns whether they remain inside a specified region. These are separate claims, each conditional on a model, an initial-state domain, and the implementation assumptions.
+An arm controller that converges exponentially to a target grasp pose can still swing its elbow through a cage-door post along the way. Stability concerns whether trajectories remain near, or converge to, an equilibrium; set invariance concerns whether they stay inside a safe region at every instant. These are separate claims, each conditional on a model, an initial-state domain, and the implementation assumptions.
 
 ### Lyapunov stability and invariant sets {#sec-appendix-control-lyapunov}
 
 Continuous gradient flow provides a useful analogy for Lyapunov analysis. It evolves parameter weights according to $\ParameterVelocity = -\nabla_\ModelParameters \LossFunction(\ModelParameters)$. Along this parameter trajectory, the empirical loss decreases monotonically via the multivariable chain rule:
 $$ \LossTimeDerivative(\ModelParameters) = \nabla_\ModelParameters\LossFunction(\ModelParameters)^\top \ParameterVelocity = -\nabla_\ModelParameters\LossFunction(\ModelParameters)^\top \nabla_\ModelParameters\LossFunction(\ModelParameters) = -\|\nabla_\ModelParameters\LossFunction(\ModelParameters)\|^2 \le 0 $$
-In parameter optimization, the software program has unconstrained, direct write access to the parameter velocity vector $\ParameterVelocity$, allowing the optimizer to force loss descent along the negative gradient direction.
-
-In physical control, the robot's physical state $\MechanicalPlantState(\TimeInstant) \in \mathbb{R}^\StateDimension$ evolves in physical state space according to continuous differential equations $\PlantStateRate = \ControlAffineDriftField(\MechanicalPlantState)$. Unlike software network weights $\ModelParameters$, physical coordinates $\MechanicalPlantState$ cannot be updated by arbitrary gradient descent: actuators cannot command arbitrary velocity vectors $\PlantStateRate$, because physical momentum, mass inertia, unforced drift, and kinematic constraints govern the system. By Newton's second law, motor actuators modulate second-order accelerations ($\GeneralizedAccelerations = \GeneralizedInertiaMatrix(\GeneralizedCoordinates)^{-1}(\JointTorque - \NonlinearBiasTorque)$), which must be integrated through continuous time against centrifugal forces, Coriolis couplings, and gravitational fields.
+In parameter optimization, the software program has unconstrained, direct write access to the parameter velocity vector $\ParameterVelocity$, allowing the optimizer to force loss descent along the negative gradient direction. In physical control, the robot's physical state $\MechanicalPlantState(\TimeInstant) \in \mathbb{R}^\StateDimension$ evolves in physical state space according to continuous differential equations $\PlantStateRate = \ControlAffineDriftField(\MechanicalPlantState)$. Unlike software network weights $\ModelParameters$, physical coordinates $\MechanicalPlantState$ cannot be updated by arbitrary gradient descent: actuators cannot command arbitrary velocity vectors $\PlantStateRate$, because physical momentum, mass inertia, unforced drift, and kinematic constraints govern the system. By Newton's second law, motor actuators modulate second-order accelerations ($\GeneralizedAccelerations = \GeneralizedInertiaMatrix(\GeneralizedCoordinates)^{-1}(\JointTorque - \NonlinearBiasTorque)$), which must be integrated through continuous time against centrifugal forces, Coriolis couplings, and gravitational fields.
 
 Instead, a **Lyapunov function** $\LyapunovFunction(\MechanicalPlantState)$ acts as an analytical, continuous state-space loss function that certifies the asymptotic convergence of the physical plant's continuous trajectories without simulating every rollout to infinity.\index{Lyapunov stability!asymptotic and exponential}\index{Invariant sets!domain of attraction} In mechanical systems, $\LyapunovFunction(\MechanicalPlantState)$ often corresponds to the physical or synthetic Hamiltonian energy of the plant: kinetic energy stored in moving mass plus potential energy stored in gravitational elevation or virtual elastic springs.
 
@@ -389,9 +377,7 @@ where $\TrackingSlackPenaltyWeight \gg 1$ heavily penalizes the tracking relaxat
 
 ### Constrained model predictive control and recursive feasibility {#sec-appendix-control-mpc}
 
-While LQR and CLF feedback laws operate reactively on instantaneous state feedback, **Model Predictive Control (MPC)**\index{Model Predictive Control!constrained QP formulation}\index{Recursive feasibility!terminal invariant set} optimizes trajectories over a predictive finite horizon $\MpcPredictionHorizon$, explicitly enforcing hard inequality constraints on physical boundaries, motor voltages, and actuator torques.
-
-The following architectural comparison summarizes the complementary roles of numerical MPC and learned generative policies:
+While LQR and CLF feedback laws operate reactively on instantaneous state feedback, **Model Predictive Control (MPC)**\index{Model Predictive Control!constrained QP formulation}\index{Recursive feasibility!terminal invariant set} optimizes trajectories over a predictive finite horizon $\MpcPredictionHorizon$, explicitly enforcing hard inequality constraints on physical boundaries, motor voltages, and actuator torques. The following architectural comparison summarizes the complementary roles of numerical MPC and learned generative policies:
 
 | Attribute                   | Classical Numerical MPC                                                                                        | Learned Action Chunking (Diffusion, ACT)                            |
 |:----------------------------|:---------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|
@@ -452,7 +438,7 @@ As framed in @sec-planning-paradigms, modern physical AI embodies a direct trade
 
 ## Safety and Control Barrier Functions {#sec-appendix-control-cbf}
 
-An independent enforcer can check a learned policy proposal against a control barrier constraint before actuation. In reliable software systems, safety properties are proven using inductive loop invariants: if an invariant holds initially and is preserved across every state transition, it holds for all executions. A Control Barrier Function (CBF)\index{Control barrier function!safety filtering} lifts this principle to continuous physical systems, framing safety as an inductive loop invariant over continuous state trajectories:
+When a learned policy commands an arm toward a rack post at $1.0\text{ m/s}$, a position check that triggers only at contact is too late because inertia carries the link into the post; an independent enforcer can instead check a control barrier constraint before actuation. In reliable software systems, safety properties are proven using inductive loop invariants: if an invariant holds initially and is preserved across every state transition, it holds for all executions. A Control Barrier Function (CBF)\index{Control barrier function!safety filtering} lifts this principle to continuous physical systems, framing safety as an inductive loop invariant over continuous state trajectories:
 
 Let the system state be $\MechanicalPlantState \in \PlantStateSpace \subset \mathbb{R}^\StateDimension$ and the control input be $\ControlInput \in \ControlInputSet \subset \mathbb{R}^\ControlInputDimension$. Suppose we define a safe operating set $\ForwardInvariantSafeSet$ as the superlevel set of a continuously differentiable scalar certificate function $\BarrierFunction(\MechanicalPlantState)$, with a nonzero gradient on its zero-level boundary:
 $$ \ForwardInvariantSafeSet = \{ \MechanicalPlantState \in \PlantStateSpace \mid \BarrierFunction(\MechanicalPlantState) \ge 0 \}, \quad \partial \ForwardInvariantSafeSet = \{ \MechanicalPlantState \in \PlantStateSpace \mid \BarrierFunction(\MechanicalPlantState) = 0 \} $$
@@ -504,9 +490,7 @@ In the interior $\text{int}(\ForwardInvariantSafeSet)$, $\BouligandContingentCon
 $$
 \BouligandContingentCone(\MechanicalPlantState) = \left\{ \TangentDirection \in \mathbb{R}^\StateDimension \;\middle|\; \nabla \BarrierFunction(\MechanicalPlantState)^\top \TangentDirection \ge 0 \right\} \quad \forall \MechanicalPlantState \in \partial \ForwardInvariantSafeSet
 $$
-Consequently, the system cannot exit the set if and only if the directional derivative satisfies $\BarrierFunctionRate(\MechanicalPlantState) = \nabla \BarrierFunction(\MechanicalPlantState)^\top \ControlAffineDriftField(\MechanicalPlantState) \ge 0$ whenever $\BarrierFunction(\MechanicalPlantState) = 0$.
-
-Control Barrier Functions [@ames2019control] extend Nagumo's subtangentiality to controlled affine systems $\PlantStateRate = \ControlAffineDriftField(\MechanicalPlantState) + \ControlAffineInputField(\MechanicalPlantState)\ControlInput$. For safety, there must exist an admissible control $\ControlInput \in \ControlInputSet$ such that $\ControlAffineDriftField(\MechanicalPlantState) + \ControlAffineInputField(\MechanicalPlantState)\ControlInput \in \BouligandContingentCone(\MechanicalPlantState)$. By introducing an extended class $\ExtendedClassKInfinityFamily$ decay rate $\ClassKFunction(\BarrierFunction(\MechanicalPlantState))$ satisfying $\ClassKFunction(0) = 0$, the CBF inequality:
+Consequently, the system cannot exit the set if and only if the directional derivative satisfies $\BarrierFunctionRate(\MechanicalPlantState) = \nabla \BarrierFunction(\MechanicalPlantState)^\top \ControlAffineDriftField(\MechanicalPlantState) \ge 0$ whenever $\BarrierFunction(\MechanicalPlantState) = 0$. Control Barrier Functions [@ames2019control] extend Nagumo's subtangentiality to controlled affine systems $\PlantStateRate = \ControlAffineDriftField(\MechanicalPlantState) + \ControlAffineInputField(\MechanicalPlantState)\ControlInput$. For safety, there must exist an admissible control $\ControlInput \in \ControlInputSet$ such that $\ControlAffineDriftField(\MechanicalPlantState) + \ControlAffineInputField(\MechanicalPlantState)\ControlInput \in \BouligandContingentCone(\MechanicalPlantState)$. By introducing an extended class $\ExtendedClassKInfinityFamily$ decay rate $\ClassKFunction(\BarrierFunction(\MechanicalPlantState))$ satisfying $\ClassKFunction(0) = 0$, the CBF inequality:
 $$
 \BarrierFunctionRate(\MechanicalPlantState, \ControlInput) = \LieDerivativeAlongDrift(\MechanicalPlantState) + \LieDerivativeAlongControl(\MechanicalPlantState)\ControlInput \ge -\ClassKFunction(\BarrierFunction(\MechanicalPlantState))
 $$
@@ -568,7 +552,7 @@ Evaluating these conditions reveals two distinct operational regimes:
 
 - **Permissive Pass-Through:** When the nominal neural proposal $\NominalControlCommand$ satisfies the safety constraint ($\BarrierConstraintNormal^\top \NominalControlCommand \le \BarrierConstraintBound$), the optimal Lagrange multiplier is $\BarrierProjectionMultiplier^* = 0$. The filter acts as an identity pass-through:
   $$ \ControlInput^* = \NominalControlCommand $$
-  Zero control effort is distorted, preserving the full behavioral fidelity of the learned policy during normal task execution.
+  Zero control effort is distorted in this regime. Passing the command untouched preserves the full behavioral fidelity of the learned policy during normal task execution.
 - **Active Minimal-Intervention Projection:** When the neural policy proposes an unsafe command that attempts to penetrate the barrier ($\BarrierConstraintNormal^\top \NominalControlCommand > \BarrierConstraintBound$), the safety constraint must be active ($\BarrierConstraintNormal^\top \ControlInput^* = \BarrierConstraintBound$) and $\BarrierProjectionMultiplier^* > 0$. Substituting the stationarity condition into the active constraint yields:
   $$ \BarrierConstraintNormal^\top \left( \NominalControlCommand - \BarrierProjectionMultiplier^* \BarrierConstraintNormal \right) = \BarrierConstraintBound \implies \BarrierConstraintNormal^\top \NominalControlCommand - \BarrierProjectionMultiplier^* \|\BarrierConstraintNormal\|^2 = \BarrierConstraintBound $$
   Solving for the optimal multiplier yields:
@@ -588,7 +572,7 @@ The unconstrained projection formula does not solve the box-constrained problem.
 
 ## Smooth Trajectories and Bumpless Transfer {#sec-appendix-control-splines}
 
-Physical systems possess inertia. A velocity step is an ideal acceleration impulse; an acceleration step is a finite torque step under a simple inertia model. Whether a commanded seam causes resonance or damage depends on the plant, load, and controller response.
+Switching directly between two action chunks that differ in velocity or acceleration commands an abrupt torque step across the gearbox. Because physical links and rotors possess inertia, a velocity step requests an ideal acceleration impulse, and an acceleration step requests an instantaneous torque jump under a rigid-inertia model. Whether a commanded seam excites drivetrain resonance or trips an inverter fault depends on the plant, load, and controller response.
 
 ### Analytical quintic splines
 
@@ -663,7 +647,7 @@ $$
 \frac{6}{\Time^5} & -\frac{3}{\Time^4} & \frac{1}{2\Time^3}
 \end{bmatrix}
 $$
-Matrix multiplication $\PolynomialCoefficientVector_{3:5} = \ConfluentVandermondeMatrix_{33}^{-1} \ReducedBoundaryConditionVector$ directly produces the closed-form coefficients $\PolynomialTrajectoryCoefficient_3, \PolynomialTrajectoryCoefficient_4, \PolynomialTrajectoryCoefficient_5$ stated above.
+Matrix multiplication $\PolynomialCoefficientVector_{3:5} = \ConfluentVandermondeMatrix_{33}^{-1} \ReducedBoundaryConditionVector$ directly produces the closed-form coefficients $\PolynomialTrajectoryCoefficient_3, \PolynomialTrajectoryCoefficient_4, \PolynomialTrajectoryCoefficient_5$ stated above. Because the inverse scales as $\Time^{-5}$ in its highest-order row, shrinking the blend duration $\Time$ rapidly amplifies the commanded jerk and torque peaks.
 
 ### Cubic Hermite spline interpolation for multi-rate synchronization
 
@@ -746,9 +730,7 @@ The actual damping and resonant frequencies depend on the transmission and load.
 
 ### Discrete-time sampling and zero-order hold phase lag {#sec-appendix-control-zoh}
 
-Real-time digital controllers execute periodically at sampling period $\SamplingPeriod = 1 / \SamplingRate$. Actuator drivers hold commanded setpoints constant between clock ticks using a **Zero-Order Hold (ZOH)**\index{Zero-order hold!discrete sampling}.
-
-At frequencies well below the sampling frequency, the zero-order hold's phase is equivalent to about half a sample period of delay:
+Real-time digital controllers execute periodically at sampling period $\SamplingPeriod = 1 / \SamplingRate$. Actuator drivers hold commanded setpoints constant between clock ticks using a **Zero-Order Hold (ZOH)**\index{Zero-order hold!discrete sampling}. At frequencies well below the sampling frequency, the zero-order hold's phase is equivalent to about half a sample period of delay:
 $$ \ZohTransportDelay = \frac{\SamplingPeriod}{2} $$
 For a closed-loop control system operating at crossover frequency $\CrossoverFrequency$, this transport delay erodes the system's phase margin $\PhaseMargin$ by:[^fn-control-phase-margin]
 $$ \FiniteChange \ZohPhaseShift = \CrossoverFrequency \frac{\SamplingPeriod}{2} \quad \text{(radians)} \approx 28.65^\circ \cdot \left(\frac{\CrossoverFrequency}{\SamplingRate}\right) $$
@@ -759,11 +741,11 @@ For fixed modeled compute and bus delays, the added phase lag near crossover is 
 
 ## Dynamic Reachability, Intent Envelopes, and Differential Games {#sec-appendix-control-reachability}
 
-Kinematic reachability characterizes the spatial set of configurations or end-effector poses an embodied system can reach over a given planning or intent horizon.\index{Kinematic reachability!intent horizon}
+A target tote $0.60\text{ m}$ from the wrist is geometrically inside a $0.855\text{ m}$ manipulator workspace, yet unreachable within a $150\text{ ms}$ intent lease if the arm cannot accelerate, traverse $0.60\text{ m}$, and decelerate to rest within its torque and jerk limits before the lease expires. Kinematic reachability characterizes the set of configurations or end-effector poses a mechanism can reach geometrically, whereas dynamic reachability restricts that set to states attainable within the remaining time horizon and actuator bounds.\index{Kinematic reachability!intent horizon}
 
 ### Forward kinematics and singularities {#sec-appendix-control-kinematics}
 
-@Sec-planning-handoff introduces forward kinematics, the Jacobian, and the singular pose on a planar two-link abstraction of the machine's arm, and @sec-planning-time-parameterization turns a path into a timed trajectory under torque and jerk bounds. This section states the general $\GeneralizedCoordinateCount$-joint form those examples specialize.
+When a two-link arm stretches straight out, a small Cartesian velocity request along the extended link axis demands huge joint velocities near the singular alignment. @Sec-planning-handoff introduces forward kinematics, the Jacobian, and the singular pose on a planar two-link abstraction of the machine's arm, and @sec-planning-time-parameterization turns a path into a timed trajectory under torque and jerk bounds; this section states the general $\GeneralizedCoordinateCount$-joint form those examples specialize.
 
 For an $\GeneralizedCoordinateCount$-joint arm, the **forward-kinematics** map $\ForwardKinematicsMap(\GeneralizedCoordinates)$ sends joint coordinates $\GeneralizedCoordinates\in\mathbb R^\GeneralizedCoordinateCount$ to an end-effector pose $\EndEffectorPose\in \SpecialEuclideanGroup$:\index{Forward kinematics!mapping}
 $$ \EndEffectorPose=\ForwardKinematicsMap(\GeneralizedCoordinates). $$
@@ -779,9 +761,7 @@ As the arm approaches a singularity, the smallest singular value vanishes ($\Jac
 
 Roboticists resolve this through **Damped Least Squares (DLS)** inverse kinematics [@wampler1986manipulator; @nakamura1986inverse]:
 $$ \DampedLeastSquaresPseudoinverse = \ManipulatorJacobian^\top \left( \ManipulatorJacobian \ManipulatorJacobian^\top + \InverseKinematicsDamping^2 \IdentityMatrix \right)^{-1} $$
-For a spatial task mixing translation and rotation, first declare a task scaling or metric so that the singular values and damping parameter are comparable. The velocity bound below uses that same scaled norm.
-
-For each singular mode, the effective inversion gain is regularized from $1/\JacobianSingularNumber_i$ to $\frac{\JacobianSingularNumber_i}{\JacobianSingularNumber_i^2 + \InverseKinematicsDamping^2} \le \frac{1}{2\InverseKinematicsDamping}$. This is mathematically identical to $\ell_2$ Tikhonov regularization (ridge regression / weight decay) in machine learning: it deliberately introduces a bounded tracking residual in exchange for strictly bounded joint velocities ($\|\GeneralizedVelocities\| \le \|\EndEffectorTwist\| / (2\InverseKinematicsDamping)$).
+For a spatial task mixing translation and rotation, first declare a task scaling or metric so that the singular values and damping parameter are comparable; the velocity bound below uses that same scaled norm. For each singular mode, the effective inversion gain is regularized from $1/\JacobianSingularNumber_i$ to $\frac{\JacobianSingularNumber_i}{\JacobianSingularNumber_i^2 + \InverseKinematicsDamping^2} \le \frac{1}{2\InverseKinematicsDamping}$. This is mathematically identical to $\ell_2$ Tikhonov regularization (ridge regression / weight decay) in machine learning: it deliberately introduces a bounded tracking residual in exchange for strictly bounded joint velocities ($\|\GeneralizedVelocities\| \le \|\EndEffectorTwist\| / (2\InverseKinematicsDamping)$).
 
 [^fn-control-yoshikawa-manipulability]: **Yoshikawa Manipulability Measure**\index{Manipulability index!Yoshikawa formulation}: The measure summarizes the velocity ellipsoid for a chosen task Jacobian. Near rank loss, inverse-kinematics commands can exceed joint-rate or torque limits. The actual drive response and fallback depend on the specified controller and hardware.
 
@@ -794,9 +774,7 @@ For a one-dimensional rest-to-rest move with symmetric available acceleration $\
 2. **Trapezoidal profile (velocity-limited):** For larger horizons ($\TargetTravelDistance > \CriticalTransitDistance$):
    $$ \MinimumTransitTime = \frac{\TargetTravelDistance}{\SpeedBound} + \frac{\SpeedBound}{\ProfileAccelerationBound}, \quad \ReachableDistance(\RemainingIntentTime) = \SpeedBound \left( \RemainingIntentTime - \frac{\SpeedBound}{\ProfileAccelerationBound} \right) $$
 
-Below $\CriticalTransitDistance$ the reachable distance grows with the square of the available time, and above it only linearly, because the mechanism spends the rest of the move at its speed ceiling.
-
-With $|\ProfileJerk|\le \JerkLimit$, reaching full acceleration from zero takes at least $\ProfileAccelerationBound/\JerkLimit$, if the profile reaches it at all. The bound exists because an acceleration step is a torque step, which shocks gearbox backlash, excites structural modes, and drives motor current toward the inverter's fault limits. The minimum-time trajectory may have four or seven jerk phases, so an unconditional additive offset to the trapezoidal time is invalid. Solve the constrained profile for the stated start/end velocity and acceleration, then include the stopping suffix and response delay when sizing a lease.
+Below $\CriticalTransitDistance$ the reachable distance grows with the square of the available time, and above it only linearly, because the mechanism spends the rest of the move at its speed ceiling. When jerk is also bounded by $|\ProfileJerk|\le \JerkLimit$, reaching full acceleration from zero takes at least $\ProfileAccelerationBound/\JerkLimit$, if the profile reaches it at all. That bound exists because an acceleration step is a torque step, which shocks gearbox backlash, excites structural modes, and drives motor current toward the inverter's fault limits. The minimum-time trajectory may have four or seven jerk phases, so an unconditional additive offset to the trapezoidal time is invalid. Solve the constrained profile for the stated start/end velocity and acceleration, then include the stopping suffix and response delay when sizing a lease.
 
 The idealized profiles still serve admission, because each added limit (jerk, torque, or thermal derating) can only shrink the **dynamic reachable set** $\DynamicReachableSet(\RemainingIntentTime)$, the states reachable from the measured state within the remaining time $\RemainingIntentTime=\IntentLeaseExpiry-\CurrentTime$.\index{Dynamic reachability!reachable set} Their transit times are therefore necessary lower bounds, and a proposal whose idealized time already exceeds $\RemainingIntentTime$ can be rejected before a full path, torque, and stopping check. @Sec-intent-admissible-goal-sets applies this rejection to the arm's reach against the tracked horizon.
 
@@ -842,13 +820,11 @@ All vectors in these sums must be expressed in the same frame, and $\Glyph{P}$ m
 
 ### Watchdog validity leases and teleoperation latency bounds {#sec-appendix-control-teleop-leases}
 
-In distributed autonomous systems and supervisory teleoperation architectures, actuation authority is governed by bounded-duration validity leases and communications latency constraints.\index{Watchdog lease!kinematic derivation}\index{Teleoperation!latency bound}
+When an application processor stalls mid-aisle while the mobile base is cruising at $1.5\text{ m/s}$, the base continues advancing $1.5\text{ mm}$ per millisecond until the safety microcontroller's lease expires and the brakes engage. In distributed autonomous systems and supervisory teleoperation architectures, actuation authority is governed by bounded-duration validity leases and communications latency constraints.\index{Watchdog lease!kinematic derivation}\index{Teleoperation!latency bound}
 
 #### Kinematic derivation of watchdog validity leases
 
-Consider an autonomous mobile platform or manipulator moving at speed $\SpeedAtDetection$ toward an obstacle with measured physical clearance $\ClearDistance$. If the host processor or neural network fails to refresh the control setpoint, a hardware or firmware watchdog must intervene to prevent boundary violation.
-
-For a stop triggered by lease expiry, measure clearance at the supporting observation's capture epoch. The elapsed time from that epoch until physical braking initiates is $\LeaseExpiryDelaySubtotal + \DispatchAdmissionInterval$. The pre-brake subtotal $\LeaseExpiryDelaySubtotal$ comprises five nonoverlapping intervals, a lease-expiry form of the stopping-budget delay whose hazard-detection form appears in @sec-appendix-systems-stopping:
+Consider an autonomous mobile platform or manipulator moving at speed $\SpeedAtDetection$ toward an obstacle with measured physical clearance $\ClearDistance$. If the host processor or neural network fails to refresh the control setpoint, a hardware or firmware watchdog must intervene to prevent boundary violation. For a stop triggered by lease expiry, measure clearance at the supporting observation's capture epoch. The elapsed time from that epoch until physical braking initiates is $\LeaseExpiryDelaySubtotal + \DispatchAdmissionInterval$. The pre-brake subtotal $\LeaseExpiryDelaySubtotal$ comprises five nonoverlapping intervals, a lease-expiry form of the stopping-budget delay whose hazard-detection form appears in @sec-appendix-systems-stopping:
 $$ \LeaseExpiryDelaySubtotal = \ChunkLease + \DetectionInterval + \FallbackHold + \DispatchObservationAge + \ActuatorResponseTime $$
 and the dispatch-to-admission interval $\DispatchAdmissionInterval$ is charged beside it, never inside it. Here:
 
@@ -861,13 +837,11 @@ and the dispatch-to-admission interval $\DispatchAdmissionInterval$ is charged b
 
 The event boundaries follow the stalled-proposer timeline in @sec-nervous-lease-sizing. A heartbeat timeout is an alternative trigger with its own response path, not an extra countdown appended to an expired chunk lease. If clearance is instead referenced to a hazard's appearance, the bound must also include any time until the supporting observation captures it.
 
-Under constant cruising speed $\SpeedAtDetection$ prior to brake onset, a verified lower bound on mechanical braking deceleration $\CredibleBrakingDeceleration > 0$, a localization bound $\LocalizationBound$, and a fixed protective clearance $\ProtectiveClearanceMargin$, the total stopping distance bounded by available clearance $\ClearDistance$ satisfies:
+Under constant cruising speed $\SpeedAtDetection$ before brake onset, a verified lower bound on mechanical braking deceleration $\CredibleBrakingDeceleration > 0$, a localization bound $\LocalizationBound$, and a fixed protective clearance $\ProtectiveClearanceMargin$, the total stopping distance bounded by available clearance $\ClearDistance$ satisfies:
 $$ \SpeedAtDetection\,(\LeaseExpiryDelaySubtotal + \DispatchAdmissionInterval) + \frac{\SpeedAtDetection^2}{2 \CredibleBrakingDeceleration} + \LocalizationBound + \ProtectiveClearanceMargin \le \ClearDistance $$
 Solving directly for the maximum admissible validity lease $\ChunkLease$ yields:
 $$ \ChunkLease \le \frac{\ClearDistance - \LocalizationBound - \ProtectiveClearanceMargin - \frac{\SpeedAtDetection^2}{2 \CredibleBrakingDeceleration}}{\SpeedAtDetection} - \left( \DetectionInterval + \FallbackHold + \DispatchObservationAge + \DispatchAdmissionInterval + \ActuatorResponseTime \right) $$
-This constant-deceleration model is a reference calculation, not the complete stopping budget of the running machine. A shaped stop must substitute its qualified stopping distance for $\SpeedAtDetection^2/(2\CredibleBrakingDeceleration)$ and reserve tracking error and every other justified allowance. The same substitution applies to the teleoperation bound below.
-
-If the right-hand side is nonpositive, this budget permits no positive execution lease. The enforcer must select the available fallback immediately; a negative bound means that even an immediate response lacks the stated stopping reservation.
+This constant-deceleration model is a reference calculation, not the complete stopping budget of the running machine. A shaped stop must substitute its qualified stopping distance for $\SpeedAtDetection^2/(2\CredibleBrakingDeceleration)$ and reserve tracking error and every other justified allowance, and the same substitution applies to the teleoperation bound below. If the right-hand side is nonpositive, this budget permits no positive execution lease: the enforcer must select the available fallback immediately, because a negative bound means that even an immediate response lacks the stated stopping reservation.
 
 #### Teleoperation network round-trip time bounds
 
@@ -889,7 +863,7 @@ Transport delay in teleoperation creates two distinct failure modes: spatial bou
 
 ## Rigid Body Contact Mechanics {#sec-appendix-control-contact}
 
-Simulating and controlling physical interaction (locomotion, dexterous manipulation, tool assembly) requires modeling mechanical contact. The ideal unilateral, nonadhesive rigid-contact model uses complementarity: interaction forces arise strictly when bodies establish physical contact.
+In free space, a small change in joint torque produces a smooth change in link acceleration; when a gripper finger or foot touches a rigid surface, the gap closes to zero and a normal reaction force appears abruptly to prevent interpenetration. Simulating and controlling physical interaction (locomotion, dexterous manipulation, tool assembly) requires modeling this boundary transition. The ideal unilateral, nonadhesive rigid-contact model uses complementarity: interaction forces arise strictly when bodies establish physical contact.
 
 Let $\GeneralizedCoordinates \in \mathbb{R}^\GeneralizedCoordinateCount$ denote generalized configuration coordinates. Let $\ContactGapFunction(\GeneralizedCoordinates)$ be the signed distance (or gap function) between contact geometries:
 
@@ -1009,9 +983,7 @@ Force closure is qualitative. It says a balancing set of forces exists, not that
 
 ## Continuous Covariance Propagation and Observability {#sec-appendix-control-covariance}
 
-The discrete Kalman filter and its extended form, which the machine actually runs on dated measurements, are developed in @sec-perception-state-estimation, and the consistency tests that decide whether a filter's reported covariance can be trusted are in @sec-memory-estimator-consistency. This section treats the continuous-time limit, which shows how uncertainty grows between measurements.
-
-When sensors suffer line-of-sight dropouts or environmental occlusion, internal state estimators must project the physical state forward in time. Quantifying how rapidly estimation confidence degrades across blind intervals requires analyzing continuous error covariance dynamics and systems observability.
+When sensors suffer line-of-sight dropouts or environmental occlusion, internal state estimators must project the physical state forward in time, and quantifying how rapidly estimation uncertainty grows across that blind interval requires continuous error-covariance dynamics and observability analysis. The discrete Kalman filter and its extended form, which the machine runs on dated measurements, are developed in @sec-perception-state-estimation, and the consistency tests that decide whether a filter's reported covariance can be trusted are in @sec-memory-estimator-consistency; this section treats the continuous-time limit that governs uncertainty growth between measurements.
 
 ### Continuous Lyapunov and Riccati covariance dynamics
 
@@ -1035,9 +1007,7 @@ Consider a one-dimensional double-integrator kinematic system modeling position 
 $$
 \begin{bmatrix} \DoubleIntegratorPositionDerivative(\TimeInstant) \\ \DoubleIntegratorVelocityDerivative(\TimeInstant) \end{bmatrix} = \begin{bmatrix} 0 & 1 \\ 0 & 0 \end{bmatrix} \begin{bmatrix} \DoubleIntegratorPosition(\TimeInstant) \\ \DoubleIntegratorVelocity(\TimeInstant) \end{bmatrix} + \begin{bmatrix} 0 \\ 1 \end{bmatrix} \AccelerationWhiteNoise(\TimeInstant)
 $$
-where $\AccelerationWhiteNoise(\TimeInstant)$ is zero-mean continuous white process noise with continuous spectral power intensity $\AccelerationNoiseSpectralDensity > 0$, such that $\mathbb{E}[\AccelerationWhiteNoise(\TimeInstant) \AccelerationWhiteNoise(\PairedTimeInstant)] = \AccelerationNoiseSpectralDensity \UnitImpulseFunction(\TimeInstant - \PairedTimeInstant)$. Here, $\StateSpaceSystemMatrix = \begin{bmatrix} 0 & 1 \\ 0 & 0 \end{bmatrix}$ and the continuous process noise matrix is $\ProcessNoiseIntensity = \begin{bmatrix} 0 & 0 \\ 0 & \AccelerationNoiseSpectralDensity \end{bmatrix}$.
-
-The intensity is not a per-sample acceleration variance. For position in meters and time in seconds, its units are square meters per cubic second; multiplying it by elapsed time cubed gives positional variance in square meters.
+where $\AccelerationWhiteNoise(\TimeInstant)$ is zero-mean continuous white process noise with continuous spectral power intensity $\AccelerationNoiseSpectralDensity > 0$, such that $\mathbb{E}[\AccelerationWhiteNoise(\TimeInstant) \AccelerationWhiteNoise(\PairedTimeInstant)] = \AccelerationNoiseSpectralDensity \UnitImpulseFunction(\TimeInstant - \PairedTimeInstant)$. Here, $\StateSpaceSystemMatrix = \begin{bmatrix} 0 & 1 \\ 0 & 0 \end{bmatrix}$ and the continuous process noise matrix is $\ProcessNoiseIntensity = \begin{bmatrix} 0 & 0 \\ 0 & \AccelerationNoiseSpectralDensity \end{bmatrix}$. This intensity is not a per-sample acceleration variance: for position in meters and time in seconds, its units are square meters per cubic second, so multiplying it by elapsed time cubed gives positional variance in square meters.
 
 Because $\StateSpaceSystemMatrix^2=\ZeroMatrix$, the matrix exponential terminates after its linear term. The state transition is:
 $$
@@ -1067,7 +1037,7 @@ This derivation explains the distinct physical error regimes during sensor occlu
 
 ### Observability rank and Lie derivative extensions
 
-In machine learning and state estimation, observability is the mathematical dual of reachability: whereas reachability asks whether latent internal states can be steered by control inputs, observability asks whether latent states can be reconstructed from external sensor observations $\MeasurementVector(\TimeInstant)$.
+Measuring only a mobile base's wheel speeds tells an estimator how fast the base is moving, but not where it started in the aisle: two trajectories shifted by $0.5\text{ m}$ produce identical wheel-speed traces. In state estimation and machine learning, observability is the mathematical dual of reachability: whereas reachability asks whether latent internal states can be steered by control inputs, observability asks whether latent states can be reconstructed from external sensor observations $\MeasurementVector(\TimeInstant)$.
 
 In modern deep learning (such as world models, state-space models, and latent representation learning), neural encoders $\EncodedLatentState = \LatentStateEncoder(\MeasurementVector)$ attempt to reconstruct underlying states from sensory observations. Observability establishes the fundamental, information-theoretic limit of this reconstruction: if a dynamical system is unobservable, the mapping from physical state trajectories to sensor observations is strictly non-injective. In that case, distinct physical states can produce mathematically indistinguishable observation sequences. No neural network, regardless of parameter count or training data, can reconstruct an unobservable state without additional information. Active excitation can help some nonlinear systems, but a known input cannot repair the unobservable subspace of a fixed LTI model.
 
@@ -1151,11 +1121,7 @@ For nonadhesive support contacts with finite friction, admissible contact wrench
 
 ### Hierarchical whole-body control quadratic program {#sec-appendix-control-wbc}
 
-In floating-base humanoid and legged systems, high-level policies (such as learned vision-language-action models or action chunking policies) propose desired kinematic behaviors: end-effector manipulation paths, torso orientation, gaze directions, or swing-foot trajectories. However, because the 6-DoF floating base is unactuated, these kinematic proposals cannot be executed directly by joint motors.
-
-The **Hierarchical Whole-Body Control (WBC) Quadratic Program**\index{Whole-body control!hierarchical QP}\index{Whole-body control!multi-task optimization} acts as a real-time multi-task constrained optimization projection layer. It projects competing operational-space task accelerations $\DesiredTaskSpaceAcceleration_i$ through a prioritized optimization hierarchy while strictly enforcing rigid-body Newton-Euler dynamics, friction cones, and actuator limits.
-
-In optimization and machine learning terms, Whole-Body Control solves the physical counterpart of multi-task learning with conflicting gradients:
+In floating-base humanoid and legged systems, high-level policies (such as learned vision-language-action models or action chunking policies) propose desired kinematic behaviors: end-effector manipulation paths, torso orientation, gaze directions, or swing-foot trajectories. However, because the 6-DoF floating base is unactuated, these kinematic proposals cannot be executed directly by joint motors. The **Hierarchical Whole-Body Control (WBC) Quadratic Program**\index{Whole-body control!hierarchical QP}\index{Whole-body control!multi-task optimization} acts as a real-time multi-task constrained optimization projection layer, projecting competing operational-space task accelerations $\DesiredTaskSpaceAcceleration_i$ through a prioritized optimization hierarchy while strictly enforcing rigid-body Newton-Euler dynamics, friction cones, and actuator limits. In optimization and machine learning terms, Whole-Body Control solves the physical counterpart of multi-task learning with conflicting gradients:
 
 | Concept                  | Multi-Task Deep Learning (PCGrad / MGDA)                                                                        | Hierarchical Whole-Body Control (WBC)                                                                                                                                                                 |
 |:-------------------------|:----------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1242,12 +1208,12 @@ Because the channel stores transmitted energy without amplifying wave amplitudes
 
 ## Further Reading
 
-For a deeper theoretical foundation in control theory, robotics, and dynamical systems, consult the following authoritative references:
+For a deeper theoretical foundation in control theory, robotics, and dynamical systems, consult the following references:
 
-* **Modern Robotics: Mechanics, Planning, and Control** [@lynch2017modern] provides an elegant, rigorous treatment of kinematics and dynamics using screw theory and Lie groups.
-* **Robotics: Modelling, Planning and Control** [@siciliano2009robotics] serves as an authoritative reference for multi-body robot dynamics, trajectory generation, and operational space control.
+* **Modern Robotics: Mechanics, Planning, and Control** [@lynch2017modern] provides a rigorous treatment of kinematics and dynamics using screw theory and Lie groups.
+* **Robotics: Modelling, Planning and Control** [@siciliano2009robotics] serves as a reference for multi-body robot dynamics, trajectory generation, and operational space control.
 * **Feedback Systems: An Introduction for Scientists and Engineers** [@astrom2021feedback] establishes classical and state-space control theory, frequency-domain stability margins, and state estimation from first principles.
 * **Applied Nonlinear Control** [@slotine1991applied] provides a foundational treatment of nonlinear dynamical systems, Lyapunov stability certificates, and sliding mode control.
-* **Control Barrier Functions: Theory and Applications** [@ames2019control] establishes the definitive formulation of control barrier functions, safety-critical quadratic programming filters, and forward invariance.
+* **Control Barrier Functions: Theory and Applications** [@ames2019control] sets out the formulation of control barrier functions, safety-critical quadratic programming filters, and forward invariance.
 * **A Time-Dependent Hamilton-Jacobi Formulation of Reachable Sets for Continuous Dynamic Games** [@mitchell2005time] establishes the level set method and viscosity solutions for continuous-state differential games and safety verification.
 * **A Predictive Safety Filter for Learning-Based Control of Constrained Nonlinear Dynamical Systems** [@wabersich2021predictive] develops predictive safety filters and constrained MPC methods for safe learning on physical systems.
