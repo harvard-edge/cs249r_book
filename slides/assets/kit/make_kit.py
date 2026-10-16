@@ -126,6 +126,45 @@ def chips(xr, yc, lectures, accent, on, anchor="end"):
     return out
 
 
+# ---------------------------------------------------------------- course order
+# Volume I lectures in semester order, grouped by the book's parts, each with
+# the stack layer it teaches ("all" for lectures that span the stack).
+COURSE = [
+    ("Start", [(1, "Introduction", "all")]),
+    ("Part I  Foundations", [(2, "System Paradigms", "all"), (3, "ML Lifecycle", "all"),
+                              (4, "Data Engineering", "Data")]),
+    ("Part II  Development", [(5, "Neural Computation", "Models"), (6, "Architectures", "Models"),
+                               (7, "Frameworks", "Frameworks"), (8, "Training", "Training")]),
+    ("Part III  Optimization", [(9, "Data Selection", "Data"), (10, "Compression", "Models"),
+                                 (11, "Hardware Acceleration", "Hardware"), (12, "Benchmarking", "Hardware")]),
+    ("Part IV  Deployment", [(13, "Serving", "Serving"), (14, "ML Operations", "Operations"),
+                              (15, "Responsible Engineering", "Applications")]),
+    ("Close", [(16, "Conclusion", "all")]),
+]
+
+
+def course_order(accent):
+    """The semester as rows (one per part), each lecture a card with its
+    number, title, and the stack layer it teaches."""
+    out, y = [], 14
+    rowh, cw, gap, x0 = 66, 222, 10, 196
+    for part, lectures in COURSE:
+        out.append(text(10, y + 26, part, size=17, weight=700, fill=C["gray"]))
+        x = x0
+        for n, title, layer in lectures:
+            lit = layer != "all"
+            out.append(rect(x, y, cw, 54, accent, opacity=0.14 if lit else 0.06,
+                            stroke=accent, sw=1.2, rx=8))
+            out.append(text(x + 10, y + 19, f"L{n}", size=15, weight=700, fill=accent))
+            out.append(text(x + 48, y + 19, title,
+                            size=13, weight=700, fill=C["text"]))
+            out.append(text(x + 10, y + 40, "whole stack" if not lit else f"{layer} layer",
+                            size=12, weight=600, fill=C["gray"]))
+            x += cw + gap
+        y += rowh
+    return svg("".join(out), w=x0 + 4 * (cw + gap) + 4, h=y, label="Course order")
+
+
 # ---------------------------------------------------------------- machine
 def machine(accent, step=4, hl=None):
     """One accelerator node. step 1: compute array; 2: + on-chip SRAM;
@@ -253,7 +292,8 @@ def main():
     accent = ACCENT[args.volume]
     out = Path(__file__).parent / f"vol{args.volume}"
     out.mkdir(exist_ok=True)
-    figs = {"stack": stack(accent),
+    figs = {"course_order": course_order(accent),
+            "stack": stack(accent),
             "stack_roadmap": stack(accent, roadmap=True)}
     for name in STACK + ["Data"]:
         figs[f"stack_{name.lower()}"] = stack(accent, highlight=name)

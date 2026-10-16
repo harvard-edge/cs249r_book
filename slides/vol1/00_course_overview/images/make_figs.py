@@ -44,15 +44,21 @@ sp.hbars_steps(out / "fleet_daily", [
 ], "MWh", log=False, xlabel="Energy (megawatt-hours)", size=sp.SHORT)
 
 # Training against generating text on one accelerator (schematic roofline)
+# H100 ridge point 295 FLOP/byte (Hardware Acceleration, Sec. 11.6).
+# Decode at batch 1 with 16-bit weights: about 2 operations per 2 bytes of
+# weights, about 1 FLOP/byte. The training point is placed illustratively
+# above the ridge.
 sp.roofline_steps(out / "roofline_train_decode", [
-    ("Generating text, one user", 1.0, "memory"),
-    ("Training, large batch", 1000.0, "compute"),
-])
+    ("Generating text", 1.0, "memory"),
+    ("Training, large batch", 3000.0, "compute"),
+], ridge=295.0, xticks=[1, 10, 100, 1000], ridge_label="H100 ridge: 295",
+    xlabel="Arithmetic intensity (FLOPs per byte moved, log scale)",
+    note="Performance axis schematic")
 
 # Utilization is energy: joules per generated token
 sp.hbars_steps(out / "energy_utilization", [
     ("Well batched", 1.1, "compute"),
-    ("10% GPU utilization", 6.6, "danger"),
+    ("Poorly batched (10% of the rate)", 6.6, "danger"),
 ], "J per token", log=False, value_fmt="{:.1f}", size=sp.SHORT)
 
 # Datacenter electricity (IEA)
