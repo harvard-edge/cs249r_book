@@ -164,6 +164,13 @@ EDGE_ADAPTATION_TIER_PROFILE = _est(
 )
 
 # --- Hardware technology-class facts (Hardware.Tech) ---
+OCONNOR_FGDRAM_2017 = _lit(
+    "prov:oconnor-fgdram-2017",
+    "O'Connor et al. (2017), Fine-Grained DRAM: Energy-Efficient DRAM for Extreme Bandwidth Systems, MICRO-50 (Section 1, Figure 1b)",
+    url="https://research.nvidia.com/publication/2017-10_fine-grained-dram-energy-efficient-dram-extreme-bandwidth-systems",
+    verified="2026-10-15",
+    notes="'The energy to access a bit in HBM2 is approximately 3.97 pJ/bit' (activation + on-die data movement + I/O).",
+)
 HOROWITZ_ENERGY = _lit(
     "prov:horowitz-2014",
     "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
@@ -1480,6 +1487,21 @@ FABRIC_LATENCY_ASSUMPTIONS = _conv(
     notes="Order-of-magnitude μs values for napkin math; not vendor QoS guarantees.",
 )
 
+EFFECTIVE_COLLECTIVE_ALPHA_RANGES = _est(
+    "prov:effective-collective-alpha-ranges",
+    "Effective per-message collective-launch latency (alpha) ranges by interconnect: NVLink 4.0, "
+    "PCIe Gen5, InfiniBand NDR and HDR, 100G RoCE",
+    notes=(
+        "Teaching assumption, not a vendor figure: alpha here is the EFFECTIVE launch latency of one "
+        "collective message, communication-library software stack included, so it sits above the wire "
+        "latencies in Tech.Interconnect and Fabrics. Ranges: NVLink 1-2 us, PCIe Gen5 2-5 us, IB NDR "
+        "1-3 us, IB HDR 2-5 us, RoCE 100G 5-10 us. They bracket the single-value anchors AlphaNdr "
+        "(1.5 us) and AlphaRoce (5 us) from prov:fabric-latency-assumptions. Consolidated 2026-10-15 "
+        "from three identical hand-typed copies in book cells into this one source."
+    ),
+    verified="2026-10-15",
+)
+
 SWITCH_OPTICS_REFERENCE = _conv(
     "prov:switch-optics-reference",
     "Datacenter switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
@@ -1605,6 +1627,18 @@ MODEL_LOADING_SCENARIO_ASSUMPTIONS = _est(
         "values are teaching-scale assumptions and should be calibrated from fleet "
         "measurements for production sizing."
     ),
+)
+
+REPLICA_COLD_START_SCENARIO = _est(
+    "prov:replica-cold-start-scenario",
+    "Reference cold start of a newly placed LLM serving replica",
+    notes=(
+        "Documented teaching assumption: 60 seconds to acquire and boot an instance, the weight "
+        "artifact fetched from object storage at an effective 0.5 GB/s, and 60 seconds of device "
+        "loading and warmup. Calibrate all three from fleet measurements for production sizing; "
+        "cached artifacts or overlapped phases shorten the path, shared storage lengthens it."
+    ),
+    verified="2026-10-15",
 )
 
 LLM_SERVING_PRECISION_DIVIDEND_PROFILE = _est(
@@ -2119,6 +2153,15 @@ NVIDIA_HOPPER_HBM_STACKS = _ds(
     verified=_V,
     notes="H100 SXM5: five active HBM3 stacks (six sites) for 80 GB; B200: eight HBM3e stacks for 192 GB.",
 )
+NVIDIA_BLACKWELL_NV_HBI = _ds(
+    "prov:nvidia-blackwell-nv-hbi",
+    "NVIDIA Blackwell Architecture (technology overview page)",
+    "https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/",
+    verified="2026-10-15",
+    notes=("Quoted: two reticle-limited dies 'connected by a 10 terabytes per second (TB/s) "
+           "chip-to-chip interconnect in a unified single GPU' (NV-HBI). NVIDIA does not say "
+           "whether 10 TB/s is per direction or a bidirectional total."),
+)
 DGX_H100_USER_GUIDE_PHYSICAL = _ds(
     "prov:nvidia-dgx-h100-user-guide-physical",
     "NVIDIA DGX H100/H200 User Guide: hardware overview and physical specifications",
@@ -2335,4 +2378,64 @@ GOOGLE_SEARCH_VOLUME_2025 = _lit(
     url="https://blog.google/products/ads-commerce/ai-personalization-and-the-future-of-shopping/",
     verified="2026-10-13",
     notes="'We already see more than 5 trillion searches on Google annually.' Daily figure = 5e12 / 365, a lower bound.",
+)
+
+# --- Fleet scheduling scenarios (2026-10-15) ---
+# Shared scenario anchors for the orchestration and performance-engineering
+# examples, registered so every reader computes from one source instead of
+# copying the values by hand.
+FORCED_PREEMPTION_SCENARIO = _est(
+    "prov:forced-preemption-scenario",
+    "Reference forced-preemption scenario for a low-priority training job on a shared fleet",
+    notes=(
+        "Documented teaching assumption: a forced (non-graceful) preemption discards 15 minutes of "
+        "work since the last durable checkpoint (half of a 30-minute checkpoint interval), and a "
+        "low-priority job with no preemption budget is struck 12 times a day. Relaunch, checkpoint "
+        "reload, and warmup are not part of this record: they come from "
+        "Systems.Reliability.Recovery.cold_restart_time(), the same cold-restart steps as a failure "
+        "recovery, without failure detection because the scheduler initiates the stop."
+    ),
+    verified="2026-10-15",
+)
+SPOT_INTERRUPTION_SCENARIO = _est(
+    "prov:spot-interruption-scenario",
+    "Reference spot-capacity interruption scenario for a large training job on slow storage",
+    notes=(
+        "Documented teaching assumption: each spot reclamation costs a 15-minute graceful checkpoint "
+        "to slow (object-class) storage plus 30 minutes to reacquire capacity, restart, and reload, "
+        "after every 2 hours of retained progress. Slower than the cluster recovery budget "
+        "(Systems.Reliability.Recovery) because the capacity is re-provisioned and the checkpoint "
+        "path is not the cluster's parallel file system."
+    ),
+    verified="2026-10-15",
+)
+ELASTIC_RESIZE_SCENARIO = _est(
+    "prov:elastic-resize-scenario",
+    "Reference elastic-resize decision scenario (128/256/512 GPUs over a 24-hour window)",
+    notes=(
+        "Documented teaching assumption: relative throughput 1.0, 1.8, and 3.2 epochs/hour at 128, "
+        "256, and 512 GPUs (90 and 80 percent scaling efficiency against 128); the full 512-GPU "
+        "allocation frees after a 4-hour queue wait; one resize costs 10 minutes to checkpoint, "
+        "reshard, and restart; 24-hour comparison window."
+    ),
+    verified="2026-10-15",
+)
+UTILIZATION_TIERS_SCENARIO = _est(
+    "prov:utilization-tiers-scenario",
+    "Reference allocated/active/productive capacity tiers for one team's allocation",
+    notes=(
+        "Documented teaching assumption: 500 GPUs allocated, 350 active-device equivalents, and 280 "
+        "device-equivalents of useful work at the job's fault-free step rate (time averages)."
+    ),
+    verified="2026-10-15",
+)
+FLEET_UTILIZATION_SNAPSHOT_SCENARIO = _est(
+    "prov:fleet-utilization-snapshot-scenario",
+    "Reference shared-fleet utilization snapshot (assigned, incomplete-gang, input-wait shares)",
+    notes=(
+        "Documented teaching assumption: 80 percent of in-service capacity assigned to jobs, of which "
+        "15 percent of the fleet sits in gangs still waiting for members and another 5 percent sits "
+        "in complete allocations waiting for input."
+    ),
+    verified="2026-10-15",
 )
