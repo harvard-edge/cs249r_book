@@ -483,7 +483,7 @@ The price is noise margin. With four levels packed into the same voltage swing, 
 
 :::
 
-Doubling line rate without doubling the symbol rate therefore trades signal-to-noise ratio (SNR) for bandwidth, and forward error correction\index{Forward Error Correction!channel limit} is what lets the link operate that close to the channel limit.
+Doubling line rate without doubling the symbol rate therefore trades signal-to-noise ratio (SNR) for bandwidth, and forward error correction\index{Forward Error Correction!channel limit} is what lets the link operate that close to the channel limit. Because that tighter margin leaves less room for channel attenuation, it also shortens the distance a passive copper cable can span before the link must switch to optics.
 
 ### Reach and medium for copper and optics {#sec-network-fabrics-copper-optics}
 
@@ -693,11 +693,9 @@ GPU clusters commonly choose between two RDMA transport stacks, and the decision
 
 : **RDMA transport stack trade-offs**: InfiniBand and RoCE expose RDMA semantics through different operational contracts, one built around native losslessness and the other around Ethernet compatibility. {#tbl-network-fabrics-rdma-stacks tbl-colwidths="[20,30,25,25]"}
 
-The InfiniBand\index{IB|see{InfiniBand}}[^fn-infiniband-protocol-origin] row reflects a protocol heritage that favors hardware-managed losslessness over Ethernet compatibility.
+The InfiniBand\index{IB|see{InfiniBand}}[^fn-infiniband-protocol-origin] row reflects a protocol heritage that favors hardware-managed losslessness over Ethernet compatibility, and this architectural choice is visible at the protocol boundary. @Fig-ib-roce-stack partitions the protocol stack across user-space, kernel, and hardware bands, contrasting traditional socket overhead against direct verbs hardware offload. While the conventional copied TCP/IP path illustrated on the left uses two software copies across kernel buffer boundaries and software protocol execution, the RDMA stack (right) traces a single amber bypass arrow straight from the collective communication library (such as the NVIDIA Collective Communications Library, or NCCL) and the user-space **verbs API**\index{Verbs API!definition} to the RDMA NIC, keeping the operating system entirely off the active data path.
 
 [^fn-infiniband-protocol-origin]: [offset=-32mm] **InfiniBand**\index{InfiniBand!origin}: Formed in 1999 from the merger of two competing server I/O standards (Future I/O and NGIO), InfiniBand was originally designed to replace PCI as a general-purpose system interconnect. Its pivot to HPC networking preserved the credit-based, hardware-managed flow control that server I/O demanded, and that heritage is why InfiniBand provides native losslessness without the PFC fragility of Ethernet-based RDMA fabrics.
-
-This architectural choice is visible at the protocol boundary. @Fig-ib-roce-stack partitions the protocol stack across user-space, kernel, and hardware bands, contrasting traditional socket overhead against direct verbs hardware offload. While the conventional copied TCP/IP path illustrated on the left uses two software copies across kernel buffer boundaries and software protocol execution, the RDMA stack (right) traces a single amber bypass arrow straight from the collective communication library (such as the NVIDIA Collective Communications Library, or NCCL) and the user-space **verbs API**\index{Verbs API!definition} to the RDMA NIC, keeping the operating system entirely off the active data path.
 
 ::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**Traditional TCP/IP vs. RDMA verbs stacks**: Read each stack top to bottom through the user-space, kernel, and hardware bands. In the illustrated copied TCP/IP socket path (left), a send enters the kernel through a system call, the payload is copied into kernel socket buffers and again toward the NIC's transmit ring, and the CPU runs the transport protocol in software. With RDMA verbs over InfiniBand or RoCEv2 (right), the collective library posts work requests from user space, the kernel stays off the data path, and the RDMA NIC runs the reliable transport in hardware, reading GPU memory directly through GPUDirect instead of staging a host copy." fig-alt="Two panels, each divided by dashed lines into user space, kernel, and hardware bands. Left, TCP/IP sockets: training framework in user space, then socket API, TCP/IP stack, and NIC driver in the kernel, then the Ethernet NIC; beside the stack, three payload tiles marked n attach to the framework, the socket API, and the NIC driver and are labeled user buf, socket buf, and TX ring; dashed arrows labeled copy 1 and copy 2 join them, and a thin solid arrow labeled DMA read carries the TX ring into the Ethernet NIC; the footer reads CPU copies data and runs the transport. Right, RDMA verbs: NCCL above the verbs API in user space, then a single amber arrow straight through the empty kernel band, labeled kernel not on the data path, to the RDMA NIC with transport in hardware; a GPU memory box beside the NIC holds a single payload tile and feeds the NIC through a short green arrow; the footer reads NIC reads GPU memory directly (GPUDirect)."}
 ![](images/svg/networking-stacks.svg)
@@ -1215,7 +1213,7 @@ class NetworkTopologyRadixRecap:
     n_leaf_groups_str = fmt(n_leaf_groups, precision=0, commas=False)
 ```
 
-A cluster can have thousands of fast links at the edge and still starve its AllReduce operations if the cross-sectional capacity at the narrowest point in the switching hierarchy is insufficient. The physical arrangement of switches determines whether that cross-section throttles collective communication or sustains full line-rate exchange across all participating workers. Two properties govern this capability: bisection bandwidth $\BisectionBandwidth$ and whether the fabric is non-blocking, a constraint captured by the bisection bandwidth theorem (principle \ref{pri-bisection-bandwidth}).
+A cluster can have thousands of fast links at the edge and still starve its AllReduce operations if the cross-sectional capacity at the narrowest point in the switching hierarchy is insufficient. The physical arrangement of switches determines whether that cross-section throttles collective communication or sustains full line-rate exchange across all participating workers. Two properties govern this capability: bisection bandwidth $\BisectionBandwidth$ and whether the fabric is non-blocking, a constraint captured by the bisection bandwidth theorem (principle \ref{pri-bisection-bandwidth}). Bisection bandwidth quantifies the worst-case throughput ceiling that the topology imposes on global collectives.
 
 ```{python}
 #| echo: false
@@ -1253,8 +1251,6 @@ class NonBlockingOversubscription:
     comm_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
     throughput_loss_pct_str = fmt_percent(throughput_loss_pct / 100, precision=1, commas=False, style='prose')
 ```
-
-Bisection bandwidth quantifies this worst-case throughput ceiling that the topology imposes on global collectives.
 
 ```{python}
 #| echo: false
@@ -1436,9 +1432,7 @@ class NetworkFatTreeRecap:
     n_gpus_str = fmt(Systems.Clusters.Training_1K.total_accelerators, precision=0, commas=True)
 ```
 
-A fat-tree built from switches with radix $\SwitchRadix$ supports $\FatTreeHostCount= \SwitchRadix^{3}/4$ hosts at three tiers. A standalone two-tier non-blocking fabric can instead use $\SwitchRadix$ leaves, each with $\SwitchRadix/2$ host ports and $\SwitchRadix/2$ uplinks, connected to $\SwitchRadix/2$ spines. Each spine uses all $\SwitchRadix$ ports to reach the leaves, providing $\SwitchRadix^{2}/2 =$ `{python} FatTreeScaling.fat_tree_two_tier_hosts_str` host ports for radix-64 switches. One pod of the three-tier design has only $\SwitchRadix/2$ leaves and therefore $(\SwitchRadix/2)^2 =$ `{python} FatTreeScaling.fat_tree_pod_hosts_str` host ports; its spine switches reserve ports for the core. These are different port allocations and switch counts rather than two ways of counting the same fabric, and while the `{python} NetworkFatTreeRecap.n_gpus_str`-GPU reference cluster fits within a standalone two-tier design, the distinction matters as soon as a cluster outgrows that limit. A `{python} FatTreeScaling.scale_out_hosts_str`-GPU deployment cannot join two fully populated standalone `{python} FatTreeScaling.fat_tree_two_tier_hosts_str`-host fabrics at their spines, because every spine port is already occupied by a leaf connection; instead, it is built as `{python} FatTreeScaling.scale_out_pods_word_str` `{python} FatTreeScaling.fat_tree_pod_hosts_str`-host pods of the three-tier design, joined through a core tier.
-
-A concrete bisection estimate shows how quickly oversubscription turns into synchronization delay.
+A fat-tree built from switches with radix $\SwitchRadix$ supports $\FatTreeHostCount= \SwitchRadix^{3}/4$ hosts at three tiers. A standalone two-tier non-blocking fabric can instead use $\SwitchRadix$ leaves, each with $\SwitchRadix/2$ host ports and $\SwitchRadix/2$ uplinks, connected to $\SwitchRadix/2$ spines. Each spine uses all $\SwitchRadix$ ports to reach the leaves, providing $\SwitchRadix^{2}/2 =$ `{python} FatTreeScaling.fat_tree_two_tier_hosts_str` host ports for radix-64 switches. One pod of the three-tier design has only $\SwitchRadix/2$ leaves and therefore $(\SwitchRadix/2)^2 =$ `{python} FatTreeScaling.fat_tree_pod_hosts_str` host ports; its spine switches reserve ports for the core. These are different port allocations and switch counts rather than two ways of counting the same fabric, and while the `{python} NetworkFatTreeRecap.n_gpus_str`-GPU reference cluster fits within a standalone two-tier design, the distinction matters as soon as a cluster outgrows that limit. A `{python} FatTreeScaling.scale_out_hosts_str`-GPU deployment cannot join two fully populated standalone `{python} FatTreeScaling.fat_tree_two_tier_hosts_str`-host fabrics at their spines, because every spine port is already occupied by a leaf connection; instead, it is built as `{python} FatTreeScaling.scale_out_pods_word_str` `{python} FatTreeScaling.fat_tree_pod_hosts_str`-host pods of the three-tier design, joined through a core tier. A concrete bisection estimate shows how quickly oversubscription at that spine or core boundary turns into synchronization delay.
 
 ```{python}
 #| echo: false
@@ -2013,9 +2007,7 @@ When each buffer in the cycle fills beyond its configured pause threshold, each 
 ![](images/svg/pfc-credit-deadlock.svg)
 :::
 
-Routing changes and flooding can create the dependencies needed for deadlock. During link failure or Border Gateway Protocol (BGP) convergence, inconsistent forwarding tables can create transient loops. A lossy IP network eventually discards a looping packet when its time-to-live expires; a lossless class has no such release, so looping traffic can fill the buffers along the loop and hold them. If traffic occupies a cycle of mutually blocked queues, backpressure can prevent progress until recovery breaks the dependency. Multicast or broadcast replication can also fill queues whose dependencies intersect, while cross-connects and asymmetric failover paths can introduce cycles absent from the intended hierarchical route. None of these conditions alone proves a deadlock; the occupied buffers and pause states must form the closed waiting cycle described by the model.
-
-Microsoft's production RoCE deployment encountered the flooding trigger directly (war story \ref{ws-network-fabrics-microsoft-pfc-deadlock}).
+Routing changes and flooding can create the dependencies needed for deadlock. During link failure or Border Gateway Protocol (BGP) convergence, inconsistent forwarding tables can create transient loops. A lossy IP network eventually discards a looping packet when its time-to-live expires; a lossless class has no such release, so looping traffic can fill the buffers along the loop and hold them. If traffic occupies a cycle of mutually blocked queues, backpressure can prevent progress until recovery breaks the dependency. Multicast or broadcast replication can also fill queues whose dependencies intersect, while cross-connects and asymmetric failover paths can introduce cycles absent from the intended hierarchical route. None of these conditions alone proves a deadlock; the occupied buffers and pause states must form the closed waiting cycle described by the model. Microsoft's production RoCE deployment encountered the flooding trigger directly (war story \ref{ws-network-fabrics-microsoft-pfc-deadlock}).
 
 ::: {#ws-network-fabrics-microsoft-pfc-deadlock .callout-war-story title="Microsoft's PFC deadlock (2016)"}
 
@@ -2033,11 +2025,7 @@ Microsoft's production RoCE deployment encountered the flooding trigger directly
 
 #### PFC storms and victim flows {#sec-network-pfc-storms}
 
-In contrast to a static topological cycle, a **PFC storm**\index{PFC storm!definition} is a dynamic, runaway amplification phenomenon. A single "slow drainer" (an accelerator stalled by memory bus saturation, operating system preemption, or a degraded transceiver with elevated bit error rates) fails to consume packets at wire speed.
-
-The attached ToR switch queue fills and sends a PAUSE frame to the sender. Because multi-port switches aggregate traffic from many sources across shared packet buffers, the paused queue blocks buffer allocation for unrelated packets (head-of-line blocking). The spine switches feeding that ToR then fill their buffers and pause the other leaf switches that send through them. Each additional tier widens the set of paused links until traffic between node pairs that never communicated with the stalled worker also stops. These victim flows\index{Victim flow!PFC cascade} turn one slow endpoint into a job-wide barrier delay, because every data-parallel worker whose path crosses a paused spine port now arrives late at the barrier.
-
-Because a degraded transceiver is one such slow drainer, a component-exposure calculation shows how often a cluster should expect at least one, even though exposure alone does not estimate the probability of a PFC storm.
+In contrast to a static topological cycle, a **PFC storm**\index{PFC storm!definition} is a dynamic, runaway amplification phenomenon triggered when a single "slow drainer" (an accelerator stalled by memory bus saturation, operating system preemption, or a degraded transceiver with elevated bit error rates) fails to consume packets at wire speed. The attached ToR switch queue fills and sends a PAUSE frame to the sender. Because multi-port switches aggregate traffic from many sources across shared packet buffers, the paused queue blocks buffer allocation for unrelated packets (head-of-line blocking). The spine switches feeding that ToR then fill their buffers and pause the other leaf switches that send through them, and each additional tier widens the set of paused links until traffic between node pairs that never communicated with the stalled worker also stops. These victim flows\index{Victim flow!PFC cascade} turn one slow endpoint into a job-wide barrier delay, because every data-parallel worker whose path crosses a paused spine port now arrives late at the barrier. Because a degraded transceiver is one such slow drainer, a component-exposure calculation shows how often a cluster should expect at least one, even though exposure alone does not estimate the probability of a PFC storm.
 
 ```{python}
 #| echo: false
@@ -2565,7 +2553,7 @@ When a training job reports lower-than-expected throughput, the diagnostic order
 4. **Check PFC/ECN counters**\index{Congestion control!PFC and ECN counters}: Inspect switch counters along the path. Sustained PFC activity indicates persistent congestion that should be investigated at the scheduler or routing level.
 5. **Validate physical layer**\index{Physical layer!validation}: Check symbol errors and CRC counts to identify failing transceivers or cables.
 
-In this order, application symptoms identify the failing path, transport counters show whether congestion or fallback is involved, and physical telemetry confirms whether the wire itself is degrading.
+In this order, application symptoms identify the failing path, transport counters show whether congestion or fallback is involved, and physical telemetry confirms whether the wire itself is degrading. Applying the sequence to a concrete slowdown shows how each layer narrows the search before any hardware is replaced.
 
 ```{python}
 #| echo: false

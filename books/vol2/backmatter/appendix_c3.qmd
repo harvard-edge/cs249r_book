@@ -54,7 +54,7 @@ This equation is the fleet-scale counterpart of the iron law. Where the iron law
 
 ### Component decomposition {#sec-appdx-c3-taxonomy-component-decomposition}
 
-Each Fleet Law term maps to specific measurable activities:
+Each Fleet Law term maps to specific measurable activities that can be isolated in a timeline trace or cluster telemetry log. By attributing every millisecond of step duration to one of four terms, engineers can tell whether hardware is doing useful math, moving bytes across wires, or waiting on barriers:
 
 - **$\IronLawComputeTime/\DeviceCount$**: Forward pass, backward pass, and optimizer step, all local arithmetic after distribution across $\DeviceCount$ devices. Governed by MFU and per-GPU kernel efficiency. Improvements come from better kernels, mixed precision, and operator fusion.
 - **$\CommunicationTime(\DeviceCount)$**: AllReduce of gradients, AllGather of parameters (in FSDP/ZeRO), activation transfers in tensor/pipeline parallelism. Governed by network bandwidth and collective algorithm choice. Improvements come from gradient compression, hierarchical collectives, and compute-communication overlap.
@@ -69,9 +69,7 @@ When $\UsefulComputeFraction$ drops below 0.5, the fleet spends more time on com
 
 ## C$^3$ Intersections {#sec-appdx-c3-taxonomy-intersection-landscape}
 
-In a production cluster, a stalled training step rarely comes from a single isolated resource; a slow collective can idle tensor cores while a synchronous checkpoint write blocks both the GPUs and the network fabric. The Venn diagram in @fig-c3-taxonomy maps how distributed execution spans the node substrate ($\FleetComputeTaxonomyAxis$), the networking backbone ($\FleetCommunicationTaxonomyAxis$), and the orchestration layer ($\FleetCoordinationTaxonomyAxis$). Because real bottlenecks arise at the pairwise and central boundaries where two or more of these dimensions compound, diagnosing them requires mapping observed symptoms back to the governing intersection before selecting an engineering fix.
-
-@Tbl-c3-intersections expands the three pure dimensions, the three pairwise boundaries, and the central convergence into concrete engineering techniques and their primary book chapters.
+In a production cluster, a stalled training step rarely comes from a single isolated resource; a slow collective can idle tensor cores while a synchronous checkpoint write blocks both the GPUs and the network fabric. The Venn diagram in @fig-c3-taxonomy maps how distributed execution spans the node substrate ($\FleetComputeTaxonomyAxis$), the networking backbone ($\FleetCommunicationTaxonomyAxis$), and the orchestration layer ($\FleetCoordinationTaxonomyAxis$). Because real bottlenecks arise at the pairwise and central boundaries where two or more of these dimensions compound, diagnosing them requires mapping observed symptoms back to the governing intersection before selecting an engineering fix. @Tbl-c3-intersections expands the three pure dimensions, the three pairwise boundaries, and the central convergence into concrete engineering techniques and their primary book chapters.
 
 | **Zone**                                                                                                                                                  | **Name**                            | **Key Techniques**                                                                                                               | **Book Coverage**                                                                                                   |
 |:----------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------|
@@ -93,9 +91,7 @@ In a GPU trace, this bottleneck appears as exposed communication intervals where
 
 ### Compute $\cap$ coordination {#sec-appdx-c3-taxonomy-comp-coord}
 
-A 1,024-GPU cluster that pauses every thirty minutes to flush a multi-terabyte checkpoint to shared storage turns expensive arithmetic capacity into idle wait time. This intersection captures the idle compute caused by orchestration and resilience mechanisms. While compute engines should remain saturated with arithmetic, coordination overhead repeatedly forces hardware into idle states.
-
-Three distinct mechanisms govern this intersection:
+A 1,024-GPU cluster that pauses every thirty minutes to flush a multi-terabyte checkpoint to shared storage turns expensive arithmetic capacity into idle wait time. This intersection captures the idle compute caused by orchestration and resilience mechanisms. While compute engines should remain saturated with arithmetic, coordination overhead repeatedly forces hardware into idle states. Three distinct mechanisms govern this intersection:
 
 1.  **Pipeline bubbles**: In pipeline parallelism (PP), stages idle during pipeline fill (warmup) and drain (cooldown). For $\PipelineParallelDegree$ pipeline stages and $\MicrobatchCount$ microbatches, the bubble fraction $\PipelineBubbleFraction = (\PipelineParallelDegree - 1)/(\PipelineParallelDegree - 1 + \MicrobatchCount)$ (@sec-appdx-comm-foundations-bubble-fraction) is accelerator time lost to idling; more microbatches or interleaved schedules shrink it.
 2.  **Checkpoint stalls**: Synchronous checkpoint writes that block the training loop to serialize terabytes of weights and optimizer states convert expensive compute time into storage wait time. Asynchronous checkpointing mitigates this by snapshotting host-pinned or local Non-Volatile Memory Express (NVMe) memory in milliseconds, delegating remote persistence to background I/O threads.
@@ -105,15 +101,11 @@ Three distinct mechanisms govern this intersection:
 
 When a single GPU or network link drops packets or throttles its clock during an AllReduce collective, every other rank in the group must wait at the dependency boundary before the next step can proceed. This intersection captures the synchronization cost embedded in network communication. A collective operation (AllReduce, AllGather, ReduceScatter) moves data over physical wires ($\FleetCommunicationTaxonomyAxis$) while creating dependencies among its participating ranks ($\FleetCoordinationTaxonomyAxis$). It need not impose a separate cluster-wide barrier, but a delayed contribution can prevent dependent outputs from becoming ready.
 
-The governing failure mode is that one slow participant paces the whole collective\index{Straggler!appendix refresher}. If a single GPU or link experiences packet drops, thermal throttling, or ECC retry delays, every other GPU in the collective waits, transforming a localized degradation into a cluster-wide halt. At fleet scale ($\DeviceCount\ge 10{,}000$), tail latency dominates the barrier time, because the probability that at least one node straggles approaches unity ($1 - (1 - \NodeStragglerProbability)^\DeviceCount\to 1$).
-
-Engineering at this intersection focuses on decoupling synchronization from raw communication: using hierarchical collectives that isolate high-bandwidth intra-node NVLink domains from inter-node InfiniBand fabrics, adopting bounded-staleness asynchronous training to absorb transient tail latency, and enforcing topology-aware gang scheduling to align collective communication rings with physical spine-leaf switch rails (@sec-collective-communication, @sec-fault-tolerance-reliability).
+The governing failure mode is that one slow participant paces the whole collective\index{Straggler!appendix refresher}. If a single GPU or link experiences packet drops, thermal throttling, or ECC retry delays, every other GPU in the collective waits, transforming a localized degradation into a cluster-wide halt. At fleet scale ($\DeviceCount\ge 10{,}000$), tail latency dominates the barrier time, because the probability that at least one node straggles approaches unity ($1 - (1 - \NodeStragglerProbability)^\DeviceCount\to 1$). Engineering at this intersection focuses on decoupling synchronization from raw communication: using hierarchical collectives that isolate high-bandwidth intra-node NVLink domains from inter-node InfiniBand fabrics, adopting bounded-staleness asynchronous training to absorb transient tail latency, and enforcing topology-aware gang scheduling to align collective communication rings with physical spine-leaf switch rails (@sec-collective-communication, @sec-fault-tolerance-reliability).
 
 ### Fleet-scale ML systems engineering {#sec-appdx-c3-taxonomy-triple-intersection}
 
-Partitioning a 405-billion-parameter model across 16,384 GPUs requires fitting shard states into high-bandwidth memory (HBM) ($\FleetComputeTaxonomyAxis$), matching tensor and pipeline traffic to intra-node NVLink and inter-node InfiniBand bandwidths ($\FleetCommunicationTaxonomyAxis$), and keeping pipeline bubbles and checkpoint stalls from consuming wall-clock time ($\FleetCoordinationTaxonomyAxis$). At the center ($\FleetComputeTaxonomyAxis\cap \FleetCommunicationTaxonomyAxis\cap \FleetCoordinationTaxonomyAxis$), all three constraints converge simultaneously. This is the discipline of **fleet-scale ML systems engineering**\index{Fleet-scale ML systems engineering!definition}. Systems engineers at this center do not optimize a single accelerator or a single network switch; they manage the trade-offs of the distributed machine as an integrated whole.
-
-The central engineering challenges encompass:
+Partitioning a 405-billion-parameter model across 16,384 GPUs requires fitting shard states into high-bandwidth memory (HBM) ($\FleetComputeTaxonomyAxis$), matching tensor and pipeline traffic to intra-node NVLink and inter-node InfiniBand bandwidths ($\FleetCommunicationTaxonomyAxis$), and keeping pipeline bubbles and checkpoint stalls from consuming wall-clock time ($\FleetCoordinationTaxonomyAxis$). At the center ($\FleetComputeTaxonomyAxis\cap \FleetCommunicationTaxonomyAxis\cap \FleetCoordinationTaxonomyAxis$), all three constraints converge simultaneously. This is the discipline of **fleet-scale ML systems engineering**\index{Fleet-scale ML systems engineering!definition}. Systems engineers at this center do not optimize a single accelerator or a single network switch; they manage the trade-offs of the distributed machine as an integrated whole. The central engineering challenges encompass three coupled design problems:
 
 -  **4D parallelism co-design**: Balancing data parallelism (DP), tensor parallelism (TP), pipeline parallelism (PP), and expert parallelism (EP) so that memory consumption fits within accelerator HBM ($\FleetComputeTaxonomyAxis$), high-frequency communications map to intra-node NVLink and low-frequency communications map to inter-node fabrics ($\FleetCommunicationTaxonomyAxis$), and pipeline bubbles and barrier dependencies are minimized ($\FleetCoordinationTaxonomyAxis$).
 -  **Memory sharding vs. communication volume**: Frameworks like PyTorch FSDP2 and DeepSpeed ZeRO-3 eliminate memory redundancy ($\FleetComputeTaxonomyAxis$) by partitioning model states across workers, but pay for it with repeated AllGather communication ($\FleetCommunicationTaxonomyAxis$) and state coordination metadata ($\FleetCoordinationTaxonomyAxis$).
@@ -135,9 +127,7 @@ Just as single-node execution transforms the additive iron law into a maximum bo
 
 ### Storage as the persistent substrate {#sec-appdx-c3-taxonomy-storage-substrate}
 
-A common diagnostic question is why Storage does not appear as a fourth explicit coordinate in the C$^3$ taxonomy or as an independent $\Glyph{T_{\text{storage}}}$ term in the Fleet Law.
-
-The physical data center is procured around Compute, Network, and Storage (@sec-data-storage). At runtime, however, storage devices execute no model arithmetic. Storage overhead therefore manifests dynamically through the three C$^3$ dimensions:
+A common diagnostic question is why Storage does not appear as a fourth explicit coordinate in the C$^3$ taxonomy or as an independent $\Glyph{T_{\text{storage}}}$ term in the Fleet Law. The physical data center is procured around Compute, Network, and Storage (@sec-data-storage), yet at runtime storage devices execute no model arithmetic. Storage overhead therefore manifests dynamically through the three C$^3$ dimensions:
 
 -  **In Compute ($\FleetComputeTaxonomyAxis$)**: High-throughput local NVMe drives function as the tier-3 extension of the accelerator memory hierarchy (below SRAM and HBM), serving parameter offloading (ZeRO-Offload) and activation spilling.
 -  **In Communication ($\FleetCommunicationTaxonomyAxis$)**: Remote dataset streaming from parallel file systems (Lustre, GPFS) or object stores (S3, Ceph) shares cluster network bandwidth and network interface card (NIC) capacity with collective communication traffic.
@@ -166,7 +156,7 @@ In the middle of a production incident, fast heuristics narrow the search space 
 
 ### The C$^3$ traffic light {#sec-appdx-c3-taxonomy-traffic-light}
 
-@Tbl-c3-traffic-light provides threshold-based triage for each C$^3$ axis.
+@Tbl-c3-traffic-light provides threshold-based triage for each C$^3$ axis so operators can classify a run in seconds from high-level telemetry. Comparing observed MFU, communication fraction, and runtime goodput against these bands immediately isolates which subsystem warrants a deeper trace.
 
 | **C$^3$ Axis**    | **Green (Healthy)**                            | **Yellow (Investigate)**                                                          | **Red (Bottleneck)**                          |
 |:------------------|:-----------------------------------------------|:----------------------------------------------------------------------------------|:----------------------------------------------|
@@ -275,13 +265,13 @@ The **Compute**\index{C³ Taxonomy!compute} axis is the leading hypothesis to in
 
 #### The fix {.unnumbered}
 
-If traces confirm inefficient local execution, target the compute axis across `{python} C3CaseStudies.case1_n_gpus_str` accelerators:
+If traces confirm inefficient local execution, target the compute axis across `{python} C3CaseStudies.case1_n_gpus_str` accelerators to raise per-device kernel utilization. Three adjustments recover most of the missing arithmetic throughput:
 
 - **Mixed precision**: Ensure BF16/FP8 Tensor Cores are engaged. A common culprit is FP32 fallback in normalization layers or loss computation.
 - **Operator fusion**: Use `torch.compile` or similar just-in-time (JIT) compilation to fuse element-wise operations and reduce kernel launch overhead.
 - **Batch size tuning**: If per-GPU batch size is too small, the matrix multiplications have insufficient arithmetic intensity to saturate the Tensor Cores.
 
-Raising MFU from `{python} C3CaseStudies.case1_mfu_pct_str` to `{python} C3CaseStudies.case1_target_mfu_pct_str` on the same hardware delivers `{python} C3CaseStudies.case1_target_mfu_pct_str`/`{python} C3CaseStudies.case1_mfu_pct_str` = `{python} C3CaseStudies.case1_target_gain_mult_str` more useful work, the equivalent of tripling the fleet without buying a single GPU.
+Raising MFU from `{python} C3CaseStudies.case1_mfu_pct_str` to `{python} C3CaseStudies.case1_target_mfu_pct_str` on the same hardware delivers `{python} C3CaseStudies.case1_target_mfu_pct_str`/`{python} C3CaseStudies.case1_mfu_pct_str` = `{python} C3CaseStudies.case1_target_gain_mult_str` more useful work, the equivalent of tripling the fleet without buying a single GPU. Because communication is already below 10 percent of step time, all of that per-device gain translates directly into faster step completion.
 
 ### Case 2 on the communication wall {#sec-appdx-c3-taxonomy-case-2}
 
@@ -295,7 +285,7 @@ The **Communication**\index{C³ Taxonomy!communication} axis dominates. Each GPU
 
 #### The fix {.unnumbered}
 
-Target the communication axis without touching the per-GPU computation:
+Target the communication axis without touching the per-GPU computation. Three network-level interventions shrink or hide the exposed collective time:
 
 - **Compute-communication overlap**: Launch AllReduce during the backward pass rather than waiting until it completes. Modern frameworks (FSDP, DeepSpeed) support this natively.
 - **Gradient compression**: Apply Top-k sparsification or quantization to reduce the bytes crossing the network by 10--100$\times$.
@@ -315,7 +305,7 @@ The **Coordination**\index{C³ Taxonomy!coordination} axis dominates. Although p
 
 #### The fix {.unnumbered}
 
-Target the coordination axis:
+Target the coordination axis so that orchestration and fault-recovery events stop idling the healthy accelerators. Four operational changes attack both the in-step bubble losses and the out-of-step downtime:
 
 - **Asynchronous checkpointing**: Overlap checkpoint writes with the next training step, reducing visible checkpoint overhead from `{python} C3CaseStudies.oh_checkpoint_str` to near zero.
 - **Elastic training**: When a node fails, shrink the job and continue rather than halting all `{python} C3CaseStudies.case3_n_gpus_str` GPUs for recovery. This converts the `{python} C3CaseStudies.oh_failure_str` failure recovery cost into a smaller throughput reduction.
@@ -324,7 +314,7 @@ Target the coordination axis:
 
 ## Production Troubleshooting {#sec-appdx-c3-taxonomy-production-troubleshooting}
 
-@Tbl-c3-troubleshooting provides a diagnostic matrix for common fleet-scale failure modes.
+@Tbl-c3-troubleshooting provides a diagnostic matrix for common fleet-scale failure modes encountered during large training runs. Operators can match an observed cluster symptom to its primary C$^3$ axis, run the listed diagnostic check, and apply the corresponding engineering fix.
 
 | **Symptom**                                    |     **C$^3$ Axis**    | **Diagnostic Question**                                                      | **Measurement**                                                                       | **Action**                                                             |
 |:-----------------------------------------------|:---------------------:|:-----------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|
@@ -381,7 +371,7 @@ When step time suddenly doubles in the middle of a training run, on-call operato
 
 ### Telemetry signal mapping to C$^3$ axes {#sec-appdx-c3-telemetry-mapping}
 
-A degraded PCIe riser or a clogged cooling loop first surfaces in hardware counters across silicon, PCIe buses, thermal sensors, and network switches:
+A degraded PCIe riser or a clogged cooling loop first surfaces in hardware counters across silicon, PCIe buses, thermal sensors, and network switches. Monitoring daemons collect four primary classes of low-level telemetry to catch these faults early:
 
 - **MFU Drops**: Sudden or sustained drops in model FLOPs utilization below expected baselines.
 - **PCIe AER (Advanced Error Reporting) Retries**: Non-fatal bus errors causing packet retries, link downgrades (e.g., PCIe Gen 5 $\to$ Gen 3), or host-to-device direct memory access (DMA) throttling.
@@ -400,7 +390,7 @@ Triage starts from whichever telemetry source shows the anomaly and narrows to t
 
 ### Structured diagnostic telemetry table {#sec-appdx-c3-telemetry-table}
 
-@Tbl-c3-telemetry-diagnostic maps hardware-level telemetry counters to root causes, C$^3$ axes, and concrete operational remediations.
+@Tbl-c3-telemetry-diagnostic maps hardware-level telemetry counters to root causes, C$^3$ axes, and concrete operational remediations. Pairing each counter with its physical subsystem lets automated health checks route alerts to the right repair workflow without manual guesswork.
 
 | **Telemetry Signal**                   | **Hardware/OS Counter**                                        | **Root Cause**                                    | **C$^3$ Axis**    | **Remediation Action**                                                          |
 |:---------------------------------------|:---------------------------------------------------------------|:--------------------------------------------------|:------------------|:--------------------------------------------------------------------------------|
@@ -414,7 +404,7 @@ Triage starts from whichever telemetry source shows the anomaly and narrows to t
 
 ### Fleet D·A·M scorecard {#sec-appdx-c3-dam-scorecard}
 
-The fleet D·A·M scorecard in @tbl-c3-dam-scorecard generalizes single-node Data, Algorithm, and Machine (D·A·M) diagnostics to fleet-scale C$^3$ bottlenecks.
+The fleet D·A·M scorecard in @tbl-c3-dam-scorecard generalizes single-node Data, Algorithm, and Machine (D·A·M) diagnostics to fleet-scale C$^3$ bottlenecks. Each row links a single-node resource category to the cluster-level telemetry signal and target benchmark that govern distributed execution.
 
 | **D·A·M Axis**             | **Fleet Telemetry Signal**                                                   | **C$^3$ Axis**                 | **Target Efficiency Benchmark**                                                                                         |
 |:---------------------------|:-----------------------------------------------------------------------------|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------|
@@ -479,13 +469,11 @@ class C3EffectiveFlops:
     )
 ```
 
-A fleet's **effective FLOP/s**\index{Effective FLOP/s} is the usable throughput after compounding three disjoint C$^3$ efficiency factors:
+A fleet's **effective FLOP/s**\index{Effective FLOP/s} is the usable throughput after compounding three disjoint C$^3$ efficiency factors across the cluster:
 
 $$\EffectiveFleetThroughput = (\DeviceCount\PeakRate) \times \underbrace{\ModelFlopsUtilization}_{\text{Compute}} \times \underbrace{\ScalingEfficiency}_{\text{Distributed step}} \times \underbrace{\RuntimeGoodput}_{\text{Runtime goodput}}$$
 
-MFU, the single-device baseline, measures useful model arithmetic against peak throughput only while local computation is active. This compute-phase factor is not the step-averaged fleet MFU of @tbl-c3-scorecard, whose $\DistributedStepTime$ denominator already includes the in-step losses that $\ScalingEfficiency$ counts, so the product does not count them twice. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Runtime goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice.
-
-A concrete estimate makes the multiplicative loss visible at fleet scale.
+MFU, the single-device baseline, measures useful model arithmetic against peak throughput only while local computation is active. This compute-phase factor is not the step-averaged fleet MFU of @tbl-c3-scorecard, whose $\DistributedStepTime$ denominator already includes the in-step losses that $\ScalingEfficiency$ counts, so the product does not count them twice. Scaling efficiency captures communication and other distributed-step losses, including pipeline bubbles. Runtime goodput captures time outside those measured steps, including checkpointing, failure recovery, scheduler preemptions, and maintenance. These disjoint measurement windows prevent the same loss from being counted twice, while a concrete estimate makes the multiplicative loss visible at fleet scale.
 
 ::: {#psp-appendix-c3-tax-100000-gpu-cluster .callout-perspective title="The C³ tax on a 100,000-GPU cluster"}
 

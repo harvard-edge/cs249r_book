@@ -528,7 +528,7 @@ The table separates traffic pattern from limiting resource. A dense reduction, a
 
 :::
 
-Before any of those interventions can be priced, each exchange needs a precise contract that states which ranks contribute and what each holds afterward.
+A traffic map names which pattern a workload generates, but it does not specify what each rank must hold when the call completes. Before any of those interventions can be priced, each exchange needs a precise contract that states which ranks contribute and what each holds afterward.
 
 ## Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
@@ -827,7 +827,7 @@ Sending a gradient tensor to a peer does not specify which workers must contribu
 
 :::
 
-The primitive choice is the first scaling decision because it fixes which ranks must coordinate and which result each must obtain, while the algorithm and placement determine how that traffic crosses the fabric.
+The primitive choice is the first scaling decision because it fixes which ranks must coordinate and which result each must obtain. Once that contract is chosen, the algorithm and placement determine how the resulting traffic crosses the fabric.
 
 ### The six core primitives {#sec-collective-communication-six-core-primitives-8a66}
 
@@ -844,9 +844,7 @@ Calling a full AllReduce when each rank's optimizer updates only a $1/\DeviceCou
 
 : **The Six Collective Primitives**: What each primitive computes, its primary use, and its communication cost, ordered from root-centered patterns (Broadcast, Reduce) to the fully destination-specific AllToAll. The order describes routing, not cost. {#tbl-collective-primitives tbl-colwidths="[14,30,27,29]"}
 
-Ring achieves AllReduce's bandwidth-optimal cost while the simple full-message Tree model\index{Broadcast!tree topology} trades bandwidth for logarithmic latency [@patarasuk2009; @thakur2005].
-
-AllReduce decomposes into ReduceScatter\index{ReduceScatter!decomposition} followed by AllGather\index{AllGather!decomposition}. The decomposition is operational as well as mathematical, since Ring AllReduce's first phase is a ReduceScatter and its second phase is an AllGather. ReduceScatter performs arithmetic, so it does not invert AllGather despite reversing the direction of shard expansion. Full ZeRO-style sharding\index{ZeRO!parameter sharding} and PyTorch FSDP use the pair the same way, gathering parameter shards with AllGather before a module needs them and reducing gradients with ReduceScatter after backward so each rank retains only its shard for the optimizer step [@rajbhandari2020]. Sharding parameters, gradients, and optimizer state across workers reduces persistent model-state memory roughly by $\DeviceCount\times$, while temporary full-parameter buffers and prefetching determine peak memory. That memory saving is developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69; the communication it adds is priced in @sec-communication-fsdp-patterns.
+Ring achieves AllReduce's bandwidth-optimal cost while the simple full-message Tree model\index{Broadcast!tree topology} trades bandwidth for logarithmic latency [@patarasuk2009; @thakur2005], and AllReduce itself decomposes into ReduceScatter\index{ReduceScatter!decomposition} followed by AllGather\index{AllGather!decomposition}. The decomposition is operational as well as mathematical, since Ring AllReduce's first phase is a ReduceScatter and its second phase is an AllGather. ReduceScatter performs arithmetic, so it does not invert AllGather despite reversing the direction of shard expansion. Full ZeRO-style sharding\index{ZeRO!parameter sharding} and PyTorch FSDP use the pair the same way, gathering parameter shards with AllGather before a module needs them and reducing gradients with ReduceScatter after backward so each rank retains only its shard for the optimizer step [@rajbhandari2020]. Sharding parameters, gradients, and optimizer state across workers reduces persistent model-state memory roughly by $\DeviceCount\times$, while temporary full-parameter buffers and prefetching determine peak memory. That memory saving is developed in @sec-distributed-training-systems-systems-memoryefficient-data-parallelism-zero-fsdp-0e69; the communication it adds is priced in @sec-communication-fsdp-patterns.
 
 The same AllGather/ReduceScatter pair also appears in sequence parallelism, where an AllGather reconstructs the activation view needed for a local operation and a later ReduceScatter redistributes the result along the sequence dimension. A primitive's semantics stay fixed even when the tensor dimension being sharded changes, so every schedule developed for the pair applies to both uses.
 
@@ -854,9 +852,7 @@ Beyond defining data-movement dependencies, collective operations carry explicit
 
 Reduction order introduces a second, numerical contract. Floating-point addition is not associative, so ring, tree, and switch-assisted reductions may accumulate the same values in different orders and produce different low-order bits [@goldberg1991]. A correct AllReduce therefore guarantees the specified reduction over all contributions, not bitwise identity across algorithms, rank counts, or hardware. Reproducibility-sensitive workloads must fix the algorithm and process-group configuration or use a reproducible accumulation\index{Numerical reproducibility!reduction order} scheme; ordinary training should treat small order-dependent differences as numerical behavior while still checking for larger rank disagreement.
 
-AllToAll scales differently from AllReduce with cluster size, and @sec-communication-alltoall develops the bound that governs it.
-
-With the six contracts defined, every row of @tbl-parallelism-communication-mapping names a primitive whose output and traffic pattern are precise. The sharded data-parallel row repays closer study, because sharding changes how often those primitives run rather than which ones run.
+AllToAll scales differently from AllReduce with cluster size, and @sec-communication-alltoall develops the bound that governs it. With the six contracts defined, every row of @tbl-parallelism-communication-mapping now names a primitive whose output and traffic pattern are precise, and the sharded data-parallel row repays closer study because sharding changes how often those primitives run rather than which ones run.
 
 ### FSDP communication patterns {#sec-communication-fsdp-patterns}
 
@@ -1030,9 +1026,7 @@ class InterconnectAlphaBeta:
 
 : **Interconnect Performance Parameters**: Effective per-message launch latency ($\MessageStartupLatency$, including the software stack), per-direction link bandwidth ($\LinkBandwidth$, the one-way deliverable rate that enters $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$; NVLink's datasheet `{python} InterconnectAlphaBeta.nvlink_bidir_str` is the bidirectional total, so its $\LinkBandwidth$ is the `{python} InterconnectAlphaBeta.nvlink_bw_str` one-way rate), and the computed crossover size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$ at each row's $\MessageStartupLatency$ midpoint (for InfiniBand NDR, at the representative `{python} InterconnectAlphaBeta.ndr_alpha_anchor_us_str` used throughout this chapter), where communication transitions from latency-bound to bandwidth-bound. {#tbl-interconnect-parameters}
 
-The NVLink and NDR rows show the roughly ninefold per-direction cliff of @sec-compute-bandwidth-hierarchy, which @sec-network-fabrics-introduction traces across a decade of interconnect generations.
-
-A bucket far above $\LatencyBandwidthCrossoverSize$ can still travel in chunks below it, because a ring divides the bucket among its $\DeviceCount$ ranks. Pricing one bucket at two group sizes shows when that happens and what it costs.
+The NVLink and NDR rows show the roughly ninefold per-direction cliff of @sec-compute-bandwidth-hierarchy, which @sec-network-fabrics-introduction traces across a decade of interconnect generations. Even on the lower-crossover inter-node fabric, a bucket far above $\LatencyBandwidthCrossoverSize$ can still travel in chunks below it because a ring divides the bucket among its $\DeviceCount$ ranks. Pricing one bucket at two group sizes shows when that happens and what it costs.
 
 ```{python}
 #| echo: false
@@ -1424,9 +1418,7 @@ Across the $2(\DeviceCount-1)$ send/receive rounds each rank moves $\CollectiveP
 
 :::
 
-Logical ring edges may share physical links, and startup, local reduction, or contention can leave transfer capacity unused, so byte optimality does not guarantee peak physical-link utilization.
-
-Consider 4 GPUs reducing a vector of 4 elements by summation. Each GPU $\RankIndex$ starts with a local gradient vector $\LocalGradient_i = [\FirstRingTraceElement_i, \SecondRingTraceElement_i, \ThirdRingTraceElement_i, \FourthRingTraceElement_i]$. The vector is split into 4 chunks (one per GPU), and the algorithm proceeds through two phases.
+Logical ring edges may share physical links, and startup, local reduction, or contention can leave transfer capacity unused, so byte optimality does not guarantee peak physical-link utilization. To see how the logical schedule itself reaches that byte lower bound, consider 4 GPUs reducing a vector of 4 elements by summation. Each GPU $\RankIndex$ starts with a local gradient vector $\LocalGradient_i = [\FirstRingTraceElement_i, \SecondRingTraceElement_i, \ThirdRingTraceElement_i, \FourthRingTraceElement_i]$ split into 4 chunks (one per GPU), and the algorithm proceeds through two phases.
 
 ```{python}
 #| echo: false
@@ -2238,9 +2230,7 @@ A flat ring whose ordering repeatedly crosses node boundaries can leave local NV
 
 With $\AcceleratorsPerNode$ GPUs in each of $\ClusterNodeCount$ nodes, the three phases form a single causal pipeline. First, an intra-node ReduceScatter over NVLink performs a local reduction among the $\AcceleratorsPerNode$ GPUs in each node, leaving each GPU with a $1/\AcceleratorsPerNode$ shard of partially reduced data while consuming only abundant intra-node bandwidth. Next, each corresponding-rank group applies an inter-node AllReduce over InfiniBand to its $\CollectivePayloadSize/\AcceleratorsPerNode$-byte input shard, where the chosen collective algorithm dictates the bytes transmitted across the network fabric. Finally, an intra-node AllGather over NVLink redistributes the globally reduced shards within each node, completing the collective without consuming additional inter-node bandwidth.
 
-Only Phase 2 (Shard AllReduce) loads the slower inter-node InfiniBand links (@fig-hierarchical-allreduce). In this middle phase, each corresponding-rank group reduces an $\CollectivePayloadSize/\AcceleratorsPerNode$-byte shard across $\ClusterNodeCount$ nodes. A ring in that group sends $2(\ClusterNodeCount-1)\CollectivePayloadSize/(\ClusterNodeCount\AcceleratorsPerNode)$ bytes per participating GPU and receives the same amount. Summing across the node's $\AcceleratorsPerNode$ GPUs gives $2(\ClusterNodeCount-1)\CollectivePayloadSize/\ClusterNodeCount$ bytes sent per node. Smaller per-port payloads improve elapsed time when the node has independent ports and sufficient fabric capacity; sharding does not create bandwidth on a shared uplink.
-
-An 8-node budget quantifies the bandwidth multiplier this decomposition provides.
+Only Phase 2 (Shard AllReduce) loads the slower inter-node InfiniBand links (@fig-hierarchical-allreduce). In this middle phase, each corresponding-rank group reduces an $\CollectivePayloadSize/\AcceleratorsPerNode$-byte shard across $\ClusterNodeCount$ nodes. A ring in that group sends $2(\ClusterNodeCount-1)\CollectivePayloadSize/(\ClusterNodeCount\AcceleratorsPerNode)$ bytes per participating GPU and receives the same amount. Summing across the node's $\AcceleratorsPerNode$ GPUs gives $2(\ClusterNodeCount-1)\CollectivePayloadSize/\ClusterNodeCount$ bytes sent per node. Smaller per-port payloads improve elapsed time when the node has independent ports and sufficient fabric capacity; sharding does not create bandwidth on a shared uplink. An 8-node budget quantifies the bandwidth multiplier this decomposition provides when those ports operate in parallel.
 
 ```{python}
 #| echo: false
@@ -2920,11 +2910,9 @@ If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllT
 
 :::
 
-Production routing makes every one of those terms data-dependent, and the hierarchy just developed for AllReduce reappears as one of the schedules that can contain them.
-
 ### Dynamic routing and expert imbalance in MoE AllToAll {#sec-collective-communication-moe-dynamic-routing}
 
-The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing, in which every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent. The exchange keeps its two-phase shape, but its buffer sizes, its slowest receiver, and its load on the fabric all become functions of the routing distribution.
+The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing, in which every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent. The exchange keeps its two-phase shape, but its buffer sizes, its slowest receiver, and its load on the fabric all become functions of the routing distribution, and the hierarchy just developed for AllReduce reappears as one of the schedules that can contain them.
 
 Each MoE layer performs two exchanges. In an MoE transformer layer with $\ExpertCount$ experts distributed across $\DeviceCount$ ranks ($\ExpertCount/\DeviceCount$ experts per rank), each rank holds a local batch of $\LocalTokenCount$ tokens. A gating router computes top-$\RoutedExpertCount$ routing probabilities over all $\ExpertCount$ experts for each token, inducing two collective communication phases separated by expert computation. During token dispatch\index{AllToAll!dispatch phase}, each rank partitions its $\LocalTokenCount$ local token activation vectors ($\LayerInputVector\in \mathbb{R}^\HiddenDimension$, where $\HiddenDimension$ is the model's hidden dimension) according to the destination ranks hosting the selected experts, executing an AllToAll collective (or variable-size `AllToAllv`\index{AllToAll!variable-size AllToAllv}) to route tokens across the fabric according to the routing matrix\index{AllToAll!routing matrix}. After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), the token combine\index{AllToAll!combine phase} phase executes a second AllToAll collective to route output vectors back to their originating ranks. Each rank then computes the weighted combination of expert outputs:
 $$\LayerOutputVector_i = \sum_{j \in \text{top-}\RoutedExpertCount} {\RouterGateProbability}_{i,j} \cdot \text{Expert}_j(\LayerInputVector_i)$$
@@ -3194,7 +3182,7 @@ class ErrorFeedbackTrace:
 
 : **Naive Compression Trace (No Error Feedback)**: Five-step worked trace showing how a rounding compressor transmits zero whenever an individual gradient falls below 0.5. {#tbl-error-feedback-naive}
 
-@Tbl-error-feedback runs the same sequence with a residual accumulator $\ErrorFeedbackResidual_t$ that re-injects the discarded remainder into the next step.
+@Tbl-error-feedback runs the same sequence with a residual accumulator $\ErrorFeedbackResidual_t$ that re-injects the discarded remainder into the next step. Instead of vanishing at each rounding step, the fractional updates accumulate locally until they cross the transmission threshold.
 
 | **Step** |        **$\LossGradient_t$**         | **$\ErrorFeedbackResidualElement_t$** | **$\LossGradient_t + \ErrorFeedbackResidualElement_t$** | **$\CompressedGradientUpdateElement_t$** | **$\ErrorFeedbackResidualElement_{t+1} = (\LossGradient_t + \ErrorFeedbackResidualElement_t) - \CompressedGradientUpdateElement_t$** | **Cumulative $\CompressedGradientUpdateElement$** |
 |:---------|:------------------------------------:|:-------------------------------------:|:-------------------------------------------------------:|:----------------------------------------:|:------------------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------:|
@@ -3298,7 +3286,7 @@ class CompressionPayback:
 
 :::
 
-The second test spans the run, because a compressor that passes the per-step test can still lose once slower convergence adds steps.
+The second test spans the full training run, because a compressor that passes the per-step test can still lose once slower convergence adds iterations. Comparing total wall-clock time to the same quality target on a slow and a fast network shows how a modest step-count penalty can reverse the verdict.
 
 ```{python}
 #| echo: false
@@ -3654,7 +3642,7 @@ The pipeline also has boundary effects\index{Communication-computation overlap!b
 
 A third limitation arises from memory pressure. Buffers used by an in-flight transfer must remain valid while independent computation produces or consumes other tensors. Their overlapping lifetimes can increase peak GPU memory use\index{Communication-computation overlap!memory overhead}, although views and buffer reuse can avoid separate copies. For FSDP workloads, prefetching parameters can keep multiple materialized groups resident at once, trading memory savings for communication overlap. The engineering challenge is to hide transfers within the available memory budget, and FSDP's prefetch and resharding policies\index{FSDP!prefetch tuning} are the controls that set this trade-off.
 
-A realistic training configuration shows how much communication remains exposed after overlap.
+Together, processor overhead, boundary stalls, and per-layer transfer time determine how much of a collective schedule can hide behind backward computation. Pricing a realistic 32-layer transformer backward pass shows how much communication remains exposed when each layer's reduction outlasts its compute window.
 
 ```{python}
 #| echo: false
@@ -3885,7 +3873,7 @@ class CommInfraRecap:
 
 ## Fallacies and Pitfalls {#sec-communication-collective-operations-collective-operations-fallacies-pitfalls-9cd0}
 
-Communication optimization attracts persistent misconceptions because the interaction between latency, bandwidth, topology, and compression creates nonobvious failure modes that simple mental models miss.
+Communication optimization attracts persistent misconceptions because the interaction between latency, bandwidth, topology, and compression creates nonobvious failure modes that simple mental models miss. Each of the following pitfalls traces a common rule of thumb to the physical or algorithmic boundary where it breaks down.
 
 ::: {.fallacy-pitfall}
 
@@ -3977,9 +3965,9 @@ If the job scheduler assigns ranks to GPUs without considering the physical topo
 
 ## Summary {#sec-communication-collective-operations-summary}
 
-Every mechanism in this chapter works on the communication term $\CommunicationTime(\DeviceCount)$ of the Fleet Law (@eq-fleet-law), either shrinking it through better schedules, placement, and smaller payloads or enlarging $\OverlappedTime$ so that less of it is exposed, and each spends effort on the Communication axis of C³ so that added compute does not sit waiting.
+Every mechanism in this chapter works on the communication term $\CommunicationTime(\DeviceCount)$ of the Fleet Law (@eq-fleet-law), either shrinking it through better schedules, placement, and smaller payloads or enlarging $\OverlappedTime$ so that less of it is exposed, and each spends effort on the Communication axis of C³ so that added compute does not sit waiting. The mechanisms compose into one ordered judgment that starts with the collective contract, because the primitive whose output the next computation consumes fixes which ranks exchange data and what each holds afterward, and no faster schedule can recover bytes spent delivering a broader result than the model needs. Once the contract is fixed, the $\MessageStartupLatency$-$\LinkBandwidth$ model, the critical size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, and the ring-tree crossover $\RingTreeCrossoverPayload$ price each candidate schedule round by round on its per-step chunk rather than on the whole tensor.
 
-The mechanisms compose into one ordered judgment that starts with the collective contract, because the primitive whose output the next computation consumes fixes which ranks exchange data and what each holds afterward, and no faster schedule can recover bytes spent delivering a broader result than the model needs. Once the contract is fixed, the $\MessageStartupLatency$-$\LinkBandwidth$ model, the critical size $\LatencyBandwidthCrossoverSize = \MessageStartupLatency\cdot \LinkBandwidth$, and the ring-tree crossover $\RingTreeCrossoverPayload$ price each candidate schedule round by round on its per-step chunk rather than on the whole tensor. A schedule priced on a flat network realizes that cost only when hierarchy, rail alignment, and rank order map the logical exchange onto the physical links, after which compression and overlap determine how much of the remaining transfer reaches the critical path, with LogP separating the network transit time that overlap can hide from the processor overhead it cannot, and with every candidate judged by time to the same quality target rather than isolated collective speed. A model calibrated against the same collective, process group, and topology closes the loop by separating a schedule's inherent traffic from library or placement loss.
+A schedule priced on a flat network realizes that cost only when hierarchy, rail alignment, and rank order map the logical exchange onto the physical links. Compression and overlap then determine how much of the remaining transfer reaches the critical path, with LogP separating the network transit time that overlap can hide from the processor overhead it cannot, and with every candidate judged by time to the same quality target rather than isolated collective speed. A model calibrated against the same collective, process group, and topology closes the loop by separating a schedule's inherent traffic from library or placement loss.
 
 ::: {.callout-takeaways title="Every byte has a travel cost"}
 
