@@ -86,7 +86,7 @@ all: vol1 vol2
 
 svgs:
 	@echo "Converting SVGs to PDFs..."
-	@find $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -name "*.svg" 2>/dev/null | while read svg; do \
+	@find assets/kit $(VOL1_SRC) $(VOL2_SRC) $(VOL3_SRC) $(VOL4_SRC) -name "*.svg" 2>/dev/null | while read svg; do \
 		pdf="$${svg%.svg}.pdf"; \
 		if [ ! -f "$$pdf" ] || [ "$$svg" -nt "$$pdf" ]; then \
 			$(SVG2PDF) --export-filename="$$pdf" "$$svg" 2>/dev/null && echo "  ✓ $$pdf" || echo "  ✗ $$svg"; \
@@ -315,3 +315,35 @@ check: svgs
 	else \
 		echo ""; echo "✓ All slides pass overflow check"; \
 	fi
+
+# =============================================================================
+# Kit, fit check, handout, notes (any volume): make <target> V=1 D=00_course_overview
+# =============================================================================
+PY ?= python3
+
+kit:
+	@$(PY) assets/kit/make_kit.py --volume $(or $(V),1)
+
+# Fit check: LaTeX overflow mapped to frames, plus rendered bleed per page.
+fit:
+	@$(PY) tools/fitcheck.py vol$(V)/$(D)/$(D).tex --pdf $(BUILD_DIR)/vol$(V)/$(D).pdf --log vol$(V)/$(D)/$(D).log
+
+# Student handout: the final state of every frame, no builds.
+handout:
+	@mkdir -p $(BUILD_DIR)/vol$(V)
+	@cd vol$(V)/$(D) && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-handout "\PassOptionsToClass{handout}{beamer}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-handout "\PassOptionsToClass{handout}{beamer}\input{$(D).tex}" > /dev/null 2>&1 && \
+	mv $(D)-handout.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-handout.pdf" || \
+	{ echo "  ✗ handout build failed"; exit 1; }
+	@cd vol$(V)/$(D) && rm -f $(D)-handout.{aux,log,nav,out,snm,toc,vrb}
+
+# Instructor notes: each slide with its speaker notes on the right.
+notes:
+	@mkdir -p $(BUILD_DIR)/vol$(V)
+	@cd vol$(V)/$(D) && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	mv $(D)-notes.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-notes.pdf" || \
+	{ echo "  ✗ notes build failed"; exit 1; }
+	@cd vol$(V)/$(D) && rm -f $(D)-notes.{aux,log,nav,out,snm,toc,vrb}
