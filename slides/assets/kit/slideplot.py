@@ -73,10 +73,11 @@ def hbars(path, rows, unit, log=True, xlabel=None, step=None, note=None,
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(),
                 ha="right", va="center", fontsize=13, color=C["text"],
                 fontweight="bold")
-        if shown:
-            ax.text(v * (1.15 if log else 1.01) if log else v + max(vals) * 0.01,
-                    y, shown_text, va="center",
-                    fontsize=13, color=C[ck], fontweight="bold")
+        # Every step draws every value label (hidden ones invisible), so the
+        # tight bounding box, and the figure size, are the same in every step.
+        ax.text(v * (1.15 if log else 1.01) if log else v + max(vals) * 0.01,
+                y, shown_text, va="center", fontsize=13, color=C[ck],
+                fontweight="bold", alpha=1.0 if shown else 0.0)
     ax.set_yticks([])
     for x, label, ck in (vlines or []):
         ax.axvline(x, color=C[ck], lw=1.5, ls="--", zorder=1)
