@@ -129,6 +129,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
 # === PHASE 3: INKSCAPE INSTALLATION ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
+    echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
     echo "🔄 Adding Inkscape PPA repository..." && \
     apt-get update && \
     echo "📦 Installing software-properties-common..." && \
