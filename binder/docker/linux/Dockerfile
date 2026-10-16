@@ -20,7 +20,7 @@ ENV PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/us
 
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
 # Copy dependency files early for better cache efficiency
-COPY binder/tools/dependencies/requirements.txt /tmp/requirements.txt
+COPY binder/tools/dependencies/requirements.lock.txt /tmp/requirements.txt
 COPY binder/tools/dependencies/install_packages.R /tmp/install_packages.R
 COPY binder/tools/dependencies/required_r_packages.R /tmp/required_r_packages.R
 COPY binder/tools/dependencies/tl_packages /tmp/tl_packages
