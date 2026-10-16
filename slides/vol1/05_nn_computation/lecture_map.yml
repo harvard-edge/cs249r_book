@@ -1,0 +1,241 @@
+chapter: 05_nn_computation
+lecture: 5
+title: Neural Computation
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+layer: models
+thesis: "A neural network is a long chain of multiply-adds, and counting them, with the bytes they move and the values training must keep, gives a model's time, memory, and failure modes before any code runs."
+hook:
+  minutes: "0-6"
+  setup: "Ariane 5 Flight 501 (1996): about 37 seconds after liftoff both inertial reference units shut down because a 64-bit floating-point value did not fit a signed 16-bit integer; the launcher veered off course and self-destructed. Photo of an Ariane 5 liftoff and a recovered fragment of the 501 vehicle."
+  question_to_class: "Vote: when a neural network fails, what usually goes wrong? A: a crash with a stack trace; B: the wrong branch is taken; C: a number leaves the range its format can hold; D: the tensors no longer fit in memory."
+  payoff: "C and D. A network has no branches: one digit is 109,184 multiply-accumulates and nothing else. It fails numerically, as Ariane did, or on resources. The lecture counts both, and the synthesis returns to Ariane with the format ranges."
+  sources: ["chapter War Story 5.1 (European Space Agency 1996 inquiry)", "chapter §5.1 (109,184 MACs; fails numerically)", "chapter self-check answer §5.1 Q2 (numerically or on resources)", "photos: ESA/CNES/Arianespace (CC BY 4.0); Deadpan (public domain), Wikimedia Commons"]
+driving_question: "What does a neural network actually compute, and what does that arithmetic cost the machine?"
+recall: "Lecture 4: the data pipeline ends with a clean, versioned training set. One example from it, a 28x28 handwritten digit, is where today begins."
+running_example: "The chapter's MNIST classifier, 784 -> 128 -> 64 -> 10: 109,386 parameters, 438 KB in FP32, 109,184 MACs (218,368 FLOPs) per digit; batch 32 for training."
+
+segments:
+  - name: Rules to Arithmetic
+    divider_question: "Why did recognizing a digit become a pile of arithmetic?"
+    read: "§5.1 and §5.2"
+    concept_questions: [1, 2]
+    land: "Learned features buy accuracy with arithmetic: 1,100 times the work of hand-written rules for one digit."
+  - name: Neuron to Network
+    divider_question: "What does one neuron compute, and what does a network of them cost?"
+    read: "§5.3"
+    concept_questions: [3, 4, 5, 6, 7, 8]
+    land: "Layer widths fix parameters and MACs before any code runs: one MAC per weight per example."
+  - name: Forward Pass
+    divider_question: "Where do the operations of a forward pass go, and what limits their speed?"
+    read: "§5.4.2 and §5.4.6"
+    concept_questions: [9, 10, 11]
+    land: "Matrix multiplication is over 99 percent of the work, and how many operations it does per byte moved decides how fast it runs."
+  - name: Backpropagation
+    divider_question: "How does a network learn from a mistake, and what must it remember to do so?"
+    read: "§5.4.3 to §5.4.5"
+    concept_questions: [12, 13, 14, 15]
+    land: "Every backward step consumes a value the forward pass saved, so training must keep the forward pass in memory."
+  - name: Memory
+    divider_question: "Why does training need several times the memory of inference?"
+    read: "§5.4.5.5 and §5.5"
+    concept_questions: [16, 17]
+    land: "Training holds four kinds of state; inference holds the weights and two short-lived buffers."
+
+concept_questions:
+  - id: 1
+    q: "How much work does it take to recognize one digit with rules, with engineered features, and with a learned network?"
+    picture: "Log ladder built in three steps (new plot, make_figs.py ops_ladder)"
+    numbers: "About 100 comparisons, about 8,000 operations (HOG + linear SVM), 109,184 MACs; 1,100x (chapter §5.2, illustrative implementations)"
+    example: "The same 28x28 digit"
+    read: "§5.2"
+  - id: 2
+    q: "If backpropagation dates from 1974 to 1986, why did deep learning take until about 2012?"
+    picture: "Book figure: parameter counts of 725 notable models since 1950 (Epoch AI)"
+    numbers: "Doubling every 43 months before 2010, every 10 months after; largest models above a trillion parameters (chapter §5.4.5)"
+    example: "Werbos 1974, Rumelhart et al. 1986; the running network marked on the plot"
+    read: "§5.2.3"
+  - id: 3
+    q: "What does one artificial neuron compute, and what does it cost?"
+    picture: "Book figure: perceptron (inputs, weights, sum, bias, activation)"
+    numbers: "n MACs per neuron; 1 MAC = 2 FLOPs (chapter §5.1, §5.3.1)"
+    example: "A first-layer unit weighing all 784 pixels"
+    read: "§5.3.1, §5.3.2"
+  - id: 4
+    q: "Why does a network need a nonlinearity at all?"
+    picture: "XOR truth table with two ReLU hidden units, built in steps; book figure of linear and curved boundaries"
+    numbers: "h1 = ReLU(x1 + x2), h2 = ReLU(x1 + x2 - 1), y = h1 - 2 h2 gives 0, 1, 1, 0 (Example 5.2)"
+    example: "XOR, Minsky and Papert 1969"
+    read: "§5.3.2"
+  - id: 5
+    q: "How much learning signal does an activation pass back, and why did ReLU replace sigmoid?"
+    picture: "Slope plot: sigmoid derivative peaks at 0.25; ReLU slope 1 (new plot)"
+    numbers: "0.25^20 = 9.1e-13 after 20 sigmoid layers (footnote 1); AlexNet: ReLU reached 25 percent training error on CIFAR-10 six times sooner than tanh (Krizhevsky et al. 2012, footnote 8)"
+    example: "A 20-layer sigmoid network"
+    read: "§5.3.2"
+  - id: 6
+    q: "What does an activation cost in silicon?"
+    picture: "Two bars: ReLU 50 against sigmoid 2,500 transistor equivalents (illustrative)"
+    numbers: "50x, a stylized teaching ratio (chapter §5.3.2)"
+    example: "Comparator and multiplexer against an exponential approximation"
+    read: "§5.3.2"
+  - id: 7
+    q: "How does a layer of neurons become one matrix multiply, and why does batching reuse weights?"
+    picture: "Book figure: from neuron to machine (dot product, GEMM, weight tile)"
+    numbers: "B x n_in x n_out MACs; (32 x 784)(784 x 128) for layer 1 at batch 32"
+    example: "MNIST layer 1"
+    read: "§5.3.2, §5.3.3"
+  - id: 8
+    q: "How many parameters, MACs, and bytes does the MNIST network need, and where do they sit?"
+    picture: "Book figure of the 784-128-64-10 topology; worked count on a given card"
+    numbers: "100,352 + 8,192 + 640 weights, 202 biases, 109,386 parameters, 437.5 KB; layer 1 holds 91.9 percent of the MACs (Table 5); width costs quadratically, depth linearly (Figure 12: 2,048 to 4,096 wide is 3.4x MACs; 16 to 32 deep is 2.0x MACs and 1.9x activations)"
+    example: "The running network"
+    read: "§5.3.3 to §5.3.5"
+  - id: 9
+    q: "Where do the operations of one forward pass go?"
+    picture: "Bars per layer at batch 32 (new plot from Table 7)"
+    numbers: "6,422,528 + 524,288 + 40,960 MatMul FLOPs; 12,928 bias and activation operations; about 7 MOp; over 99 percent matrix multiply (Napkin Math 5.1)"
+    example: "A batch of 32 digits"
+    read: "§5.4.2"
+  - id: 10
+    q: "What is arithmetic intensity, and why does batching raise it?"
+    picture: "Equation anatomy: operations over bytes, batch 1 against batch 32"
+    numbers: "About 0.5 FLOP/byte at batch 1; about 11.9 at batch 32 (588 KB moved) (Napkin Math 5.1)"
+    example: "One weight read serving 32 images"
+    read: "§5.4.2"
+  - id: 11
+    q: "Does a faster chip make this network faster?"
+    picture: "Book roofline (CPU and accelerator, FP32 ridge about 20 FLOP/byte); epoch-time bars (new plot)"
+    numbers: "Accelerator 2 to 40 TFLOP/s attainable, CPU 25 to 595 GFLOP/s (Figure 14); epoch work 46 ms CPU against 0.7 ms accelerator, overhead 225 against 337.5 ms, totals 271 and 338 ms (Napkin Math 5.3)"
+    example: "One epoch of MNIST, 1,875 steps"
+    read: "§5.4.2, §5.4.6"
+  - id: 12
+    q: "How does the network measure how wrong it is?"
+    picture: "Book figure: cross-entropy against the correct-class probability"
+    numbers: "-log(0.8) = 0.223; -log(0.1) = 2.30; uniform guess log 10 = 2.3 (§5.4.3)"
+    example: "A seven scored as a three"
+    read: "§5.4.3"
+  - id: 13
+    q: "How does backpropagation compute every gradient, step by step?"
+    picture: "TikZ network (2 inputs, 2 ReLU hidden units, 1 output) with forward values, then backward values, saved values boxed"
+    numbers: "z = [0.9, -0.2], a = [0.9, 0], y_hat = 0.54, L = 0.1058; dL/dy = -0.46; dW2 = [-0.414, 0]; signal [-0.276, 0.184] masked to [-0.276, 0]; dW1 rows [-0.276, 0], [-0.138, 0]; w11 0.5 -> 0.5276 at learning rate 0.1 (Napkin Math 5.2)"
+    example: "Napkin Math 5.2"
+    read: "§5.4.5"
+  - id: 14
+    q: "Why does a training step cost about three forward passes?"
+    picture: "Stacked bar of one training step's FLOPs (new plot)"
+    numbers: "Forward 6.99 M, weight gradients 6.99 M, input gradients 0.57 M (layer 1 skips it); 14.5 MFLOP, 2.08x forward (§5.4.5, Napkin Math 5.3)"
+    example: "MNIST at batch 32"
+    read: "§5.4.5"
+  - id: 15
+    q: "What happens to a gradient that is too small for its number format?"
+    picture: "Log-scale ranges of FP32, BF16, FP16, INT16 with the 20-layer sigmoid gradient marked (new plot)"
+    numbers: "FP16 smallest normal 6.10e-5, maximum 65,504; FP32 smallest normal 1.18e-38 (footnote 20); INT16 maximum 32,767 (format definition)"
+    example: "Ariane 501 and an FP16 gradient"
+    read: "§5.4.5 (Initialization and numerical range)"
+  - id: 16
+    q: "Why does training need 3.4 times the memory of inference for the same network?"
+    picture: "Stacked bars built term by term (new plot from Table 9); book figure of memory through one step at batch 32 and 1,024"
+    numbers: "Weights 437.5 KB, saved activations 126 KB, gradients 437.5 KB, Adam 875.1 KB, about 1.9 MB; inference 437.5 + 117 KB = 554 KB (Table 9)"
+    example: "Batch 32 against batch 1,024"
+    read: "§5.4.5.5, §5.5.2"
+  - id: 17
+    q: "What happens to the same accounting at GPT-2 scale?"
+    picture: "Book figure: model bytes against memory tiers (MNIST, ResNet-50, GPT-2)"
+    numbers: "MNIST 438 KB, ResNet-50 25.6M parameters about 102.4 MB, GPT-2 1.5B parameters about 6 GB in FP32 (Lighthouse 5.1); weights + gradients + two Adam moments = 4 copies = about 24 GB"
+    example: "Estimate exercise"
+    read: "§5.4.5.5"
+
+worked_examples:
+  - name: "Counting the MNIST network (Table 5)"
+    steps: ["given: 784 -> 128 -> 64 -> 10, FP32", "weights per layer: 784x128, 128x64, 64x10", "add 202 biases: 109,386 parameters", "MACs per digit = weights = 109,184; FLOPs = 218,368", "bytes: x 4 = 437.5 KB, more than an L1 cache", "meaning: layer 1 is 92 percent of the work"]
+  - name: "Napkin Math 5.1: one forward pass at batch 32"
+    steps: ["given: 2 x B x n_in x n_out FLOPs per layer", "layer FLOPs 6.42 M, 0.52 M, 0.04 M", "bias and activation 12,928", "result: about 7 MOp, over 99 percent matrix multiply", "intensity 0.5 -> 11.9 FLOP/byte", "meaning: batching climbs the bandwidth slope"]
+  - name: "Napkin Math 5.2: a backpropagation trace"
+    steps: ["given: 2-2-1 ReLU network, x = [1.0, 0.5], target 1.0", "forward: z, a, y_hat = 0.54, L = 0.1058, saving x, z, a", "output gradient -0.46", "dW2 uses saved a", "ReLU mask uses saved z", "dW1 uses saved x", "update w11 to 0.5276", "meaning: every backward step reads a forward value"]
+  - name: "Table 9: training against inference memory"
+    steps: ["given: batch 32, FP32", "weights 437.5 KB", "saved activations 126 KB", "gradients 437.5 KB", "Adam 875.1 KB", "result: 1.9 MB against 554 KB, 3.4x", "meaning: batch 1,024 makes activations dominate"]
+
+active_learning:
+  - at_minute: 3
+    type: concept_question
+    prompt: "When a neural network fails, what usually goes wrong? (pick all that apply)"
+    answer: "C and D: numerical range and memory. No branches exist to go wrong (§5.1)."
+  - at_minute: 17
+    type: predict
+    prompt: "Each sigmoid layer passes back at most a quarter of the gradient. After 20 layers, how much is left?"
+    answer: "0.25^20 = 9.1e-13 of it at best (footnote 1); ReLU passes 1 on its positive branch."
+  - at_minute: 24
+    type: estimate
+    prompt: "Count the MNIST network: parameters, MACs per digit, FP32 bytes."
+    answer: "109,386 parameters; 109,184 MACs (218,368 FLOPs); 437.5 KB; layer 1 is 91.9 percent."
+  - at_minute: 34
+    type: predict
+    prompt: "Both machines sit on the bandwidth slope. Going from batch 1 to batch 32, how much faster does the accelerator process each image?"
+    answer: "About 20 to 24 times: intensity rises 0.5 -> 11.9 FLOP/byte and the attainable rate rises with it (2 -> 40 TFLOP/s on the book roofline)."
+  - at_minute: 39
+    type: predict
+    prompt: "One epoch of MNIST at batch 32: which finishes first, a desktop CPU or a datacenter accelerator?"
+    answer: "The CPU: 271 ms against 338 ms. Work alone is 67x faster on the accelerator, but fixed per-operation overhead is 99.8 percent of its epoch (Napkin Math 5.3). Tests the fallacy 'more compute automatically means faster training' (§5.8)."
+  - at_minute: 55
+    type: concept_question
+    prompt: "A gradient of 9.1e-13 is stored in FP16. What value does the weight update see?"
+    answer: "Zero: it is far below FP16's smallest normal 6.1e-5 and even its subnormal range, so it underflows and the weight stops learning. In FP32 or BF16 it survives."
+  - at_minute: 63
+    type: estimate
+    prompt: "GPT-2 has 1.5 billion parameters. In FP32 with Adam, how much memory do weights, gradients, and optimizer state take before activations? Does it fit an 80 GB accelerator?"
+    answer: "6 GB of weights x 4 copies (weights, gradients, two Adam moments) = 24 GB; it fits before activations, which the batch then decides (Lighthouse 5.1, Figure 19)."
+
+open_questions:
+  - "ReLU won on cheap silicon and clean gradients. If hardware made exponentials free, would sigmoid come back?"
+  - "Training stores activations to save arithmetic; recomputing them saves memory. When would you pay the arithmetic?"
+  - "The 1989 ZIP-code reader rejected 12.1 percent of digits to reach 1 percent error. Who should decide where that threshold sits?"
+
+more_examples:
+  - "Ariane 501 inquiry board report (ESA 1996)."
+  - "USPS ZIP-code reader: about 10,000 parameters, 1 percent error after rejecting 12.1 percent, 10 to 12 classifications per second including acquisition, trained 3 days on a Sun-4/260 (LeCun et al. 1989; chapter Table 11)."
+  - "AlexNet: ReLU six times faster to 25 percent training error than tanh (Krizhevsky et al. 2012)."
+  - "GPT-2 feed-forward block holds 67 percent of each layer's weights (chapter §5.3.3)."
+
+closing:
+  return_to_hook: "Ariane failed on a number that left its range, not on a branch. A network is 218,368 FLOPs per digit with no branches; count its operations, its bytes, and its ranges before running it."
+  read_and_practice: ["Neural Computation §5.1 to §5.5", "Self-check questions after §5.3 and §5.4", "Napkin Math 5.1, 5.2, 5.3", "TinyTorch modules on layers, activations, and autograd"]
+  further_reading:
+    - cite: "Neural Computation, §5.3 to §5.5"
+      url: "https://mlsysbook.ai"
+      why: "Every number in this lecture, derived."
+    - cite: "Rumelhart, Hinton, and Williams, Learning Representations by Back-Propagating Errors, Nature 1986"
+      url: "https://doi.org/10.1038/323533a0"
+      why: "Four pages that made hidden layers trainable."
+    - cite: "LeCun et al., Backpropagation Applied to Handwritten Zip Code Recognition, Neural Computation 1989"
+      url: "https://doi.org/10.1162/neco.1989.1.4.541"
+      why: "The running task, deployed, with measured throughput and rejection."
+    - cite: "Williams, Waterman, and Patterson, Roofline, CACM 2009"
+      url: "https://doi.org/10.1145/1498765.1498785"
+      why: "The model behind the batch 1 against batch 32 plot."
+    - cite: "European Space Agency, Ariane 501 Inquiry Board Report, 1996"
+      url: "https://www.esa.int"
+      why: "A short, readable failure report on numerical range."
+  bridge: "Lecture 6: why is choosing an architecture also choosing an infrastructure?"
+
+left_to_reading:
+  - concept: "Reject-option thresholds and the document-recognition pipeline (§5.6)"
+    why: "Secondary concept; an open question and a 'more examples' item. Serving latency and Amdahl's law are taught in Lectures 11 and 13."
+  - concept: "Overfitting and regularization"
+    why: "Secondary; students meet it in ML courses, and Lecture 8 covers the training-loop costs."
+  - concept: "Log-sum-exp stable softmax"
+    why: "One line in the cross-entropy notes; detail is better read than heard."
+  - concept: "Tanh, softmax details, dying ReLU"
+    why: "Named in notes; the lecture teaches the sigmoid against ReLU contrast."
+
+coverage:
+  primary_taught: ["Network as linear maps and nonlinearities", "Cost from layer shapes", "Backprop over saved activations", "Training holds four kinds of state", "Batching raises dense-layer intensity"]
+  primary_left_to_reading: []
+  secondary: ["Activation functions (taught)", "Loss and mini-batch descent (taught)", "Numerical range (taught)", "Reject-option thresholds (reading)", "Overfitting and regularization (reading)"]
+
+notes_for_author:
+  - "The transistor counts (50 against 2,500) are the chapter's stylized ratio; the slide labels them illustrative."
+  - "The epoch-time comparison is the chapter's estimate (Napkin Math 5.3), not a measurement; the slide says so."
+  - "INT16 maximum 32,767 and FP32 maximum 3.4e38 are format definitions, not chapter numbers; credited on the slide."
+  - "The GPT-2 estimate uses four FP32 copies per parameter; Lecture 8 owns the full 16-bytes-per-parameter accounting, so the slide stays at the small-network rule scaled up."
