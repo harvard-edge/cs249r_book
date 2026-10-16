@@ -117,8 +117,8 @@ build-%: svgs
 	cp $$ch_dir/$$tex_name.pdf $(VOL1_OUT)/$$tex_name.pdf; \
 	echo "  → $(VOL1_OUT)/$$tex_name.pdf"; \
 	echo ""; \
-	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
-	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
+	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
+	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
 	if [ "$$overfull" -gt 0 ]; then \
 		echo "  ⚠ $$overfull overfull boxes:"; \
 		grep "Overfull" $$ch_dir/$$tex_name.log | sed 's/^/    /' | head -10; \
@@ -174,8 +174,8 @@ define build-chapter-impl
 	cp $$ch_dir/$$tex_name.pdf $(2)/$$tex_name.pdf; \
 	echo "  → $(2)/$$tex_name.pdf"; \
 	echo ""; \
-	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
-	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || echo 0); \
+	overfull=$$(grep -c "Overfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
+	underfull=$$(grep -c "Underfull" $$ch_dir/$$tex_name.log 2>/dev/null || true); \
 	if [ "$$overfull" -gt 0 ]; then \
 		echo "  ⚠ $$overfull overfull boxes:"; \
 		grep "Overfull" $$ch_dir/$$tex_name.log | sed 's/^/    /' | head -10; \
