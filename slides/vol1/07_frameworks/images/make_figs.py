@@ -26,6 +26,8 @@ Every value is from the rendered chapter (ML Frameworks):
 Run from this folder: python3 make_figs.py
 """
 
+# Microseconds are written with the Greek small mu (U+03BC): Helvetica draws
+# the micro sign (U+00B5) slanted, which reads as italic next to upright text.
 import sys
 from pathlib import Path
 
@@ -59,7 +61,7 @@ sp.hbars_steps(out / "decode", [
 
 # -- Dispatch share of a small and a large operation (two steps) -------------
 def dispatch_share(path, k):
-    rows = [("Small op\n(1 µs kernel)", 15, 1), ("Large op\n(100 µs kernel)", 15, 100)]
+    rows = [("Small op\n(1 μs kernel)", 15, 1), ("Large op\n(100 μs kernel)", 15, 100)]
     fig, ax = plt.subplots(figsize=sp.SHORT)
     for i, (label, disp, kern) in enumerate(rows):
         y = 1 - i
@@ -83,7 +85,7 @@ def dispatch_share(path, k):
     ax.set_ylim(-0.6, 1.6)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Share of the step (15 µs dispatch per operation, model)")
+    ax.set_xlabel("Share of the step (15 μs dispatch per operation, model)")
     sp.save(fig, path)
 
 
@@ -104,17 +106,17 @@ def timeline(path, k):
         ax.barh(1, 1, left=t + 10, color=C["compute"], height=0.55)
         t += 11
     ax.text(2, 1.45, "Python dispatch", color=C["neutral"], fontsize=11, fontweight="bold")
-    ax.text(t + 0.8, 1, "55 µs", va="center", fontsize=12, fontweight="bold", color=C["danger"])
+    ax.text(t + 0.8, 1, "55 μs", va="center", fontsize=12, fontweight="bold", color=C["danger"])
     if k == 2:
         ax.barh(0, 5, left=0, color=C["neutral_l"], edgecolor=C["neutral"], height=0.55)
         ax.barh(0, 4, left=5, color=C["compute"], height=0.55)
-        ax.text(9.8, 0, "9 µs: one launch, one fused kernel", va="center", fontsize=12,
+        ax.text(9.8, 0, "9 μs: one launch, one fused kernel", va="center", fontsize=12,
                 fontweight="bold", color=C["compute"])
     ax.set_xlim(0, 62)
     ax.set_ylim(-0.5, 1.8)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Time (µs); orange = kernel running on the accelerator")
+    ax.set_xlabel("Time (μs); orange = kernel running on the accelerator")
     sp.save(fig, path)
 
 
@@ -172,10 +174,10 @@ sp.hbars_steps(out / "bandwidth", [
 
 # -- One MNIST training step: where the time goes (three steps) --------------
 sp.hbars_steps(out / "mnist_step", [
-    ("Arithmetic, 13.1 MFLOP", 0.2, "compute", "0.2 µs"),
-    ("Memory traffic, 1.2 MB", 0.4, "memory", "0.4 µs"),
-    ("Host dispatch and launch", 95, "danger", "95 µs"),
-], "µs", xlabel="Time on an H100 (µs, log scale; lower bounds and a host model)",
+    ("Arithmetic, 13.1 MFLOP", 0.2, "compute", "0.2 μs"),
+    ("Memory traffic, 1.2 MB", 0.4, "memory", "0.4 μs"),
+    ("Host dispatch and launch", 95, "danger", "95 μs"),
+], "μs", xlabel="Time on an H100 (μs, log scale; lower bounds and a host model)",
     value_fmt="{:g}")
 
 print("figures written")

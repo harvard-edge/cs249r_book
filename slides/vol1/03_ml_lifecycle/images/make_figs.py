@@ -172,6 +172,44 @@ loop("loop_dam.svg", dam=True)
 loop("loop_hl1.svg", hl=1)
 
 
+# A compact loop for a column slot (the diagnose and closing slides): the same
+# six stages with the short names the slides use, in three rows of two, drawn
+# at the column's shape so the names read at slide scale. The flow runs down
+# the left (1-2-3), across the bottom, up the right (4-5-6), and monitoring
+# evidence returns across the top. tint colors stages by the slide's key.
+CPOS = {1: (130, 115), 2: (130, 275), 3: (130, 435),
+        4: (430, 435), 5: (430, 275), 6: (430, 115)}
+CNAMES = {1: "Define", 2: "Data", 3: "Train", 4: "Validate", 5: "Deploy", 6: "Monitor"}
+CW, CH = 210, 84
+
+
+def loop_compact(name, tint=None):
+    tint = tint or {}
+    p = svg_open(560, 500)
+    for k in range(1, 7):
+        x, y = CPOS[k]
+        col, fill = tint.get(k, ("#777777", "#F4F4F4"))
+        tcol = col if k in tint else C["text"]
+        p.append(f'<rect x="{x - CW / 2}" y="{y - CH / 2}" width="{CW}" height="{CH}" '
+                 f'rx="12" fill="{fill}" stroke="{col}" stroke-width="{4 if k in tint else 2.5}"/>')
+        p.append(text(x, y + 12, f"{k}  {CNAMES[k]}", 34, tcol, "bold"))
+    g = CH / 2 + 4
+    for a, b in ((1, 2), (2, 3)):
+        p.append(line(130, CPOS[a][1] + g, 130, CPOS[b][1] - g - 4, "#555555", 3.5))
+    for a, b in ((4, 5), (5, 6)):
+        p.append(line(430, CPOS[a][1] - g, 430, CPOS[b][1] + g + 4, "#555555", 3.5))
+    p.append(line(130 + CW / 2 + 4, 435, 430 - CW / 2 - 8, 435, "#555555", 3.5))
+    p.append(line(430 - CW / 2 - 4, 115, 130 + CW / 2 + 10, 115, C["data"], 4.5, "d",
+                  dash="10,6"))
+    p.append(text(280, 40, "monitoring evidence", 28, C["data"], "bold"))
+    save_svg(p, name)
+
+
+loop_compact("loop_compact.svg")
+loop_compact("loop_compact_fix.svg", tint={2: (C["data"], C["data_l"]),
+                                           5: (C["memory"], C["memory_l"])})
+
+
 # Propagation on the loop: the 500 MB limit found at stage 5 invalidates the
 # artifacts behind it; it belongs at stage 1.
 def badge(x, y, s, col, fill):

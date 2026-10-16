@@ -224,4 +224,84 @@ sp.hbars_steps(out / "voice_upload", [
 ], "B/s", xlabel="Audio sent to the cloud (bytes per second, log scale)",
     size=sp.SHORT)
 
+# ---------------------------------------------------------------------------
+# 8. Fifty years of microprocessor trends, redrawn at column size from the
+#    same series the book's figure plots (MLSysIM Literature registry:
+#    Karl Rupp, Microprocessor Trend Data). Direct labels replace the legend.
+# ---------------------------------------------------------------------------
+def trends():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
+    from mlsysim import Literature
+    rows = Literature.Series.MicroprocessorTrends.entries
+    series = [  # key, label, color, marker, label y at the right edge
+        ("transistors", "Transistors (K)", C["danger"], "o", 3e7),
+        ("specint", "Single-thread\nperf. (SPECint ×10³)", C["memory"], "s", 1.2e5),
+        ("frequency", "Clock (MHz)", C["data"], "^", 3.5e3),
+        ("watts", "Power (W)", C["compute"], "D", 2.5e2),
+        ("cores", "Cores", C["neutral"], "v", 1.6e1),
+    ]
+    fig, ax = sp.plt.subplots(figsize=(3.3, 2.45))
+    ax.axvspan(2004.5, 2006.5, color=C["grid"], alpha=0.6, zorder=0)
+    ax.text(2005.5, 2.5e8, "End of Dennard\nscaling", ha="center", va="bottom",
+            fontsize=10, color=C["text"])
+    for key, label, col, mk, ly in series:
+        pts = [(r["year"], r["value"]) for r in rows if r["series"] == key]
+        ax.scatter([x for x, _ in pts], [y for _, y in pts], s=9, color=col,
+                   marker=mk, alpha=0.8, edgecolors="none")
+        ax.text(2024, ly, label, color=col, fontsize=10, fontweight="bold",
+                va="center", ha="left")
+    ax.set_yscale("log")
+    ax.set_xlim(1970, 2023)
+    ax.set_ylim(0.5, 2e8)
+    ax.set_xticks([1970, 1990, 2010])
+    ax.set_yticks([1, 1e2, 1e4, 1e6, 1e8])
+    ax.minorticks_off()
+    ax.set_ylabel("Value (log scale)")
+    ax.grid(axis="y", color=C["grid"], lw=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / "microprocessor_trends.svg")
+
+
+trends()
+
+# ---------------------------------------------------------------------------
+# 9. Energy per inference across tiers, redrawn at slide size with the
+#    values printed on the book's figure (System Paradigms, fig. 7,
+#    EnergyAnchors): 10 μJ, 2.6 mJ, 15.9 mJ, 75.5 mJ, 1 kJ; span 100,000,000×.
+# ---------------------------------------------------------------------------
+def energy():
+    rows = [
+        ("TinyML: keyword spotting", 10e-6, "compute", "≈10 μJ"),  # Greek mu: Helvetica slants the micro sign
+        ("Mobile: MobileNetV2, phone", 2.6e-3, "memory", "≈2.6 mJ"),
+        ("Edge: ResNet-50, Jetson", 15.9e-3, "data", "≈15.9 mJ"),
+        ("Cloud: ResNet-50, A100", 75.5e-3, "danger", "≈75.5 mJ"),
+        ("Cloud: LLM query (anchor)", 1e3, "danger", "≈1 kJ"),
+    ]
+    fig, ax = sp.plt.subplots(figsize=(5.8, 2.55))
+    n = len(rows)
+    for i, (label, v, ck, txt) in enumerate(rows):
+        y = n - 1 - i
+        ax.barh(y, v, left=1e-6, color=C[ck], height=0.62)
+        ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
+                va="center", fontsize=12, fontweight="bold", color=C["text"])
+        ax.text(v * 2.2, y, txt, va="center", fontsize=12, fontweight="bold", color=C[ck])
+    ax.annotate("", xy=(4e5, n - 1), xytext=(4e5, 0),
+                arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=2))
+    ax.text(6e5, (n - 1) / 2, "100,000,000×", color=C["danger"], fontsize=12,
+            fontweight="bold", rotation=90, va="center", ha="left")
+    ax.set_xscale("log")
+    ax.set_xlim(1e-6, 1e6)
+    ax.set_xticks([1e-6, 1e-4, 1e-2, 1, 1e2, 1e4, 1e6])
+    ax.minorticks_off()
+    ax.set_ylim(-0.6, n - 0.4)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x", color=C["grid"], lw=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel("Energy per inference (joules, log scale)")
+    sp.save(fig, out / "energy_per_inference.svg")
+
+
+energy()
+
 print("figures written")

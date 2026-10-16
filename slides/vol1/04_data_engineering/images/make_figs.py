@@ -381,4 +381,75 @@ bars_lines(out / "label_errors.svg", [
 ], log=False, xlim=(0, 13), size=(5.8, 2.8),
     xlabel="Test-set labels found to be wrong (%)")
 
+
+# ---------------------------------------------------------------------------
+# Data cascades (chapter figure 1, after Sambasivan et al., CHI 2021), redrawn
+# at slide size from the book's TikZ: the same seven stages, the same arcs
+# (start stage, end stage, cause, and curvature), the same impact and restart
+# markers. Stage names are horizontal and shortened so they read on a slide.
+# ---------------------------------------------------------------------------
+def cascades():
+    from matplotlib.path import Path as MPath
+    from matplotlib.patches import PathPatch, FancyArrowPatch
+    cols = {"blue": C["memory"], "red": C["danger"], "green": C["data"],
+            "orange": "#CC5500", "violet": "#7030A0"}
+    px = [i * 10 / 6 for i in range(7)]
+    # (from, to, cause, out angle, in angle, heavy) as in the book's figure
+    arcs = [(0, 6, "red", 60, 120, True), (0, 5, "red", 60, 125, True),
+            (1, 6, "blue", 60, 120, True), (1, 6, "red", 50, 125, True),
+            (4, 6, "blue", 60, 125, True), (3, 6, "blue", 60, 120, True),
+            (1, 6, "orange", 44, 132, False), (1, 6, "green", 38, 135, False),
+            (1, 5, "orange", 30, 135, False), (1, 5, "green", 36, 130, False),
+            (2, 6, "orange", 40, 135, False), (2, 5, "orange", 40, 135, False)]
+    fig = plt.figure(figsize=(7.0, 2.3))
+    ax = fig.add_axes([0.0, 0.22, 0.64, 0.76])
+    ax.plot([0, 10], [0, 0], color="#BBBBBB", lw=2.5, zorder=1)
+    for a, b, ck, o, i, heavy in arcs:
+        x0, x1 = px[a], px[b]
+        d = 0.3915 * (x1 - x0)
+        oo, ii = np.radians(o), np.radians(i)
+        verts = [(x0, 0), (x0 + d * np.cos(oo), d * np.sin(oo)),
+                 (x1 + d * np.cos(ii), d * np.sin(ii)), (x1, 0)]
+        ax.add_patch(PathPatch(MPath(verts, [1, 4, 4, 4]), fill=False,
+                               ec=cols[ck], lw=2.6 if heavy else 1.4, zorder=2))
+    for k in (5, 6):  # impact markers where the cascades land
+        ax.add_patch(FancyArrowPatch((px[k] - 1.15, 1.05), (px[k] - 0.12, 0.18),
+                                     arrowstyle="simple,head_width=12,head_length=10,tail_width=5",
+                                     color=cols["violet"], alpha=0.55, lw=0, zorder=3))
+    for x0, x1 in ((px[1], 0.8), (px[6], 9.1)):  # up, then bend back to restart
+        rp = MPath([(x0, 0.12), (x0, 2.0), (x0, 2.7), (x1, 2.7)], [1, 2, 3, 3])
+        ax.add_patch(FancyArrowPatch(path=rp, arrowstyle="-|>,head_width=4,head_length=7",
+                                     color=cols["red"], lw=1.6, ls=(0, (4, 3)), zorder=3))
+    ax.scatter(px, [0] * 7, s=28, color=C["text"], zorder=4)
+    names = ["Problem\nstatement", "Collect,\nlabel", "Analyze,\nclean", "Select\nmodel",
+             "Train\nmodel", "Evaluate\nmodel", "Deploy\nmodel"]
+    for x, nm in zip(px, names):
+        ax.text(x, -0.25, nm, ha="center", va="top", fontsize=10.5, color=C["text"])
+    ax.set_xlim(-0.8, 10.8)
+    ax.set_ylim(-1.15, 3.0)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    lg = [("blue", "Interacting with physical\nworld brittleness"),
+          ("red", "Inadequate application-\ndomain expertise"),
+          ("green", "Conflicting reward\nsystems"),
+          ("orange", "Poor cross-organizational\ndocumentation")]
+    y = 0.95
+    for ck, t in lg:
+        fig.text(0.655, y - 0.035, "●", color=cols[ck], fontsize=13, va="center")
+        fig.text(0.683, y, t, fontsize=10.5, va="top", color=C["text"], linespacing=1.1)
+        y -= 0.165
+    fig.add_artist(FancyArrowPatch((0.655, y - 0.035), (0.693, y - 0.035), transform=fig.transFigure,
+                                   arrowstyle="simple,head_width=9,head_length=7,tail_width=4",
+                                   color=cols["violet"], alpha=0.8, lw=0))
+    fig.text(0.703, y - 0.035, "Impact of the cascade", fontsize=10.5, va="center", color=C["text"])
+    y -= 0.11
+    fig.add_artist(FancyArrowPatch((0.655, y - 0.035), (0.693, y - 0.035), transform=fig.transFigure,
+                                   arrowstyle="-|>,head_width=3,head_length=5", ls=(0, (3, 2)),
+                                   color=cols["red"], lw=1.6))
+    fig.text(0.703, y - 0.035, "Abandon or restart", fontsize=10.5, va="center", color=C["text"])
+    sp.save(fig, out / "cascades.svg")
+
+
+cascades()
+
 print("figures written")

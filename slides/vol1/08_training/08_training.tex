@@ -28,7 +28,7 @@
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
 \usepackage{booktabs,amsmath}
-\usetikzlibrary{arrows.meta,positioning}
+\usetikzlibrary{arrows.meta,positioning,calc}
 \graphicspath{{images/}}
 \setcounter{mlsystotalsections}{6}
 
@@ -308,12 +308,27 @@
 
 \begin{frame}{Diagnose: why is this accelerator idle most of the time?}
   \mlsysactivity{Diagnose}{3 min}
-  \centering
-  \safeimg[width=0.95\textwidth,height=3.3cm,keepaspectratio]{fig-tf-bottleneck-trace.png}\\[0.2cm]
-  {\normalsize Python threads prepare each batch in 250 ms; the GPU computes it in 12 ms.}\\[0.15cm]
-  \uncover<2->{\normalsize Busy $= 12 / (250 + 12) \approx$ \textbf{4.6\%}. The data path binds.\\[0.1cm]}
-  \uncover<3->{\normalsize Fix: process workers, prefetching, or decoding on the accelerator.}
-  \mlsyscredit{Trace: Model Training, \S8.5 (data-bound profiler trace). Numbers: Example 8.2.}
+  \begin{columns}[c]
+    \begin{column}{0.63\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \node[anchor=north west, inner sep=0] (tr) at (0,0) {\safeimg[width=7.8cm,height=5.0cm,keepaspectratio]{trace_crop.png}};
+        % the crop's top 48% is the GPU's rows, the bottom 45% the host thread
+        \draw[midgray, line width=1pt] ([xshift=-0.12cm]tr.north west) -- ([xshift=-0.12cm]$(tr.north west)!0.47!(tr.south west)$);
+        \draw[midgray, line width=1pt] ([xshift=-0.12cm]$(tr.north west)!0.55!(tr.south west)$) -- ([xshift=-0.12cm]tr.south west);
+        \node[anchor=east, align=right, font=\footnotesize\bfseries, text=darktext] at ([xshift=-0.2cm]$(tr.north west)!0.235!(tr.south west)$) {GPU\\steps};
+        \node[anchor=east, align=right, font=\footnotesize\bfseries, text=darktext] at ([xshift=-0.2cm]$(tr.north west)!0.775!(tr.south west)$) {Host\\Python};
+        \node[anchor=north, font=\footnotesize, text=midgray] at (tr.south) {two training steps; time runs left to right};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \small
+      Python threads prepare each batch in 250 ms; the GPU computes it in 12 ms.\\[0.3cm]
+      \uncover<2->{Busy $= 12 / (250 + 12) \approx$ \textbf{4.6\%}. The data path binds.\\[0.3cm]}
+      \uncover<3->{Fix: process workers, prefetching, or decoding on the accelerator.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Trace: Model Training, \S8.5 (data-bound profiler trace, cropped to two steps). Numbers: Example 8.2.}
   \note{[3 min] Explain the trace first: time runs left to right; the upper rows are GPU streams, the bottom rows the host's Python thread. The GPU works in short bursts separated by wide gaps while the host is busy. ENGAGE: the class names the binding resource before any reveal. Step 2: preparation 250 ms, compute 12 ms, so the accelerator is busy about 4.6 percent of the time. A data problem in D·A·M terms; no kernel optimization helps. Step 3: the cause is Python's global interpreter lock (GIL), which lets one thread run Python code at a time, so the preparation threads take turns. Separate worker processes (num\_workers greater than zero) avoid it; libraries such as NVIDIA DALI decode on the accelerator. WARN: a twice-as-fast GPU changes this step from 262 ms to 256 ms. Land the segment: throughput is the minimum of preparation, transfer, and compute; overlap hides the faster stages but cannot speed up the slowest.}
 \end{frame}
 

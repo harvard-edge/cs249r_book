@@ -424,4 +424,20 @@ axs[1].set_xlim(0, 175)
 axs[1].set_xlabel("Time (schematic: prepare 20, compute 15 per batch)", fontsize=11)
 sp.save(fig, out / "prefetch_overlap.svg")
 
+
+# ---------------------------------------------------------------------------
+# The data-bound profiler trace (chapter figure, Sec. 8.5), cropped to two
+# training steps and to the rows that carry the story: the GPU's step and op
+# rows on top, the host's Python thread below. The crop is shown about three
+# times larger than the whole screenshot could be; the slide labels the two
+# halves. Pixel box of the source PNG (1000 x 398): x 285-668, y 208-398.
+# ---------------------------------------------------------------------------
+def trace_crop():
+    from PIL import Image
+    src = Image.open(out / "fig-tf-bottleneck-trace.png").convert("RGB")
+    src.crop((285, 208, 668, 398)).save(out / "trace_crop.png")
+
+
+trace_crop()
+
 print("figures written")
