@@ -623,6 +623,27 @@ class Series:
         "Training compute, accelerator count, duration, and utilization of notable training runs.",
         numeric=("training_compute_flop", "hardware_quantity", "training_time_hours", "mfu", "frontier"),
     )
+    # Added 2026-10-15: the pre-2012 complement of NotableModelTrainingRuns, so a
+    # long-run compute-trend figure (1950 onward, two-era fit after Sevilla et
+    # al. 2022) can be drawn from Epoch's data instead of reproducing Epoch's chart.
+    NotableModelComputePre2012 = TrendSeries(
+        "notable_model_compute_pre2012",
+        Provenance(
+            kind=ProvenanceKind.LITERATURE,
+            ref="Epoch AI, Notable AI Models database (CC BY 4.0), snapshot 2026-10-15",
+            url="https://epoch.ai/data/notable-ai-models",
+            verified="2026-10-15",
+            notes=(
+                "every model published before 2012-01-01 with a training-compute estimate (72 rows, "
+                "1950-2011), extracted from https://epoch.ai/data/notable_ai_models.csv; values as "
+                "published by Epoch (mostly Epoch estimates); frontier = Epoch's frontier flag. "
+                "The 2026-10-15 download agrees with the 2026-10-12 snapshot behind "
+                "NotableModelTrainingRuns on all 501 post-2012 rows but one compute value, so the two "
+                "series join into one 1950-onward history"),
+        ),
+        "Training compute of notable models published before 2012 (complements NotableModelTrainingRuns).",
+        numeric=("training_compute_flop", "frontier"),
+    )
     MLPerfStorageV1Training = TrendSeries(
         "mlperf_storage_v1_training",
         _lit("MLCommons, MLPerf Storage v1.0 results (Apache-2.0), published 2024-09-25, snapshot 2026-10-12",

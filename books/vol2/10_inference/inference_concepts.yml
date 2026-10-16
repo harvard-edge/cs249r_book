@@ -1,7 +1,7 @@
 concept_map:
   schema_version: 2
   source: 10_inference.qmd
-  generated_date: '2026-10-13'
+  generated_date: '2026-10-15'
   primary_concepts:
     - Serving cost dominance
     - SLO goodput and the serving tax
@@ -13,12 +13,13 @@ concept_map:
     - State-aware request routing
   secondary_concepts:
     - Paged KV allocation and prefix sharing
-    - Prefill-decode disaggregation
     - Serving precision decision
+    - Speculative decoding
+    - Per-request compute budget
     - Overload containment
     - Token-denominated tenant isolation
     - Phase-aware autoscaling and cold start
-    - Global placement by policy then cost
+    - Tail latency under fan-out
   claims:
     Serving cost dominance: Lifetime cost is training once plus cost per query times traffic times deployment time,
       so at high volume serving overtakes training within days to weeks and the lever is cost per completed request
@@ -28,30 +29,37 @@ concept_map:
       to model time, so a 70 ms model in a 100 ms budget leaves 30 ms for everything else.
     Batch formation trades waiting for reuse: With batch service time t_0 + B t_req throughput saturates toward
       1/t_req past a knee near t_0/t_req, and request latency is queueing plus formation plus execution, so a batching
-      window caps formation but not queueing.
+      window caps formation but not queueing, while Little's law (in-flight work = arrival rate x mean latency) sizes
+      the concurrency and replica count a target rate and latency imply.
     Iteration-level batching: Fixed batch membership strands slots when output lengths differ, and admitting requests
       at iteration boundaries recovers that capacity only when requests are waiting, KV memory is free, and per-iteration
       scheduling is cheap relative to a decode step.
-    Prefill-decode interference and chunked prefill: A monolithic compute-bound prefill colocated with active streams
-      lands in every decoder's per-token latency, and chunked prefill caps prompt tokens per iteration, moving rather
-      than removing the cost into the long prompt's time to first token.
+    Prefill-decode interference and chunked prefill: Prefill sits far above the ridge while decode intensity grows
+      roughly linearly with batch, so batching buys a large cost-per-token cut until KV capacity stops it, and a
+      monolithic prefill colocated with active streams lands in every decoder's per-token latency, which chunked prefill
+      caps per iteration by moving rather than removing the cost into the long prompt's time to first token; separate
+      prefill and decode pools remove the interference instead but pay alpha + KV bytes / beta per handoff, so
+      disaggregation earns that transfer cost only through measured goodput.
     KV cache as admission budget: KV bytes per token = 2 x layers x KV heads x head dimension x bytes, so maximum
       batch is free HBM over context times bytes per token, weight fit does not establish serving capacity, and
-      each lever changes a different factor.
+      each lever changes a different factor; resident LoRA adapters draw on the same HBM pool, so adapter locality
+      is an admission decision, and preempting a running request means choosing to retain, swap, recompute, or
+      reject its KV state against the waiting request's deadline.
     Serving parallelism chosen by the SLO: Weight bytes set the minimum shard count, but latency follows the per-request
       Fleet Law, so tensor parallelism divides layer compute while paying collectives per token whose fixed latency
       dominates decode and keeps it inside one fast domain.
     State-aware request routing: Two random probes cut the maximum load from log n / log log n to log log n in the
       static model, but serving needs a work signal (active tokens, remaining decode, KV pressure) and atomic admit-or-reject
-      because probes go stale and requests differ fiftyfold in remaining work.
+      because probes go stale and requests differ fiftyfold in remaining work; across regions the balancer first
+      filters by data-placement policy, artifact version, readiness, and capacity and only then chooses by measured
+      latency or cost.
     Paged KV allocation and prefix sharing: Contiguous maximum-length reservation strands most reserved KV memory,
       and paged allocation through per-sequence block tables bounds waste to the last block and lets compatible
       prefixes share physical blocks copy-on-write.
-    Prefill-decode disaggregation: Separate prefill and decode pools remove phase interference and tune TTFT and
-      per-token latency independently, but every handoff pays alpha + KV bytes / beta, so disaggregation earns its
-      transfer tax only through measured goodput.
-    Serving precision decision: A precision change is deployed only for the resource that binds (fit, bandwidth-bound
-      decode, compute-bound prefill, outliers), and the runtime must keep the packed format resident, select supported
+    Serving precision decision: The roofline regime picks the format, weight-only low-bit formats for bandwidth-bound
+      decode and weight-activation W8A8 or FP8 for compute-bound prefill, with block-wise scaling containing weight
+      outliers and PTQ tried before QAT, so a precision change is deployed only for the resource that binds and only
+      with quality measured beside throughput, and the runtime must keep the packed format resident, select supported
       kernels, and plan KV around real allocations.
     Overload containment: A slowing replica becomes a fleet failure when timeouts and retries consume neighbors'
       headroom, so circuit breakers withdraw it, backpressure pushes overload upstream to admission control, and
@@ -62,10 +70,19 @@ concept_map:
     Phase-aware autoscaling and cold start: Average utilization is the wrong control signal, so scaling acts on
       outstanding work against phase-specific service rates with asymmetric hysteresis, and a large-model cold start
       takes minutes that a ready reserve must cover.
-    Global placement by policy then cost: A global balancer first filters regions by data-placement policy, artifact
-      version, readiness, and capacity and only then chooses by measured latency or cost, because cross-region sharding
-      pays one to two orders of magnitude on the execution path.
+    Per-request compute budget: Serial reasoning tokens multiply latency by the ratio of reasoning tokens to answer
+      tokens and extend KV residency, so test-time compute is a recurring serving cost per request whose budget must
+      be stated in both time and capacity and justified by measured quality gain.
+    Tail latency under fan-out: A request that waits for N independent leaves is slow with probability 1 - (1 - q)^N,
+      so 100 leaves at their own p99 leave about 63 percent of requests slow and holding the request at p99 needs
+      each leaf near p99.99, which makes fan-out width a tail cost that fewer shards, queue-aware routing, deadlines
+      with partial results, and hedging each attack.
+    Speculative decoding: A draft model proposes K tokens that the target verifies in one pass while preserving
+      its distribution, so the gain depends on acceptance rate, draft cost, and spare compute, and it vanishes as
+      batching consumes decode's compute headroom.
   previews:
+    - concept: Adaptation method by budget term
+      owner: 11_edge_intelligence
     - concept: Local training must earn its place
       owner: 11_edge_intelligence
     - concept: Staged rollout exposure budget
@@ -77,12 +94,12 @@ concept_map:
       owner: 01_introduction
     - concept: Naming the efficiency measure
       owner: 01_introduction
-    - concept: Lighthouse archetypes
-      owner: 01_introduction
     - concept: Capacity and bandwidth are separate tests
       owner: 02_compute_infrastructure
     - concept: Alpha-beta model
       owner: 03_network_fabrics
+    - concept: Hedged reads against storage tail latency
+      owner: 04_data_storage
     - concept: Ring AllReduce and the bandwidth bound
       owner: 05_collective_communication
     - concept: AllToAll active bound
@@ -92,6 +109,8 @@ concept_map:
     - concept: Pipeline parallelism bubble
       owner: 06_distributed_training
     - concept: Expert parallelism
+      owner: 06_distributed_training
+    - concept: Parallelism plan as joint placement
       owner: 06_distributed_training
     - concept: Sparse embedding sharding
       owner: 06_distributed_training
@@ -109,25 +128,12 @@ concept_map:
       owner: 08_fleet_orchestration
     - concept: Scheduling objectives and matched signals
       owner: 08_fleet_orchestration
-    - concept: Prefill-decode intensity and batch operating point
-      owner: 09_performance_engineering
-    - concept: Speculative decoding
-      owner: 09_performance_engineering
-    - concept: Precision engineering by regime
+    - concept: ML goodput
       owner: 09_performance_engineering
     - concept: Tensor-parallel collectives under contention
       owner: 09_performance_engineering
     - concept: Reproducible measurement contract
       owner: 09_performance_engineering
-  splits:
-    - concept: Serving precision decision
-      here: owns the serving decision model, runtime contract, and cost-per-token effect
-      with: 09_performance_engineering
-      there: owns the quantization methods and the regime rule
-    - concept: Prefill-decode interference and chunked prefill
-      here: owns the scheduling consequences of the phase asymmetry
-      with: 09_performance_engineering
-      there: owns the intensity asymmetry and batch operating point
   technical_terms:
     - Time to First Token
     - Time Per Output Token
@@ -168,7 +174,7 @@ concept_map:
     - Target Model
     - Acceptance Rate
     - Rejection Sampling
-    - Speculation Tax
+    - Speculation Overhead
     - Self-Speculative Decoding
     - Medusa
     - Lookahead Decoding
@@ -225,6 +231,10 @@ concept_map:
     - E[\text{max queue}]_{\text{two choices}} = \Theta(\log \log n)
     - T_{\text{response}} = T_{\text{detect}} + T_{\text{decide}} + T_{\text{provision}} + T_{\text{warmup}}
     - \text{Decode throughput} \propto \frac{\text{Memory bandwidth}}{\text{Model size in bytes}}
+    - \mathbb{E}[N_{\text{emit}}] = \frac{1-\alpha_{\text{acc}}^{K+1}}{1-\alpha_{\text{acc}}}
+    - s_i = \frac{x_{\max,i} - x_{\min,i}}{2^{b} - 1}
+    - T_{\text{handoff}} = \alpha + \frac{M_{\text{KV}}}{\beta}
+    - P(\text{request slow}) = 1 - (1 - p)^{N}
   methodologies:
     - Total cost of serving analysis
     - Serving tax latency budgeting
@@ -239,15 +249,16 @@ concept_map:
     - PagedAttention block allocation
     - Prefix cache hit-rate analysis
     - KV cache compression strategy selection
+    - Block-wise quantization and outlier handling
+    - Precision dividend analysis
     - Speculative decoding acceptance-rate analysis
     - Prefill and decode phase separation
     - Chunked prefill scheduling
     - Disaggregated serving pool design
+    - Decode-step budget accounting
     - Tensor parallel sharding analysis
     - Pipeline parallel throughput analysis
     - Expert parallel routing analysis
-    - Embedding sharding strategy selection
-    - Hybrid sharding composition
     - Collective cost budgeting by interconnect
     - Power-of-two-choices routing
     - Weighted and adaptive load balancing
@@ -269,6 +280,8 @@ concept_map:
     - Quantization method selection
     - Calibration-driven weight quantization
     - Deadline propagation in cascaded serving
+    - Fan-out tail budgeting by leaf percentile
+    - Per-request compute budgeting for test-time compute
   applications:
     - Large language model API serving
     - Real-time chatbot serving

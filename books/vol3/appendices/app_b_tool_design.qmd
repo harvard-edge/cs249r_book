@@ -9,7 +9,7 @@ An agent's tool interface must describe what a call means, reject invalid inputs
 
 ## How to Use This Appendix {.unnumbered}
 
-Select the section that matches the observed failure at the tool boundary.
+Select the section that matches the observed failure at the tool boundary. Each entry pairs the failure signature with the descriptor, schema, or result-envelope change that prevents it:
 
 - When calls fail validation or confuse units, @sec-vol3-app-b-json-schema supplies schema constraints and distinguishes them from execution obligations.
 - When malformed calls consume repair turns, @sec-vol3-app-b-logit-masking compares their expected latency with the overhead of constrained decoding.
@@ -18,7 +18,7 @@ Select the section that matches the observed failure at the tool boundary.
 
 ## Schema Rules for Tool Definitions {#sec-vol3-app-b-json-schema}
 
-A tool schema has two readers. The model uses its names and descriptions to propose arguments; the runtime validates the proposal before considering a grant (@sec-vol3-tool-calling-schemas). A description can communicate intent without enforcing it. The distinction between assertions and annotations in the JSON Schema validation specification [@wright2022jsonschemavalidation] supports five checks on this boundary:
+Writing "path must stay inside the workspace" in a tool description tells the model what to propose, but leaves an unvalidated `../` traversal free to pass unless the schema and runtime enforce the constraint. Because a tool schema has two readers—the model uses its names and descriptions to propose arguments, and the runtime validates the proposal before considering a grant (@sec-vol3-tool-calling-schemas)—a description can communicate intent without enforcing it. The distinction between assertions and annotations in the JSON Schema validation specification [@wright2022jsonschemavalidation] supports five checks on this boundary:
 
 - Close each fixed argument object with `additionalProperties: false`, so the validator rejects undeclared fields rather than silently forwarding them. A constrained decoder can enforce the same restriction only when its supported schema subset includes it.
 - Put mandatory fields in `required`. An optional field needs explicit absence semantics; the `default` annotation does not insert a missing value during validation [@jsonschemaUnderstanding]. Any defaulting step is part of the runtime's argument-normalization contract.
@@ -72,7 +72,7 @@ An exact-replacement file tool can express a small edit without requiring the mo
 
 The required Boolean makes repeat-match intent explicit; a descriptor with an optional Boolean would instead need a documented normalization rule. JSON Schema measures `maxLength` in characters, not serialized bytes or model tokens. The request transport therefore needs its own byte bound, while context construction needs its own token accounting. Replacement size also differs from result-file size: repeated replacements can expand a file beyond either string bound.
 
-The implementation must enforce the advertised match behavior and workspace boundary. A path pattern does not establish confinement, and checking a unique match before an uncoordinated write does not prevent a concurrent change. Resolve and authorize the actual target, enforce the match precondition together with the mutation, and bound the resulting file and returned observation. A missing response still requires the operation-identity contract below; a schema cannot establish whether an edit committed.
+The implementation must enforce the advertised match behavior and workspace boundary: because a path pattern does not establish confinement and checking a unique match before an uncoordinated write does not prevent a concurrent change, the endpoint must resolve and authorize the actual target, enforce the match precondition together with the mutation, and bound both the resulting file and the returned observation. Even then, a missing response still requires the operation-identity contract below, because a schema cannot establish whether an edit committed.
 
 Keep the published schema, normalization rules, and implementation version together. Generating a schema from a typed argument model can reduce transcription drift, but it does not prove that a decoder, validator, and implementation accept the same inputs. Contract tests should include missing required fields, extra fields, oversized strings, wrong types, and valid boundary values. Tests must also exercise advertised behavior outside the schema, including concurrent edits and uncertain outcomes.
 
@@ -92,7 +92,7 @@ Tools adapted from existing service interfaces often carry patterns that suit a 
 
 The last row can matter for latency when generated output lies on the critical path (@sec-vol3-foundation-model-cost). A whole-file rewrite pays decode time for every unchanged line, and @sec-vol3-foundation-model-interface-design works an example in which the rewrite misses a per-call deadline that an anchored diff meets. Exact replacement has its own cost when the selected anchor is ambiguous or stale; the right representation depends on the edits the workload requires.
 
-## Architectural Criteria for Constrained Decoding {#sec-vol3-app-b-logit-masking}
+## When Constrained Decoding Pays for Itself {#sec-vol3-app-b-logit-masking}
 
 A model that samples freely can emit malformed arguments. Under a supported grammar and correct masking, a generation that reaches an accepting completion belongs to that grammar; truncation or interruption does not supply a complete valid call (@sec-vol3-foundation-model-grammar-constrained, @sec-vol3-appendix-math-dfa). @Sec-vol3-appendix-inference-decode-loop develops mask placement and storage. Here the narrower question is whether masking overhead is lower than the expected latency of one repair under a stipulated comparison.
 
@@ -120,13 +120,13 @@ Operation identity and authorization solve different problems. An idempotency ke
 
 ### Retaining operation identity
 
-Assign an identifier to the intended operation and retain it across retries and recovery. A fresh transport attempt can have a new call identifier while referring to the same operation. Conversely, two separately intended operations may have identical arguments and still need distinct identities. Deriving an identifier from recorded inputs or storing a generated identifier are both possible; either method requires enough durable state to recover the same identity after a crash.
+Generating a fresh UUID inside a retry loop makes every network timeout look like a brand-new mutation to the receiving endpoint. Instead, the runtime must assign an identifier to the intended operation and retain it across retries and recovery. A fresh transport attempt can have a new call identifier while referring to the same operation. Conversely, two separately intended operations may have identical arguments and still need distinct identities. Deriving an identifier from recorded inputs or storing a generated identifier are both possible; either method requires enough durable state to recover the same identity after a crash.
 
 The endpoint binds this identity to the authorized scope and request payload and rejects conflicting reuse. If canonical serialization is used to compare payloads, its rules must match at both ends. Identity does not authorize the request, and hashing arguments alone cannot distinguish an intentional second operation from a retry.
 
 ### The endpoint contract
 
-A useful status model distinguishes an unseen operation, work in flight, a completed operation with a retained result, and an operation whose effect is in doubt. These states describe the required behavior, not a complete implementation:
+When a retried request arrives with the same operation ID, an endpoint that only returns "success" or "error" cannot tell the caller whether the first attempt is still running or failed partway through. A useful status model distinguishes an unseen operation, work in flight, a completed operation with a retained result, and an operation whose effect is in doubt. These states describe the required behavior, not a complete implementation:
 
 1. **Admission.** Claim the operation under the endpoint's concurrency and durability contract, checking scope and payload consistency.
 2. **In flight.** A repeated request must not start an independent execution of the same effect. It can obtain status or wait under the endpoint's defined limits.
@@ -141,7 +141,7 @@ A reconciliation probe supplies scoped evidence. Finding the pre-dispatch state 
 
 ### The capability check
 
-The tuple $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
+An idempotency key prevents duplicate execution of the same request, but does not check whether the caller is allowed to touch the target object in the first place. The capability tuple $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes the rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$ that govern access. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
 
 For delegation, let $\GrantAllowedAccesses(\CapabilityGrant)$ denote the accesses a grant permits. A derived child must satisfy
 
@@ -169,7 +169,7 @@ On-demand staging changes the per-call count. If call $\ModelCallIndex$ stages $
 
 Compatible available prefix state can reduce recomputation, and qualifying cached-input billing can reduce price, without releasing logical context capacity. A changed descriptor affects reuse from its first divergence, not necessarily the entire earlier prefix (@sec-vol3-context-engineering-staging).
 
-@Tbl-vol3-app-b-deep-vs-shallow sets the two catalog shapes side by side on these costs and on where authority is enforced.
+@Tbl-vol3-app-b-deep-vs-shallow sets the two catalog shapes side by side on these costs and on where authority is enforced. Each row separates the surface property of the catalog from the underlying runtime measurement or enforcement obligation.
 
 | Dimension             | Many narrow tools                                        | A few general tools                                            | Consequence                                                                                                 |
 |:----------------------|:---------------------------------------------------------|:---------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|
@@ -199,6 +199,6 @@ A catalog comparison needs a fixed workload and acceptance policy. For coding ta
 
 : **Catalog comparison worksheet**: Fields that make a workload-specific comparison interpretable rather than equating fewer tool names with a better interface. {#tbl-vol3-app-b-catalog-worksheet tbl-colwidths="[22,40,38]"}
 
-Each operation also needs explicit input, execution, and observation bounds. A file viewer's line window does not bound its returned bytes, because one line can be large. Search needs limits on both its input expression and its work, matches, and captured output. An editor needs a resulting-file bound as well as bounded replacement strings. A command runner needs containment and resource accounting beyond a timeout argument. These are endpoint obligations even when several operations share one implementation.
+Each operation also needs explicit input, execution, and observation bounds that match its mechanics: a file viewer's line window does not bound its returned bytes because one line can be arbitrarily long, whereas a search tool needs limits on its input expression as well as its work, matches, and captured output; similarly, an editor needs a resulting-file bound in addition to bounded replacement strings, while a command runner needs containment and resource accounting beyond a timeout argument. These remain endpoint obligations even when several operations share one implementation.
 
 A compact catalog is useful when it reduces the total work required to finish the specified tasks without weakening the acceptance or authority contract. Specialized interfaces can instead reduce ambiguity and expose narrower effects. The worksheet supports that decision; it does not prescribe a catalog size.
