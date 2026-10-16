@@ -1145,7 +1145,7 @@ class ValidateCommand:
         )
 
         try:
-            ns = parser.parse_args(args)
+            ns = parser.parse_intermixed_args(args)
         except SystemExit:
             # argparse uses SystemExit(0) for --help and non-zero for parse errors.
             return ("-h" in args) or ("--help" in args)
