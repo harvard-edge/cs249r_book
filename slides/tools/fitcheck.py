@@ -72,6 +72,22 @@ def log_overflow(tex, log):
     return problems
 
 
+NOTE_WORD_LIMIT = 220   # the notes page silently cuts off longer notes (plain layout, footnotesize)
+
+
+def long_notes(tex):
+    """Speaker notes the notes PDF would truncate without warning."""
+    src = tex.read_text(errors="replace")
+    out = []
+    for m in re.finditer(r"\\(?:mlsys)?note\{(.*?)\}\s*\n", src):
+        body = re.sub(r"\\[A-Za-z]+|[{}$]", " ", m.group(1))
+        n = len(body.split())
+        if n > NOTE_WORD_LIMIT:
+            line = src.count("\n", 0, m.start()) + 1
+            out.append(f"note at line {line} has {n} words (limit {NOTE_WORD_LIMIT}; the notes PDF truncates it)")
+    return out
+
+
 def is_ink(px):
     return min(px[:3]) < INK
 
@@ -120,6 +136,9 @@ def main():
             failed = True
     else:
         print("⚠ no log found; skipped the overflow check")
+    for p in long_notes(a.tex):
+        print("✗", p)
+        failed = True
     with tempfile.TemporaryDirectory() as d:
         subprocess.run(["pdftoppm", "-png", "-r", str(DPI), str(pdf), f"{d}/p"], check=True)
         pages = sorted(Path(d).glob("p-*.png"), key=lambda p: int(p.stem.split("-")[1]))
