@@ -98,3 +98,46 @@ def hbars_steps(stem, rows, unit, **kw):
     """Write stem_step1.svg ... stem_stepN.svg, one more bar per step."""
     for k in range(1, len(rows) + 1):
         hbars(f"{stem}_step{k}.svg", rows, unit, step=k, **kw)
+
+
+def roofline_steps(stem, points, size=SIZE, ridge=100.0, peak=1.0,
+                   xlabel="Arithmetic intensity (operations per byte moved)",
+                   ylabel="Achieved performance", note="Schematic"):
+    """A schematic roofline (memory slope blue, compute ceiling orange) with
+    workload points revealed one per step. points: list of (label, intensity,
+    color_key). Axes are log-log and unnumbered unless the caller adds ticks;
+    the shape, not the numbers, carries the point."""
+    import numpy as np
+    xs = np.logspace(-1, 4, 200)
+    roof = np.minimum(peak, xs / ridge * peak)
+    for k in range(0, len(points) + 1):
+        fig, ax = plt.subplots(figsize=size)
+        ax.plot(xs[xs <= ridge], roof[xs <= ridge], color=C["memory"], lw=3)
+        ax.plot(xs[xs >= ridge], roof[xs >= ridge], color=C["compute"], lw=3)
+        ax.fill_between(xs[xs <= ridge], 1e-4, roof[xs <= ridge], color=C["memory_l"], alpha=0.6)
+        ax.fill_between(xs[xs >= ridge], 1e-4, roof[xs >= ridge], color=C["compute_l"], alpha=0.6)
+        # regime names sit low in each shaded region, away from the points
+        ax.text(0.3, 1.3e-3, "Memory bound", color=C["memory"], fontsize=12,
+                fontweight="bold")
+        ax.text(ridge * 2.0, 1.3e-3, "Compute bound", color=C["compute"],
+                fontsize=12, fontweight="bold")
+        for label, x, ck in points[:k]:
+            y = min(peak, x / ridge * peak)
+            ax.plot([x], [y], "o", ms=11, color=C[ck], mec="white", mew=1.5, zorder=5)
+            # label below and right of the point, inside the shaded region
+            ax.annotate(label, (x, y), xytext=(10, -20), textcoords="offset points",
+                        ha="left" if x < ridge else "center", fontsize=12,
+                        fontweight="bold", color=C[ck])
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlim(0.1, 1e4)
+        ax.set_ylim(5e-4, 3)
+        ax.minorticks_off()
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        if note:
+            ax.text(0.01, 0.97, note, transform=ax.transAxes, ha="left",
+                    va="top", fontsize=9, color=C["neutral"])
+        save(fig, f"{stem}_step{k}.svg")

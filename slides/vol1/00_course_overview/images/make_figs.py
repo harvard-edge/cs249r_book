@@ -7,8 +7,7 @@ Every value is sourced:
     10 percent GPU utilization, about 6.6 J/token. Google's measured median
     Gemini text prompt is 0.24 Wh = 864 J (Elsworth et al. 2025, cited there).
     Charging a phone is about 40,000 J (same box).
-  - AlexNet: two consumer GPUs for about six days (Introduction, Sec. 1.3);
-    frontier training anchor about 2.5 million GPU-days (Introduction, Table 3).
+  - Daily chat prompts: about 2.5 billion (OpenAI to Axios, July 2025).
   - Datacenter electricity: 415 TWh in 2024, about 945 TWh projected for 2030
     (IEA, Energy and AI, 2025, executive summary).
   - Energy per operation: DRAM access 160 pJ, FP16 multiply 1.1 pJ, INT8
@@ -27,24 +26,34 @@ import slideplot as sp  # noqa: E402
 
 out = Path(__file__).parent
 
-# One chat answer against everyday energy (built up in three steps)
+# One chat answer against everyday energy, on a linear axis so the ratio
+# reads true (built up in three steps)
 sp.hbars_steps(out / "energy_answer", [
     ("One answer (estimate)", 548, "compute"),
     ("One prompt (Google, measured)", 864, "compute"),
     ("Charging a phone", 40000, "neutral"),
-], "J", xlabel="Energy (joules, log scale)")
+], "J", log=False, xlabel="Energy (joules)")
+
+# Fleet scale: about 2.5 billion ChatGPT prompts a day (OpenAI to Axios,
+# July 2025) at Google's measured 0.24 Wh each is about 600 MWh a day,
+# against 1,287 MWh to train GPT-3 (Patterson et al. 2021). Estimate: the
+# per-prompt figure is Gemini's median, applied to another service.
+sp.hbars_steps(out / "fleet_daily", [
+    ("Chat prompts, one day (estimate)", 600, "compute", "about 600 MWh"),
+    ("Training GPT-3, once", 1287, "neutral", "1,287 MWh"),
+], "MWh", log=False, xlabel="Energy (megawatt-hours)", size=sp.SHORT)
+
+# Training against generating text on one accelerator (schematic roofline)
+sp.roofline_steps(out / "roofline_train_decode", [
+    ("Generating text, one user", 1.0, "memory"),
+    ("Training, large batch", 1000.0, "compute"),
+])
 
 # Utilization is energy: joules per generated token
 sp.hbars_steps(out / "energy_utilization", [
     ("Well batched", 1.1, "compute"),
     ("10% GPU utilization", 6.6, "danger"),
 ], "J per token", log=False, value_fmt="{:.1f}", size=sp.SHORT)
-
-# Then and now: GPU-days to train
-sp.hbars_steps(out / "then_now_gpudays", [
-    ("AlexNet, 2012", 12, "neutral", "12 GPU-days"),
-    ("Frontier model today", 2.5e6, "compute", "2.5 million GPU-days"),
-], "GPU-days", xlabel="GPU-days (log scale)", size=sp.SHORT)
 
 # Datacenter electricity (IEA)
 sp.hbars_steps(out / "datacenter_electricity", [
@@ -55,10 +64,10 @@ sp.hbars_steps(out / "datacenter_electricity", [
 
 # Where the energy goes: one access against one operation
 sp.hbars_steps(out / "energy_per_op", [
-    ("Read from DRAM", 160, "memory"),
-    ("FP16 multiply", 1.1, "compute"),
-    ("INT8 multiply", 0.2, "compute"),
-], "pJ", xlabel="Energy (picojoules, log scale)", value_fmt="{:g}")
+    ("Read one byte from DRAM", 160, "memory"),
+    ("One FP16 multiply", 1.1, "compute"),
+    ("One INT8 multiply", 0.2, "compute"),
+], "pJ", xlabel="Energy (picojoules, log scale; 45 nm, Horowitz 2014)", value_fmt="{:g}")
 
 # One model, four machines: power envelope by deployment tier
 sp.hbars_steps(out / "power_tiers", [
