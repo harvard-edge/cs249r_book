@@ -31,7 +31,7 @@ out = Path(__file__).parent
 sp.hbars_steps(out / "energy_answer", [
     ("One answer (estimate)", 548, "compute"),
     ("One prompt (Google, measured)", 864, "compute"),
-    ("Charging a phone", 40000, "neutral"),
+    ("Charging a phone", 40000, "neutral", "40,000 J  = 73 answers"),
 ], "J", log=False, xlabel="Energy (joules)")
 
 # Fleet scale: about 2.5 billion ChatGPT prompts a day (OpenAI to Axios,
@@ -58,7 +58,7 @@ sp.roofline_steps(out / "roofline_train_decode", [
 # Utilization is energy: joules per generated token
 sp.hbars_steps(out / "energy_utilization", [
     ("Well batched", 1.1, "compute"),
-    ("Poorly batched (10% of the rate)", 6.6, "danger"),
+    ("Poorly batched (10% of the rate)", 6.6, "danger", "6.6 J per token: 6× more"),
 ], "J per token", log=False, value_fmt="{:.1f}", size=sp.SHORT)
 
 # Datacenter electricity (IEA)
