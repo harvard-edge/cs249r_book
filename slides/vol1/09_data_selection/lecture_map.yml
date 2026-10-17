@@ -1,0 +1,294 @@
+chapter: 09_data_selection
+lecture: 9
+title: Data Selection
+layer: data
+minutes: 75
+notes_minutes: 71.5
+target_ideas: 30
+thesis: "The cheapest computation is the one never run: a well-chosen subset keeps most of a dataset's value, provided selection costs less than the training it removes and the subset still covers the cases deployment needs."
+
+hook:
+  minutes: "0-6"
+  setup: "Step 1, the data wall in real data: reported pretraining tokens of frontier language models grow about 2.9x a year, from 300 billion (GPT-3, 2020) to 36 trillion (Qwen3, 2025), toward an estimated stock of public human text of 10^14 to 10^15 tokens (Data Engineering figure 6, Villalobos et al. 2024). Step 2, the same wall on one machine: GPT-2 XL's corpus, WebText, holds about 10 billion tokens; the compute-optimal fit asks for 30 billion; the original run processed about 167 billion. Step 3, the obvious escape and its trap: train on generated data. The slide shows the chapter's illustrative scenario, labeled on the slide as such, in which accuracy falls from 95 to 78 percent over five recursive generations; Shumailov et al. 2024 is cited for the mechanism (model collapse) only, not for these numbers."
+  question_to_class: "GPT-2's run processed 167 billion tokens from a 10-billion-token corpus. How many times did it see each token? A) once B) 3 times C) about 17 times D) about 100 times"
+  payoff: "C. Less than a week of one eight-H100 machine (4.4 days, 590 kWh) passes over the whole corpus about 17 times. More compute buys repetition, not information; more generated data risks collapse. What is left is choosing which examples deserve a step. The synthesis returns to GPT-2 (deduplicate and filter, 3 to 14 hours saved) and to the collapse curve (a real-data anchor)."
+  sources: ["chapter §9.1 (WebText 40 GB, 10B tokens, 30B, 167B, 17x, 4.4 days, 590 kWh)", "Data Engineering figure 6 (fig-running-out-of-human-data; Villalobos et al. 2024)", "chapter §9.10 pitfall and margin figure (95 to 78 percent, labeled illustrative); Shumailov et al., Nature 2024"]
+
+driving_question: "When good data runs short and compute does not, how do we decide which examples are worth a training step, and how do we know the choice saved anything?"
+
+recall: "Lecture 8: a training run costs about 6PD FLOPs. Which factor did Lecture 8 hold fixed while it made each step cheap? (D, the tokens or samples; in the iron law, Samples/Task.)"
+
+running_example: "Two lighthouses. GPT-2 XL on WebText carries the wall, the tokens-per-parameter diagnosis, and deduplication (10B unique tokens, 6.7 per parameter, 17 passes, 4.4 days on 8 H100s). ResNet-50 on ImageNet on one H100 carries coresets, the selection inequality, the data path, data echoing, and the cost breakdown (1.28M images, 24.6 GFLOP per training image, 3.2e16 FLOPs per epoch, 126 s and 88 kJ per epoch at 25 percent of peak, host supplies 5,250 of the 10,100 images/s the accelerator can consume)."
+
+segments:
+  - name: The Wall
+    divider_question: "Is there enough good data to train on?"
+    read: "§9.1; Data Engineering §4.4"
+    concept_questions: [1]
+    land: "More compute repeats scarce data, and generated data can erode a model; what is left is choosing which examples get a step."
+    minutes: 9.5
+  - name: Value
+    divider_question: "What is one training example worth?"
+    read: "§9.1, §9.2"
+    concept_questions: [2, 3, 4, 5]
+    focus: "T_selection + T_train(N_subset) < T_train(N_total) at matched quality and coverage (equation 2)."
+    land: "An example is worth the learning it returns per FLOP, and selection pays only when scoring plus subset training beats full training at the same quality."
+    minutes: 12.5
+  - name: Pruning
+    divider_question: "Which examples can we remove before training starts?"
+    read: "§9.3"
+    concept_questions: [6, 7, 8]
+    land: "Deduplicate first because it is cheap; rank the rest with a proxy score; never let the ranking go below a coverage floor."
+    minutes: 10
+  - name: Selecting while training
+    divider_question: "Which examples should the model see, or a human label, next?"
+    read: "§9.4, §9.8.2"
+    concept_questions: [9, 10]
+    land: "Value changes as the model learns; active learning buys labels where the model is unsure, and its savings count only against a budget-matched random baseline after scoring cost."
+    minutes: 9.5
+  - name: Creating data
+    divider_question: "What do we do when the cases we need are not in the pool?"
+    read: "§9.5, §9.6"
+    concept_questions: [11, 12, 13]
+    land: "Synthetic data fills gaps the pool cannot, but it must stay anchored to real data, and labels can be stretched by learning from unlabeled data."
+    minutes: 8
+  - name: On the machine
+    divider_question: "Does the saving survive the trip through the machine?"
+    read: "§9.7"
+    concept_questions: [14, 15]
+    land: "Pruning halves arithmetic, but storage reads halve only if the subset is materialized, and when the host is the slow stage, echoing recovers the idle accelerator."
+    minutes: 9
+  - name: The Bill
+    divider_question: "What does data cost, and what did GPT-2 need?"
+    read: "§9.8, §9.10"
+    concept_questions: [16]
+    land: "At ImageNet scale data is 99.6 percent of the bill (illustrative scenario), so the lever that saves labels usually matters most; synthesis returns to GPT-2."
+    minutes: 13.5
+
+concept_questions:
+  - id: 1
+    q: "Why is the data wall a systems problem and not only an economics problem?"
+    picture: "Book figure from Data Engineering (fig-running-out-of-human-data): reported pretraining tokens against the stock-of-text band; then new bars for GPT-2: 10B unique, 30B compute-optimal, 167B processed"
+    numbers: "2.9x per year fitted growth; stock 1e14 to 1e15 tokens (Villalobos et al. 2024); GPT-2: 40 GB, about 10B tokens, 30B asked, 167B processed, about 17 passes, 4.4 days and 590 kWh on 8 H100s at 50 percent MFU (§9.1)"
+    example: "GPT-2 XL on WebText"
+    read: "§9.1; Data Engineering §4.4"
+  - id: 2
+    q: "Which factor of the iron law does data selection change, and why do the three factors compound?"
+    picture: "Kit D-A-M triangle with D highlighted beside the iron law Time = Samples/Task x FLOPs/Sample x Seconds/FLOP, Samples/Task boxed"
+    numbers: "2x fewer samples x 2x fewer FLOPs per sample x 2x faster machine = 8x (Systems Perspective 9.1); halving the GPT-2 corpus halves 4.4 days and 590 kWh if the schedule adds no steps"
+    example: "GPT-2 run halved"
+    read: "§9.1, Systems Perspective 9.1"
+  - id: 3
+    q: "How do we measure what an example is worth? (the information-compute ratio)"
+    picture: "Equation anatomy ICR = delta I / delta FLOPs, then worked example card (Napkin Math 9.1)"
+    numbers: "Full epoch 1.28M x 24.6 GFLOP = 3.2e16 FLOPs, +5 pp, ICR 1.6e-16 per FLOP; 50 percent EL2N coreset 1.6e16 FLOPs, +4.5 pp (assumed), ICR 2.9e-16, 1.8x higher (Napkin Math 9.1, assumed gains)"
+    example: "ResNet-50 one epoch on ImageNet"
+    read: "§9.2.1, §9.2.2, §9.2.4"
+  - id: 4
+    q: "How do we know whether a run is starved for data?"
+    picture: "New horizontal bars: tokens per parameter for GPT-3, GPT-2 on WebText, Chinchilla's fit, Llama 2 70B, with a line at 20"
+    numbers: "GPT-3 about 1.7 (Brown et al. 2020); GPT-2 on WebText 6.7; Chinchilla fit about 20 (Hoffmann et al. 2022); Llama 2 70B about 28.6 (Touvron et al. 2023); compute-optimal tokens grow as sqrt(compute), 41.4 percent more tokens per doubling (§9.2.3)"
+    example: "GPT-2 at a third of the fitted balance, repeating its corpus 17 times"
+    read: "§9.2.3"
+  - id: 5
+    q: "When does selection actually save time? (the selection inequality)"
+    picture: "Focus slide: T_selection + T_train(subset) < T_train(full); then stacked bars: baseline 211 min, target-model scoring 42 s + 21.1 min, proxy 18 s + 21.1 min, rescore every epoch 70 + 21 min"
+    numbers: "Example 9.2: 10 percent coreset, 211 min baseline, Option A saves 188.8 min (89.7 percent), Option B 189.1 min; rescoring all 100 epochs costs 70 min and cuts the saving to 57 percent (§9.7.1)"
+    example: "ResNet-50 on one H100 at 25 percent of peak"
+    read: "§9.2.6, §9.7.1"
+  - id: 6
+    q: "How do we find duplicates in billions of documents without comparing every pair?"
+    picture: "New build: document -> shingles -> MinHash signature -> bands -> bucket collision; O(D^2) crossed out"
+    numbers: "MinHash collision probability equals Jaccard similarity; 128 hashes per document; WebText's about 8M documents need 4.1 GB of signatures; one 40 GB read at 7 GB/s is about 6 s (§9.3.2)"
+    example: "Near-duplicate web pages (Broder 1997, AltaVista)"
+    read: "§9.3.2"
+  - id: 7
+    q: "What does deduplication buy GPT-2?"
+    picture: "New bars: near-duplicate share in C4 (3.04 percent) and RealNews (13.63 percent), converted to hours and kWh of GPT-2's run"
+    numbers: "3.04 to 13.63 percent (Lee et al. 2022) -> 3 to 14 hours of 4.4 days, 18 to 80 kWh; dedup also reduced memorization while preserving or improving perplexity; train-test overlap above 4 percent of validation examples (Lee et al. 2022)"
+    example: "GPT-2 XL; cross-split contamination as the fallacy"
+    read: "§9.3.2, §9.10"
+  - id: 8
+    q: "Which unique examples should a coreset keep, and what must it never drop?"
+    picture: "Book figure fig-coreset-selection (random against boundary-focused picks); then a new bar build of a coverage floor"
+    numbers: "EL2N = ||p - y||, one forward pass of a briefly trained proxy (5 epochs for a 90-epoch target); reported: half of CIFAR-10 removed without loss (Paul et al. 2021), 20 percent of ImageNet with a self-supervised prototype metric (Sorscher et al. 2022); coverage: 1M examples, 0.1 percent rare = 1,000, unstratified 10 percent coreset keeps 100 against an illustrative floor of 150 (§9.10)"
+    example: "ResNet-50 10 percent coreset (Example 9.3); tumor dataset transfer fallacy"
+    read: "§9.3.3, §9.3.4"
+  - id: 9
+    q: "Why does an example's value change during training, and how do we spend labels where it is highest?"
+    picture: "Commons photo of a video doorbell (Robert Nelson, CC BY 2.0) beside four TikZ tiles of what its detector sees (empty porch, statue, laundry pile, shadow marked 'Person: 51%'); book figure fig-active-learning-loop on the exercise slide"
+    numbers: "None in the example (Example 9.4); mastered examples' gradient norms decay toward zero (§9.4); curriculum warmup serves D(W+1)/2 samples instead of W*D, half the warmup FLOPs (§9.4.1)"
+    example: "Hard negative mining in a smart doorbell; radiology labels"
+    read: "§9.4, Example 9.4"
+  - id: 10
+    q: "When does active learning pay for itself?"
+    picture: "Measured result: a card with the active-learning result in the abstract's words, then a bar of relative end-to-end training time for the CIFAR10 core-set result (1.0 against 1/1.6); then book figure fig-active-learning-loop beside the break-even exercise card"
+    numbers: "MEASURED (Coleman et al., Selection via Proxy, ICLR 2020, arXiv:1906.11829, abstract read 2026-10-16): in active learning, a small proxy model gives an order-of-magnitude improvement in data-selection runtime, with final error not significantly higher, often within 0.1 percent; for core-set selection, proxies over 10x faster to train removed up to 50 percent of CIFAR10 without hurting the target's final accuracy, a 1.6x end-to-end training-time improvement; five datasets including ImageNet. SCENARIO (chapter): hospital 1M scans x $5 = $5M against a $500K budget, random 100,000 labels against 50,000 (2x assumed), in notes only; break-even exercise: random 5,000 x $10 = $50,000, active 2,000 x $10 + 10 x $50 = $20,500, 143.9 percent (§9.8.2); illustrative 4x multiplier figure dropped to notes; 14-day annotation latency pitfall"
+    example: "Hospital chest X-ray team"
+    read: "§9.4.2, §9.8.2"
+  - id: 11
+    q: "What does synthetic data cost, and where does the cost land?"
+    picture: "No slide of its own (cut in revision); taught in the notes of the domain-gap frame: augmentation lands on host CPUs, generative models on accelerator inference, simulators on host physics and rendering"
+    numbers: "CutMix +2.28 pp ImageNet top-1 for ResNet-50 (Yun et al. 2019); AutoAugment search about 15,000 GPU-hours against RandAugment's two knobs (Cubuk et al. 2019, 2020); diffusion 20 to 50 denoising steps per batch (§9.5.2)"
+    example: "ResNet-50 RandAugment; CARLA simulation"
+    read: "§9.5.1, §9.5.2"
+  - id: 12
+    q: "Why does a model trained on synthetic data fail on real data, and why does recursion make it worse?"
+    picture: "One two-panel frame: left, book figure fig-domain-gap with the three fixes (randomize, adapt, mix with real); right, the hook's collapse line with a tail-narrowing sketch as the last step. On-slide label: 'Chapter's illustrative scenario. Mechanism: Shumailov et al. 2024.'"
+    numbers: "Chapter's illustrative scenario: 95 to 78 percent over five generations, 17 pp (§9.10); Shumailov et al. 2024 cited for the mechanism only (tails erode under recursive training)"
+    example: "Simulator-trained detector; recursive generator training"
+    read: "§9.5.3, §9.10"
+  - id: 13
+    q: "How far can unlabeled data stretch a handful of labels?"
+    picture: "New bars from table 4: FixMatch accuracy at 40, 250, and 4,000 CIFAR-10 labels against the 50,000-label set"
+    numbers: "40 labels 88.6 percent; 250 labels 94.9 percent; 4,000 labels 95.7 percent (Sohn et al. 2020, table 4); illustrative cost $4,050 against $500 at 5x the compute (Example 9.5); foundation amortization 10,000 GPU-h pretrain, 50 per task against 1,000, break-even at 11 tasks (§9.6.3, in notes)"
+    example: "FixMatch on CIFAR-10"
+    read: "§9.6"
+  - id: 14
+    q: "Where does a pruned epoch's saving show up on the machine?"
+    picture: "Slide variant of fig-data-selection-resnet-data-path, redrawn as SVG at slide size in make_figs.py; highlight moves H100, storage, host; random-read penalty in the notes"
+    numbers: "Full epoch 126 s and 88 kJ, pruned 63 s and 44 kJ; scoring 42 s and 29 kJ once; over 90 epochs 4 MJ and 2 h saved, 135x the scoring energy; 148 GB read at 7 GB/s = 21 s per epoch; 74 GB repacked subset; random 4 KB penalty HDD 375x, SATA SSD 13.8x, NVMe 1.75x (Napkin Math 9.4, tables 7 and 8)"
+    example: "ResNet-50 on one H100"
+    read: "§9.7, §9.7.2"
+  - id: 15
+    q: "What can we do when the host, not the accelerator, is the slow stage? (data echoing)"
+    picture: "Book margin figure (utilization rises with echo factor until e = r, then flat), redrawn at slide size with the ResNet-50 point marked"
+    numbers: "r = 10,100 / 5,250 = 1.92; accelerator busy 52 percent; e = 2: 90 epochs from 6.1 h to 3.2 h if echoed data is as useful; Choi et al. 2019 report 3.25x lower wall-clock time to target in one ResNet-50 configuration (Napkin Math 9.5)"
+    example: "ResNet-50 on one H100 fed by 14 host cores"
+    read: "§9.7.3"
+  - id: 16
+    q: "What does data cost at ImageNet scale, and when does a selection investment pay?"
+    picture: "New bars of the four cost terms (log scale), share annotated, on a predict slide; the amortized ROI line over runs on its own slide (log axis of runs, break-even at 5.5)"
+    numbers: "Recomputed with the chapter's consistent values (1.28M images, 148 GB): $50,000 acquisition + $64,000 labels (1.28M x $0.05) + $36 storage (148 GB x $0.02 x 12 = $35.52, rounded) + $421 compute (30 runs x 3.51 h = 105.3 GPU-h at $4; the chapter prints 3.5 h and 105 GPU-h, rounded) = $114,457; data 99.6 percent, compute 0.4 percent (0.37), the same shares as the chapter's table; dedup pipeline $50K + $5K for $10K per run: -81.8 percent at 1 run, -9.1 at 5, +81.8 at 10, +809.1 at 50 (Napkin Math 9.6, tables 13 and 14)"
+    example: "ResNet-50 vision team"
+    read: "§9.8"
+
+worked_examples:
+  - name: "Napkin Math 9.1: ICR of a ResNet-50 coreset"
+    steps: ["given: 1.28M images, 24.6 GFLOP per training image, assumed +5 pp per early epoch", "full epoch 3.2e16 FLOPs, ICR 1.6e-16 per FLOP", "50 percent EL2N coreset: 1.6e16 FLOPs, assumed +4.5 pp, ICR 2.9e-16", "1.8x higher ICR with a 0.5 pp smaller gain", "meaning: learning per FLOP rose, but equal final quality is not shown; that needs DCR at a target"]
+  - name: "Example 9.2 and §9.7.1: the selection inequality on one H100"
+    steps: ["given: 211 min for 100 epochs at 25 percent of peak; 10 percent coreset", "scoring with ResNet-50: 42 s; subset training 21.1 min; total 21.8 min", "saves 188.8 min (89.7 percent); proxy saves only 24 s more", "rescore every epoch: 70 + 21 = 91 min, saving falls to 57 percent", "meaning: refresh rate and scorer size, not the retained fraction, decide the saving"]
+  - name: "§9.8.2 break-even (student exercise; Napkin Math 9.3 hospital case in the notes)"
+    steps: ["given: 1M scans, $5 per label, $500K budget", "label all: $5M; budget-matched random: 100,000 labels", "uncertainty sampling: 50,000 labels, $250K (2x assumed)", "break-even form: $50,000 random against $20,500 active (labels + 10 rounds of $50 scoring), 143.9 percent", "meaning: the multiplier is measured, not assumed; scoring and latency belong in the cost"]
+  - name: "Napkin Math 9.5: data echoing for ResNet-50"
+    steps: ["given: host 5,250 images/s, H100 10,100 images/s", "r = 1.92; accelerator waits 48 percent", "e = 2 after augmentation: 10,100 images/s, unique images still 5,250", "90 epochs: 6.1 h to 3.2 h if echoed images are as useful", "meaning: echoing trades freshness for utilization only when r > 1"]
+  - name: "Napkin Math 9.6: cost breakdown at ImageNet scale (synthesis)"
+    steps: ["given: licensed images $50,000; 1.28M labels at $0.05; 148 GB stored 12 months at $0.02/GB-month; 30 runs of 3.51 h (100 epochs at 126 s) on one H100 at $4/h", "labels $64,000; storage $35.52, shown as $36; compute 105.3 GPU-h, $421", "total $114,457", "99.6 percent data, 0.4 percent compute", "meaning: in supervised vision the label bill, not the GPU bill, is what selection targets most"]
+
+active_learning:
+  - at_minute: 3
+    type: predict
+    prompt: "GPT-2 processed 167 billion tokens from a 10-billion-token corpus. How many passes? A) 1 B) 3 C) about 17 D) about 100"
+    answer: "C. 167 / 10 is about 17 passes, in 4.4 days on one eight-H100 machine (§9.1)."
+  - at_minute: 7.5
+    type: retrieval
+    prompt: "Close your notes: a training run costs about 6PD FLOPs. What are P and D, and which did Lecture 8 shrink?"
+    answer: "P parameters, D training tokens. Lecture 8 made each step cheaper and held D fixed; this lecture shrinks D, the Samples/Task factor of the iron law."
+  - at_minute: 19
+    type: estimate
+    prompt: "Full training 10 h; subset training 1 h; scoring the pool with the production model 12 h. Does selection save time? What would you change?"
+    answer: "No: 12 + 1 = 13 h > 10 h. Scoring must fall below 9 h at the same quality, for example with a proxy or cached embeddings (self-check §9.2)."
+  - at_minute: 29
+    type: predict
+    prompt: "1M examples, a rare class of 0.1 percent. An unstratified 10 percent coreset keeps how many rare examples, against a floor of 150?"
+    answer: "About 100 in expectation, below the floor. Reserve the floor first, fill the rest by score; the floor has an explicit opportunity cost (§9.3.4, §9.10)."
+  - at_minute: 38.5
+    type: estimate
+    prompt: "Labels $10 each. Random labeling needs 5,000 for the target; active learning needs 2,000 plus 10 scoring rounds at $50. Net return?"
+    answer: "$50,000 against $20,500; ($50,000 - $20,500) / $20,500 = 143.9 percent, before retraining, engineering, and latency costs (§9.8.2)."
+  - at_minute: 47.5
+    type: discuss
+    prompt: "Synthetic images cost almost nothing per sample. For a doorbell detector, how much of the training set would you let be synthetic, and what evidence would change your mind?"
+    answer: "No single answer. The chapter's position: synthetic data supplements, it does not replace; keep a real-data anchor, track provenance, and decide on held-out real deployment data (§9.5.3)."
+  - at_minute: 55
+    type: predict
+    prompt: "Host supplies 5,250 images/s, the H100 consumes 10,100. Echo factor 2: new throughput? And if the host were twice as fast as the H100 (r = 0.5)?"
+    answer: "10,100 images/s (r = 1.92 < 2), 6.1 h to 3.2 h for 90 epochs. With r = 0.5, no gain: the accelerator never waits (Napkin Math 9.5, self-check §9.7)."
+  - at_minute: 59.5
+    type: predict
+    prompt: "An ImageNet-scale campaign: licensed images, crowd labels, a year of storage, 30 training runs on one H100. What share of the bill is compute? A) 60 percent B) 20 percent C) 5 percent D) under 1 percent"
+    answer: "D: $421 of $114,457, 0.4 percent (Napkin Math 9.6 recomputed at 1.28M images and 148 GB; the chapter's printed table gives $110,457 and the same 0.4 percent)."
+  - at_minute: 63
+    type: concept_question
+    prompt: "True or false: more data always pays for itself; selection overhead is too small to matter; deduplicating the training set makes evaluation reliable; a pruning ratio that works on ImageNet works on my data."
+    answer: "All false: power-law returns (10x data, illustrative +4 pp); 10 h of scoring against an 8 h baseline; over 4 percent train-test overlap needs cross-split dedup (Lee et al. 2022); heavy-tailed domains lose the rare cases (§9.10)."
+
+open_questions:
+  - "If public text runs out late this decade, is generated data a way through the wall or a way into collapse? What would you measure to tell?"
+  - "A proxy scorer is cheaper and transfers well on average but drops a rare class. Who should own the coverage floor: the data team, the model team, or the product owner?"
+  - "Selection judges an example by what the current model already knows. Does that bias a model toward what it can already do?"
+
+more_examples:
+  - "Villalobos et al. 2024 (Epoch AI): stock of public human text and the date corpora reach it (Data Engineering figure 6)."
+  - "Lee et al. 2022: near-duplicates 3.04 percent (C4) to 13.63 percent (RealNews); over 4 percent train-test overlap."
+  - "Recht et al. 2019: new ImageNet and CIFAR-10 test sets cost 11 to 14 and 3 to 15 points (Example 9.1)."
+  - "C4 and The Pile as filtered and multi-source corpora (Raffel et al. 2020, Gao et al. 2020)."
+  - "Classifier-based quality filtering with fastText against reference text (§9.3.3); FineWeb-Edu and DataComp as public outside examples (numbers to verify before use)."
+  - "Coleman et al. 2020, Selection via Proxy: order-of-magnitude faster selection, error often within 0.1 percent; up to 50 percent of CIFAR10 removed; 1.6x end-to-end (abstract, verified)."
+  - "Choi et al. 2019: data echoing, 3.25x faster to target for one ResNet-50 configuration."
+  - "Lighthouse table 16: ResNet-50 coreset; GPT-2 dedup and filtering; MobileNetV2 augmentation matched to capacity; DLRM interaction dedup; KWS synthesis from small seeds."
+
+left_to_reading:
+  - concept: "Selection across multiple accelerators (centralized against hierarchical, stale active-learning scores)"
+    why: "Secondary detail of §9.7.4 that needs the single-host data path first; one line in the data-path notes."
+  - concept: "PPD, AULC, and DCR as separate metrics; validating a reduced dataset (coverage, KL/PSI, label checks)"
+    why: "Named on the ICR worked example (DCR is why 1.8x is not the end of the story); the metric definitions read better than they present. PSI is owned by Lecture 4."
+  - concept: "k-Center, herding, GraNd, forgetting events, influence functions"
+    why: "EL2N carries the coreset idea; the table of methods (table 2) is reference material."
+  - concept: "Curriculum strategy table, anti-curriculum, self-paced learning"
+    why: "One line on the doorbell slide (warmup costs half its FLOPs); the gains are illustrative and workload-specific."
+  - concept: "Self-supervised pretext tasks, SimCLR and MoCo memory costs, label propagation"
+    why: "Self-supervision and foundation-model amortization get one note on the FixMatch slide (break-even at 11 tasks); the contrastive memory story belongs with the reading."
+  - concept: "Knowledge distillation mechanics (loss, temperature)"
+    why: "Owned by Lecture 10. Here only its data cost: 5.1 GB of FP32 logits against 2.6 MB of labels, one line on the data-path slide."
+  - concept: "Decision tree (figure 12) and the four-step vision-team decision"
+    why: "The synthesis lighthouse line carries the idea; the tree is a reference figure."
+  - concept: "Cross-layer interactions with compression"
+    why: "Preview owned by Lecture 10; used as the bridge."
+
+closing:
+  return_to_hook: "Back to GPT-2 and the wall: its run is data-starved (6.7 tokens per parameter against about 20), so more compute only repeats WebText. Deduplication alone returns 3 to 14 of its 105 hours for a 6-second read and 4.1 GB of signatures; quality filtering and coverage-floored selection raise the learning per FLOP of what remains. Back to the collapse curve: generated data can fill gaps, but only beside a real-data anchor and a real test set. And the bill: at ImageNet scale, data is 99.6 percent of the cost, so the lever that saves labels usually matters more than the one that saves GPU-hours."
+  read_and_practice: ["§9.1 to §9.8 and §9.10", "self-check questions at the end of each section", "Napkin Math 9.1, 9.3, 9.4, 9.5, 9.6"]
+  further_reading:
+    - cite: "Data Selection, §9.2, §9.3, §9.7, §9.8"
+      url: "https://mlsysbook.ai"
+      why: "ICR, the selection inequality, the H100 data path, and the cost model with every number."
+    - cite: "Sorscher, Geirhos, Shekhar, Ganguli, Morcos, Beyond Neural Scaling Laws: Beating Power Law Scaling via Data Pruning, NeurIPS 2022"
+      url: "https://doi.org/10.52202/068431-1419"
+      why: "Why pruning can bend the scaling curve, and when it cannot."
+    - cite: "Lee et al., Deduplicating Training Data Makes Language Models Better, ACL 2022"
+      url: "https://doi.org/10.18653/v1/2022.acl-long.577"
+      why: "The duplicate shares and train-test overlap used in the lecture."
+    - cite: "Shumailov et al., AI Models Collapse When Trained on Recursively Generated Data, Nature 2024"
+      url: "https://doi.org/10.1038/s41586-024-07566-y"
+      why: "The mechanism behind model collapse, from the source."
+    - cite: "Coleman et al., Selection via Proxy: Efficient Data Selection for Deep Learning, ICLR 2020"
+      url: "https://arxiv.org/abs/1906.11829"
+      why: "Measured evidence that a small proxy makes active learning and core-set selection cheap at nearly equal error."
+    - cite: "Choi, Passos, Shallue, Dahl, Faster Neural Network Training with Data Echoing, 2019 (cited on the echo slide; dropped from the reading slide for space)"
+      url: "https://doi.org/10.48550/arXiv.1907.05550"
+      why: "Echo factor, insertion point, and measured speedups."
+    - cite: "Settles, Active Learning Literature Survey, University of Wisconsin-Madison Computer Sciences TR 1648, 2009"
+      url: "http://digital.library.wisc.edu/1793/60660"
+      why: "The query strategies (uncertainty, committee, expected change, diversity) in one place."
+  bridge: "Lecture 10: selection shrank the work of training, but the trained model is the same size. How do we shrink the model to fit the device?"
+
+coverage:
+  primary_taught: ["Selection inequality (focus slide, Example 9.2, rescoring, exercise)", "Measuring data value (ICR worked example; DCR named)", "Compute-optimal frontier (tokens per parameter)", "Selection engineering on the data path (pruned epoch, materialize or stream, data echoing)", "Static pruning with coverage floors (MinHash dedup, EL2N coreset, floor predict)"]
+  primary_left_to_reading: []
+  secondary: ["Dynamic selection (taught: doorbell hard negatives, active learning loop and ROI; curriculum one line)", "Synthetic data as a lever (taught: costs, domain gap, collapse, discussion)", "Learning from unlabeled data (one slide: FixMatch; amortization in notes)", "Data cost and amortized ROI (taught in synthesis)"]
+  touches_reused: ["Lecture 8: 6PD, MFU, ResNet-50 supply 5,250 against demand 10,100 images/s, GPT-2 XL run (4.4 days on 8 H100s)", "Lecture 4: active learning defined and pool-scoring cost (Napkin Math 4.6), labels as specification, PSI drift statistics, feeding problem"]
+
+notes_for_author:
+  - "REVISION 2026-10-16 (lead review): segment 3 now carries measured data from Coleman et al. 2020 (numbers taken only from the arXiv abstract, read 2026-10-16); frames cut from 39 to 34; collapse labeled on the slide; cost table recomputed at 1.28M images and 148 GB; Settles cited with its persistent UW URI."
+  - "Model collapse 95 to 78 percent is the chapter's illustrative scenario (§9.10, 'in this scenario'), not a result from Shumailov et al. 2024. The hook slide labels it illustrative and cites Shumailov for the mechanism only. If you want measured data on the hook, the Nature paper's own figures would need to be redrawn from the paper; I have not taken numbers from it."
+  - "The chapter's own data-wall figure in §9.1 is a schematic (two diverging lines). The hook uses Data Engineering figure 6 (Villalobos et al. 2024, real data) instead. Lecture 4 mentioned it only in its open-question notes, so this is its first showing."
+  - "Segment 3's hospital numbers, 2x and 4x multipliers, and break-even case are chapter scenarios; its measured data is now Coleman et al. 2020 (SVP). The SVP 'order of magnitude' is stated as such on the slide, not as a computed ratio, because the abstract gives no exact figure; the paper's tables could supply per-dataset numbers if wanted."
+  - "The smart-doorbell photo needs a Wikimedia Commons search; the shared photo library has none."
+  - "Napkin Math 9.6 prints 1.2M images and 150 GB ($110,457); the rest of the chapter uses 1.28M images and 148 GB. Per the lead review, the deck recomputes with 1.28M and 148 GB: labels $64,000, storage $35.52 shown as $36, total $114,457, shares unchanged (99.6 / 0.4 percent). The slide will say 'recomputed from Napkin Math 9.6 at 1.28M images'. Recommend fixing the chapter's table so book and deck agree. The $421 compute line is 105.3 GPU-hours x $4 (the chapter prints the rounded 105 h)."
+  - "The chapter calls the GPT-2 dedup saving '18 kWh to 80 kWh'; that is 3.04 and 13.63 percent of 590 kWh, consistent. Hours: 3.2 to 14.4 of 105.6."
+  - "Data echoing and the ResNet-50 supply numbers (5,250 and 10,100 images/s) repeat Lecture 8's feeding slide on purpose: Lecture 8 left the accelerator half idle, and echoing is the fix it did not show. The notes say so."
+  - "Active learning is recalled, not redefined: Lecture 4 defined it and showed that scoring a 10M pool costs $100K before one label. This lecture adds the loop, the query rules, the budget-matched baseline, and break-even."
+  - "Frame count is 34 including the title and five dividers. Cut or merged in revision: recall merged with the driving question; hospital worked example (to notes); illustrative AL multiplier figure replaced by the measured SVP slide; synthetic-cost comparison (to notes of the domain-gap frame); tail-erosion frame merged into the domain-gap frame; amortized ROI merged into the cost frame. All nine activities kept. For a 60-minute version cut frames 23 (FixMatch), the reported-results step of 15, and the ROI step of 28."
+  - "BUILD 2026-10-17: deck built with 7 sections (The Wall, Value, Pruning, Selecting, Creating, The Machine, The Bill), 37 frames, 69 presenting pages, 71.5 minutes of notes. Changes from the storyboard: opening and closing dividers added so every frame sits in a header section; the cost frame split into a predict slide and a separate ROI slide; the data-wall figure redrawn at slide size from MLSysIM (same data as Data Engineering figure 6); the data-path figure redrawn as an SVG variant; the doorbell 'what the machine sees' tiles drawn in TikZ (no Commons frame captures used, to avoid an identifiable person); the collapse curve's middle points (92, 88, 83) read from the book's margin figure; the tail-narrowing sketch labeled 'shape illustrative'. Choi et al. is credited on the echo slide rather than listed on the reading slide."
+  - "Coverage-floor wording: the plan's notes say a score-based coreset 'may keep fewer' rare examples than 100; this is reasoning, not a chapter number."
