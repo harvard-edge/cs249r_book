@@ -1,0 +1,287 @@
+chapter: 12_benchmarking
+lecture: "12b"
+title: "Benchmarking, Part 2: Deciding from Measurements"
+layer: hardware
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+thesis: "A measurement supports a decision only when the difference exceeds its noise, the comparison changes one thing at a time, the score has not become the target, and the model keeps its quality on the frontier and against gates fixed before the test."
+
+hook:
+  minutes: "0-4"
+  setup: "MLPerf Training v4.0, closed division, ResNet-50 to 75.9 percent top-1 on ImageNet, two servers with the same eight H100-SXM5-80GB accelerators. Step 1: two bars on one axis, Dell XE9680 13.22 min and NVIDIA Eos 13.33 min (the published scores: five runs, fastest and slowest dropped, the rest averaged, times the 1.0042 scaling factor the review set for every ResNet result; see build_note). Step 2: the question. Step 3 (reveal): the ten runs behind the two bars as a dot strip. Dell's four converged runs sit within 0.02 min of each other (13.148 to 13.168); its fifth run trained the full 35 epochs and stopped at 75.894 percent, short of the target, and the rule counts it as the slowest run. Eos's five runs spread 0.13 min (13.186 to 13.318)."
+  question_to_class: "Is Dell's server faster at training ResNet-50? A) yes, by 0.8 percent B) no, the gap is noise C) these two numbers cannot say. Then: what would you need to decide?"
+  payoff: "C. Two scores cannot say; the ten runs can. Segment 2 computes the interval on the difference: 0.10 min, from 0.03 to 0.18 min (0.2 to 1.4 percent), so the gap is larger than its noise. It is still not a finding about the server: the two systems differ in host CPU (Xeon 8480+ against 8480C) and software container (NGC MXNet 23.09 against 24.04), and 0.8 percent is below any threshold a buyer would act on. The synthesis returns to the strip with all three verdicts (real, not attributable, not useful) beside the H200 comparison, which changes one thing and is 9.3 percent faster."
+  sources:
+    - "mlcommons/training_results_v4.0, closed division, resnet result_0 to result_4 for Dell/XE9680x8H100-SXM-80GB and NVIDIA/eos_ngc24.04_mxnet (MLLOG run_start, run_stop, eval_accuracy, status; read for this plan 2026-10-17). Run times in minutes: Dell 13.1587, 13.1615, 13.1480, 13.1681, 13.9440 (status aborted, 75.894 percent at epoch 35); Eos 13.3062, 13.3178, 13.3016, 13.2031, 13.1860."
+    - "Scoring rule: MLPerf Training rules (mlcommons/training_policies, training_rules.adoc): drop the fastest and slowest runs and average the rest; a single non-converging run may be treated as the slowest; image classification needs at least 5 runs."
+    - "System descriptions: Dell systems/XE9680x8H100-SXM-80GB.json (Xeon Platinum 8480+, NGC MXNet 23.09); NVIDIA MLLOG SYSJSON in the Eos logs (Xeon Platinum 8480C, MXNet NVIDIA Release 24.04)."
+    - "Scores derived by the rule: Dell 13.163 min (13.1587, 13.1615, 13.1681), Eos 13.270 min (13.2031, 13.3016, 13.3062); difference 0.81 percent of Eos. Check against the published v4.0 results table before building."
+
+driving_question: "Two measurements disagree. How do we decide whether the difference is real, whether the comparison is fair, and whether the model can ship?"
+
+goals:
+  - "Size the noise in a benchmark and turn repeated runs into an interval on a difference."
+  - "Say how many runs, images, or queries a claim needs, and design a comparison that changes one thing."
+  - "Recognize when a score has become the target, and the defenses that keep it a measure."
+  - "Accept or reject a model on a frontier, its calibration, its slices, and gates set in advance."
+
+recall: "Part 1 (Lecture 12), close your notes: what four conditions must a benchmark number state before it is a test? (The load and statistic, such as p99 under open-loop arrivals; the boundary, from kernel to end to end; the scenario, such as SingleStream against Offline; and the power boundary, thermal state, and duty cycle.) Part 1's two hook bars, 20 against 1.5 TOPS/W, appear as a thumbnail. Today adds the last two conditions: the noise and the quality held. (Answered across segments 1 to 4; the synthesis lists all six.)"
+
+running_example: "Two cases, one per half. The system half is real: MLPerf Training v4.0 ResNet-50 on single eight-GPU servers, 20 published runs from four submissions (Dell XE9680 8x H100; NVIDIA Eos 8x H100; NVIDIA 8x H200 with the same host and software as Eos; NVIDIA Eos 64x H100), each with its time to train, its accuracy at the stopping epoch, its seed, and whether it converged. The model half is the chapter's camera trap: INT8 MobileNetV2 against FP32 (Lighthouse 12.3, assumed values, labeled), made concrete with measured data: Sandler et al. 2018 (frontier), Guo et al. 2017 (calibration), and iWildCam2020-WILDS, a ResNet-50 species classifier on camera traps it never saw (Koh et al. 2021)."
+
+segments:
+  - name: Noise
+    divider_question: "How much does a benchmark move when nothing changes?"
+    read: "§12.4.2, §12.8.1, §12.8.2"
+    concept_questions: [1, 2, 3, 4]
+    land: "Every measurement carries noise from the machine, the seed, and the sample; a suite fixes how many runs it takes and how they are combined, and one binomial formula sizes both a test set and a tail-latency run."
+    minutes: 12
+  - name: Fair Comparison
+    divider_question: "Is the difference real, and is it the one we meant to measure?"
+    read: "§12.8.1 (paired comparisons, intervals, minimum useful reduction), §12.2.6, §12.8.3"
+    concept_questions: [5, 6, 7, 8, 9]
+    land: "A difference is a finding when its interval excludes zero, it is attributable when one thing changed, and it is worth acting on only when the interval clears a threshold set before the measurement."
+    minutes: 18.5
+  - name: Goodhart
+    divider_question: "When does a score stop measuring?"
+    read: "§12.1 (principle 2), §12.4.2 (Example 12.1), §12.8.4, §12.9.2 (saturation)"
+    concept_questions: [10, 11]
+    land: "A score that becomes the target rewards whatever raises the score; run rules, disclosed configurations, and fresh test sets keep it a measure."
+    minutes: 11
+  - name: Model Quality and the Gate
+    divider_question: "Is the model still right, and does it ship?"
+    read: "§12.9.1, §12.9.2 (distribution alignment), §12.9.3"
+    concept_questions: [12, 13, 14, 15]
+    land: "A model is chosen on a frontier measured on its own hardware and accepted only when accuracy, calibration, and the slices that matter each clear a gate set in advance, with enough data to tell."
+    minutes: 15
+
+concept_questions:
+  - id: 1
+    q: "How much does a benchmark move when nothing changes?"
+    picture: "New dot strip (one row per submission, minutes on a shared axis): the 20 MLPerf Training v4.0 ResNet-50 runs from four submissions, each dot a run, the two runs that missed 75.9 percent drawn as open circles with an X. Step 2 labels each row with its coefficient of variation (CV) over converged runs. Step 3 adds a small strip of three noise sources as icons on the plot margin: machine (clocks, OS jitter, DVFS), algorithm (seed, data order, reduction order), sample (finite test set)."
+    numbers: "Derived from the v4.0 logs (converged runs only): Eos 8x H100 mean 13.263 min, SD 0.063, CV 0.48 percent, spread 0.99 percent; Dell 8x H100 SD 0.008, CV 0.06 percent; NVIDIA 8x H200 mean 12.028, CV 0.07 percent; Eos 64x H100 mean 2.505, CV 0.04 percent. Outside: an RTX 4050 laptop decoding an LLM varied with CV 2.2 percent, a Hailo-10H NPU with CV 0.04 percent (Tummalapalli et al. 2026, arXiv 2603.23640, preprint). Chapter: CV as the micro-benchmark variance rule, no universal 5 percent cutoff (perspective 12.4, rule 2)."
+    example: "Two runs of the same submission, same code and hardware, differ by up to 1 percent (Eos); one run of a different submission failed to converge at all (Dell). Neither is a bug; both are what the benchmark must absorb."
+    read: "§12.4.2, §12.3.1 (perspective 12.4)"
+  - id: 2
+    q: "Does a seed move accuracy too?"
+    picture: "New strip plot: top-1 at the stopping epoch for the same 20 runs, one dot per run, with a vertical target line at 75.9 percent; the two runs just under it highlighted. Final step: a bracket labeled 'seed spread 0.33 points' and, below it, a second bracket for what a fresh draw of 50,000 test images would add (about plus or minus 0.37 points at 95 percent, derived)."
+    numbers: "Derived from the v4.0 logs: top-1 at epoch 35 ranges 75.88 to 76.21 percent across 20 runs (mean 76.02, SD 0.09 points); two runs stopped at 75.894 and 75.882 percent and did not converge. Binomial standard error of 76 percent on 50,000 images: 0.19 points (derived; ImageNet validation set size from the chapter's dataset discussion). Outside: deep RL results that reverse across random seeds (Henderson et al. 2018, cited §12.8.1); GAN rank reversals across seeds (Lucic et al. 2018, cited §12.8.1)."
+    example: "A paper that reports a 0.2-point gain from one run on each side has reported less than the seed spread of this one recipe."
+    read: "§12.8.1, §12.8.2"
+  - id: 3
+    q: "How does a suite turn noisy runs into one score?"
+    picture: "Build on the Dell row of the strip: step 1 five runs sorted; step 2 the fastest and the non-converged run struck out; step 3 the remaining three averaged into the score marker (13.163 min). Side card: the rule in three lines (at least 5 runs for image classification, 40 for medical image segmentation; drop fastest and slowest; at most one non-converging run, treated as slowest). Final step: one line of the anti-cherry-picking rule (pick M runs in advance, take a sliding window of N, submit the median window)."
+    numbers: "MLPerf Training rules (training_rules.adoc, read for this plan): result is the mean after dropping the highest and lowest run; image classification at least 5 runs; UNET3D 40 runs, dropping 4 fastest and 4 slowest; more than one non-converging run invalidates the result; 'An MLPerf submission score is intended to represent the median expected result across a large number of runs.' Dell score derived 13.163 min."
+    example: "Why drop both ends: a trimmed mean resists one lucky run and one stalled run; why count a failed run as slowest: time to quality includes the risk of not reaching quality."
+    read: "§12.5.2, §12.8.2; MLPerf Training rules"
+  - id: 4
+    q: "How many test images, or how many queries, does a number need?"
+    picture: "Estimate card, then one equation as the slide's anchor, n = z^2 p (1 - p) / m^2, with three rows filled in step by step as a table built on the slide: (1) a test-set accuracy of 95 percent to plus or minus 1 point at 95 percent confidence; (2) MLPerf's p90 latency at 99 percent confidence to plus or minus 0.5 percent; (3) p99 at 99 percent confidence to plus or minus 0.05 percent. Last step: a log bar of the three n values."
+    numbers: "Chapter: about 1,825 images for plus or minus 1 point on one accuracy (Napkin Math 12.5; 1.96^2 x 0.95 x 0.05 / 0.01^2 = 1,825, derived). MLPerf Inference rules (inference_rules.adoc, minimum-query table, read for this plan): p90, 99 percent confidence, 0.50 percent margin, 23,886 inferences rounded to 24,576; p99, 99 percent confidence, 0.05 percent margin, 262,742 rounded to 270,336. Both follow from the same formula with z = 2.576 (derived check)."
+    example: "A test-set accuracy and a tail-latency percentile are the same kind of number: the fraction of trials that pass. MLPerf's early-stopping rule lets a system far above its percentile stop sooner, at a small penalty (inference rules appendix)."
+    read: "§12.8.1 (Napkin Math 12.5); MLPerf Inference rules"
+  - id: 5
+    q: "Is a measured difference larger than its noise?"
+    picture: "Worked example on the hook's data as a four-step build on one horizontal axis (minutes of difference, Eos minus Dell): step 1 the two means and the difference, 0.104 min; step 2 the standard error from each side's spread and run count; step 3 the 95 percent interval drawn as a bar, 0.026 to 0.182 min, with a vertical zero line it does not touch; step 4 the same construction for H200 against Eos, 1.16 to 1.31 min, on the same axis."
+    numbers: "Derived from the v4.0 logs (Welch interval, converged runs: Eos n = 5, SD 0.0630; Dell n = 4, SD 0.0084): SE = sqrt(0.063^2/5 + 0.0084^2/4) = 0.0285 min; t about 2.7 at 4.2 degrees of freedom; interval 0.026 to 0.182 min (0.2 to 1.4 percent of Eos). H200 (n = 5, SD 0.0087): difference 1.235 min, interval 1.157 to 1.313 min (9.3 percent). Chapter: report the interval method and confidence level and use run pairs as the repeated observations (§12.8.1)."
+    example: "The chapter's rule in one line: an interval that spans zero cannot resolve which system is faster, and that does not prove they are equal (§12.8.1)."
+    read: "§12.8.1"
+  - id: 6
+    q: "How many runs does a comparison need?"
+    picture: "New line plot: 95 percent half-width of a mean (percent of 13.27 min) against the number of runs, 2 to 30, computed from Eos's measured SD; horizontal lines at 1 percent and 0.5 percent; markers at n = 5 (MLPerf's minimum) and at the run count needed to resolve a 0.5 percent difference."
+    numbers: "Derived from Eos's SD 0.063 min: half-width at n = 5 is 2.776 x 0.063 / sqrt(5) = 0.078 min (0.59 percent); at n = 20, 0.030 min (0.22 percent). Resolving a 0.5 percent difference (0.066 min) with 80 percent power needs about 15 runs per system (normal approximation, 2 (1.96 + 0.84)^2 s^2 / d^2, derived); resolving 1 percent needs about 4. Dell's lower spread would need fewer."
+    example: "Noise shrinks with the square root of the run count: four times the runs halves the interval. A 0.5 percent claim on five runs per side is underpowered on Eos's noise."
+    read: "§12.8.1 (statistical-power targets)"
+  - id: 7
+    q: "Why compare on the same images, and what does the pairing buy?"
+    picture: "Moved from Part 1: vote card (95 against 94 percent on the same 1,000 images), then the disagreement number line with the threshold at 26 (variant of the §12.8.1 margin figure). New final step: a 2x2 agreement table for the two models with the both-right and both-wrong cells grayed, showing that only the off-diagonal counts b and c enter McNemar's statistic."
+    numbers: "Napkin Math 12.5: 50 against 60 errors; independent-sample interval about -1 to 3 points; McNemar (b - c)^2 / (b + c) > 3.84 only if b + c <= 26 (100 / 27 = 3.70 fails, derived check). Same principle for timing: pair complete baseline and candidate runs under the same warm-up and thermal protocol, randomized order (§12.8.1)."
+    example: "Keep per-image outcomes in every benchmark report; two accuracies alone cannot decide a one-point gap (Napkin Math 12.5 implication)."
+    read: "§12.8.1 (Napkin Math 12.5)"
+  - id: 8
+    q: "Did the comparison change only the thing we meant to test?"
+    picture: "New comparison card built from the MLPerf system descriptions, three columns (Eos, Dell, H200), rows: accelerator, accelerator memory, host CPU, host memory, software container, global batch size, epochs. Cells that differ from Eos are highlighted. Step 2: a second panel on drift: two run orders on a time axis over a warming device, AAAAA then BBBBB against ABABAB, with Lee et al.'s measured iPhone Xs GPU latency rise as the drift (about 2.4 to 3.9 ms over 200 s, approximate); the blocked order charges the drift to B."
+    numbers: "MLPerf v4.0 system files: Eos and H200 share host CPU (Xeon Platinum 8480C, 2.0 TB host memory) and software (MXNet NVIDIA Release 24.04), and differ in accelerator (H100-SXM5-80GB against H200-SXM5-141GB); Dell differs from Eos in host CPU (8480+), host memory (1.024 TB), and software (NGC MXNet 23.09); all three use global batch 3,200 and 35 epochs. Outside: H200 SXM 141 GB and 4.8 TB/s against H100 SXM's 3.35 TB/s, same dense FP16 rate (NVIDIA H200 datasheet; H100 values from the chapter). Lee et al. 2019, Figure 8 (approximate, read from the plot by Part 1)."
+    example: "MLPerf's closed division is this rule at the scale of a community: fix the model, data, and quality target so the remaining difference belongs to the system (§12.4.4). Lecture 11 LINK: H200 adds 43 percent bandwidth and no compute, and ResNet-50 trains 10 percent faster, consistent with part of the step running on the bandwidth slope (interpretation, not attribution)."
+    read: "§12.2.6, §12.4.4, §12.8.1, §12.8.3"
+  - id: 9
+    q: "Is a real difference a useful one?"
+    picture: "New interval chart, three bars on one axis of 'percent faster than Eos' with two vertical lines, zero and a minimum useful difference set before the test (2 percent, labeled as the example team's threshold): (a) Dell with its failed run timed as a run, interval spans zero: unresolved; (b) Dell, converged runs: excludes zero, below 2 percent: real, not worth acting on; (c) H200: clears 2 percent: real and useful. Vote card first, intervals revealed after."
+    numbers: "Derived from the v4.0 logs: (a) Dell all five runs mean 13.316, SD 0.351; difference -0.053 min, interval about -0.49 to 0.39 min (-3.7 to 2.9 percent); (b) 0.2 to 1.4 percent; (c) 8.7 to 9.9 percent. The 2 percent threshold is illustrative; the chapter requires a prespecified minimum useful reduction (§12.8.1)."
+    example: "The chapter's three outcomes: an interval spanning zero leaves the question open; an interval above zero but reaching below the threshold supports a gain without justifying adoption; an interval above the threshold supports both, if the quality and resource gates also pass (§12.8.1)."
+    read: "§12.8.1"
+  - id: 10
+    q: "What happens when the score becomes the target?"
+    picture: "Step 1 (predict, moved from Part 1 and turned into a prediction): Example 12.1 as two bars, beam 1 against beam 10, BLEU +0.5 and latency 50 to 200 ms against a 100 ms SLO line, labeled illustrative. Step 2: a measured case of a device gaming its benchmark: Galaxy S4 GPU clock in games (480 MHz) against in benchmark apps (532 MHz) as two bars. Step 3: the chapter's three forbidden shortcuts as three labeled icons (undisclosed precision truncation, work pruning on fixed test sets, benchmark fingerprinting); the Galaxy S4 case is tagged as fingerprinting."
+    numbers: "Example 12.1 (illustrative): +0.5 BLEU, 10x candidate evaluations, 50 to 200 ms. Outside: AnandTech (Klug and Shimpi, July 2013) found the Galaxy S4's GPU ran at 532 MHz under GLBenchmark, AnTuTu, and Quadrant and at 480 MHz in games, an 11 percent clock raise for benchmark apps (derived); Samsung stated 533 MHz is the maximum and that games run lower (reported by VentureBeat and BetaNews, July 2013). Read AnandTech's original before building. §12.8.4: three forbidden shortcuts."
+    example: "Goodhart's law (Goodhart 1984; Strathern 1997, footnote 1): when a measure becomes a target, it ceases to be a good measure. It acts on a team's metric (Example 12.1) and on an organization's incentives (§12.8.4)."
+    read: "§12.1, §12.4.2 (Example 12.1), §12.8.4"
+  - id: 11
+    q: "How do we check that a test set still measures?"
+    picture: "Two-panel data comparison. Left: ImageNet against ImageNetV2, models' accuracy on the original test set against the new one, drop 11 to 14 points with the ranking preserved (Recht et al. 2019). Right: GSM8k against GSM1k, a fresh set of grade-school math problems written to match, accuracy drops of up to 8 percent with several model families overfit (Zhang et al. 2024). Last step: a one-line contrast under the two panels: harder images on the left, memorization on the right."
+    numbers: "Recht et al. 2019 (abstract, read by Part 1): 3 to 15 points on CIFAR-10 and 11 to 14 points on ImageNet; the authors attribute the drops to harder images rather than adaptive overfitting, and gains carried over. Zhang et al. 2024, 'A Careful Examination of Large Language Model Performance on Grade School Arithmetic', NeurIPS Datasets and Benchmarks (arXiv 2405.00332 abstract, read 2026-10-17): drops of up to 8 percent; several families show systematic overfitting; Spearman r^2 = 0.36 between a model's probability of generating GSM8k examples and its gap; frontier models show minimal overfitting. Chapter: reading comprehension and language understanding crossed human baselines in under two years (fig-dataset-saturation, AI Index 2024); GLUE saturated, followed by SuperGLUE (footnote 4)."
+    example: "Temporal holdouts, fresh sets built by the original procedure, and contamination tests are the chapter's leakage defenses (§12.9.1, LLM benchmarks). LINK Lecture 4b: there, ImageNetV2 was a distribution-shift case; here it is a test of test-set reuse."
+    read: "§12.8.4 (benchmark evolution), §12.9.1 (contamination), §12.9.2 (saturation)"
+  - id: 12
+    q: "Which model is the best trade, and does the answer survive a change of hardware?"
+    picture: "Moved from Part 1 unchanged: scatter of Sandler et al. 2018 Table 4 (Pixel 1, TF-Lite) with the frontier through the two MobileNetV2 points and V1 and NASNet-A grayed 'dominated'; final step the hardware-lottery inset (Chu et al. 2021 values from §12.8.3)."
+    numbers: "Sandler et al. 2018, Table 4: MobileNetV1 70.6 percent at 113 ms; MobileNetV2 72.0 at 75 ms; NASNet-A 74.0 at 183 ms; MobileNetV2 (1.4) 74.7 at 143 ms. §12.8.3: MobileNetV3 Large about 75 percent, about 20 ms on CPU float against 4.5 ms on the Pixel 4 DSP; Multi-MAX 2.2 ms on EdgeTPU, 3.4 ms on DSP."
+    example: "Footnote 31: dominated means another model is at least as good on every axis and better on one; a frontier point still has to clear the deployment's absolute floor."
+    read: "§12.9.1 (compression validation), §12.8.3"
+  - id: 13
+    q: "Can we trust the model's confidence, and how is that measured?"
+    picture: "Diagram build: step 1 a reliability diagram for 100 predictions in three confidence bins (bars of accuracy against the diagonal of perfect calibration), labeled illustrative; step 2 each bin's gap shaded; step 3 ECE computed on the slide as the weighted sum, 0.2 x 0.05 + 0.3 x 0.05 + 0.5 x 0.13 = 0.09. Step 4 (measured): Guo et al. 2017 bars, LeNet 5 against ResNet-110 on CIFAR-100 (error 44.9 against 30.6 percent; ECE 4.85 against 16.53 percent), then ResNet-152 on ImageNet, ECE 5.48 percent before and 1.86 percent after temperature scaling."
+    numbers: "ECE definition, equation 4 (§12.9.1). Illustrative bins (constructed for the slide): 20 predictions at confidence 0.65 and accuracy 0.60; 30 at 0.85 and 0.80; 50 at 0.97 and 0.84; ECE 0.09. Guo et al. 2017 (ICML; Figure 1 and Table 1, read 2026-10-17, M = 15 bins): CIFAR-100 LeNet 5 error 44.9, ECE 4.85 percent; ResNet-110 error 30.6, ECE 16.53 percent (1.26 after temperature scaling); ImageNet ResNet-152 ECE 5.48 percent, 1.86 after temperature scaling; DenseNet-161 6.28 and 1.99."
+    example: "The more accurate network is the worse calibrated one: accuracy and confidence are separate measurements. Temperature scaling divides the logits by one fitted constant, so it cannot change which class wins (Guo et al. 2017; §12.9.1 Lighthouse 12.3 fix). WARN: quantization-range calibration (Lecture 10b) is a different procedure with the same name (footnote 21)."
+    read: "§12.9.1 (confidence calibration)"
+  - id: 14
+    q: "What does an aggregate score hide?"
+    picture: "New paired bars for iWildCam2020-WILDS (camera-trap species classification, 182 species, test traps never seen in training): average accuracy in distribution 75.7 against out of distribution 71.6 percent, and macro F1, which weights rare species equally, 47.0 against 31.0. Annotation on the plot: average falls 4.1 points, macro F1 falls 16.0. Small second panel: the chapter's rare-species case, 99 percent accuracy with 10 percent recall (illustrative)."
+    numbers: "Koh et al. 2021, WILDS (Table 1 and Table 4, read 2026-10-17): iWildCam2020-WILDS ERM, ResNet-50 pretrained on ImageNet, test ID macro F1 47.0 (SD 1.4), avg acc 75.7 (0.3); test OOD macro F1 31.0 (1.3), avg acc 71.6 (2.5); 3 replicates; train and test traps disjoint, over 200 traps in training. Chapter: Camelyon17-WILDS 93.2 against 70.3 percent (§12.9.2); rare species at 10 percent recall inside 99 percent accuracy (§12.9.1, illustrative)."
+    example: "The camera trap's real risk: a model that meets every latency and energy gate on the board can still fail on traps it has never seen, and the average barely shows it (§12.9.2, iWildCam paragraph). LINK Lecture 15: per-group release gates for people, Gender Shades."
+    read: "§12.9.1 (accuracy metrics and blind spots), §12.9.2 (distribution alignment)"
+  - id: 15
+    q: "What must a compressed model pass before it ships?"
+    picture: "Moved from Part 1 and extended: the acceptance card (Lighthouse 12.3, table 18) revealed row by row, top-1, top-5, ECE, edge-case accuracy, labeled 'assumed values (chapter scenario)'; new column 'enough data?' that applies segment 1 and 2 (the top-1 row needs paired outcomes; edge cases are about 5 percent of inputs, so a 1,000-image test holds about 50 of them). New final row: board p99 latency and energy from Part 1, marked 'measured in Part 1'. Each gate shows pass, fail, or insufficient evidence."
+    numbers: "Table 18 (assumed in the chapter): top-1 71.8 to 70.9; top-5 91 to 90.4; ECE 0.031 to 0.089; edge-case accuracy 68.2 to 61.4; acceptance allows under 1 point of top-1 or top-5 loss and no ECE or edge-case regression; edge cases about 5 percent of inputs (Lighthouse 12.3). Derived: about 50 edge-case images per 1,000; a binomial half-width near 13 points at 95 percent for 68 percent on 50 images, so a 6.8-point edge-case drop on 50 images is not resolved without more edge cases (derived from the segment-1 formula)."
+    example: "The chapter's holistic cascade in one line: INT8 ranges calibrated on ImageNet clip night-time infrared frames, and the training data had no infrared images (§12.9.3). Temperature scaling repairs ECE, not edge-case errors (Lighthouse 12.3 fix). LINK Lecture 14 owns the online half of the gate: shadow, canary, A/B sizing, rollback."
+    read: "§12.9.1 (Lighthouse 12.3), §12.9.3, §12.11 (table 21)"
+
+worked_examples:
+  - name: "MLPerf Training v4.0: is Dell's eight-H100 server faster than NVIDIA's? (the hook, worked across segments 1 and 2)"
+    steps: ["given: ten published runs, five per system, ResNet-50 to 75.9 percent; one Dell run did not converge", "score each by the run rule: Dell 13.163, Eos 13.270 min (derived)", "interval on the difference from the converged runs: 0.104 min, SE 0.0285, 95 percent interval 0.026 to 0.182 min (0.2 to 1.4 percent; Welch, derived)", "result: the gap exceeds its noise", "meaning: real but not attributable (host CPU and software also differ) and below a useful threshold; the H200 comparison, with one change, gives 9.3 percent (interval 8.7 to 9.9) and is both real and attributable"]
+  - name: "One formula for test sets and tail latency"
+    steps: ["given: n = z^2 p (1 - p) / m^2 for a fraction p estimated to margin m", "accuracy 95 percent, plus or minus 1 point, 95 percent confidence: 1.96^2 x 0.0475 / 0.0001 = 1,825 images (Napkin Math 12.5)", "p90 latency, plus or minus 0.5 percent, 99 percent confidence: 2.576^2 x 0.09 / 0.000025 = 23,886 queries (MLPerf: 24,576)", "p99, plus or minus 0.05 percent: 262,742 queries (MLPerf: 270,336)", "meaning: a tail percentile is expensive because the event is rare; a deep tail needs ten times the queries of a shallow one, and a test set sized for aggregate accuracy is too small for a 5 percent slice"]
+  - name: "Napkin Math 12.5 with the pairing made visible"
+    steps: ["given: 95 against 94 percent on the same 1,000 images", "independent view: interval about -1 to 3 points, includes zero", "paired view: only images where the models disagree count; b - c = 10", "McNemar: 100 / (b + c) > 3.84 only when b + c <= 26", "meaning: keep per-image outcomes; nonsignificance does not prove equivalence"]
+  - name: "ECE by hand, then measured"
+    steps: ["given: 100 predictions in three confidence bins (illustrative)", "per-bin gap: 0.05, 0.05, 0.13", "weights by bin size: 0.2, 0.3, 0.5; ECE = 0.09", "measured: ResNet-110 on CIFAR-100 has lower error than LeNet 5 and 3.4x its ECE (16.53 against 4.85 percent; Guo et al. 2017)", "meaning: calibration is a separate gate; temperature scaling cut ResNet-152's ImageNet ECE from 5.48 to 1.86 percent without changing a single prediction"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "Two eight-H100 servers trained ResNet-50 to MLPerf's target: 13.22 and 13.33 minutes. Is the first server faster? A) yes, by 0.8 percent B) no, the gap is noise C) these two numbers cannot say"
+    answer: "C. Each bar is a score over five runs, and the decision needs the runs (reveal: the dot strip). Students who answer A treat a score as a measurement without noise; students who answer B guess the conclusion that segment 2 overturns (the interval excludes zero)."
+  - at_minute: 4
+    type: retrieval
+    prompt: "Close your notes: name four conditions a benchmark number must state before it is a test."
+    answer: "Load and statistic (p99 under open-loop arrivals), boundary (kernel, model, end to end), scenario (SingleStream, Server, Offline), power boundary with thermal state and duty cycle (Part 1)."
+  - at_minute: 15.5
+    type: estimate
+    prompt: "With n = z^2 p (1 - p) / m^2: how many test images give 95 percent accuracy to plus or minus 1 point at 95 percent confidence (z = 1.96)? How many queries pin p99 to plus or minus 0.05 percent at 99 percent confidence (z = 2.576)?"
+    answer: "About 1,825 images (Napkin Math 12.5) and about 262,742 queries (MLPerf rounds to 270,336). The p99 run is about 144 times larger because the margin is 20 times tighter and the confidence higher."
+  - at_minute: 26
+    type: concept_question
+    prompt: "A compressed model scores 94 percent, the baseline 95 percent, on the same 1,000 test images. Is this a regression? A) yes, one point is one point B) no, it is inside the noise C) it depends on information not given"
+    answer: "C (Napkin Math 12.5). Treated as independent samples the interval is about -1 to 3 points; on the same images McNemar's test calls it a regression only if the models disagree on at most 26 images. B has the right instinct with the wrong reason."
+  - at_minute: 34.5
+    type: concept_question
+    prompt: "Three intervals for 'percent faster than Eos', with a 2 percent threshold set before the test: (a) -3.7 to 2.9; (b) 0.2 to 1.4; (c) 8.7 to 9.9. For each: buy, do not buy, or measure more?"
+    answer: "(a) measure more: unresolved, and not evidence of equality; (b) do not switch for speed: real but below the threshold; (c) buy, if quality and resource gates pass. The data: Dell with its failed run timed, Dell converged runs, H200 (MLPerf v4.0, derived)."
+  - at_minute: 38
+    type: predict
+    prompt: "A translation team widens beam search from 1 to 10 and gains 0.5 BLEU. Latency was 50 ms against a 100 ms SLO. What happens to latency? A) about 55 ms B) about 100 ms C) about 200 ms"
+    answer: "C, 200 ms, 4x slower, twice the SLO (Example 12.1, illustrative). The score the team optimized never contained the deadline."
+  - at_minute: 46
+    type: discuss
+    prompt: "Your team's bonus depends on a public leaderboard rank. Name one change that would raise the rank and hurt your users, and one rule that would stop it. Two minutes with a neighbor."
+    answer: "Open. Expected: a wider beam or larger batch that breaks the latency SLO (Example 12.1); tuning for fixed benchmark shapes; detecting the benchmark and raising clocks (Galaxy S4); quantizing until calibration fails. Rules: closed-division run rules, a latency SLO inside the score, disclosed configurations, fresh or held-out test sets, audits (§12.8.4)."
+  - at_minute: 49
+    type: predict
+    prompt: "Four models on accuracy against Pixel 1 latency: MobileNetV1 70.6 percent at 113 ms, MobileNetV2 72.0 at 75 ms, NASNet-A 74.0 at 183 ms, MobileNetV2 (1.4) 74.7 at 143 ms. Which would you never ship, whatever your latency budget?"
+    answer: "MobileNetV1 (beaten on both axes by MobileNetV2) and NASNet-A (beaten on both by MobileNetV2 1.4): both dominated (Sandler et al. 2018, Table 4). Which of the remaining two ships depends on the budget, and on which processor (hardware lottery, §12.8.3)."
+  - at_minute: 60
+    type: diagnose
+    prompt: "INT8 MobileNetV2 for the camera trap: top-1 71.8 to 70.9, top-5 91 to 90.4, ECE 0.031 to 0.089, edge-case accuracy 68.2 to 61.4 (assumed values). The gate allows under 1 point of accuracy loss and no ECE or edge-case regression. Ship it? And is there enough data to tell?"
+    answer: "No: ECE fails, and the edge-case drop must be confirmed on more edge cases (about 50 per 1,000 images gives a half-width near 13 points). Temperature scaling may fix ECE but not edge-case errors, which need diagnosis of quantization ranges and data coverage (Lighthouse 12.3; §12.9.3)."
+  - at_minute: 63.5
+    type: retrieval
+    prompt: "Back to the two servers. Close your notes and write the three questions you would ask before saying one is faster."
+    answer: "Is the difference beyond its noise (interval on repeated runs)? Did one thing change (system cards, closed division)? Does the interval clear a threshold set in advance? Then, for a model: frontier, calibration, slices, gates with enough data."
+
+open_questions:
+  - "Static test sets saturate and leak into training data; dynamic ones cannot be compared across years. For a product you must ship next year, which would you trust, and why?"
+  - "Who should set the minimum useful difference for a hardware purchase or a model swap (engineering, finance, or product), and why must it be set before the measurement?"
+  - "The camera trap passes every lab gate. What is the cheapest field measurement that would show it still works at night, at a new trap, a year later?"
+
+more_examples:
+  - "MLPerf Training v4.0 ResNet-50, 20 runs from four submissions: run-time CV 0.04 to 0.48 percent; two of 20 runs missed 75.9 percent (derived from mlcommons/training_results_v4.0)."
+  - "MLPerf Training UNET3D: 40 runs, 4 fastest and 4 slowest dropped, because of large variance (training rules)."
+  - "MLPerf Inference minimum query counts: 24,576 for p90, 270,336 for p99 at 99 percent confidence (inference rules)."
+  - "Henderson et al. 2018: deep RL comparisons that change with the random seed."
+  - "Guo et al. 2017: across vision and NLP datasets, ECE typically 4 to 10 percent before calibration; temperature scaling outperformed the other methods on vision tasks."
+  - "Koh et al. 2021: Camelyon17-WILDS 93.2 against 70.3 percent across hospitals (chapter); iWildCam macro F1 47.0 against 31.0."
+  - "Zhang et al. 2024: GSM1k, up to 8 percent accuracy drops against GSM8k for some model families."
+  - "AnandTech 2013: Galaxy S4 GPU at 532 MHz in benchmark apps, 480 MHz in games."
+  - "Northcutt et al. 2021: label errors average about 3 percent across ten test sets, about 6 percent on ImageNet validation (chapter; LINK Lecture 4)."
+  - "Tummalapalli et al. 2026: an RTX 4050 laptop's LLM decode throughput varied with CV 2.2 percent; a Hailo-10H NPU with CV 0.04 percent."
+
+left_to_reading:
+  - concept: "Reproducibility envelope and nondeterministic reductions (§12.8.2)"
+    why: "Detail better read than heard; the seed strip carries the idea, and the run envelope is a checklist."
+  - concept: "LLM benchmark taxonomy (MMLU, HELM, perplexity) and LLM-as-judge variance"
+    why: "Table 19 is a reference; GSM1k carries contamination on the Goodhart frame. One note line on judge variance."
+  - concept: "Data benchmark protocol: coverage minimums, inter-annotator agreement, label quality, DataPerf and DataComp, Dynabench"
+    why: "Label quality and drift statistics are Lecture 4's and 4b's; dynamic benchmarks appear in the first open question."
+  - concept: "D·A·M troubleshooting matrix (table 20)"
+    why: "A reference table; Lecture 8 owns profiling."
+  - concept: "Bootstrap intervals for percentiles and the full early-stopping algorithm"
+    why: "One note line; the minimum-query formula carries the idea."
+
+closing:
+  return_to_hook: "Back to the dot strip. Three questions decide it. Is the gap real? Yes: the interval, 0.2 to 1.4 percent, excludes zero. Is it the server? Not shown: host CPU and software changed too. Is it worth acting on? No: below a 2 percent threshold, and one of Dell's five runs never reached the quality target. The H200 row changes one thing and is 9.3 percent faster, interval 8.7 to 9.9. With Part 1's four conditions, a benchmark claim now states six: load and statistic, boundary, scenario, power and heat, noise, and the quality held."
+  read_and_practice: ["§12.8.1 to §12.8.4, §12.9.1 to §12.9.3, §12.10, §12.11 (table 21)", "self-check questions for §12.8 and §12.9", "Napkin Math 12.5 by hand; recompute this lecture's interval from the ten logged run times (mlcommons/training_results_v4.0)", "train a small CIFAR-10 model with five seeds; report the mean, the spread, and ECE before and after temperature scaling"]
+  further_reading:
+    - cite: "Benchmarking, §12.8 and §12.9"
+      url: "https://mlsysbook.ai"
+      why: "Repeated runs, paired tests, intervals with a minimum useful reduction, Goodhart's law, calibration, and the acceptance gates, with every number."
+    - cite: "MLCommons, MLPerf Training rules (benchmark results and run counts) and Inference rules (minimum query counts, early stopping)"
+      url: "https://github.com/mlcommons/training_policies"
+      why: "How a community benchmark turns noisy runs into one comparable score."
+    - cite: "Guo, Pleiss, Sun, Weinberger, On Calibration of Modern Neural Networks, ICML 2017"
+      url: "https://arxiv.org/abs/1706.04599"
+      why: "Reliability diagrams, ECE, and why temperature scaling works; short and readable."
+    - cite: "Koh et al., WILDS: A Benchmark of in-the-Wild Distribution Shifts, ICML 2021"
+      url: "https://arxiv.org/abs/2012.07421"
+      why: "The camera-trap and hospital shifts measured; how an evaluation set can stop representing deployment."
+    - cite: "Henderson et al., Deep Reinforcement Learning That Matters, AAAI 2018"
+      url: "https://doi.org/10.1609/aaai.v32i1.11694"
+      why: "A careful demonstration that seeds and implementations can reverse a published comparison."
+    - cite: "Zhang et al., A Careful Examination of Large Language Model Performance on Grade School Arithmetic, NeurIPS 2024"
+      url: "https://arxiv.org/abs/2405.00332"
+      why: "Building a fresh test set to measure how much a benchmark score reflects memorization."
+  bridge: "Lecture 13: the model passed its gates in the lab. What changes when real users send requests?"
+
+coverage:
+  primary_taught: ["Differences beyond noise (seed and run strips, olympic scoring, the binomial sizing formula, the Welch interval worked on MLPerf runs, run counts, McNemar, one change at a time, the minimum useful difference)", "Quality beyond accuracy (Pareto frontier, ECE and temperature scaling with Guo et al., iWildCam slices, the acceptance gate with an evidence column)", "Verification gap (a finite test set as an instrument; slices with too few examples; ImageNetV2 and GSM1k)", "Measurement validity (Goodhart's law: Example 12.1, benchmark fingerprinting, fresh test sets)"]
+  primary_left_to_reading: []
+  secondary: ["Data benchmarks (iWildCam and Camelyon taught as slices; coverage and label-quality protocol to reading)", "Time to quality target (the run rule counts a non-converging run as the slowest; scaling taught in Part 1)", "Standardized benchmark suites (run counts, scoring, closed division as fair comparison)"]
+  touches_reused: ["Lecture 12 Part 1: the four conditions (retrieval), Lee et al. thermal drift (reused as order bias), MLPerf scenarios (one line)", "Lecture 10 and 10b: the accuracy-efficiency frontier, range calibration (WARN on the name)", "Lecture 11: H100 and H200 bandwidth against the roofline (one LINK line)", "Lecture 4b: ImageNetV2 as distribution shift, K-S significance at large n (one LINK line)"]
+  hand_offs: ["Part 1 (Lecture 12) owns the load and statistic, granularity, suites and scenarios, power, thermal state, and duty cycle", "Lecture 13 owns tail latency under load, queueing, batching, and serving SLOs", "Lecture 14 owns online experiments (A/B sizing, canary, shadow), drift monitoring, and rollback", "Lecture 15 owns fairness release gates with per-group intervals and Gender Shades"]
+
+notes_for_author:
+  - "The hook's two scores (Dell 13.163, Eos 13.270 min) are derived from the five published logs per submission by the run rule. They should match MLCommons' published v4.0 ResNet results; check before building and quote the published value if it differs."
+  - "The two non-converging runs (Dell result_4, 75.894 percent; Eos 64-GPU result_4, 75.882 percent) are logged with status 'aborted' after 35 epochs. The slide calls them 'did not reach 75.9 percent', which the logs show; it does not claim why."
+  - "Welch intervals use converged runs only (Dell n = 4). The 'Dell all five runs' interval in concept question 9 times the aborted run as a run; this is a teaching construction, labeled so, not how MLPerf scores it."
+  - "The 2 percent minimum useful difference is illustrative. The chapter requires a prespecified threshold but gives no number."
+  - "The Galaxy S4 clocks (532 against 480 MHz) come from secondary coverage of AnandTech's July 2013 article (VentureBeat, BetaNews, Ubergizmo). Read the AnandTech original before building; Samsung's statement (533 MHz maximum, lower clocks in some games) goes in the notes."
+  - "H200 values (141 GB, 4.8 TB/s, 700 W, dense FP16 equal to H100's) are from NVIDIA's H200 datasheet; the 1,979 TFLOP/s FP16 figure on that sheet includes sparsity. Add H200 to MLSysIM's registry if the slide shows it beside H100 values."
+  - "The ECE three-bin example is constructed for the slide (labeled illustrative) and lands near Lighthouse 12.3's 0.089 on purpose; the measured values are Guo et al.'s."
+  - "Lighthouse 12.3's table 18 values remain assumed in the chapter. No measured study of ECE after INT8 quantization was read for this plan; Guo et al. supplies measured calibration and temperature scaling, and iWildCam supplies measured slice loss."
+  - "Recht et al. 2019 also appears in Lecture 4b (as distribution shift). Here it answers a different question (does test-set reuse overfit?); the notes say so in one line."
+  - "Derived statistics (CVs, intervals, power counts, binomial n) were computed for this plan from the log values listed in the hook sources; the build should compute them in images/make_figs.py from the same values, not retype them."
+
+build_note:
+  date: "2026-10-17"
+  status: "Built: 34 frames, 67 presenting pages, 34 handout pages; notes total 71 minutes; fit check passes. Figures and every derived number come from images/make_figs.py, which reads images/mlperf_v40_resnet_runs.csv (the 20 runs) and prints the statistics."
+  settled_numbers:
+    - "Hook scores. The run rule on the logs gives 13.163 (Dell) and 13.270 (Eos) minutes. The published table was not reachable (the MLCommons Tableau view is behind a bot check), so the score was settled from the official scoring code (mlcommons/logging result_summarizer) and the result folders: each ResNet folder carries scaling.json with scaling_factor 1.0042232277526395, which the summarizer multiplies into the trimmed mean (training rules, Score scaling; normalization to the reference convergence points). Published scores: Dell 13.218, Eos 13.326, H200 12.078, Eos_n8 2.516 minutes. The slides show 13.22 and 13.33 and say how the rule produces them; intervals use the raw run times, and the factor cancels in every ratio."
+    - "Galaxy S4: read in the original (Klug and Lal Shimpi, AnandTech, July 30, 2013, via the Internet Archive). Games ran at 480 MHz; GLBenchmark 2.5.1, AnTuTu, and Quadrant at 532 MHz. The article's triangle-throughput table (GFXBench 2.7 37.9M against GLBenchmark 2.5.1 43.2M triangles/s, same low-level test, mean of 5 runs) is plotted instead of the two clocks. Samsung's 533 MHz statement stays in the notes as reported."
+    - "H200: NVIDIA H200 product page and datasheet: 141 GB, 4.8 TB/s, FP16 Tensor 1,979 TFLOP/s with sparsity (989 dense); cited on the system-card slide. Not added to MLSysIM (outside this deck's folders)."
+    - "Illustrative or assumed, labeled on their slides: the 2 percent threshold (useful_step: 'set before the test (example)'), the three ECE bins ('Illustrative'), Lighthouse 12.3 table 18 ('Assumed values (chapter scenario)'), Example 12.1, and the drift curve on the order frame (a smooth curve through Lee et al.'s approximate endpoints)."
+  changes_from_plan:
+    - "McNemar on real data: a new frame applies the test to two Eos runs on the same 50,000 validation images (76.206 against 75.900 percent, 153 images): a regression only if b + c <= 6,096. The logs keep no per-image outcomes, so the slide asks the question the data cannot answer."
+    - "Hardware lottery redrawn as its own [OPTIONAL] frame from Chu et al. 2021, Table 1 (four models, CPU float against DSP on a Pixel 4), replacing the illegible book inset."
+    - "The run-rule card became one line under the olympic figure; the noise sources became one line under the strip; the defenses are four tags."
+    - "Recall uses a thumbnail of Part 1's hook regenerated here (recall_hook)."

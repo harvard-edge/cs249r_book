@@ -42,6 +42,18 @@ with an "Illustrative" tag on the plot.
   - Goodhart: chapter Example 12.1 (illustrative); Recht et al. 2019
     abstract (accuracy drops on new test sets).
   - Pareto: Sandler et al. 2018, Table 4 (Pixel 1, one large core, TF-Lite).
+    (Statistics, Goodhart, and Pareto figures are no longer used by this deck;
+    Lecture 12b regenerates them.)
+  - Fan-out: chapter footnote 20 (Dean and Barroso 2013): 1 - 0.99^100 = 63
+    percent; the curve 1 - 0.99^n is computed.
+  - Time to quality: mlperf_v40_eos_result0_evals.csv (this folder), the
+    eval_accuracy lines of MLPerf Training v4.0, NVIDIA eos_ngc24.04_mxnet,
+    resnet/result_0.txt (minutes since run_start, top-1 percent).
+  - Scaling: MLPerf Training v4.0 published scores, NVIDIA eos_ngc24.04_mxnet
+    (8x H100) and eos_n8_ngc24.04_mxnet (64x H100): mean of the middle three
+    runs (a non-converged run counts as slowest) times the scaling.json
+    factor 1.0042232; run times from the result_N.txt logs, typed below.
+  - Power boundaries: chapter Sec. 12.7.1 and figure 8 (after Tschand et al.).
 
 Run from this folder: python3 make_figs.py
 """
@@ -161,9 +173,9 @@ for k in (1, 2, 3):
 # Closed-loop against open-loop load generators (mechanism, Sec. 12.2.4)
 # -----------------------------------------------------------------------------
 stall = (300, 800)
-for k in (1, 2, 3):
-    fig, ax = plt.subplots(figsize=(5.4, 2.6))
-    ax.add_patch(Rectangle((stall[0], -0.5), stall[1] - stall[0], 3.0,
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.6, 2.0))
+    ax.add_patch(Rectangle((stall[0], 0.1), stall[1] - stall[0], 2.0,
                            color=C["neutral_l"], zorder=0))
     ax.text((stall[0] + stall[1]) / 2, 2.25, "server stalls 500 ms",
             ha="center", fontsize=11, color=C["neutral"], fontweight="bold")
@@ -176,8 +188,6 @@ for k in (1, 2, 3):
             ax.add_patch(Rectangle((t, y - 0.18), end - t, 0.36, color=C["danger"]))
             t = end + 15
             continue
-        if t + 20 > stall[0] and t < stall[0]:
-            pass
         ax.add_patch(Rectangle((t, y - 0.18), 20, 0.36, color=C["memory"]))
         t += 35
     ax.text(-15, y, "Closed loop", ha="right", va="center", fontsize=12,
@@ -186,44 +196,51 @@ for k in (1, 2, 3):
             fontweight="bold", color=C["danger"])
     # open loop: requests on their own schedule; arrivals in the stall wait
     y = 0.6
-    arrivals = list(range(0, 1000, 35))
     slow = 0
     alpha = 1.0 if k >= 2 else 0.0
-    for a in arrivals:
-        if stall[0] <= a < stall[1]:
-            ax.add_patch(Rectangle((a, y - 0.18), stall[1] + 20 - a, 0.36,
+    for a_ in range(0, 1000, 35):
+        if stall[0] <= a_ < stall[1]:
+            ax.add_patch(Rectangle((a_, y - 0.18), stall[1] + 20 - a_, 0.36,
                                    color=C["danger"], alpha=0.35 * alpha, lw=0))
-            ax.plot([a, a], [y - 0.18, y + 0.18], color=C["danger"], lw=1.5, alpha=alpha)
+            ax.plot([a_, a_], [y - 0.18, y + 0.18], color=C["danger"], lw=1.5, alpha=alpha)
             slow += 1
         else:
-            ax.add_patch(Rectangle((a, y - 0.18), 20, 0.36, color=C["memory"], alpha=alpha))
+            ax.add_patch(Rectangle((a_, y - 0.18), 20, 0.36, color=C["memory"], alpha=alpha))
     ax.text(-15, y, "Open loop", ha="right", va="center", fontsize=12,
             fontweight="bold", color=C["text"], alpha=alpha)
     ax.text(1010, y, f"{slow} slow requests", va="center", fontsize=11,
             fontweight="bold", color=C["danger"], alpha=alpha)
-    # host timer against device timer
-    y = -0.4 + 0.0
-    a3 = 1.0 if k >= 3 else 0.0
     ax.set_xlim(0, 1000)
-    ax.set_ylim(-1.75, 2.6)
-    ax.add_patch(Rectangle((0, -1.25), 30, 0.3, color=C["neutral"], alpha=a3))
-    ax.add_patch(Rectangle((40, -1.25), 420, 0.3, color=C["compute"], alpha=a3))
-    ax.text(-15, -1.1, "Timing a launch", ha="right", va="center", fontsize=12,
-            fontweight="bold", color=C["text"], alpha=a3)
-    ax.annotate("", xy=(30, -0.7), xytext=(0, -0.7), alpha=a3,
-                arrowprops=dict(arrowstyle="|-|", color=C["danger"], lw=1.4, alpha=a3))
-    ax.text(45, -0.62, "host timer stops at enqueue", fontsize=10, color=C["danger"],
-            fontweight="bold", alpha=a3, va="center")
-    ax.annotate("", xy=(460, -1.55), xytext=(0, -1.55),
-                arrowprops=dict(arrowstyle="|-|", color=C["data"], lw=1.4, alpha=a3))
-    ax.text(470, -1.55, "synchronize: stops at kernel end", fontsize=10,
-            color=C["data"], fontweight="bold", alpha=a3, va="center")
+    ax.set_ylim(0.0, 2.6)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xticks([0, 250, 500, 750, 1000])
-    ax.set_xlabel("Time (ms; launch row not to scale)")
-    tag(ax, "Mechanism only (Benchmarking, §12.2.4)", (0.0, -0.3))
+    ax.set_xlabel("Time (ms)")
+    tag(ax, "Mechanism only (Benchmarking, §12.2.4)", (0.0, -0.42))
     sp.save(fig, out / f"loop_step{k}.svg")
+
+# Host timer against device timer (Systems Perspective 12.4, rule 5)
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.6, 1.7))
+    ax.add_patch(Rectangle((0, 0.8), 30, 0.4, color=C["neutral"]))
+    ax.text(15, 1.35, "enqueue", ha="center", fontsize=10.5, color=C["neutral"], fontweight="bold")
+    ax.add_patch(Rectangle((40, 0.8), 420, 0.4, color=C["compute"]))
+    ax.text(250, 1.0, "kernel runs on the GPU", ha="center", va="center", fontsize=11,
+            color="white", fontweight="bold")
+    ax.annotate("", xy=(30, 0.4), xytext=(0, 0.4),
+                arrowprops=dict(arrowstyle="|-|", color=C["danger"], lw=1.6))
+    ax.text(45, 0.4, "host timer stops at enqueue", fontsize=11, color=C["danger"],
+            fontweight="bold", va="center")
+    al = 1.0 if k >= 2 else 0.0
+    ax.annotate("", xy=(460, -0.15), xytext=(0, -0.15), alpha=al,
+                arrowprops=dict(arrowstyle="|-|", color=C["data"], lw=1.6, alpha=al))
+    ax.text(470, -0.15, "with synchronize: kernel end", fontsize=11, color=C["data"],
+            fontweight="bold", va="center", alpha=al)
+    ax.set_xlim(-10, 760)
+    ax.set_ylim(-0.45, 1.6)
+    ax.axis("off")
+    tag(ax, "Mechanism only, not to scale (Benchmarking, Systems Perspective 12.4)", (0.0, -0.08))
+    sp.save(fig, out / f"timer_step{k}.svg")
 
 # -----------------------------------------------------------------------------
 # Granularity: the measurement boundary widens (after the book's figure)
@@ -405,7 +422,7 @@ for k in (1, 2):
             color=C["memory"])
     a1.text(1, 44411 + 1500, "44,411", ha="center", fontsize=11, fontweight="bold",
             color=C["compute"])
-    a1.text(0.42, 24000, "12.5×", ha="center", fontsize=13, fontweight="bold")
+    a1.text(0, 30000, "12.5×", ha="center", fontsize=13, fontweight="bold")
     a1.set_xticks([0, 1])
     a1.set_xticklabels(["Single-\nStream", "Offline"], fontsize=10)
     a1.set_ylim(0, 55000)
@@ -642,5 +659,136 @@ sp.roofline_steps(out / "recall_roof", [
     ("ResNet-50", 3000.0, "compute"),
 ], ridge=295.0, xticks=[1, 10, 100, 1000], ridge_label="ridge: 295",
     xlabel="FLOPs per byte (log scale)", note="Schematic", size=(4.2, 2.4))
+
+
+# -----------------------------------------------------------------------------
+# Fan-out: chance a request waits on at least one slow shard (footnote 20)
+# -----------------------------------------------------------------------------
+import math  # noqa: E402
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(4.0, 2.5))
+    ns = list(range(1, 101))
+    pr = [100 * (1 - 0.99 ** n) for n in ns]
+    if k >= 2:
+        ax.plot(ns, pr, color=C["danger"], lw=3)
+        ax.plot(100, pr[-1], "o", ms=10, color=C["danger"])
+        ax.text(97, pr[-1] + 4, f"100 shards: {pr[-1]:.0f}%", ha="right", fontsize=12,
+                fontweight="bold", color=C["danger"])
+        ax.plot(10, pr[9], "o", ms=8, color=C["text"])
+        ax.text(14, 1.5, f"10 shards: {pr[9]:.1f}%", fontsize=11, color=C["text"],
+                fontweight="bold")
+    else:
+        ax.text(100, 50, "???", ha="right", fontsize=16, fontweight="bold", color=C["danger"])
+    ax.plot(1, 1, "o", ms=10, color=C["memory"])
+    ax.text(2, 30, "1 shard: 1%", fontsize=11, color=C["memory"], fontweight="bold")
+    ax.set_xlim(0, 105)
+    ax.set_ylim(0, 78)
+    ax.set_xlabel("Shards per request (each slow 1%)")
+    ax.set_ylabel("requests slowed (%)")
+    ax.grid(color=C["grid"], lw=0.6)
+    sp.save(fig, out / f"fanout_step{k}.svg")
+
+# -----------------------------------------------------------------------------
+# Time to quality: one MLPerf Training v4.0 run (Eos, 8x H100, result_0)
+# -----------------------------------------------------------------------------
+import csv  # noqa: E402
+ev = list(csv.DictReader(open(out / "mlperf_v40_eos_result0_evals.csv")))
+tm = [float(r["minutes"]) for r in ev]
+ac = [float(r["top1"]) for r in ev]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.15))
+    ax.plot(tm, ac, "-o", color=C["memory"], lw=2.5, ms=7)
+    ax.axhline(75.9, color=C["danger"], lw=1.5, ls="--")
+    ax.text(0.3, 78.2, "target 75.9%", fontsize=11, color=C["danger"], fontweight="bold")
+    if k >= 2:
+        ax.plot(tm[-1], ac[-1], "o", ms=12, color=C["danger"], zorder=5)
+        ax.annotate(f"time to quality: {tm[-1]:.2f} min\n(epoch 35, {ac[-1]:.2f}%)",
+                    (tm[-1], ac[-1]), xytext=(-4, -78), textcoords="offset points",
+                    ha="right", fontsize=11, fontweight="bold", color=C["danger"])
+    ax.set_xlim(0, 14.2)
+    ax.set_ylim(25, 84)
+    ax.set_xlabel("Wall-clock minutes since run start")
+    ax.set_ylabel("ImageNet top-1 (%)")
+    ax.grid(color=C["grid"], lw=0.6)
+    sp.save(fig, out / f"ttq_step{k}.svg")
+
+# -----------------------------------------------------------------------------
+# Strong scaling: 8 against 64 H100s (MLPerf Training v4.0, NVIDIA Eos)
+# -----------------------------------------------------------------------------
+SCALE = 1.0042232277526395
+eos8 = sorted([13.30620, 13.31780, 13.30162, 13.20308, 13.18598])
+eos64 = sorted([2.50543, 2.50527, 2.50357, 2.50593]) + [math.inf]  # result_4 missed target
+s8 = sum(eos8[1:-1]) / 3 * SCALE
+s64 = sum(eos64[1:-1]) / 3 * SCALE
+speed = s8 / s64
+eff = speed / 8
+ips8 = 35 * 1281167 / (s8 / SCALE * 60) / 8
+ips64 = 35 * 1281167 / (s64 / SCALE * 60) / 64
+print("scaling: %.2f -> %.2f min, %.2fx, efficiency %.0f%%, %.0f -> %.0f images/s per GPU" % (
+    s8, s64, speed, 100 * eff, ips8, ips64))
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(4.0, 1.75))
+    rows = [("8 H100s", s8, "memory", f"{s8:.2f} min"),
+            ("64 H100s", s64, "compute", f"{s64:.2f} min ({speed:.1f}×)")]
+    for i, (lab, v, ck, txt) in enumerate(rows):
+        y = 1 - i
+        shown = (i == 0) or k >= 2
+        ax.barh(y, v, color=C[ck], height=0.6, alpha=1.0 if shown else 0.0)
+        ax.text(v + 0.2, y, txt, va="center", fontsize=12, fontweight="bold", color=C[ck],
+                alpha=1.0 if shown else 0.0)
+        if not shown:
+            ax.text(0.3, y, "???", va="center", fontsize=15, fontweight="bold", color=C["danger"])
+        ax.text(-0.25, y, lab, ha="right", va="center", fontsize=12, fontweight="bold")
+    ax.plot([s8 / 8, s8 / 8], [-0.45, 0.45], color=C["text"], lw=2, ls=":",
+            alpha=1.0 if k >= 2 else 0.0)
+    ax.text(s8 / 8, -0.62, f"perfect 8×: {s8 / 8:.2f}", ha="center", va="top", fontsize=10,
+            color=C["text"], alpha=1.0 if k >= 2 else 0.0)
+    ax.set_xlim(0, 19.5)
+    ax.set_xticks([0, 5, 10, 15])
+    ax.set_ylim(-1.0, 1.5)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlabel("Minutes to 75.9% top-1 (published)")
+    sp.save(fig, out / f"scale_step{k}.svg")
+
+# -----------------------------------------------------------------------------
+# Where MLPerf Power draws the boundary (Sec. 12.7.1, figure 8)
+# -----------------------------------------------------------------------------
+tiers = [
+    ("Tiny", ["compute cores", "on-chip SRAM", "power manager"], [], "at the DC rail"),
+    ("Inference", ["host CPU, DRAM", "accelerators", "local storage", "fans"],
+     ["remote storage"], "the whole node"),
+    ("Training", ["compute nodes", "top-of-rack switches"],
+     ["chillers", "facility PDUs", "storage cluster"], "nodes and switches"),
+]
+for k in (1, 2, 3, 4):
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-7, 54)
+    ax.axis("off")
+    xs = [1, 34.5, 68]
+    for i, (name, inside, outside, cap) in enumerate(tiers):
+        x = xs[i]
+        lit = (i == k - 1) or k == 4
+        al = 1.0 if lit else 0.3
+        ax.text(x + 15.5, 51, name, ha="center", va="center", fontsize=13,
+                fontweight="bold", color=C["text"], alpha=al)
+        ax.add_patch(Rectangle((x, 19), 31, 28.5, fc="none", ec="#A51C30", lw=2.6 if lit else 1.2,
+                               alpha=al))
+        for j, item in enumerate(inside):
+            ax.add_patch(Rectangle((x + 2, 41 - j * 4.9), 27, 4.1, fc=C["compute_l"],
+                                   ec=C["compute"], lw=0.8, alpha=al))
+            ax.text(x + 15.5, 43.05 - j * 4.9, item, ha="center", va="center", fontsize=9.5,
+                    color=C["text"], alpha=al)
+        ax.text(x + 15.5, 22, cap, ha="center", va="center", fontsize=10,
+                color="#A51C30", fontweight="bold", alpha=al)
+        for j, item in enumerate(outside):
+            ax.add_patch(Rectangle((x + 2, 12.5 - j * 5.6), 27, 4.6, fc="white",
+                                   ec=C["neutral"], lw=0.8, ls="--", alpha=al))
+            ax.text(x + 15.5, 14.8 - j * 5.6, item, ha="center", va="center",
+                    fontsize=9.5, color=C["neutral"], alpha=al)
+    ax.text(1, -5.5, "Crimson: measured boundary. Dashed: outside it.", fontsize=9.5,
+            color=C["neutral"])
+    sp.save(fig, out / f"powerbound_step{k}.svg")
 
 print("figures written")
