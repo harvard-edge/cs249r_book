@@ -37,6 +37,16 @@ Every value is sourced. "Chapter" means Model Compression in Volume I.
   - Paper 8x against realized 1.5x (Sec. 10.4, illustrative); model 20
     percent of latency caps a perfect model speedup at 1.25x (Systems
     Perspective 10.4).
+  - Added 2026-10-17: listing 1 mask (threshold 0.5 keeps 0.8, -0.7, -0.9,
+    -0.6; Sec. 10.2.1); the 4x4 sparse product, 16 against 6 (Sec. 10.4.2);
+    break-evens CSR 50, COO 66.7 percent (Sec. 10.7) and unstructured kernels
+    slower than dense until 80 to 90 percent (Sec. 10.4.2); one-shot 0.995 ->
+    0.914 -> 0.943, iterative 0.995 -> 0.971 -> 0.992 -> 0.991 (Sec. 10.2.1,
+    figures 6 and 7, illustrative); teacher softened at T = 4 (derived from
+    85/10/5: 48/28/24); MLP 8d^2 against projections 4d^2 multiply-
+    accumulates per token (Sec. 10.6.1).
+  - hook_step1.svg is copied from ../10b_model_compression/images (generated
+    there from Krishnamoorthi 2018, Table 3) for the closing slide.
 
 Run from this folder: python3 make_figs.py
 """
@@ -379,24 +389,30 @@ bars(out / "distilbert.svg", distil_rows, [1, 1, 1], xlim=(0, 260), size=(4.8, 2
      xticks=[(0, "0"), (100, "100 = BERT"), (200, "200")],
      xlabel="DistilBERT relative to BERT (%)")
 
-# Soft targets (variant of fig-kd-targets): hard label against the teacher
-for k in (1, 2):
+# Soft targets (variant of fig-kd-targets): hard label, teacher at T = 1,
+# then the same teacher softened at T = 4 (derived: p_i^(1/4), renormalized).
+soft1 = [85, 10, 5]
+_r = np.array(soft1, float) ** 0.25
+soft4 = list(np.round(100 * _r / _r.sum()).astype(int))  # 48, 28, 24
+for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(4.0, 2.9))
     cls = ["Cat", "Dog", "Fox"]
-    hard, soft = [100, 0, 0], [85, 10, 5]
+    hard = [100, 0, 0]
     xs = np.arange(3)
-    ax.bar(xs - 0.2, hard, width=0.38, color=C["neutral"])
-    for x, v in zip(xs, hard):
-        ax.text(x - 0.2, v + 2, f"{v}", ha="center", fontsize=12, color=C["neutral"],
-                fontweight="bold")
-    a = 1.0 if k == 2 else 0.0
-    ax.bar(xs + 0.2, soft, width=0.38, color=C["compute"], alpha=a)
-    for x, v in zip(xs, soft):
-        ax.text(x + 0.2, v + 2, f"{v}", ha="center", fontsize=12, color=C["compute"],
-                fontweight="bold", alpha=a)
-    ax.text(2.45, 92, "label", ha="right", fontsize=13, color=C["neutral"], fontweight="bold")
-    ax.text(2.45, 78, "teacher", ha="right", fontsize=13, color=C["compute"],
-            fontweight="bold", alpha=a)
+    wbar = 0.26
+    series = [(hard, "neutral", -wbar, 1.0),
+              (soft1, "compute", 0.0, 1.0 if k >= 2 else 0.0),
+              (soft4, "data", wbar, 1.0 if k >= 3 else 0.0)]
+    for vals, ck, dx, a in series:
+        ax.bar(xs + dx, vals, width=wbar * 0.95, color=C[ck], alpha=a)
+        for x, v in zip(xs, vals):
+            ax.text(x + dx, v + 2, f"{v}", ha="center", fontsize=11, color=C[ck],
+                    fontweight="bold", alpha=a)
+    ax.text(2.45, 94, "label", ha="right", fontsize=13, color=C["neutral"], fontweight="bold")
+    ax.text(2.45, 81, "teacher, T = 1", ha="right", fontsize=13, color=C["compute"],
+            fontweight="bold", alpha=1.0 if k >= 2 else 0.0)
+    ax.text(2.45, 68, "teacher, T = 4", ha="right", fontsize=13, color=C["data"],
+            fontweight="bold", alpha=1.0 if k >= 3 else 0.0)
     ax.set_xticks(xs)
     ax.set_xticklabels(cls, fontsize=13)
     ax.set_ylim(0, 112)
@@ -568,5 +584,120 @@ for k in (1, 2):
     ax.set_xlabel("Share of the original frame latency (%)")
     ax.spines["left"].set_visible(False)
     sp.save(fig, out / f"amdahl_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 16. Added 2026-10-17 with the Part 1 / Part 2 split
+# ---------------------------------------------------------------------------
+# 16a. Listing 1: magnitude pruning at threshold 0.5 keeps 4 of 9 (Sec. 10.2.1)
+L1 = [[0.8, 0.1, -0.7], [0.05, -0.9, 0.03], [-0.6, 0.02, 0.4]]
+CELL = 84
+for k in (1, 2):
+    body = text(10, 30, "Dense: 9 weights", 26, C["text"], "bold")
+    for i in range(3):
+        for j in range(3):
+            v = L1[i][j]
+            body += box(10 + j * CELL, 50 + i * CELL, CELL, CELL, C["compute_l"],
+                        C["compute"], 2, 0)
+            body += text(10 + j * CELL + CELL / 2, 50 + i * CELL + CELL / 2 + 9,
+                         f"{v:g}".replace("-", "−"), 26, C["text"], "bold", "middle")
+    op = 1 if k == 2 else 0
+    body += f'<g opacity="{op}">\n'
+    body += arrow(285, 176, 375, 176, C["neutral"], 3)
+    body += text(330, 160, "|w| ≥ 0.5", 22, C["neutral"], "bold", "middle")
+    body += text(390, 30, "Pruned: 4 of 9 kept", 26, C["data"], "bold")
+    for i in range(3):
+        for j in range(3):
+            v = L1[i][j]
+            keep = abs(v) >= 0.5
+            body += box(390 + j * CELL, 50 + i * CELL, CELL, CELL,
+                        C["data_l"] if keep else "white",
+                        C["data"] if keep else "#999999", 2, 0)
+            body += text(390 + j * CELL + CELL / 2, 50 + i * CELL + CELL / 2 + 9,
+                         f"{v:g}".replace("-", "−") if keep else "0", 26,
+                         C["text"] if keep else "#999999",
+                         "bold" if keep else "normal", "middle")
+    body += "</g>\n"
+    svg(out / f"mask_step{k}.svg", 660, 310, body)
+
+# 16b. The chapter's 4x4 sparse matrix-vector product (Sec. 10.4.2)
+M4 = [[2, 0, 0, 1], [0, 3, 0, 0], [4, 0, 5, 0], [0, 0, 0, 6]]
+CELL = 74
+for k in (1, 2):
+    body = ""
+    for i in range(4):
+        for j in range(4):
+            v = M4[i][j]
+            live = k == 1 or v != 0
+            body += box(20 + j * CELL, 20 + i * CELL, CELL, CELL,
+                        C["compute_l"] if live else "white",
+                        C["compute"] if live else "#BBBBBB", 2, 0)
+            body += text(20 + j * CELL + CELL / 2, 20 + i * CELL + CELL / 2 + 6,
+                         str(v), 26, C["text"] if live else "#AAAAAA",
+                         "bold" if live else "normal", "middle")
+            if k == 2 and v != 0:
+                body += text(20 + j * CELL + CELL - 6, 20 + i * CELL + 20, f"c{j}", 15,
+                             C["memory"], "bold", "end")
+    body += text(340, 175, "×", 40, C["text"], "bold", "middle")
+    for i in range(4):
+        body += box(370, 20 + i * CELL, CELL, CELL, C["memory_l"], C["memory"], 2, 0)
+        body += text(370 + CELL / 2, 20 + i * CELL + CELL / 2 + 8, f"x{i + 1}", 24,
+                     C["text"], "bold", "middle")
+    msg = ("Dense: 16 multiply-accumulates" if k == 1 else
+           "Sparse: 6 products + 6 column indices")
+    body += text(20, 360, msg, 26, C["compute"] if k == 1 else C["memory"], "bold")
+    svg(out / f"spmv_step{k}.svg", 600, 380, body)
+
+# 16c. Where sparsity starts to pay: break-evens on one sparsity axis
+fig, ax = plt.subplots(figsize=(5.8, 2.0))
+ax.axvspan(80, 90, color=C["danger_l"])
+ax.text(85, 1.75, "unstructured kernel\ncan lose to dense\nuntil 80 to 90%", ha="center",
+        va="center", fontsize=11, fontweight="bold", color=C["danger"])
+for x, lab, ck, y in ((50, "CSR bytes: 50%", "memory", 1.05), (66.7, "COO bytes: 66.7%", "memory", 0.5),
+                      (50, "2:4 pattern: exactly 50%,\nhardware path", "data", -0.75)):
+    ax.plot([x], [0], "o", ms=10, color=C[ck], zorder=5)
+    ax.plot([x, x], [0, y - 0.2 if y > 0 else y + 0.35], color=C[ck], lw=1.2)
+    ax.text(x, y, lab, ha="center", va="center", fontsize=11, fontweight="bold", color=C[ck])
+ax.axhline(0, color=C["text"], lw=1.5)
+ax.set_xlim(0, 100)
+ax.set_ylim(-1.3, 2.5)
+ax.set_yticks([])
+for side in ("left", "bottom"):
+    ax.spines[side].set_visible(False)
+ax.set_xticks([0, 25, 50, 75, 100])
+ax.set_xticklabels(["0%", "25%", "50%", "75%", "100%"])
+ax.tick_params(axis="x", length=0, pad=-6)
+ax.set_xlabel("Share of weights that are zero")
+sp.save(fig, out / "breakeven.svg")
+
+# 16d. One cut or three (Sec. 10.2.1, figures 6 and 7, illustrative)
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(4.6, 2.6))
+    ax.plot([0, 1, 2], [0.995, 0.914, 0.943], "o-", color=C["danger"], lw=2.2, ms=8)
+    ax.text(2.08, 0.943, "one cut of 6:\n0.943", va="center", fontsize=11,
+            fontweight="bold", color=C["danger"])
+    a = 1.0 if k == 2 else 0.0
+    ax.plot([0, 1, 2], [0.995, 0.971, 0.992], "s-", color=C["data"], lw=2.2, ms=7, alpha=a)
+    ax.plot([2, 3], [0.992, 0.991], "s:", color=C["data"], lw=2.2, ms=7, alpha=a)
+    ax.text(3.08, 0.991, "three cuts of 2:\n0.991", va="center", fontsize=11,
+            fontweight="bold", color=C["data"], alpha=a)
+    ax.text(2.5, 0.981, "two more\ncycles", ha="center", va="top", fontsize=9, color=C["data"], alpha=a)
+    ax.set_xticks([0, 1, 2, 3])
+    ax.set_xticklabels(["start", "cut", "fine-tune", "end"], fontsize=11)
+    ax.set_xlim(-0.3, 4.3)
+    ax.set_ylim(0.9, 1.005)
+    ax.set_ylabel("Accuracy")
+    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
+    fig.text(0.01, -0.03, "Illustrative (chapter figures 6 and 7)", fontsize=9, color=C["neutral"])
+    sp.save(fig, out / f"schedule_step{k}.svg")
+
+# 16e. Multiply-accumulates per token in one transformer layer (Sec. 10.6.1)
+mlp_rows = [
+    dict(label="MLP block", value=8, color="compute", text="8d²: about two thirds"),
+    dict(label="Q, K, V, O projections", value=4, color="memory", text="4d²: just under a third"),
+    dict(label="LayerNorm", value=0.05, color="neutral", text="almost none"),
+]
+bars(out / "mlpshare.svg", mlp_rows, [1, 1, 1], xlim=(0, 14), size=(5.0, 1.9),
+     xticks=[(0, "0"), (4, "4d²"), (8, "8d²")],
+     xlabel="Multiply-accumulates per token, per layer")
 
 print("figures written")

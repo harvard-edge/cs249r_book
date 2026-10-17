@@ -1,0 +1,723 @@
+#!/usr/bin/env python3
+"""Figures for Lecture 10b (Model Compression, Part 2: How Few Bits?).
+
+Every value is sourced. "Chapter" means Model Compression in Volume I.
+Outside papers were read on 2026-10-17.
+
+  - Krishnamoorthi 2018 (arXiv 1806.08342). Table 3, post-training INT8
+    weights and activations: MobileNetV2 1.0 224 asymmetric per-layer 0.001,
+    symmetric per-channel 0.698, float 0.719; ResNet-v1-50 0.75, 0.751, 0.752;
+    MobileNet-v1 symmetric per-channel 0.591, asymmetric per-channel 0.703,
+    float 0.709. Table 4 (QAT, symmetric per-channel): MobileNetV2 0.711,
+    ResNet-v1-50 0.75. Table 5 (4-bit weights): ResNet-v1-50 per-layer PTQ
+    0.002, per-channel PTQ 0.54, QAT 0.732; MobileNetV2 0.001, 0.001, 0.62.
+    Table 7 (Pixel 2): MobileNetV2 105 ms float CPU, 63 ms fixed point CPU,
+    15.5 ms fixed point on the Hexagon DSP (NN-API).
+  - Nagel et al. 2019 (arXiv 1906.04721), Figure 2: per-output-channel weight
+    ranges of the first depthwise-separable layer of MobileNetV2, 32 channels,
+    "strong differences between channel weight ranges". The redraw below is a
+    schematic of that finding; no channel value is read from the plot. The
+    paper's own example (section 3.1): one channel in [-128, 128], another in
+    (-0.5, 0.5); at 8 bits the second rounds entirely to 0.
+  - Dettmers et al. 2022 (arXiv 2208.07339), Table 1: C4 perplexity of fairseq
+    dense transformers, 125M to 13B. 32-bit float 25.65 15.91 14.43 13.30
+    12.45; INT8 absmax 87.76 16.55 15.11 14.59 19.08; absmax LLM.int8() 25.83
+    15.93 14.44 13.24 12.45.
+  - Frantar et al. 2023, GPTQ (arXiv 2210.17323). Table 5, OPT-175B WikiText2:
+    FP16 8.34, RTN 4-bit 10.54, GPTQ 4-bit 8.37, RTN 3-bit 7.3e3, GPTQ 3-bit
+    8.68. Table 6: per-token latency, FP16 on five A100s 230 ms, 3-bit on one
+    A100 71 ms (3.24x).
+  - Lin et al. 2024, AWQ (arXiv 2306.00978), Table 1: OPT-6.7B INT3 group 128,
+    WikiText perplexity: FP16 10.86, RTN 23.54, 1 percent kept in FP16 chosen
+    by activation 11.39, by weight 22.37.
+  - Micikevicius et al. 2022 (arXiv 2209.05433), Table 1: E4M3 max normal 448,
+    min subnormal 2^-9; E5M2 max 57,344. The E4M3 value grid below is derived
+    from that definition (one NaN pattern, 127 non-negative finite values).
+  - Chapter: FP16 max 65,504 (Sec. 10.3.1); storage 2x / 4x / 8x (table 7);
+    Horowitz energy (table 8); Napkin Math 10.1 and 10.4; listing 2 weights;
+    blur waterfall (fig-compression-waterfall, illustrative); GPT-2 XL
+    streaming times (table 1).
+  - Derived on the slides and labeled so: the 3-bit toy grid, the unfused
+    dequantization traffic 0.75 + 3 + 3 + 0.31 = 7.06 GB (about 138 ms at
+    51.2 GB/s).
+
+Run from this folder: python3 make_figs.py
+"""
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+import slideplot as sp  # noqa: E402
+
+plt = sp.plt
+C = sp.C
+out = Path(__file__).parent
+FONT = "Helvetica, Arial, sans-serif"
+
+
+# ---------------------------------------------------------------------------
+# Helpers (copied from Lecture 10's generator so this folder stands alone)
+# ---------------------------------------------------------------------------
+def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE,
+         vlines=(), xticks=None, note=None, label_size=13, boxed=False):
+    """Horizontal bars with a show mask; hidden rows keep their slot."""
+    fig, ax = plt.subplots(figsize=size)
+    n = len(rows)
+    for i, r in enumerate(rows):
+        y = n - 1 - i
+        vis = shown[i]
+        ax.barh(y, r["value"], color=C[r["color"]], height=0.62,
+                alpha=1.0 if vis else 0.0)
+        ax.text(-0.01, y, r["label"], transform=ax.get_yaxis_transform(),
+                ha="right", va="center", fontsize=label_size, color=C["text"],
+                fontweight="bold", alpha=1.0 if vis else 0.0)
+        tx = r["value"] * 1.25 if log else r["value"] + (xlim[1] if xlim else 1) * 0.012
+        bb = dict(facecolor="white", edgecolor="none", pad=1.0,
+                  alpha=1.0 if vis else 0.0) if boxed else None
+        ax.text(r.get("tx", tx), y, r["text"], va="center", fontsize=12, bbox=bb,
+                zorder=4, color=C[r.get("tcolor", r["color"])],
+                fontweight="bold", alpha=1.0 if vis else 0.0)
+    for x, label, ck in vlines:
+        ax.axvline(x, color=C[ck], lw=1.5, ls="--", zorder=1)
+        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=10,
+                fontweight="bold", va="bottom", ha="left")
+    if log:
+        ax.set_xscale("log")
+    if xlim:
+        ax.set_xlim(*xlim)
+    ax.set_yticks([])
+    ax.set_ylim(-0.6, n - 0.4)
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    if xticks:
+        ax.set_xticks([t for t, _ in xticks])
+        ax.set_xticklabels([s for _, s in xticks])
+        ax.minorticks_off()
+    if xlabel:
+        ax.set_xlabel(xlabel)
+    if note:
+        fig.text(0.99, 0.01, note, ha="right", va="bottom", fontsize=9,
+                 color=C["neutral"])
+    return fig, ax
+
+
+def bars_save(path, *a, **k):
+    fig, _ = bars(path, *a, **k)
+    sp.save(fig, path)
+
+
+def svg(path, w, h, body):
+    Path(path).write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
+        f'viewBox="0 0 {w} {h}" font-family="{FONT}">\n'
+        f'<rect width="{w}" height="{h}" fill="white"/>\n{body}</svg>\n')
+
+
+def text(x, y, s, size=22, color=C["text"], weight="normal", anchor="start"):
+    return (f'<text x="{x}" y="{y}" font-size="{size}" fill="{color}" '
+            f'font-weight="{weight}" text-anchor="{anchor}">{s}</text>\n')
+
+
+def box(x, y, w, h, fill, stroke, sw=2, rx=6, dash=None):
+    d = f' stroke-dasharray="{dash}"' if dash else ""
+    return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{d}/>\n')
+
+
+def vbars(ax, groups, series, shown, width=0.2, fmt="{:.1f}", ymax=85,
+          inside=None):
+    """Grouped vertical bars. groups: names; series: list of (name, color,
+    values per group). shown[s][g] masks a bar (hidden bars keep their slot).
+    """
+    ns = len(series)
+    for si, (sname, ck, vals) in enumerate(series):
+        for gi, v in enumerate(vals):
+            x = gi + (si - (ns - 1) / 2) * width
+            vis = shown[si][gi]
+            if v is None:
+                continue
+            ax.bar(x, v, width=width * 0.92, color=C[ck], alpha=1.0 if vis else 0.0)
+            ax.text(x, v + ymax * 0.015, fmt.format(v), ha="center", va="bottom",
+                    fontsize=10.5, fontweight="bold", color=C[ck],
+                    alpha=1.0 if vis else 0.0)
+    ax.set_xticks(range(len(groups)))
+    ax.set_xticklabels(groups, fontsize=12, fontweight="bold")
+    ax.set_ylim(0, ymax)
+    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+
+
+# ---------------------------------------------------------------------------
+# 1. Hook: one INT8 recipe, two networks (Krishnamoorthi 2018, Table 3)
+# ---------------------------------------------------------------------------
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(4.4, 2.9))
+    groups = ["ResNet-50", "MobileNetV2"]
+    flt = [75.2, 71.9]
+    i8 = [75.0, 0.1]
+    w = 0.36
+    for gi in range(2):
+        show_f = gi == 0 or k >= 2
+        show_q = gi == 0 or k >= 3
+        a = 1.0 if show_f else 0.0
+        ax.bar(gi - w / 2, flt[gi], width=w * 0.92, color=C["neutral"], alpha=a)
+        ax.text(gi - w / 2, flt[gi] + 1.5, f"{flt[gi]:.1f}", ha="center",
+                fontsize=12, fontweight="bold", color=C["neutral"], alpha=a)
+        aq = 1.0 if show_q else 0.0
+        ax.bar(gi + w / 2, max(i8[gi], 0.6), width=w * 0.92, color=C["compute"], alpha=aq)
+        ax.text(gi + w / 2, i8[gi] + 1.5, f"{i8[gi]:.1f}", ha="center", fontsize=12,
+                fontweight="bold", color=C["danger"] if i8[gi] < 1 else C["compute"],
+                alpha=aq)
+        if gi == 1 and k == 2:
+            ax.add_patch(plt.Rectangle((gi + w / 2 - w * 0.46, 0), w * 0.92, 40,
+                                       fill=False, ls="--", lw=1.5, ec=C["compute"]))
+            ax.text(gi + w / 2, 18, "?", ha="center", va="center", fontsize=26,
+                    fontweight="bold", color=C["compute"])
+    ax.text(0.02, 0.98, "float", transform=ax.transAxes, color=C["neutral"],
+            fontsize=12, fontweight="bold", va="top")
+    ax.text(0.22, 0.98, "INT8, one scale per tensor", transform=ax.transAxes,
+            color=C["compute"], fontsize=12, fontweight="bold", va="top")
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(groups, fontsize=13, fontweight="bold")
+    ax.set_xlim(-0.6, 1.6)
+    ax.set_ylim(0, 112)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.set_ylabel("ImageNet top-1 (%)")
+    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f"hook_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 2. Bit fields to scale: what each format spends its bits on (3 steps)
+# ---------------------------------------------------------------------------
+formats = [
+    # name, sign, exponent, mantissa, integer bits, note, step
+    ("FP32", 1, 8, 23, 0, "baseline", 1),
+    ("BF16", 1, 8, 7, 0, "FP32's range, 2× smaller", 1),
+    ("FP16", 1, 5, 10, 0, "max 65,504, 2× smaller", 1),
+    ("FP8 E4M3", 1, 4, 3, 0, "max 448, 4× smaller", 2),
+    ("FP8 E5M2", 1, 5, 2, 0, "max 57,344, 4× smaller", 2),
+    ("INT8", 0, 0, 0, 8, "256 levels, 4× smaller", 3),
+    ("INT4", 0, 0, 0, 4, "16 levels, 8× smaller", 3),
+]
+BW = 15  # px per bit
+X0 = 150
+for k in (1, 2, 3):
+    body = ""
+    # legend
+    lx = X0
+    for name, fill, stroke in (("sign", C["neutral_l"], C["neutral"]),
+                               ("exponent: range", C["memory_l"], C["memory"]),
+                               ("mantissa: precision", C["data_l"], C["data"]),
+                               ("integer levels", C["compute_l"], C["compute"])):
+        body += box(lx, 12, 22, 22, fill, stroke, 2, 2)
+        body += text(lx + 30, 30, name, 19, C["text"])
+        lx += 46 + len(name) * 10
+    for i, (name, s, e, m, b, note, step) in enumerate(formats):
+        y = 52 + i * 58
+        op = 1.0 if step <= k else 0.0
+        if step == 1 and k > 1:
+            op = 0.55  # recall rows recede once new formats arrive
+        body += f'<g opacity="{op}">\n'
+        body += text(X0 - 12, y + 30, name, 22, C["text"], "bold", "end")
+        x = X0
+        for nbits, fill, stroke in ((s, C["neutral_l"], C["neutral"]),
+                                    (e, C["memory_l"], C["memory"]),
+                                    (m, C["data_l"], C["data"]),
+                                    (b, C["compute_l"], C["compute"])):
+            if nbits:
+                body += box(x, y + 6, nbits * BW, 36, fill, stroke, 2, 2)
+                if nbits * BW >= 30:
+                    body += text(x + nbits * BW / 2, y + 31, str(nbits), 18, stroke,
+                                 "bold", "middle")
+                x += nbits * BW
+        body += text(X0 + 32 * BW + 18, y + 31, note, 20, C["text"])
+        body += "</g>\n"
+    body += text(X0 + 32 * BW + 18, 30, "", 10)
+    svg(out / f"formats_step{k}.svg", 900, 470, body)
+
+# ---------------------------------------------------------------------------
+# 3. Float grid against integer grid on one log axis (derived)
+# ---------------------------------------------------------------------------
+e4m3 = []
+for ef in range(16):
+    for mf in range(8):
+        if ef == 15 and mf == 7:
+            continue  # the single NaN pattern
+        v = (mf / 8) * 2.0 ** -6 if ef == 0 else (1 + mf / 8) * 2.0 ** (ef - 7)
+        e4m3.append(v)
+e4m3 = np.array(sorted(e4m3))
+assert len(e4m3) == 127 and e4m3.max() == 448
+pos = e4m3[e4m3 > 0]
+below1 = int((e4m3 < 1).sum())          # 56, zero included
+top = int(((pos >= 256)).sum())         # 7
+s_int = 448 / 127
+int_levels = s_int * np.arange(1, 128)
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.3))
+    ax.vlines(pos, 1.0, 1.6, color=C["memory"], lw=1.1)
+    ax.text(0.0013, 1.95, f"FP8 E4M3: {len(pos)} positive values, {below1 - 1} of them below 1",
+            fontsize=12, fontweight="bold", color=C["memory"])
+    a = 1.0 if k == 2 else 0.0
+    ax.vlines(int_levels, 0.0, 0.6, color=C["compute"], lw=1.1, alpha=a)
+    ax.axvspan(0.001, s_int / 2, ymin=0.233, ymax=0.433, color=C["danger_l"], alpha=a)
+    ax.text(0.0013, -0.5, f"INT8 scaled to 448: one level every {s_int:.2f};"
+            f" all below {s_int / 2:.2f} round to 0", fontsize=12,
+            fontweight="bold", color=C["compute"], alpha=a)
+    ax.set_xscale("log")
+    ax.set_xlim(0.001, 1000)
+    ax.set_ylim(-0.7, 2.3)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xticks([0.001, 0.01, 0.1, 1, 10, 100, 1000])
+    ax.set_xticklabels(["0.001", "0.01", "0.1", "1", "10", "100", "1000"])
+    ax.minorticks_off()
+    ax.set_xlabel("Magnitude of a stored value (log scale)")
+    sp.save(fig, out / f"grids_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 4. Energy per operation (copied from Lecture 10; Horowitz 2014 via table 8)
+# ---------------------------------------------------------------------------
+ops = [("Add", 0.90, 0.03, "30×"), ("Multiply", 3.70, 0.20, "18.5×"),
+       ("Multiply-accumulate", 4.60, 0.30, "15×")]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    ylabels = []
+    for i, (name, f32, i8, ratio) in enumerate(ops):
+        y = 3 - i
+        ax.barh(y + 0.19, f32, height=0.34, color=C["compute"])
+        ax.barh(y - 0.19, i8, height=0.34, color=C["neutral"])
+        ax.text(f32 * 1.2, y + 0.19, f"FP32 {f32:.2f} pJ", va="center", fontsize=11,
+                color=C["compute"], fontweight="bold")
+        ax.text(i8 * 1.2, y - 0.19, f"INT8 {i8:.2f} pJ: {ratio} less", va="center",
+                fontsize=11, color=C["neutral"], fontweight="bold")
+        ylabels.append((y, name))
+    vis = 1.0 if k == 2 else 0.0
+    ax.barh(-0.05, 640, height=0.42, color=C["memory"], alpha=vis)
+    ax.text(640 * 1.2, -0.05, "640 pJ", va="center", fontsize=11, color=C["memory"],
+            fontweight="bold", alpha=vis)
+    ylabels.append((-0.05, "32-bit DRAM read"))
+    for y, name in ylabels:
+        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
+                va="center", fontsize=12, fontweight="bold", color=C["text"],
+                alpha=vis if name.startswith("32") else 1.0)
+    ax.set_xscale("log")
+    ax.set_xlim(0.01, 20000)
+    ax.set_ylim(-0.6, 3.6)
+    ax.set_yticks([])
+    ax.minorticks_off()
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel("Energy (picojoules, log scale; 45 nm)")
+    sp.save(fig, out / f"energy_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 5. The integer grid laid over a real range: a 3-bit toy (derived)
+#    [alpha, beta] = [-1, 2.5], b = 3: s = 3.5 / 7 = 0.5, z = round(1/0.5) = 2
+# ---------------------------------------------------------------------------
+ALPHA, BETA, B = -1.0, 2.5, 3
+S_TOY = (BETA - ALPHA) / (2 ** B - 1)
+Z_TOY = round(-ALPHA / S_TOY)
+levels = S_TOY * (np.arange(2 ** B) - Z_TOY)
+samples = [-1.4, -0.3, 0.8, 1.6, 2.9]
+
+
+def quant_toy(x):
+    q = int(np.clip(round(x / S_TOY + Z_TOY), 0, 2 ** B - 1))
+    return q, S_TOY * (q - Z_TOY)
+
+
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.3))
+    ax.plot([-1.75, 3.25], [1, 1], color=C["text"], lw=1.5)
+    ax.axvspan(ALPHA, BETA, ymin=0.52, ymax=0.70, color=C["memory_l"])
+    ax.text(ALPHA, 1.58, "α = −1", ha="center", fontsize=13, fontweight="bold",
+            color=C["memory"])
+    ax.text(BETA, 1.58, "β = 2.5", ha="center", fontsize=13, fontweight="bold",
+            color=C["memory"])
+    ax.text(-1.9, 1, "real", ha="right", va="center", fontsize=13, fontweight="bold")
+    for x in samples:
+        inside = ALPHA <= x <= BETA
+        ax.plot([x], [1], "o", ms=9, color=C["data"] if inside else C["danger"], zorder=5)
+        ax.text(x, 1.18, f"{x:g}", ha="center", fontsize=12, fontweight="bold",
+                color=C["data"] if inside else C["danger"])
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.plot([-1.75, 3.25], [0, 0], color=C["neutral"], lw=1.5, alpha=a2)
+    ax.text(-1.9, 0, "3-bit\ncode", ha="right", va="center", fontsize=12,
+            fontweight="bold", color=C["neutral"], alpha=a2)
+    for q, lv in enumerate(levels):
+        hl = q == Z_TOY
+        ax.plot([lv, lv], [-0.12, 0.12], color=C["compute"], lw=3 if hl else 2, alpha=a2)
+        ax.plot([lv, lv], [0.12, 0.95], color=C["compute"], lw=0.8, ls=":", alpha=a2)
+        ax.text(lv, -0.42, str(q), ha="center", fontsize=13, fontweight="bold",
+                color=C["danger"] if hl else C["compute"], alpha=a2)
+    ax.annotate("", (levels[5], -0.66), (levels[4], -0.66),
+                arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.3, alpha=a2))
+    ax.text(levels[4] + S_TOY / 2, -1.02, "s = 0.5", ha="center", fontsize=12,
+            fontweight="bold", alpha=a2)
+    ax.text(levels[Z_TOY], -1.02, "z = 2", ha="center", fontsize=12,
+            fontweight="bold", color=C["danger"], alpha=a2)
+    a3 = 1.0 if k >= 3 else 0.0
+    for x in samples:
+        q, xr = quant_toy(x)
+        inside = ALPHA <= x <= BETA
+        ck = C["data"] if inside else C["danger"]
+        ax.annotate("", (xr, 0.14), (x, 0.9),
+                    arrowprops=dict(arrowstyle="-|>", color=ck, lw=1.6, alpha=a3))
+    ax.text(3.25, 0.5, "outside:\nclamped", ha="left", va="center", fontsize=11,
+            fontweight="bold", color=C["danger"], alpha=a3)
+    ax.set_xlim(-2.6, 3.9)
+    ax.set_ylim(-1.2, 1.85)
+    ax.axis("off")
+    sp.save(fig, out / f"affgrid_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 6. Napkin Math 10.1 on a number line (copied from Lecture 10)
+# ---------------------------------------------------------------------------
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(4.6, 1.7))
+    ax.plot([-1.25, 3.25], [1, 1], color=C["text"], lw=1.5)
+    ax.plot([-1.25, 3.25], [0, 0], color=C["neutral"], lw=1.5)
+    ax.text(-1.4, 1, "real", ha="right", va="center", fontsize=15, fontweight="bold")
+    ax.text(-1.4, 0, "UINT8", ha="right", va="center", fontsize=15, fontweight="bold",
+            color=C["neutral"])
+    for real, q in ((-1, 0), (0, 64), (1, 128), (3, 255)):
+        xq = -1 + q * 4 / 255
+        ax.plot([real], [1], "o", ms=9, color=C["memory"])
+        ax.text(real, 1.25, f"{real:g}", ha="center", fontsize=15, fontweight="bold",
+                color=C["memory"])
+        a = 1.0 if k == 2 else 0.0
+        ax.annotate("", (xq, 0.06), (real, 0.92), alpha=a,
+                    arrowprops=dict(arrowstyle="-|>", color=C["compute"], lw=1.6, alpha=a))
+        ax.plot([xq], [0], "s", ms=8, color=C["compute"], alpha=a)
+        ax.text(xq, -0.5, f"{q}", ha="center", fontsize=15, fontweight="bold",
+                color=C["compute"], alpha=a)
+    ax.set_xlim(-2.2, 3.4)
+    ax.set_ylim(-0.6, 1.5)
+    ax.axis("off")
+    sp.save(fig, out / f"numline_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 7. Rounding error against the real value, same 3-bit toy (derived)
+# ---------------------------------------------------------------------------
+xs = np.linspace(-1.75, 3.25, 4001)
+err = np.array([quant_toy(x)[1] - x for x in xs])
+inside = (xs >= ALPHA) & (xs <= BETA)
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(4.6, 2.7))
+    ax.axhspan(-S_TOY / 2, S_TOY / 2, color=C["data_l"], zorder=0)
+    ax.plot(xs[inside], err[inside], color=C["data"], lw=2)
+    ax.text(1.0, 0.33, "inside: at most s/2 = 0.25", ha="center", fontsize=12,
+            fontweight="bold", color=C["data"])
+    a = 1.0 if k == 2 else 0.0
+    ax.plot(xs[xs < ALPHA], err[xs < ALPHA], color=C["danger"], lw=2.4, alpha=a)
+    ax.plot(xs[xs > BETA], err[xs > BETA], color=C["danger"], lw=2.4, alpha=a)
+    ax.annotate("clipped: grows", (2.95, -0.47), (0.55, -0.66), fontsize=12,
+                fontweight="bold", color=C["danger"], alpha=a, va="center",
+                arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=1.4, alpha=a))
+    for x in (ALPHA, BETA):
+        ax.axvline(x, color=C["memory"], lw=1.2, ls="--")
+    ax.text(ALPHA, 0.72, "α", ha="center", fontsize=13, fontweight="bold", color=C["memory"])
+    ax.text(BETA, 0.72, "β", ha="center", fontsize=13, fontweight="bold", color=C["memory"])
+    ax.axhline(0, color=C["neutral"], lw=0.8)
+    ax.set_xlim(-1.75, 3.25)
+    ax.set_ylim(-0.85, 0.85)
+    ax.set_xlabel("Real value x (3-bit grid, s = 0.5)")
+    ax.set_ylabel("Error after round trip")
+    sp.save(fig, out / f"rounderr_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 8. Symmetric against asymmetric, MobileNet-v1 per-channel PTQ (Table 3)
+# ---------------------------------------------------------------------------
+zp_rows = [
+    dict(label="Symmetric (z = 0)", value=59.1, color="danger", text="59.1"),
+    dict(label="Asymmetric (z ≠ 0)", value=70.3, color="data", text="70.3"),
+    dict(label="Float", value=70.9, color="neutral", text="70.9"),
+]
+bars_save(out / "zeropoint.svg", zp_rows, [1, 1, 1], xlim=(0, 82), size=(5.4, 1.6),
+          xlabel="MobileNet-v1 top-1 (%), INT8 post-training, per-channel")
+
+# ---------------------------------------------------------------------------
+# 9. Per-channel ranges: a schematic redraw after Nagel et al. 2019, Fig. 2.
+#    No channel value is read from the plot; heights are schematic.
+# ---------------------------------------------------------------------------
+rng = np.random.default_rng(7)
+wide = {4: 0.55, 14: 0.75, 15: 0.85, 27: 0.70, 28: 0.80, 29: 0.95}
+half = np.array([wide.get(c, rng.uniform(0.02, 0.07)) for c in range(32)])
+center = np.array([rng.uniform(-0.15, 0.15) * h for h in half])
+narrow_ch = 9
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    for c in range(32):
+        lo, hi = center[c] - half[c], center[c] + half[c]
+        ck = C["compute"] if c in wide else C["memory"]
+        ax.plot([c + 1, c + 1], [lo, hi], color=ck, lw=1.2)
+        ax.add_patch(plt.Rectangle((c + 1 - 0.32, center[c] - half[c] * 0.45), 0.64,
+                                   half[c] * 0.9, facecolor=C[("compute" if c in wide
+                                                              else "memory") + "_l"],
+                                   edgecolor=ck, lw=1.0))
+    a2 = 1.0 if k >= 2 else 0.0
+    step = 2 * half.max() / 10  # schematic level spacing: the widest channel sets it
+    for j in range(-5, 6):
+        ax.axhline(j * step, color=C["neutral"], lw=0.7, ls="--", alpha=a2, zorder=0)
+    ax.text(32.9, 5 * step, "per-tensor levels\n(schematic)", fontsize=10,
+            va="center", color=C["neutral"], fontweight="bold", alpha=a2)
+    ax.annotate("narrow channel:\nfew levels", (narrow_ch + 1, half[narrow_ch] + 0.03),
+                (5.6, 0.72), fontsize=11, fontweight="bold",
+                color=C["danger"], alpha=a2,
+                arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=1.4, alpha=a2))
+    a3 = 1.0 if k >= 3 else 0.0
+    ax.add_patch(plt.Rectangle((narrow_ch + 0.5, center[narrow_ch] - half[narrow_ch]), 1.0,
+                               2 * half[narrow_ch], facecolor="none", edgecolor=C["data"],
+                               lw=1.6, alpha=a3, zorder=7))
+    inset = ax.inset_axes([0.03, 0.03, 0.30, 0.30])
+    inset.add_patch(plt.Rectangle((0.3, -0.45), 0.4, 0.9, facecolor=C["memory_l"],
+                                  edgecolor=C["memory"], lw=1.2))
+    inset.plot([0.5, 0.5], [-1, 1], color=C["memory"], lw=1.2)
+    for j in np.linspace(-1, 1, 11):
+        inset.plot([0.1, 0.9], [j, j], color=C["data"], lw=1.0)
+    inset.add_patch(plt.Rectangle((0, -1.15), 3.2, 2.3, facecolor="white",
+                                  edgecolor=C["data"], lw=1.0, zorder=0))
+    inset.text(1.0, 0.0, "zoom: own scale,\nall 256 levels", fontsize=10, va="center",
+               fontweight="bold", color=C["data"])
+    inset.set_xlim(0, 3.2)
+    inset.set_ylim(-1.15, 1.15)
+    inset.axis("off")
+    for child in inset.get_children():
+        try:
+            child.set_alpha(a3)
+        except Exception:
+            pass
+    if k < 3:
+        inset.remove()
+    ax.set_xlim(0, 36.5)
+    ax.set_ylim(-1.05, 1.05)
+    ax.set_yticks([])
+    ax.set_xticks([1, 8, 16, 24, 32])
+    ax.set_xlabel("Output channel (32 in the layer)")
+    ax.set_ylabel("Weight range")
+    sp.save(fig, out / f"chanrange_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 10. Per-channel scales restore MobileNetV2 (Krishnamoorthi 2018, Tables 3, 4)
+# ---------------------------------------------------------------------------
+pc_series = [
+    ("Float", "neutral", [71.9, 75.2]),
+    ("INT8 per-tensor", "danger", [0.1, 75.0]),
+    ("INT8 per-channel", "data", [69.8, 75.1]),
+    ("INT8 per-channel + QAT", "memory", [71.1, 75.0]),
+]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    shown = [[1, 1], [1, 1], [1, 1], [k >= 2, k >= 2]]
+    vbars(ax, ["MobileNetV2", "ResNet-50"], pc_series, shown, width=0.19, ymax=92)
+    for si, (sname, ck, _) in enumerate(pc_series):
+        vis = all(shown[si])
+        ax.text(1.02, 0.92 - si * 0.16, sname, transform=ax.transAxes, fontsize=11,
+                fontweight="bold", color=C[ck], alpha=1.0 if vis else 0.0)
+    ax.set_xlim(-0.5, 1.5)
+    ax.set_ylabel("ImageNet top-1 (%)")
+    sp.save(fig, out / f"perchannel_step{k}.svg")
+
+# Synthesis: MobileNetV2 alone, large enough to read in half a slide
+syn_rows = [
+    dict(label="Float", value=71.9, color="neutral", text="71.9"),
+    dict(label="INT8 per-tensor", value=0.1, color="danger", text="0.1"),
+    dict(label="INT8 per-channel", value=69.8, color="data", text="69.8"),
+    dict(label="+ QAT", value=71.1, color="memory", text="71.1"),
+]
+bars_save(out / "synth_acc.svg", syn_rows, [1, 1, 1, 1], xlim=(0, 85), size=(4.0, 2.3),
+          xlabel="MobileNetV2 top-1 (%)")
+
+# ---------------------------------------------------------------------------
+# 11. Outliers in large language models (Dettmers et al. 2022, Table 1)
+# ---------------------------------------------------------------------------
+size_b = [0.125, 1.3, 2.7, 6.7, 13]
+f32 = [25.65, 15.91, 14.43, 13.30, 12.45]
+absmax = [87.76, 16.55, 15.11, 14.59, 19.08]
+llmint8 = [25.83, 15.93, 14.44, 13.24, 12.45]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    ax.axvspan(6.0, 16, color=C["danger_l"], alpha=0.6 if k == 2 else 0.0, zorder=0)
+    ax.plot(size_b, f32, "o-", color=C["neutral"], lw=2.2, ms=7)
+    ax.plot(size_b, absmax, "o-", color=C["danger"], lw=2.2, ms=7)
+    a = 1.0 if k == 2 else 0.0
+    ax.plot(size_b, llmint8, "s--", color=C["data"], lw=2.0, ms=6, alpha=a)
+    ax.text(13.6, 19.08, "INT8, one scale\nper tensor: 19.08", fontsize=11,
+            fontweight="bold", color=C["danger"], va="center")
+    ax.text(13.6, 12.2, "32-bit float: 12.45" if k == 1 else
+            "32-bit float and\nLLM.int8(): 12.45", fontsize=11, fontweight="bold",
+            color=C["neutral"] if k == 1 else C["data"], va="center")
+    ax.text(6.3, 60, "outlier features\nin every layer", fontsize=10.5,
+            fontweight="bold", color=C["danger"], alpha=a)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(0.09, 60)
+    ax.set_ylim(10, 100)
+    ax.set_xticks(size_b)
+    ax.set_xticklabels(["125M", "1.3B", "2.7B", "6.7B", "13B"])
+    ax.set_yticks([10, 15, 20, 30, 50, 100])
+    ax.set_yticklabels(["10", "15", "20", "30", "50", "100"])
+    ax.minorticks_off()
+    ax.set_xlabel("Parameters")
+    ax.set_ylabel("C4 perplexity (lower\nis better, log scale)")
+    ax.grid(color=C["grid"], linewidth=0.5)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f"llmint8_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 12. The cliff: 8-bit against 4-bit weights (Krishnamoorthi 2018, Tables 3-5)
+# ---------------------------------------------------------------------------
+cliff_series = [
+    ("Float", "neutral", [75.2, 71.9]),
+    ("INT8 per-channel PTQ", "data", [75.1, 69.8]),
+    ("INT4 per-tensor PTQ", "danger", [0.2, 0.1]),
+    ("INT4 per-channel PTQ", "compute", [54.0, 0.1]),
+    ("INT4 per-channel QAT", "memory", [73.2, 62.0]),
+]
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    vis = [k >= 1, k >= 1, k >= 2, k >= 2, k >= 3]
+    shown = [[v, v] for v in vis]
+    vbars(ax, ["ResNet-50", "MobileNetV2"], cliff_series, shown, width=0.155, ymax=92)
+    for si, (sname, ck, _) in enumerate(cliff_series):
+        ax.text(1.02, 0.95 - si * 0.15, sname, transform=ax.transAxes, fontsize=10.5,
+                fontweight="bold", color=C[ck], alpha=1.0 if vis[si] else 0.0)
+    ax.set_xlim(-0.5, 1.5)
+    ax.set_ylabel("ImageNet top-1 (%)")
+    sp.save(fig, out / f"cliff_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 13. GPTQ on OPT-175B and AWQ's salient channels on OPT-6.7B
+# ---------------------------------------------------------------------------
+gptq_rows = [
+    dict(label="FP16", value=8.34, color="neutral", text="8.34"),
+    dict(label="4-bit, round to nearest", value=10.54, color="danger", text="10.54"),
+    dict(label="4-bit, GPTQ", value=8.37, color="data", text="8.37"),
+    dict(label="3-bit, round to nearest", value=16, color="danger",
+         text="", tx=10.6),
+    dict(label="3-bit, GPTQ", value=8.68, color="data", text="8.68"),
+]
+fig, ax = bars(None, gptq_rows, [1] * 5, xlim=(0, 16), size=(5.8, 2.5),
+               xlabel="OPT-175B WikiText2 perplexity (lower is better)", boxed=True)
+for dx in (13.6, 14.0):  # break marks on the cut bar
+    ax.plot([dx - 0.15, dx + 0.15], [0.69, 1.31], color="white", lw=3, zorder=5)
+ax.text(0.3, 1, "7.3 thousand: bar cut off", va="center", fontsize=12,
+        fontweight="bold", color="white", zorder=6)
+sp.save(fig, out / "gptq.svg")
+
+awq_rows = [
+    dict(label="FP16", value=10.86, color="neutral", text="10.86"),
+    dict(label="INT3, round to nearest", value=23.54, color="danger", text="23.54"),
+    dict(label="Keep 1% by weight size", value=22.37, color="compute", text="22.37"),
+    dict(label="Keep 1% by activation size", value=11.39, color="data", text="11.39"),
+]
+for k in (1, 2):
+    bars_save(out / f"awq_step{k}.svg", awq_rows, [1, 1, k >= 2, k >= 2], xlim=(0, 30),
+              size=(5.8, 2.1), xlabel="OPT-6.7B WikiText perplexity (lower is better)")
+
+# ---------------------------------------------------------------------------
+# 14. Two regimes on a schematic roofline (copied from Lecture 10)
+# ---------------------------------------------------------------------------
+sp.roofline_steps(out / "roofline_int", [
+    ("Decode, INT4: 3.1×", 20.0, "memory"),
+    ("Large-batch MLP, INT8: 2×", 3000.0, "compute"),
+], note="Schematic axes")
+
+# ---------------------------------------------------------------------------
+# 15. Bytes per token for GPT-2 XL on the phone: fused against unfused
+#     dequantization (Napkin Math 10.4; unfused traffic derived from Sec. 10.4.1)
+# ---------------------------------------------------------------------------
+segs = [
+    ("FP16", [(3.0, "memory", "FP16 weights, 3 GB"), (0.31, "neutral", "")], "3.31 GB, 65 ms"),
+    ("INT4, fused", [(0.75, "data", ""), (0.31, "neutral", "")], "1.06 GB, 21 ms"),
+    ("INT4, separate\ndequantize pass",
+     [(0.75, "data", ""), (3.0, "danger", "write FP16, 3 GB"), (3.0, "memory", "read FP16, 3 GB"),
+      (0.31, "neutral", "")], "7.06 GB, ≈138 ms"),
+]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.3))
+    for i, (name, parts, tot) in enumerate(segs):
+        y = 2 - i
+        vis = 1.0 if (i < 2 or k == 2) else 0.0
+        x = 0
+        for v, ck, lab in parts:
+            ax.barh(y, v, left=x, color=C[ck], height=0.6, alpha=vis, edgecolor="white")
+            if lab:
+                ax.text(x + v / 2, y, lab, ha="center", va="center", fontsize=10,
+                        color="white", fontweight="bold", alpha=vis)
+            x += v
+        ax.text(x + 0.1, y, tot, va="center", fontsize=12, fontweight="bold",
+                color=C["danger"] if i == 2 else C["text"], alpha=vis)
+        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
+                va="center", fontsize=12, fontweight="bold", color=C["text"], alpha=vis)
+    ax.text(0.0, -0.75, "green: packed INT4 weights, 0.75 GB;  gray: FP16 KV cache, 0.31 GB",
+            fontsize=10, color=C["neutral"])
+    ax.set_xlim(0, 10)
+    ax.set_ylim(-1.0, 2.5)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel("GB read and written per token at 51.2 GB/s")
+    sp.save(fig, out / f"dequant_step{k}.svg")
+
+# ---------------------------------------------------------------------------
+# 16. MobileNetV2 on a Pixel 2 (Krishnamoorthi 2018, Table 7)
+# ---------------------------------------------------------------------------
+px_rows = [
+    dict(label="FP32, CPU", value=105, color="neutral", text="105 ms"),
+    dict(label="INT8, CPU", value=63, color="compute", text="63 ms (1.7×)"),
+    dict(label="INT8, DSP", value=15.5, color="data", text="15.5 ms (6.8×)"),
+]
+bars_save(out / "pixel2.svg", px_rows, [1, 1, 1], xlim=(0, 150), size=(5.0, 1.9),
+          vlines=[(33.3, "33 ms frame", "danger")], boxed=True,
+          xlabel="MobileNetV2 on a Pixel 2, one image (ms)")
+
+# ---------------------------------------------------------------------------
+# 17. Part 1 recall: weight streaming and the blur waterfall (copied code)
+# ---------------------------------------------------------------------------
+stream_rows = [
+    dict(label="MobileNetV2, FP32", value=0.27, color="memory",
+         text="0.27 ms: 1% of a frame"),
+    dict(label="ResNet-50, FP32", value=2.0, color="memory", text="2 ms"),
+    dict(label="GPT-2 XL, FP16", value=59, color="danger", text="59 ms per token"),
+]
+bars_save(out / "stream.svg", stream_rows, [1, 1, 1], xlim=(0, 80), size=(4.6, 2.2),
+          vlines=[(33.3, "33 ms frame", "compute")], boxed=True,
+          xlabel="Read every weight once at 51.2 GB/s (ms)")
+
+stages = ["FP32\nCPU", "Pruned\nCPU", "Pruned INT8\naccelerator"]
+memv = [14.0, 10.4, 2.6]
+timev = [125, 87, 20]
+for k in (2, 3):
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.3))
+    for ax, vals, ck, unit, ttl in ((a1, memv, "memory", "MB", "Weight memory (MB)"),
+                                    (a2, timev, "compute", "ms", "Frame time (ms)")):
+        for i, v in enumerate(vals):
+            a = 1.0 if i < k else 0.0
+            ax.bar(i, v, color=C[ck], width=0.7, alpha=a)
+            inside_bar = ck == "compute" and v < 40
+            ax.text(i, v / 2 if inside_bar else v + max(vals) * 0.03, f"{v:g} {unit}",
+                    ha="center", va="center" if inside_bar else "bottom",
+                    fontsize=10 if inside_bar else 11, fontweight="bold",
+                    color="white" if inside_bar else C[ck], alpha=a)
+        ax.set_xticks(range(3))
+        ax.set_xticklabels(stages, fontsize=9)
+        ax.set_ylim(0, max(vals) * 1.2)
+        ax.set_title(ttl, fontsize=12, fontweight="bold")
+        ax.tick_params(axis="y", labelsize=10)
+    a2.axhline(33, color=C["danger"], lw=1.5, ls="--")
+    a2.text(2.45, 33, " 33 ms\n budget", color=C["danger"], fontsize=11, fontweight="bold",
+            ha="left", va="center", clip_on=False)
+    fig.text(0.01, -0.02, "Illustrative scenario (Example 10.1)", fontsize=9,
+             color=C["neutral"])
+    fig.tight_layout(w_pad=1.5)
+    sp.save(fig, out / f"waterfall_step{k}.svg")
+
+print("figures written")
