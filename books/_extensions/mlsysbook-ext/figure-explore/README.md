@@ -35,6 +35,15 @@ behavior, deterministic rendering, and surrounding filter compatibility.
 The catalog review record distinguishes these checks from semantic judgment
 and records the remaining source conflicts.
 
+The final book-code snapshot also passed all eight full-volume PDF/EPUB builds.
+All PDF extracted text and page counts match the earlier static baseline;
+six figure pages were visually inspected, including four pixel-identical memory
+and state examples. EPUBs retain static figures without Explore controls,
+runtime assets, or broken image references. The two intentionally seeded
+Volume I SVGs match the reviewed HTML artwork exactly. The existing malformed
+Volume I dependency-map target remains part of the four held source conflicts.
+This is representative visual verification, not an audit of every PDF page.
+
 Source and artwork freshness guards fail back to Diagram if either changes.
 The source digest ignores enrollment attributes only. SVG digests ignore
 metadata and generated identifier names, preserving geometry, text, and colors.
