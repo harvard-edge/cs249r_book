@@ -122,7 +122,7 @@ PEAK, BW = 312.0, 2.04       # TFLOP/s, TB/s
 RIDGE = PEAK / BW            # about 153 FLOP/byte
 
 
-def roofline(name, parts, points=(), peak2=False, arrow=False, qmark=False):
+def roofline(name, parts):
     xs = np.logspace(-1, 4, 400)
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
     slope = xs * BW
@@ -141,26 +141,6 @@ def roofline(name, parts, points=(), peak2=False, arrow=False, qmark=False):
         ax.axvline(RIDGE, color=C["neutral"], lw=1.2, ls="--")
         ax.text(RIDGE * 1.1, 0.25, "Ridge\n153 FLOP/byte", color=C["neutral"],
                 fontsize=10, va="bottom")
-    if peak2:
-        r2 = 2 * PEAK / BW
-        m = xs >= r2
-        ax.plot(xs[xs <= r2], xs[xs <= r2] * BW, color=C["memory"], lw=1.5, ls=":")
-        ax.plot(xs[m], [2 * PEAK] * m.sum(), color=C["compute"], lw=2, ls=":")
-        ax.text(3000, 2 * PEAK * 1.25, "A chip with 2× FLOP/s", color=C["compute"], fontsize=10,
-                ha="center", va="bottom")
-    for label, x, ck, dx, dy, ha in points:
-        y = min(PEAK, x * BW)
-        ax.plot([x], [y], "o", ms=11, color=C[ck], mec="white", mew=1.5, zorder=5)
-        ax.annotate(label, (x, y), xytext=(dx, dy), textcoords="offset points",
-                    ha=ha, fontsize=11, fontweight="bold", color=C[ck])
-    if arrow:
-        ax.annotate("", xy=(256, PEAK), xytext=(1.3, 1.0 * BW * 1.3),
-                    arrowprops=dict(arrowstyle="-|>", color=C["neutral"], lw=2))
-        ax.text(0.13, 1200, "Batching: batch B reuses\neach weight B times", color=C["neutral"],
-                fontsize=10, ha="left", va="center", style="italic")
-    if qmark:
-        ax.text(1.0, 6, "???", color=C["danger"], fontsize=18, fontweight="bold",
-                ha="center")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(0.1, 1e4)
@@ -178,12 +158,63 @@ def roofline(name, parts, points=(), peak2=False, arrow=False, qmark=False):
 roofline("roofline_step1", ["slope"])
 roofline("roofline_step2", ["slope", "ceiling"])
 roofline("roofline_step3", ["slope", "ceiling", "ridge"])
-RESNET = ("ResNet-50, batch 1: 146", 146.0, "memory", -12, -4, "right")
-roofline("roofline_resnet", ["slope", "ceiling", "ridge"], points=[RESNET])
-DECODE = ("Text generation,\nbatch 1: ≈1", 1.0, "danger", 8, -30, "left")
-roofline("roofline_decode_q", ["slope", "ceiling", "ridge"], peak2=True, qmark=True)
-roofline("roofline_decode_a", ["slope", "ceiling", "ridge"], points=[DECODE],
-         peak2=True, arrow=True)
+
+
+def roofline_col(name, point=None, peak2=False, arrow=False, qmark=False):
+    """The same A100 roofline, drawn at the size of a half-slide column
+    (about 3.3 x 2.05 in) so its 12 pt labels are not shrunk. The slope label
+    is left off: the full-width build on the previous slide teaches it."""
+    xs = np.logspace(-1, 4, 400)
+    fig, ax = sp.plt.subplots(figsize=(3.3, 2.05))
+    m = xs <= RIDGE
+    ax.plot(xs[m], xs[m] * BW, color=C["memory"], lw=3.5)
+    ax.plot(xs[~m], [PEAK] * (~m).sum(), color=C["compute"], lw=3.5)
+    ax.text(1500, PEAK * 0.72, "312 TFLOP/s", color=C["compute"], fontsize=12,
+            fontweight="bold", ha="center", va="top")
+    ax.axvline(RIDGE, color=C["neutral"], lw=1.2, ls="--")
+    ax.text(RIDGE * 1.15, 0.22, "Ridge\n153", color=C["neutral"], fontsize=12,
+            va="bottom")
+    if peak2:
+        r2 = 2 * PEAK / BW
+        ax.plot(xs[xs <= r2], xs[xs <= r2] * BW, color=C["memory"], lw=1.5, ls=":")
+        ax.plot(xs[xs >= r2], [2 * PEAK] * (xs >= r2).sum(), color=C["compute"],
+                lw=2, ls=":")
+        ax.text(2200, 2 * PEAK * 1.2, "2× FLOP/s", color=C["compute"], fontsize=12,
+                ha="center", va="bottom")
+    if point:
+        label, x, ck, dx, dy, ha, va = point
+        y = min(PEAK, x * BW)
+        ax.plot([x], [y], "o", ms=11, color=C[ck], mec="white", mew=1.5, zorder=5)
+        ax.annotate(label, (x, y), xytext=(dx, dy), textcoords="offset points",
+                    ha=ha, va=va, fontsize=12, fontweight="bold", color=C[ck])
+    if arrow:
+        ax.annotate("", xy=(256, PEAK), xytext=(1.3, 1.3 * BW),
+                    arrowprops=dict(arrowstyle="-|>", color=C["neutral"], lw=2))
+        ax.text(4, 6, "batch B", color=C["neutral"], fontsize=12,
+                fontweight="bold", ha="left", va="top")
+    if qmark:
+        ax.text(1.0, 6, "???", color=C["danger"], fontsize=18, fontweight="bold",
+                ha="center")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(0.1, 1e4)
+    ax.set_ylim(0.15, 3000)
+    ax.minorticks_off()
+    ax.set_xticks([1, 10, 100, 1000])
+    ax.set_xticklabels(["1", "10", "100", "1,000"], fontsize=12)
+    ax.set_yticks([1, 10, 100, 1000])
+    ax.set_yticklabels(["1", "10", "100", "1,000"], fontsize=12)
+    ax.set_xlabel("FLOP per byte (log scale)", fontsize=12)
+    ax.set_ylabel("TFLOP/s (log scale)", fontsize=12)
+    sp.save(fig, out / f"{name}.svg")
+
+
+roofline_col("roofline_resnet",
+             point=("ResNet-50,\nbatch 1: 146", 146.0, "memory", -10, 4, "right", "bottom"))
+roofline_col("roofline_decode_q", peak2=True, qmark=True)
+roofline_col("roofline_decode_a",
+             point=("Decode,\nbatch 1: ≈1", 1.0, "danger", 6, -8, "left", "top"),
+             peak2=True, arrow=True)
 
 
 # ---------------------------------------------------------------------------
@@ -268,23 +299,41 @@ trends()
 # 9. Energy per inference across tiers, redrawn at slide size with the
 #    values printed on the book's figure (System Paradigms, fig. 7,
 #    EnergyAnchors): 10 μJ, 2.6 mJ, 15.9 mJ, 75.5 mJ, 1 kJ; span 100,000,000×.
+#    Step 2 adds Napkin Math 2.5: sending 1 MB by radio costs about 100 mJ,
+#    39 times the whole phone's 2.6 mJ; the NPU alone uses about 0.1 mJ.
 # ---------------------------------------------------------------------------
-def energy():
+def energy(step):
     rows = [
         ("TinyML: keyword spotting", 10e-6, "compute", "≈10 μJ"),  # Greek mu: Helvetica slants the micro sign
         ("Mobile: MobileNetV2, phone", 2.6e-3, "memory", "≈2.6 mJ"),
+        ("Mobile: send 1 MB by radio", 0.1, "danger", "≈100 mJ: 39× the phone"),
         ("Edge: ResNet-50, Jetson", 15.9e-3, "data", "≈15.9 mJ"),
         ("Cloud: ResNet-50, A100", 75.5e-3, "danger", "≈75.5 mJ"),
         ("Cloud: LLM query (anchor)", 1e3, "danger", "≈1 kJ"),
     ]
-    fig, ax = sp.plt.subplots(figsize=(5.8, 2.55))
+    fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
     n = len(rows)
     for i, (label, v, ck, txt) in enumerate(rows):
         y = n - 1 - i
-        ax.barh(y, v, left=1e-6, color=C[ck], height=0.62)
+        send = label.startswith("Mobile: send")
+        shown = step == 2 or not send
+        alpha = 1.0 if shown else 0.0  # hidden rows keep their slot
+        if send:
+            ax.barh(y, v, left=1e-6, height=0.62, facecolor="white",
+                    edgecolor=C[ck], lw=2.2, ls="--", alpha=alpha)
+        else:
+            ax.barh(y, v, left=1e-6, color=C[ck], height=0.62)
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
-                va="center", fontsize=12, fontweight="bold", color=C["text"])
-        ax.text(v * 2.2, y, txt, va="center", fontsize=12, fontweight="bold", color=C[ck])
+                va="center", fontsize=12, fontweight="bold",
+                color=C["danger"] if send else C["text"], alpha=alpha)
+        ax.text(v * 2.2, y, txt, va="center", fontsize=12, fontweight="bold",
+                color=C[ck], alpha=alpha)
+    # the phone's NPU alone, inside the whole-phone bar
+    ynpu = n - 2
+    ax.plot([1e-4, 1e-4], [ynpu - 0.31, ynpu + 0.31], color="white", lw=2.5,
+            alpha=1.0 if step == 2 else 0.0)
+    ax.text(1e-4, ynpu + 0.36, "NPU alone ≈0.1 mJ", color=C["memory"], fontsize=10,
+            fontweight="bold", ha="center", va="bottom", alpha=1.0 if step == 2 else 0.0)
     ax.annotate("", xy=(4e5, n - 1), xytext=(4e5, 0),
                 arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=2))
     ax.text(6e5, (n - 1) / 2, "100,000,000×", color=C["danger"], fontsize=12,
@@ -299,9 +348,48 @@ def energy():
     ax.grid(axis="x", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     ax.set_xlabel("Energy per inference (joules, log scale)")
-    sp.save(fig, out / "energy_per_inference.svg")
+    sp.save(fig, out / f"energy_per_inference_step{step}.svg")
 
 
-energy()
+for k in (1, 2):
+    energy(k)
+
+
+# ---------------------------------------------------------------------------
+# 10. Smart doorbell scorecard on the ESP32-S3 (System Paradigms, S2.3.2 and
+#     fig. 3): 0.5 MB of weights fill 11.9% of 4.2 MB flash; 25 MFLOP at
+#     about 0.25 GFLOP/s plus 1 ms overhead = 101 ms per frame. Step 1: the
+#     200 ms chime, 101 / 200 = 51% (derived). Step 2: a 50 ms chime, 202%.
+# ---------------------------------------------------------------------------
+def doorbell(step):
+    lat = 101 / 200 * 100 if step == 1 else 202.0
+    lat_txt = "101 ms of 200 ms: 51%" if step == 1 else "101 ms of 50 ms: 202%"
+    rows = [("Latency\nper frame", lat, "danger" if lat > 100 else "data", lat_txt),
+            ("Weights in\n4.2 MB flash", 11.9, "data", "11.9%")]
+    fig, ax = sp.plt.subplots(figsize=(4.0, 2.3))
+    for i, (label, v, ck, txt) in enumerate(rows):
+        y = 1 - i
+        ax.barh(y, v, color=C[ck], height=0.55)
+        ax.text(-0.02, y, label, transform=ax.get_yaxis_transform(), ha="right",
+                va="center", fontsize=12, fontweight="bold", color=C["text"])
+        if i == 0:  # the latency value sits above its bar, so it never moves
+            ax.text(2, y + 0.34, txt, va="bottom", ha="left", fontsize=12,
+                    fontweight="bold", color=C[ck], zorder=4,
+                    bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
+        else:
+            ax.text(v + 4, y, txt, va="center", ha="left", fontsize=12,
+                    fontweight="bold", color=C[ck])
+    ax.axvline(100, color=C["neutral"], lw=2, ls="--")
+    ax.set_xlim(0, 230)
+    ax.set_ylim(-0.5, 1.9)
+    ax.set_yticks([])
+    ax.set_xticks([0, 100, 200])
+    ax.set_xticklabels(["0", "100%\nbudget", "200%"], fontsize=12)
+    ax.spines["left"].set_visible(False)
+    sp.save(fig, out / f"doorbell_step{step}.svg")
+
+
+for k in (1, 2):
+    doorbell(k)
 
 print("figures written")
