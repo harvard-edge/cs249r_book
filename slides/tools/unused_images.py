@@ -29,7 +29,9 @@ def main():
             continue
         stem = f.stem
         prefix = re.sub(r"\d+$", "", stem)
-        if stem in src or (prefix and prefix != stem and prefix in src):
+        # A whole-name match: "cover_x" inside "cover_x_blueprint" is not a use.
+        whole = re.search(re.escape(stem) + r"(?![A-Za-z0-9_])", src)
+        if whole or (prefix and prefix != stem and prefix in src):
             continue
         print(f)
 
