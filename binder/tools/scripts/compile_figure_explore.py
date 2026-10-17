@@ -53,29 +53,11 @@ def validate(row, original):
         return
     if row.get('artwork_reviewed') is not True:
         raise ValueError(f'{key}: ready without artwork review')
-    if row.get('script'):
-        for field in ('name', 'script', 'stylesheet'):
-            if not row.get(field):
-                raise ValueError(f'{key}: missing {field}')
-        return
-    for field in ('title', 'question', 'scope', 'regions', 'steps'):
+    if not row.get('script'):
+        raise ValueError(f'{key}: highlight-only tours are archived; ready lessons require a stateful implementation')
+    for field in ('name', 'script', 'stylesheet'):
         if not row.get(field):
-            raise ValueError(f'{key}: empty {field}')
-    regions = row['regions']
-    used = set()
-    for name, region in regions.items():
-        x, y, w, h = [region[k] for k in ('x', 'y', 'w', 'h')]
-        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (x, y, w, h)) or min(x, y) < 0 or min(w, h) <= 0 or x+w > 1.000001 or y+h > 1.000001 or not region.get('label'):
-            raise ValueError(f'{key}: invalid region {name}')
-    for step in row['steps']:
-        if not step.get('title') or not step.get('description') or not step.get('focus'):
-            raise ValueError(f'{key}: incomplete step')
-        unknown = set(step['focus']) - set(regions)
-        if unknown:
-            raise ValueError(f'{key}: unknown focus {unknown}')
-        used.update(step['focus'])
-    if set(regions) != used:
-        raise ValueError(f'{key}: unused regions {set(regions)-used}')
+            raise ValueError(f'{key}: missing {field}')
 
 
 def figure_match(text, figure):

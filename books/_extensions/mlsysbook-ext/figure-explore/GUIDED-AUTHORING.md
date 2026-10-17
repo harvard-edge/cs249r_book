@@ -1,4 +1,24 @@
-# Original-art guided figures
+# Archived guided-annotation authoring
+
+The mass guided-annotation rollout is withdrawn. This document describes its
+legacy manifest format for maintenance and historical review; it is not an
+instruction to enroll more figures. Retain the original diagram when a player
+would only move an outline and narrate unchanged artwork. DAM conceptual triads,
+taxonomies, chapter maps, and static topologies do not earn animation by having
+several labeled parts.
+
+For a new Explore view, follow README.md selection criteria and implement a
+mechanism whose state or declared parameter visibly changes. A meaningful
+change can include a value being computed, data moving, a resource being retained
+or released, a dependency becoming ready, or a permission being granted/refused.
+The reader must be able to inspect the consequence. Do not disguise caption
+repetition as a state transition, and do not animate every figure to meet a quota.
+
+The compiler rejects `ready` entries without a stateful implementation script.
+Keep archived annotation manifests static; changing a status must not reenroll
+a highlight-only tour. A script alone is not a teaching-quality approval.
+
+The legacy format below is retained as implementation history only.
 
 `guided-figure.js` registers the `guided-figure` factory. This is an **annotation**
 treatment, not a numerical simulation or animated execution model. It keeps the

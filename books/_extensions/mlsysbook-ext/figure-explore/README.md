@@ -4,55 +4,79 @@ Opt-in Diagram / Explore views inside an existing numbered Quarto figure.
 The static figure, caption, alt text, numbering, and cross-reference anchor
 remain owned by the chapter. No post-render HTML patch is required.
 
-## Series rollout
+## Selection: changing state must teach something
 
-The four-volume registry is generated from reviewed `lessons/*.json` files.
-Two treatments share the same bounded Diagram / Explore frame:
+Keep a figure static unless interaction makes its mechanism easier to understand.
+An Explore view earns its place when a reader can follow an actual change in
+values, location, ownership, lifetime, dependencies, resource use, or permission,
+or vary a declared parameter and observe a meaningful consequence. The caption
+and surrounding prose remain sufficient for the static textbook.
 
-- Guided annotations preserve the original artwork and focus authored regions.
-  They do not simulate execution or invent values. Dense diagrams have an
-  Enlarge view with the same state, controls, and readable narration.
-- Specialized lessons expose changing ownership, storage, partial results,
-  scheduling, branches, or permission state. Their assumptions and accounting
-  boundaries remain explicit.
+Do not add a player merely to highlight parts of an unchanged diagram while
+repeating its description. Narrated slideshows and blue focus boxes do not
+constitute an animated mechanism. Taxonomies, topologies, conceptual triangles,
+and chapter maps normally remain static. In particular, the DAM triad remains
+a static conceptual diagram. A topology deserves interaction only when traffic,
+queueing, failures, or another relevant state actually changes.
 
-Every canonical catalog entry has a reviewed treatment or an explicit static /
-source-conflict reason. A source conflict is not an implemented enhancement.
-The catalog reports the original proposal separately from the delivered form.
+Selection requires four answers:
 
-The reviewed rollout contains 690 enhancements: 215 in Volume I, 258 in
-Volume II, 89 in Volume III, and 128 in Volume IV. Of these, 674 are guided
-annotations and 16 are specialized stateful lessons. Seventeen cataloged
-figures remain static by design. The four previously held source conflicts
-were corrected with explicit user approval, reviewed, and enrolled; no blocked
-catalog entries remain. Coverage is not an animation quota or a claim that
-every figure benefits from changing machine state.
+1. What precise systems question does the figure teach?
+2. What changes visibly, and how does the state demonstrate cause and effect?
+3. What can the reader learn by stepping or varying a parameter that the static
+   figure and prose do not already convey as clearly?
+4. Does that learning value justify the controls and added visual complexity?
 
-Historical validation covered the original 686-player runtime sweep, refined
-four-profile projection/capture pass (2,744 screenshots with recorded retries),
-a separate 16-lesson runtime recheck, and actual-chapter visual review by the
-owning authors. Those totals describe that earlier snapshot, not a completed
-690-player sweep. Final source/artwork integrity passed for all 690 entries
-across 83 chapter pages. The four approved additions passed full runtime checks in four profiles
-(16 runtime screenshots), plus all sequence-stage and Enlarge captures (68 each),
-with actual-theme visual review. The catalog review record records their exact
-results and keeps runtime checks separate from semantic
-judgment. The 24 focused tests cover compiler enrollment, static format behavior,
-deterministic rendering, and surrounding filter compatibility.
+Preserve the original objects, labels, assumptions, topology, palette, and
+caption. State any worked-case simplification. Reading-time playback must not
+imply measured machine latency. Do not invent counters or hardware effects to
+make a conceptual diagram appear dynamic. There is no animation quota.
 
-Earlier static verification passed all eight full-volume PDF/EPUB builds, with
-unchanged PDF text/page counts before the approved source repairs. It confirmed
-static EPUB behavior and representative rendered figure pages, including the
-seeded MNIST and QKV diagrams. The four approved source corrections intentionally
-change captions, alt text, or frontmatter markup in the final static outputs;
-all four final EPUBs preserve static images under all 707 canonical figure
-targets, without enhancement runtime, controls, or broken image references.
-Only the intentionally corrected coreset SVG differs from the earlier image
-assets. The catalog review record records final build and comparison results;
-no unchanged-whole-book-text claim applies after the approved corrections.
-All four final PDF builds also succeeded; the four corrected figure pages were
-rendered and inspected. Representative page checks are not an audit of every
-PDF page.
+## Selective rollout
+
+All 674 highlight-only players have been withdrawn. Two of their figures now
+have substantive convolution and quantization lessons; the other 672 return to
+static presentation. Archived manifests and original proposals are planning
+and review evidence, not implemented animations. The catalog
+defaults to the implemented stateful subset and can show all retained figures.
+
+The retention audit keeps 14 existing mechanisms and withdraws the dataloader
+plot-cursor and release-record flowchart players. Their current controls do not
+expose enough changing system state to justify a player. Convolution and
+quantized arithmetic add two numerical worked cases, giving 16 registered
+lessons: 5 / 4 / 4 / 3 by volume. The other 691 cataloged figures remain static;
+no guided-annotation players are enrolled. Fresh final-build loading, ID, and freshness checks passed for all 16. An
+absence scan of 146 HTML files confirmed the former image tours and DAM triad
+remain static.
+
+Convolution computes products and partial sums as a shared filter moves between
+input windows and completes output values. Quantized arithmetic follows float
+operands through INT8 representation, corrected INT32 products/accumulation,
+and requantized output; changing scale exposes rounding error. Both state their
+worked-case assumptions. Each retained lesson's specific dynamic teaching value
+appears in the catalog and review record.
+
+Fresh four-profile runtime proof covers 15 unchanged factories on build 182142
+and convolution on final build 183145 after a responsive-layout fix. The two new
+lessons passed 172 state/profile captures with independent numeric and overflow
+checks; quantization also passed eight states at an alternate scale. Human
+review inspected convolution window contacts and representative final chapter
+renders. This is a scoped combination of checks, not an assertion that all 16
+full runtime tests were rerun on the final build or a blanket semantic approval.
+
+Historical coverage QA belongs to the withdrawn rollout: the 686-player sweep,
+2,744 refined captures, later 690-entry integrity check, and four added guided
+players establish facts about that snapshot. They do not validate the selective
+set or justify keeping a slideshow. The review record retains those results as
+history and records fresh mechanism, runtime, and visual checks separately.
+
+PDF and EPUB retain static figures. Fresh focused PDF/EPUB builds of the two
+new lessons preserve their original artwork and captions. Their EPUB figure
+assets match the earlier full-volume static output byte for byte and contain no
+enhancement runtime, controls, or broken image references. Both PDF figure pages
+were rendered and inspected. This verifies two chapter targets, not a new
+whole-book static rebuild. Previously approved manuscript corrections remain
+valid independently of animation enrollment.
 
 Source and artwork freshness guards fail back to Diagram if either changes.
 The source digest ignores enrollment attributes only. SVG digests ignore
@@ -78,6 +102,11 @@ python3 binder/tools/scripts/compile_figure_explore.py --require-complete --chec
 # Rebuild to package the generated volume bundles and registered assets.
 ./binder/binder build html --all --parallel 4 --skip-validate
 ```
+
+The compiler rejects `ready` lessons without a declared stateful implementation
+script. Archived highlight-only manifests must remain static; changing their
+status cannot silently reenroll them. This guard enforces enrollment structure,
+not teaching quality.
 
 `--require-complete` checks catalog coverage and schema; it does not certify
 blocked entries or replace visual and runtime review. The explicit compilation
