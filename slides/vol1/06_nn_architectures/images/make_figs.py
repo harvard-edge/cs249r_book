@@ -22,6 +22,14 @@ unless noted:
     cache passes the weights near 10K, as the chapter states.
   - Capacity wall: 100M items x 128 x 4 bytes = 51.2 GB; two tables
     102.4 GB; 80 GB A100 (Napkin Math 6.2).
+  - Added 2026-10-17 for the Part 1 / Part 2 split:
+    MNIST detectors: 32 dense features 25,088 weights against 32 shared
+    3x3 filters, 288 weights, 87x (Example 6.1).
+    Depthwise separable count for 3x3, 64 channels in and out, per output
+    position: standard 36,864 MACs; depthwise 576 + pointwise 4,096 = 4,672
+    (Sec. 6.3.5 formula; ratio 7.9x derived).
+    KWS DS-CNN: 200K parameters, 800 KB in FP32, 200 KB in INT8
+    (Lighthouse 6.3, Table 10).
 
 Run from this folder: python3 make_figs.py
 """
@@ -253,4 +261,29 @@ def lighthouse_plot():
 
 
 lighthouse_plot()
+
+# --- Dense segment: weights per detector, dense against shared ------------
+MARGINS.update(left=0.33, right=0.70, bottom=0.30, top=0.97)
+sp.hbars_steps(out / "mnist_detectors", [
+    ("32 dense features", 25088, "danger", "25,088"),
+    ("32 shared 3×3 filters", 288, "compute", "288: 87× fewer"),
+], "weights", xlabel="Weights for 32 feature detectors on a 28×28 image (log scale)",
+    size=sp.SHORT)
+
+# --- Depth and efficiency segment: factoring a 3x3 convolution ------------
+MARGINS.update(left=0.36, right=0.72, bottom=0.30, top=0.97)
+sp.hbars_steps(out / "depthwise", [
+    ("Standard 3×3", 36864, "danger", "36,864"),
+    ("Depthwise + pointwise", 4672, "compute", "576 + 4,096 = 4,672"),
+], "MACs", log=False,
+    xlabel="Multiply-adds per output position (3×3 filter, 64 channels in and out)",
+    size=sp.SHORT)
+
+# --- Depth and efficiency segment: KWS weight bytes ------------------------
+MARGINS.update(left=0.30, right=0.80, bottom=0.30, top=0.97)
+sp.hbars(out / "kws_bytes.svg", [
+    ("FP32 weights", 800, "danger", "800 KB"),
+    ("INT8 weights", 200, "data", "200 KB"),
+], "KB", log=False, xlabel="KWS DS-CNN, 200K weights (KB)", size=sp.SHORT)
+MARGINS.clear()
 print("figures written")

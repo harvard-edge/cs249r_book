@@ -1,7 +1,8 @@
 chapter: 06_nn_architectures
 lecture: 6
-title: Network Architectures
+title: "Network Architectures, Part 1: Dense, Convolutional, and Recurrent Networks"
 minutes: 75
+notes_minutes: 71
 target_ideas: 30
 layer: models
 thesis: "Each architecture is a bet about the structure of the data, and each bet commits the machine to its own compute and memory signature."
@@ -10,7 +11,7 @@ hook:
   minutes: "0-5"
   setup: "The Netflix Prize leaderboard, 2009: a $1 million award for a 10 percent better rating predictor. Students predict whether Netflix shipped the winning ensemble."
   question_to_class: "Did Netflix put the winning algorithm into production? (A) yes, (B) parts of it, (C) no."
-  payoff: "No. The earlier Progress Prize blend of 107 algorithms (8.43 percent) was built for 100 million ratings while production held about 5 billion; Netflix kept two of its algorithms and judged that the Grand Prize's extra accuracy did not justify the engineering. Accuracy is one column; what a model costs the machine is the rest of the table. The lecture builds that table."
+  payoff: "No. The earlier Progress Prize blend of 107 algorithms (8.43 percent) was built for 100 million ratings while production held about 5 billion; Netflix kept two of its algorithms and judged that the Grand Prize's extra accuracy did not justify the engineering. Accuracy is one column; what a model costs the machine is the rest of the table. Part 1 builds the columns for weights, work, bytes, and serial steps; Part 2 adds memory that grows with the input and tables larger than the device."
   sources:
     - "chapter War Story 6.1 (Johnston 2012, Ars Technica)"
     - "Amatriain and Basilico, Netflix Recommendations: Beyond the 5 stars, Netflix Tech Blog, April 2012; RecSys 2012 tutorial (107 algorithms, 8.43 percent, 100M against 5B ratings)"
@@ -18,149 +19,170 @@ hook:
 
 recall: "Lecture 5: the MNIST network spends 109,184 MACs per digit, and matrix multiply is over 99 percent of its forward-pass FLOPs (Neural Computation)."
 
-driving_question: "What does each architecture commit the machine to?"
+driving_question: "What does each structural bet commit the machine to?"
 
-running_example: "One accelerator, three requests (a camera frame, a prompt, a click), then the five lighthouses: ResNet-50, MobileNetV2, KWS, GPT-2 XL, DLRM (chapter Table 8)."
+running_example: "One accelerator, three requests (a camera frame, a prompt, a click); today prices the camera frame with the dense, convolutional, and recurrent families. ResNet-50, MobileNetV2, and KWS are the lighthouses; GPT-2 XL and DLRM belong to Part 2."
 
 goals:
-  - "Name the inductive bias of each family and the data structure it matches."
-  - "Count weights, multiply-accumulates, and bytes for dense, convolutional, recurrent, attention, and embedding layers."
-  - "Predict which limit binds a workload from its arithmetic intensity, state, or table size."
-  - "Explain why doubling a transformer's context quadruples its score work."
+  - "Name the bet each family makes about its data."
+  - "Count the weights, multiply-adds, and bytes of dense, convolutional, depthwise, and recurrent layers."
+  - "Explain how a convolution becomes one matrix multiply, and what that lowering costs in memory."
+  - "Predict whether compute, bandwidth, or a serial chain limits a layer."
 
 segments:
   - name: Dense
     question: "What does a layer with no assumptions cost?"
     read: "Network Architectures, 6.1 and 6.2"
-    minutes: 8.5
-    concept_questions: [1, 2, 3]
+    minutes: 14
+    concept_questions: [1, 2, 3, 4, 5]
   - name: Convolution
     question: "What does assuming locality buy?"
-    read: "6.3 and 6.4"
+    read: "6.3"
+    minutes: 17
+    concept_questions: [6, 7, 8, 9, 10]
+  - name: Depth
+    question: "What does it take to go deep, and to go small?"
+    read: "6.4 and 6.3.5"
     minutes: 12
-    concept_questions: [4, 5, 6, 7]
+    concept_questions: [11, 12, 13, 14, 15]
   - name: Recurrence
     question: "What does carrying state through time cost?"
     read: "6.5"
-    minutes: 6
-    concept_questions: [8, 9]
-  - name: Attention
-    question: "What does letting every token see every other token cost?"
-    read: "6.6 and 6.7"
-    minutes: 14.5
-    concept_questions: [10, 11, 12, 13]
-  - name: Embeddings
-    question: "Why is a recommender a memory machine?"
-    read: "6.8"
-    minutes: 7
-    concept_questions: [14]
-  - name: Choosing
-    question: "How do we choose, knowing what each family costs?"
+    minutes: 7.5
+    concept_questions: [16, 17, 18]
+  - name: Comparing
+    question: "How do these three families compare on one machine?"
     read: "6.9 and 6.10"
-    minutes: 12
-    concept_questions: [15]
+    minutes: 11
+    concept_questions: [19]
 
 concept_questions:
   - id: 1
     q: "What is an inductive bias, and why does every architecture have one?"
-    picture: "spectrum from strong prior, less data (CNN) through transformer to weak prior, more data (MLP); the five families with their data types"
-    numbers: "MNIST: 32 dense features need 25,088 weights; 32 3x3 filters need 288, 87x fewer per detector (Example 6.1)"
+    picture: "spectrum from strong prior, less data (CNN) through RNN and transformer to weak prior, more data (MLP)"
+    numbers: "ordering from 6.1 and 6.9.4"
     example: "Images have locality, language has order, tabular records have neither"
     read: "6.1, 6.2.1"
   - id: 2
+    q: "Does convolution save weights per detector or per network?"
+    picture: "two bars: 32 dense features 25,088 weights against 32 shared 3x3 filters 288"
+    numbers: "87x fewer per detector; small CNN 421,408 weights against the 784-128-64-10 MLP's 109,184, 96 percent in the CNN's dense head (Example 6.1)"
+    example: "MNIST"
+    read: "6.2.1"
+  - id: 3
     q: "What does a dense layer cost the machine?"
-    picture: "dense bipartite graph beside its weight matrix"
+    picture: "dense bipartite graph beside its weight counts"
     numbers: "784x128 = 100,352 weights; 2,048x2,048 = 4,194,304 weights, 16.8 MB in FP32 (6.2.3, 6.2.5)"
     example: "The MNIST reference layer"
     read: "6.2.3 to 6.2.5"
-  - id: 3
-    q: "What is arithmetic intensity, and why is a batch-one dense layer at 0.5 FLOP/byte?"
-    picture: "equation 2 revealed term by term; focus slide I = O / D"
-    numbers: "0.5 FLOP/byte at batch one in FP32; moving a weight costs about 139x its multiply-add (640 pJ against 4.6 pJ; Horowitz 2014)"
-    example: "Batching divides the ratio by the batch size (Lecture 5)"
-    read: "6.2.5"
   - id: 4
-    q: "How does weight sharing cut parameters?"
-    picture: "book Fig. 4 (convolution window); bars Dense 205M against Conv 37K"
-    numbers: "3x3x64x64 = 36,864 weights against 224^2 x 64 x 64, about 205 million; about 5,575x (Definition 6.3)"
-    example: "One 3x3 layer on a 224x224 feature map"
-    read: "6.3.2"
+    q: "What does one dense layer compute, number by number?"
+    picture: "the 4-pixel input, 4x3 weight matrix, three sums, ReLU, filled in cell by cell"
+    numbers: "outputs 0.59, -0.09, 0.45; after ReLU 0.59, 0, 0.45; 12 weights, 12 MACs (Example 6.2)"
+    example: "Part 2 opens attention with the same by-hand treatment"
+    read: "6.2.3"
   - id: 5
-    q: "Why is convolution compute bound when dense layers are not?"
-    picture: "intensity bars Dense 0.5 against ResNet-50 80.1 FLOP/byte"
-    numbers: "each weight reused at 50,176 positions; 1.85 billion MACs per layer; weights 147.5 KB against activations 12.8 MB (6.3.4); ResNet-50 80.1 FLOP/byte (Table 8)"
-    example: "ResNet-50, 25.6M parameters, 8.2 GFLOP per image"
-    read: "6.3.4"
+    q: "What is arithmetic intensity, and why is a batch-one dense layer at 0.5 FLOP/byte?"
+    picture: "equation 2 revealed term by term, plus the batch step; focus slide I = O / D"
+    numbers: "0.5 FLOP/byte at batch one in FP32; about 0.5 B with batch B; moving a weight costs about 139x its multiply-add (640 pJ against 4.6 pJ; Horowitz 2014)"
+    example: "Batching divides the weight bytes per example by B (Lecture 5)"
+    read: "6.2.5"
   - id: 6
-    q: "Why do deep networks need skip connections, and what do they cost?"
-    picture: "book Fig. 6 residual block"
-    numbers: "56-layer plain net worse than 20-layer; residual 56 layers 7.0 percent against 8.8 percent; residual add about 0.08 FLOP/byte (6.4.1)"
-    example: "ResNet-50"
-    read: "6.4"
+    q: "What do locality and sharing mean for a convolution?"
+    picture: "book Fig. 4 (convolution window)"
+    numbers: "a 3x3 window; the same 9 weights per input channel at every position"
+    example: "An edge is an edge wherever it appears"
+    read: "6.3.1, 6.3.2"
   - id: 7
-    q: "Do fewer FLOPs mean a faster model?"
-    picture: "ResNet-50 against MobileNetV2 card"
-    numbers: "MobileNetV2 3.5M parameters, 600 MFLOP, 13.7x fewer FLOPs; gains far less on datacenter GPUs at small batch (Perspective 6.1)"
-    example: "Depthwise separable convolution, about 8 to 9x fewer MACs"
-    read: "6.3.5"
+    q: "What is translation equivariance, and what does locality cost in reach?"
+    picture: "7x7 vertical edge and its shifted copy, with their 5x5 feature maps"
+    numbers: "outputs 3 and -3 shift by 2 columns with the input (Example 6.3); receptive field grows 2 pixels per 3x3 layer, three layers see 7x7 (6.3.2 self-check)"
+    example: "Pooling then makes the class label ignore position"
+    read: "6.3.2"
   - id: 8
-    q: "What does recurrence commit the hardware to?"
-    picture: "unrolled RNN chain, built one step at a time"
-    numbers: "100 -> 128: 29,184 MACs per step; 1,000 tokens means 1,000 ordered updates; LSTM four times the weights and MACs (6.5)"
-    example: "Keyword spotting on a microcontroller (fixed state budget)"
-    read: "6.5.2 to 6.5.5"
+    q: "How does weight sharing cut parameters?"
+    picture: "bars Dense 205M against Conv 37K"
+    numbers: "3x3x64x64 = 36,864 weights against 224^2 x 64 x 64, about 205 million; about 5,575x (Definition 6.3)"
+    example: "One 3x3 layer on a 224x224 feature map; the filter budget does not grow with the image"
+    read: "6.3.2"
   - id: 9
-    q: "Why does an RNN's state stay flat while a transformer's grows?"
-    picture: "log-log plot: RNN state (2 KB) against GPT-2 XL KV cache (307.2 KB per token)"
-    numbers: "512-d FP32 state 2 KB (6.5.5); GPT-2 XL 307.2 KB per token (6.7.4)"
-    example: "Mamba revives recurrence for decode-time state"
-    read: "6.5.5"
+    q: "Why is convolution compute bound when dense layers are not, and where does its memory go?"
+    picture: "intensity bars Dense 0.5 against ResNet-50 80.1 FLOP/byte"
+    numbers: "each weight reused at 50,176 positions; 1.85 billion MACs per layer; weights 147.5 KB against activations 12.8 MB per image (6.3.4); ResNet-50 80.1 FLOP/byte (Table 8)"
+    example: "Activation memory, not weights, binds CNN training"
+    read: "6.3.4"
   - id: 10
-    q: "What does attention compute?"
-    picture: "book Fig. 8 (they -> student, finish); softmax(QK^T / sqrt(d)) V built term by term"
-    numbers: "S^2 d MACs per head for each of the two products (6.6.3)"
-    example: "The trophy did not fit in the suitcase because it was too big / small"
-    read: "6.6.1 to 6.6.3"
+    q: "How does a convolution become one matrix multiply, and what does that cost?"
+    picture: "the 3x3 input and 2x2 filter unfolded into a 4x4 patch matrix, row by row"
+    numbers: "9 values become 16; for 3x3 filters up to 9 copies of each pixel (6.3.3)"
+    example: "Implicit GEMM computes addresses instead of storing copies; mobile runtimes often use direct convolution"
+    read: "6.3.3"
   - id: 11
-    q: "Why does doubling the context quadruple the cost?"
-    picture: "score-memory parabola, 4K then 8K tokens (12 heads, FP16, one layer)"
-    numbers: "4,096 tokens: 33.6 MB per head per layer; 100,000 tokens x 12 heads: 240 GB per layer, 7,680 GB for 32 layers (Napkin Math 6.1)"
-    example: "BERT's 512-token limit: 4,096 tokens would need 64x the score memory (Example 6.4)"
-    read: "6.6.4"
+    q: "Can one GPU run ResNet-50 at 30 frames a second?"
+    picture: "given card and the estimate revealed line by line"
+    numbers: "8.2 GFLOP per image; 30 x 8.2 = 246 GFLOP/s; 5 TFLOP/s effective gives 20.3x headroom; a 100 GFLOP detector needs 3 TFLOP/s, 1.7x (Napkin Math 6.3, Lighthouse 6.1)"
+    example: "A single stream at batch one runs well below the planning utilization"
+    read: "6.3.4, 6.9.5"
   - id: 12
-    q: "Why is the same transformer compute bound in prefill and memory bound in decode?"
-    picture: "book Fig. 12 prefill and decode"
-    numbers: "decode 1.0 FLOP/byte in FP16; GPT-2 XL 1.5B parameters, 3 GFLOP per token (Lighthouse 6.4)"
-    example: "A 70B model streams 140 GB of weights per token"
-    read: "6.7.4"
+    q: "Why do deep networks need skip connections, and what do they cost?"
+    picture: "residual block (chapter Fig. 6)"
+    numbers: "0.9^50 about 0.005; 56-layer plain net worse than 20-layer; residual 56 layers 7.0 percent against 8.8 percent; residual add about 0.08 FLOP/byte (6.4.1)"
+    example: "ResNet-50; Part 2's transformer block"
+    read: "6.4.1"
   - id: 13
-    q: "What grows as context grows: weights, KV cache, or scores?"
-    picture: "slide variant of the context-memory figure, built in three steps"
-    numbers: "GPT-2 XL: weights 3 GB FP16 fixed; KV passes the weights near 10K tokens; one layer's scores fill an 80 GB device near 41K (6.7.4)"
-    example: "Serving budgets the KV cache per request (Lecture 13)"
-    read: "6.7.4"
+    q: "Why does a transformer use LayerNorm rather than BatchNorm?"
+    picture: "three-column comparison from Table 4"
+    numbers: "Table 4 (6.4.2): normalization axis, batch dependence, typical use, train and serve identical or not"
+    example: "BatchNorm's running statistics as a source of training-serving skew"
+    read: "6.4.2"
   - id: 14
-    q: "Why is a recommender capacity bound?"
-    picture: "DLRM pipeline (bottom MLP, tables, interaction, top MLP); capacity bars against 80 GB"
-    numbers: "100M items x 128 x 4 B = 51.2 GB, 64 percent of 80 GB; two tables 102.4 GB (Napkin Math 6.2); DLRM 25B embedding parameters, 100 GB; recommenders up to 79 percent of Meta's AI inference cycles (Gupta et al. 2020)"
-    example: "Shrink, move, or partition the tables"
-    read: "6.8"
+    q: "How much work does factoring a convolution save, and does it become speed?"
+    picture: "two bars, standard 36,864 against depthwise plus pointwise 4,672; then the MobileNetV2 vote"
+    numbers: "3x3x64x64 = 36,864 MACs per position; 576 + 4,096 = 4,672; 7.9x, the fraction 1/64 + 1/9 (derived from the 6.3.5 formula); MobileNetV2 13.7x fewer FLOPs than ResNet-50, far less speedup on a datacenter GPU (Perspective 6.1)"
+    example: "On a phone CPU the savings do become speed"
+    read: "6.3.5"
   - id: 15
-    q: "How do the five lighthouses compare on one machine?"
-    picture: "intensity bars for the lighthouses (Table 8); the comparison table students fill in"
-    numbers: "ResNet-50 80.1, MobileNetV2 42.8, KWS 25, GPT-2 XL 0.50 FLOP/byte; DLRM n/a (Table 8)"
-    example: "One accelerator, three requests (6.1, 6.9)"
-    read: "6.9"
+    q: "Why does an always-on keyword spotter need 8-bit weights?"
+    picture: "two bars, 800 KB in FP32 against 200 KB in INT8"
+    numbers: "200K parameters; 800 KB FP32 against a few hundred kilobytes for the model; 200 KB INT8 (Lighthouse 6.3, Table 10)"
+    example: "Lecture 10 covers quantization"
+    read: "6.3.5"
+  - id: 16
+    q: "What does recurrence commit the hardware to?"
+    picture: "unrolled RNN chain, built one link at a time"
+    numbers: "100 -> 128: 29,184 MACs per step; 1,000 tokens means 1,000 ordered updates (6.5)"
+    example: "Keyword spotting on a microcontroller (fixed state budget)"
+    read: "6.5.2, 6.5.5"
+  - id: 17
+    q: "Why does a faster accelerator barely speed up a long sequence?"
+    picture: "predict card"
+    numbers: "batch-one step about 0.5 FLOP/byte; 1,000 serial steps (6.5.4, 6.5.5)"
+    example: "What helps: batching sequences, weights on chip, fused steps"
+    read: "6.5.4, 6.5.5"
+  - id: 18
+    q: "What does an LSTM add, and what does training keep?"
+    picture: "four gate boxes and two state boxes"
+    numbers: "four affine maps, 4x weights and MACs, 2x state (6.5.3); 2 KB inference state for 512-wide FP32; one state per step in training (6.5.2, 6.5.5)"
+    example: "Bridge: Part 2 removes the serial chain and pays in memory"
+    read: "6.5.2, 6.5.3"
+  - id: 19
+    q: "What limits each of today's models?"
+    picture: "comparison table students fill in"
+    numbers: "dense layer batch one 0.5; ResNet-50 80.1; MobileNetV2 42.8; KWS 25 FLOP/byte (equation 2, Table 8, FP32 weight-only proxy); RNN 0.5 per step"
+    example: "Netflix's Prize scored one column"
+    read: "6.9.1, 6.9.2"
 
 worked_examples:
   - name: "Dense layer intensity (equation 2)"
-    steps: ["given: d_in x d_out FP32 weights, batch one", "FLOPs = 2 d_in d_out", "bytes = 4 d_in d_out", "0.5 FLOP/byte", "far below any accelerator's balance: memory bound"]
+    steps: ["given: d_in x d_out FP32 weights, batch one", "FLOPs = 2 d_in d_out", "bytes = 4 d_in d_out", "0.5 FLOP/byte", "far below any accelerator's balance; batch B multiplies it by about B"]
   - name: "Weight sharing (Definition 6.3)"
     steps: ["given: 224x224x64 input, 64 outputs", "dense: 224^2 x 64 x 64 = about 205M", "conv: 3x3x64x64 = 36,864", "about 5,575x", "outputs differ in shape; the filter budget does not grow with resolution"]
-  - name: "Napkin Math 6.1: the quadratic bottleneck"
-    steps: ["given: 100,000 tokens, 12 heads, FP16", "1.2 x 10^11 scores", "240 GB per layer", "7,680 GB for 32 retained layers", "tile (FlashAttention) or compute fewer scores"]
-  - name: "Napkin Math 6.2: the capacity wall"
-    steps: ["given: 100M items, 128-wide, FP32", "51.2 GB", "64 percent of an 80 GB A100", "a second table: 102.4 GB, does not fit", "shrink, move, or partition"]
+  - name: "The im2col miniature (6.3.3)"
+    steps: ["given: 3x3 input, 2x2 filter", "each window becomes a row: 1 2 4 5; 2 3 5 6; 4 5 7 8", "students unfold the last: 5 6 8 9", "one GEMM against the flattened filter", "9 values became 16; implicit GEMM avoids the copies"]
+  - name: "Napkin Math 6.3: the throughput ceiling"
+    steps: ["given: ResNet-50 8.2 GFLOP, 30 FPS, 10 TFLOP/s at 50 to 60 percent", "246 GFLOP/s needed", "20.3x headroom", "a 100 GFLOP detector: 1.7x", "batch-one streams fall below the planning utilization"]
+  - name: "Depthwise separable count (6.3.5)"
+    steps: ["given: 3x3, 64 channels in and out", "standard 36,864 MACs per position", "depthwise 576 + pointwise 4,096 = 4,672", "7.9x, about 1/64 + 1/9", "the vote tests whether it becomes speed"]
 
 active_learning:
   - at_minute: 2
@@ -171,84 +193,78 @@ active_learning:
     type: retrieval
     prompt: "What share of the MNIST network's forward-pass FLOPs is matrix multiply?"
     answer: "Over 99 percent; 109,184 MACs per digit."
-  - at_minute: 28
+  - at_minute: 33
+    type: estimate
+    prompt: "Unfold the last 2x2 window of the 3x3 input into a row."
+    answer: "5, 6, 8, 9."
+  - at_minute: 37
+    type: estimate
+    prompt: "Can one GPU at 10 TFLOP/s peak run ResNet-50 at 30 frames a second?"
+    answer: "246 GFLOP/s needed against about 5 TFLOP/s effective: 20.3x headroom; a 100 GFLOP detector leaves 1.7x."
+  - at_minute: 49
     type: concept_question
     prompt: "MobileNetV2 has 13.7x fewer FLOPs than ResNet-50. On a datacenter GPU at small batch, is it 13.7x faster?"
     answer: "No. Depthwise layers have low intensity and leave matrix units idle; gains are far smaller, sometimes none."
-  - at_minute: 35
+  - at_minute: 56
     type: predict
     prompt: "A 1,000-step sequence on an accelerator with 10x the peak FLOP/s: 10x faster?"
     answer: "No. 1,000 ordered steps remain; at batch one each step is a memory-bound matrix-vector product, so more FLOP/s barely helps."
-  - at_minute: 42
-    type: predict
-    prompt: "Double the context from 4K to 8K tokens: score work grows by 2x, 4x, or 8x?"
-    answer: "4x (S squared)."
-  - at_minute: 55
-    type: estimate
-    prompt: "100M items, 128-wide, FP32: does the table fit an 80 GB accelerator? Two tables?"
-    answer: "51.2 GB, 64 percent; two tables 102.4 GB do not fit."
-  - at_minute: 61
+  - at_minute: 63
     type: diagnose
-    prompt: "Fill in the binding limit for each lighthouse."
-    answer: "ResNet-50 compute; MobileNetV2 latency on a phone; KWS power; GPT-2 XL decode bandwidth; DLRM capacity."
+    prompt: "Fill in the binding limit for each of today's models."
+    answer: "Dense batch one bandwidth; ResNet-50 compute; MobileNetV2 latency on a phone; KWS power; RNN the serial chain."
 
 open_questions:
   - "If transformers win at scale with weak priors, is there still a reason to design architectures by hand?"
-  - "Should a context window be priced by the token, when the cost grows faster than the tokens?"
+  - "Mamba keeps recurrence's fixed state and trains in parallel. Is a fixed state worth giving up attention's direct links?"
   - "Netflix chose a simpler model it could run. When is a few percent of accuracy worth a new system?"
 
 more_examples:
   - "Vision transformers matched CNNs on ImageNet only with far larger pretraining (Dosovitskiy et al. 2021; Fallacies)."
   - "Mamba: recurrence revived for its fixed decode-time state (Gu and Dao 2023)."
-  - "Grouped-query attention cuts KV cache size by sharing keys and values (Ainslie et al. 2023)."
-  - "FlashAttention removes score storage but not score arithmetic (Dao et al. 2022)."
-  - "Meta: recommendation models up to 79 percent of AI inference cycles (Gupta et al. 2020)."
+  - "RMSNorm drops mean centering and runs 7 to 64 percent faster than LayerNorm in its authors' tests (Zhang and Sennrich 2019; 6.4.2)."
 
 left_to_reading:
-  - concept: "Normalization variants (BatchNorm, LayerNorm, RMSNorm)"
-    why: "Secondary; one line in the skip-connection notes, table 4 in the chapter."
   - concept: "Architecture selection flowchart and the wildlife-monitoring worked example"
-    why: "Procedure better read than heard; the comparison activity practices the core of it."
-  - concept: "im2col details and implicit GEMM"
-    why: "Named on the convolution slide; owned in depth by Lectures 7 and 11."
+    why: "Procedure better read than heard; Part 2's comparison activity practices the core of it."
   - concept: "Data movement primitives (broadcast, scatter, gather, reduction)"
     why: "Previewed only; Lectures 8 and 11 use them."
 
 closing:
-  return_to_hook: "Netflix again: the 2009 ensemble won on the accuracy column alone. The table the class just built has four more columns, and Netflix's choice was a decision on those."
-  read_and_practice: ["Network Architectures, 6.1 to 6.10", "self-check questions in each section", "TinyTorch modules on convolution and attention"]
+  return_to_hook: "Netflix again: the 2009 ensemble won on the accuracy column alone. The table the class just built has the columns for weights, work, bytes, and serial steps; Part 2 adds the columns where the Netflix recommender itself lives."
+  read_and_practice: ["Network Architectures, 6.1 to 6.5", "self-check questions in each section", "TinyTorch convolution module"]
   further_reading:
-    - cite: "Network Architectures, 6.9 Comparing and Choosing Architectures"
-      why: "The counting rules and workload profile in one place."
+    - cite: "Network Architectures, 6.3.3 (im2col) and 6.4 (skip connections and normalization)"
+      why: "The lowering and the depth building blocks in full."
     - cite: "He et al., Deep Residual Learning for Image Recognition, CVPR 2016"
       url: "https://arxiv.org/abs/1512.03385"
       why: "Why depth needed skip connections."
-    - cite: "Vaswani et al., Attention Is All You Need, NeurIPS 2017"
-      url: "https://arxiv.org/abs/1706.03762"
-      why: "The transformer and its parallelism claim."
-    - cite: "Naumov et al., Deep Learning Recommendation Model for Personalization and Recommendation Systems, 2019"
-      url: "https://arxiv.org/abs/1906.00091"
-      why: "The DLRM lighthouse."
-    - cite: "Gupta et al., The Architectural Implications of Facebook's DNN-based Personalized Recommendation, HPCA 2020"
-      url: "https://arxiv.org/abs/1906.03109"
-      why: "Why recommenders dominate inference cycles and stress memory."
-  bridge: "Lecture 7: how does Python code become kernels on the hardware?"
+    - cite: "Howard et al., MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications, 2017"
+      url: "https://arxiv.org/abs/1704.04861"
+      why: "The depthwise separable factoring."
+    - cite: "Chetlur et al., cuDNN: Efficient Primitives for Deep Learning, 2014"
+      url: "https://arxiv.org/abs/1410.0759"
+      why: "How a library lowers convolution onto matrix multiply."
+  bridge: "Lecture 6b: why do transformers and recommenders wait on memory, not arithmetic?"
 
 coverage:
   primary_taught:
     - Inductive bias buys data and cost
-    - Every family lowers onto GEMM
+    - "Every family lowers onto GEMM (im2col miniature; Part 2 recalls it for the fused QKV projection and DLRM's MLPs)"
     - Architectures as cost signatures
+  moved_to_part_2:
     - Quadratic attention
     - Autoregressive decode and the KV cache
     - Embedding capacity wall
     - Architecture selection by workload profile
   primary_left_to_reading: []
   secondary:
-    - "Skip connections and normalization (one optional slide)"
-    - "Efficient architecture families (MobileNetV2 concept question)"
+    - "Skip connections and normalization (taught in full: residual block and Table 4)"
+    - "Efficient architecture families (depthwise count, MobileNetV2 vote, KWS)"
 
 notes_for_author:
+  - "2026-10-17: split into two lectures per ../06b_nn_architectures/part1_changes.md. Moved to Part 2: the RNN-against-KV-cache plot, the attention and embeddings segments, the lighthouse intensity plot, and the five-lighthouse table. Added: MNIST detector bars (Example 6.1), the four-pixel computation (Example 6.2), equivariance and receptive field (Example 6.3), the activation-memory step, the im2col miniature, Napkin Math 6.3, the 0.9^50 step, the normalization table, the depthwise count, KWS sizing, the LSTM frame, and the rewritten diagnose table. Sections 6 to 5; notes 71 minutes. Images no longer used by the deck (kept, not deleted): state_memory_step*, quadratic_step*, context_memory_step*, capacity_step*, lighthouse_intensity, and the ch06-*.pdf book exports."
   - "Netflix Progress Prize facts (107 algorithms, 8.43 percent, 100M against 5B ratings) come from the 2012 Netflix Tech Blog and RecSys tutorial as reported secondhand; the tech blog page refused automated fetch. The chapter's War Story carries only the $1M, 10 percent, and the two retained algorithms."
-  - "The context-memory slide is a slide-size redraw of the chapter figure using GPT-2 XL's shape (48 layers, width 1,600, 25 heads); the 80 GB line is drawn at 80 GiB so the scores cross it near 41K tokens, as the chapter states."
+  - "The depthwise ratio 7.9x for 64 channels is derived from the chapter's formula; the chapter states 8 to 9x for large channel counts."
+  - "The 1.7x detector headroom uses the lower 5 TFLOP/s estimate, as Napkin Math 6.3 does."
   - "Table 8 intensities are FP32 weight-only proxies; the deck never places them against an FP16 ridge point."

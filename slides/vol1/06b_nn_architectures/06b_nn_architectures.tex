@@ -1,0 +1,682 @@
+% =============================================================================
+% Lecture 6b: Network Architectures, Part 2 (Transformers and Recommenders)
+% Introduction to Machine Learning Systems (Volume I)
+% =============================================================================
+% Attention and embedding lookups move the binding limit from arithmetic to
+% memory. A four-token toy shows attention by hand; GPT-2 XL carries the costs
+% of the transformer block, the quadratic score term, and decode; DLRM carries
+% the recommender; the five lighthouses close the chapter in one table.
+%
+% Build: make -C slides build-06b_nn_architectures   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml and storyboard.md in this folder.
+% Boundaries: Lecture 8 owns tiled attention; Lecture 13 owns serving
+% (batching decode, paging). This deck keeps one-line pointers to both.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume I},
+  chapter={Chapter 6},
+  chaptertitle={Network Architectures, Part 2},
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+  layer=models,
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
+
+\title{Network Architectures, Part 2}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A highlighted answer choice, shown from overlay #1 on
+\newcommand{\answer}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% Styles for the TikZ diagrams
+\tikzset{
+  blk/.style={draw=#1, fill=#1!12, line width=1pt, rounded corners=2pt,
+    align=center, font=\small, text=darktext, minimum height=0.8cm},
+  arr/.style={-{Stealth[length=2.2mm]}, line width=0.9pt, color=midgray},
+  tok/.style={inner sep=1.5pt, text=darktext, text height=1.6ex, text depth=0.3ex},
+  cell/.style={draw=lightgray, line width=0.6pt, minimum width=#1, minimum height=0.55cm,
+    inner sep=0pt, font=\small, text=darktext},
+  cell/.default=0.6cm,
+  bx/.style={draw=#1, fill=#1!10, line width=1pt, minimum width=4.0cm,
+    minimum height=0.5cm, align=center, text=darktext, font=\footnotesize},
+}
+
+\begin{document}
+
+% =============================================================================
+% TITLE
+% =============================================================================
+\mlsysnote{[0.5 min] Read the thesis once. Say what today is: the second half of the architectures chapter. Last lecture priced the families whose weights are fixed (dense, convolutional, recurrent). Today prices two bets whose memory grows with the input or exceeds the device: attention and the transformer built on it, and the recommender's embedding tables. The lecture ends by filling one table for all five lighthouse models. Notes total about 71 minutes. FLEX: [CORE]. Notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 58 minutes.}
+\mlsystitle{Network Architectures, Part 2}{Attention and embedding tables move the limit from arithmetic to memory.}{cover_nn_architectures_blueprint.png}
+
+% =============================================================================
+% HOOK (before the first section)
+% =============================================================================
+\begin{frame}{Context windows grew 500 times in four years}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \safeimg[width=0.95\textwidth,height=4.2cm,keepaspectratio]{context_windows.pdf}\\[0.05cm]
+  \uncover<2->{%
+    {\normalsize 500$\times$ the window: how much more score work per layer, and memory per request?}\\[0.1cm]
+    {\normalsize\choice{A}{500$\times$, 500$\times$}\qquad\choice{B}{250{,}000$\times$, 500$\times$}\qquad\choice{C}{250{,}000$\times$, 250{,}000$\times$}}}
+  \mlsyscredit{Devlin et al. 2019; Radford et al. 2019; Brown et al. 2020; OpenAI DevDay, 6 Nov 2023; Anthropic, Claude 2.1, 21 Nov 2023; Google, Gemini 1.5, 15 Feb 2024 (1M in limited preview; standard 128K).}
+  \note{[3.5 min] Step 1: the published context window, the most text a model accepts in one request, for six language models on a log scale. BERT read 512 tokens in 2018; GPT-3 read 2,048 in 2020. In November 2023 GPT-4 Turbo accepted 128,000 and Claude 2.1 200,000, and in February 2024 Google offered Gemini 1.5 Pro with up to a million tokens to a limited group of developers (its standard window was 128,000; the plot labels the point ``preview''). From GPT-3 to Gemini 1.5 the largest window grew about 500 times. Step 2: the vote. ENGAGE: students vote with one to three fingers and write one sentence on why. Do not reveal the answer; say that segment 2 answers the first number, segment 3 the second, and the last content slide prices one full request. Expected split: many pick A because ``everything scales with the input''; students who pick C assume memory follows work. WARN: a window is a promise in the product, not a measure of cost. The cost is what this lecture computes. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Recall: what did recurrence cost?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \centering
+  \only<1-2|handout:0>{%
+    {\Large Close your notes.}\\[0.5cm]
+    {\large A 1,000-step sequence at batch one, on 10$\times$ the FLOP/s:}\\[0.15cm]
+    {\large how much faster? How much state does the RNN keep?}\\[0.6cm]
+    \uncover<2->{{\Large\textbf{\textcolor{mlsysaccent}{Barely faster: 1,000 ordered steps. 2 KB of state.}}}}}%
+  \only<3-|handout:1>{%
+    \safeimg[width=0.92\textwidth,height=4.6cm,keepaspectratio]{state_memory.pdf}\\[0.15cm]
+    {\normalsize Attention removes the serial chain and pays for it in memory.}}
+  \mlsyscredit{RNN: 512-wide FP32 state (\S6.5.5). GPT-2 XL: 307.2 KB per token in FP16 (\S6.7.4).}
+  \note{[2.5 min] ENGAGE: thirty seconds, write both answers. Step 2: barely faster, because the 1,000 updates must run in order and each one is a batch-one matrix-vector product, limited by memory and launch overhead rather than arithmetic. The state is 2 KB, a 512-wide vector in FP32, whatever the stream length. If students say ``10 times faster'', ask which term of the iron law a faster arithmetic unit shrinks (only the compute term). Step 3: Part 1's plot. The blue line is the RNN's fixed state. The red line is what a transformer keeps when it generates text, 307.2 KB per token for GPT-2 XL, 3.1 GB at 10,000 tokens. Say the bridge aloud: ``Attention lets every token reach every other token in one step, so nothing waits in a chain. Today we price what it keeps instead.'' LINK: Part 1, recurrence segment. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{When the bet is attention or a table, why does memory bind?}
+  \begin{columns}[T]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{Running example}\\[0.1cm]
+        GPT-2 XL\\
+        48 blocks, width 1,600\\
+        1.5B weights\\
+        3 GFLOP per token
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \small\textbf{By the end of today, you will be able to}
+      \begin{itemize}\setlength{\itemsep}{0.15cm}
+        \item Compute an attention head by hand, and count its work for any context.
+        \item Count a transformer block's weights and FLOPs, and find where attention dominates.
+        \item Explain why decode reads every weight per token, and size the KV cache.
+        \item Trace a recommender's bytes, and size its tables against a device.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{GPT-2 XL: Network Architectures, Lighthouse 6.4 (Radford et al. 2019).}
+  \note{[1.5 min] The driving question is the title. Part 1 ended with arithmetic intensity: work per byte, compared with the machine's balance. Today's two families break that frame in two ways. A transformer adds memory that grows with the input; a recommender holds tables that may not fit at all. The card is today's running example: GPT-2 XL, 48 blocks of width 1,600, 1.5 billion weights, about 3 GFLOP per generated token. Four goals, one per segment; the closing table tests all four. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: ATTENTION
+% =============================================================================
+\mlsysnote{[0.5 min] Start with what attention computes, by hand, before pricing it.}
+\mlsysdivider{What does attention compute?}{Network Architectures, \S6.6.1 to \S6.6.3, \S6.7.2, \S6.7.3}
+\section{Attention}
+
+\begin{frame}{Attention lets each token choose which tokens to read}
+  \centering
+  \begin{tikzpicture}[font=\normalsize]
+    % Sentence 1 (chapter figure 8)
+    \node[tok] (a1) at (0,0) {The};
+    \foreach \w/\p/\n in {student/a1/a2, did/a2/a3, not/a3/a4, finish/a4/a5, all/a5/a6, the/a6/a7, homework/a7/a8, because/a8/a9}
+      \node[tok, right=0.13cm of \p] (\n) {\w};
+    \node[tok, right=0.13cm of a9, font=\normalsize\bfseries, text=BlueLine] (they) {they};
+    \node[tok, right=0.13cm of they] (a11) {were};
+    \node[tok, right=0.13cm of a11] (a12) {tired.};
+    \draw[-{Stealth[length=3mm]}, line width=2.6pt, color=BlueLine] (they.north) to[out=160, in=20, looseness=0.55] (a2.north);
+    \draw[-{Stealth[length=3mm]}, line width=2.2pt, color=BlueLine] (they.north) to[out=155, in=25, looseness=0.6] (a5.north);
+    \draw[-{Stealth[length=2mm]}, line width=1.2pt, color=BlueLine!70] (they.north) to[out=140, in=40, looseness=0.8] (a8.north);
+    \draw[-{Stealth[length=2mm]}, line width=0.6pt, color=lightgray] (they.south) to[out=-165, in=-15, looseness=0.45] (a1.south);
+    \draw[-{Stealth[length=2mm]}, line width=0.6pt, color=lightgray] (they.south) to[out=-155, in=-25, looseness=0.6] (a6.south);
+    % Sentence 2 (chapter 6.6.1)
+    \uncover<2->{
+    \node[tok] (b1) at (0,-2.3) {The};
+    \foreach \w/\p/\n in {trophy/b1/b2, did/b2/b3, not/b3/b4, fit/b4/b5, in/b5/b6, the/b6/b7, suitcase/b7/b8, because/b8/b9}
+      \node[tok, right=0.13cm of \p] (\n) {\w};
+    \node[tok, right=0.13cm of b9, font=\normalsize\bfseries, text=OrangeLine] (it) {it};
+    \node[tok, right=0.13cm of it] (b11) {was};
+    \node[tok, right=0.13cm of b11] (b12) {too};
+    \node[tok, right=0.13cm of b12, font=\normalsize\bfseries, text=OrangeLine] {\alt<3->{small.}{big.}};
+    }
+    \only<2|handout:0>{
+      \draw[-{Stealth[length=3mm]}, line width=2.6pt, color=OrangeLine] (it.north) to[out=160, in=20, looseness=0.6] (b2.north);
+      \draw[-{Stealth[length=2mm]}, line width=0.6pt, color=lightgray] (it.south) to[out=-150, in=-30, looseness=0.8] (b8.south);}
+    \only<3-|handout:1>{
+      \draw[-{Stealth[length=3mm]}, line width=2.6pt, color=OrangeLine] (it.north) to[out=145, in=35, looseness=0.8] (b8.north);
+      \draw[-{Stealth[length=2mm]}, line width=0.6pt, color=lightgray] (it.south) to[out=-165, in=-15, looseness=0.5] (b2.south);}
+  \end{tikzpicture}\\[0.3cm]
+  \uncover<3->{\normalsize Same positions, different link: the words decide what each token reads.}
+  \mlsyscredit{Sentences: Network Architectures, figure 8 and \S6.6.1. Arrow weights illustrative, not measured.}
+  \note{[1.5 min] Arrow thickness stands for attention weight; the weights are illustrative, drawn after the chapter's figure 8, not measured from a trained model. Step 1: the pronoun ``they'' draws mostly on ``student'' and ``finish'', a little on ``homework'', almost nothing on the rest. Step 2: the chapter's trophy sentence. With ``big'', ``it'' is the trophy. Step 3: change one word to ``small'' and ``it'' is the suitcase. The positions and distances did not change; the link did. A convolution's fixed window and a recurrent network's step-by-step state cannot route by content, so attention computes a score for every pair and reads a weighted mix. ENGAGE: ``Give another sentence where a word's meaning depends on a word far away.'' FLEX: [OPTIONAL] If short, use the trophy sentence aloud on the next slide.}
+\end{frame}
+
+\begin{frame}{Attention is two matrix multiplies around a softmax}
+  \centering
+  \vspace{0.3cm}
+  {\Large $\text{Attention}(Q,K,V) = \text{softmax}\!\left(\dfrac{\alt<2>{\textcolor{OrangeLine}{QK^{T}}}{QK^{T}}}{\sqrt{d}}\right)\alt<4>{\textcolor{OrangeLine}{V}}{V}$}\\[0.7cm]
+  \begin{tikzpicture}[font=\normalsize]
+    \uncover<2->{\node[text width=4.2cm, align=center] at (0,0) {\textbf{\textcolor{OrangeLine}{Scores}}\\$S \times S$, every pair\\$S^2 d$ multiply-adds};}
+    \uncover<3->{\node[text width=4.2cm, align=center] at (4.7,0) {\textbf{\textcolor{midgray}{Softmax}}\\each row sums to 1};}
+    \uncover<4->{\node[text width=4.2cm, align=center] at (9.4,0) {\textbf{\textcolor{OrangeLine}{Mix values}}\\$S^2 d$ multiply-adds\\again};}
+  \end{tikzpicture}\\[0.5cm]
+  \uncover<5->{\normalsize $Q$, $K$, $V$ are three learned projections of the same $S$ tokens.}
+  \mlsyscredit{Network Architectures, \S6.6.2 and \S6.6.3 (Vaswani et al. 2017). $S$: sequence length; $d$: head width.}
+  \note{[2 min] Step 1: the operator from the chapter. Step 2: every token's query against every token's key gives an S by S grid of scores, S squared times d multiply-adds per head. Step 3: softmax turns each row into weights that sum to one; it needs the whole row before it can finish. Step 4: the weights mix the value vectors, another S squared times d. Step 5: Q, K, and V come from three learned weight matrices applied to the same input, ordinary dense layers. The query is what a token looks for, the key what it offers, the value what it passes on. The chapter's figure 9 draws the same flow for six tokens. ENGAGE: ``Which parts grow with the square of the sequence length, and which grow linearly?'' Expected: the two products around the softmax are quadratic; the three projections are linear. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Four tokens through one attention head, by hand}
+  \mlsysactivity{Estimate}{2 min}
+  \centering
+  \begin{tikzpicture}
+    % headers
+    \foreach \x/\t in {0.6/Q, 2.3/K, 4.0/V} \node[font=\normalsize\bfseries, text=darktext] at (\x,0.6) {$\t$};
+    \node[font=\small\bfseries, text=OrangeLine] at (7.1,0.6) {scores $q_i \cdot k_j / \sqrt{2}$};
+    \node[font=\small\bfseries, text=BlueLine] at (11.35,0.6) {output};
+    % token numbers
+    \foreach \r in {1,...,4} \node[font=\footnotesize, text=midgray] at (-0.55,-0.55*\r+0.55) {\r};
+    % Q, K, V tables
+    \foreach \r/\a/\b in {1/1/0, 2/0/1, 3/1/1, 4/1/0} {
+      \node[cell] at (0.3,-0.55*\r+0.55) {\a}; \node[cell] at (0.9,-0.55*\r+0.55) {\b};}
+    \foreach \r/\a/\b in {1/2/0, 2/0/2, 3/1/1, 4/0/0} {
+      \node[cell] at (2.0,-0.55*\r+0.55) {\a}; \node[cell] at (2.6,-0.55*\r+0.55) {\b};}
+    \foreach \r/\a/\b in {1/1/0, 2/0/1, 3/1/1, 4/0/0} {
+      \node[cell] at (3.7,-0.55*\r+0.55) {\a}; \node[cell] at (4.3,-0.55*\r+0.55) {\b};}
+    % score grid outline and key labels
+    \foreach \c in {1,...,4} {
+      \node[font=\footnotesize, text=midgray] at (5.1+\c,-2.35) {$k_{\c}$};
+      \foreach \r in {1,...,4} \node[cell=1.0cm] at (5.1+\c,-0.55*\r+0.55) {};}
+    % output grid outline
+    \foreach \r in {1,...,4} {\node[cell=0.9cm] at (10.9,-0.55*\r+0.55) {}; \node[cell=0.9cm] at (11.8,-0.55*\r+0.55) {};}
+    % step 2: row 1 scores
+    \only<2-|handout:1>{
+      \foreach \c/\v in {1/1.41, 2/0, 3/0.71, 4/0}
+        \node[cell=1.0cm, fill=OrangeL] at (5.1+\c,0) {\v};}
+    % step 3: softmax of row 1
+    \only<3-|handout:1>{
+      \node[font=\footnotesize, text=midgray, anchor=east] at (5.55,-2.95) {softmax, row 1};
+      \foreach \c/\v in {1/0.51, 2/0.12, 3/0.25, 4/0.12}
+        \node[cell=1.0cm, fill=BlueL, font=\small\bfseries] at (5.1+\c,-2.95) {\v};}
+    % step 4: output row 1
+    \only<4-|handout:1>{
+      \node[cell=0.9cm, fill=BlueL, font=\small\bfseries] at (10.9,0) {0.75};
+      \node[cell=0.9cm, fill=BlueL, font=\small\bfseries] at (11.8,0) {0.37};}
+    % step 5: row 2 for the students
+    \only<5|handout:0>{
+      \foreach \c in {1,...,4} \node[cell=1.0cm, fill=mlsysaccent!12, font=\small\bfseries, text=mlsysaccent] at (5.1+\c,-0.55) {?};
+      \node[cell=0.9cm, fill=mlsysaccent!12, font=\small\bfseries, text=mlsysaccent] at (10.9,-0.55) {?};
+      \node[cell=0.9cm, fill=mlsysaccent!12, font=\small\bfseries, text=mlsysaccent] at (11.8,-0.55) {?};}
+    % step 6: everything
+    \only<6-|handout:1>{
+      \foreach \r/\a/\b/\c/\d in {2/0/1.41/0.71/0, 3/1.41/1.41/1.41/0, 4/1.41/0/0.71/0} {
+        \node[cell=1.0cm] at (6.1,-0.55*\r+0.55) {\a}; \node[cell=1.0cm] at (7.1,-0.55*\r+0.55) {\b};
+        \node[cell=1.0cm] at (8.1,-0.55*\r+0.55) {\c}; \node[cell=1.0cm] at (9.1,-0.55*\r+0.55) {\d};}
+      \foreach \r/\a/\b in {2/0.37/0.75, 3/0.62/0.62, 4/0.75/0.37} {
+        \node[cell=0.9cm, font=\small\bfseries] at (10.9,-0.55*\r+0.55) {\a};
+        \node[cell=0.9cm, font=\small\bfseries] at (11.8,-0.55*\r+0.55) {\b};}
+      \draw[RedLine, line width=1.2pt, rounded corners=2pt] (10.4,0.3) rectangle (12.3,-0.3);
+      \draw[RedLine, line width=1.2pt, rounded corners=2pt] (10.4,-1.35) rectangle (12.3,-1.95);}
+  \end{tikzpicture}\\[0.25cm]
+  \normalsize
+  \only<1|handout:0>{Four tokens, width $d = 2$. Each output row is a weighted mix of the rows of $V$.}%
+  \only<2|handout:0>{Row 1: $q_1 = (1,0)$ against each key, divided by $\sqrt{2}$.}%
+  \only<3|handout:0>{Softmax turns row 1 into weights that sum to 1.}%
+  \only<4|handout:0>{Output 1 $= 0.51\,v_1 + 0.12\,v_2 + 0.25\,v_3 + 0.12\,v_4 = (0.75, 0.37)$.}%
+  \only<5|handout:0>{\textbf{Your turn, in pairs:} row 2's scores, weights, and output.}%
+  \only<6-|handout:1>{Equal queries (1 and 4) read the same mix. Work: $4^2 \times 2 = 32$ MACs, twice: $S^2 d$ each.}
+  \mlsyscredit{Illustrative toy, values computed in images/make\_figs.py. Operator: Network Architectures, \S6.6.2.}
+  \note{[5 min] Worked example 1, by hand. The numbers are a toy chosen for easy arithmetic, not a trained model. Step 1: four tokens, each with a query, key, and value of width two. Step 2: token 1's query (1, 0) against each key gives 2, 0, 1, 0; divided by the square root of 2: 1.41, 0, 0.71, 0. Two design points live here. Queries and keys come from different weight matrices, so ``1 looks at 3'' need not score like ``3 looks at 1''. The divisor keeps the scores' variance near one as the head widens, so softmax does not saturate. Step 3: softmax of row 1: 0.51, 0.12, 0.25, 0.12. Step 4: those weights mix the value rows: (0.75, 0.37). Step 5: ENGAGE, two minutes in pairs on row 2. Expected: scores 0, 1.41, 0.71, 0; weights 0.12, 0.51, 0.25, 0.12; output (0.37, 0.75), the mirror of row 1. Step 6: rows 1 and 4 share a query and read the same mix, whatever their positions: attention routes by content. Token 3 spreads its weight about 0.31 over tokens 1 to 3. Work: 32 multiply-adds for the scores and 32 for the mix, S squared times d each. WARN: students who skip the softmax use raw scores as weights. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Twelve heads of 64 cost the same as one head of 768}
+  \centering
+  \begin{tikzpicture}[font=\small]
+    \node[draw=midgray, fill=vlightgray!60, minimum width=1.0cm, minimum height=1.5cm] (E) at (0,0) {};
+    \node[above=0.1cm of E, text=darktext] {Tokens};
+    \node[below=0.1cm of E, text=midgray, align=center] {6 $\times$ 768};
+    \node[font=\Large] at (1.05,0) {$\times$};
+    \foreach \x/\l/\c in {2.4/Q/BlueLine, 3.7/K/RedLine, 5.0/V/GreenLine}
+      \node[draw=\c, fill=\c!15, minimum width=1.3cm, minimum height=2.2cm, font=\large\bfseries, text=\c] at (\x,0) {\l};
+    \node[above=1.2cm, text=darktext] at (3.7,0) {Packed weights};
+    \node[below=1.2cm, text=midgray] at (3.7,0) {768 $\times$ 2,304};
+    \node[font=\Large] at (6.25,0) {$=$};
+    \foreach \x/\l/\c in {7.5/Q/BlueLine, 8.8/K/RedLine, 10.1/V/GreenLine}
+      \node[draw=\c, fill=\c!15, minimum width=1.3cm, minimum height=1.5cm, font=\large\bfseries, text=\c] (o\l) at (\x,0) {\l};
+    \node[above=0.85cm, text=darktext] at (8.8,0) {Q, K, V for all six tokens};
+    \node[below=0.85cm, text=midgray] at (8.8,0) {6 $\times$ 2,304, one kernel};
+    \uncover<2->{
+      \foreach \x in {6.85,9.45} \foreach \i in {1,...,11} \draw[white, line width=0.9pt] (\x+0.1083*\i,0.74) -- (\x+0.1083*\i,-0.74);
+      \foreach \i in {1,...,11} \draw[white, line width=0.9pt] (8.15+0.1083*\i,0.74) -- (8.15+0.1083*\i,-0.74);
+      \foreach \x/\l/\c in {7.5/Q/BlueLine, 8.8/K/RedLine, 10.1/V/GreenLine}
+        \node[fill=\c!15, inner sep=1.5pt, font=\large\bfseries, text=\c] at (\x,0) {\l};
+      \node[text=BlueLine, font=\normalsize\bfseries, align=left, anchor=west] at (11.1,0) {12 heads\\of 64 each};}
+  \end{tikzpicture}\\[0.5cm]
+  \uncover<2->{\normalsize Head widths sum to 768: the same multiply-adds, split 12 ways.}
+  \mlsyscredit{After the chapter's QKV projection figure (\S6.6.2, figure 10). GPT-2 Small: width 768, 12 heads (MLSysIM GPT2\_Small).}
+  \note{[1.5 min] GPT-2 Small, the chapter's figure 10. Step 1: six tokens, each a 768-wide vector, multiply one packed weight matrix that holds the query, key, and value weights side by side, 768 by 2,304. One kernel produces all three projections, which keeps the accelerator's matrix units busy and saves two kernel launches. Step 2: each 768-wide projection is cut into 12 heads of 64. Each head runs its own attention, and their outputs are concatenated and projected back to 768. ENGAGE: ``Twelve heads: twelve times the score work?'' Expected: no. Each head does S squared times 64, and 12 of them do S squared times 768, the same as one wide head. Heads buy different patterns, not more arithmetic; analyses of BERT find heads that specialize and heads that are redundant (Clark et al. 2019). WARN: the cache on later slides is sized by the key and value widths, so head count matters there. FLEX: [OPTIONAL] Say the last sentence aloud on the next slide.}
+\end{frame}
+
+\begin{frame}{A transformer block: attention and an MLP, each with a skip}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \centering
+      \begin{tikzpicture}[font=\small]
+        \node[bx=RedLine] (emb) at (0,0) {Token embedding + position};
+        \node[bx=GreenLine] (att) at (0,1.0) {Masked multi-head attention};
+        \node[bx=BrownLine] (n1) at (0,1.75) {Add \& Norm};
+        \node[bx=BlueLine] (ff) at (0,2.65) {Feed forward};
+        \node[bx=BrownLine] (n2) at (0,3.4) {Add \& Norm};
+        \node[bx=OrangeLine] (out) at (0,4.4) {Linear + softmax};
+        \draw[arr] (emb) -- (att); \draw[arr] (att) -- (n1); \draw[arr] (n1) -- (ff); \draw[arr] (ff) -- (n2); \draw[arr] (n2) -- (out);
+        \draw[arr] (0,0.5) -- (2.35,0.5) -- (2.35,1.75) -- (n1.east);
+        \draw[arr] (0,2.15) -- (2.35,2.15) -- (2.35,3.4) -- (n2.east);
+        \draw[lightgray, line width=0.8pt, dashed, rounded corners=3pt] (-2.3,0.6) rectangle (2.6,3.8);
+        \node[font=\small\bfseries, text=midgray, anchor=east] at (-2.35,2.2) {$\times 48$};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \normalsize
+      \uncover<2->{\textcolor{GreenLine}{\textbf{Attention:}} $4d^2$ weights\\{\small Q, K, V, and output projections}\\[0.35cm]}
+      \uncover<2->{\textcolor{BlueLine}{\textbf{Feed forward:}} $8d^2$ weights\\{\small $d \rightarrow 4d \rightarrow d$}\\[0.35cm]}
+      \uncover<3->{\textcolor{BrownLine}{\textbf{Add \& Norm:}} Part 1's skip\\connections and LayerNorm\\[0.35cm]}
+      \uncover<3->{{\large\textbf{\textcolor{mlsysaccent}{$12d^2$ weights per block}}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Decoder tower after the chapter's transformer figure (\S6.7.2, figure 11). Counts: Table 7, feed-forward width $4d$.}
+  \note{[1.5 min] A decoder-only model such as GPT-2 keeps only the right-hand tower of the chapter's figure 11, without the attention that reads an encoder. Step 1: tokens enter as embedding vectors plus a position signal (sinusoidal in the original paper, rotary in many newer models; position costs little next to what follows). Inside each of the 48 blocks, masked multi-head attention mixes information across positions, and a two-layer feed-forward network transforms each position on its own. Step 2: the weight count. The four projections are d by d each, 4 d squared. The feed-forward network goes from d to 4d and back, 8 d squared. Step 3: the Add and Norm boxes are Part 1's skip connections and layer normalization, reused; the gray arrows are the skips. The block holds 12 d squared weights, and nothing in it depends on the context length. ENGAGE: ``Where are the attention scores in this weight count?'' Expected: nowhere; scores are computed, not stored as weights. WARN: newer decoders change the details (RMSNorm, gated MLPs, shared key-value heads), so 12 d squared is a counting rule for the classic block, not every model. LINK: Part 1, depth segment. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{GPT-2 XL's 1.5B weights follow from one rule}
+  \mlsysactivity{Estimate}{2.5 min}
+  \centering
+  {\normalsize\textbf{Given:} 48 blocks, $d = 1{,}600$, $12d^2$ weights per block, vocabulary 50,257}\\[0.3cm]
+  \begin{minipage}{0.86\textwidth}
+    \small
+    \uncover<2->{$12 \times 1{,}600^2 = 30.7$M per block $\times\,48 =$ \textbf{1.47B}; + 80M token table $\approx$ \textbf{1.55B}\\[0.12cm]}
+    \uncover<4->{FLOPs per token $\approx 2 \times 1.47$B $=$ \textbf{2.95 GFLOP} (chapter: 3)\\[0.12cm]}
+    \uncover<5->{A 1,024-token prompt: \textbf{3.34 TFLOP}, of which the attention products are 0.32}
+  \end{minipage}\\[0.2cm]
+  \uncover<3->{\safeimg[width=0.95\textwidth,height=2.8cm,keepaspectratio]{gpt2xl_params.pdf}}
+  \mlsyscredit{Derived from the block rule (Table 7) and MLSysIM GPT2 shape; vocabulary: Radford et al. 2019.}
+  \note{[4 min] Worked example 2. ENGAGE: two minutes in pairs on the weights, then reveal. Step 2: 12 times 1,600 squared is 30.7 million weights per block; times 48 blocks, 1.47 billion. The token table, one 1,600-wide row for each of 50,257 tokens, adds 80 million, about 1.55 billion in all. Step 3: the bar. Attention projections 0.49 billion, the MLPs 0.98 billion, the token table 0.08 billion, against the published 1.5 billion; the small gap is rounding in the published figure and the omitted biases and norms. Two thirds of a transformer's weights sit in its MLPs, not its attention. Step 4: each weight takes part in one multiply-add per token, two FLOPs, so about 2.95 GFLOP per token, the chapter's 3 GFLOP. (The output layer reuses the token table to score all 50,257 tokens and adds about 0.16 GFLOP more.) Step 5: a 1,024-token prompt costs 3.34 TFLOP, of which the two attention products are 0.32. Say the landing line: ``Scores add work, not weights.'' WARN: students multiply 1.5 billion by 4 bytes and call it the decode traffic; that is right for FP32 and doubles the FP16 figure, so ask which precision. LINK: the token table is an embedding table; segment 4 builds a whole architecture on them. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: QUADRATIC
+% =============================================================================
+\mlsysnote{[0.5 min] The hook asked about score work. Now count it.}
+\mlsysdivider{What does letting every token see every other token cost?}{Network Architectures, \S6.6.4 and \S6.7.4 (Training and prefill)}
+\section{Quadratic}
+
+\begin{frame}{Predict: how much of a block's work is attention?}
+  \mlsysactivity{Predict}{1.5 min}
+  \centering
+  {\large GPT-2 XL, one block, a 1,024-token prompt.}\\[0.15cm]
+  {\large What share of its multiply-adds are the two attention products?}\\[0.5cm]
+  \begin{minipage}{0.5\textwidth}
+    \Large
+    \choice{A}{About 90 percent}\\[0.15cm]
+    \choice{B}{About 50 percent}\\[0.15cm]
+    \answer{2}{C}{About 10 percent}
+  \end{minipage}\\[0.4cm]
+  \uncover<2->{\normalsize 3.36B of 34.8B MACs. The quadratic term is still small here.}
+  \mlsyscredit{Derived from the block account, \S6.7.3 and \S6.7.4: $12Sd^2$ against $2S^2d$, $d = 1{,}600$.}
+  \note{[2 min] ENGAGE: vote with fingers. Students who checked the last line of the previous slide already know; ask them to keep quiet for a minute. Many will pick A, because ``attention is quadratic'' sounds like ``attention is most of the work''. Step 2: C. Per block, the projections and MLP cost 12 S d squared, 31.5 billion multiply-adds at 1,024 tokens; the two attention products cost 2 S squared d, 3.36 billion. About 10 percent. WARN: quadratic describes how a cost grows, not how large it is today; a quadratic term with a small coefficient can stay behind a linear one for a long way. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Attention's products overtake the rest only past 9,600 tokens}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{block_macs_step}{4}\\[0.1cm]
+  \uncover<4->{\normalsize Short contexts are bound by ordinary dense multiplies.}
+  \mlsyscredit{Derived from the chapter's block account (\S6.7.3); crossover at $6d$ (\S6.7.4). GPT-2 XL, $d = 1{,}600$ (MLSysIM).}
+  \note{[2.5 min] Explain the axes first: context length across, multiply-adds per block up, both on log scales, so a straight line's slope is its power. Step 1: the orange line, projections and MLP, grows in proportion to S (slope one). The blue line, the two attention products, grows with S squared (slope two). Step 2: at 1,024 tokens the gap is about ten to one, the vote's answer. Step 3: the lines cross where 12 S d squared equals 2 S squared d, at S equal to 6 d, 9,600 tokens for GPT-2 XL, as the chapter states. Step 4: at 100,000 tokens attention is about ten times everything else. ENGAGE: ``A model twice as wide: where is the crossover?'' Expected: twice as far out, because the crossover is 6 d. WARN: this counts arithmetic only. Storing the scores is a separate cost, and it is the next slide. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{100,000 tokens would need 240 GB of scores per layer}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{quadratic.pdf}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \normalsize
+      \textbf{Given:} 100,000 tokens, 12 heads, FP16 scores\\[0.3cm]
+      \uncover<2->{$100{,}000^2 \times 12 = 1.2 \times 10^{11}$ scores\\[0.3cm]}
+      \uncover<3->{$\times$ 2 bytes $=$ {\Large\textbf{\textcolor{mlsysaccent}{240 GB}}} per layer\\[0.3cm]}
+      \uncover<4->{32 layers kept for training: 7,680 GB}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, Definition 6.5 and Napkin Math 6.1. Plot: one layer's scores, 12 heads, FP16.}
+  \note{[3 min] Worked example 3. Step 1, the plot: storing one layer's scores for 12 heads in FP16. At 4,096 tokens that is 0.40 GB; at 8,192 it is 1.61 GB, four times as much for twice the tokens. ENGAGE: one minute in pairs on the given before step 2. Step 2: 100,000 squared is 10 to the 10th; times 12 heads, 1.2 times 10 to the 11th scores. Step 3: two bytes each, 240 GB for one layer, three times an 80 GB accelerator. Step 4: training that kept every layer's scores for the backward pass would need 7,680 GB. Students who get 2.4 GB dropped a factor of 100 in the square; have them write the exponent. LINK, one line only: Lecture 8 shows how tiling avoids storing the scores; the S squared arithmetic remains. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{True or false: two claims about attention's cost}
+  \mlsysactivity{Vote}{1.5 min}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \large\textbf{1.} BERT could read 4,096 tokens on an accelerator with enough memory.\\[0.4cm]
+      \uncover<2->{\normalsize\textbf{\textcolor{mlsysaccent}{False.}} It learned 512 positions; and 4,096 tokens need 64$\times$ the score memory.}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \large\textbf{2.} Twelve heads of width 64 do twelve times the score work of one head of width 768.\\[0.4cm]
+      \uncover<2->{\normalsize\textbf{\textcolor{mlsysaccent}{False.}} The head widths sum to 768: the same work.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, Example 6.4 (Devlin et al. 2019) and \S6.7 self-check.}
+  \note{[2 min] ENGAGE: thumbs up or down for each claim, then reveal. Claim 1: false for two reasons. BERT was pretrained with 512 learned position embeddings, so positions beyond 512 do not exist for the model, however much memory there is. And the limit was set partly by cost: 4,096 tokens would need (4,096 over 512) squared, 64 times the score memory. A model meant for long inputs must be trained with long positions. Claim 2: false; the twelve heads split the 768 width, so their score work adds up to one wide head's. The chapter's pitfall in the same spirit: 2,048 tokens need 16 times the stored scores of 512. Landing line for the segment: ``Score work grows with the square of the context; it dominates only past about six times the model width, and storing the scores would not fit long before that.'' FLEX: [OPTIONAL] If short, read both claims and their answers aloud.}
+\end{frame}
+
+% =============================================================================
+% SECTION: DECODE
+% =============================================================================
+\mlsysnote{[0.5 min] The hook's second number: memory per request. It comes from generating text one token at a time.}
+\mlsysdivider{Why does generating text wait on memory?}{Network Architectures, \S6.7.2 (prefill and decode) and \S6.7.4 (Autoregressive decoding)}
+\section{Decode}
+
+\begin{frame}{One model runs a prompt in parallel and a reply one token at a time}
+  \begin{columns}[c]
+    \begin{column}{0.27\textwidth}
+      \centering
+      \begin{tikzpicture}[font=\footnotesize]
+        \foreach \w/\i in {The/1, cat/2, sat/3, on/4} {
+          \node[anchor=east, text=darktext] at (-0.1,-0.5*\i+0.5) {\w};
+          \node[rotate=60, anchor=south west, text=darktext] at (0.5*\i-0.6,0.35) {\w};}
+        \foreach \r in {1,...,4} \foreach \c in {1,...,4} {
+          \ifnum\c>\r
+            \node[draw=white, fill=vlightgray, minimum size=0.5cm, inner sep=0pt] at (0.5*\c-0.35,-0.5*\r+0.5) {};
+          \else
+            \node[draw=white, fill=OrangeLine!45, minimum size=0.5cm, inner sep=0pt] at (0.5*\c-0.35,-0.5*\r+0.5) {};
+          \fi}
+        \node[text width=3.2cm, align=center, text=darktext] at (0.9,-2.4) {Causal mask: each token sees itself and earlier tokens};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.71\textwidth}
+      \centering
+      \uncover<2->{%
+      \begin{tikzpicture}[font=\small, scale=0.74, transform shape]
+        \node[font=\normalsize\bfseries, text=OrangeLine] at (2.6,3.0) {Prefill};
+        \foreach \i/\w in {0/The,1/cat,2/sat,3/on} \node[blk=midgray, minimum width=1.0cm, minimum height=0.6cm] (p\i) at (1.15*\i+0.9,2.1) {\w};
+        \node[blk=OrangeLine, minimum width=4.6cm] (pp) at (2.6,0.9) {One pass, all prompt tokens\\matrix $\times$ matrix};
+        \foreach \i in {0,...,3} \draw[arr] (p\i) -- (p\i |- pp.north);
+        \node[text width=5cm, align=center, font=\small, text=OrangeLine] at (2.6,-0.35) {Each weight reused across the prompt: \textbf{compute bound}};
+        \uncover<3->{
+        \node[font=\normalsize\bfseries, text=BlueLine] at (9.4,3.0) {Decode};
+        \foreach \i in {0,1,2} \node[blk=BlueLine, minimum width=1.7cm, minimum height=1.1cm] (d\i) at (6.9+2.5*\i,1.5) {matrix $\times$\\vector};
+        \draw[arr] (pp.east) to[out=0, in=180] (d0.west);
+        \draw[arr] (d0) -- node[above, font=\small\bfseries, text=darktext] {the} (d1);
+        \draw[arr] (d1) -- node[above, font=\small\bfseries, text=darktext] {mat} (d2);
+        \draw[arr] (d2.east) -- ++(0.5,0) node[right, font=\small\bfseries, text=darktext] {end};
+        \node[text width=6.4cm, align=center, font=\small, text=BlueLine] at (9.4,-0.35) {Every weight and the KV cache re-read per token: \textbf{memory bound}};
+        }
+      \end{tikzpicture}}
+    \end{column}
+  \end{columns}
+  \vspace{0.3cm}
+  \centering
+  \uncover<3->{\normalsize Same weights, two regimes: a benchmark of one says nothing about the other.}
+  \mlsyscredit{After the chapter's prefill and decode figure, \S6.7.2 (figure 12). Mask: \S6.7.2.}
+  \note{[3 min] Step 1: the causal mask on a four-token prompt. Rows are queries, columns are keys. The gray cells, later tokens, get a score of minus infinity before the softmax, so each token reads only itself and what came before, exactly what will exist when the model generates. Because the whole sequence is known in training and in the prompt, the mask lets every row be computed at once. Step 2, prefill: the whole prompt goes through the model in one pass as matrix-matrix products; each weight is reused across every prompt token, so prefill is usually compute bound. It writes each token's keys and values to a store called the KV cache. Step 3, decode: the reply comes one token per step, each fed back as the next input (``The cat sat on'' gives ``the'', then ``mat''). Each step multiplies the weights by one vector and reads the keys and values of every earlier token. ENGAGE: ``Why can decode not run its tokens in parallel the way prefill does?'' Expected: token t is not known until step t minus 1 finishes. WARN: the chapter's fallacy, ``an architecture has one bottleneck''. Same weights, two regimes. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Your turn: how fast can a 70B model write one reply?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \centering
+  \safeimg[width=0.88\textwidth,height=2.6cm,keepaspectratio]{decode_ridge.pdf}\\[0.25cm]
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given:} 70B model, FP16\\
+        H100: 3.35 TB/s, batch one
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \normalsize
+      \uncover<2->{Every weight read per token: 140 GB\\[0.15cm]}
+      \uncover<3->{140 GB $\div$ 3.35 TB/s $=$ 42 ms per token\\[0.15cm]}
+      \uncover<4->{{\Large\textbf{\textcolor{mlsysaccent}{At most 24 tokens/s}}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Intensity and 140 GB: \S6.7.4. H100: 989 TFLOP/s dense FP16, 3.35 TB/s (MLSysIM). Time and rate derived.}
+  \note{[3.5 min] Worked example 4. Step 1, the bars: decode at batch one with 16-bit weights does 2 FLOPs per 2-byte weight, 1 FLOP per byte (chapter 6.7.4). An H100 does 989 trillion FP16 FLOPs per second and reads 3.35 TB per second, so it needs 295 FLOPs per byte to keep its arithmetic busy. Decode sits 295 times below that line. ENGAGE: two minutes in pairs: tokens per second for one sequence. Step 2: a 70-billion-parameter model in FP16 is 140 GB, and every byte is read for every token. Step 3: 140 GB divided by 3.35 TB per second is 42 milliseconds. Step 4: at most about 24 tokens per second, whatever the peak FLOP/s; the arithmetic would take well under a millisecond, and reading the KV cache only adds to the bytes. WARN: students reach for the 989 TFLOP/s and get thousands of tokens per second; ask which number the weights travel through. A faster arithmetic unit does not help; fewer bytes per token or more tokens per byte read does. LINK, one line only: Lecture 13 shows what a server does about this. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Each token GPT-2 XL keeps costs 307 KB of cache}
+  \centering
+  \vspace{0.2cm}
+  {\large KV cache per token $= 2 \times \text{layers} \times \text{key-value width} \times \text{bytes}$}\\[0.6cm]
+  \uncover<2->{{\large $= 2 \times 48 \times 1{,}600 \times 2\ \text{B} =$ {\LARGE\textbf{\textcolor{mlsysaccent}{307.2 KB}}}}\\[0.6cm]}
+  \uncover<3->{{\normalsize At its 1,024-token window: 314.6 MB for one sequence.}\\[0.2cm]
+  {\normalsize Keys and values are kept; each new query reads all of them.}}
+  \mlsyscredit{Network Architectures, \S6.7.4 and Table 7 ($2Ld$ values per token). 314.6 MB derived.}
+  \note{[2 min] Step 1: the formula. A key and a value (the 2), for every layer, each as wide as the key-value width, in some number of bytes. Step 2: GPT-2 XL, 48 layers, width 1,600, FP16: 307.2 KB for every token a request keeps. Step 3: at its full 1,024-token window, one sequence holds 314.6 MB. Why keep keys and values but not queries? Each new token's query must score every earlier key and read every earlier value, so those are needed again; an old query is never read again, because earlier tokens never attend forward. Keeping them avoids recomputing the whole prompt at every step. ENGAGE: ``Which number in the formula did grouped heads or a narrower format change?'' Hold the answer for two slides. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The cache passes the weights near 10,000 tokens}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  {\normalsize Predict: which comes first as context grows, the cache passing the weights,\\or one layer's scores (if stored) filling 80 GB?}\\[0.15cm]
+  \mlsyssteps[width=0.92\textwidth,height=4.6cm,keepaspectratio]{context_memory_step}{3}
+  \mlsyscredit{Slide redraw of the chapter's context-memory figure (\S6.7.4, figure 13): GPT-2 XL, FP16; KV 307.2 KB per token; scores for one layer, 25 heads.}
+  \note{[2.5 min] ENGAGE: thirty seconds, write a guess for each and which comes first. Three memories for one model as the context grows, log scales. Step 1: the weights, 3 GB in FP16, flat; they do not depend on context. Step 2: the KV cache for one request grows in a straight line, 307.2 KB per token, and passes the weights near 10,000 tokens. Step 3: one layer's scores, if stored, grow with the square and would fill an 80 GB accelerator near 41,000 tokens. Answer: the cache passes the weights first. The cache is the cost that cannot be tiled away, because decode needs it at every step. WARN: batching shares the weights across requests but not the caches; each request keeps its own. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Sharing keys across heads cuts the cache fourfold or more}
+  \centering
+  \safeimg[width=0.95\textwidth,height=4.9cm,keepaspectratio]{kv_per_token.pdf}\\[0.1cm]
+  \uncover<2->{\normalsize Llama 3.1 8B at its 128K window: 17.2 GB of cache, 16.1 GB of weights.}
+  \mlsyscredit{Derived: $2 \times$ layers $\times$ key-value width $\times$ 2 B. Shapes: MLSysIM; Ainslie et al. 2023 (GQA); Shazeer 2019, Chowdhery et al. 2022 (PaLM). Window: Llama 3.1 model card.}
+  \note{[2.5 min] KV cache per token in FP16 for five decoders, log scale. GPT-2 XL gives each of its 25 heads its own keys and values: 307 KB. Llama 2 7B does the same with 32 heads of 128: 524 KB. Llama 3.1 8B, the same width, lets 32 query heads share 8 key-value heads (grouped-query attention): 131 KB, four times less. Llama 2 70B shares 8 key-value heads among 64 query heads: 328 KB instead of 2.6 MB, eight times less. PaLM 540B uses one shared key-value head of width 256 (multi-query attention): 121 KB per token. Step 2: even so, Llama 3.1 8B holding its full 128K window keeps 17.2 GB of cache, more than its 16.1 GB of weights in BF16 (a 16-bit format). WARN: sharing keys is a choice made before training, so it belongs to the architecture and changes the model; paging and offloading, which Lecture 13 covers, change only where the bytes live. Answer to the earlier question: grouped heads change the key-value width; a narrower format changes the bytes. Landing line for the segment: ``Decode reads every weight for every token and keeps 2 L d values per token.'' FLEX: [OPTIONAL] If short, give the 4 times and 17.2 GB figures aloud.}
+\end{frame}
+
+% =============================================================================
+% SECTION: EMBEDDINGS
+% =============================================================================
+\mlsysnote{[0.5 min] GPT-2 XL's token table was one embedding table. A recommender is built from hundreds.}
+\mlsysdivider{Why is a recommender a memory machine?}{Network Architectures, \S6.8}
+\section{Embeddings}
+
+\begin{frame}{A recommender is mostly lookup tables around two small MLPs}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering
+      {\fontsize{40}{44}\selectfont\bfseries\textcolor{mlsysaccent}{79\%}}\\[0.3cm]
+      {\small of AI inference cycles in Meta's datacenters went to recommendation models}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \centering
+      \uncover<2->{%
+      \begin{tikzpicture}[font=\footnotesize]
+        \node[blk=midgray, minimum width=2.3cm, minimum height=0.6cm, font=\footnotesize] (df) at (0,0) {Dense features};
+        \node[blk=OrangeLine, minimum width=2.3cm, minimum height=0.6cm, font=\footnotesize] (bm) at (0,1.3) {Bottom MLP};
+        \node[blk=midgray, minimum width=3.6cm, minimum height=0.6cm, font=\footnotesize] (ids) at (4.4,0) {Categorical IDs};
+        \foreach \x/\y in {3.2/1.55, 4.4/1.15, 5.6/1.75} {
+          \node[draw=BlueLine, fill=BlueL, line width=1pt, minimum width=0.8cm, minimum height=1.2cm] at (\x,1.4) {};
+          \fill[BlueLine] (\x-0.4,\y-0.07) rectangle (\x+0.4,\y+0.07);}
+        \node[font=\footnotesize, text=BlueLine, align=left, anchor=west] at (6.15,1.4) {\textbf{Embedding}\\\textbf{tables}};
+        \node[blk=VioletLine, minimum width=7.6cm, minimum height=0.6cm, font=\footnotesize] (int) at (2.7,2.75) {Interaction (pairwise dot products)};
+        \node[blk=OrangeLine, minimum width=3.6cm, minimum height=0.6cm, font=\footnotesize] (tm) at (2.7,3.75) {Top MLP $\rightarrow$ click probability};
+        \draw[arr] (df) -- (bm); \draw[arr] (bm) -- (bm |- int.south);
+        \foreach \x in {3.2,4.4,5.6} {\draw[arr] (\x,0.3) -- (\x,0.8); \draw[arr] (\x,2.0) -- (\x,2.45);}
+        \draw[arr] (int) -- (tm);
+      \end{tikzpicture}}
+    \end{column}
+  \end{columns}
+  \vspace{0.3cm}
+  \centering
+  \uncover<3->{\normalsize Callback: GPT-2 XL's token table, 80M weights, is one such table.}
+  \mlsyscredit{Share: Gupta et al., HPCA 2020. Pipeline after the chapter's DLRM figure (\S6.8.2, figure 14; Naumov et al. 2019).}
+  \note{[2.5 min] Step 1: the number. Meta reported that recommendation models used 79 percent of the AI inference cycles in its datacenters (Gupta et al. 2020). This is the largest inference workload most students have never studied. Step 2: DLRM, the recommendation lighthouse, in four stages. Dense features such as age or time of day go through a bottom MLP: ordinary matrix multiplies. Categorical IDs (user, item, items recently viewed) each select one learned row from an embedding table, the dark stripes. Raw IDs carry no meaning as numbers (user 1042 is no closer to user 1043 than to user 9,000,000), so each gets its own learned vector. An interaction layer takes dot products among all the pieces, and a top MLP predicts the click. Step 3: the token table from GPT-2 XL was exactly this structure: one row per token. ENGAGE: ``Which stage does the arithmetic, and which stage holds the bytes?'' Expected: the MLPs and interaction do the arithmetic; the tables hold the bytes. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A request gathers scattered rows, and their home sets the rate}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering
+      \begin{tikzpicture}[font=\footnotesize]
+        \draw[BlueLine, line width=1pt, rounded corners=3pt, fill=BlueL!40] (0,0) rectangle (8.6,2.25);
+        \node[anchor=south west, text=BlueLine, font=\footnotesize\bfseries] at (0.1,0.02) {HBM: 26 tables, one per feature};
+        \foreach \x/\y in {0.6/1.6, 1.6/1.0, 2.6/1.85, 3.6/1.3, 6.2/0.9, 7.2/1.7} {
+          \draw[BlueLine, fill=white, line width=0.8pt] (\x-0.3,0.5) rectangle (\x+0.3,2.1);
+          \fill[OrangeLine] (\x-0.3,\y-0.07) rectangle (\x+0.3,\y+0.07);}
+        \node[text=BlueLine, font=\large\bfseries] at (4.9,1.3) {$\cdots$};
+        \uncover<2->{
+          \foreach \x in {0.6,1.6,2.6,3.6,6.2,7.2} {\draw[arr, color=OrangeLine] (\x,2.15) -- (\x,2.75);
+            \fill[OrangeLine] (\x-0.3,2.82) rectangle (\x+0.3,2.97);}
+          \node[text=OrangeLine, font=\footnotesize\bfseries] at (4.3,3.35) {26 rows $\times$ 512 B $=$ 13.3 KB copied, no arithmetic};}
+        \uncover<3->{
+          \node[blk=VioletLine, minimum width=8.6cm, minimum height=0.9cm, font=\footnotesize] at (4.3,4.55)
+            {Interaction of 27 vectors: 351 dot products, 44,928 MACs\\about 7 FLOP per gathered byte};
+          \draw[arr] (4.3,3.6) -- (4.3,4.05);}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering
+      \uncover<4->{\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{recsys_rate.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Illustrative request: 26 categorical features as in Criteo (Naumov et al. 2019); 128-wide FP32 rows, 512 B (\S6.8.3). Bounds derived from MLSysIM H100 (HBM, PCIe Gen5 x16).}
+  \note{[3 min] An illustrative request, shaped like the Criteo benchmark DLRM was published on: 26 categorical features, one 128-wide FP32 row each, 512 bytes per row. Step 1: the tables live in HBM, the accelerator's memory; each feature's ID lights one row, at an address that depends on the data, so the next address cannot be predicted. Step 2: the gather copies the 26 rows, 13.3 KB, with no arithmetic at all. The chapter's listing 9 writes this as a loop that reads a row and sums it. Step 3: the interaction layer takes dot products among 27 vectors (the 26 rows and the bottom MLP's output), 351 pairs of 128, 44,928 multiply-adds: about 7 FLOPs per byte gathered, far below the H100's 295. Step 4: so the bytes set the rate. If every row streamed at HBM's 3.35 TB/s, one accelerator could feed at most 252 million such requests per second; if the tables sat in host memory across PCIe at 64 GB/s, 4.8 million, 52 times fewer. WARN: these are upper bounds. Scattered 512-byte reads reach less than either peak, and popular rows stay in cache while the long tail goes to DRAM. ENGAGE: ``What decides which of these two bars you get?'' Expected: whether the tables fit in HBM, the next slide. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: does one table fit an 80 GB accelerator?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[T]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{Given}\\[0.1cm]
+        100 million items\\
+        128 numbers per row\\
+        FP32 (4 bytes)\\
+        One A100: 80 GB
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \normalsize
+      \uncover<2->{$10^8 \times 128 \times 4$ bytes $=$ {\Large\textbf{\textcolor{mlsysaccent}{51.2 GB}}}\\[0.3cm]}
+      \uncover<3->{51.2 / 80 $=$ 64\% of the device, for one feature\\[0.3cm]}
+      \uncover<4->{Add a user table of the same size: 102.4 GB.\\[0.3cm]}
+      \uncover<5->{A billion users: 512 GB for that table alone.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, Napkin Math 6.2 and \S6.8.2.}
+  \note{[3 min] Worked example 5. ENGAGE: ninety seconds in pairs. Step 2: 100 million rows times 128 numbers times 4 bytes, 51.2 GB. Step 3: 64 percent of an 80 GB A100, for one categorical feature, before any activations or the MLPs. Step 4: a user table of the same size brings the total to 102.4 GB, which does not fit. Step 5: at a billion users, 128 wide, the user table alone is 512 GB. Students who get 51.2 MB dropped a factor of 1,000; check units aloud. WARN: FLOP counts do not answer this question. The arithmetic per request is small; the question is where the table can live. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Capacity decides where the tables live before speed matters}
+  \begin{columns}[T]
+    \begin{column}{0.54\textwidth}
+      \centering
+      \safeimg[width=\textwidth,height=3.3cm,keepaspectratio]{capacity.pdf}\\[0.3cm]
+      \uncover<2->{%
+      \begin{tabular}{@{}ccc@{}}
+        \textbf{\textcolor{BlueLine}{Shrink}} & \textbf{\textcolor{BlueLine}{Move}} & \textbf{\textcolor{BlueLine}{Partition}} \\
+        {\footnotesize hash, compress} & {\footnotesize host DRAM, PCIe} & {\footnotesize across devices}
+      \end{tabular}}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \centering
+      \uncover<3->{\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{all-to-all.pdf}\\[0.1cm]
+      {\small ``train very large DLRMs with up to 12 Trillion parameters''}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Network Architectures, Napkin Math 6.2 and \S6.8.3. Quote: Mudigere et al., Facebook, arXiv 2104.05158 (ISCA 2022).}
+  \note{[2 min] Step 1: the estimate as bars. One table fits at 64 percent; two cross the 80 GB line. Step 2: the three ways out, each with its price. Shrink the tables (hashing, compression, pruning), at the risk of losing rare users and items. Move them to host memory, where every lookup crosses PCIe, the 52 times lower bar on the previous slide. Partition them across accelerators. Step 3: partitioning makes each request need rows held by every device, an all-to-all exchange. Production systems do this at scale: a Facebook team reported training DLRMs with up to 12 trillion parameters. In iron-law terms, capacity is a check that comes before both terms: it decides which bandwidth the data term pays. LINK: partitioning across accelerators, Lecture 8. Landing line for the segment: ``A recommender's bytes are scattered rows, so where its tables live comes first.'' FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: CHOOSING
+% =============================================================================
+\mlsysnote{[0.5 min] All five lighthouses are now on the table. Put them side by side.}
+\mlsysdivider{With all five families on the table, what limits each one?}{Network Architectures, \S6.9 and \S6.10}
+\section{Choosing}
+
+\begin{frame}{Your turn: what limits each lighthouse?}
+  \mlsysactivity{Diagnose}{3 min}
+  \centering\footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{@{}l l r r l@{}}
+    \toprule
+    \textbf{Lighthouse} & \textbf{Family} & \textbf{FLOP/byte} & \textbf{Training state} & \textbf{Binding limit} \\
+    \midrule
+    ResNet-50 & CNN & 80.1 & 409.6 MB & \uncover<2->{\textbf{\textcolor{OrangeLine}{Compute}}} \\
+    MobileNetV2 & depthwise CNN & 42.8 & 56.1 MB & \uncover<3->{\textbf{\textcolor{OrangeLine}{Latency on a phone}}} \\
+    KWS (DS-CNN) & depthwise CNN & 25 & 3.2 MB & \uncover<4->{\textbf{\textcolor{GreenLine}{Power, milliwatts}}} \\
+    GPT-2 XL & transformer & 0.50 & 24 GB & \uncover<5->{\textbf{\textcolor{BlueLine}{Decode bandwidth}}} \\
+    DLRM & embeddings + MLPs & n/a & \alert<6->{400 GB} & \uncover<6->{\textbf{\textcolor{VioletLine}{Capacity}}} \\
+    \bottomrule
+  \end{tabular}\\[0.3cm]
+  {\normalsize Which ones could train on one 80 GB accelerator?}
+  \mlsyscredit{Network Architectures, Tables 8 and 10. Intensity: FLOPs over FP32 weight bytes (weight-only proxy). Training state: 16 B per parameter.}
+  \note{[5 min] The chapter's comparison. Explain the number columns first. FLOP per byte is the chapter's weight-only proxy with FP32 weights (so decode shows 0.50, not the FP16 slide's 1.0); do not set it against the H100's FP16 ridge of 295. Training state is 16 bytes per parameter: the FP32 weight, its gradient, and two optimizer moments. ENGAGE: two minutes in pairs to fill the last column and answer the question, then reveal row by row (steps 2 to 6), asking one pair per row for its reasoning. ResNet-50: filters reused across the image put it above the machine's balance when batched, so peak FLOP/s binds. MobileNetV2: built for a latency target on a phone; on a datacenter GPU its small kernels underuse the matrix units. KWS: 200K weights on a microcontroller listening all day, a milliwatt budget. GPT-2 XL: decode reads every weight per token, so bandwidth binds, plus 307.2 KB of cache per token. DLRM: 100 GB of tables before anything runs. The question: all but DLRM, whose 400 GB of training state does not fit. WARN: the chapter's fallacy that complex architectures always win; vision transformers matched CNNs on ImageNet only with far larger pretraining. LINK: Part 1's Netflix Prize scored only the accuracy column. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A million-token request is a memory budget first}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=3.9cm,keepaspectratio]{million_request_step}{3}\\[0.2cm]
+  \uncover<3->{\normalsize Attention arithmetic: about $5 \times 10^{17}$ FLOP per prompt, nearly 9 minutes of H100 peak.\\[0.15cm]
+  \textbf{\textcolor{mlsysaccent}{Hook answer: B.}} Score work 250,000$\times$; memory 500$\times$.}
+  \mlsyscredit{Illustrative: a model of Llama 3.1 8B's shape (its card states 128K) at 1M tokens. Derived from MLSysIM Llama3\_8B and H100.}
+  \note{[2.5 min] Return to the hook and price one full request at the largest window on the plot, using a model of Llama 3.1 8B's shape; the shape is real, the million-token use is illustrative, since that model's card states 128K. Step 1: its weights in BF16, a 16-bit format, 16.1 GB, under the 80 GB line. Step 2: the KV cache at 131,072 bytes per token, times a million tokens, 131 GB: the request alone does not fit one device. Step 3: the scores, if stored, would be 2 TB for one head of one layer, so no kernel stores them (Lecture 8). The arithmetic remains: two attention products of S squared times 4,096 over 32 layers, about 5 times 10 to the 17th FLOPs, nearly 9 minutes of an H100's peak for one prompt, about half that with the causal mask skipping the masked half. Answer to the hook: B. Score work grows with the square of the window, 250,000 times; the memory a request keeps grows with the window, 500 times. Say the closing sentence: ``The window is a memory budget before it is a feature.'' FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item Attention scores every pair: score work grows with $S^2$.
+    \item A block holds $12d^2$ weights; attention's work dominates only past $6d$ tokens.
+    \item Decode reads every weight per token and keeps $2Ld$ values per token.
+    \item A recommender's bytes are scattered rows; where its tables live comes first.
+  \end{itemize}
+  \note{[1.5 min] One line per segment. Ask students to circle the one they could not have explained an hour ago and to write the number that goes with it (S squared; 9,600; 307.2 KB; 51.2 GB). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \normalsize
+      \begin{itemize}\setlength{\itemsep}{0.35cm}
+        \item A longer window costs memory in proportion and work in square. Is it worth it if models use long contexts less well?
+        \item Should a context window be priced by the token?
+        \item If a recommender's main operation is a copy, should its hardware look more like a memory system?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \centering
+      \safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{fiction_livebench.pdf}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{DeepSeek-R1-0528, Fiction.LiveBench}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fiction.LiveBench scores via the Epoch AI Benchmarking Hub (CC BY 4.0), MLSysIM literature series.}
+  \note{[1.5 min] No single answer. The first: on Fiction.LiveBench, a test of understanding a story placed in context, DeepSeek-R1-0528 scores 0.917 with 400 tokens of story and 0.583 with 60,000; longer windows cost more and may be used less well. The second: providers price per token, while score work grows faster than the tokens. The third: the copy-dominated recommender against hardware built around matrix units. Ask students to write one sentence on one of them. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.05cm}
+    \item \textbf{Read:} Network Architectures, \S6.6 to \S6.10, and the self-checks in \S6.6 to \S6.8.
+    \item \textbf{Practice:} the TinyTorch attention module.
+    \item Alammar, ``The Illustrated Transformer,'' 2018 (jalammar.github.io).
+    \item Vaswani et al., ``Attention Is All You Need,'' NeurIPS 2017.
+    \item Shazeer, ``Fast Transformer Decoding: One Write-Head is All You Need,'' 2019.
+    \item Naumov et al., ``Deep Learning Recommendation Model for Personalization and Recommendation Systems,'' 2019.
+    \item Gupta et al., ``The Architectural Implications of Facebook's DNN-based Personalized Recommendation,'' HPCA 2020.
+  \end{itemize}
+  \note{[1 min] The chapter first; \S6.7.4 covers prefill, decode, and the cache, and \S6.9 collects the counting rules for all five families in one table. Alammar draws queries, keys, values, and heads step by step, as the toy did. Vaswani et al. is the transformer; Shazeer introduced multi-query attention, the cache-shrinking idea on the PaLM bar; Naumov et al. and Gupta et al. are the recommender and its systems costs. FLEX: [OPTIONAL] Replace a paper with your own lab or TinyTorch module.}
+\end{frame}
+
+\begin{frame}[c]
+  \centering
+  {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} ML FRAMEWORKS}}\\[0.5cm]
+  {\LARGE\bfseries How does Python code become\\kernels on the hardware?}
+  \note{[0.5 min] Two lectures fixed what work each architecture must do and what it commits the machine to. Next time: who decides when that work runs, how its gradients are computed, and which device runs it. Ask students to read ML Frameworks before then. FLEX: [CORE].}
+\end{frame}
+
+\end{document}
