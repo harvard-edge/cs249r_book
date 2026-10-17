@@ -1,0 +1,294 @@
+chapter: 13_model_serving
+lecture: 13
+title: Model Serving
+layer: serving
+minutes: 75
+notes_minutes: 70.0
+target_ideas: 30
+thesis: "Serving reverses training's priorities: every request must finish before its deadline, so a service is sized by its latency budget and its queue's headroom, and each millisecond it will not spend waiting for a batch is paid for in accelerators."
+
+hook:
+  minutes: "0-4"
+  setup: "Example 13.1 drawn as two cost bars on one axis, the same GPU rented at $4 per hour serving the book's reference ResNet-50 profile. Step 1: batch 1, 3.5 ms latency, 283 requests/s, $3.92 per million requests. Step 2: the question, with batch 8's bar hidden. Step 3: batch 8, 3.8 ms, 2,129 requests/s, $0.52 per million. Annotation on the plot: '0.3 ms faster, 7.5x the cost'. Labeled 'modeled: the book's reference profile'."
+  question_to_class: "Batch 8 adds 0.3 ms of latency. How much more does serving one image at a time cost per million requests? A) 10 percent more B) 2x C) 7.5x D) 25x"
+  payoff: "C: $3.92 against $0.52, 7.5x, for 0.3 ms. The fixed cost of each forward pass (174 kernel launches, one weight read) is paid once per request at batch 1 and once per eight requests at batch 8. Students who answer A reason from latency; students who answer D remember Lecture 12's batch-32 or Offline ratios. The synthesis returns to these bars with the capacity plan: 36 H100s at batch 1 against 3 batched, for the same 5,000 requests/s."
+  sources: ["§13.1.1, Example 13.1 (batch 1: 3.5 ms, 283 req/s, $3.92; batch 8: 3.8 ms, 2,129 req/s, $0.52; $4/hour); the book states 8x, the ratio of the two costs is 7.5x", "§13.3.2 (174 kernels, 2.6 ms of launch at batch 1)"]
+
+driving_question: "What does it take for every request, not the average one, to finish before its deadline, and what does that cost?"
+
+recall: "Lecture 12 measured one RTX 4090 two ways in MLPerf: one query at a time (SingleStream, 0.28 ms) and everything at once (Offline, 44,411 samples/s, 12.5x the one-at-a-time rate). Ask which of the two a photo-upload service runs. Answer: neither. Requests arrive at random and each must meet a tail deadline: MLPerf's Server scenario, Poisson arrivals scored against a p99 bound. Lecture 12 handed this lecture batching policy, queueing, TTFT and TPOT, and cold starts. (Answered in segment 2 with measured Server against Offline data.)"
+
+running_example: "First half: the book's ResNet-50 image service on the reference H100 (reference profile, modeled from the iron law, not measured): 3.5 ms batch-1 forward pass, 8.6 ms end to end, 280 to 283 requests/s at batch 1, 7,040 images/s at batch 32, affine service time 3.50 ms + 0.033 ms per image. Measured anchors: MLPerf Inference v5.0 ResNet-50 on 8x H100-SXM (Offline 715,761 samples/s, Server 652,002 queries/s under a 15 ms p99 bound, submission 5.0-0010) and on L4 (SingleStream 0.414 ms, MultiStream batch 8 0.770 ms, Offline 38,566 samples/s on three L4s, 5.0-0047). Second half: GPT-2 XL chat (3 GB FP16 weights, 0.9 ms decode floor per token on the H100, 307.2 KB of KV cache per token) and Llama 3 8B (131 KB per token, 16.1 GB FP16 weights, 65 conversations of 8,192 tokens per H100). Measured anchors: Splitwise (Patel et al. 2024) on DGX-H100, vLLM (Kwon et al. 2023) on A100, MLPerf Inference v5.0 Llama 2 70B on 8x H100-SXM (5.0-0020)."
+
+segments:
+  - name: The Budget
+    divider_question: "Where does one request's time go?"
+    read: "§13.1, §13.3"
+    concept_questions: [2, 3, 4]
+    land: "A request's deadline is shared by every stage on its path; the model is one slice, so a faster model buys far less than its own speedup."
+    minutes: 7.0
+  - name: Queues
+    divider_question: "How much idle capacity must a service keep?"
+    read: "§13.4"
+    concept_questions: [5, 6, 7, 8]
+    land: "Waiting time grows as 1 / (1 - utilization), so a tail target fixes the highest safe utilization, and that utilization, not the peak rate, sizes the fleet."
+    minutes: 16.0
+  - name: Batching
+    divider_question: "What does a batch buy, and who pays for it?"
+    read: "§13.5"
+    concept_questions: [9, 10]
+    land: "A batch shares fixed costs and raises throughput almost for free in compute time, but every request pays the wait for the batch to form; the deadline, not throughput, sets the largest useful batch."
+    minutes: 11.0
+  - name: Cold Start
+    divider_question: "How long before a new replica can help?"
+    read: "§13.8.1 to §13.8.3, §13.11 (cold-start fallacy)"
+    concept_questions: [11]
+    land: "A replica is useless until its weights are loaded, its engine built, and its kernels warmed; that delay arrives exactly when a spike needs capacity, so it belongs in the capacity plan."
+    minutes: 7.0
+  - name: Tokens
+    divider_question: "What changes when the answer is a stream of tokens?"
+    read: "§13.9"
+    concept_questions: [12, 13, 14, 15]
+    land: "LLM serving is memory management: decode bandwidth sets each token's floor, KV-cache memory sets how many conversations share that bandwidth, and the batch that fills sets the joules per token."
+    minutes: 14.5
+
+concept_questions:
+  - id: 1
+    q: "Why does serving one request at a time cost so much more than serving eight?"
+    picture: "New hbars (slideplot): cost per million requests, batch 1 against batch 8, latency labeled on each bar; annotation '0.3 ms faster, 7.5x the cost'."
+    numbers: "Example 13.1: batch 1 3.5 ms, 283 req/s, $3.92 per million; batch 8 3.8 ms, 2,129 req/s, $0.52; GPU at $4/hour. Ratio 7.5x (the book rounds to 8x). Modeled, the book's reference profile."
+    example: "Training would never run at batch 1; a live service often must."
+    read: "§13.1.1"
+  - id: 2
+    q: "Where does one request's time go?"
+    picture: "Book fig-model-serving-request-timeline (host CPU, PCIe, GPU lanes over 8.6 ms) revealed lane by lane with a highlight box; the GPU lane's 5 ms idle stripe boxed last."
+    numbers: "Table 3 (assumed host phases, modeled forward pass): JPEG decode 3 ms, resize 1 ms, normalize 0.5 ms, copy 0.5 ms, forward pass 3.5 ms (41 percent), softmax and top-5 0.1 ms, total 8.6 ms; preprocessing 52 percent. With a compiled 0.33 ms engine, preprocessing becomes 83 percent (§13.3.2)."
+    example: "DLRM in contrast: embedding lookups 6 of 9 ms, the MLP 1.5 ms (Lighthouse 13.1), named in the notes."
+    read: "§13.3.1, §13.3.2"
+  - id: 3
+    q: "What does a 10x faster model buy the user?"
+    picture: "Predict slide: the 8.6 ms bar, model slice shrunk 10x, '???' for the new total; reveal 5.5 ms (1.6x). Second panel: measured face-recognition pipeline (Richins et al.): AI stages under 60 percent of frame latency; detection 42 percent AI, speedup ceiling 1.74x."
+    numbers: "Book: 3.5 -> 0.35 ms model gives 8.6 -> 5.5 ms, 1.6x (Systems Perspective 13.2). Measured: production-size edge face recognition, less than 60 percent of frame latency in AI stages, over a third in message brokers (Fig. 6); detection 42 percent AI, asymptotic speedup 1.74x, 1.66x at 16x acceleration; identification 88 percent AI, 6.6x at 32x acceleration (Richins et al., AI Tax, arXiv 2007.10571, Section 5.2, read from the paper)."
+    example: "Amdahl's law (Lecture 1, Lecture 11) applied to a request path."
+    read: "§13.3.2 (Systems Perspective 13.2)"
+  - id: 4
+    q: "How does overlapping host work with accelerator work raise the accelerator's duty cycle?"
+    picture: "Final step of the timeline frame: book fig-serving-pipeline-timing (serial against pipelined rows)."
+    numbers: "Serial: accelerator busy 41 percent (3.5 ms of the 8.6 ms request); pipelined with one preprocessing worker: 78 percent; a second worker removes the cap (§13.3.5)."
+    example: "Double buffering from Lecture 7, now on the request path."
+    read: "§13.3.5"
+  - id: 5
+    q: "How many requests are inside the server at once?"
+    picture: "Equation anatomy: N = lambda x W built term by term, with a small queue-and-server icon (requests in queue plus in service) beside it."
+    numbers: "Napkin Math 13.2: 1,000 QPS x 0.05 s = 50 requests in flight; a GPU that executes at most 32 per batch still sustains it, the rest wait in host memory. Converse: 50 in flight at 10 ms supports 5,000 req/s (§13.4.1)."
+    example: "Sizing host buffers and worker threads before sizing GPUs."
+    read: "§13.4.1"
+  - id: 6
+    q: "Why does waiting explode near full load, and how far does p99 sit above the mean?"
+    picture: "Book fig-tail-latency-explosion (mean and p99 against utilization, safe and danger zones), with a build that adds the table 7 points for a 3.5 ms service: 50 percent 7.1 ms, 80 percent 17.6 ms, 90 percent 35.3 ms, 95 percent 70.6 ms; final step the p99 law W99 = 4.6 S / (1 - rho) written on the plot."
+    numbers: "M/M/1: W = S / (1 - rho) (equation 4); p99 ~= 4.6 S / (1 - rho) (equation 5), since ln 100 = 4.6. At 70 percent: mean 3.3 S, p99 15.3 S; 3.5 ms service: mean 11.8 ms, p99 54.1 ms (§13.11 pitfall)."
+    example: "Pitfall: 70 to 90 percent utilization cuts modeled cost 22.2 percent but triples mean latency; p99 54.1 -> 162 ms (§13.11)."
+    read: "§13.4.2, §13.4.3"
+  - id: 7
+    q: "How many accelerators does a 5,000 request/s service need to meet a p99 target?"
+    picture: "Worked-example card (given values left, steps right, revealed line by line)."
+    numbers: "Napkin Math 13.3: 50 ms queue-plus-GPU p99 sub-budget, 5,000 QPS, 3.5 ms service; rho <= 1 - 4.6 x 3.5 / 50 = 0.68; 5,000 / 0.68 = 7,403 req/s; / 283 = 26.1 -> 27 GPUs; x 1.3 headroom = 36; N+1 check: 35 GPUs at 50.4 percent."
+    example: "The same arithmetic with batched service (7,040 img/s): 2 GPUs before headroom, 3 after (§13.10.2), held for the synthesis."
+    read: "§13.4.3, §13.10.2"
+  - id: 8
+    q: "What does a real tail bound cost in measured throughput?"
+    picture: "New paired hbars (slideplot), two 8x H100-SXM systems running ResNet-50 in MLPerf Inference v5.0: Offline against Server (Poisson arrivals, 15 ms p99 bound); annotation with the percentage kept."
+    numbers: "Cisco UCS C885A M8 (5.0-0010): Offline 715,761 samples/s, Server 652,002 queries/s (91.1 percent). QuantaGrid D74H-7U (5.0-0065): 712,859 against 584,161 (81.9 percent). Offline per GPU about 89,500/s, the figure the chapter cites. ResNet-50 Server bound 15 ms p99 (MLPerf inference rules). Read from summary_results.json, mlcommons/inference_results_v5.0, closed division, datacenter suite."
+    example: "Same chips, same model; the only change is that queries arrive at random and the tail must hold."
+    read: "§13.4.3 (MLPerf Server paragraph)"
+  - id: 9
+    q: "Why does batching raise throughput so cheaply?"
+    picture: "Two-panel build. Left: new stacked bars of time per image at batch 1, 8, 32 split into fixed cost and per-image work (table 8, affine model). Right: measured MLPerf v5.0 points on an NVIDIA L4: batch 1 (SingleStream) 0.414 ms; batch 8 (MultiStream) 0.770 ms; Offline 12,855 samples/s per GPU (38,566 over three L4s, derived); annotation '1.9x the latency, 4.3x the throughput'."
+    numbers: "Book (modeled): 174 kernels x 15 us = 2.6 ms of launch per pass; fixed-cost share 99 percent at batch 1, 77 percent at batch 32; throughput 280 -> 7,040 img/s (25x) while inference grows 3.53 -> 4.55 ms (table 8); energy per image 39.2 -> 23.4 mJ, movement share 52 -> 19 percent (table 9). Measured: L4 SingleStream 0.414 ms (2,415/s), MultiStream 8 samples in 0.770 ms (10,390/s), Offline 38,566 on 3 GPUs (MLPerf v5.0, 5.0-0047, edge suite). Batch-8 rate and per-GPU Offline rate derived and labeled."
+    example: "Lecture 11's intensity argument (batch 1 at about 1 FLOP/byte for a dense layer) seen as a cost per image."
+    read: "§13.5.1"
+  - id: 10
+    q: "What does a batch cost the request that waits for it?"
+    picture: "One icon, one change per frame: a 10 ms window on a time axis with Poisson arrivals; step 1 mean wait = window / 2; step 2 three Poisson histograms of requests per window at 50, 200, and 1,000 QPS (61 percent empty windows at 50 QPS); step 3 the dual trigger (dispatch at max batch or at the timeout, whichever first) and the 500 QPS envelope: mean 8.7 ms, p99 envelope 13.9 ms."
+    numbers: "E[wait] = window / 2 (equation 8); 20 ms window adds 10 ms mean, 20 percent of a 50 ms budget. Window 10 ms: 50 QPS mean 0.5, 61 percent empty; 200 QPS mean 2; 1,000 QPS mean 10 (§13.5.4). At 500 QPS: request-seen batch mean 6, p99 12; mean 8.7 ms, envelope 13.9 ms, 1.6x (equation 12)."
+    example: "Example 13.4 trace (arrivals 0, 2, 5, 9 ms; timer at 12 ms; worker free at 18 ms; done at 25.6 ms) told in the notes."
+    read: "§13.5.2 to §13.5.4"
+  - id: 11
+    q: "What must happen before a new replica serves, and why does it hurt most during a spike?"
+    picture: "New hbars of table 17's phases on a log time axis (SSD load 0.5 s, S3 load 3 to 5 s, CUDA context 0.3 to 0.5 s, TensorRT build 15 to 30 s, warmup 0.2 s, runtime 0.4 s; totals 1.5 s precompiled, about 35 s first deploy), then a measured strip (ServerlessLLM: Llama 2 70B onto 8 GPUs 84 s with PyTorch); then the book margin figure: 10 GB over PCIe Gen4 x16 is at least 312.5 ms against a 50 ms SLO."
+    numbers: "Table 17 (book, representative); Example 13.10: 5 GB checkpoint 15 s with pickle, 1.5 s with safetensors; §13.8.4: 10 GB / 32 GB/s = 312.5 ms, more than 6x a 50 ms SLO. Measured: loading OPT-30B into 4 GPUs 34 s and Llama 2 70B into 8 GPUs 84 s with PyTorch; downloading a 130 GB checkpoint at 5 GB/s at least 26 s (Fu et al., ServerlessLLM, OSDI 2024, §2.3, read from the paper). Fallacy: 10 replicas x 30 s of compilation; a request that reaches an unwarmed replica waits about 500 ms instead of 5 ms (§13.11)."
+    example: "Autoscaling during a launch or a Black Friday surge."
+    read: "§13.8.1 to §13.8.4, §13.11"
+  - id: 12
+    q: "Why does a chat answer need two latency targets?"
+    picture: "Variant of the old deck's ttft-tpot-timeline: one request as a prefill block then a train of decode ticks; labeled with Splitwise's measured median for Llama 2 70B on one DGX-H100 without batching (TTFT 84 ms, TBT 28 ms, end to end 3,387 ms for conversation); final step MLPerf's two Llama 2 70B targets (2,000 ms / 200 ms conversational, 450 ms / 40 ms interactive)."
+    numbers: "Book: GPT-2 XL 512-token prompt, 1.5 TFLOP, about 3.9 ms of prefill at 40 percent of FP16 peak; decode floor 3 GB / 3.35 TB/s = 0.9 ms per token; eager dispatch of 576 kernels would take 8.6 ms (§13.9.2). Measured: Splitwise Table IV, P50 on H100, Llama 2 70B, conversation trace: TTFT 84 ms, TBT 28 ms, E2E 3,387 ms; 'most of the E2E time is spent running the token phase' (Patel et al., ISCA 2024). MLPerf inference rules: Llama 2 70B TTFT/TPOT 2,000/200 ms conversational, 450/40 ms interactive."
+    example: "Recall only: Lectures 0, 2, and 11 placed decode at about 1 FLOP/byte on the roofline; this lecture converts it to milliseconds per token."
+    read: "§13.9.1, §13.9.2"
+  - id: 13
+    q: "What does batching decode share, and what does it not?"
+    picture: "Stacked bars of bytes per decode step at batch 1 and batch 32 for GPT-2 XL with a full 1,024-token context (weights 3 GB shared, cache 0.3 GB per sequence): step time 1.0 against 3.9 ms, throughput 1,010 against 8,200 tokens/s; measured inset: Splitwise, batching decode to 64 raises time between tokens only 2x. Then one icon, one change: static batch with finished slots idle, against continuous batching refilling each slot at the next step."
+    numbers: "Book: batch 1 step moves 3.3 GB in 1.0 ms; batch 32 moves 13.1 GB, 77 percent cache, in 3.9 ms; 1,010 -> 8,200 tokens/s; TPOT 3.9x longer (§13.9.2). Measured: 'With a batch size of 64, there is only 2x impact on TBT' (Splitwise §III-C, BLOOM-176B and Llama 2 70B on DGX-H100). Continuous batching: one sequence ends at 10 tokens, others at 100, 90 percent of its slot idle under request-level batching (Orca, Yu et al. 2022; §13.9.4)."
+    example: "Chunked prefill (Sarathi-Serve) and speculative decoding (0.90 -> 0.43 ms per token at 70 percent acceptance) named in the notes."
+    read: "§13.9.2 to §13.9.4"
+  - id: 14
+    q: "How many conversations fit on one accelerator, and how much of that memory does allocation waste?"
+    picture: "Estimate card (Llama 3 8B on an H100), then book fig-kv-cache-growth (70B-class, context against KV size, OOM zone); then new bars of vLLM's measured KV-cache use: share of reserved KV memory holding token states, and average batched requests."
+    numbers: "Book: 2 x 32 layers x 8 KV heads x 128 x 2 bytes = 131,072 bytes per token; 8,192 tokens = 1.07 GB; 85.9 - 16.1 = 69.8 GB -> about 65 conversations; 70B-class at 4-bit: 50.6 GB of cache, 32 conversations exhaust it near 4,800 tokens (§13.9.5). Measured (Kwon et al. 2023, OPT-13B on one A100, ShareGPT trace): token states fill 20.4 percent (Orca Max), 26.8 percent (Pow2), 38.2 percent (Oracle) of KV memory against 96.3 percent in vLLM (Fig. 2); average batched requests 7.00, 9.81, 13.62 against 30.42 (Fig. 13a), 2.2x Oracle; 1.7x to 2.7x higher request rate than Orca (Oracle) at similar latency (§6.2)."
+    example: "Paging borrowed from the operating system (Atlas, 1962)."
+    read: "§13.9.4 (PagedAttention), §13.9.5"
+  - id: 15
+    q: "What sets the energy of one generated token?"
+    picture: "Build on Lecture 0's 1.1 J per token: new bars of joules per token for GPT-2 XL decode at batch 1 and batch 32 at a constant 1 kW node (derived), annotated 'decode power barely changes with batch (Splitwise, measured)'; final step one number: Google's median Gemini prompt energy fell 33x in a year, 1.4x of it from utilization (Elsworth et al. 2025)."
+    numbers: "Derived: 1,000 W / 1,010 tokens/s = 0.99 J; 1,000 W / 8,200 tokens/s = 0.12 J (node power from Napkin Math 13.5, token rates from §13.9.2); label 'derived, constant power assumed'. Measured: Splitwise Fig. 8, token-phase power 'does not vary when increasing the number of tokens to process'. Elsworth et al. 2025 (arXiv 2508.15734, §4): 33x reduction in per-prompt energy May 2024 to May 2025, 23x from model improvements and 1.4x from improved machine utilization."
+    example: "Do not repeat Lecture 0's 548 J answer or the 0.24 Wh boundary breakdown (Lecture 12); the new point is why energy per token is a batching result."
+    read: "§13.9.6 (Napkin Math 13.5)"
+
+worked_examples:
+  - name: "Systems Perspective 13.2 and Table 3: what a 10x faster model buys"
+    steps: ["given: request 8.6 ms; preprocessing 4.5 ms, transfer 0.5 ms, model 3.5 ms, postprocessing 0.1 ms", "model 10x faster: 3.5 -> 0.35 ms", "new total 5.5 ms", "result: 1.6x end to end", "meaning: optimize the stage that holds the time; measured face-recognition pipelines show the same ceiling (detection 1.74x)"]
+  - name: "Napkin Math 13.3: ResNet-50 capacity plan"
+    steps: ["given: 5,000 QPS peak, 3.5 ms batch-1 service, 50 ms p99 queue-plus-GPU sub-budget", "safe utilization: 1 - 4.6 x 3.5 / 50 = 0.68", "required service rate: 5,000 / 0.68 = 7,403 req/s", "GPUs: 7,403 / 283 = 26.1 -> 27; with 30 percent headroom 36", "check N+1: 35 GPUs at 50.4 percent, under 0.68", "meaning: the tail target, not the peak rate, sizes the fleet; batched service needs 3 (§13.10.2)"]
+  - name: "Equations 8 to 12: a 10 ms window at 500 QPS"
+    steps: ["given: 500 QPS, 10 ms calendar window, service 3.50 ms + 0.033 ms per image", "mean wait: 5 ms", "request-seen batch: mean 6, p99 12 (1 + Poisson(5))", "mean latency 5 + 3.7 = 8.7 ms; envelope 10 + 3.9 = 13.9 ms", "meaning: the tail of the batch distribution, not its mean, must fit the SLO"]
+  - name: "§13.9.5: KV budget for Llama 3 8B on one H100"
+    steps: ["given: 32 layers, 8 KV heads, head dimension 128, FP16; 16.1 GB weights; 85.9 GB device", "per token: 2 x 32 x 8 x 128 x 2 = 131,072 bytes", "per 8,192-token conversation: 1.07 GB", "free memory 69.8 GB -> about 65 conversations", "meaning: memory, not arithmetic, caps concurrency; every thousand tokens of context costs conversations"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Batch 8 adds 0.3 ms. How much more does serving one image at a time cost per million requests? A) 10 percent B) 2x C) 7.5x D) 25x"
+    answer: "C: $3.92 against $0.52 (Example 13.1). Fixed per-pass cost is paid by one request instead of eight."
+  - at_minute: 10.5
+    type: predict
+    prompt: "Our 8.6 ms request: the model gets 10x faster (3.5 -> 0.35 ms). What is the new end-to-end time?"
+    answer: "5.5 ms, 1.6x (Systems Perspective 13.2). Students who answer 0.86 ms scaled the whole request. Measured pipelines agree: face detection at 42 percent AI cannot exceed 1.74x (Richins et al.)."
+  - at_minute: 21
+    type: estimate
+    prompt: "5,000 requests/s, 3.5 ms per request on one H100, p99 for queue plus GPU under 50 ms. How many H100s? Use p99 ~= 4.6 S / (1 - rho)."
+    answer: "rho <= 0.68; 7,403 req/s; 27 GPUs; 36 with 30 percent headroom; N+1 holds at 50.4 percent (Napkin Math 13.3). Students who divide 5,000 by 283 (18 GPUs) planned for 100 percent utilization."
+  - at_minute: 27
+    type: concept_question
+    prompt: "A service runs at 80 percent utilization with 3.5 ms service time. A kernel optimization makes the model 2x faster (1.8 ms). Mean time in system improves by: A) under 2x B) exactly 2x C) about 6x D) not at all, the queue dominates"
+    answer: "C: 17.6 -> 3.0 ms. The faster model also drops utilization to 41 percent and drains the queue (first fallacy, §13.11). A is the fixed-fraction Amdahl reasoning that ignores load; D confuses queue length with a fixed cost."
+  - at_minute: 38.5
+    type: concept_question
+    prompt: "At 500 QPS the ResNet-50 service runs batches capped at 16. Raising the cap to 32 lifts saturated throughput 77 percent and batch inference only from 4.0 to 4.5 ms. Raise it? A) yes, more throughput is free B) no, the service already has spare capacity and the wait to fill doubles C) only if the GPU has memory"
+    answer: "B: capacity at 16 is 3,980 img/s against 500 offered; mean formation wait for a count-triggered batch rises from 15 to 31 ms (§13.11 fallacy). C names a real limit but not the binding one."
+  - at_minute: 45
+    type: discuss
+    prompt: "Traffic jumps 10x (Example 13.3, 10,000 QPS). A new replica needs about 35 s on first deploy, 1.5 s with a precompiled engine. What do you do in the first minute, and what do you report? Two minutes with a neighbor."
+    answer: "Open. Expected: admission control (reject with 503 rather than admit doomed work), graceful degradation (a smaller warmed model, shorter generations), warm pools and precompiled engines, predictive scaling. Report rejection rate and fallback quality with latency, or shedding hides the failure (§13.4.4, §13.8, §13.10.1)."
+  - at_minute: 55
+    type: estimate
+    prompt: "Llama 3 8B: 32 layers, 8 KV heads of dimension 128, FP16 cache. Weights take 16.1 GB of an H100's 85.9 GB. How many 8,192-token conversations fit?"
+    answer: "131,072 bytes per token; 1.07 GB per conversation; 69.8 GB free; about 65 (§13.9.5). Common error: forgetting the factor 2 for keys and values (130), or using 32 query heads instead of 8 KV heads (16)."
+  - at_minute: 62
+    type: retrieval
+    prompt: "Back to the hook's two bars. Close your notes: write the three quantities that decide how many accelerators this service needs."
+    answer: "Service time per request (set by batching and runtime), the highest utilization the tail target allows, and the peak arrival rate with headroom; for LLMs add the KV memory per conversation. Synthesis: 36 H100s at batch 1 against 3 batched (§13.10.2)."
+
+open_questions:
+  - "A provider could offer a slower, cheaper tier that waits to batch. Who should decide how much latency a request is worth, the provider or the user?"
+  - "Reasoning models spend more tokens per question by choice (Systems Perspective 13.7). Each token pays decode time, cache memory, and joules. Where should a service cap that spending, and who sets the cap?"
+  - "Google cut energy per median prompt 33x in a year (Elsworth et al. 2025), and API prices fell by orders of magnitude (fig-intelligence-deflation). Will total serving energy fall or rise (Jevons paradox, §13.10)?"
+
+more_examples:
+  - "MLPerf Inference v5.0, Llama 2 70B on one 8x H100-SXM system (Dell PowerEdge XE9680, 5.0-0020): Server 30,904 tokens/s under the conversational 2,000/200 ms TTFT/TPOT bound against 12,979 tokens/s under the interactive 450/40 ms bound, 2.4x less for the tighter target (summary_results.json; inference rules). Used in the synthesis."
+  - "Static inference: classifying 10,000 photos one at a time at 3.5 ms takes 35 s; at MLPerf's 89,500 images/s it takes 0.11 s, about 320x faster (§13.1.1)."
+  - "DLRM: embedding lookups 6 of 9 ms per request; the MLP is 17 percent (Lighthouse 13.1)."
+  - "Runtime choice at batch 1 (Example 13.6, modeled): eager 3.53 ms, TorchScript 1.79, ONNX Runtime 0.61, TensorRT FP32 0.38, FP16 0.33, INT8 0.30; removing per-operation dispatch, not lowering precision, gives most of the speedup."
+  - "Mobile single-stream ResNet-50 (Example 13.5, illustrative): 45 ms, 2.98 mJ, NPU at 82 percent utilization at batch 1."
+  - "Hedged requests and the tail at scale: 0.99^100 = 36.6 percent of fan-out requests meet the target (§13.4.5); Lecture 12 showed Dean and Barroso's measured table."
+  - "Speculative decoding for GPT-2 XL: GPT-2 Small draft, 4 tokens per round, 70 percent acceptance, 2.8 tokens per round, 0.90 -> 0.43 ms per token (§13.9.4); Leviathan et al. 2023 report 2 to 3x on T5-XXL."
+  - "ServerlessLLM: Llama 2 70B checkpoint loading 8.2x faster than PyTorch and 4.7x faster than Safetensors with chunked direct I/O (Fu et al. 2024, §7.2)."
+  - "Splitwise: for BLOOM-176B a 1,500-token prompt takes as long as 6 output tokens (§III-C)."
+
+left_to_reading:
+  - concept: "Serialization and protocols (JSON against Protobuf, REST against gRPC; Napkin Math 13.1)"
+    why: "Secondary to the budget argument; named in the notes of the timeline frame as one of the per-request overheads (table 5)."
+  - concept: "Runtime and precision selection (§13.6)"
+    why: "Lectures 7, 10, and 11 own compilation, quantization, and Tensor Core formats; one line and the Example 13.6 numbers in the notes of the fixed-cost frame."
+  - concept: "Host-path optimization: CPU pinning, mlock, interrupts, NUMA, CPU inference, profiling (§13.7)"
+    why: "Detail better read than heard; Lecture 8 owns the profiling method."
+  - concept: "Multi-model serving, MIG and MPS, model caching tiers (§13.8.3, §13.8.4)"
+    why: "Operational detail; the 312.5 ms swap is the one number taught."
+  - concept: "Training-serving skew (§13.8.5)"
+    why: "Lecture 4 owns the consistency principle and Lecture 14 owns detection; it is the bridge on the next-lecture frame."
+  - concept: "Prefix caching, KV offloading, session affinity, tensor-parallel serving (§13.9.5, §13.9.6)"
+    why: "Extensions of the KV budget; one line in the notes of the paging frame."
+  - concept: "Economics detail: CPU, T4, and H100 cost per million images and the 3,000 img/s crossover (Example 13.13); the Llama 3 8B unit-cost case study (§13.10.3)"
+    why: "The synthesis carries the capacity-plan comparison; the cost tables are better read."
+  - concept: "Traffic patterns and MLPerf scenario mapping, mobile serving (§13.5.5)"
+    why: "Lecture 12 taught the four scenarios; mobile serving appears as one example."
+
+closing:
+  return_to_hook: "Back to the two cost bars. The 7.5x is the hook's version of a planning result: at 5,000 requests/s under a 50 ms p99 sub-budget, batch-1 service needs 36 H100s and batched service about 3 (§13.10.2, same utilization factor, still to be load-tested). For LLMs the measured version: the same 8x H100 system serves Llama 2 70B at 30,904 tokens/s under 2,000/200 ms TTFT/TPOT and at 12,979 tokens/s under 450/40 ms (MLPerf v5.0, 5.0-0020). A tighter deadline is bought with accelerators."
+  read_and_practice: ["§13.1, §13.3 to §13.5, §13.8.1 to §13.8.4, §13.9, §13.11", "Self-check questions for §13.3, §13.4, §13.5, §13.9", "Napkin Math 13.2, 13.3, 13.4; Example 13.4; Checkpoints 13.2 and 13.5"]
+  further_reading:
+    - cite: "Model Serving, §13.4 and §13.9"
+      url: ""
+      why: "The queueing derivations and the LLM serving section this lecture compresses."
+    - cite: "Harchol-Balter, Performance Modeling and Design of Computer Systems: Queueing Theory in Action, 2013"
+      url: "https://doi.org/10.1017/CBO9781139226424"
+      why: "The standard text for Little's law, M/M/1, and why the tail behaves as it does."
+    - cite: "Crankshaw et al., Clipper: A Low-Latency Online Prediction Serving System, NSDI 2017"
+      url: "https://www.usenix.org/conference/nsdi17/technical-sessions/presentation/crankshaw"
+      why: "Adaptive batching against a latency objective in a real serving system."
+    - cite: "Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention, SOSP 2023"
+      url: "https://arxiv.org/abs/2309.06180"
+      why: "The measured KV-cache waste and the paging design behind vLLM."
+    - cite: "Patel et al., Splitwise: Efficient Generative LLM Inference Using Phase Splitting, ISCA 2024"
+      url: "https://arxiv.org/abs/2311.18677"
+      why: "Measured prefill and decode behavior on H100: latency, batching, memory, and power by phase."
+    - cite: "Richins et al., AI Tax: The Hidden Cost of AI Data Center Applications (extends the HPCA 2020 paper)"
+      url: "https://arxiv.org/abs/2007.10571"
+      why: "A measured production-size pipeline where most of the time is not the model."
+
+bridge: "Lecture 14: the service is up and fast. How do we know it is still right? Training-serving skew (a resize or color-order mismatch) keeps every latency dashboard green while predictions change (§13.8.5, What's Next)."
+
+coverage:
+  primary_taught: ["Serving inverts training (hook, recall, synthesis)", "Latency budget (timeline, Amdahl predict, AI tax)", "Queueing sets headroom (Little's law, knee, p99 law, capacity plan, MLPerf Server against Offline, faster-model fallacy, overload discussion)", "Batching trades latency for throughput (fixed cost, L4 measured points, formation delay and Poisson batches, dual trigger, batch-cap fallacy)", "LLM serving phases (TTFT and TPOT with Splitwise and MLPerf, decode floor, batching shares weights not cache, continuous batching)", "KV cache budget bounds concurrency (Llama 3 8B estimate, 70B figure, vLLM measured waste)"]
+  primary_left_to_reading: []
+  secondary: ["Static vs dynamic inference (notes of the hook and recall; 320x photo-library example)", "Cold start and model loading (taught: segment 4)", "Runtime and precision selection (notes only, Example 13.6)", "Host-path optimization (reading; pipelining duty cycle taught)", "Serving economics (hook and synthesis; cost tables to reading)", "Speculative decoding (notes of the decode frame)"]
+  touches_reused: ["Lecture 0: decode on the roofline, 548 J per answer, 1.1 against 6.6 J per token (built on, not repeated)", "Lecture 1 and Lecture 11: Amdahl's law (applied to the request path)", "Lecture 2 and Lecture 11: decode at about 1 FLOP/byte against the 295 FLOP/byte ridge (one recall line)", "Lecture 6: KV cache per token (307.2 KB for GPT-2 XL) and why it grows (recall line; this lecture budgets it)", "Lecture 7: dispatch overhead and CUDA graph capture (174 kernels, 576 decode kernels)", "Lecture 12: MLPerf scenarios, open-loop load, p99 and SLOs, Dean and Barroso's fan-out table"]
+  hand_offs: ["Lecture 12 hands over batching policy, queueing and Little's law, TTFT and TPOT in serving, cold-start mitigation (all taught here)", "Lecture 14 owns release (canary, shadow, rollback), monitoring, drift, training-serving skew detection, and the model registry", "Lecture 15 owns energy and carbon accounting beyond joules per token"]
+
+notes_for_author:
+  - "Example 13.1 says batch 1 'multiplies the hardware cost per million queries by 8x'; $3.92 / $0.52 = 7.5x. The slide says 7.5x. The chapter could say 7.5x."
+  - "The book's ResNet-50 numbers (3.5 ms, 283 req/s, table 8, table 9, table 3 host phases) are the modeled reference profile and stated assumptions; every slide that shows them is labeled 'modeled' or 'assumed'. Measured anchors on the same frames: MLPerf v5.0 (H100 Server against Offline; L4 SingleStream, MultiStream, Offline), Richins et al. for the latency budget."
+  - "The L4 batch-8 rate (10,390/s) and per-GPU Offline rate (12,855/s) are derived from MLPerf values (8 / 0.770 ms; 38,566 / 3) and labeled derived. MultiStream is 8 samples per query by rule; whether the submission ran SingleStream and MultiStream on one of the three L4s is assumed and stated in the notes."
+  - "The MLPerf v5.0 ResNet-50 15 ms Server bound is read from the inference_policies llama2-70b-interactive branch, which holds the v5.0-era datacenter table; the current master no longer lists ResNet-50 in the datacenter suite."
+  - "vLLM's Orca baselines are the vLLM authors' reimplementations of Orca with three reservation policies; the slide says 'Orca as reimplemented by Kwon et al.'. Fig. 2 percentages are read from the extracted figure text; the breakdown of the remaining share (reservation, internal, external) is not shown on the slide."
+  - "Splitwise's 'batch 64, 2x TBT' is a measured statement in prose (§III-C), not a table value; the slide quotes it. Its Table IV values are P50 without batching on Llama 2 70B."
+  - "The joules-per-token bars are derived from §13.9.2 token rates and Napkin Math 13.5's 1 kW node; they assume constant power, which Splitwise supports qualitatively for the token phase. Labeled 'derived'."
+  - "The 33x figure (Elsworth et al. 2025) mixes model changes (23x) with utilization (1.4x) and is a whole-service number, not a batching measurement; the notes say so."
+  - "No \\mlsysfocus planned; the p99 law is written on the knee plot instead. If one focus slide is wanted, p99 ~= 4.6 S / (1 - rho) is the candidate."
+  - "Old deck figures to inspect for reuse or variants: ttft-tpot-timeline.svg, continuous-vs-static-batching.svg, queuing-latency.svg, batching-comparison.svg. The old deck's Facebook war story and Llama-3-70B exercise are not used."
+
+build_note:
+  date: "2026-10-17"
+  result: "36 frames, 73 presenting pages, 36 handout pages; notes total 70.0 minutes; fit check passes. Figures in images/make_figs.py; every value is sourced in its docstring."
+  sources_rechecked: "MLPerf Inference v5.0 values re-read from summary_results.json (5.0-0010, 5.0-0065, 5.0-0047, 5.0-0020, 5.0-0032) and the v5.0-era inference rules (ResNet-50 Server bound 15 ms; Llama 2 70B TTFT/TPOT 2,000/200 and 450/40 ms; SingleStream reports the 90th and MultiStream the 99th percentile latency). Kwon et al. Fig. 2 and Fig. 13a, Splitwise Table IV and Sec. III-C, Richins et al. Fig. 6 and Sec. 5.1, Fu et al. Sec. 2.3, and Elsworth et al. Sec. 4 re-read from the arXiv PDFs. All plan values matched."
+  changes:
+    - change: "Request timeline drawn as a slide-size variant of the chapter's figure 3 (timeline_step1-3) instead of the book PNG with highlight boxes."
+      reason: "At slide size the book PNG's labels render near 6 pt, under the legibility floor."
+    - change: "Pipelining moved from the timeline's third step to its own frame (1.5 min, OPTIONAL); the timeline frame takes 3 min."
+      reason: "Two figures side by side shrank both below the legibility floor."
+    - change: "Knee plot redrawn as a variant with the table 7 points; the two laws sit beside the plot, not on it."
+      reason: "The book PNG's legend and zone labels were too small; LaTeX typesets the laws more legibly than the plotting library."
+    - change: "MLPerf Server against Offline frame kept but cut to 1.5 min, marked OPTIONAL, and framed as a return to Lecture 12."
+      reason: "Lecture 12's plan shows the same two 8x H100 pairs; this lecture now explains the gap with the knee instead of introducing it."
+    - change: "Measured panel of the predict frame shows Richins et al. Fig. 6 as one stacked bar (ingestion 18.8, detection 74.8, brokers 126.1, identification 131.5 ms; AI stages 59 percent). The 1.74x detection ceiling is in the notes."
+      reason: "A stacked bar matches the book's request bar directly above it; the per-stage ceilings come from a different breakdown (Fig. 8) and would need their own explanation."
+    - change: "L4 rates labeled as derived from tail latencies (p90 SingleStream, p99 MultiStream) and Offline/3."
+      reason: "MLPerf reports percentile latencies, not rates; the notes state the assumption that latency runs used one L4."
+    - change: "Cold-start measured values (ServerlessLLM) shown as a small card, not a plot; model-swap frame uses a redrawn bar (model_swap) instead of margin-001."
+      reason: "A three-bar plot in a third-width column fell under the legibility floor; the margin figure has no axis and tiny text."
+    - change: "TTFT/TPOT timeline and continuous-batching figures drawn new instead of variants of the old-deck SVGs; decode share of the request (97 percent) labeled derived."
+      reason: "The old SVGs carry dense 7 pt text and unsourced targets; the new ones use Splitwise's measured medians."
+    - change: "KV estimate and the 70B-class budget figure split into two frames (2.5 + 1 min); the 70B figure redrawn (kv_budget)."
+      reason: "The estimate needs the full width for its arithmetic, and the book PNG's legend was illegible. The redraw assumes 327,680 bytes per token (80 layers, 8 KV heads of 128, FP16), our assumption for a 70B-class model; it reproduces the chapter's 50.6 GB budget and 4,800-token crossing."
+    - change: "Next-lecture image is the kit stack with the operations layer, not training-serving-skew.svg."
+      reason: "The old SVG's text is unreadable at slide size."
+  old_images_unused: ["batching-comparison.svg/.pdf", "continuous-vs-static-batching.svg/.pdf", "inference-pipeline.svg/.pdf", "queuing-latency.svg/.pdf", "serving-inversion.svg/.pdf", "training-serving-skew.svg/.pdf", "ttft-tpot-timeline.svg/.pdf", "server-rack-datacenter.jpg"]
