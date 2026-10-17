@@ -7,6 +7,7 @@ from argparse import ArgumentParser, Namespace
 from rich.panel import Panel
 
 from ..base import BaseCommand
+from ...core.virtual_env_manager import resolve_venv_tool
 
 class NbdevCommand(BaseCommand):
     @property
@@ -72,14 +73,15 @@ class NbdevCommand(BaseCommand):
         (nbdev-docs, not nbdev_docs); calling the underscore form raises
         FileNotFoundError since it has never existed under that name.
         """
+        tool_path = resolve_venv_tool(command)
         try:
             result = subprocess.run(
-                [command], capture_output=True, text=True, encoding="utf-8", errors="replace"
+                [tool_path], capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
         except FileNotFoundError:
             console.print(Panel(
-                f"[red]❌ '{command}' not found[/red]\n\n"
-                "This requires nbdev to be installed:\n"
+                f"[red]❌ '{command}' not found at '{tool_path}' and not on PATH.[/red]\n\n"
+                "Activate your virtual environment, or install nbdev:\n"
                 "  [cyan]pip install nbdev[/cyan]",
                 title=f"{label} Error", border_style="red"
             ))
