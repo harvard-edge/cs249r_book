@@ -20,29 +20,39 @@ Every canonical catalog entry has a reviewed treatment or an explicit static /
 source-conflict reason. A source conflict is not an implemented enhancement.
 The catalog reports the original proposal separately from the delivered form.
 
-The reviewed rollout contains 686 enhancements: 213 in Volume I, 257 in
-Volume II, 89 in Volume III, and 127 in Volume IV. Of these, 670 are guided
+The reviewed rollout contains 690 enhancements: 215 in Volume I, 258 in
+Volume II, 89 in Volume III, and 128 in Volume IV. Of these, 674 are guided
 annotations and 16 are specialized stateful lessons. Seventeen cataloged
-figures remain static by design; four remain unenrolled because their source
-captions or labels conflict with the artwork. Coverage is not an animation
-quota or a claim that every figure benefits from changing machine state.
+figures remain static by design. The four previously held source conflicts
+were corrected with explicit user approval, reviewed, and enrolled; no blocked
+catalog entries remain. Coverage is not an animation quota or a claim that
+every figure benefits from changing machine state.
 
-The local validation includes a 686-player runtime sweep, a refined
-four-profile projection/capture pass (2,744 screenshots, with recorded retries),
+Historical validation covered the original 686-player runtime sweep, refined
+four-profile projection/capture pass (2,744 screenshots with recorded retries),
 a separate 16-lesson runtime recheck, and actual-chapter visual review by the
-owning authors. The 24 focused tests cover compiler enrollment, static format
-behavior, deterministic rendering, and surrounding filter compatibility.
-The catalog review record distinguishes these checks from semantic judgment
-and records the remaining source conflicts.
+owning authors. Those totals describe that earlier snapshot, not a completed
+690-player sweep. Final source/artwork integrity passed for all 690 entries
+across 83 chapter pages. The four approved additions passed full runtime checks in four profiles
+(16 runtime screenshots), plus all sequence-stage and Enlarge captures (68 each),
+with actual-theme visual review. The catalog review record records their exact
+results and keeps runtime checks separate from semantic
+judgment. The 24 focused tests cover compiler enrollment, static format behavior,
+deterministic rendering, and surrounding filter compatibility.
 
-The final book-code snapshot also passed all eight full-volume PDF/EPUB builds.
-All PDF extracted text and page counts match the earlier static baseline;
-six figure pages were visually inspected, including four pixel-identical memory
-and state examples. EPUBs retain static figures without Explore controls,
-runtime assets, or broken image references. The two intentionally seeded
-Volume I SVGs match the reviewed HTML artwork exactly. The existing malformed
-Volume I dependency-map target remains part of the four held source conflicts.
-This is representative visual verification, not an audit of every PDF page.
+Earlier static verification passed all eight full-volume PDF/EPUB builds, with
+unchanged PDF text/page counts before the approved source repairs. It confirmed
+static EPUB behavior and representative rendered figure pages, including the
+seeded MNIST and QKV diagrams. The four approved source corrections intentionally
+change captions, alt text, or frontmatter markup in the final static outputs;
+all four final EPUBs preserve static images under all 707 canonical figure
+targets, without enhancement runtime, controls, or broken image references.
+Only the intentionally corrected coreset SVG differs from the earlier image
+assets. The catalog review record records final build and comparison results;
+no unchanged-whole-book-text claim applies after the approved corrections.
+All four final PDF builds also succeeded; the four corrected figure pages were
+rendered and inspected. Representative page checks are not an audit of every
+PDF page.
 
 Source and artwork freshness guards fail back to Diagram if either changes.
 The source digest ignores enrollment attributes only. SVG digests ignore

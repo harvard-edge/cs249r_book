@@ -18,7 +18,7 @@ for v in range(1,5):
  for order,rel in enumerate(paths):
   p=books/rel
   if not p.exists():continue
-  text=p.read_text();lines=text.splitlines();headings=[]
+  text=re.sub(r' data-explore(?:-key)?="[^"]*"', '', p.read_text());lines=text.splitlines();headings=[]
   for i,line in enumerate(lines):
    h=re.match(r'^(#{1,6})\s+(.+)',line)
    if h:headings.append((i,len(h[1]),h[2]))
