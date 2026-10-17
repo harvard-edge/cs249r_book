@@ -245,25 +245,31 @@ for k in (1, 2):
     sp.save(fig, out / f"pipeline_step{k}.svg")
 
 # ------------------------------------------------------- knee (variant)
+# Five steps: the table 7 points one at a time, a predict pause before 90
+# percent, then the p99 curve and the 70 percent point.
 S = 3.53  # the book's reference service time, printed as 3.5 ms
-rho = np.linspace(0.0, 0.97, 400)
-mean = S / (1 - rho)
-p99 = 4.6 * S / (1 - rho)
 points = [(0.5, 7.1), (0.8, 17.6), (0.9, 35.3), (0.95, 70.6)]
-for k in (1, 2, 3):
+reach = {1: 0.5, 2: 0.8, 3: 0.8, 4: 0.97, 5: 0.97}
+for k in (1, 2, 3, 4, 5):
     fig, ax = plt.subplots(figsize=(5.8, 2.75))
     ax.axvspan(70, 100, color=C["danger_l"], alpha=0.6, lw=0)
-    ax.plot(rho * 100, mean, color=C["memory"], lw=3)
-    ax.text(97, 92, "", fontsize=1)
-    for r, w in points:
+    rho = np.linspace(0.0, reach[k], 400)
+    ax.plot(rho * 100, S / (1 - rho), color=C["memory"], lw=3)
+    shown = {1: 1, 2: 2, 3: 2, 4: 4, 5: 4}[k]
+    for r, w in points[:shown]:
         ax.plot([r * 100], [w], "o", ms=8, color=C["memory"], mec="white", mew=1.5, zorder=5)
         ax.annotate(f"{w:g} ms", (r * 100, w), xytext=(-8, -14 if w > 60 else 4),
-                    textcoords="offset points", ha="right", fontsize=11, color=C["memory"], fontweight="bold")
+                    textcoords="offset points", ha="right", fontsize=11,
+                    color=C["memory"], fontweight="bold")
+    if k == 3:
+        ax.plot([90], [35.3], "o", ms=9, mfc="white", mec=C["danger"], mew=2, zorder=5)
+        ax.annotate("90%: ???", (90, 35.3), xytext=(-10, 4), textcoords="offset points",
+                    ha="right", fontsize=12, color=C["danger"], fontweight="bold")
     ax.text(8, 8, "Mean", color=C["memory"], fontsize=12, fontweight="bold")
-    if k >= 2:
-        ax.plot(rho * 100, p99, color=C["danger"], lw=3)
+    if k >= 5:
+        rr = np.linspace(0.0, 0.97, 400)
+        ax.plot(rr * 100, 4.6 * S / (1 - rr), color=C["danger"], lw=3)
         ax.text(30, 30, "p99", color=C["danger"], fontsize=12, fontweight="bold")
-    if k >= 3:
         ax.plot([70], [54.1], "o", ms=9, color=C["danger"], mec="white", mew=1.5, zorder=6)
         ax.annotate("70%: p99 54.1 ms,\nmean 11.8 ms", (70, 54.1), xytext=(-10, 6),
                     textcoords="offset points", ha="right", fontsize=11,
@@ -500,167 +506,191 @@ ax.spines["left"].set_visible(False)
 ax.set_xlabel("Milliseconds")
 sp.save(fig, out / "model_swap.svg")
 
-# ------------------------------------------------- TTFT and TPOT (measured)
+# ------------------------------------------- static against dynamic (13.1.1)
+sp.hbars(out / "static_dynamic.svg", [
+    ("On demand, batch 1", 35, "danger", "35 s"),
+    ("Overnight, large batch", 0.11, "data", "0.11 s: about 320× faster"),
+], "", log=False, size=sp.SHORT,
+    xlabel="Seconds to classify 10,000 photos on one H100")
+
+# --------------------------------------------- second budget: DLRM (Lighthouse 13.1)
+resnet = [("Preprocess 4.5", 4.5, "data"), ("", 0.5, "network"),
+          ("Model 3.5", 3.5, "compute"), ("", 0.1, "neutral")]
+dlrm = [("", 0.5, "neutral"), ("Embedding lookup 6", 6.0, "memory"),
+        ("MLP", 1.5, "compute"), ("", 1.0, "neutral")]
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 1.9))
-    ax.barh(0, 84, color=C["compute"], height=0.5)
-    ticks = np.arange(84 + 28, 3387, 28)
-    for t in ticks:
-        ax.plot([t, t], [-0.25, 0.25], color=C["memory"], lw=1.2)
-    ax.annotate("first token at 84 ms", (84, 0.3), xytext=(150, 0.95), fontsize=11,
-                color=C["compute"], fontweight="bold",
-                arrowprops=dict(arrowstyle="-", color=C["compute"]))
-    ax.text(1700, -0.75, "then one token every 28 ms, for about 120 tokens", ha="center",
-            fontsize=11, color=C["memory"], fontweight="bold")
-    ax.text(3387, 0.95, "3,387 ms", ha="right", fontsize=11, fontweight="bold",
-            color=C["text"])
-    if k == 2:
-        ax.axvspan(84, 3387, color=C["memory_l"], alpha=0.45, lw=0, zorder=0)
-        ax.text(1700, 0.55, "decode: 97% of the time (derived)", ha="center", fontsize=11,
-                color=C["memory"], fontweight="bold")
-    ax.set_xlim(0, 3450)
-    ax.set_ylim(-1.0, 1.3)
-    ax.set_yticks([])
+    fig, ax = plt.subplots(figsize=(5.8, 2.0))
+    for y, parts, show in ((1, resnet, True), (0, dlrm, k >= 2)):
+        left = 0.0
+        for name, v, ck in parts:
+            ax.barh(y, v, left=left, color=C[ck], height=0.6, edgecolor="white",
+                    lw=1.5, alpha=1.0 if show else 0.0)
+            if name:
+                ax.text(left + v / 2, y, name, ha="center", va="center", color="white",
+                        fontsize=11, fontweight="bold", alpha=1.0 if show else 0.0)
+            left += v
+        txt = "8.6 ms: model 41%" if y == 1 else "9 ms: MLP 17%"
+        ax.text(left + 0.15, y, txt, va="center", fontsize=12, fontweight="bold",
+                alpha=1.0 if show else 0.0)
+    ax.set_yticks([1, 0])
+    ax.set_yticklabels(["ResNet-50", "DLRM"], fontsize=12, fontweight="bold")
+    if k < 2:
+        ax.get_yticklabels()[1].set_alpha(0.0)
+    ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Milliseconds, one chat request")
-    sp.save(fig, out / f"ttft_step{k}.svg")
+    ax.set_xlim(0, 12.5)
+    ax.set_ylim(-0.5, 1.5)
+    ax.set_xlabel("One request (ms; Model Serving, tables 3 and 4)")
+    sp.save(fig, out / f"dlrm_step{k}.svg")
 
-# --------------------------------------------- decode bytes per step
+# ------------------------------------------------- fan-out tail (Sec. 13.4.5)
+nn = np.arange(1, 101)
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 1.9))
-    for i, (b, cache, ms, rate) in enumerate(((1, 0.31, "1.0 ms", "1,010 tokens/s"),
-                                              (32, 10.07, "3.9 ms", "8,200 tokens/s"))):
-        y = 1 - i
-        a = 1.0 if (k == 2 or b == 1) else 0.0
-        ax.barh(y, 3.0, color=C["memory"], height=0.55, alpha=a)
-        ax.barh(y, cache, left=3.0, color=C["data"], height=0.55, alpha=a)
-        ax.text(3.0 + cache + 0.2, y, f"{3.0 + cache:.1f} GB: {ms}, {rate}", va="center",
-                fontsize=11, fontweight="bold", color=C["text"], alpha=a)
-        ax.text(-0.15, y, f"Batch {b}", ha="right", va="center", fontsize=12,
-                fontweight="bold")
-    ax.text(1.5, 1.45, "weights 3 GB", ha="center", color=C["memory"], fontsize=11,
-            fontweight="bold")
-    ax.text(8.0, -0.55, "KV cache, 0.31 GB per sequence", ha="center", va="top",
-            color=C["data"], fontsize=11, fontweight="bold", alpha=1.0 if k == 2 else 0.0)
-    ax.set_xlim(0, 22)
-    ax.set_ylim(-0.9, 1.7)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Bytes read per decode step (GB; GPT-2 XL, 1,024-token context, modeled)")
-    sp.save(fig, out / f"decode_bytes_step{k}.svg")
-
-# ------------------------------------------- static against continuous
-lengths = [100, 10, 60, 100]
-for k in (1, 2):
-    fig, axes = plt.subplots(2, 1, figsize=(5.8, 2.9), gridspec_kw={"hspace": 0.85})
-    for p, ax in enumerate(axes):
-        show = p == 0 or k == 2
-        a = 1.0 if show else 0.0
-        for s, L in enumerate(lengths):
-            y = 3 - s
-            ax.barh(y, L, color=C["memory"], height=0.7, alpha=a, edgecolor="white")
-            if p == 0 and L < 100:
-                ax.barh(y, 100 - L, left=L, color=C["danger_l"], height=0.7, alpha=a,
-                        hatch="//", edgecolor=C["danger"], linewidth=0)
-            if p == 1 and L < 100:
-                ax.barh(y, 100 - L - 1, left=L + 1, color=C["data"], height=0.7,
-                        alpha=a, edgecolor="white")
-                ax.text(L + (100 - L) / 2, y, "new request", ha="center", va="center",
-                        color="white", fontsize=9, fontweight="bold", alpha=a)
-        ax.set_yticks([3, 2, 1, 0])
-        ax.set_yticklabels(["slot 1", "slot 2", "slot 3", "slot 4"], fontsize=10)
-        for t in ax.get_yticklabels():
-            t.set_alpha(a)
-        ax.set_xlim(0, 100)
-        ax.set_ylim(-0.6, 3.6)
-        ax.spines["left"].set_visible(False)
-        ax.tick_params(axis="y", length=0)
-        if not show:
-            ax.spines["bottom"].set_alpha(0.0)
-            ax.tick_params(axis="x", colors="white")
-    axes[0].set_title("Request-level batch: slot 2 sits idle 90 of 100 steps", fontsize=11,
-                      loc="left", fontweight="bold", color=C["danger"])
-    axes[1].set_title("Iteration-level batch: a waiting request takes the slot",
-                      fontsize=11, loc="left", fontweight="bold", color=C["data"],
-                      alpha=1.0 if k == 2 else 0.0)
-    axes[1].set_xlabel("Decode steps (sequence lengths illustrative)", fontsize=10,
-                       alpha=1.0 if k == 2 else 0.0)
-    sp.save(fig, out / f"continuous_step{k}.svg")
-
-# ------------------------------------------------------------ vLLM measured
-names = ["Orca (Max)", "Orca (Pow2)", "Orca (Oracle)", "vLLM"]
-used = [20.4, 26.8, 38.2, 96.3]
-batched = [7.00, 9.81, 13.62, 30.42]
-for k in (1, 2):
-    fig, (ax, bx) = plt.subplots(1, 2, figsize=(5.9, 2.4), gridspec_kw={"wspace": 0.08})
-    for i, n in enumerate(names):
-        y = 3 - i
-        ck = "data" if n == "vLLM" else "neutral"
-        ax.barh(y, used[i], color=C[ck], height=0.6)
-        ax.text(used[i] + 2, y, f"{used[i]:g}%", va="center", fontsize=11,
-                fontweight="bold", color=C[ck])
-        ax.text(-3, y, n, ha="right", va="center", fontsize=11, fontweight="bold")
-        a = 1.0 if k == 2 else 0.0
-        bx.barh(y, batched[i], color=C[ck], height=0.6, alpha=a)
-        bx.text(batched[i] + 0.8, y, f"{batched[i]:.1f}", va="center", fontsize=11,
-                fontweight="bold", color=C[ck], alpha=a)
-    ax.set_xlim(0, 125)
-    bx.set_xlim(0, 40)
-    for a_ in (ax, bx):
-        a_.set_yticks([])
-        a_.set_ylim(-0.5, 3.6)
-        a_.spines["left"].set_visible(False)
-    ax.set_title("KV memory holding tokens", fontsize=11, loc="left", fontweight="bold")
-    bx.set_title("Requests in a batch", fontsize=11, loc="left", fontweight="bold",
-                 alpha=1.0 if k == 2 else 0.0)
-    ax.set_xlabel("percent")
-    bx.set_xlabel("average count", alpha=1.0 if k == 2 else 0.0)
+    fig, ax = plt.subplots(figsize=(5.0, 2.5))
+    ax.plot(nn, 100 * 0.99 ** nn, color=C["memory"], lw=3)
+    ax.plot([1], [99], "o", ms=8, color=C["memory"], mec="white", zorder=5)
+    ax.plot([10], [90.4], "o", ms=8, color=C["memory"], mec="white", zorder=5)
+    ax.annotate("10 servers: 90.4%", (10, 90.4), xytext=(10, -4), textcoords="offset points",
+                fontsize=11, fontweight="bold", color=C["memory"])
     if k == 1:
-        bx.spines["bottom"].set_alpha(0.0)
-        bx.tick_params(axis="x", colors="white")
-    sp.save(fig, out / f"vllm_step{k}.svg")
-
-# ------------------------------------------------------ joules per token
-sp.hbars(out / "joules_token.svg", [
-    ("Batch 1", 0.99, "danger", "0.99 J per token"),
-    ("Batch 32", 0.12, "data", "0.12 J per token"),
-], "", log=False, value_fmt="{:.2f}", size=sp.SHORT,
-    xlabel="GPT-2 XL decode, joules per token (derived: 1 kW node, constant power)")
-
-# ------------------------------------------- KV budget, 70B class (variant)
-# Slide variant of MS figure 8. Per-token cache for a 70B-class model with
-# grouped-query attention, derived here: 2 x 80 layers x 8 KV heads x 128 x
-# 2 bytes = 327,680 bytes; budget 50.6 GB after 4-bit weights (MS Sec. 13.9.5).
-ctx = np.linspace(0, 32768, 200)
-fig, ax = plt.subplots(figsize=(5.8, 2.7))
-ax.axhspan(50.6, 125, color=C["danger_l"], alpha=0.6, lw=0)
-ax.axhline(50.6, color=C["danger"], lw=2, ls="--")
-ax.text(32000, 53, "budget after 4-bit weights: 50.6 GB", ha="right", va="bottom",
-        fontsize=11, color=C["danger"], fontweight="bold")
-for b, ck in ((1, "memory"), (4, "data"), (16, "compute"), (32, "network")):
-    kv = b * ctx * 327680 / 1e9
-    ax.plot(ctx, kv, color=C[ck], lw=3)
-    if b > 4:
-        xe = 118e9 / (b * 327680)
-        lx, ly = xe * 0.97, b * xe * 327680 / 1e9 + 2
+        ax.annotate("100: ???", (100, 36.6), xytext=(-12, -24), textcoords="offset points",
+                    ha="right", fontsize=12, fontweight="bold", color=C["danger"])
     else:
-        lx = 24000 if b == 4 else 32000
-        ly = b * lx * 327680 / 1e9 + 3
-    ax.text(lx, ly, f"batch {b}", ha="right", fontsize=11, color=C[ck], fontweight="bold")
-x32 = 50.6e9 / (32 * 327680)
-ax.plot([x32], [50.6], "o", ms=9, color=C["network"], mec="white", mew=1.5, zorder=5)
-ax.annotate("32 chats: full near 4,800 tokens", (x32, 50.6), xytext=(17500, 74),
-            fontsize=11, color=C["network"], fontweight="bold",
-            arrowprops=dict(arrowstyle="-", color=C["network"]))
-ax.set_xlim(0, 32768)
-ax.set_ylim(0, 120)
-ax.set_xticks([0, 8192, 16384, 24576, 32768])
-ax.set_xticklabels(["0", "8K", "16K", "24K", "32K"])
-ax.set_xlabel("Context length (tokens)")
-ax.set_ylabel("KV cache (GB, FP16)")
-tag(ax, "After Model Serving, figure 8: 70B-class model with grouped-query attention, one H100",
-    y=-0.28)
-sp.save(fig, out / "kv_budget.svg")
+        ax.plot([100], [36.6], "o", ms=9, color=C["danger"], mec="white", zorder=5)
+        ax.annotate("100: 36.6%", (100, 36.6), xytext=(-12, -24), textcoords="offset points",
+                    ha="right", fontsize=12, fontweight="bold", color=C["danger"])
+    ax.set_xlim(0, 105)
+    ax.set_ylim(0, 105)
+    ax.set_xlabel("Servers each request fans out to")
+    ax.set_ylabel("Requests on time (%)")
+    tag(ax, "Each server on time 99% of the time, independent (Model Serving, 13.4.5)", y=-0.30)
+    sp.save(fig, out / f"fanout_step{k}.svg")
+
+# ------------------------------------------------ runtime table (Example 13.6)
+rt = [("PyTorch eager", 3.53, "neutral", "3.53 ms"),
+      ("TorchScript", 1.79, "compute", "1.79 ms (2×)"),
+      ("ONNX Runtime", 0.61, "compute", "0.61 ms (5.8×)"),
+      ("TensorRT FP32", 0.38, "compute", "0.38 ms (9.3×)"),
+      ("TensorRT FP16", 0.33, "data", "0.33 ms (10.6×)"),
+      ("TensorRT INT8", 0.30, "data", "0.30 ms (11.6×)")]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    for i, (lab, v, ck, txt) in enumerate(rt):
+        y = 5 - i
+        show = k == 2 or i < 4
+        ax.barh(y, v, color=C[ck], height=0.62, alpha=1.0 if show else 0.0)
+        ax.text(v + 0.05, y, txt, va="center", fontsize=11, fontweight="bold",
+                color=C[ck], alpha=1.0 if show else 0.0)
+        ax.text(-0.05, y, lab, ha="right", va="center", fontsize=11, fontweight="bold",
+                alpha=1.0 if show else 0.0)
+    ax.text(2.6, 3.0, "less dispatch:\n9.3×", fontsize=11, color=C["compute"],
+            fontweight="bold", ha="center", va="center")
+    ax.text(2.6, 0.5, "lower precision:\n1.3× more", fontsize=11, color=C["data"],
+            fontweight="bold", ha="center", va="center", alpha=1.0 if k == 2 else 0.0)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlim(0, 4.0)
+    ax.set_ylim(-0.5, 5.5)
+    ax.set_xlabel("ResNet-50, batch 1, one H100 (ms; modeled, Example 13.6)")
+    sp.save(fig, out / f"runtime_step{k}.svg")
+
+# --------------------------------------- dual-trigger trace (Example 13.4)
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.4))
+    for t in (0, 2, 5, 9):
+        ax.plot([t, t], [1.65, 2.35], color=C["text"], lw=2.5)
+    ax.text(4.5, 2.55, "arrivals at 0, 2, 5, 9 ms", ha="center", fontsize=11,
+            fontweight="bold")
+    ax.barh(1.0, 12, color=C["memory_l"], edgecolor=C["memory"], height=0.5)
+    ax.text(6, 1.0, "timer 12 ms", ha="center", va="center", fontsize=11,
+            color=C["memory"], fontweight="bold")
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.barh(1.0, 6, left=12, color=C["danger_l"], edgecolor=C["danger"], height=0.5,
+            hatch="//", alpha=a2)
+    ax.text(15, 0.62, "worker busy 6 ms", ha="center", va="top", fontsize=10.5,
+            color=C["danger"], fontweight="bold", alpha=a2)
+    ax.barh(1.0, 3.6, left=18, color=C["compute"], height=0.5, alpha=a2)
+    ax.text(19.8, 1.35, "batch of 4: 3.6 ms", ha="center", va="bottom", fontsize=10.5,
+            color=C["compute"], fontweight="bold", alpha=a2)
+    a3 = 1.0 if k >= 3 else 0.0
+    ax.barh(1.0, 4, left=21.6, color=C["network"], height=0.5, alpha=a3)
+    ax.text(25.0, 0.62, "response 4 ms", ha="left", va="top", fontsize=10.5,
+            color=C["network"], fontweight="bold", alpha=a3)
+    ax.annotate("", (50, -0.05), xytext=(25.6, -0.05),
+                arrowprops=dict(arrowstyle="<->", color=C["data"], lw=1.8, alpha=a3))
+    ax.text(49.0, -0.2, "done at 25.6 ms: 24.4 ms of slack", ha="right", va="top",
+            fontsize=11, color=C["data"], fontweight="bold", alpha=a3)
+    ax.axvline(50, color=C["danger"], lw=2, ls="--")
+    ax.text(49.5, 2.55, "deadline 50 ms", ha="right", fontsize=11, color=C["danger"],
+            fontweight="bold")
+    ax.set_xlim(-1, 52)
+    ax.set_ylim(-0.9, 2.9)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlabel("ms since the oldest request arrived (hypothetical trace)")
+    sp.save(fig, out / f"dual_trigger_step{k}.svg")
+
+# ----------------------------------- cost per image across hardware (Ex. 13.13)
+inst = [("c5.xlarge (CPU)", 0.17, 50), ("g4dn.xlarge (T4)", 0.53, 400), ("H100", 4.0, 7040)]
+load = np.arange(50, 7041, 10)
+for k in (1, 2):
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(5.9, 2.5),
+                                 gridspec_kw={"width_ratios": [1, 1.25], "wspace": 0.6})
+    for i, (lab, usd, rate) in enumerate(inst):
+        y = 2 - i
+        cpm = usd / (rate * 3600) * 1e6
+        ck = "data" if lab == "H100" else "neutral"
+        ax.barh(y, cpm, color=C[ck], height=0.6)
+        ax.text(cpm + 0.03, y, f"\\${cpm:.2f}", va="center", fontsize=11, fontweight="bold",
+                color=C[ck])
+        ax.text(-0.03, y, {"c5.xlarge (CPU)": "CPU (c5)", "g4dn.xlarge (T4)": "T4"}.get(lab, lab), ha="right",
+                va="center", fontsize=10.5, fontweight="bold")
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlim(0, 1.3)
+    ax.set_ylim(-0.5, 2.5)
+    ax.set_title("Fully busy", fontsize=11, loc="left", fontweight="bold")
+    ax.set_xlabel("\\$ per million images", fontsize=10)
+    a = 1.0 if k >= 2 else 0.0
+    t4 = np.ceil(load / 400) * 0.53 / (load * 3600) * 1e6
+    h1 = 4.0 / (load * 3600) * 1e6
+    bx.plot(load / 1000, h1, color=C["data"], lw=2.5, alpha=a)
+    bx.plot(load / 1000, t4, color=C["neutral"], lw=2, alpha=a)
+    bx.axvline(2.9, color=C["danger"], lw=1.5, ls="--", alpha=a)
+    bx.text(3.1, 1.15, "crossover\nnear 3,000/s", fontsize=10, color=C["danger"],
+            fontweight="bold", alpha=a)
+    bx.text(0.55, 1.85, "one H100", ha="left", fontsize=10, color=C["data"],
+            fontweight="bold", alpha=a)
+    bx.text(7.05, 0.62, "T4s sized to load", ha="right", fontsize=10,
+            color=C["neutral"], fontweight="bold", alpha=a)
+    bx.set_ylim(0, 2.0)
+    bx.set_xlim(0, 7.1)
+    bx.set_title("At a given load (derived)", fontsize=11, loc="left", fontweight="bold",
+                 alpha=a)
+    bx.set_xlabel("Sustained load (thousand img/s)", fontsize=10, alpha=a)
+    if k < 2:
+        for sp_ in bx.spines.values():
+            sp_.set_alpha(0.0)
+        bx.tick_params(colors="white")
+    sp.save(fig, out / f"cost_hw_step{k}.svg")
+
+# ------------------------------------- next lecture: Part 2's hook, third bar hidden
+HOOK = [("No deadline\n(Offline)", 31216.8, "neutral", "31,217"),
+        ("TTFT 2 s,\nTPOT 200 ms", 30903.6, "compute", "30,904"),
+        ("TTFT 450 ms,\nTPOT 40 ms", 12979.4, "danger", "")]
+fig, ax = plt.subplots(figsize=(3.2, 2.0))
+for i, (lab, v, ck, txt) in enumerate(HOOK):
+    y = 2 - i
+    ax.barh(y, v / 1000 if i < 2 else 0, color=C[ck], height=0.6)
+    ax.text(-0.4, y, lab, ha="right", va="center", fontsize=10, fontweight="bold")
+    ax.text((v / 1000 + 0.5) if i < 2 else 0.6, y, txt if i < 2 else "???", va="center",
+            fontsize=10, fontweight="bold", color=C[ck])
+ax.set_yticks([])
+ax.set_xlim(0, 40)
+ax.set_ylim(-0.5, 2.5)
+ax.spines["left"].set_visible(False)
+ax.set_xlabel("Thousand tokens/s, Llama 2 70B, 8× H100", fontsize=10)
+sp.save(fig, out / "next_hook.svg")
 
 sp.hbars(out / "synth_hook.svg", [
     ("Batch 1", 3.92, "danger", "\\$3.92 per million"),
@@ -673,10 +703,10 @@ sp.hbars(out / "synth_gpus.svg", [
     ("Batched", 3, "data", "3 H100s"),
 ], "", log=False, size=(3.4, 1.5),
     xlabel="5,000 req/s, 50 ms p99 (plan)")
-sp.hbars(out / "synth_llm.svg", [
-    ("2,000 / 200 ms", 30904, "compute", "30,904"),
-    ("450 / 40 ms", 12979, "danger", "12,979"),
+sp.hbars(out / "synth_cost.svg", [
+    ("Batch 1", 8.0, "danger", "\\$8.00 per million"),
+    ("Batched", 0.67, "data", "\\$0.67"),
 ], "", log=False, size=(3.4, 1.5),
-    xlabel="Tokens/s, Llama 2 70B, 8x H100 (MLPerf)")
+    xlabel="Fleet cost at 5,000 req/s (derived)")
 
 print("figures written")
