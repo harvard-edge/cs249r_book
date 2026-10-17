@@ -139,36 +139,45 @@ for k in (1, 2, 3):
 
 
 def epoch_plot(path, step):
-    fig, ax = plt.subplots(figsize=(5.8, 2.2))
+    fig, ax = plt.subplots(figsize=(5.8, 2.3))
     rows = [("CPU", 46.0, 225.0), ("Accelerator", 0.7, 337.5)]
     for i, (name, work, over) in enumerate(rows):
-        y = 1 - i
-        ax.barh(y, work, color=sp.C["compute"], height=0.55)
+        y = 1.3 * (1 - i)
+        ax.barh(y, work, color=sp.C["compute"], height=0.5)
         ax.text(-4, y, name, ha="right", va="center", fontsize=13,
                 fontweight="bold", color=sp.C["text"])
         if step == 1:
             ax.text(work + 4, y, f"{work:g} ms", va="center", fontsize=13,
                     fontweight="bold", color=sp.C["compute"])
         else:
-            ax.barh(y, over, left=work, color=sp.C["neutral_l"], height=0.55,
+            ax.barh(y, over, left=work, color=sp.C["neutral_l"], height=0.5,
                     edgecolor=sp.C["neutral"], lw=0.8)
             ax.text(work + over + 4, y, f"{work + over:.0f} ms", va="center",
                     fontsize=13, fontweight="bold", color=sp.C["text"])
     if step == 1:
-        ax.text(80, 0.45, "Work alone: the accelerator is 67× faster",
-                fontsize=12, color=sp.C["compute"], fontweight="bold")
+        ax.text(80, 0.65, "Work alone: the accelerator is 67× faster",
+                fontsize=13, color=sp.C["compute"], fontweight="bold")
     else:
-        ax.text(170, 0.0, "fixed overhead per operation: 99.8%", fontsize=11,
-                color=sp.C["text"], va="center", ha="center")
+        ax.text(338, 0.65, "fixed overhead: 99.8% of the accelerator's epoch",
+                fontsize=13, fontweight="bold", color=sp.C["neutral"],
+                ha="right", va="center")
+    # two-entry legend, drawn in both steps so the axes do not move
+    alpha = 1.0 if step == 2 else 0.0
+    for j, (txt, fc, ec) in enumerate((
+            ("arithmetic and data movement", sp.C["compute"], sp.C["compute"]),
+            ("fixed per-operation overhead", sp.C["neutral_l"], sp.C["neutral"]))):
+        x0, y0 = 5, 2.35 - j * 0.32
+        ax.add_patch(plt.Rectangle((x0, y0 - 0.1), 14, 0.2, facecolor=fc, edgecolor=ec,
+                                   lw=0.8, alpha=alpha, clip_on=False))
+        ax.text(x0 + 20, y0, txt, fontsize=13, va="center", color=sp.C["text"],
+                alpha=alpha)
     ax.set_xlim(0, 420)
-    ax.set_ylim(-0.6, 1.6)
+    ax.set_ylim(-0.5, 2.5)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Time for one epoch of MNIST at batch 32 (ms)")
+    ax.set_xlabel("Time for one epoch of MNIST at batch 32 (ms); estimate, Napkin Math 5.3")
     ax.grid(axis="x", color=sp.C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
-    ax.text(0.0, -0.45, "Estimate (Neural Computation, Napkin Math 5.3)",
-            transform=ax.transAxes, fontsize=9, color=sp.C["neutral"])
     sp.save(fig, path)
 
 
@@ -252,13 +261,13 @@ def ranges_plot(path, step):
     if step >= 2:
         x = np.log10(9.1e-13)
         ax.axvline(x, color=sp.C["danger"], lw=2, ls="--")
-        ax.text(x - 1.2, 3.62, "20 sigmoid layers: 9.1×10⁻¹³",
-                ha="right", fontsize=11, color=sp.C["danger"], fontweight="bold")
+        ax.text(x - 1.2, 3.55, "20 sigmoid layers: 9.1×10⁻¹³",
+                ha="right", fontsize=13, color=sp.C["danger"], fontweight="bold")
     ticks = [-40, -30, -20, -10, 0, 10, 20, 30, 40]
     ax.set_xticks(ticks)
     ax.set_xticklabels([f"10$^{{{t}}}$" for t in ticks])
     ax.set_xlim(-41, 41)
-    ax.set_ylim(-0.5, 4.0)
+    ax.set_ylim(-0.5, 4.1)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xlabel("Magnitudes a format holds at full precision (log scale)")
@@ -413,7 +422,7 @@ def mnist_roofline():
     M = CH["MnistFlopsCalc"]
     ai = np.logspace(-1.3, 3, 400)
     fig, ax = plt.subplots(figsize=(5.5, 1.95))
-    machines = [("Desktop CPU", H.Cloud.ReferenceCPU, "#8B5A2B", "--", (10, -10)),
+    machines = [("Desktop CPU", H.Cloud.ReferenceCPU, "#8B5A2B", "--", (12, -8)),
                 ("Data-center accelerator", H.Cloud.H100, K["memory"], "-", (10, -10))]
     ridges = []
     for name, hw, col, ls, off in machines:
@@ -431,8 +440,8 @@ def mnist_roofline():
             ax.annotate(f"{lab}:\n{val}" if lab == "batch 1" and up else f"{lab}: {val}", (x, y),
                         xytext=(-10, 6) if up else off, textcoords="offset points",
                         ha="right" if up else "left", va="bottom" if up else "top",
-                        fontsize=10.5, color=K["text"])
-    ax.text(max(ridges) * 1.15, 1.6e-3, f"ridge ≈ {np.mean(ridges):.0f} FLOP/byte on both",
+                        fontsize=12, color=K["text"])
+    ax.text(max(ridges) * 2.5, 1.6e-3, f"ridge ≈ {np.mean(ridges):.0f} FLOP/byte\non both machines",
             fontsize=10.5, color=K["text"], ha="left", va="bottom")
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -444,58 +453,6 @@ def mnist_roofline():
     ax.grid(color=K["grid"], lw=0.5)
     ax.set_axisbelow(True)
     sp.save(fig, out / "mnist_roofline.svg")
-
-
-def step_memory():
-    dims = CH["_MNIST_LAYERS_DIMS"]
-    bpp = int(CH["BYTES_FP32"].to(CH["byte"]).magnitude)
-    nl = len(dims) - 1
-    lp = [dims[i] * dims[i + 1] + dims[i + 1] for i in range(nl)]
-    pkb = sum(lp) * bpp / 1000
-
-    def timeline(batch):
-        acts = [batch * dd * bpp / 1000 for dd in dims]
-        labels, A, Gr = ["load"], [acts[0]], [0.0]
-        live = [acts[0]]
-        for i in range(nl):
-            live.append(acts[i + 1]); labels.append(f"F{i + 1}"); A.append(sum(live)); Gr.append(Gr[-1])
-        g = 0.0
-        for i in reversed(range(nl)):
-            live.pop(); g += lp[i] * bpp / 1000
-            labels.append(f"B{i + 1}"); A.append(sum(live)); Gr.append(g)
-        labels.append("update"); A.append(0.0); Gr.append(g)
-        peak = max(acts[i] + acts[i + 1] for i in range(nl))
-        return labels, np.array(A), np.array(Gr), peak
-
-    series = [("Weights", K["memory_l"], K["memory"]), ("Adam state", K["network_l"], K["network"]),
-              ("Gradients", K["compute_l"], K["compute"]), ("Saved activations", K["danger_l"], K["danger"])]
-    fig, axes = plt.subplots(1, 2, figsize=(6.0, 1.75), gridspec_kw={"wspace": 0.3})
-    B = CH["_MNIST_BATCH_SIZE"]
-    for ax, batch in zip(axes, (B, 32 * B)):
-        labels, A, Gr, peak = timeline(batch)
-        x = np.arange(len(labels))
-        bottom = np.zeros_like(A)
-        for vals, (nm, fill, edge) in zip([np.full_like(A, pkb), np.full_like(A, 2 * pkb), Gr, A], series):
-            ax.bar(x, vals, bottom=bottom, width=0.72, color=fill, edgecolor=edge, lw=0.8,
-                   label=nm)
-            bottom = bottom + vals
-        ax.axhline(pkb + peak, color=K["data"], ls="--", lw=2, label="Inference peak")
-        ax.axvline(nl + 0.5, color=K["neutral"], lw=1, ls=":")
-        top = bottom.max() * 1.3
-        ax.set_ylim(0, top)
-        ax.text(nl / 2, top * 0.97, "forward", ha="center", va="top", fontsize=10.5, color=K["neutral"])
-        ax.text(nl + 0.5 + (nl + 1) / 2, top * 0.97, "backward", ha="center", va="top",
-                fontsize=10.5, color=K["neutral"])
-        ax.set_xticks(x)
-        # "update" drops a line so it clears "B1" at this width
-        ax.set_xticklabels(labels[:-1] + ["\n" + labels[-1]], fontsize=9.5)
-        ax.tick_params(axis="x", length=0)
-        ax.set_title(f"Batch {batch:,}", fontsize=12, fontweight="bold")
-    axes[0].set_ylabel("Live memory (KB)")
-    h, n = axes[0].get_legend_handles_labels()
-    fig.legend(h, n, loc="upper center", bbox_to_anchor=(0.5, -0.03), ncol=5, frameon=False,
-               fontsize=10.5, handlelength=1.4, columnspacing=1.0)
-    sp.save(fig, out / "step_memory.svg")
 
 
 def model_bytes():
@@ -511,23 +468,29 @@ def model_bytes():
              ("H100 HBM", H.Cloud.H100.memory.capacity.to(by).magnitude)]
     y = np.arange(len(models))
     wts = np.array([n * bpp for _, n in models])
-    fig, ax = plt.subplots(figsize=(3.6, 1.55))
+    fig, ax = plt.subplots(figsize=(3.8, 1.45))
     ax.barh(y + 0.19, wts * 4, height=0.36, color=K["compute_l"], edgecolor=K["compute"])
     ax.barh(y - 0.19, wts, height=0.36, color=K["memory_l"], edgecolor=K["memory"])
-    ax.text(wts[1] * 1.5, 1 - 0.19, "weights", va="center", fontsize=10.5, color=K["memory"], fontweight="bold")
-    ax.text(wts[1] * 6.0, 1 + 0.19, "training", va="center", fontsize=10.5, color=K["compute"], fontweight="bold")
     ax.set_xscale("log")
     ax.set_xlim(1e4, 1e13)
     ax.set_yticks(y)
-    ax.set_yticklabels([m for m, _ in models], fontsize=11)
+    ax.set_yticklabels([m for m, _ in models], fontsize=13)
     ax.invert_yaxis()
-    for nm, cap in tiers:
+    # tier lines, labeled above the plot on two rows so the labels never meet
+    for (nm, cap), ha in zip(tiers, ("right", "left", "left")):
         ax.axvline(cap, color=K["danger"], lw=1.5, ls="--")
-        ax.text(cap, 1.03, nm, transform=ax.get_xaxis_transform(), fontsize=10.5,
-                color=K["danger"], ha={"MCU SRAM": "right", "H100 L2": "left"}.get(nm, "center"),
-                va="bottom", fontweight="bold")
+        ax.text(cap, 1.03, nm, transform=ax.get_xaxis_transform(), fontsize=13,
+                color=K["danger"], ha=ha, va="bottom", fontweight="bold")
+    # legend in its own row above the tier labels
+    for j, (txt, fc, ec) in enumerate((("weights", K["memory_l"], K["memory"]),
+                                       ("training state (×4)", K["compute_l"], K["compute"]))):
+        x0 = 0.0 + j * 0.38
+        ax.add_patch(plt.Rectangle((x0, 1.27), 0.05, 0.1, transform=ax.transAxes,
+                                   facecolor=fc, edgecolor=ec, clip_on=False))
+        ax.text(x0 + 0.07, 1.32, txt, transform=ax.transAxes, fontsize=13,
+                va="center", color=K["text"])
     ax.set_xticks([1e4, 1e6, 1e8, 1e10, 1e12])
-    ax.set_xticklabels(["10 KB", "1 MB", "100 MB", "10 GB", "1 TB"], fontsize=10.5)
+    ax.set_xticklabels(["10 KB", "1 MB", "100 MB", "10 GB", "1 TB"], fontsize=12)
     ax.minorticks_off()
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
@@ -537,7 +500,152 @@ def model_bytes():
 param_growth()
 depth_width()
 mnist_roofline()
-step_memory()
 model_bytes()
+
+
+# ---------------------------------------------------------------------------
+# The running network, 784 -> 128 -> 64 -> 10, drawn as four columns of
+# units with every connection between adjacent columns. Step 2 adds the
+# weight count of each gap (products of adjacent widths, chapter Table 5).
+# The digit is a drawn 28x28 stroke, not an MNIST sample.
+
+
+def digit_seven():
+    img = np.zeros((28, 28))
+    img[6:9, 7:21] = 1.0
+    for r in range(8, 24):
+        c = int(round(20 - (r - 8) * 0.55))
+        img[r, c - 1:c + 2] = 1.0
+    return img
+
+
+def mnist_net(path, step):
+    fig, ax = plt.subplots(figsize=(5.8, 1.9))
+    cols = [(1.9, 784, 7), (3.25, 128, 6), (4.45, 64, 5), (5.5, 10, 4)]
+    ys = {}
+    for x, n, k in cols:
+        yy = np.linspace(0.15, 1.45, k) if k > 4 else np.linspace(0.35, 1.25, k)
+        ys[x] = yy
+    for (x0, _, _), (x1, _, _) in zip(cols[:-1], cols[1:]):
+        for a in ys[x0]:
+            for b in ys[x1]:
+                ax.plot([x0, x1], [a, b], color="#BBBBBB", lw=0.6, zorder=1)
+    for x, n, k in cols:
+        ax.scatter([x] * k, ys[x], s=70, color="white", edgecolors=K["memory"],
+                   lw=1.5, zorder=3)
+        ax.text(x, 1.62, f"{n:,}", ha="center", va="bottom", fontsize=14,
+                fontweight="bold", color=K["text"])
+    ax.imshow(digit_seven(), cmap="Greys", extent=(0.05, 1.0, 0.3, 1.25), zorder=2)
+    ax.annotate("", (1.75, 0.8), xytext=(1.1, 0.8),
+                arrowprops=dict(arrowstyle="-|>", color=K["text"], lw=1.4))
+    ax.text(0.52, 1.62, "28×28 digit", ha="center", va="bottom", fontsize=12,
+            color=K["neutral"])
+    if step >= 2:
+        for (x0, n0, _), (x1, n1, _) in zip(cols[:-1], cols[1:]):
+            ax.text((x0 + x1) / 2, -0.08, f"{n0 * n1:,}", ha="center", va="top",
+                    fontsize=14, fontweight="bold", color=K["compute"])
+    ax.set_xlim(0, 5.8)
+    ax.set_ylim(-0.42, 1.9)
+    ax.set_aspect("auto")
+    ax.axis("off")
+    sp.save(fig, path)
+
+
+for k in (1, 2):
+    mnist_net(out / f"mnist_net_step{k}.svg", k)
+
+# ---------------------------------------------------------------------------
+# XOR on the unit square: no line separates the classes (step 1); the band
+# 0.5 < x1 + x2 < 1.5 where y = h1 - 2 h2 exceeds 0.5 (step 2).
+
+
+def xor_plot(path, step):
+    fig, ax = plt.subplots(figsize=(2.2, 2.2))
+    if step == 2:
+        xx = np.array([-0.3, 1.3])
+        ax.fill_between(xx, 0.5 - xx, 1.5 - xx, color=K["compute_l"], zorder=0)
+        ax.plot(xx, 0.5 - xx, color=K["compute"], lw=1.5, ls="--")
+        ax.plot(xx, 1.5 - xx, color=K["compute"], lw=1.5, ls="--")
+        ax.text(0.5, 0.5, "y > 0.5", rotation=-45, ha="center", va="center",
+                fontsize=15, fontweight="bold", color=K["compute"])
+    pts = [((0, 0), 0), ((0, 1), 1), ((1, 0), 1), ((1, 1), 0)]
+    for (a, b), c in pts:
+        ax.scatter(a, b, s=260, color=K["compute"] if c else "white",
+                   edgecolors=K["compute"] if c else K["memory"], lw=2.5, zorder=3)
+    ax.set_xlim(-0.3, 1.3)
+    ax.set_ylim(-0.3, 1.3)
+    ax.set_xticks([0, 1])
+    ax.set_yticks([0, 1])
+    ax.set_xlabel("$x_1$", fontsize=16)
+    ax.set_ylabel("$x_2$", fontsize=16, rotation=0, labelpad=10)
+    ax.tick_params(labelsize=15)
+    ax.set_aspect("equal")
+    sp.save(fig, path)
+
+
+for k in (1, 2):
+    xor_plot(out / f"xor_step{k}.svg", k)
+
+# ---------------------------------------------------------------------------
+# Cross-entropy for one example: loss = -log p_correct (chapter eq. 18).
+# Points: p = 0.9 -> 0.11, p = 0.8 -> 0.22, uniform guess p = 0.1 -> 2.30.
+
+
+def cross_entropy():
+    fig, ax = plt.subplots(figsize=(5.6, 2.3))
+    p = np.linspace(0.02, 1.0, 400)
+    ax.plot(p, -np.log(p), color=K["memory"], lw=3)
+    for pv, txt, dx, dy, ha in ((0.1, "p = 0.1: 2.30\n(uniform guess, or a\nconfident mistake)", 0.05, 0.25, "left"),
+                                (0.8, "p = 0.8: 0.22", 0.0, 0.75, "center"),
+                                (0.9, "p = 0.9: 0.11", 0.06, 0.45, "left")):
+        lv = -np.log(pv)
+        ax.plot(pv, lv, "o", color=K["danger"], ms=9, zorder=4)
+        ax.annotate(txt, (pv, lv), xytext=(pv + dx, lv + dy), fontsize=13,
+                    color=K["text"], ha=ha, va="bottom",
+                    arrowprops=dict(arrowstyle="-", color=K["neutral"], lw=1))
+    ax.set_xlim(0, 1.02)
+    ax.set_ylim(0, 4.2)
+    ax.set_xlabel("Probability the network gives the correct digit")
+    ax.set_ylabel("Loss, −log p")
+    ax.grid(color=K["grid"], lw=0.5)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / "cross_entropy.svg")
+
+
+cross_entropy()
+
+# ---------------------------------------------------------------------------
+# Risk-coverage: error among accepted digits against the fraction accepted.
+# The curve's shape is schematic; the one measured point is LeCun et al.
+# 1989 via chapter Table 11 (1% error after rejecting 12.1%, so 87.9%
+# accepted).
+
+
+def risk_coverage():
+    fig, ax = plt.subplots(figsize=(3.7, 2.3))
+    c = np.linspace(0.55, 1.0, 200)
+    risk = 1.0 * np.exp(9.0 * (c - 0.879))   # schematic: through the point
+    ax.plot(c * 100, risk, color=K["memory"], lw=3)
+    ax.plot(87.9, 1.0, "o", color=K["danger"], ms=10, zorder=4)
+    ax.annotate("1989 ZIP-code\nreader: 1% error,\n12.1% rejected", (87.9, 1.0),
+                xytext=(57, 1.6), fontsize=12, fontweight="bold", color=K["danger"],
+                arrowprops=dict(arrowstyle="-", color=K["danger"], lw=1))
+    ax.axvline(87.9, color=K["neutral"], ls=":", lw=1.5)
+    ax.text(88.6, 3.5, "threshold", fontsize=12, color=K["neutral"], ha="left",
+            va="top")
+    ax.set_xlim(55, 101)
+    ax.set_ylim(0, 3.6)
+    ax.set_yticks([0, 1, 2, 3])
+    ax.set_yticklabels(["0%", "1%", "2%", "3%"])
+    ax.set_xlabel("Digits accepted by the machine (%)")
+    ax.set_ylabel("Error among\naccepted digits")
+    ax.text(1.0, 1.02, "curve schematic; point measured", transform=ax.transAxes,
+            ha="right", va="bottom", fontsize=11, color=K["neutral"])
+    ax.grid(axis="y", color=K["grid"], lw=0.5)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / "risk_coverage.svg")
+
+
+risk_coverage()
 
 print("figures written")
