@@ -1,0 +1,289 @@
+chapter: 12_benchmarking
+lecture: 12
+title: Benchmarking
+layer: hardware
+minutes: 75
+notes_minutes: 70.5
+target_ideas: 30
+thesis: "A benchmark answers one question under stated conditions, and production asks another: a number means something only with its boundary, its load, its operating point, its noise, and the quality it held, and the work of benchmarking is to make the measured conditions match the deployed ones."
+
+hook:
+  minutes: "0-3"
+  setup: "Step 1: a datasheet line, '10 TOPS at 0.5 W', drawn as one efficiency bar (20 TOPS/W). Step 2: the same chip under sustained inference load, 3 TOPS at 2 W (1.5 TOPS/W), the second bar drawn on the same axis (§12.7 opening and margin figure; the chapter's scenario, labeled illustrative on the slide). Step 3: the question."
+  question_to_class: "By how much does the sustained efficiency fall short of the datasheet? A) about 1.5x B) about 3x C) about 7x D) about 13x. Then: name one thing the datasheet did not say."
+  payoff: "D: 20 against 1.5 TOPS/W, 13.3x. Throughput fell 3.3x and power rose 4x, and the two multiply. The datasheet read its numerator and its denominator at different operating points (§12.7: TOPS/W is a ratio of two separately quotable peaks). Each segment adds one condition the datasheet left out (the load and statistic, the boundary, the scenario, the thermal state, the noise, the quality held); the synthesis returns to these two bars annotated with all of them, and segment 4 shows the same fall on real phones."
+  sources: ["§12.7 opening paragraph and its margin figure (10 TOPS at 0.5 W, 3 TOPS at 2 W, 13.3x); the chapter gives no device, so the slide says 'illustrative'", "§12.7 second paragraph (TOPS/W as a ratio of two peaks)"]
+
+driving_question: "When a vendor, a paper, or a colleague hands you a number, how do you know whether it will hold in your deployment?"
+
+recall: "Lecture 11 drew ResNet-50's layers on the H100 roofline: the convolutions sit above the 295 FLOP/byte ridge, so the model predicts compute-bound training. Lecture 10 accepted a compressed model only against gates, calibration error among them. Both were predictions or plans. Today they meet measurements. (Answered in segment 2, where the roofline ceiling meets MLPerf, and segment 5, where the calibration gate is applied.)"
+
+running_example: "MobileNetV2 on the chapter's camera-trap edge board (labeled composite, Lighthouse 12.1 and 12.2, Example 12.3): FP32 50 ms and INT8 15 ms on the low-power host CPU, about 2 ms on the attached INT8 accelerator (7.5x isolated), 18 against 6 ms end to end (about 3x), 120 mW host against 500 mW accelerator, 1.8 against 1 mJ active energy; a 33 ms frame deadline at 30 FPS. Every chapter value for the board is illustrative and is labeled so. Real measured MobileNet data carries the evidence: MobileNet v1 on iPhone and Pixel phones (Lee et al. 2019, latency per framework and latency over 200 s), MobileNetV2 against V1 and NASNet-A on a Pixel 1 (Sandler et al. 2018, Table 4), the MobileNet family on five Pixel 4 processors (Chu et al. 2021, book fig-hw-lottery), and MLPerf Tiny visual wake words (a MobileNetV1 0.25x reference) on microcontrollers (MLPerf Tiny v1.2). ResNet-50 is the single data-center contrast (roofline against MLPerf; MLPerf Inference v5.0 scenarios), and keyword spotting carries the duty-cycle estimate."
+
+segments:
+  - name: The Gap
+    divider_question: "What does a benchmark number leave out?"
+    read: "§12.1, §12.2, §12.6.2"
+    concept_questions: [1, 2, 3]
+    land: "A number without its load, statistic, boundary, and quality floor is a claim, not a measurement; the mean hides the tail, and a closed-loop client hides the stall it was meant to catch."
+    minutes: 11.5
+  - name: Granularity
+    divider_question: "How much of the system should a benchmark time?"
+    read: "§12.3"
+    concept_questions: [4, 5, 6]
+    land: "A prediction and a measurement together locate a bottleneck; a kernel speedup is diluted by every stage it does not touch, and the software stack is part of what is measured."
+    minutes: 10.5
+  - name: Suites
+    divider_question: "Why does one chip report many different numbers?"
+    read: "§12.4, §12.5, §12.6.3"
+    concept_questions: [7, 8]
+    land: "A suite makes numbers comparable by fixing the model, the quality target, the run rules, and how queries arrive; the scenario must match the deployment, because the same GPU reports a 12.5x different rate under two of them."
+    minutes: 9.5
+  - name: Power and Heat
+    divider_question: "What does a watt measure?"
+    read: "§12.7, §12.6.4"
+    concept_questions: [9, 10, 11, 12]
+    land: "Energy is power integrated over a stated boundary and window, efficiency belongs to one operating point and one thermal state, and a duty-cycled device's idle floor can set its battery life."
+    minutes: 11
+  - name: Noise and Quality
+    divider_question: "Is the difference real, and is the model still right?"
+    read: "§12.8.1, §12.8.4, §12.9.1, §12.10"
+    concept_questions: [13, 14, 15, 16]
+    land: "A difference is real only beyond its noise, a target that becomes the score stops measuring, and a model is accepted on a frontier and against gates set in advance, measured on the hardware it will run on."
+    minutes: 15
+
+concept_questions:
+  - id: 1
+    q: "How far apart are a benchmark's typical number and the tail a user meets?"
+    picture: "New data plot (hbars, two groups) of measured latencies from a Google fan-out service (Dean and Barroso 2013, Table 1): one random leaf finishes at 1 ms (p50) and 10 ms (p99); all leaves finish at 40 ms (p50) and 140 ms (p99). Final step adds the chapter's illustrative strip: 15 ms model-only mean against 150 to 200 ms production p99 (variant of the §12.10 margin figure), labeled illustrative."
+    numbers: "Measured: one leaf p99 10 ms against all-leaves p99 140 ms, 14x (Dean and Barroso 2013, Table 1, read from the paper). Chapter: 1 percent slow responses at 100 shards give a 63 percent chance that a request is slow (footnote 20, Dean and Barroso 2013); illustrative 15 ms mean against 150 to 200 ms p99, 10 to 13.3x (§12.10). Definitions: p99 is the time 99 percent of requests meet or beat (§12.1); an SLO is a target for a named indicator, an SLA a contract (Definition 12.5)."
+    example: "The camera trap's 33 ms frame deadline at 30 FPS: a 15 ms mean says nothing about how many frames miss it (§12.6)."
+    read: "§12.1, §12.6.2"
+  - id: 2
+    q: "What must a claim state before it is a test?"
+    picture: "Annotated definition: the vendor sentence '10,000 inferences/second on ResNet-50' with four missing conditions circled and arrowed (batch size, precision, measurement boundary, accuracy held), then the completed sentence from Systems Perspective 12.3. Activity frame: four marketing phrases from table 5 on cards."
+    numbers: "Completed claim: batch 32, INT8, 76 percent top-1, including JPEG decoding, H100 at 700 W TDP (Systems Perspective 12.3, the chapter's example). MLPerf's ResNet-50 quality gate: 99 percent of FP32 (76.46 percent) (MLPerf Inference rules, read from mlcommons/inference_policies). Table 5: 'Up to 10,000 images/sec' = peak at maximum batch, INT8, no preprocessing; 'Sub-millisecond latency' = accelerator compute only; '5x more efficient' = per operation, not system; 'Optimized for AI' = some operators or precisions only."
+    example: "The chapter's inherited claim, 'ResNet-50 is faster at INT8', can reverse depending on whether timing starts at a JPEG on storage or at a tensor in accelerator memory (§12.2)."
+    read: "§12.2.1, §12.2.6"
+  - id: 3
+    q: "How can the measuring client itself erase the tail?"
+    picture: "New SVG, one icon with one change per step: a time axis with a 500 ms server stall. Step 1: closed-loop client, one request outstanding, records one slow request and stops sending during the stall. Step 2: open-loop client on its own Poisson schedule, requests pile up behind the stall, every one of them is slow. Step 3: a host timer around an asynchronous launch measures the enqueue, not the kernel; a synchronize barrier fixes it."
+    numbers: "500 ms stall (§12.2.4, the chapter's coordinated-omission example); a naive host timer measures sub-microsecond enqueue latency (§12.2.4); MLPerf Server uses Poisson arrivals (§12.4.4). No measured values; the slide shows mechanism only."
+    example: "Coordinated omission in a closed-loop load generator; torch.cuda.synchronize() and CUDA events (perspective 12.4, rule 5)."
+    read: "§12.2.4, §12.3.1 (perspective 12.4)"
+  - id: 4
+    q: "What is a micro, a macro, and an end-to-end benchmark, and which one answers my question?"
+    picture: "Book fig-granularity as a diagram walkthrough (highlight moves ML layers -> ML model -> AI task -> end-to-end), with book fig-benchmark-tradeoffs as a small inset on the last step (isolation against representativeness)."
+    numbers: "Illustrative: a 3x model-stage speedup inside a 50 ms request gives about 1.2x end to end (§12.3, margin-001; 10 ms model stage)."
+    example: "cuBLAS GEMM (micro), ResNet-50 forward pass (macro), upload-decode-classify-write request (end to end) (§12.3 self-check 2)."
+    read: "§12.3, §12.3.5"
+  - id: 5
+    q: "How far is a measured workload from its roofline ceiling, and what does the gap say?"
+    picture: "Predict, then a worked example as two hbars on one axis (slideplot.hbars): roofline ceiling 40,200 images/s against MLPerf about 5,000 images/s per H100; then a utilization bar 12.4 percent of 989 TFLOP/s; question-in-the-figure '???' on the measured bar before the reveal."
+    numbers: "24.6 GFLOP per training image (3 x 8.2); 989 TFLOP/s / 24.6 GFLOP = about 40,200 images/s; MLPerf Training per-accelerator H100-class about 5,000 images/s = about 123 TFLOP/s, MFU 12.4 percent, 8.0x below the ceiling (Napkin Math 12.1, Definition 12.1)."
+    example: "Lecture 11 placed the stage-3 convolutions above the 295 FLOP/byte ridge; normalization, elementwise layers, JPEG decode on the host, and launch overhead take the rest (Napkin Math 12.1 diagnosis)."
+    read: "§12.3.1, §12.3.2 (Napkin Math 12.1)"
+  - id: 6
+    q: "Where does a component speedup go, and is the software stack part of the measurement?"
+    picture: "Step 1: book fig-benchmarking-mobilenet-waterfall at slide size (isolated 50 -> 15 -> 2 ms; end to end 18 -> 6 ms; energy 1.8 -> 1 mJ), labeled illustrative. Step 2: new hbars of measured MobileNet v1 latency on the same phones with different software: iPhone Xs TFLite GPU 2.3 ms, Metal (MPSCNN) 4.1 ms, Core ML 7.1 ms; Pixel 3 TFLite CPU 51.7 ms against TFLite GPU 12.5 ms (Lee et al. 2019, Tables 4 and 5, Figure 7)."
+    numbers: "Illustrative board: 7.5x isolated becomes about 3x end to end because preprocessing and the host-accelerator copy are untouched; active energy 1.8x (Lighthouse 12.2, table 14). Chapter notebook: 8 ms preprocessing + 10 ms inference, 5x on inference gives 1.8x, ceiling 2.25x (Napkin Math 12.2). Measured: same model, same iPhone Xs, 3.1x between two frameworks; same Pixel 3, 4.1x between CPU and GPU paths (Lee et al. 2019; 10 warm-up runs skipped, mean of 100)."
+    example: "Clipper: JSON deserialization and copying took longer than the model for small models (Crankshaw et al. 2017, §12.3.4). Amdahl is recalled in one line (owned by Lecture 11)."
+    read: "§12.3.4, §12.6.5 (Lighthouse 12.2)"
+  - id: 7
+    q: "Why do benchmark suites need run rules and divisions?"
+    picture: "Timeline build, left to right: Whetstone 1976, LINPACK 1979 (gamed by compilers), SPEC CPU 1989 (real applications), SPEC Power and Green500 2007 (performance per watt), MLPerf 2018 (quality target + scenarios); last step a two-panel strip, closed division (same model and quality target: compares systems) against open division (model may change: compares solutions)."
+    numbers: "Years and lessons from table 9; MLPerf Training ResNet-50 must reach 75.9 percent top-1 or the run is invalid (§12.5.2); Training results improved up to 34x for ResNet and 48.8x for Mask R-CNN against 6.6x for Moore's law, 2018 to 2024 (figure 5, Tschand et al. 2024), shown in the notes or as an optional inset."
+    example: "Time to quality rather than samples per second: a faster step that needs more epochs is not faster training (§12.5.2, self-check answer 4: 1.8x step speed against 2.5x more steps is about 1.39x slower)."
+    read: "§12.4.1, §12.4.4, §12.5.2"
+  - id: 8
+    q: "What does an MLPerf scenario change about the number?"
+    picture: "Step 1: new SVG of the four arrival patterns on one time axis (SingleStream: next query after the last completes; MultiStream: groups of 8; Server: Poisson arrivals under a tail bound; Offline: everything at once), each with its metric. Step 2 (predict): the same RTX 4090 and ResNet-50 card. Step 3: new hbars of MLPerf Inference v5.0 closed results: RTX 4090 SingleStream 0.282 ms (one at a time, at most about 3,550 per second) against Offline 44,411 samples/s; 8x H100-SXM systems Offline against Server: Cisco 715,761 against 652,002, Quanta 712,859 against 584,161."
+    numbers: "MLPerf Inference v5.0 closed, ResNet-50 INT8, accuracy 76.06 to 76.08 percent (summary_results.json, mlcommons/inference_results_v5.0, read for this plan): RTX 4090 (GATEOverflow 5.0-0032) SingleStream 0.281736 ms, Offline 44,411.1 samples/s (12.5x the single-stream rate, derived); Cisco UCS C885A M8 8x H100-SXM (5.0-0010) Offline 715,761, Server 652,002 (8.9 percent lower); Quanta D74H-7U 8x H100-SXM (5.0-0065) Offline 712,859, Server 584,161 (18.1 percent lower); the two Server results on the same eight-GPU configuration differ by 11.6 percent. Rules: SingleStream reports the 90th-percentile latency, Server the Poisson rate a 99th-percentile bound supports, runs of at least 600 s (MLPerf Inference rules)."
+    example: "The camera trap is SingleStream; an overnight photo archive job is Offline (§12.4.4, table 10)."
+    read: "§12.4.4 (MLPerf execution scenarios), §12.6.3"
+  - id: 9
+    q: "Where is the power measured, and how much does the boundary change the answer?"
+    picture: "New stacked bar of Google's median Gemini text prompt: 0.10 Wh counting active accelerators only, against 0.24 Wh counting the full serving boundary, split 58 percent accelerators, 25 percent host CPU and DRAM, 17 percent idle reserve and facility overhead; book fig-power-diagram as a thumbnail of the three MLPerf Power boundaries."
+    numbers: "0.10 Wh against 0.24 Wh, about 2.4x; 58 / 25 / 17 percent (Elsworth et al. 2025, §12.7.1); data movement 57.3 percent of mobile inference energy (Boroumand et al. 2018, §12.7.1); PUE about 1.1 to over 2.0 (Barroso et al. 2019) in the notes."
+    example: "Chapter self-check: '10 TOPS at 0.5 W' core-only against 4.5 W at the wall for the same workload (§12.7 self-check 1)."
+    read: "§12.7, §12.7.1"
+  - id: 10
+    q: "How much does a device slow down when it stays hot?"
+    picture: "Book margin-003 (burst, knee, sustained) for one step as the mechanism, then a new line plot of measured data: MobileNet v1 latency over 200 s on an iPhone Xs, TFLite CPU rising from about 20 to about 26 ms and TFLite GPU from about 2.4 to about 3.9 ms while the Pixel 3 GPU stays near 12.8 ms (Lee et al. 2019, Figure 8, values read from the plot and labeled approximate); a second panel, iPhone 16 Pro decode throughput 40.49 tok/s at peak against 23.67 tok/s in the hot state, -41.5 percent (Tummalapalli et al. 2026)."
+    numbers: "Lee et al. 2019, Figure 8 (approximate, read from the published plot): iPhone Xs CPU about +30 percent, iPhone Xs GPU about +60 percent over 200 s; Pixel 3 GPU flat. Tummalapalli et al. 2026 (arXiv 2603.23640, read): iPhone 16 Pro peak 40.49 tok/s in iterations 1 to 2, 24.96 tok/s in iterations 3 to 16 (-38.4 percent), 23.67 tok/s from iteration 17 (-41.5 percent); Hailo-10H NPU flat, throughput CV 0.04 percent. Chapter: 800 QPS burst against 400 to 500 QPS sustained, 37.5 to 50 percent (§12.10, illustrative); run longer than 30 s and verify thermal stabilization (perspective 12.7)."
+    example: "The hook's 10 TOPS against 3 TOPS; Example 12.2's '1 W AI' chip that matches its datasheet only in burst."
+    read: "§12.6.4 (Example 12.2, margin-003), §12.7.3"
+  - id: 11
+    q: "Does energy per inference belong to a chip, or to an operating point?"
+    picture: "New hbars (log axis) of MLPerf Tiny v1.2 closed results for visual wake words, all at about 85 percent accuracy: Syntiant NDP9120 at 30.7 MHz 71.7 uJ, the same chip at 98.7 MHz 97.2 uJ, STM32U575 1,355 uJ, STM32H7A3 2,965 uJ, STM32L4R5 3,895 uJ per inference; annotation on the Syntiant pair: 3.1x faster, 1.36x more energy."
+    numbers: "MLPerf Tiny v1.2 summary.csv (mlcommons/tiny_results_v1.2, read for this plan): Syntiant NDP9120 78.6 inf/s at 71.711 uJ (30.7 MHz) and 243.883 inf/s at 97.164 uJ (98.7 MHz), accuracy 84.8 percent; STM NUCLEO-U575ZI-Q 16.87 inf/s, 1,354.685 uJ; NUCLEO-H7A3ZI-Q 42.009 inf/s, 2,965.461 uJ; NUCLEO-L4R5ZI 11.245 inf/s, 3,894.566 uJ, accuracy 85.2 percent. Spread about 54x across boards (derived). The visual wake words reference is a MobileNetV1 0.25x network, a smaller relative of the running example (Banbury et al. 2021)."
+    example: "Chapter self-check 2 of §12.7: +5 percent clock needing +15 percent voltage costs 38.9 percent more dynamic power, so performance per watt falls to 0.756 (P proportional to V^2 f; owned by Lecture 11, one line here)."
+    read: "§12.7.3, §12.7.5"
+  - id: 12
+    q: "What sets the battery life of a device that is mostly waiting?"
+    picture: "Exercise card, then a new two-segment bar of average power: idle 49.6 mW against active 3.3 mW of a 52.9 mW total, with the duty-cycle equation P_avg = d P_active + (1 - d) P_standby as the slide's one equation."
+    numbers: "DS-CNN keyword spotting, 20 MFLOP, on an ESP32-S3-class board: 8.3 ms per inference once per 1 s window (d about 0.8 percent), 0.4 W active, 3.3 mJ per inference, 50 mW idle; average 52.9 mW, 94 percent of it idle; active overtakes idle only above about 11 percent duty cycle (§12.7.2, the chapter's worked case)."
+    example: "The camera trap waiting for motion (d far below 0.01) against continuous video analytics (d near 1) (§12.7.2)."
+    read: "§12.7.2"
+  - id: 13
+    q: "How many test images, runs, and queries does it take to trust a difference?"
+    picture: "Exercise frame (vote), then a number line of disagreement counts with the threshold at 26 (variant of the §12.8.1 margin figure); final step a small table of what MLPerf itself requires."
+    numbers: "95 against 94 percent on the same 1,000 images: about 7 errors of standard deviation; treated as independent samples, the 1-point difference has an interval of about -1 to 3 points; McNemar's test flags a regression only if the models disagree on at most 26 images; one accuracy to +-1 point needs about 1,825 images (Napkin Math 12.5). MLPerf rules (read for this plan): Training image classification at least 5 runs and medical image segmentation 40, scored by dropping the fastest and slowest and averaging the rest (mlcommons/training_policies); Inference p90 at 99 percent confidence about 24,576 queries, p99 about 270,336 (mlcommons/inference_policies, minimum query table)."
+    example: "Coefficient of variation as the micro-benchmark variance rule, with no universal 5 percent cutoff (perspective 12.4, rule 2); RL results that vanish across seeds (Henderson et al. 2018)."
+    read: "§12.8.1, §12.8.2"
+  - id: 14
+    q: "What happens when the benchmark becomes the goal?"
+    picture: "Two-panel comparison: left, Example 12.1 as two bars (beam 1 -> 10: BLEU +0.5, latency 50 -> 200 ms against a 100 ms SLO), labeled illustrative; right, measured accuracy on the original and the rebuilt ImageNet test set, drops of 11 to 14 percent (Recht et al. 2019), with book fig-dataset-saturation as a thumbnail. Discussion prompt on the last step."
+    numbers: "Example 12.1: +0.5 BLEU, 10x candidate evaluations, 50 -> 200 ms (illustrative). Recht et al. 2019 (abstract, read): accuracy drops of 3 to 15 percent on CIFAR-10 and 11 to 14 percent on ImageNet on new test sets built by the original process; the authors attribute the drops to harder images rather than to adaptive overfitting, and gains on the old test set carried over. Fig-dataset-saturation: reading comprehension and language understanding crossed human baselines in under two years (AI Index 2024, §12.9.2). Footnote 4: GLUE saturated by BERT, followed by SuperGLUE."
+    example: "Three forbidden shortcuts in MLPerf: undisclosed precision truncation, work pruning on fixed test sets, benchmark fingerprinting (§12.8.4)."
+    read: "§12.1 (principle 2), §12.4.2 (Example 12.1), §12.8.4"
+  - id: 15
+    q: "Which model is the best trade, and does the answer survive a change of hardware?"
+    picture: "New scatter (accuracy against latency) of Sandler et al. 2018 Table 4, Pixel 1 single large core, TF-Lite: MobileNetV1 70.6 percent at 113 ms, MobileNetV2 72.0 at 75 ms, NASNet-A 74.0 at 183 ms, MobileNetV2 (1.4) 74.7 at 143 ms; frontier line through the two V2 points, V1 and NASNet-A grayed and labeled 'dominated' (the book's margin-004 shape with real data). Final step: book fig-hw-lottery, the same model families on five Pixel 4 processors with their frontiers reshuffled."
+    numbers: "Sandler et al. 2018, Table 4 (read): values above; V2 beats V1 on both axes (1.4 points, 38 ms) and V2 (1.4) beats NASNet-A on both (0.7 points, 40 ms). Chu et al. 2021 via figure 10: MobileNetV3 Large at about 75 percent top-1, about 20 ms on CPU float against 4.5 ms on the DSP; Multi-MAX about 75 percent at 2.2 ms on EdgeTPU and 3.4 ms on DSP (§12.8.3)."
+    example: "Pareto frontier (footnote 31): dominated means another model is at least as good on every axis and better on one; frontier membership does not mean a deployment threshold is met."
+    read: "§12.9.1 (compression validation), §12.8.3 (hardware lottery)"
+  - id: 16
+    q: "What must a compressed model pass besides top-1 accuracy?"
+    picture: "Table as an acceptance card (Lighthouse 12.3, table 18), revealed row by row with pass and fail marks: top-1 71.8 -> 70.9 percent (pass, under 1 point), top-5 91 -> 90.4 (pass), ECE 0.031 -> 0.089 (fail), edge-case accuracy 68.2 -> 61.4 percent (fail); labeled 'assumed values (chapter scenario)'. A reliability-diagram icon defines ECE in one picture."
+    numbers: "Table 18 values are assumed in the chapter; acceptance permits under 1 point of top-1 or top-5 loss and no ECE or edge-case regression; edge cases about 5 percent of inputs (over 50 percent occlusion, under 100 lux, over 30 degree rotation) (Lighthouse 12.3). ECE definition (equation 4). Measured context for the data axis in the notes: Camelyon17-WILDS 93.2 percent in distribution against 70.3 percent out of distribution (Koh et al. 2021, §12.9.2); label errors average about 3 percent across ten test sets, about 6 percent on ImageNet validation (Northcutt et al. 2021)."
+    example: "Lecture 10 named calibration as a gate with no number; here it fails one. Temperature scaling repairs confidence but cannot repair edge-case errors (Lighthouse 12.3 fix). The infrared night-frame cascade (§12.9.3) as the system-model-data story in one line."
+    read: "§12.9.1 (Lighthouse 12.3), §12.9.3"
+
+worked_examples:
+  - name: "Napkin Math 12.1: ResNet-50 on the roofline, predicted against measured"
+    steps: ["given: 8.2 GFLOP forward, x3 for training = 24.6 GFLOP per image; H100 989 TFLOP/s dense FP16; convolutions above the 295 FLOP/byte ridge (Lecture 11)", "ceiling: 989e12 / 24.6e9 = about 40,200 images/s", "measured: MLPerf Training H100-class about 5,000 images/s = about 123 TFLOP/s", "result: 8.0x below the ceiling, MFU 12.4 percent", "meaning: the roofline bounded the convolutions and omitted normalization layers, JPEG decode, and launch overhead; the prediction and the measurement together say time goes somewhere other than arithmetic, and a profiler attributes it"]
+  - name: "MLPerf Inference v5.0: one GPU, two scenarios (data reading exercise)"
+    steps: ["given: ResNet-50 INT8 on one RTX 4090, closed division, accuracy 76.06 to 76.08 percent", "SingleStream: 0.282 ms at the 90th percentile; one query at a time caps the rate near 1 / 0.282 ms = about 3,550 per second", "Offline: 44,411 samples/s with all inputs available", "result: 12.5x between two correct numbers for the same chip and model", "meaning: the scenario is part of the claim; then the 8x H100 Server results (8.9 and 18.1 percent below Offline, two submitters) show what a tail-latency bound costs and that software differs by 11.6 percent on identical hardware"]
+  - name: "Duty-cycle energy for keyword spotting (§12.7.2)"
+    steps: ["given: 8.3 ms per inference every 1 s, 0.4 W active, 50 mW idle", "duty cycle d = 0.0083; energy per inference 0.4 W x 8.3 ms = 3.3 mJ", "P_avg = 0.0083 x 400 + 0.9917 x 50 = 3.3 + 49.6 = 52.9 mW", "result: 94 percent of the battery drain is waiting; active energy would match idle only above d = 50 / 450, about 11 percent", "meaning: a power benchmark for a duty-cycled device states the duty cycle; halving inference energy here saves about 3 percent of battery"]
+  - name: "Napkin Math 12.5: the statistical confidence trap"
+    steps: ["given: 95 against 94 percent top-1 on the same 1,000 images (50 and 60 errors)", "independent-sample view: SE of the difference about 1.0 point, interval about -1 to 3 points, includes zero", "paired view: only disagreements count; the score gap fixes b - c = 10; McNemar (b - c)^2 / (b + c) > 3.84 only if b + c <= 26", "result: the two accuracies cannot decide it; the per-image disagreement count does", "meaning: keep per-image outcomes; size the test set to the change (about 1,825 images for +-1 point on one accuracy); nonsignificance does not prove equivalence"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "A datasheet says 10 TOPS at 0.5 W. Under sustained load the chip gives 3 TOPS at 2 W. By how much does sustained efficiency fall short? A) 1.5x B) 3x C) 7x D) 13x"
+    answer: "D: 20 against 1.5 TOPS/W, 13.3x (§12.7). Throughput falls 3.3x and power rises 4x; the two ratios multiply. Students who answer B divided only the throughputs."
+  - at_minute: 11.5
+    type: diagnose
+    prompt: "Four vendor phrases: 'Up to 10,000 images/sec', 'Sub-millisecond latency', '5x more efficient', 'Optimized for AI'. For each, write the one condition you would ask for before believing it. One minute alone, one with a neighbor."
+    answer: "Batch size, precision, and whether preprocessing is included; whether the time includes transfers and pre- and postprocessing; per operation or whole system, and at what boundary; which operators and precisions run on the accelerator (table 5). Any answer that names a condition from Systems Perspective 12.3 is right."
+  - at_minute: 19
+    type: predict
+    prompt: "The roofline says an H100 can train ResNet-50 at most about 40,200 images/s. What does MLPerf measure per accelerator? A) about 38,000 B) about 20,000 C) about 5,000 D) about 500"
+    answer: "C: about 5,000 images/s, 12.4 percent MFU, 8.0x below the ceiling (Napkin Math 12.1). A is the misconception that compute-bound means at peak."
+  - at_minute: 32.5
+    type: predict
+    prompt: "One RTX 4090 runs ResNet-50 in MLPerf. SingleStream (one query at a time) reports 0.28 ms per query. What does Offline (all inputs at once) report? A) about 3,500/s B) about 7,000/s C) about 45,000/s"
+    answer: "C: 44,411 samples/s, 12.5x the one-at-a-time rate of about 3,550/s (MLPerf Inference v5.0, 5.0-0032). Batching and overlap use the GPU that a single image leaves idle; Lecture 13 owns the latency cost of that batching."
+  - at_minute: 45
+    type: estimate
+    prompt: "A keyword spotter runs 8.3 ms of inference at 0.4 W once per second and idles at 50 mW. Average power? What share is idle? If a new model halves inference energy, how much battery life is gained?"
+    answer: "52.9 mW, 94 percent idle (§12.7.2). Halving 3.3 mW of active power saves about 1.65 of 52.9 mW, about 3 percent: the idle floor sets battery life."
+  - at_minute: 48
+    type: concept_question
+    prompt: "A compressed model scores 94 percent, the baseline 95 percent, on the same 1,000 test images. Is this a regression? A) yes, one point is one point B) no, it is inside the noise C) it depends on information not given"
+    answer: "C (Napkin Math 12.5). Treated as independent samples the interval is about -1 to 3 points; on the same images McNemar's test calls it a regression only if the models disagree on at most 26 images. Students who answer B have the right instinct with the wrong reason."
+  - at_minute: 54
+    type: discuss
+    prompt: "Your team's bonus depends on a public leaderboard rank. Name one change that would raise the rank and hurt your users, and one rule that would stop it. Two minutes with a neighbor."
+    answer: "Open. Expected: a wider beam or larger batch that breaks the latency SLO (Example 12.1); tuning for fixed benchmark shapes; quantizing until calibration fails. Rules: closed-division run rules, a latency SLO inside the score, held-out or refreshed test sets, audits (§12.8.4)."
+  - at_minute: 59.5
+    type: diagnose
+    prompt: "INT8 MobileNetV2 for the camera trap: top-1 71.8 -> 70.9, top-5 91 -> 90.4, ECE 0.031 -> 0.089, edge-case accuracy 68.2 -> 61.4 (assumed values). The gate allows under 1 point of accuracy loss and no ECE or edge-case regression. Ship it?"
+    answer: "No: two gates fail. Temperature scaling may fix ECE but not the 6.8-point edge-case loss, which needs diagnosis of quantization and data coverage (Lighthouse 12.3)."
+  - at_minute: 62.5
+    type: retrieval
+    prompt: "Back to the hook's two bars. Close your notes and list the conditions the datasheet line left out."
+    answer: "Statistic and load (mean or p99, under what arrivals), measurement boundary, scenario, thermal state and operating point, noise (how many runs), quality held (accuracy, calibration, slices)."
+
+open_questions:
+  - "MLPerf lets vendors choose which systems and workloads to submit. Is a voluntary benchmark evidence, or advertising with rules?"
+  - "Static test sets saturate and dynamic ones cannot be compared across years. For a product you must ship next year, which would you trust, and why?"
+  - "The camera trap's lab benchmark passes every gate. What is the cheapest field measurement that would convince you it still works at night, a year later?"
+
+more_examples:
+  - "Dean and Barroso 2013, Table 1: one leaf p99 10 ms; all leaves p99 140 ms (measured, Google service)."
+  - "MLPerf Inference v5.0 closed: ResNet-50 on RTX 4090, L4, and 8x H100 systems across scenarios (summary_results.json)."
+  - "MLPerf Tiny v1.2: KWS on Syntiant NDP9120 31.5 uJ against STM32L4R5 1,820 uJ per inference (summary.csv)."
+  - "Lee et al. 2019: TFLite GPU 2 to 9x faster than CPU across networks; GPU often memory bound at 20 to 40 percent ALU utilization."
+  - "Tummalapalli et al. 2026: RTX 4050 laptop 131.7 tok/s at 34.1 W, CV 2.2 percent; Hailo-10H 6.9 tok/s at under 2 W against a 40 TOPS rating."
+  - "Elsworth et al. 2025: Gemini median prompt 0.10 against 0.24 Wh by boundary."
+  - "MLPerf Power trends: ResNet and RetinaNet about 3x samples per joule from v1.0 to v4.1 (figure 9, Tschand et al. 2024)."
+  - "Recht et al. 2019: ImageNetV2, 11 to 14 percent drops, rankings preserved."
+  - "WILDS iWildCam: camera-trap models tested on unseen trap locations (Koh et al. 2021)."
+  - "Discord Read States: Go garbage collection spiked p99 every two minutes until a Rust rewrite (Howarth 2020)."
+  - "Brutlag 2009: 100 to 400 ms of added search latency measurably reduced daily searches per user."
+
+left_to_reading:
+  - concept: "Training benchmark detail: scaling efficiency (Napkin Math 12.3, 75 percent), table 11 overhead sources, fault tolerance and checkpoint overhead"
+    why: "Time to quality is taught in one frame; strong-scaling arithmetic was Lecture 8's, and the attribution table is illustrative."
+  - concept: "Data benchmarks: coverage, label quality (Northcutt et al. 2021), WILDS, DataPerf and DataComp, Dynabench"
+    why: "Secondary concept; named in the acceptance-gate notes and the open questions. Data drift statistics are Lecture 4's and Lecture 14's."
+  - concept: "LLM benchmarks: MMLU, HELM, perplexity, contamination; TTFT and TPOT"
+    why: "Token latency metrics are owned by Lecture 13 for serving; the LLM evaluation table is better read than heard."
+  - concept: "Reproducibility envelope, nondeterministic reductions, PUE, Koomey's law, EDP, MLPerf Power trend figure"
+    why: "Detail that supports the taught rules; each is one paragraph in §12.7 and §12.8.2."
+  - concept: "Cold-start latency and serverless loading"
+    why: "Owned by Lecture 13 (cold starts break SLOs); named once as a gate on the acceptance card."
+  - concept: "Profiler mapping of iron-law terms (perspective 12.5) and the D·A·M troubleshooting matrix (table 20)"
+    why: "Lecture 8 owns profiling; the matrix is a reference table."
+
+closing:
+  return_to_hook: "Back to the two bars. '10 TOPS at 0.5 W' is a number at one operating point, at an unstated boundary, in burst, with no quality attached. Each segment named one missing condition: the load and statistic (one leaf p99 10 ms, all leaves 140 ms), the granularity (roofline 40,200 against MLPerf 5,000 images/s), the scenario (one GPU, 0.28 ms or 44,411 per second), the boundary and the heat (0.10 against 0.24 Wh; an iPhone losing 41.5 percent), the noise (26 disagreements decide a one-point gap), and the quality held (a model on the frontier that still fails its calibration gate). A benchmark is trustworthy when every one of those is stated and matches the deployment."
+  read_and_practice: ["§12.1 to §12.3, §12.4.4, §12.6.4 to §12.6.5, §12.7, §12.8.1, §12.9.1, §12.10", "self-check questions at the end of each section", "Napkin Math 12.1, 12.2, 12.4, 12.5 by hand; Checkpoint 12.1 (decoding vendor claims)", "time one model on your own laptop twice: once with a host timer and no warm-up, once with warm-up, a synchronize barrier, 30 repeated runs, and p50 and p99; compare"]
+  further_reading:
+    - cite: "Benchmarking, §12.2, §12.3, §12.7, §12.8.1"
+      url: "https://mlsysbook.ai"
+      why: "Benchmark carpentry, granularity with Napkin Math 12.1, power boundaries and duty cycle, and the statistics with every number."
+    - cite: "Reddi et al., MLPerf Inference Benchmark, ISCA 2020"
+      url: "https://doi.org/10.1109/isca45697.2020.00045"
+      why: "Why the four scenarios exist and how LoadGen enforces them."
+    - cite: "Dean and Barroso, The Tail at Scale, CACM 2013"
+      url: "https://doi.org/10.1145/2408776.2408794"
+      why: "The measured fan-out table and the tail-tolerant techniques Lecture 13 builds on."
+    - cite: "Tschand et al., MLPerf Power: Benchmarking the Energy Efficiency of Machine Learning Systems from uWatts to MWatts, HPCA 2025"
+      url: "https://doi.org/10.1109/hpca61900.2025.00092"
+      why: "Measurement boundaries and calibrated instruments across tiny, edge, and data-center systems."
+    - cite: "Recht, Roelofs, Schmidt, Shankar, Do ImageNet Classifiers Generalize to ImageNet?, ICML 2019"
+      url: "https://arxiv.org/abs/1902.10811"
+      why: "What happens when a benchmark is rebuilt: a careful, readable test of benchmark overfitting."
+    - cite: "MLCommons, MLPerf Inference and Tiny results and rules"
+      url: "https://mlcommons.org/benchmarks/"
+      why: "The published results this lecture plots; students can read any submission's system description and code."
+  bridge: "Lecture 13: the model passed its benchmark. What changes when real users send requests?"
+
+coverage:
+  primary_taught: ["Measurement validity (hook, fan-out tail, closed loop, synthesis)", "Benchmark specification (annotated vendor claim, table 5 diagnose, harness)", "Benchmark granularity (fig-granularity, roofline against MLPerf, waterfall, Lee et al. stack data)", "Latency distribution and the SLO (Dean and Barroso table, p99 and SLO definitions, MLPerf scenarios)", "Differences beyond noise (Napkin Math 12.5 vote, MLPerf run and query counts)", "Quality beyond accuracy (Pareto from Sandler et al., hardware lottery, Lighthouse 12.3 gates)", "Verification gap (named on the test-set-as-instrument frame and in the Recht et al. discussion)"]
+  primary_left_to_reading: []
+  secondary: ["Time to quality target (one step in the suites timeline; scaling efficiency to reading)", "Energy measurement boundary (taught: Gemini boundary, MLPerf Tiny operating points, duty cycle)", "Standardized benchmark suites (taught: run rules, divisions, scenarios with v5.0 data)", "Data benchmarks (notes and open question only)", "Throughput-latency measurement (taught as the measurement statement on the scenario frame; batching policy left to Lecture 13)"]
+  touches_reused: ["Lecture 1: iron law, D·A·M (one line each)", "Lecture 8: MFU, profiling (MFU computed on the roofline frame)", "Lecture 10: calibration as a gate (applied on the acceptance card); accuracy-efficiency frontier (made real with Sandler et al.)", "Lecture 11: roofline and ridge 295 FLOP/byte, Amdahl, CMOS power (recalled, not rebuilt)"]
+  hand_offs: ["Lecture 11 hands over the H100 roofline position of ResNet-50 (this lecture measures against it) and power as performance per watt (this lecture measures it at a boundary and a duty cycle)", "Lecture 10 hands over calibration error as a gate (this lecture applies it, with the chapter's assumed values)", "Lecture 13 owns batching policy and the batch-size sweep, queueing and Little's law, TTFT and TPOT in serving, cold-start mitigation", "Lecture 14 owns monitoring baselines, drift alerts, staged rollout and rollback", "Lecture 15 owns fairness release gates and carbon accounting"]
+
+notes_for_author:
+  - "The hook's 10 TOPS at 0.5 W against 3 TOPS at 2 W (§12.7) names no device and is not labeled illustrative in the chapter; the slide labels it illustrative and segment 4 supplies measured throttling (Lee et al. 2019; Tummalapalli et al. 2026). The chapter could label it as a scenario."
+  - "The 15 ms mean against 150 to 200 ms p99 (§12.10) is illustrative in the chapter; it appears only as a labeled strip under the measured Dean and Barroso table."
+  - "Napkin Math 12.1's 'about 5,000 images/s' MLPerf Training per-accelerator figure names no round or submission. Before building, read a specific MLPerf Training ResNet result (the benchmark was retired after v4.0) to cite it; if none matches, the slide says 'chapter value'."
+  - "Lee et al. 2019 Figure 8 values (iPhone Xs CPU about 20 to 26 ms, GPU about 2.4 to 3.9 ms, Pixel 3 GPU about 12.8 ms over 200 s) are read from the published plot and labeled approximate. Its model is MobileNet v1, not V2."
+  - "Tummalapalli et al. 2026 (arXiv 2603.23640) is a preprint and its workload is an LLM (Qwen 2.5 1.5B, 4-bit), not MobileNet; it is the second panel, labeled with workload and source."
+  - "MLPerf Tiny visual wake words uses a MobileNetV1 0.25x reference, not MobileNetV2; the slide says so. The two Syntiant rows are two published operating points of one chip."
+  - "MLPerf Inference v5.0 values come from summary_results.json in mlcommons/inference_results_v5.0 (read 2026-10-16), closed division, available systems; the RTX 4090 rows are a GATEOverflow submission. The 3,550/s single-stream rate is derived (1 / 0.2817 ms) and labeled derived. The current rules no longer list a ResNet-50 Server latency bound, so the slide does not state one."
+  - "Lighthouse 12.3's table 18 (ECE 0.031 -> 0.089, edge cases 68.2 -> 61.4) is assumed in the chapter; the slide says 'assumed values'. No measured calibration-after-quantization data was read for this plan; a candidate is to read one published INT8 calibration study before building, otherwise segment 5's measured data is Sandler et al., Chu et al., Recht et al., and the MLPerf rules."
+  - "The chapter gives MobileNetV2 3.5M parameters and 600 MFLOP; Sandler et al. Table 4 gives 3.4M and 300M multiply-adds (600 MFLOP). The slide quotes the paper's values on the paper's plot."
+  - "Example 12.3, Lighthouse 12.2, and fig-benchmarking-mobilenet-waterfall are illustrative board values; the slides label them so."
+  - "No \\mlsysfocus planned: the chapter has no single key law. If one is wanted, the duty-cycle equation (P_avg = d P_active + (1 - d) P_standby) is the candidate."
+
+build_note:
+  date: "2026-10-17"
+  status: "Built from this map and storyboard.md: 34 frames, 75 presenting pages, 34 handout pages, notes total 70.5 minutes; fit check passes."
+  sourcing:
+    - "Napkin Math 12.1's 'about 5,000 images/s' is kept on the slide as 'chapter value'. No published result reproduces it exactly. The MLPerf Training v4.0 NVIDIA closed ResNet logs (mlcommons/training_results_v4.0) give, as 35 epochs x 1,281,167 images over the timed run per GPU (derived): Eos, one node of 8 H100-SXM5, about 7,000 to 7,080 images/s per GPU (13.2 to 13.3 min); Eos_n8, 64 H100-SXM5, about 4,660 per GPU (2.5 min). The slide shows this range as a bracket under the chapter value; the gap to the 40,200 ceiling is 5.7 to 8.6x. The chapter could cite one of these submissions."
+    - "MLPerf Inference v5.0 and MLPerf Tiny v1.2 values rechecked against summary_results.json and summary.csv on 2026-10-17; all slide values match."
+  changes:
+    - "Predict frames take question titles (hook, roofline, MLPerf v5.0, duty cycle, vote) so the title does not give away the answer."
+    - "fig-granularity, fig-power-diagram, fig-dataset-saturation: book figures are illegible at slide size (text under 5 pt). Granularity is redrawn as a four-tier build (granularity_step1..4); the power-diagram and dataset-saturation thumbnails are dropped, with their content carried in the notes (boundary frame, open questions)."
+    - "fig-benchmarking-mobilenet-waterfall is redrawn at slide size as a three-step build (waterfall_step1..3) with the same illustrative values, because the book PNG's text falls below the legibility floor."
+    - "Throttling frame: Lee et al. Figure 8 is shown as start and after-200-s bars, labeled approximate, instead of a line plot, so no curve shape is invented between values read from the plot."
+    - "Frame 25: the '1,825 images' line moved to the notes to fit the enlarged figure."
+    - "fig-hw-lottery stays as the final step of the Pareto frame for recognition; its axis labels are below the legibility floor at slide size. A legible variant needs the Chu et al. 2021 data."
