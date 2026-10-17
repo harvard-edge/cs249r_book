@@ -179,6 +179,8 @@ $it$
 $endfor$
 $additional-packages$
 \begin{document}
+% Reproducible default; an authored seed in the body still takes precedence.
+\pgfmathsetseed{1}%
 $body$
 \end{document}
 ]]
@@ -515,13 +517,24 @@ local function get_cached_image (hash, mime_type)
   return nil
 end
 
+-- TikZ's deterministic rendering default changes its output without changing
+-- authored source. Keep old unseeded cache entries out of this pipeline;
+-- preserve the cache identity of all other engines.
+local function image_cache_key (codeblock)
+  local source = codeblock.text
+  if codeblock.classes[1] == 'tikz' then
+    source = 'tikz-default-seed-1:v2\n' .. source
+  end
+  return pandoc.sha1(source)
+end
+
 local function cache_image (codeblock, imgdata, mimetype)
   -- do nothing if caching is disabled or not possible.
   if not image_cache then
     return
   end
   local ext = extension_for_mimetype[mimetype]
-  local filename = pandoc.sha1(codeblock.text) .. '.' .. ext
+  local filename = image_cache_key(codeblock) .. '.' .. ext
   local imgpath = pandoc.path.join{image_cache, filename}
   write_file(imgpath, imgdata)
 end
@@ -554,7 +567,7 @@ local function code_to_figure (conf)
     local imgdata, imgtype
     if conf.cache then
       imgdata, imgtype = get_cached_image(
-        pandoc.sha1(block.text),
+        image_cache_key(block),
         run_pdf2svg and 'image/svg+xml' or engine.mime_type
       )
     end

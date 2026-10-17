@@ -1,9 +1,9 @@
 # Volume 1 web animation prototype
 
-## Current status: memory figure integrated in Quarto source
+## Current status: shared integration across Volumes I–IV
 
-The tensor-memory-layout figure now uses the shared `figure-explore` extension
-in its normal chapter source. Build it with binder; do not run the old memory
+The series now uses the shared `figure-explore` extension in chapter sources,
+with authored original-art annotations and specialized stateful lessons. Build it with binder; do not run the old memory
 post-render injector. The convolution and other standalone examples remain
 review prototypes. See the production
 [authoring guide](../../_extensions/mlsysbook-ext/figure-explore/README.md).

@@ -11,6 +11,8 @@ HERE=Path(__file__).resolve().parent
 ROOT=HERE.parents[2]
 BUILD=ROOT/'books/_build/html-vol1/chapters/06_nn_architectures'
 TARGET=BUILD/'vol1/06_nn_architectures/06_nn_architectures.html'
+if 'data-mlsys-explore=' in TARGET.read_text():
+    raise SystemExit('This chapter now uses source-integrated figures. Build normally; do not apply the legacy injector.')
 prototype=BeautifulSoup((HERE/'convolution-in-context.html').read_text(),'html.parser')
 backup=TARGET.with_name('06_nn_architectures.static.html')
 if not backup.exists() or 'id="cnn-player-script"' not in TARGET.read_text():

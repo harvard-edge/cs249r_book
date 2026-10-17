@@ -36,5 +36,29 @@
     select(initialView==='explore'?'explore':'diagram');
     return {select};
   }
+  // Quarto clones local figures for cross-reference hover previews. Keep those
+  // clones static: controls have no listeners there and copied IDs are invalid.
+  const sanitizePreviews = () => {
+    document.querySelectorAll('.tippy-content .mlsys-figure-views').forEach(preview => {
+      preview.querySelectorAll('.mlsys-figure-tabs,.mlsys-explore-panel').forEach(node => node.remove());
+      preview.querySelectorAll('.mlsys-diagram-panel').forEach(panel => {
+        panel.hidden = false; panel.removeAttribute('role'); panel.removeAttribute('aria-labelledby');
+      });
+      preview.classList.remove('mlsys-figure-views');
+      for (const node of [preview, ...preview.querySelectorAll('[id]')]) node.removeAttribute('id');
+      preview.querySelectorAll('[aria-controls],[aria-labelledby],[aria-describedby]').forEach(node => {
+        node.removeAttribute('aria-controls'); node.removeAttribute('aria-labelledby'); node.removeAttribute('aria-describedby');
+      });
+    });
+  };
+  const watchPreviews = () => {
+    const observer = new MutationObserver(records => {
+      if (records.some(record => record.addedNodes.length)) sanitizePreviews();
+    });
+    observer.observe(document.body, {childList:true, subtree:true});
+    sanitizePreviews();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchPreviews, {once:true});
+  else watchPreviews();
   window.MLSysFigureViews=Object.freeze({enhance});
 })();

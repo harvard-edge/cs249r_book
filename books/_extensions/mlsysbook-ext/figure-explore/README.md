@@ -4,6 +4,59 @@ Opt-in Diagram / Explore views inside an existing numbered Quarto figure.
 The static figure, caption, alt text, numbering, and cross-reference anchor
 remain owned by the chapter. No post-render HTML patch is required.
 
+## Series rollout
+
+The four-volume registry is generated from reviewed `lessons/*.json` files.
+Two treatments share the same bounded Diagram / Explore frame:
+
+- Guided annotations preserve the original artwork and focus authored regions.
+  They do not simulate execution or invent values. Dense diagrams have an
+  Enlarge view with the same state, controls, and readable narration.
+- Specialized lessons expose changing ownership, storage, partial results,
+  scheduling, branches, or permission state. Their assumptions and accounting
+  boundaries remain explicit.
+
+Every canonical catalog entry has a reviewed treatment or an explicit static /
+source-conflict reason. A source conflict is not an implemented enhancement.
+The catalog reports the original proposal separately from the delivered form.
+
+Source and artwork freshness guards fail back to Diagram if either changes.
+The source digest ignores enrollment attributes only. SVG digests ignore
+metadata and generated identifier names, preserving geometry, text, and colors.
+Raster digests cover all bytes. This detects accidental drift; it is not a
+security boundary. Rebuild artwork, inspect mappings, and recompile after a
+source edit rather than disabling the guards.
+
+Quarto cross-reference tooltips show static-only figure previews. They must not
+clone live controls or IDs. Whole-book figures keep their frame in the reading
+column, even when the surrounding Quarto layout includes margin material.
+
+### Review and rebuild
+
+```sh
+# First build the canonical artwork through the normal book pipeline.
+./binder/binder build html --all --parallel 4 --skip-validate
+# Index the successful build tree for visual mapping and freshness checks.
+python3 binder/tools/scripts/build_figure_art_index.py --build-root books/_build/parallel/RUN --output /tmp/mlsys-figure-art
+# Enroll only reviewed lessons; static and conflicted figures stay static.
+python3 binder/tools/scripts/compile_figure_explore.py --require-complete --enroll
+python3 binder/tools/scripts/compile_figure_explore.py --require-complete --check
+# Rebuild to package the generated volume bundles and registered assets.
+./binder/binder build html --all --parallel 4 --skip-validate
+```
+
+`--require-complete` checks catalog coverage and schema; it does not certify
+blocked entries or replace visual and runtime review. The explicit compilation
+report distinguishes ready, intentionally static, and blocked source conflicts.
+Keep the artwork index and screenshots outside version control. The authored
+manifests, generated registry, and volume JavaScript bundles are versioned.
+
+Run the Quarto format and compiler tests together with
+`python3 -m pytest binder/tests/test_figure_explore.py binder/tests/test_figure_explore_compiler.py binder/tests/test_diagram_determinism.py -q`.
+The browser QA utility is `binder/tools/scripts/check_figure_explore_browser.cjs`;
+its `--help` describes the build tree, Playwright module, and output options.
+Its report separates automated checks from human visual and pedagogical review.
+
 ## Authoring
 
 Enable the extension in the HTML filter list (the book does this centrally in
@@ -21,10 +74,10 @@ Do not add another figure wrapper, caption, or number. Do not paste generated
 HTML or inline the runtime into the chapter. Diagram is the initial view;
 Explore initializes paused and preserves its step when views change.
 
-The extension currently registers `tensor-memory-layout` for
-`fig-tensor-memory-layout` and `matrix-tiling` for `fig-tiling-diagram`. Unknown names or mismatched figure IDs emit a
-warning and retain the static figure. Register each new lesson explicitly
-rather than attaching an unrelated laboratory to a figure.
+The generated registry binds each lesson to its exact volume, source, figure ID,
+and reviewed artwork. The two original tensor-layout and matrix-tiling lessons
+also support explicit legacy registration. Unknown names or mismatched figure
+IDs retain the static figure. Register each new lesson explicitly.
 
 ## Format behavior
 
@@ -44,7 +97,8 @@ only an HTML enrollment attribute; figure content and caption AST are unchanged.
 
 ## Adding a lesson
 
-1. Register its exact figure ID, script, and stylesheet in `figure-explore.lua`.
+1. Author its manifest in `lessons/`, then compile the exact figure binding.
+   Specialized factories also declare their script and stylesheet there.
 2. Supply a factory under `window.MLSysFigureLessons[lessonName]`. It receives
    an empty, uniquely identified, initially detached Explore panel. It builds
    scoped semantic controls/diagram and returns `{pause, destroy}`.
