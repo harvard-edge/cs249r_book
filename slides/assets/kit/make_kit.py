@@ -38,14 +38,72 @@ C = {
 FONT = "Helvetica, Arial, sans-serif"
 W, H = 900, 500
 
-# Volume I stack, bottom to top, with the lectures that sit on each layer.
-STACK = ["Hardware", "Frameworks", "Models", "Training", "Serving",
-         "Operations", "Applications"]
-ROADMAP = {
-    "Hardware": [11, 12], "Frameworks": [7], "Models": [5, 6, 10],
-    "Training": [8], "Serving": [13], "Operations": [14],
-    "Applications": [15], "Data": [4, 9],
+# Each volume's stack, bottom to top, with the lectures that sit on each
+# layer. DATA: whether the stack carries Volume I's vertical data bar.
+# PARTS: (label, first layer, last layer) brackets drawn left of the stack.
+# COURSE: lectures in semester order, grouped by the book's parts, each with
+# the stack layer it teaches ("all" for lectures that span the stack).
+VOLUMES = {
+    1: dict(
+        stack=["Hardware", "Frameworks", "Models", "Training", "Serving",
+               "Operations", "Applications"],
+        roadmap={
+            "Hardware": [11, 12], "Frameworks": [7], "Models": [5, 6, 10],
+            "Training": [8], "Serving": [13], "Operations": [14],
+            "Applications": [15], "Data": [4, 9],
+        },
+        data=True, parts=None,
+        course=[
+            ("Start", [(1, "Introduction", "all")]),
+            ("Part I  Foundations", [(2, "System Paradigms", "all"), (3, "ML Lifecycle", "all"),
+                                      (4, "Data Engineering", "Data")]),
+            ("Part II  Development", [(5, "Neural Computation", "Models"), (6, "Architectures", "Models"),
+                                       (7, "Frameworks", "Frameworks"), (8, "Training", "Training")]),
+            ("Part III  Optimization", [(9, "Data Selection", "Data"), (10, "Compression", "Models"),
+                                         (11, "Hardware Acceleration", "Hardware"), (12, "Benchmarking", "Hardware")]),
+            ("Part IV  Deployment", [(13, "Serving", "Serving"), (14, "ML Operations", "Operations"),
+                                      (15, "Responsible Engineering", "Applications")]),
+            ("Close", [(16, "Conclusion", "all")]),
+        ]),
+    2: dict(
+        stack=["Facility & Accelerators", "Fabric & Storage",
+               "Distributed Execution", "Reliability & Control",
+               "Runtime & Serving", "Operations", "Assurance",
+               "Governance & Sustainability"],
+        roadmap={
+            "Facility & Accelerators": [2], "Fabric & Storage": [3, 4],
+            "Distributed Execution": [5, 6], "Reliability & Control": [7, 8],
+            "Runtime & Serving": [9, 10, 11], "Operations": [12],
+            "Assurance": [13, 14], "Governance & Sustainability": [15, 16],
+        },
+        data=False,
+        parts=[("Part I", 0, 1), ("Part II", 2, 3), ("Part III", 4, 5),
+               ("Part IV", 6, 7)],
+        course=[
+            ("Start", [(1, "Introduction", "all")]),
+            ("Part I  The Fleet", [(2, "Compute Infrastructure", "Facility & Accelerators"),
+                                    (3, "Network Fabrics", "Fabric & Storage"),
+                                    (4, "Data Storage", "Fabric & Storage")]),
+            ("Part II  Distributed ML", [(5, "Collective Communication", "Distributed Execution"),
+                                          (6, "Distributed Training", "Distributed Execution"),
+                                          (7, "Fault Tolerance", "Reliability & Control"),
+                                          (8, "Fleet Orchestration", "Reliability & Control")]),
+            ("Part III  In Production", [(9, "Fleet Efficiency", "Runtime & Serving"),
+                                          (10, "Serving at Scale", "Runtime & Serving"),
+                                          (11, "Edge Intelligence", "Runtime & Serving"),
+                                          (12, "ML Ops at Scale", "Operations")]),
+            ("Part IV  Responsible", [(13, "Security & Privacy", "Assurance"),
+                                       (14, "Robust AI", "Assurance"),
+                                       (15, "Sustainable AI", "Governance & Sustainability"),
+                                       (16, "Responsible AI", "Governance & Sustainability")]),
+            ("Close", [(17, "Conclusion", "all")]),
+        ]),
 }
+
+# Set from VOLUMES by main(); Volume I by default.
+STACK, ROADMAP, COURSE = (VOLUMES[1]["stack"], VOLUMES[1]["roadmap"],
+                          VOLUMES[1]["course"])
+DATA, PARTS = True, None
 
 
 def svg(body, w=W, h=H, label=""):
@@ -68,16 +126,40 @@ def rect(x, y, w, h, fill, stroke="none", sw=0, rx=8, opacity=1.0, extra=""):
 
 
 # ---------------------------------------------------------------- stack
-def stack(accent, highlight=None, upto=None, data=True, roadmap=False):
+def stack(accent, highlight=None, upto=None, data=None, roadmap=False):
     """The stack. highlight: layer name or 'Data'. upto: number of layers
     shown from the bottom (build steps); hidden layers are left empty so
     every step has the same geometry."""
+    data = DATA if data is None else data
     x0, y0, bw, gap = 60, 28, 640 if not roadmap else 560, 10
     bh = 48 if roadmap else 54
     if roadmap:
         y0 = 16
-    out = []
     n = len(STACK)
+    if n > 7:
+        # Keep the Volume I height: shrink layers to fit more of them.
+        total = 7 * bh + 6 * gap
+        gap = 8
+        bh = (total - (n - 1) * gap) / n
+    out = []
+    if PARTS:
+        x0 = 120
+        if not roadmap:
+            bw = 600
+        for label, lo, hi in PARTS:
+            if upto is not None and lo >= upto:
+                continue
+            if upto is not None:
+                hi = min(hi, upto - 1)
+            ytop = y0 + (n - 1 - hi) * (bh + gap)
+            ybot = y0 + (n - 1 - lo) * (bh + gap) + bh
+            out.append(f'<path d="M {x0 - 10} {ytop} H {x0 - 26} V {ybot} '
+                       f'H {x0 - 10}" fill="none" stroke="{C["gray"]}" '
+                       f'stroke-width="2"/>\n')
+            cx, cy = x0 - 46, (ytop + ybot) / 2
+            out.append(text(cx, cy, label, size=17, weight=700, fill=C["gray"],
+                            anchor="middle",
+                            extra=f' transform="rotate(-90 {cx} {cy})"'))
     for i, name in enumerate(STACK):
         if upto is not None and i >= upto:
             continue
@@ -87,7 +169,8 @@ def stack(accent, highlight=None, upto=None, data=True, roadmap=False):
         fill_op = 1.0 if on else (0.10 if dim else 0.12 + 0.05 * (i % 3))
         out.append(rect(x0, y, bw, bh, accent, opacity=fill_op))
         col = C["white"] if on else (C["pale"] if dim else accent)
-        out.append(text(x0 + 22, y + bh / 2, name, size=26,
+        out.append(text(x0 + 22, y + bh / 2, name.replace("&", "&amp;"),
+                        size=26 if n <= 7 else 23,
                         weight=700 if on else 600, fill=col))
         if roadmap:
             out += chips(x0 + bw - 14, y + bh / 2, ROADMAP[name], accent, on)
@@ -127,22 +210,6 @@ def chips(xr, yc, lectures, accent, on, anchor="end"):
 
 
 # ---------------------------------------------------------------- course order
-# Volume I lectures in semester order, grouped by the book's parts, each with
-# the stack layer it teaches ("all" for lectures that span the stack).
-COURSE = [
-    ("Start", [(1, "Introduction", "all")]),
-    ("Part I  Foundations", [(2, "System Paradigms", "all"), (3, "ML Lifecycle", "all"),
-                              (4, "Data Engineering", "Data")]),
-    ("Part II  Development", [(5, "Neural Computation", "Models"), (6, "Architectures", "Models"),
-                               (7, "Frameworks", "Frameworks"), (8, "Training", "Training")]),
-    ("Part III  Optimization", [(9, "Data Selection", "Data"), (10, "Compression", "Models"),
-                                 (11, "Hardware Acceleration", "Hardware"), (12, "Benchmarking", "Hardware")]),
-    ("Part IV  Deployment", [(13, "Serving", "Serving"), (14, "ML Operations", "Operations"),
-                              (15, "Responsible Engineering", "Applications")]),
-    ("Close", [(16, "Conclusion", "all")]),
-]
-
-
 def course_order(accent):
     """The semester as rows (one per part), each lecture a card with its
     number, title, and the stack layer it teaches."""
@@ -156,9 +223,10 @@ def course_order(accent):
             out.append(rect(x, y, cw, 54, accent, opacity=0.14 if lit else 0.06,
                             stroke=accent, sw=1.2, rx=8))
             out.append(text(x + 10, y + 19, f"L{n}", size=15, weight=700, fill=accent))
-            out.append(text(x + 48, y + 19, title,
+            out.append(text(x + 48, y + 19, title.replace("&", "&amp;"),
                             size=13, weight=700, fill=C["text"]))
-            out.append(text(x + 10, y + 40, "whole stack" if not lit else f"{layer} layer",
+            out.append(text(x + 10, y + 40, "whole stack" if not lit
+                            else f"{layer} layer".replace("&", "&amp;"),
                             size=12, weight=600, fill=C["gray"]))
             x += cw + gap
         y += rowh
@@ -272,6 +340,11 @@ def dam(accent, hl=None):
     return svg("".join(out), label="D-A-M triangle")
 
 
+def layer_slug(name):
+    """File-name form of a layer: 'Fabric & Storage' -> 'fabric'."""
+    return name.split(" & ")[0].split()[0].lower()
+
+
 def to_pdf(path):
     pdf = path.with_suffix(".pdf")
     if shutil.which("rsvg-convert"):
@@ -285,27 +358,33 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--volume", type=int, default=1)
     args = ap.parse_args()
-    if args.volume != 1:
-        # Each volume has its own stack (the fleet stack, the agent stack, the
-        # physical stack); add its layers and roadmap here before generating.
+    if args.volume not in VOLUMES:
+        # Each volume has its own stack (the agent stack, the physical
+        # stack); add its layers, roadmap, and course to VOLUMES first.
         raise SystemExit(f"Volume {args.volume} stack not defined yet")
+    global STACK, ROADMAP, COURSE, DATA, PARTS
+    v = VOLUMES[args.volume]
+    STACK, ROADMAP, COURSE = v["stack"], v["roadmap"], v["course"]
+    DATA, PARTS = v["data"], v["parts"]
     accent = ACCENT[args.volume]
     out = Path(__file__).parent / f"vol{args.volume}"
     out.mkdir(exist_ok=True)
     figs = {"course_order": course_order(accent),
             "stack": stack(accent),
             "stack_roadmap": stack(accent, roadmap=True)}
-    for name in STACK + ["Data"]:
-        figs[f"stack_{name.lower()}"] = stack(accent, highlight=name)
-    for k in range(1, len(STACK) + 2):
+    for name in STACK + (["Data"] if DATA else []):
+        figs[f"stack_{layer_slug(name)}"] = stack(accent, highlight=name)
+    for k in range(1, len(STACK) + (2 if DATA else 1)):
         figs[f"stack_build{k}"] = stack(accent, upto=k)
     for k in range(1, 5):
         figs[f"machine_step{k}"] = machine(accent, step=k)
     for h in ("compute", "sram", "hbm", "link", "host"):
         figs[f"machine_hl_{h}"] = machine(accent, hl=h)
-    figs["dam"] = dam(accent)
-    for v in "DAM":
-        figs[f"dam_{v}"] = dam(accent, hl=v)
+    if args.volume == 1:
+        # D-A-M is Volume I's taxonomy; Volume II's C3 figure is not drawn yet.
+        figs["dam"] = dam(accent)
+        for v in "DAM":
+            figs[f"dam_{v}"] = dam(accent, hl=v)
     for name, s in figs.items():
         p = out / f"{name}.svg"
         p.write_text(s)
