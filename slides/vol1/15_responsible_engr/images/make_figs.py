@@ -41,6 +41,17 @@ so nothing moves. Every value is sourced:
     of the carbon of large-scale ML tasks (location-based).
   - DP-SGD per-sample gradients (chapter Sec. 15.5.2): KWS 204.8 MB per batch
     of 256, GPT-2 1.5 TB, H100 memory 80 GB.
+  - Shared threshold (chapter figure 2 and Sec. 15.3.2.1): 75 percent overall
+    accuracy at one line, 81.25 percent at the other; Subgroup B's errors
+    triple (1 to 3) while Subgroup A's fall to 0.
+  - Interventions (chapter Sec. 15.3.2.1): reweighting, adversarial debiasing
+    with a reversed gradient, threshold adjustment (legally restricted).
+  - Next-lecture teaser: Strubell et al. 2019 (284 t estimate; car lifetime
+    57 t); the measured value is revealed in Lecture 15b.
+
+The Patterson, DLRM TCO, fleet-share, lineage, and DP-SGD figures moved to
+Lecture 15b on 2026-10-17 (copied or regenerated there); their code stays here
+so the files in this folder remain reproducible.
 
 Run from this folder: python3 make_figs.py
 """
@@ -634,5 +645,105 @@ g.text(815, 292, "Update the\nfleet", 20, C["danger"], "bold", first=3)
 g.text(450, 345, "Illustrative lineage for the KWS pipeline (chapter Sec. 15.5.4)", 17,
        C["neutral"], first=1)
 g.write("lineage", 3)
+
+# Shared threshold on two score distributions (chapter figure 2, regenerated in
+# two steps). Left of the line is approved; circles would repay, crosses would
+# not. 75 percent overall at the first line (A 3 errors, B 1); 81.25 percent at
+# the second (A 0, B 3).
+g = Svg(900, 330)
+xs = 0.643
+a_pos = [(497, "o"), (615, "o"), (697, "o"), (780, "o"),
+         (1010, "+"), (1085, "+"), (1170, "+"), (1255, "+")]
+b_pos = [(262, "o"), (343, "o"), (425, "o"), (617, "+"), (697, "o"),
+         (780, "+"), (862, "+"), (1085, "+")]
+for row, pts, ck, y in (("Subgroup A", a_pos, "memory", 95), ("Subgroup B", b_pos, "danger", 200)):
+    g.add(1, f'<line x1="150" y1="{y + 32}" x2="890" y2="{y + 32}" stroke="{C["neutral"]}" stroke-width="4"/>')
+    g.text(10, y + 32, row, 22, C["text"], "bold", "start")
+    for x, m in pts:
+        cx = 40 + x * xs
+        if m == "o":
+            g.circle(cx, y, 16, "none", C[ck], sw=4)
+        else:
+            g.add(1, f'<path d="M{cx - 16},{y} H{cx + 16} M{cx},{y - 16} V{y + 16}" '
+                     f'stroke="{C[ck]}" stroke-width="7"/>')
+for x, lab, first, last in ((555, "75%", 1, 99), (945, "81.25%", 2, 99)):
+    cx = 40 + x * xs
+    g.add(first, f'<line x1="{cx}" y1="55" x2="{cx}" y2="260" stroke="{C["text"]}" '
+                 f'stroke-width="3" stroke-dasharray="8 6"/>')
+    g.text(cx, 38, f"overall {lab}", 20, C["text"], "bold", first=first)
+g.text(450, 290, "Left of a line: approved.  Circle: would repay.  Cross: would default.",
+       19, C["neutral"])
+g.text(160, 322, "At 75%: A errors 3, B errors 1", 20, C["memory"], "bold", "start", first=1, last=1)
+g.text(160, 322, "At 81.25%: A errors 0, B errors 3 (tripled)", 20, C["danger"], "bold", "start", first=2)
+g.write("threshold", 2)
+
+# Three places to intervene; during training, an adversary head with a reversed
+# gradient (chapter Sec. 15.3.2.1)
+g = Svg(560, 470)
+stages = [("Before training", "Reweight the\ntraining examples", 1, "data"),
+          ("During training", "", 2, "compute"),
+          ("After training", "Move Group B's\nthreshold", 3, "danger")]
+for i, (stage, body, first, ck) in enumerate(stages):
+    y = 10 + i * 155
+    g.rect(10, y, 540, 140, C[ck + "_l"], C[ck], first=first, sw=2.5)
+    g.text(25, y + 24, stage, 25, C[ck], "bold", "start", first=first)
+    if body:
+        g.text(280, y + 80, body, 27, C["text"], "bold", first=first)
+y = 165
+g.rect(25, y + 50, 125, 62, "white", C["neutral"], first=2)
+g.text(87, y + 81, "Encoder", 22, C["text"], "bold", first=2)
+g.rect(205, y + 36, 140, 44, "white", C["data"], first=2)
+g.text(275, y + 58, "Task head", 21, C["text"], "bold", first=2)
+g.rect(205, y + 88, 140, 44, "white", C["danger"], first=2)
+g.text(275, y + 110, "Adversary", 21, C["danger"], "bold", first=2)
+g.line(152, y + 72, 201, y + 60, C["neutral"], first=2)
+g.line(152, y + 92, 201, y + 106, C["neutral"], first=2)
+g.text(448, y + 58, "repay?", 22, C["data"], "bold", first=2)
+g.text(448, y + 104, "group?\ngradient reversed", 19, C["danger"], "bold", first=2)
+g.text(280, 448, "Legally restricted in US credit", 22, C["danger"], "bold", first=3)
+g.write("interventions", 3)
+
+# Fairness-accuracy frontier, slide variant of the chapter's figure 3
+# (hypothetical): A unconstrained at disparity 0.18, B 91 percent accuracy at
+# 0.05, C strict equality at 0 with a large drop. Curve drawn through the
+# three points as y = 0.85 + 0.1729 x^0.337.
+xx = np.linspace(0, 0.18, 200)
+yy = 0.85 + 0.1729 * xx ** 0.337
+fig, ax = plt.subplots(figsize=(3.9, 3.0))
+ax.plot(xx, yy, color=C["neutral"], lw=2.5, ls="--")
+for x, y, ck, lab, off, ha in ((0.18, 0.85 + 0.1729 * 0.18 ** 0.337, "danger", "A: unconstrained", (-6, 10), "left"),
+                               (0.05, 0.913, "data", "B: 91% accuracy,\ndisparity 0.05", (-12, -36), "right"),
+                               (0.0, 0.85, "memory", "C: strict equality,\nlarge drop", (-8, 4), "right")):
+    ax.plot([x], [y], "o", ms=11, color=C[ck], zorder=5)
+    ax.annotate(lab, (x, y), xytext=off, textcoords="offset points", ha=ha,
+                fontsize=11, fontweight="bold", color=C[ck])
+ax.set_xlim(0.2, -0.01)
+ax.set_ylim(0.83, 0.97)
+ax.set_xlabel("Disparity (lower is fairer)")
+ax.set_ylabel("Accuracy")
+ax.text(0.0, -0.3, "Hypothetical (chapter figure 3)", transform=ax.transAxes, fontsize=9,
+        color=C["neutral"])
+sp.save(fig, out / "frontier.svg")
+
+# Next lecture teaser: the architecture-search estimate (Lecture 15b's hook)
+fig, ax = plt.subplots(figsize=(4.6, 1.9))
+for i, (label, v, ck, txt) in enumerate((("One car, lifetime", 57, "neutral", "57 t"),
+                                         ("Search, estimated", 284, "compute", "284 t"),
+                                         ("Search, measured", 3.2, "data", "???"))):
+    y = 2 - i
+    ax.barh(y, v, color=C[ck], height=0.62, alpha=0.0 if txt == "???" else 1.0)
+    ax.text(-0.02, y, label, transform=ax.get_yaxis_transform(), ha="right",
+            va="center", fontsize=12, fontweight="bold", color=C["text"])
+    ax.text(v * 1.2 if txt != "???" else 8, y, txt, va="center", fontsize=13,
+            fontweight="bold", color=C["danger"] if txt == "???" else C[ck])
+ax.set_xscale("log")
+ax.set_xlim(1, 3000)
+ax.set_ylim(-0.6, 2.6)
+ax.set_yticks([])
+ax.spines["left"].set_visible(False)
+ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+ax.set_axisbelow(True)
+ax.set_xlabel("Tonnes of CO₂e (log scale)")
+sp.save(fig, out / "next_part2.svg")
 
 print("figures written")
