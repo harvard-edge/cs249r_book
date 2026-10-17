@@ -12,16 +12,13 @@ marked illustrative:
     coordinates have 40 entries (Sec. 4.6.1).
   - Label cost: $100K labeling budget against a $20 to $40 ResNet-50 run on
     8 A100s (Sec. 4.6.2).
-  - Storage latency: DRAM 100 ns, local NVMe 100 us, remote SSD 2 ms, object
-    store 20 ms against a 1 ms line (Sec. 4.10 margin figure).
-  - Storage supply: object store about 100 MB/s per connection, attached
-    volume 250 MB/s, SATA SSD 500 MB/s, NVMe 5 to 7 GB/s; demand 480 MB/s
-    sustained and 1.9 GB/s at the compute ceiling (Sec. 4.9.3, Napkin Math 4.8).
-  - Format: 20 of 100 equal-size columns (Napkin Math 4.9).
-  - K-S: n = 1,000 per sample, critical value 0.061, observed D = 0.08
-    (Napkin Math 4.5). The two CDF curves are illustrative.
 
-Diagrams (leakage split, skew, drift types, pipeline synthesis) are SVG
+2026-10-17: the storage latency, storage supply, format, drift-type, and K-S
+figures moved to Lecture 4b (Data Engineering, Part 2), whose own
+images/make_figs.py regenerates them. Their old SVG and PDF files in this
+folder are no longer used by this deck.
+
+Diagrams (leakage split, skew, pipeline synthesis) are SVG
 written by this script.
 
 Run from this folder: python3 make_figs.py
@@ -125,71 +122,6 @@ steps("label_cost", [
 ], xlim=(5, 2e7), size=sp.SHORT, xlabel="Cost (US dollars, log scale)",
     xticks=[(10, r"\$10"), (1000, r"\$1,000"), (1e5, r"\$100,000")])
 
-# 5. Storage latency ladder against a 1 ms line (values in ms)
-steps("latency_ladder", [
-    ("DRAM", 1e-4, "memory", "100 ns"),
-    ("Local NVMe SSD", 0.1, "memory", "100 µs", "in"),
-    ("Remote SSD", 2, "danger", "2 ms"),
-    ("Object store", 20, "danger", "20 ms"),
-], lines=[(1, "1 ms", "danger", 1.04)], xlim=(3e-5, 2e3),
-    xlabel="Access latency (log scale)",
-    xticks=[(1e-4, "100 ns"), (1e-2, "10 µs"), (1, "1 ms"), (100, "100 ms")])
-
-# 6. Storage supply against the ResNet-50 demand (MB/s); the ceiling demand
-# appears on the second step
-supply_rows = [
-    ("Needed at 3,200 img/s", 480, "compute", "480 MB/s"),
-    ("Object store, 1 connection", 100, "neutral", "100 MB/s"),
-    ("Attached block volume", 250, "neutral", "250 MB/s"),
-    ("SATA SSD", 500, "memory", "500 MB/s"),
-    ("Local NVMe SSD", 5000, "memory", "5 to 7 GB/s"),
-    ("Needed at the 12,682 img/s ceiling", 1900, "danger", "1.9 GB/s"),
-]
-for k in (1, 2):
-    bars_lines(out / f"storage_supply_step{k}.svg", supply_rows, step=4 + k,
-               xlim=(30, 1e5), size=(5.8, 2.9),
-               xlabel="Sequential read bandwidth (MB/s, log scale)",
-               xticks=[(100, "100"), (1000, "1,000"), (10000, "10,000")])
-
-# 7. Bytes read for 20 of 100 columns
-steps("format_bytes", [
-    ("Row format (CSV)", 100, "neutral", "reads 100 of 100 columns"),
-    ("Columnar (Parquet)", 20, "data", "reads 20 columns: 5× less"),
-], log=False, xlim=(0, 175), size=sp.SHORT,
-    xlabel="Share of the table read from disk (%)")
-
-# 8. K-S test on clip loudness (illustrative curves, chapter numbers)
-from math import erf, sqrt  # noqa: E402
-xs = np.linspace(-50, -10, 400)
-cdf = np.vectorize(lambda x, m: 0.5 * (1 + erf((x - m) / (6 * sqrt(2)))))
-train = cdf(xs, -30.0)
-recent = cdf(xs, -31.2)   # shift of 0.2 sigma gives a largest gap of about 0.08
-gap = recent - train
-i = int(np.argmax(gap))
-for k in (1, 2, 3):
-    fig, ax = plt.subplots(figsize=(5.8, 2.6))
-    ax.plot(xs, train, color=C["memory"], lw=3)
-    ax.text(-25.5, 0.45, "Training clips", color=C["memory"], fontsize=12,
-            fontweight="bold", ha="left")
-    if k >= 2:
-        ax.plot(xs, recent, color=C["danger"], lw=3)
-        ax.text(-47.5, 0.42, "Recent clips", color=C["danger"], fontsize=12,
-                fontweight="bold", ha="left")
-    if k >= 3:
-        ax.plot([xs[i], xs[i]], [train[i], recent[i]], color=C["text"], lw=3.5,
-                solid_capstyle="butt", zorder=6)
-        ax.annotate("D = 0.08, the largest gap", xy=(xs[i], (train[i] + recent[i]) / 2),
-                    xytext=(-24, 0.12), fontsize=12, fontweight="bold",
-                    color=C["text"], arrowprops=dict(arrowstyle="-", color=C["text"], lw=1))
-    ax.set_xlim(-50, -10)
-    ax.set_ylim(0, 1.05)
-    ax.set_xlabel("Clip loudness (dBFS)")
-    ax.set_ylabel("Share of clips\nat most this loud", fontsize=11)
-    ax.text(1.0, -0.42, "Illustrative curves; D from Napkin Math 4.5",
-            transform=ax.transAxes, ha="right", fontsize=9, color=C["neutral"])
-    sp.save(fig, out / f"ks_cdf_step{k}.svg")
-
-
 # ---------------------------------------------------------------------------
 # SVG diagrams, drawn at 900 x 500 with 20 to 24 px type
 # ---------------------------------------------------------------------------
@@ -257,12 +189,12 @@ def leak(k):
     if k >= 2:
         rows.append((195, "Split by hash of speaker key", [A, A, A, A, B, B], [Cc, Cc, Cc],
                      "every test voice is new", C["data"]))
-    for y, name, tr, te, msg, col in rows:
+    for y, name, train_clips, test_clips, msg, col in rows:
         s += txt(20, y + 8, name, 24, True, anchor="start")
         s += box(20, y + 28, 370, 70, "#F7F7F7", "#BBBBBB", rx=10)
-        s += clips(34, y + 41, tr)
+        s += clips(34, y + 41, train_clips)
         s += box(560, y + 28, 280, 70, "#F7F7F7", "#BBBBBB", rx=10)
-        s += clips(574, y + 41, te)
+        s += clips(574, y + 41, test_clips)
         s += txt(700, y + 120, msg, 22, True, col)
     s += txt(205, 358, "Squares are clips; letters are speakers.", 20, False, "#666666")
     svg(out / f"leak_step{k}.svg", s, h=375)
@@ -307,40 +239,6 @@ for k in (1, 2):
     skew(k)
 
 
-# Drift types: three panels revealed one per step (900 x 400)
-def drift(k):
-    panels = [
-        ("Covariate shift", "p(x) changes", "p(y | x) stays",
-         "New microphone,\nsame words", "Compare input\nfeatures", C["memory"], C["memory_l"]),
-        ("Label shift", "p(y) changes", "p(x | y) stays",
-         "Flu season: more\npositive cases", "Compare the\nprediction mix", C["compute"], C["compute_l"]),
-        ("Concept drift", "p(y | x) changes", "the mapping moves",
-         "Fraudsters change\ntactics", "Needs fresh\nlabels", C["danger"], C["danger_l"]),
-    ]
-    s = ""
-    for j, (name, what, keep, ex, det, col, light) in enumerate(panels):
-        x = 10 + j * 297
-        if j >= k:
-            s += box(x, 10, 285, 380, "#FAFAFA", "#DDDDDD")
-            continue
-        s += box(x, 10, 285, 380, "white", col)
-        s += f'<rect x="{x}" y="10" width="285" height="58" rx="8" fill="{col}"/>'
-        s += txt(x + 142, 39, name, 27, True, "white")
-        s += txt(x + 142, 100, what, 27, True, col)
-        s += txt(x + 142, 135, keep, 22, False, "#555555")
-        for m, ln in enumerate(ex.split("\n")):
-            s += txt(x + 142, 185 + m * 30, ln, 23)
-        s += box(x + 18, 270, 249, 100, light, col)
-        dl = det.split("\n")
-        for m, ln in enumerate(dl):
-            s += txt(x + 142, 320 - (len(dl) - 1) * 15 + m * 30, ln, 23, True, col)
-    svg(out / f"drift_step{k}.svg", s, h=400)
-
-
-for k in (1, 2, 3):
-    drift(k)
-
-
 # Synthesis: Tay's path against the KWS pipeline with its boundaries (900 x 360)
 def pipeline(k):
     s = txt(10, 20, "Tay, 2016", 25, True, C["danger"], "start")
@@ -355,11 +253,15 @@ def pipeline(k):
                   ("Deliver", "sized to the\naccelerator"), ("Monitor", "drift,\nfalse wakes")]
         for j, (name, gate) in enumerate(stages):
             x = 10 + j * 149
-            s += box(x, 172, 134, 62, C["data_l"], C["data"], name, 23, True)
+            later = j >= 4   # delivery and monitoring are taught in Part 2
+            col = "#999999" if later else C["data"]
+            s += box(x, 172, 134, 62, "#F7F7F7" if later else C["data_l"], col, name, 23,
+                     True, color="#888888" if later else None, dash=later)
             if j < len(stages) - 1:
-                s += arrow(x + 134, 203, x + 149, 203, C["data"], 2.5)
+                s += arrow(x + 134, 203, x + 149, 203, col, 2.5)
             for m, ln in enumerate(gate.split("\n")):
-                s += txt(x + 67, 262 + m * 26, ln, 20, False, "#333333")
+                s += txt(x + 67, 262 + m * 26, ln, 20, False, "#999999" if later else "#333333")
+        s += txt(747, 150, "Part 2", 22, True, "#888888")
         s += txt(450, 340, "Each stage turns a silent data failure into a loud one.",
                  24, True, C["text"])
     svg(out / f"pipeline_step{k}.svg", s, h=360)
