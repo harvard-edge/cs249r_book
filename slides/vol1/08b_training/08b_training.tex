@@ -1,0 +1,477 @@
+% =============================================================================
+% Lecture 8b: Model Training, Part 2: Fitting the Step
+% Introduction to Machine Learning Systems (Volume I), Chapter 8
+% =============================================================================
+% Thesis: a training step that needs seven accelerators' worth of memory fits
+% on one once each memory term meets the technique that removes it, each at a
+% cost the engineer must name. Running case: GPT-2 XL at batch 32 of 1,024
+% tokens on one H100, 598 GB to 311 to 109.6 to 66.8 GB.
+% Hook and synthesis: AlexNet's two 3 GB GTX 580s (Model Training, Sec. 8.7.1).
+%
+% Build: make -C slides build-08b_training   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml and storyboard.md in this folder.
+% Numbers: the rendered chapter; derived values and toys say so on the slide.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume I},
+  chapter={Chapter 8},
+  chaptertitle={Model Training, Part 2},
+  layer=training,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
+
+\title{Model Training, Part 2: Fitting the Step}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A white mask over part of a book figure, in coordinates of the image node
+% (0,0 bottom left, 1,1 top right): \figmask{x0}{y0}{x1}{y1}
+\newcommand{\figmask}[4]{\fill[white, opacity=0.85] (#1,#2) rectangle (#3,#4);}
+% One score cell of the online-softmax row: x, value, fill color
+\newcommand{\scorecell}[3]{%
+  \node[draw=darktext, fill=#3, minimum width=1.2cm, minimum height=0.75cm,
+        font=\normalsize\bfseries] at (#1,0) {#2};}
+
+\begin{document}
+
+% =============================================================================
+% TITLE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Last lecture counted the bytes of one GPT-2 XL training step and found it far too large for one accelerator. Today removes those bytes one technique at a time and names what each one costs. The notes total about 71 minutes. FLEX: notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 60 minutes.}
+\mlsystitle{Model Training, Part 2: Fitting the Step}{A step that needs seven accelerators' memory fits on one once each memory term meets the technique that removes it, at a cost the engineer must name.}{cover_training_blueprint.png}
+
+% =============================================================================
+% SECTION: THE STEP
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Open with a model that did not fit on one accelerator in 2012, and one that does not fit today.}
+\mlsysdivider{How many accelerators does one training step need?}{Model Training, \S8.6.6 and \S8.7.1}
+\section{The Step}
+
+\begin{frame}{In 2012, AlexNet needed two GPUs because one was too small}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=4.3cm,keepaspectratio]{nvidia-gtx580-die.jpg}\\[0.1cm]
+      {\small\textbf{GTX 580, 2012: 3 GB.}}\\
+      {\footnotesize\textcolor{midgray}{AlexNet: 60M parameters, split across two.}}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering
+      \uncover<2->{\mlsysphoto[width=\textwidth,height=4.3cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.1cm]
+      {\small\textbf{H100, 2022: 80 GB.}}\\
+      {\footnotesize\textcolor{midgray}{GPT-2 XL, batch 32: 598 GB per step in FP32.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photos: Fritzchens Fritz (CC0); Geekerwan (CC BY 3.0); Wikimedia Commons. AlexNet: Krizhevsky et al. 2012, via Model Training, \S8.7.1. GPT-2 XL: Napkin Math 8.10.}
+  \note{[2.5 min] [CORE] Step 1: the die of an NVIDIA GTX 580, the graphics card AlexNet trained on in 2012. The card had 3 GB of memory. AlexNet had 60 million parameters, and its authors split the network across two cards because one could not hold the training run; the paper reports the 3 GB ceiling without naming which memory term hit it. Step 2: an H100, with 80 GB, about 27 times more. Today's running example, GPT-2 XL (1.5 billion parameters) trained in batches of 32 sequences of 1,024 tokens, needs 598 GB per step if every number is stored in 32 bits. ENGAGE: in ten years accelerator memory grew about 27 times; did the problem go away? (Expected: no; models and batches grew faster.) WARN: the die photo shows the processor chip only; the 3 GB of memory sat in separate chips on the card.}
+\end{frame}
+
+\begin{frame}{How many H100s will this step need by the end of today?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \safeimg[width=0.80\textwidth,height=3.9cm,keepaspectratio]{scoreboard_step1.pdf}\\[0.2cm]
+  {\normalsize Same model, same batch of 32, same arithmetic per update.}\\[0.2cm]
+  {\large\choice{A}{8}\qquad\choice{B}{4}\qquad\choice{C}{2}\qquad\choice{D}{1}}
+  \mlsyscredit{Model Training, Napkin Math 8.10 (FP32, standard attention, batch 32 of 1,024 tokens).}
+  \note{[2.5 min] [CORE] The scoreboard from Part 1. Gray is the 24 GB of static state (weights, gradients, optimizer state); green is 574 GB of activations, the values saved for the backward pass. The dashed line is one H100: 80 GB is 80 GiB (binary gigabytes of $2^{30}$ bytes), or 85.9 GB in the decimal units the chapter uses. 598 GB is about seven H100s of memory. ENGAGE: students vote with fingers, then write their answer down. Do not reveal it. Say: the scoreboard returns at the end of each segment, and the room will see whether its vote holds. Most students choose A or B, because the arithmetic does not change and they assume memory scales with it. That intuition is today's target. WARN: the question is about memory, not speed; one H100 still takes about 35 days for the run.}
+\end{frame}
+
+\begin{frame}{Recall: what does one training step hold?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \centering
+  {\Large\bfseries Close your notes.}\\[0.2cm]
+  {\normalsize Write the four kinds of state a step holds, the bytes per parameter\\of mixed-precision Adam, and which term grows with batch size.}\\[0.4cm]
+  \uncover<2->{%
+    \safeimg[width=0.85\textwidth,height=2.2cm,keepaspectratio]{static_bytes.pdf}\\[0.1cm]
+    {\normalsize Batch 32, mixed precision: 24 static $+$ 86 activations $+$ 201 scores $=$ \textbf{311 GB}}}
+  \mlsyscredit{Model Training, \S8.3.2 and Napkin Math 8.3.}
+  \note{[1.5 min] [CORE] Retrieval from Part 1. Give 60 seconds. Step 2: weights, gradients, optimizer state, and activations. Mixed-precision Adam keeps 2 bytes of 16-bit weights, 2 of 16-bit gradients, 4 of a 32-bit master copy, and 8 for Adam's two 32-bit moments: 16 bytes per parameter, 24 GB for GPT-2 XL. Only the activations grow with batch size and sequence length. At batch 32 in mixed precision they are about 287 GB, of which about 201 GB are attention scores. For a student who missed Part 1, this slide is the whole starting point.}
+\end{frame}
+
+\begin{frame}{How do we fit a step that needs seven accelerators onto one?}
+  \normalsize
+  By the end of today, you will be able to:\\[0.2cm]
+  \begin{itemize}\setlength{\itemsep}{0.22cm}
+    \item Explain what FP16 and BF16 keep and lose, and why 32 bits remain.
+    \item Trace where attention's bytes go, and compute softmax one block at a time.
+    \item Size a micro-batch and a checkpoint schedule for a step that does not fit.
+    \item Name what each technique costs: numerics, arithmetic, or update frequency.
+  \end{itemize}
+  \vspace{0.2cm}
+  {\small\textcolor{midgray}{Running case: GPT-2 XL, 48 layers, batch 32 $\times$ 1,024 tokens, one H100 (85.9 GB).}}
+  \note{[1.5 min] [CORE] The title is the driving question. Each line is one segment: precision, tiling, and trading time for memory; the fourth line is the question asked at the end of every segment. The running case does not change all lecture: GPT-2 XL, 48 transformer layers with hidden width 1,600 and 25 attention heads, trained on 32 sequences of 1,024 tokens per step on one H100 with 85.9 GB of high-bandwidth memory (HBM). LINK: Lecture 7 showed the mechanisms (autocast, saved tensors, recomputation); today asks when and why to use them.}
+\end{frame}
+
+% =============================================================================
+% SECTION: PRECISION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The first technique changes the number format. Start with what a format is.}
+\mlsysdivider{What does a 16-bit number keep, and what does it lose?}{Model Training, \S8.6.3}
+\section{Precision}
+
+\begin{frame}{An FP32 run leaves 14 of every 15 H100 FLOPs unused}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.0cm,keepaspectratio]{precision_ladder_step}{3}
+  \mlsyscredit{Model Training, figure 10 (NVIDIA V100, A100, H100, and Blackwell datasheets), redrawn at slide size. Peak dense rates.}
+  \note{[2.5 min] [CORE] Peak dense arithmetic rate by number format, log scale. Step 1: the V100 of 2017: 15.7 TFLOP/s in 32-bit floating point (FP32) on its ordinary cores, 125 in 16-bit on its matrix units, which NVIDIA calls Tensor Cores. Step 2: four generations. From V100 to B200, FP32 grew 4.8 times; the 16-bit Tensor Core rate grew 18 times. New speed arrives almost entirely in narrower formats. Step 3: the H100 used all lecture: 67 TFLOP/s in FP32, 989 in FP16 or BF16 (brain floating point, a 16-bit format Google designed for training), 15 times more. A run kept in FP32 uses at most one fifteenth of the chip's arithmetic. TF32 (494) is NVIDIA's 19-bit format that Tensor Cores apply to FP32 inputs. ENGAGE: why would hardware designers favor narrow formats? (Expected: more multipliers per unit of silicon and fewer bytes per operand.) LINK: Lecture 11 explains the datapath.}
+\end{frame}
+
+\begin{frame}{FP16 gives up range; BF16 gives up precision}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.2cm,keepaspectratio]{fp_formats_step}{4}
+  \mlsyscredit{Model Training, \S8.6.3 and table 9. FP32 and BF16 range ends from the IEEE 754 and bfloat16 formats.}
+  \note{[3 min] [CORE] Each row is one format: the bits to scale on the left, the range of normal values on a log axis on the right. Step 1: FP32 has 1 sign bit, 8 exponent bits, and 23 mantissa bits. The exponent sets how large or small a number can be; the mantissa sets how many digits it keeps, about seven decimal digits. Step 2: FP16 keeps 5 exponent bits and 10 mantissa bits. Its normal range shrinks to $6.1\times10^{-5}$ through 65,504, about three digits. The pale band is the subnormal range: tiny values below the normal floor, down to about $6\times10^{-8}$, kept with fewer digits; many accelerators flush them to zero. Step 3: BF16 keeps FP32's 8 exponent bits and cuts the mantissa to 7: FP32's range, two to three digits. Step 4: a gradient of $10^{-6}$ is an ordinary number in FP32 and BF16 and falls below FP16's normal floor. LINK: Lecture 5 showed gradients shrinking deep in the backward pass. ENGAGE: which format would you pick for gradients, and why? (Expected: BF16, for range.)}
+\end{frame}
+
+\begin{frame}{A small update vanishes into a 16-bit weight}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  {\normalsize A weight of 0.5 is stored in FP16. The optimizer adds 0.0001.\\What is stored now? After 10,000 such updates?}\\[0.3cm]
+  \uncover<2->{%
+    \only<-2|handout:0>{\safeimg[width=0.92\textwidth,height=4.0cm,keepaspectratio]{swamp_step1.pdf}}%
+    \only<3-|handout:1>{\safeimg[width=0.92\textwidth,height=4.0cm,keepaspectratio]{swamp_step2.pdf}}}
+  \mlsyscredit{Derived from the IEEE 754 FP16 format; checked with numpy float16. Rule of 2,048: Model Training, \S8.6.3; Micikevicius et al. 2018.}
+  \note{[3.5 min] [CORE] ENGAGE: students write both answers. Most write 0.5001 and 1.5. Step 2: FP16 numbers near 0.5 sit $2^{-11}$, about $4.9\times10^{-4}$, apart. The true sum, 0.5001 (open circle), is closer to 0.5 than to the next value, 0.50049, so it rounds back to 0.5. Step 3: repeat 10,000 times. FP32 climbs to 1.5; FP16 stays at 0.5. This is swamping: an update more than about 2,048 times smaller than the weight rounds away. Learning rate times gradient is usually that small, which is why mixed precision keeps a 32-bit master copy of the weights for the update. WARN: BF16 does not fix this; its spacing near 0.5 is $2^{-8}$, about $3.9\times10^{-3}$, coarser still. BF16 fixes range, not precision. WARN: this is different from underflow; the update itself is representable, and the rounding of the sum loses it.}
+\end{frame}
+
+\begin{frame}{Loss scaling moves small gradients into FP16's range}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=3.8cm,keepaspectratio]{loss_scale_step}{2}\\[0.1cm]
+  {\normalsize\uncover<2->{$10^{-6}\times 1{,}024 = 1.02\times10^{-3}$: a normal FP16 value.}}\\[0.05cm]
+  {\footnotesize\uncover<3->{\textbf{Dynamic scaler:} overflow past 65,504 $\rightarrow$ skip the step, halve $S$.\enspace 2,000 clean steps $\rightarrow$ double $S$.}}
+  \mlsyscredit{Shape illustrative, after Micikevicius et al. 2018, Figure 3. Measured there: unscaled FP16 training of the SSD detector diverged; $S = 8$ matched FP32. Rule: Model Training, \S8.6.3.}
+  \note{[3 min] [CORE] Step 1: a distribution of gradient magnitudes on a log axis; its shape is illustrative. Values below $2^{-24}$ underflow, becoming zero in FP16, and many accelerators also flush the subnormal band. Micikevicius and colleagues measured this: training a detector called SSD in FP16 without scaling diverged. Step 2: multiply the loss by $S = 2^{10}$ before the backward pass. Differentiation is linear, so every gradient is multiplied by $S$, a shift of 10 on this axis. A gradient of $10^{-6}$ becomes $1.02\times10^{-3}$. Divide by $S$ in 32 bits before the update, and the values are exact. Step 3: if $S$ is too large, a gradient above 64 times $S$ passes 65,504; at $S = 1{,}024$ that is any gradient above 64. The scaler skips that step and halves $S$, and doubles $S$ after a window such as 2,000 clean steps. LINK: Lecture 7 showed GradScaler. BF16 usually needs no scaler: its floor is about $10^{-38}$.}
+\end{frame}
+
+\begin{frame}{Mixed precision keeps 32 bits where values accumulate}
+  \centering
+  \begin{tikzpicture}
+    \node[inner sep=0] (mp) {\safeimg[height=4.9cm,keepaspectratio]{fig-mixed-precision.png}};
+    \begin{scope}[x={($(mp.south east)-(mp.south west)$)}, y={($(mp.north west)-(mp.south west)$)}, shift={(mp.south west)}]
+      \only<1|handout:0>{\figmask{0}{0}{0.345}{1}\figmask{0.345}{0.79}{0.66}{1}\figmask{0.345}{0}{0.66}{0.2}}
+      \only<2|handout:0>{\figmask{0.345}{0.79}{0.66}{1}}
+    \end{scope}
+  \end{tikzpicture}\\[0.25cm]
+  {\normalsize\uncover<3->{Per parameter: weights 2 B $+$ gradients 2 B $+$ master 4 B $+$ Adam moments 8 B $=$ \textbf{16 B}}}
+  \mlsyscredit{Model Training, figure 11 and \S8.6.3.}
+  \note{[2.5 min] [CORE] The conventional FP16 recipe in six stages. Step 1: stages 1 and 2. The 32-bit master weights are cast to FP16, and the forward pass runs in FP16 on the Tensor Cores. Activations are stored in 16 bits, which is the memory saving. Step 2: stages 3 to 5. The loss is scaled, the backward pass produces scaled FP16 gradients, and they are copied to 32 bits and unscaled. Step 3: stage 6. The update is applied to the FP32 master weights, where the 0.0001 survives. Count the bytes held per parameter: 16, the same as plain FP32 Adam. ENGAGE: if the static state does not shrink, what does mixed precision buy? (Expected: 15 times the peak arithmetic rate and half the activation bytes.) FLEX: in the BF16 recipe stages 3 and 5 drop out; the master copy stays. Autocast also keeps softmax, normalization, and reductions in FP32.}
+\end{frame}
+
+\begin{frame}{Diagnose: what went wrong in each FP16 run?}
+  \mlsysactivity{Diagnose}{2.5 min}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{mlsyscard}{BlueLine}
+        \textbf{Run A}\\[0.1cm]
+        The loss scale halves every few dozen steps; many steps are skipped.\\[0.2cm]
+        \uncover<2->{\textbf{Overflow.} Scaled gradients pass 65,504. Look for a real gradient spike or a bad batch.}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{mlsyscard}{OrangeLine}
+        \textbf{Run B}\\[0.1cm]
+        The scale stays at 1. Loss flattens early; most late-layer gradients read exactly zero.\\[0.2cm]
+        \uncover<2->{\textbf{Underflow.} Gradients below $6.1\times10^{-5}$ flush to zero. Enable dynamic scaling, or use BF16.}
+      \end{mlsyscard}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Training, \S8.6.3 (loss scaling).}
+  \note{[2.5 min] [OPTIONAL] ENGAGE: pairs name the failure in each run and one fix, two minutes. Step 2: Run A overflows. The scaler skips a step and halves $S$ each time a scaled gradient passes 65,504, so constant halving means some gradients are genuinely huge; scaling hides nothing here, and the engineer looks for a loss spike, a bad batch, or a learning rate that is too high. Run B underflows. With the scale fixed at 1, the small gradients of late layers in the backward pass flush to zero and those weights stop learning. Dynamic loss scaling or BF16 fixes it. WARN: students blame the learning rate for Run B; a zero gradient is not a step-size problem.}
+\end{frame}
+
+\begin{frame}{16-bit arithmetic: 518 days to 35, and 598 GB to 311}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{precision_days_col.pdf}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{scoreboard_step2.pdf}}
+    \end{column}
+  \end{columns}
+  \vspace{0.3cm}
+  \centering{\normalsize 15$\times$ is a ceiling: elementwise, optimizer, and input work stay off the Tensor Cores.}
+  \mlsyscredit{Model Training, Napkin Math 8.6 and 8.7 (50\% utilization held fixed, \$4 per hour).}
+  \note{[1.5 min] [CORE] Left, run time for GPT-2 XL on one H100 at 50 percent utilization: FP32 about 518 days and \$49,751; TF32 about 70 days; BF16 about 35 days and \$3,370. Step 2: memory. Mixed precision halves the activations, 574 GB to 287 GB; the 24 GB of static state does not move. The step is 311 GB, still 3.6 H100s. WARN: holding utilization fixed overstates the gain. By Amdahl's law the work that does not run on Tensor Cores (normalization, elementwise operations, the optimizer update, input waits) bounds the real speedup below 15 times. Land the segment: 16-bit formats raise the arithmetic ceiling and halve the activations, but small updates and small gradients need 32-bit master weights and loss scaling, and the 16 bytes per parameter stay.}
+\end{frame}
+
+% =============================================================================
+% SECTION: TILING
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Most of the 311 GB is one tensor. Find it, then stop storing it.}
+\mlsysdivider{Why does attention move more bytes than its arithmetic needs?}{Model Training, \S8.3.3, \S8.3.4, and \S8.6.4}
+\section{Tiling}
+
+\begin{frame}{In one GPT-2 XL layer, attention scores take 83\% of the bytes}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.6cm,keepaspectratio]{layer_bytes_step}{3}
+  \mlsyscredit{Model Training, Napkin Math 8.3 and \S8.6.4. The 2,048-token bar is derived from the same formulas.}
+  \note{[2.5 min] [CORE] One layer's saved activations at batch 32, in 16 bits. Step 1: the query, key, value, and output projections, 419 MB; the feed-forward expansion, 419 MB; LayerNorm, about 10 MB; and the attention scores, 4,194 MB, 83 percent of the layer. Each of 25 heads has a 1,024 by 1,024 score matrix per sequence, saved three times for backward: the softmax probabilities, a one-byte mask for dropout (which randomly zeroes values during training), and the probabilities after dropout, 5 bytes per entry. Step 2: across 48 layers the scores are about 201 of the 287 GB. Step 3: double the sequence length. Everything else doubles; the scores quadruple, to 91 percent of the layer. ENGAGE: what happens at 8,192 tokens? (Expected: the scores grow 64 times while the rest grows 8 times.) WARN: the per-layer line items sum to 242 GB; the library's 287 GB also counts saved inputs this list omits.}
+\end{frame}
+
+\begin{frame}{Standard attention writes every score to HBM and reads it back}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.5cm,keepaspectratio]{attention_io_step}{3}
+  \mlsyscredit{Model Training, \S8.3 and \S8.3.4; 228 KB per SM: Hardware Acceleration. Ridge: 989 TFLOP/s $\div$ 3.35 TB/s.}
+  \note{[2.5 min] [CORE] The accelerator node from earlier lectures, with two memories. Step 1: HBM, the main memory: 80 GB at 3.35 TB/s. Step 2: on-chip SRAM beside the arithmetic units: only 30 to 50 MB across the chip, but roughly 15 to 20 TB/s. On the H100 each streaming multiprocessor (SM) has 228 KB of it to manage directly. Step 3: standard attention runs as three separate kernels: a matrix product writes the scores S to HBM, softmax reads S and writes the probabilities P, and a second product reads P. The backward pass reads them again. Counting only that traffic, the score computation does about 32 FLOPs per byte moved, against the H100's ridge of 295, so the arithmetic units wait on memory. LINK: Lecture 2 introduced the roofline and Lecture 11 develops the full hierarchy; here two tiers are enough.}
+\end{frame}
+
+\begin{frame}{A 128 $\times$ 128 tile is 65.5 KB; the full matrix is 67.1 MB}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{tile_grid_step}{2}
+  \mlsyscredit{Model Training, \S8.6.4 (4,096 tokens, one head, FP32 scores); 228 KB per SM: Hardware Acceleration. Tile count derived.}
+  \note{[2.5 min] [CORE] Step 1: one head's score matrix at 4,096 tokens, cut into tiles of 128 by 128, 32 by 32 tiles, 1,024 in all. FlashAttention takes one block of 128 queries (the blue row) and streams the key and value blocks past it, one tile at a time, entirely in on-chip memory. Step 2: the sizes. The full FP32 matrix is 67.1 MB per head; 16 heads would be 1.1 GB. One tile is 65.5 KB, which fits under the 228 KB of shared memory one SM can hold. ENGAGE: what is the obstacle? (Expected: softmax divides each score by a sum over the whole row, and one tile sees only part of the row.) The next slide removes that obstacle. WARN: the chapter counts FP32 scores here because softmax often runs in FP32; in FP16 every number halves and the quadratic growth stays.}
+\end{frame}
+
+\begin{frame}{Softmax can be computed one block at a time}
+  \only<3|handout:0>{\mlsysactivity{Your turn}{2 min}}
+  \centering
+  \begin{tikzpicture}
+    \node[anchor=east, font=\small\bfseries, text=darktext] at (-0.8,0) {scores};
+    \foreach \x/\v in {0/1, 1.2/3, 2.6/2, 3.8/5}{\scorecell{\x}{\v}{white}}
+    \only<2->{\scorecell{0}{1}{BlueL}\scorecell{1.2}{3}{BlueL}}
+    \only<4->{\scorecell{2.6}{2}{OrangeL}\scorecell{3.8}{5}{OrangeL}}
+    \node[font=\footnotesize\bfseries, text=BlueLine] at (0.6,0.65) {block 1};
+    \node[font=\footnotesize\bfseries, text=OrangeLine] at (3.2,0.65) {block 2};
+    \uncover<5->{%
+      \foreach \x/\p in {0/0.015, 1.2/0.112, 2.6/0.041, 3.8/0.831}{%
+        \node[font=\footnotesize\bfseries, text=GreenLine] at (\x,-0.65) {\p};}
+      \node[anchor=east, font=\footnotesize\bfseries, text=GreenLine] at (-0.8,-0.65) {softmax};}
+  \end{tikzpicture}\\[0.3cm]
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    & running max $m$ & running sum $\ell = \sum e^{x - m}$ \\
+    \midrule
+    Whole row at once & 5 & $e^{-4} + e^{-2} + e^{-3} + e^{0} = \mathbf{1.203}$ \\
+    \uncover<2->{Block 1 (1, 3)} & \uncover<2->{3} & \uncover<2->{$e^{-2} + e^{0} = 1.135$} \\
+    \uncover<4->{Block 2 (2, 5)} & \uncover<4->{5} & \uncover<4->{$1.135 \times e^{3-5} + e^{-3} + e^{0} = 0.154 + 0.050 + 1 = \mathbf{1.203}$} \\
+    \bottomrule
+  \end{tabular}\\[0.25cm]
+  {\normalsize\only<3|handout:0>{\textcolor{mlsysaccent}{\textbf{Your turn:} block 2 holds 2 and 5. Finish $m$ and $\ell$.}}%
+  \uncover<5->{The factor $e^{m_{\text{old}} - m_{\text{new}}}$ also rescales the partial output.}}
+  \mlsyscredit{Toy example, derived. Algorithm: Model Training, \S8.6.4; Milakov and Gimelshein 2018; Dao et al. 2022.}
+  \note{[4.5 min] [CORE] A toy row of four scores in two blocks. Step 1: the direct softmax, for reference. Subtract the row maximum, 5, exponentiate, and sum: 1.203. Step 2: block 1 alone. The running maximum is 3, and the running sum of $e^{x-3}$ is $e^{-2} + 1 = 1.135$. Step 3: ENGAGE, your turn. Students finish block 2 in pairs, two minutes. Hint if stuck: the old sum was computed relative to 3; what must happen when the maximum becomes 5? Step 4: the new maximum is 5. Multiply the old sum by $e^{3-5} = 0.135$ to get 0.154, then add $e^{-3} = 0.050$ and $e^{0} = 1$: 1.203, the same as the direct sum. Step 5: the probabilities. The same rescale factor corrects the output accumulated from earlier blocks, so the whole row never has to be in memory at once. Only $m$ and $\ell$, two numbers per row, are kept. WARN: this is exact, not an approximation.}
+\end{frame}
+
+\begin{frame}{Backward keeps two numbers per row, not the matrix}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.2cm,keepaspectratio]{flash_store.pdf}\\[0.3cm]
+  {\normalsize 32.7$\times$ less stored per head; the backward pass recomputes the tiles.}
+  \mlsyscredit{Model Training, \S8.6.4 (conventional baseline stores scores and probabilities; 4,096 tokens, FP32).}
+  \note{[1.5 min] [OPTIONAL] What each kernel keeps for the backward pass, per head at 4,096 tokens. Standard attention keeps its inputs, its output, and both the score and probability matrices: about 138.4 MB. FlashAttention keeps the queries, keys, values, the output, and the running maximum and sum for each row: about 4.2 MB, 32.7 times less. The gap widens with sequence length, because only the standard footprint is quadratic. During backward, FlashAttention recomputes each score tile from Q and K in on-chip memory instead of reading it from HBM. ENGAGE: recomputing costs arithmetic. Is that a good trade on this machine? Hold the answer for the next slide. FLEX: if short on time, state the 32.7 times and move on.}
+\end{frame}
+
+\begin{frame}{More FLOPs, fewer bytes: 5.7$\times$ faster}
+  \mlsysactivity{Predict}{2 min}
+  {\normalsize FlashAttention recomputes tiles, so it does more arithmetic. Faster or slower?}\\[0.25cm]
+  \begin{columns}[T]
+    \begin{column}{0.54\textwidth}
+      \uncover<2->{%
+        \small
+        \begin{tabular}{@{}lrr@{}}
+          \toprule
+          & Standard & FlashAttention \\
+          \midrule
+          GFLOPs & 66.6 & 75.2 \\
+          HBM reads and writes & 40.3 GB & \textbf{4.4 GB} \\
+          Runtime & 41.7 ms & \textbf{7.3 ms} \\
+          \bottomrule
+        \end{tabular}\\[0.15cm]
+        {\footnotesize\textcolor{midgray}{GPT-2 medium attention, forward and backward,\\1,024 tokens, batch 64, A100.}}}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \centering\uncover<3->{\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{scoreboard_step3.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Table: Dao et al. 2022, Figure 2 (left). Scoreboard: Model Training, \S8.6.4 and Napkin Math 8.10.}
+  \note{[3 min] [CORE] ENGAGE: vote faster or slower, with one reason. Step 2: measured data from the FlashAttention paper. It does about 13 percent more arithmetic, 75.2 against 66.6 GFLOPs, because backward recomputes the tiles. It moves about 9 times fewer bytes through HBM, 4.4 against 40.3 GB, and runs about 5.7 times faster, 7.3 against 41.7 ms. The kernel was limited by bytes, not arithmetic, so trading FLOPs for bytes wins. The paper reports up to 3 times faster end-to-end GPT-2 training than the HuggingFace implementation. Step 3: the scoreboard. Without the stored scores, GPT-2 XL's step drops from 311 GB to 109.6 GB, still about 24 GB over. In PyTorch, F.scaled\_dot\_product\_attention dispatches to such a kernel when inputs allow. Land the segment: FlashAttention computes the same attention one tile at a time in on-chip memory, keeping two numbers per row instead of the score matrix.}
+\end{frame}
+
+% =============================================================================
+% SECTION: TRADE-OFFS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The rest is ordinary activations. Now something must be given up.}
+\mlsysdivider{When the activations still do not fit, what do we give up?}{Model Training, \S8.6.5 and \S8.6.6}
+\section{Trade-offs}
+
+\begin{frame}{After FlashAttention, 23 sequences fit, not 32}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.0cm,keepaspectratio]{batch_fit_step}{2}
+  \mlsyscredit{Derived from Model Training, Napkin Math 8.10 (85.6 GB of activations at batch 32; 24 GB static).}
+  \note{[2 min] [CORE] Step memory against the number of sequences resident at once. The line starts at 24 GB of static state and rises by about 2.68 GB per sequence, 85.6 GB of activations divided by 32. It crosses the H100's 85.9 GB near 23 sequences. Step 2: batch 16 needs 66.8 GB and fits; batch 32 needs 109.6 GB and does not. ENGAGE: why not train at batch 23? (Expected: possible, but the recipe and its learning rate were tuned for 32, and changing the batch changes the optimization.) Two ways to keep the batch of 32 follow.}
+\end{frame}
+
+\begin{frame}{Accumulation adds micro-batch gradients, then updates once}
+  \centering
+  \begin{tikzpicture}
+    \node[inner sep=0] (ga) {\safeimg[width=0.95\textwidth,height=3.4cm,keepaspectratio]{fig-grad-accumulation.png}};
+    \begin{scope}[x={($(ga.south east)-(ga.south west)$)}, y={($(ga.north west)-(ga.south west)$)}, shift={(ga.south west)}]
+      \only<1|handout:0>{\figmask{0.405}{0}{1}{1}}
+      \only<2|handout:0>{\figmask{0.715}{0}{1}{1}}
+    \end{scope}
+  \end{tikzpicture}\\[0.2cm]
+  {\normalsize $\displaystyle \frac{1}{B}\sum_{i=1}^{B}\nabla \ell_i \;=\; \frac{1}{K}\sum_{j=1}^{K}\Bigl(\frac{1}{b}\sum_{i\in\text{micro-batch } j}\nabla \ell_i\Bigr), \qquad B = K\,b$}\\[0.15cm]
+  {\normalsize\uncover<3->{$2 \times 16$: \textbf{66.8 GB}, same FLOPs, one update per two passes.}}
+  \mlsyscredit{Model Training, figure 12, equation 10, and Napkin Math 8.10.}
+  \note{[3 min] [CORE] Step 1: run a micro-batch forward and compute its loss. Step 2: run backward; its gradient is added into the gradient buffer, and the weights do not change. Step 3: after $K$ micro-batches, the summed gradient drives one optimizer step. The equation says why this is the same gradient: averaging $K$ micro-batch means of $b$ examples equals the mean over all $B = Kb$ examples. For GPT-2 XL, two micro-batches of 16: only 16 sequences' activations are alive at a time, so the step needs 66.8 GB, and the arithmetic per update is unchanged. The cost: one update per two passes, and smaller micro-batches can lower utilization. WARN: equivalence needs the same examples and consistent averaging; BatchNorm, which computes statistics per micro-batch, breaks it. GPT-2 uses LayerNorm, so it holds up to dropout and rounding order.}
+\end{frame}
+
+\begin{frame}{Diagnose: why are these updates 4$\times$ too large?}
+  \mlsysactivity{Diagnose}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \footnotesize\ttfamily
+      \begin{tabular}{@{}l@{}}
+        opt = SGD(params, lr=0.1, momentum=0.9)\\
+        for step, (x, y) in enumerate(loader):\\
+        \hspace*{1.2em}loss = loss\_fn(model(x), y)\\
+        \hspace*{1.2em}\alt<2->{\textcolor{GreenLine}{\textbf{(loss / 4).backward()}}}{\textcolor{RedLine}{\textbf{loss.backward()}}}\\
+        \hspace*{1.2em}if (step + 1) \% 4 == 0:\\
+        \hspace*{2.4em}opt.step()\\
+        \hspace*{2.4em}opt.zero\_grad()
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \small
+      Four micro-batches per update. Training diverges as if the learning rate were too high.\\[0.3cm]
+      \uncover<2->{\textbf{Sum of four means} $=$ 4$\times$ the batch mean. Divide each loss by 4.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Adapted from Model Training, listing 8 and \S8.6.5 (practical considerations).}
+  \note{[2.5 min] [OPTIONAL] ENGAGE: pairs find the bug, two minutes. The loss function returns the mean over its micro-batch, and backward adds into the gradient buffer. Step 2: after four micro-batches the buffer holds the sum of four means, four times the mean over all their examples, so every update is four times too large. Dividing each loss by 4, or dividing the learning rate by 4, restores the batch-mean convention. WARN: with Adam the bug hides, because Adam divides by a running gradient magnitude and the factor mostly cancels; gradient clipping at a norm of 1.0 and Adam's epsilon still change, so the run differs in ways that are hard to trace. The chapter calls loss normalization a common source of subtle bugs.}
+\end{frame}
+
+\begin{frame}{Checkpointing keeps eight inputs and rebuilds one segment}
+  \centering
+  \safeimg[width=0.90\textwidth,height=1.7cm,keepaspectratio]{fig-activation-checkpointing.png}\\[0.05cm]
+  {\small\textcolor{GreenLine}{\textbf{stored}}\quad\textcolor{midgray}{\textbf{dropped}}\quad\textcolor{OrangeLine}{\textbf{recomputed}}}\\[0.2cm]
+  \uncover<2->{\mlsyssteps[width=0.82\textwidth,height=2.3cm,keepaspectratio]{ckpt_segments_step}{2}}\\[0.1cm]
+  {\normalsize\uncover<3->{Activations 85.6 $\rightarrow$ \textbf{11.5 GB}; step \textbf{35.5 GB}; one extra forward per layer.}}
+  \mlsyscredit{Model Training, figure 13, Napkin Math 8.8 (48 layers in 8 segments of 6), and \S8.6.5.}
+  \note{[3.5 min] [CORE] Activation checkpointing (not the training checkpoints saved to disk; the name is shared). Step 1, the book's picture: the forward pass stores only some activations (green) and drops the rest (gray); the backward pass recomputes the dropped ones (orange) from the nearest stored one. Step 2: GPT-2 XL's 48 layers as 8 segments of 6. The forward pass keeps each segment's input, 32 by 1,024 by 1,600 values in 16 bits, 0.84 GB for all eight. Step 3: the backward pass reruns one segment forward from its input, uses those activations, frees them, and moves to the previous segment: 10.7 GB live at a time. Activations fall from 85.6 GB to 11.5 GB, 7.4 times less, and the whole step to 35.5 GB. The cost: every layer runs forward twice, so a step that cost about three forward passes now costs four, about one-third more arithmetic. In PyTorch, torch.utils.checkpoint wraps each segment.}
+\end{frame}
+
+\begin{frame}{Checkpoints every $\sqrt{L}$ layers minimize memory}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.6cm,keepaspectratio]{sqrt_ckpt_step}{2}\\[0.1cm]
+  {\small\uncover<2->{Measured: a 1,000-layer ResNet, 48 GB $\rightarrow$ 7 GB for 30\% more time (Chen et al. 2016).}}
+  \mlsyscredit{Model Training, \S8.6.5.2 and table 13 (curve derived, equal layers); Chen et al. 2016, abstract.}
+  \note{[2 min] [OPTIONAL] Activation memory in units of one layer, for $L = 48$ layers and $k$ evenly spaced checkpoints: $k$ stored checkpoints plus one segment of $48/k$ layers rebuilt at a time. With one checkpoint the rebuilt segment is the whole network, 49 units, no saving. With 48 checkpoints every layer is stored, 49 units again. The minimum is at $k = \sqrt{48} \approx 7$: about 14 units. Step 2: 71 percent less activation memory for about one extra forward pass, 33 percent more step arithmetic. GPT-2 XL's 8 segments sit at $k = 8$, also 14 units. Chen and colleagues measured the trade on a 1,000-layer residual network: 48 GB to 7 GB for 30 percent more running time. ENGAGE: why is the extra cost about one forward pass whatever $k$ is? (Expected: each non-checkpoint layer is recomputed once.)}
+\end{frame}
+
+\begin{frame}{Vote: accumulate, checkpoint, or both?}
+  \mlsysactivity{Vote}{2.5 min}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      \normalsize
+      \choice{A}{Accumulate two micro-batches of 16}\\[0.1cm]
+      {\small\uncover<2->{\textcolor{GreenLine}{66.8 GB; same FLOPs; half as many updates.}}}\\[0.45cm]
+      \choice{B}{Checkpoint eight segments}\\[0.1cm]
+      {\small\uncover<2->{\textcolor{OrangeLine}{35.5 GB; one-third more FLOPs; 47 days.}}}\\[0.45cm]
+      \choice{C}{Both}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering
+      \uncover<3->{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{scoreboard_step4.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Model Training, Napkin Math 8.8 and 8.10.}
+  \note{[3 min] [CORE] ENGAGE: vote A, B, or C, with one cost for your choice. Step 2: both fit (the numbers appear on the cards). Accumulation needs 66.8 GB and keeps the arithmetic, so the run stays about 35 days; it pays in update frequency, and 16-sequence micro-batches may use the chip less well. Checkpointing needs only 35.5 GB but adds one-third more arithmetic, about 47 days at the same rate. The chapter takes A, because the batch it needs fits without recomputation. B is the choice when a larger resident micro-batch or a deeper model matters more than arithmetic; C when neither alone fits. Step 3: the scoreboard. 598 to 66.8 GB, nine times smaller, on one H100. Return to the opening vote: the answer was D. Land the segment: accumulation gives up update frequency, checkpointing gives up arithmetic, and either fits the step.}
+\end{frame}
+
+% =============================================================================
+% SECTION: WRAP-UP
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Check the ideas, then return to AlexNet.}
+\mlsysdivider{What did fitting the step cost?}{Model Training, \S8.6.6 and \S8.8}
+\section{Wrap-Up}
+
+\begin{frame}{Vote: true or false?}
+  \mlsysactivity{Vote}{2.5 min}
+  \small
+  \begin{tabular}{@{}P{0.50\textwidth}P{0.44\textwidth}@{}}
+    \toprule
+    FlashAttention reduces attention's FLOPs. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Slightly more FLOPs, far fewer bytes.} \\ \addlinespace[0.05cm]
+    Accumulating $K$ micro-batches multiplies activation memory by $K$. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} One micro-batch is resident at a time.} \\ \addlinespace[0.05cm]
+    BF16 needs no FP32 master weights. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} BF16 fixes range, not precision.} \\ \addlinespace[0.05cm]
+    Mixed precision makes training 15$\times$ faster on an H100. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} 15$\times$ is the peak ratio; Amdahl bounds it.} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Model Training, \S8.6 self-check and \S8.8.}
+  \note{[2.5 min] [CORE] ENGAGE: students write T or F for each, then compare with a neighbor. Step 2: all four are false. One: FlashAttention does about 13 percent more arithmetic and moves about 9 times fewer bytes. Two: only one micro-batch's activations are alive at a time; the chapter's self-check asks exactly this. Three: BF16's spacing near 0.5 is about $3.9\times10^{-3}$, so small updates vanish without a 32-bit master copy. Four: the 15 times is the ratio of peak rates; normalization, elementwise work, the optimizer, and input waits do not run on Tensor Cores. If many students marked the third true, return to the swamping slide.}
+\end{frame}
+
+\begin{frame}{Back to AlexNet: one H100 holds the step, at a price}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.7cm,keepaspectratio]{scoreboard_costs.pdf}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering
+      \uncover<2->{\mlsysphoto[width=0.75\textwidth,height=2.4cm,keepaspectratio]{nvidia-gtx580-die.jpg}\\[0.1cm]
+      {\small 2012: two 3 GB cards.\\Today: one card, by engineering.}}
+    \end{column}
+  \end{columns}
+  \vspace{0.25cm}
+  \centering{\small\uncover<3->{It fits, so profile it: the accelerator is busy only about 48\% of the time on a one-core tokenizer.}}
+  \mlsyscredit{Model Training, Napkin Math 8.10 and \S8.6.6. Photo: Fritzchens Fritz (CC0), Wikimedia Commons.}
+  \note{[3.5 min] [CORE] Step 1: the whole scoreboard with each bill. Mixed precision took 598 to 311 GB and cost a 32-bit master copy and loss scaling. FlashAttention took it to 109.6 GB and costs recomputed tiles in backward. Two micro-batches of 16 took it to 66.8 GB and cost one update per two passes; checkpointing instead would have cost 12 more days. The 16 bytes per parameter never moved. Step 2: AlexNet split its network across two 3 GB cards. GPT-2 XL's step is about 200 times larger, and engineering, not a second card, made it fit. Step 3: fitting comes first because a step that does not fit gives no profile. The first profile of the fitted run shows the accelerator busy about 48 percent of the time, waiting on single-core tokenization: the input problem of Lecture 4b and Part 1. FLEX: eight H100s with perfect scaling would take the run from 35 days to about 4.4 (\S8.7).}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.25cm}
+    \item 16-bit formats raise the arithmetic peak 15$\times$ and halve activations; 32-bit master weights and loss scaling keep the numerics.
+    \item FlashAttention computes exact attention tile by tile, keeping two numbers per row instead of the score matrix.
+    \item Accumulation trades update frequency for memory; checkpointing trades one forward pass.
+    \item Fit first, then profile. Every technique has a bill; name it.
+  \end{itemize}
+  \note{[1 min] [CORE] One line per segment, plus the order of work. Ask students to star the one they would have gotten wrong before today.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.35cm}
+    \item FP8 halves the bytes again but needs per-tensor scaling. How low can training precision go before the scaling machinery costs more than it saves?
+    \item Checkpointing costs GPT-2 XL 12 extra days; a second H100 costs a second rental. Which would you buy, and what numbers decide it?
+    \item Which other kernels in a training step deserve FlashAttention's rewrite?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer. FLEX: use one as a two-minute discussion if time remains, or as a written assignment. For the second, push students to name the numbers: rental price per hour, the deadline, and whether two accelerators would scale well (\S8.7). LINK: Lecture 10 develops formats below 16 bits.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.15cm}
+    \item \textbf{Read:} Model Training, \S8.6.3 to \S8.6.6; the \S8.6 self-check; redo Napkin Math 8.8 for 12 segments of 4 layers.
+    \item Micikevicius et al., ``Mixed Precision Training,'' ICLR 2018.
+    \item Kalamkar et al., ``A Study of BFLOAT16 for Deep Learning Training,'' 2019.
+    \item Dao et al., ``FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness,'' NeurIPS 2022.
+    \item Chen et al., ``Training Deep Nets with Sublinear Memory Cost,'' 2016.
+    \item H. He, ``Making Deep Learning Go Brrrr From First Principles,'' 2022.
+  \end{itemize}
+  \note{[0.5 min] [CORE] The chapter first; its walkthrough repeats today's scoreboard with every number. Each paper backs one idea: master weights and loss scaling (Micikevicius), why BF16 rarely needs scaling (Kalamkar), tiling and online softmax (Dao), and the square-root schedule (Chen). He's essay is a short outside explanation of compute, memory traffic, and overhead.}
+\end{frame}
+
+\begin{frame}[c]
+  \centering
+  {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} DATA SELECTION}}\\[0.5cm]
+  {\LARGE\bfseries Which data is worth training on?}\\[0.4cm]
+  {\normalsize\textcolor{midgray}{Today made each FLOP cheaper and made the step fit. $6PD$ never changed.}}
+  \note{[0.5 min] [CORE] Close on the training-time law's numerator. Over two lectures we made each FLOP cheaper and made the step fit; the work itself, $6PD$, never changed. Lecture 9 asks which of the $D$ tokens are worth a step.}
+\end{frame}
+
+\end{document}

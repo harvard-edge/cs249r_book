@@ -2,7 +2,7 @@ chapter: 08_training
 lecture: 8
 title: Model Training
 minutes: 75
-notes_minutes: 71
+notes_minutes: 70.5
 target_ideas: 30
 layer: training
 thesis: "Training costs orders of magnitude more than inference, and memory, not arithmetic, usually decides what fits."
@@ -14,29 +14,27 @@ hook:
   sources: ["chapter War Story 8.1 (Chowdhery et al. 2022)", "chapter §8.4.5 (14 B/param checkpoint)", "chapter §8.3.2 (16 B/param static state)", "photo: Jouppi et al., TPU v4, CC BY 4.0, Wikimedia Commons (shared library)"]
 driving_question: "Why does training a model cost so much more than running it, and what decides whether a training step fits on one accelerator?"
 recall: "Lecture 7: reverse-mode autodiff keeps the forward values its backward rules read, so training memory is set by what the tape stores, not by the weights alone."
-running_example: "GPT-2 XL (1.5B parameters, 48 layers, hidden 1,600) at batch 32 of 1,024-token sequences on one H100 (80 GB HBM, 3.35 TB/s, 989 TFLOP/s dense 16-bit). Its run needs about 1.5e21 FLOPs, about 35 days at 50 percent utilization; its batch-32 step needs 598 GB in FP32 and is brought to 66.8 GB. ResNet-50 carries the input pipeline; Llama 3 8B carries fine-tuning."
+running_example: "GPT-2 XL (1.5B parameters, 48 layers, hidden 1,600) at batch 32 of 1,024-token sequences on one H100 (80 GB HBM, 3.35 TB/s, 989 TFLOP/s dense 16-bit). Its run needs about 1.5e21 FLOPs, about 35 days at 50 percent utilization; its batch-32 step needs 598 GB in FP32 (311 GB in mixed precision), which Lecture 8b fits on one H100. ResNet-50 carries the input pipeline; Llama 3 8B carries fine-tuning."
 
 segments:
   - name: Time
     divider_question: "How long does a training run take, and what does it cost?"
-    read: "§8.1.1, §8.2, §8.5"
-    concept_questions: [3, 4, 5]
+    read: "§8.1.1, §8.2"
+    concept_questions: [3, 4]
+    minutes: 12.5
     land: "Run time is 6PD FLOPs over peak rate times utilization, so every point of utilization recovered removes time, energy, and dollars in the same proportion."
   - name: Memory
     divider_question: "What does a training step have to hold in memory?"
     read: "§8.3.2, §8.3.3"
     concept_questions: [6, 7, 8, 9]
-    land: "Mixed-precision Adam holds 16 bytes per parameter before any activation, and activations grow with batch and sequence length until they, not arithmetic, decide what fits."
-  - name: Feeding
-    divider_question: "Can the host keep the accelerator fed?"
-    read: "§8.4.1, §8.4.2, §8.5, §8.6.2"
-    concept_questions: [10, 11, 12]
-    land: "Throughput is the minimum of preparation, transfer, and compute; overlap hides the faster stages behind the slowest one but cannot speed it up."
-  - name: Fitting
-    divider_question: "How do we fit GPT-2 XL's batch-32 step on one H100?"
-    read: "§8.6.3 to §8.6.6"
-    concept_questions: [13, 14, 15]
-    land: "Mixed precision, FlashAttention, and two micro-batches take the step from 598 GB to 66.8 GB; each technique relieves one memory term and costs something elsewhere."
+    minutes: 25
+    land: "Mixed-precision Adam holds 16 bytes per parameter before any activation, and activations grow with batch and sequence length until they, not arithmetic, decide what fits. In FP32 the batch-32 step is 598 GB; Lecture 8b fits it."
+  - name: Lost Time
+    divider_question: "Where does a run lose its time?"
+    read: "§8.4.5, §8.5, §8.6.1"
+    concept_questions: [5, 10, 11]
+    minutes: 15.5
+    land: "Busy time bounds MFU, idle gaps and rewinds are lost utilization, and a profile, not a guess, says which term binds."
 
 concept_questions:
   - id: 1
@@ -195,32 +193,29 @@ left_to_reading:
 
 closing:
   return_to_hook: "Back to the TPU v4 board. PaLM's static state at 16 B/param is about 8.6 TB, the memory of about 100 H100s, before activations; each checkpoint holds about 7.6 TB at 14 B/param; each rewind replays steps already paid for, which is lost utilization. PaLM still reported 46.2 percent MFU."
-  read_and_practice: ["§8.1 to §8.6", "self-check questions at the end of each section", "TinyTorch optimizer and autograd modules"]
+  read_and_practice: ["§8.1 to §8.5", "self-check questions at the end of each section", "TinyTorch optimizer and autograd modules"]
   further_reading:
-    - cite: "Model Training, §8.2 to §8.6"
+    - cite: "Model Training, §8.1 to §8.5"
       url: "https://mlsysbook.ai"
-      why: "The law, the memory budget, the pipeline, and the GPT-2 XL walkthrough in full."
+      why: "The law, the memory budget, the pipeline, checkpoints, and bottleneck diagnosis."
     - cite: "Chowdhery et al., PaLM: Scaling Language Modeling with Pathways, 2022"
       url: "https://arxiv.org/abs/2204.02311"
       why: "The loss spikes (training instability section) and the definition of MFU."
-    - cite: "Micikevicius et al., Mixed Precision Training, ICLR 2018"
-      url: "https://arxiv.org/abs/1710.03740"
-      why: "FP32 master weights and loss scaling, from the source."
-    - cite: "Dao et al., FlashAttention, NeurIPS 2022"
-      url: "https://arxiv.org/abs/2205.14135"
-      why: "IO-aware tiling and online softmax."
-    - cite: "Chen et al., Training Deep Nets with Sublinear Memory Cost, 2016"
-      url: "https://arxiv.org/abs/1604.06174"
-      why: "The sqrt(L) checkpoint schedule."
-  bridge: "Lecture 9: the law's numerator is 6PD, and D is the one factor this lecture held fixed. Which data is worth training on?"
+    - cite: "Narayanan et al., Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM, SC 2021"
+      url: "https://arxiv.org/abs/2104.04473"
+      why: "Measured 44 to 52 percent of peak for GPT models on A100 clusters."
+  bridge: "Lecture 8b (Model Training, Part 2): how do we fit a 598 GB step on one 80 GB accelerator? The Lecture 9 bridge (D held fixed in 6PD) moves to the end of Part 2."
 
 coverage:
-  primary_taught: ["Training-time law", "Model FLOPs utilization", "Training memory at scale", "Mixed precision", "Checkpointing and accumulation", "Profile to find the binding term", "Fine-tuning scope"]
+  primary_taught: ["Training-time law", "Model FLOPs utilization", "Training memory at scale (the account)", "Profile to find the binding term", "Fine-tuning scope"]
+  primary_named: ["Mixed precision (16 B/param only; taught in Lecture 8b)", "Checkpointing and accumulation (taught in Lecture 8b)"]
   primary_left_to_reading: []
-  secondary: ["Training input pipeline (taught)", "IO-aware attention (taught)", "Training checkpoints (hook only)", "Single-node data parallelism (one line)", "Sharding within one node (one line)"]
+  secondary: ["Training input pipeline (H100 count and trace only; Lecture 4b teaches it)", "Training checkpoints (hook and Lost Time)", "IO-aware attention (Lecture 8b)", "Single-node data parallelism (one line)"]
 
 notes_for_author:
   - "Capacity: the chapter compares memory totals against 85.9 GB (the H100's 80 GiB in decimal GB). The deck draws that line and labels it, so 109.6 GB is over and 66.8 GB is under."
   - "PaLM synthesis numbers (8.6 TB static, 7.6 TB checkpoint, about 100 H100s) are derived on the slide from the chapter's 16 and 14 B/param and PaLM's 540B; they are not stated in the chapter."
   - "The PaLM loss curve on the hook slide is an illustrative schematic, labeled as such; the PaLM paper reports the spikes in prose."
   - "Scaling (§8.7) gets one line; a 75-minute lecture cannot also teach AllReduce and ZeRO well."
+  - "2026-10-17 revision (split into Parts 1 and 2, per 08b_training/part1_changes.md): the Feeding segment and the Fitting segment left this deck. Dropped frames: the NVMe-to-HBM bandwidth ladder, the slowest-stage pipeline, and the overlap timeline (Lecture 4b teaches them; the ResNet-50 note points there in one line). Moved to Lecture 8b: the 598 GB scoreboard, precision run time, the FP16 bit layouts, FlashAttention, checkpointing, the accumulate-or-checkpoint predict, and the 66.8 GB result. MFU moved from Time to the new Lost Time segment. Added: one GPT-2 XL step (295 TFLOP, 0.60 s; worked example of the law), SGD against momentum against Adam bytes (table 3), a 7B static-state exercise (112 GB, §8.1 self-check), Adam's 28-byte update traffic (42 GB, about 12.5 ms, about 2 percent of a step; derived), activations against sequence length (derived from Napkin Math 8.3 line items), busy time against MFU (self-check busy times; MFU bars illustrative), the checkpoint-cadence estimate (21 GB, 3 s; 5 percent at every 100 steps, up to 100 minutes of replay at every 10,000; derived), and the profiling flowchart redrawn in TikZ from §8.6.1. Llama exercise to 6 minutes. Sections 6 to 5 (Run, Time, Memory, Lost Time, Wrap-Up). Notes 70.5 minutes, 11 tagged [OPTIONAL]. Closing slide now points to Part 2. Concept questions 13 to 15 and their activities and worked examples (Napkin Math 8.10) now live in 08b_training/lecture_map.yml; the checkpoint-cadence estimate replaces them here."
+  - "Images no longer used by this deck (kept on disk; generated by make_figs.py): bw_ladder_step1-3, pipeline_stages, prefetch_overlap, scoreboard_step1-4, precision_days_step1-3, flash_tile_step1-2, ckpt_segments_step1-2. The flowchart slide is drawn in TikZ, so no image was added for it."

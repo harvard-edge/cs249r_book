@@ -25,8 +25,12 @@ Every value is from the rendered chapter (Model Training) unless noted:
   - Checkpointing: 8 segments of 6 layers; 0.84 GB of segment inputs plus
     10.7 GB for the live segment (Napkin Math 8.8).
   - Scoreboard: 598, 311, 109.6, 66.8 GB (Napkin Math 8.10).
-Illustrative figures (the PaLM loss curve, the prefetch timeline) say so on
-the figure.
+  - Optimizer bytes: SGD 8, momentum 12, Adam 16 bytes per parameter in FP32
+    (table 3, Sec. 8.3.2).
+  - Activations against sequence length: derived from Napkin Math 8.3's line
+    items (242 GB at 1,024 tokens; the library total is 287 GB).
+Illustrative figures (the PaLM loss curve, the prefetch timeline, the MFU bars
+of the busy-time scenarios) say so on the figure.
 
 Run from this folder: python3 make_figs.py
 """
@@ -424,6 +428,91 @@ axs[1].set_xlim(0, 175)
 axs[1].set_xlabel("Time (schematic: prepare 20, compute 15 per batch)", fontsize=11)
 sp.save(fig, out / "prefetch_overlap.svg")
 
+
+# 17. Optimizer state: SGD, momentum, Adam, bytes per parameter in FP32 ------
+#     (table 3 and Sec. 8.3.2: weights and gradients, plus 0, 1, or 2 state
+#     tensors per parameter).
+opt_rows = [("SGD", [(4, "W", "memory"), (4, "G", "network")]),
+            ("Momentum", [(4, "W", "memory"), (4, "G", "network"), (4, "v", "compute")]),
+            ("Adam", [(4, "W", "memory"), (4, "G", "network"), (4, "m", "compute"),
+                      (4, "v", "compute")])]
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.1))
+    for i, (name, parts) in enumerate(opt_rows):
+        y = 2 - i
+        shown = i < k
+        x = 0
+        for w, text, ck in parts:
+            ax.barh(y, w, left=x, color=C[ck], height=0.6, edgecolor="white",
+                    alpha=1.0 if shown else 0.0)
+            label(ax, x + w / 2, y, text, "white", shown, ha="center", va="center")
+            x += w
+        label(ax, -0.3, y, name, C["text"], shown, ha="right", va="center", fontsize=13)
+        label(ax, x + 0.4, y, f"{x} B", C["danger"] if x == 16 else C["text"], shown,
+              va="center", fontsize=13)
+    ax.set_xlim(0, 19.5)
+    ax.set_ylim(-0.5, 2.5)
+    ax.set_yticks([])
+    ax.set_xticks([0, 4, 8, 12, 16])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlabel("Bytes per parameter in FP32 (W weights, G gradients, m and v optimizer state)",
+                  fontsize=10.5)
+    sp.save(fig, out / f"optimizer_bytes_step{k}.svg")
+
+# 18. GPT-2 XL activations against sequence length, batch 32, FP16 ------------
+#     Napkin Math 8.3 line items, scaled with sequence length S (derived):
+#     linear terms 48 x (419.4 + 419.4 + 10) MB x S/1,024; scores
+#     48 x 5 x 25 x S^2 x 32 bytes. At S = 1,024: about 41 + 201 = 242 GB.
+seq = np.linspace(128, 2048, 200)
+lin = 48 * (419.4 + 419.4 + 10) * seq / 1024 / 1000
+score = 48 * 5 * 25 * seq ** 2 * 32 / 1e9
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    ax.fill_between(seq, 0, lin, color=C["data"], lw=0)
+    ax.fill_between(seq, lin, lin + score, color=C["danger"], lw=0,
+                    alpha=1.0 if k == 2 else 0.0)
+    ax.axhline(CAP, color=C["memory"], lw=2, ls="--")
+    ax.text(140, CAP + 14, "H100: 85.9 GB", color=C["memory"], fontsize=11,
+            fontweight="bold")
+    ax.text(150, 250, "green: projections and\nfeed-forward, grow with S", color=C["data"],
+            fontsize=11, fontweight="bold", ha="left", va="center")
+    label(ax, 1350, 520, "attention scores:\ngrow with S²", C["danger"], k == 2,
+          ha="right", fontsize=11.5)
+    ax.plot([1024], [lin[np.abs(seq - 1024).argmin()] + score[np.abs(seq - 1024).argmin()]],
+            "o", ms=9, color=C["danger"], mec="white", mew=1.5, alpha=1.0 if k == 2 else 0.0)
+    label(ax, 990, 370, "1,024 tokens: 242 GB", C["danger"], k == 2, ha="right",
+          fontsize=11.5)
+    ax.set_xlim(128, 2048)
+    ax.set_ylim(0, 900)
+    ax.set_xticks([256, 512, 1024, 1536, 2048], ["256", "512", "1,024", "1,536", "2,048"])
+    ax.set_xlabel("Sequence length S (batch 32; line items, derived)", fontsize=11)
+    ax.set_ylabel("Activations (GB)")
+    ax.grid(color=C["grid"], lw=0.5)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f"act_vs_seq_step{k}.svg")
+
+# 19. Busy time against MFU (illustrative scenarios after the Sec. 8.5
+#     self-check: a memory-stalled job 92 percent busy, a data-starved job 20
+#     percent busy; MFU values are illustrative) ------------------------------
+fig, ax = plt.subplots(figsize=(5.8, 2.3))
+rows = [("Memory-stalled job", 92, 20), ("Data-starved job", 20, 12)]
+for i, (name, busy, mfu) in enumerate(rows):
+    y = 1 - i
+    ax.barh(y + 0.17, busy, height=0.32, color=C["neutral"])
+    ax.barh(y - 0.17, mfu, height=0.32, color=C["compute"])
+    ax.text(busy + 1.5, y + 0.17, f"busy {busy}%", va="center", fontsize=12,
+            fontweight="bold", color=C["neutral"])
+    ax.text(mfu + 1.5, y - 0.17, "MFU (illustrative)", va="center", fontsize=12,
+            fontweight="bold", color=C["compute"])
+    ax.text(-1.5, y, name, ha="right", va="center", fontsize=12, fontweight="bold",
+            color=C["text"])
+ax.set_xlim(0, 120)
+ax.set_ylim(-0.55, 1.55)
+ax.set_yticks([])
+ax.set_xticks([0, 25, 50, 75, 100])
+ax.spines["left"].set_visible(False)
+ax.set_xlabel("Percent of the step (busy) or of peak (MFU)", fontsize=11)
+sp.save(fig, out / "busy_mfu.svg")
 
 # ---------------------------------------------------------------------------
 # The data-bound profiler trace (chapter figure, Sec. 8.5), cropped to two
