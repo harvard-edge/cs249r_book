@@ -21,8 +21,8 @@ Do not add another figure wrapper, caption, or number. Do not paste generated
 HTML or inline the runtime into the chapter. Diagram is the initial view;
 Explore initializes paused and preserves its step when views change.
 
-The extension currently registers only `tensor-memory-layout` for
-`fig-tensor-memory-layout`. Unknown names or mismatched figure IDs emit a
+The extension currently registers `tensor-memory-layout` for
+`fig-tensor-memory-layout` and `matrix-tiling` for `fig-tiling-diagram`. Unknown names or mismatched figure IDs emit a
 warning and retain the static figure. Register each new lesson explicitly
 rather than attaching an unrelated laboratory to a figure.
 
@@ -83,3 +83,8 @@ Build the pilot normally:
 ```
 
 Source API reference: [Quarto Lua API](https://quarto.org/docs/extensions/lua-api.html).
+
+The tiling lesson uses a declared small worked case on the original L-shaped
+composition. It distinguishes backing matrices, operand copies, retained partial
+sums, and a completed output write. Its counters count scheduled scalar-element
+copies and MACs, not measured DRAM traffic or elapsed time.

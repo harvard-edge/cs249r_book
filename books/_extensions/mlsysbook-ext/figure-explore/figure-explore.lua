@@ -1,6 +1,11 @@
 -- Opt-in web enhancement. Never alter the static diagram or caption AST.
 -- is_format("html") includes EPUB; html:js deliberately does not.
 local lessons = {
+  ["matrix-tiling"] = {
+    figure = "fig-tiling-diagram",
+    script = "matrix-tiling.js",
+    stylesheet = "matrix-tiling.css"
+  },
   ["tensor-memory-layout"] = {
     figure = "fig-tensor-memory-layout",
     script = "tensor-memory-layout.js",

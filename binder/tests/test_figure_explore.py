@@ -19,7 +19,7 @@ filters:
   - {FILTER.as_posix()}
 ---
 
-See @fig-tensor-memory-layout.
+See @{figure}.
 
 ::: {{#{figure} {enrollment} fig-env="figure" fig-cap="**Tensor layout**: Original static figure."}}
 
@@ -36,16 +36,17 @@ See @fig-tensor-memory-layout.
     return result
 
 
-def test_html_packages_dependencies_without_replacing_static_body(tmp_path):
-    render(tmp_path, 'html')
+@pytest.mark.parametrize('figure,lesson', [('fig-tensor-memory-layout', 'tensor-memory-layout'), ('fig-tiling-diagram', 'matrix-tiling')])
+def test_html_packages_dependencies_without_replacing_static_body(tmp_path, figure, lesson):
+    render(tmp_path, 'html', figure=figure, lesson=lesson)
     text = (tmp_path / 'figure.html').read_text()
-    assert 'data-mlsys-explore="tensor-memory-layout"' in text
+    assert f'data-mlsys-explore="{lesson}"' in text
     assert text.count('figure-explore.js') == 1
-    assert text.count('tensor-memory-layout.js') == 1
+    assert text.count(lesson + '.js') == 1
     assert 'Original static figure.' in text
     assert text.count('<figcaption') == 1
     assert '1 2 3' in text and '4 5 6' in text
-    assert list((tmp_path / 'figure_files').rglob('tensor-memory-layout.js'))
+    assert list((tmp_path / 'figure_files').rglob(lesson + '.js'))
 
 
 @pytest.mark.parametrize('figure,lesson', [
@@ -61,23 +62,25 @@ def test_unknown_lesson_or_wrong_figure_fails_closed(tmp_path, figure, lesson):
     assert 'Original static figure.' in text
 
 
-def test_latex_keeps_static_figure_even_if_filter_is_explicitly_loaded(tmp_path):
-    render(tmp_path, 'latex')
-    text = (tmp_path / 'figure.tex').read_text()
+@pytest.mark.parametrize('figure,lesson', [('fig-tensor-memory-layout', 'tensor-memory-layout'), ('fig-tiling-diagram', 'matrix-tiling')])
+def test_latex_keeps_static_figure_even_if_filter_is_explicitly_loaded(tmp_path, figure, lesson):
+    render(tmp_path, 'latex', figure=figure, lesson=lesson)
+    text = ' '.join((tmp_path / 'figure.tex').read_text().split())
     assert 'Original static figure.' in text
     assert '1 2 3' in text and '4 5 6' in text
     assert 'figure-explore' not in text
     assert 'Diagram' not in text and 'Explore' not in text
 
 
-def test_epub_keeps_static_figure_even_if_filter_is_explicitly_loaded(tmp_path):
-    render(tmp_path, 'epub')
+@pytest.mark.parametrize('figure,lesson', [('fig-tensor-memory-layout', 'tensor-memory-layout'), ('fig-tiling-diagram', 'matrix-tiling')])
+def test_epub_keeps_static_figure_even_if_filter_is_explicitly_loaded(tmp_path, figure, lesson):
+    render(tmp_path, 'epub', figure=figure, lesson=lesson)
     with zipfile.ZipFile(tmp_path / 'figure.epub') as archive:
         names = archive.namelist()
         text = '\n'.join(archive.read(n).decode() for n in names if n.endswith('.xhtml'))
     assert 'Original static figure.' in text
     assert '1 2 3' in text and '4 5 6' in text
-    assert not any('figure-explore' in n or 'tensor-memory-layout.js' in n for n in names)
+    assert not any('figure-explore' in n or lesson + '.js' in n for n in names)
     assert 'data-mlsys-explore=' not in text
 
 
