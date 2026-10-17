@@ -1,0 +1,276 @@
+chapter: 11_hw_acceleration
+lecture: 11
+title: Hardware Acceleration
+layer: hardware
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+thesis: "Accelerators win by keeping data close to arithmetic: a byte from off-chip memory costs far more time and energy than the operation it feeds, so a chip delivers its peak only when its memory hierarchy, its dataflow, and the workload's reuse keep the arrays fed."
+
+hook:
+  minutes: "0-4"
+  setup: "Step 1, the problem (Example 11.2): in 2013 Google projected that three minutes of voice search per user per day would require doubling its datacenter capacity to run neural-network inference on CPUs. Shared photo of a Google datacenter. Step 2, the answer (Example 11.1): the first TPU went into production in 2015. On six Google inference workloads it delivered 15 to 30x the throughput and 30 to 80x the performance per watt of contemporary CPUs and GPUs, the K80 among them (Jouppi et al. 2017). Two range bars. Step 3, the question."
+  question_to_class: "The TPU ran at a modest clock, about 700 MHz. Where did 30 to 80x performance per watt come from? A) a faster clock B) more transistors than the K80 C) one 256x256 array of 8-bit multipliers fed from a large on-chip buffer, so operands are reused instead of refetched D) a better compiler"
+  payoff: "C. The TPU spent its silicon on a 256x256 8-bit systolic array and a 24 MB software-managed Unified Buffer, and on almost none of a general processor's control machinery (Example 11.1, footnotes 2 and 6). A is the misconception the lecture removes. The synthesis returns to the chip: each segment's idea (energy ladder, systolic reuse, roofline, mapping) is one reason the answer is C."
+  sources: ["Example 11.1 and 11.2 (Jouppi et al. 2017): 15-30x, 30-80x, 3 min/day, doubling datacenters", "footnote 2 (256x256 8-bit array), footnote 6 (24 MB Unified Buffer)", "§11.2 self-check answer 4 (about 700 MHz)", "photo: shared google-datacenter-dalles-substation.jpg"]
+
+driving_question: "Why does moving data cost more than computing it, and how does an accelerator keep its arithmetic fed?"
+
+recall: "Lecture 10 closed on ResNet-50 INT8 on the H100: batch-one latency 0.38 -> 0.30 ms (1.3x) but large-batch throughput 5.9x. Same chip, same INT8 weights. Why does one barely move? (This lecture answers it in the synthesis: batch one sits on the overhead floor, large batch near the arithmetic ceiling, and INT8 doubles only that ceiling.)"
+
+running_example: "ResNet-50 INT8 on the reference H100 (989 TFLOP/s dense FP16, 1,979 TOPS INT8, 3.35 TB/s HBM, 50 MB L2, 228 KB shared memory per SM) carries the compute-bound side: its stage-3 3x3 convolution clears the FP16 ridge, its stage-2 layers and FC head do not, and one 56x56x64 activation map travels the hierarchy in segment 5. GPT-2 XL batch-1 decode (3 GB FP16 weights per token, about 1 FLOP/byte, 0.3 percent of peak) is the single contrast. The first TPU opens and closes the lecture."
+
+segments:
+  - name: The Chip
+    divider_question: "What is inside an accelerator, and why build one?"
+    read: "§11.1 to §11.4"
+    concept_questions: [1, 2, 3, 4]
+    land: "An accelerator spends its transistors on arrays of multipliers and on storage beside them; it wins only when an operand fetched once is reused many times before it goes back to memory."
+    minutes: 16
+  - name: Feeding It
+    divider_question: "Why can memory not feed the arrays directly?"
+    read: "§11.5.1, §11.5.3, §11.5.4"
+    concept_questions: [5, 6]
+    land: "Each step away from the arrays is slower and costlier; HBM alone cannot supply a 16,384-MAC array, so operands are staged in SRAM and registers."
+    minutes: 5
+  - name: Roofline
+    divider_question: "Which ceiling binds: arithmetic or bytes?"
+    read: "§11.6"
+    concept_questions: [7, 8, 9, 10]
+    focus: "Attainable = min(R_peak, BW x I); ridge I_ridge = R_peak / BW, one ridge per precision path"
+    land: "Compare a kernel's intensity with the ridge of the path it runs on: below it only fewer bytes or more reuse help, and every new generation and every narrower format moves the ridge right."
+    minutes: 21
+  - name: Mapping
+    divider_question: "Who decides which operand stays near the arithmetic?"
+    read: "§11.7, §11.8"
+    concept_questions: [11, 12, 13]
+    land: "The loop order picks the stationary operand, the tile size must fit every live buffer, and a dimension one past the tile pays for a whole tile; compilers search this space so engineers do not."
+    minutes: 10
+  - name: One Tensor
+    divider_question: "Where does one activation travel, and what does the trip cost?"
+    read: "§11.5.2 (Lighthouse 11.2), §11.1 (Theorem 11.1), §11.11"
+    concept_questions: [14, 15]
+    land: "The format decides which tier can hold the data, and the work the accelerator never touches caps the end-to-end gain."
+    minutes: 7
+
+concept_questions:
+  - id: 1
+    q: "What is inside an accelerator?"
+    picture: "Real, abstract: shared photo nvidia-h100-pcie.jpg beside the shared CC0 die shot nvidia-gtx580-die.jpg (an older GPU die, labeled as such; the repeated core arrays are visible); then kit machine_step1..4 built part by part (compute units, on-chip SRAM, HBM, host link), with book fig-accelerator-anatomy as the reading reference"
+    numbers: "H100: 80 billion transistors, 989 TFLOP/s dense FP16 against a 1-2 TFLOP/s reference CPU, 490-990x (Definition 11.1, Choquette 2023); more than 16,000 CUDA cores and more than 500 Tensor Cores (§11.7.1)"
+    example: "H100 as the reference machine; why specialize at all: a CPU spends hundreds of pJ of control overhead to issue a few-pJ operation, and training compute doubles every 3.4 to about 6 months against about two years for transistor density (§11.2.2); timeline thumbnail (book fig-timeline) in the notes only"
+    read: "§11.1"
+  - id: 2
+    q: "What does a byte cost compared with an operation?"
+    picture: "Slide variant of book fig-energy-hierarchy (make_figs.py energy_step1..3, log bars, 45 nm): arithmetic rungs, then the SRAM rung and the show of hands, then the DRAM bar labeled 640 pJ = 173 multiplies"
+    numbers: "INT8 add 0.03 pJ, FP32 add 0.9, FP32 multiply 3.7, 8 KB SRAM read 5, DRAM read of a 32-bit value 640 pJ; DRAM is about 173x the FP32 multiply and about 128x the SRAM read (Horowitz 2014, figure 4, §11.2.3)"
+    example: "Recall: Lecture 0 showed the ladder and Lecture 6 the 640 pJ against a 4.6 pJ MAC; new here is the on-chip SRAM rung, the one accelerators are built around"
+    read: "§11.2.3"
+  - id: 3
+    q: "Which unit runs which primitive, and how much does a matrix unit buy?"
+    picture: "New three-lane diagram: vector unit (ReLU, residual add), matrix unit (convolution, projections), special-function unit (softmax exp, GELU, rsqrt), each tagged with a lighthouse; beside it new bars of NVIDIA peak FP16: P100 21.2 against V100 125 TFLOP/s"
+    numbers: "One mma.sync.m16n8k16 instruction: 2,048 MACs across a warp, replacing 64 scalar FMAs per thread (listing 13); P100 21.2 -> V100 125 TFLOP/s FP16, about 6x, the first Tensor Cores (footnote 13, NVIDIA 2017); INT8 wins twice: half the bytes of FP16 and smaller multipliers, so more MACs per die (§11.2, §11.4.5); H100 FP8 1,979 against FP16 989 TFLOP/s"
+    example: "ResNet-50 uses the special-function path only for its 1,000-way softmax; GPT-2 XL uses it every step (softmax and GELU grow with context) (§11.3.3)"
+    read: "§11.3, §11.4.2, §11.4.5"
+  - id: 4
+    q: "How does a systolic array reuse an operand?"
+    picture: "Slide variant of book fig-systolic-array, redrawn at slide size because the book figure's labels fall below 7 pt (make_figs.py systolic_step1..3, a 4x4 weight-stationary grid): weights held in the cells, activations flow right, partial sums flow down; then the worked card for Napkin Math 11.1"
+    numbers: "128x128 array: 16,384 MACs per cycle (TPU v4; Jouppi et al. 2023); naive DRAM streaming 4 accesses x 640 pJ + 1 pJ = 2,561 pJ per op against 0.016 accesses -> about 11 pJ per op, 232.8x (Napkin Math 11.1, deliberately naive baseline); first TPU 256x256 (footnote 2)"
+    example: "TPU matrix unit"
+    read: "§11.4.4"
+  - id: 5
+    q: "Why do processors wait for memory, and is it getting better?"
+    picture: "Book fig-memory-wall (log growth since 2014: dense model parameters against per-device accelerator bandwidth)"
+    numbers: "About 3,900x in dense parameters against 33x in accelerator memory bandwidth since 2014 (figure 7, Gholami et al. 2024 and model papers); Lecture 2's 1.6x/year against 1.2x/year recalled in one line"
+    example: "GPT-2 XL decode: every token rereads 3 GB of weights"
+    read: "§11.5.1"
+  - id: 6
+    q: "What does each step of the memory hierarchy cost, and why can HBM not feed the array directly?"
+    picture: "Kit machine_hl_compute, _sram, _hbm, _link, one tier per step, with the H100 values in the right column (registers; shared memory and L2; HBM and the 100+ cycle count); final step a four-row tier table and one line for the off-chip taper (NVLink 900, PCIe 64, network 50 GB/s). The taper bars were dropped to keep the final state readable"
+    numbers: "Registers about 0.1 pJ per access; shared memory 228 KB per SM, about 17 ns; L2 50 MB, about 150 ns; HBM about 300 ns dependent access, about 160 pJ per byte (Lighthouse 11.2); at 2 GHz a cycle is 500 ps and an HBM access is 100+ cycles (Napkin Math 11.2); taper HBM 3,350, NVLink 900, PCIe 64, network 50 GB/s (§11.5.4)"
+    example: "H100"
+    read: "§11.5.3, §11.5.4"
+  - id: 7
+    q: "What is the ridge point, and why does every precision path have its own?"
+    picture: "New numeric roofline for the H100 (make_figs.py, log-log, drawn at slide size): one bandwidth slope, ceilings revealed one per step: FP32, FP16, INT8, ridge labeled on each"
+    numbers: "FP32 67 TFLOP/s -> ridge about 20; FP16 989 -> 295.2; INT8 1,979 -> 590.7 FLOP/byte, all on 3.35 TB/s (Napkin Math 11.10, 11.6); FP16 against FP32 peak about 15x on the same chip (§11.12)"
+    example: "Same H100, three ridges; opened by the focus slide (roofline equation) with a recall of Lecture 2's A100 (312 TFLOP/s, 2.04 TB/s, ridge 153)"
+    read: "§11.6.2"
+  - id: 8
+    q: "Why does the ridge keep rising across generations?"
+    picture: "Book fig-rising-ridge (V100, A100, H100, B200) in a predict frame; book fig-bandwidth-envelope (Epoch AI, 52 accelerators) moved to its own [OPTIONAL] frame of 1.5 min"
+    numbers: "Ridge V100 139, A100 153, H100 295, B200 281 FLOP/byte; 2017-2024 dense FP16 x18 against bandwidth x8.9 (§11.6.2, figure 9); best compute about 55x against best bandwidth about 13x since TPU v2 (Epoch AI 2026, figure 10); a 200 FLOP/byte kernel gains about 1.6x (bandwidth ratio), not 3.2x (compute ratio), from A100 to H100 (Napkin Math 11.3)"
+    example: "An unchanged kernel moved from A100 to H100"
+    read: "§11.6.2"
+  - id: 9
+    q: "Where do real layers sit on the H100 roofline?"
+    picture: "Variant of book fig-hw-acceleration-h100-roofline-lighthouses at slide size, FP16 points revealed one per step, each labeled with its bound as a share of peak"
+    numbers: "GPT-2 XL QKV projection, prefill batch 8: 125.8 GFLOP / 120.2 MB = 1,046.7 (compute bound); ResNet-50 stage-3 3x3 conv, batch 32: 7.4 GFLOP / 13.1 MB = 563.1 (compute bound); ResNet-50 FC head, batch 32: 131.1 MFLOP / 4.3 MB = 30.5 -> 102.3 TFLOP/s, 10.3 percent; LayerNorm: 104.9 MFLOP / 52.4 MB = 2.0 -> 6.7 TFLOP/s, 0.7 percent; softmax 0.75; GPT-2 XL decode batch 1: 1 FLOP/byte -> 3.4 TFLOP/s, 0.3 percent (Napkin Math 11.4, 11.5, 11.7, 11.8, 11.10)"
+    example: "Five layers, two lighthouses, one chip"
+    read: "§11.6.2, §11.6.3"
+  - id: 10
+    q: "How does batch size move a layer along the roofline, and when does INT8 move it below the ridge?"
+    picture: "Two frames: a new plot of intensity against batch for a 2048x2048 FP16 dense layer with the 295.2 line (batch_step1..3); then new grouped bars for three ResNet-50 layers at FP16 and INT8, with the stage-3 conv also shown at INT8 weights and FP16 activations (569), against both ridges (int8ridge_step1..3)"
+    numbers: "I approximately B: batch 1 -> 1, 32 -> 31, 512 -> 341.3 FLOP/byte (Napkin Math 11.9, equation 5); exact crossing of the FP16 ridge near batch 415 (derived from equation 5, labeled derived); stage-3 3x3 conv 563 FP16, 1,126 with INT8 activations, about 569 if activations stay FP16 (below 590.7); stage-2 3x3 287 / 574, just below both ridges; stage-2 1x1 expansion 51 / 102, far below (Napkin Math 11.6)"
+    example: "The same weights cross the ridge or not depending on how activations travel, a compiler decision"
+    read: "§11.6.3, §11.6.4"
+  - id: 11
+    q: "Why can two correct loop orders differ 36x in memory traffic?"
+    picture: "Code beside the picture: listing 15's three loop orders abridged to 12 lines (weight, output, input stationary), active block boxed one per step, beside new bars of Example 11.4 weight reads"
+    numbers: "16 filters of 3x3 on an 8x8 input: weight stationary 144 weight loads, filters spilled 36 x 144 = 5,184, 36x (Example 11.4); in listing 15 each weight is reused 32 times and each input 512 times; a 7-deep loop nest has 7! = 5,040 orders per memory level (§11.7.2, margin-003)"
+    example: "Small convolution; TPU weight-stationary"
+    read: "§11.7.2 to §11.7.4"
+  - id: 12
+    q: "How does a 4,096-wide layer fit a 128-wide array, and what happens at width 129?"
+    picture: "New tiling diagram at slide size (a 4,096-wide output cut into 32 x 32 tiles of 128, one tile highlighted; the book fig-tiling-diagram is illegible at slide scale), then variant of book margin-001 at slide size (utilization 100 percent at 128, about 50 percent at 129, labeled modeled). Measured follow-up frame: NVIDIA Matrix Multiplication Background guide, figure 7, achieved TFLOP/s against output width N on an A100 (256x128 tiles forced), revealed to N = 128 then the full saw-tooth"
+    numbers: "4,096 x 4,096 on 128 x 128: 1,024 output tiles x 32 reduction tiles = 32,768 tile products; one dimension at 129 -> 129/256, about 50 percent; 129 x 129 -> (129/256)^2, about 25 percent (§11.7.5); Tensor Core dimension multiples of 8 or 16 (footnote 14); measured on an A100 (NVIDIA Matrix Multiplication Background guide, figure 7, values read from the published plot): N = 128 about 190 TFLOP/s, N = 136 about 148 TFLOP/s, 0.153 -> 0.208 ms, +36 percent time for +6.25 percent work"
+    example: "Why channel counts are 512, not 500"
+    read: "§11.7.5"
+  - id: 13
+    q: "Who makes these choices in practice?"
+    picture: "Two bars, eager against compiled ResNet-50 batch one, labeled modeled; kernel counts on the bars; one line naming XLA, TVM, TensorRT"
+    numbers: "Modeled H100 batch-one forward pass 3.53 ms eager -> 0.33 ms compiled FP16, 10.6x, 174 framework kernels fused into 56; arithmetic floor 8 us FP16, 4 us INT8 (§11.8, §11.4.5; modeled, not measured)"
+    example: "Example 11.3: a team migrates to A100 and the Tensor Cores never engage, because the shapes and data types selected other kernels"
+    read: "§11.8, Example 11.3"
+  - id: 14
+    q: "Where does one ResNet-50 activation map live on its way to a Tensor Core?"
+    picture: "Kit machine_hl_* sequence again (the same diagram as segment 2): HBM, then on-chip SRAM for L2, then on-chip SRAM for the shared-memory question, then compute units for registers, with sizes in the right column and a summary table at the last step. The annotated die return was dropped: the only CC-licensed die is a 2010 GPU, and labeling H100 tiers on it would mislead; the TPU v4 board returns in the synthesis instead"
+    numbers: "Stage-2 output map 56 x 56 x 64: 201 KB per image INT8, 401 KB FP16, 6.4 MB for a batch of 32 at INT8; HBM about 300 ns and about 32.1 uJ to read one image's map; L2 50 MB holds the batch at INT8; shared memory 228 KB holds one image at INT8 but not at FP16; registers 0.1 pJ per access (Lighthouse 11.2)"
+    example: "The format decides which tier can hold the data"
+    read: "§11.5.2"
+  - id: 15
+    q: "How much can a faster accelerator speed up the whole job?"
+    picture: "Slide variant of book fig-iron-law-heatmap, redrawn from equation 1 at slide size (make_figs.py amdahl.svg), with the two Lighthouse 11.1 points marked: ResNet-50 18.6x and GPT-2 decode 4.9x"
+    numbers: "Amdahl: ResNet-50, p = 0.95, gain 247x (1,979 TOPS against about 8 TOPS, scenario) -> 18.6x; GPT-2 decode p = 0.80 -> 4.9x, ceiling 5x; with the bandwidth gain (67x) instead, 4.7x (Lighthouse 11.1, Theorem 11.1); one-H100 binding resources: ResNet-50 arithmetic, GPT-2 XL HBM bandwidth, DLRM capacity (100 GB of tables against 80 GB) (table 17)"
+    example: "ResNet-50 against GPT-2 XL on one H100"
+    read: "§11.1, §11.11"
+
+worked_examples:
+  - name: "Napkin Math 11.1: the energy of pulsing data through a systolic array"
+    steps: ["given: DRAM read 640 pJ, compute about 1 pJ, a 128x128 array", "naive: 3 loads + 1 write per op = 2,561 pJ per op", "systolic: 2 loads per 128 ops = 0.016 accesses -> about 11 pJ per op", "result: 232.8x", "meaning: the ratio measures locality, not a better multiplier; the baseline is deliberately naive"]
+  - name: "Napkin Math 11.4, 11.5, 11.7, 11.8, 11.10: five layers on the H100 roofline (student exercise)"
+    steps: ["given: H100 ridge 295.2 FLOP/byte (989 TFLOP/s, 3.35 TB/s); FLOPs and bytes for each layer", "QKV prefill 1,046.7 and stage-3 conv 563.1: above the ridge, compute bound", "FC head 30.5: 102.3 TFLOP/s ceiling, 10.3 percent of peak", "LayerNorm 2.0: 6.7 TFLOP/s, 0.7 percent; decode 1: 3.4 TFLOP/s, 0.3 percent", "meaning: the same chip spans three orders of magnitude of attainable rate; below the ridge the lever is fewer bytes (fusion, lower precision, batching)"]
+  - name: "Napkin Math 11.9: batch size and arithmetic intensity"
+    steps: ["given: 2048x2048 FP16 dense layer, I = 2Bn^2 / (4Bn + 2n^2)", "batch 1: about 1 FLOP/byte", "batch 32: about 31", "batch 512: 341.3, above the 295.2 ridge (crossing near 415, derived)", "meaning: batching buys intensity with waiting time, the trade Lecture 13 develops"]
+  - name: "Napkin Math 11.6: when INT8 moves a layer below the ridge (diagnose)"
+    steps: ["given: H100 ridges 295.2 (FP16) and 590.7 (INT8); three ResNet-50 layers at batch 32", "stage-3 3x3: 563 -> 1,126 if activations are INT8; about 569 if they stay FP16, below 590.7", "stage-2 3x3: 287 / 574, just below both ridges", "stage-2 1x1: 51 / 102, far below; gains only the halved bytes", "meaning: INT8 doubles the ceiling without moving the slope, so whether a layer gains 2x depends on how its activations travel, a compiler and runtime choice"]
+
+active_learning:
+  - at_minute: 3
+    type: predict
+    prompt: "The first TPU ran at about 700 MHz and beat contemporary CPUs and GPUs by 30 to 80x in performance per watt. Where did it come from? A) clock B) more transistors C) reuse in a 256x256 array fed from on-chip buffers D) the compiler"
+    answer: "C (Example 11.1, footnotes 2 and 6). Revisited in the synthesis."
+  - at_minute: 5
+    type: retrieval
+    prompt: "Close your notes. Lecture 10: ResNet-50 INT8 on an H100 gave how much at batch one, and how much at large batch?"
+    answer: "About 1.3x (0.38 -> 0.30 ms) against 5.9x (Lecture 10, table 13). Today explains the difference."
+  - at_minute: 12.5
+    type: predict
+    prompt: "Show of hands: one 32-bit DRAM read costs the energy of how many FP32 multiplies? About 2, 20, or 200?"
+    answer: "About 173 (640 against 3.7 pJ; Horowitz 2014, figure 4)."
+  - at_minute: 21
+    type: estimate
+    prompt: "A naive design reads three operands and writes one result to DRAM for every multiply-accumulate. A 128x128 systolic array loads two operands at its edges per 128 operations. Energy per operation for each, at 640 pJ per DRAM access and 1 pJ per operation?"
+    answer: "2,561 pJ against about 11 pJ, about 233x (Napkin Math 11.1)."
+  - at_minute: 34.5
+    type: predict
+    prompt: "A kernel at 200 FLOP/byte moves unchanged from an A100 to an H100, which has 3.2x the FP16 peak and 1.6x the bandwidth. How much faster?"
+    answer: "About 1.6x: 200 is above the A100 ridge (153) and below the H100 ridge (295), so on the H100 the bandwidth slope binds (Napkin Math 11.3)."
+  - at_minute: 37.5
+    type: estimate
+    prompt: "Given FLOPs and bytes, compute the intensity of five layers and place each against the H100's 295 FLOP/byte ridge: QKV prefill, ResNet-50 stage-3 conv, ResNet-50 FC head, LayerNorm, GPT-2 XL decode."
+    answer: "1,046.7 and 563.1 above; 30.5 (10.3 percent of peak), 2.0 (0.7 percent), and 1 (0.3 percent) below (Napkin Math 11.4 to 11.10)."
+  - at_minute: 43.5
+    type: predict
+    prompt: "A 2048x2048 FP16 dense layer sits at about 1 FLOP/byte at batch one. Roughly what batch puts it above the H100's ridge?"
+    answer: "Intensity is roughly the batch size, so a few hundred: 512 gives 341.3 (Napkin Math 11.9); the exact crossing is near 415 (derived)."
+  - at_minute: 46.5
+    type: diagnose
+    prompt: "INT8 doubles the H100's arithmetic ceiling. ResNet-50's stage-3 conv was compute bound at FP16 (563). After INT8, the profile shows it bandwidth bound. What happened, and what fixes it?"
+    answer: "Its activations stayed FP16, so intensity rose only to about 569, below the 590.7 INT8 ridge. Keeping activations INT8 between layers moves it to 1,126 (Napkin Math 11.6)."
+  - at_minute: 53.5
+    type: predict
+    prompt: "A 128x128 array runs a layer whose output width is 128 at full utilization. The width becomes 129. Utilization along that dimension?"
+    answer: "129/256, about 50 percent; at 129x129, about 25 percent (§11.7.5)."
+  - at_minute: 59.5
+    type: predict
+    prompt: "One SM has 228 KB of shared memory. Does one image's 56x56x64 activation map fit at FP16? At INT8?"
+    answer: "FP16 401 KB: no. INT8 201 KB: yes. The format changes which tier can hold the data (Lighthouse 11.2)."
+  - at_minute: 63
+    type: concept_question
+    prompt: "True or false: (1) a 247x faster matrix path makes ResNet-50 inference about 247x faster; (2) an A100 has 4.8x a T4's peak, so batch-one inference runs 4.8x faster on it; (3) one peak FLOP/s rating describes an H100 at every precision."
+    answer: "All false. (1) 18.6x when 5 percent is unaccelerated (Lighthouse 11.1). (2) Batch-one ceilings differ by 6.4x, the bandwidth ratio; peak contributes nothing (§11.12). (3) 989 TFLOP/s FP16 against 67 FP32, about 15x (§11.12)."
+
+open_questions:
+  - "The ridge rose from 139 to 295 FLOP/byte in seven years, and new arithmetic now goes into FP8 and FP4. Should model designers chase intensity, or should hardware designers spend area on bandwidth instead?"
+  - "The first TPU won by giving up flexibility. Which workloads of the next five years would a fixed systolic design serve badly?"
+  - "CUDA's ecosystem binds much of the field to one vendor. Is that lock-in a cost or a reason the field moved so fast?"
+
+more_examples:
+  - "Jouppi et al. 2017: TPU v1, 15-30x throughput and 30-80x performance per watt on six production workloads."
+  - "Jouppi et al. 2023: TPU v4, 128x128 BF16 systolic arrays, two cores per chip."
+  - "Eyeriss (Chen et al. 2016): row-stationary dataflow for convolutions."
+  - "FlashAttention (Dao et al. 2022): tiling through shared memory, recalled from Lecture 8 as the IO-aware answer to softmax's 0.75 FLOP/byte."
+  - "Cerebras CS-2: more than 850,000 cores on one wafer (§11.7.1)."
+  - "Epoch AI 2026: 52 accelerators, best compute 55x against best bandwidth 13x since TPU v2."
+  - "Google's 2013 voice-search projection: doubling datacenters (Example 11.2)."
+
+left_to_reading:
+  - concept: "SIMD, SIMT, warps, and warp divergence; the RISC-V vector listing"
+    why: "Mechanism detail better read than heard; warps were met in Lecture 8. One note on frame 9."
+  - concept: "Special-function unit implementation (lookup tables, interpolation)"
+    why: "Detail; the lecture keeps only which lighthouse uses the path."
+  - concept: "2:4 sparse datapath mechanics"
+    why: "Lecture 10 taught the pattern and its measured speedups; one note on frame 9."
+  - concept: "Tensor layouts (NHWC against NCHW)"
+    why: "Kernel-level detail; named once in the Example 11.3 notes."
+  - concept: "Compilation pipeline stages and runtime profiles (TensorRT tactics, shape ranges)"
+    why: "One frame shows what compilation buys; Lecture 7 owns graph capture and Lecture 13 runtime selection."
+  - concept: "Host-device transfer and DMA double buffering"
+    why: "Lecture 7 owns the feeding problem; the taper step recalls it."
+  - concept: "Beyond one accelerator (chiplets, NVLink partitioning, wafer scale)"
+    why: "Awareness only in Volume I; the taper's last bars name it."
+  - concept: "Heterogeneous SoCs, DVFS, and CMOS power"
+    why: "Lecture 2 taught the power wall and f-cubed; SoC scheduling is reading (§11.10)."
+  - concept: "Cost-performance and energy per request (Napkin Math 11.11)"
+    why: "Hypothetical fleet numbers; Lecture 12 measures power and Lecture 15 owns energy accounting. The lighthouse binding-resource table carries the selection rule."
+
+closing:
+  return_to_hook: "Back to the TPU. Its 30-80x performance per watt is this lecture in one chip: the energy ladder says a DRAM read costs about 173 multiplies, so it held operands in a 24 MB buffer and a 256x256 array that reuses each one 256 times, a dataflow chosen for convolutions and dense layers above the ridge. Back to Lecture 10's question: ResNet-50 INT8 at large batch sits near the arithmetic ceiling, so INT8's doubled ceiling shows up (5.9x); at batch one the arithmetic takes about 4 us of a modeled 0.33 ms compiled pass, so the time is overhead and halving the arithmetic barely moves it (1.3x)."
+  read_and_practice: ["§11.1 to §11.8 and §11.11", "self-check questions at the end of each section; Checkpoint 11.3 (two ridges) and 11.5 (feasibility)", "Napkin Math 11.1, 11.5, 11.6, 11.9, 11.10 by hand", "TinyTorch modules on matrix multiplication and acceleration, if assigned"]
+  further_reading:
+    - cite: "Hardware Acceleration, §11.5.2 (Lighthouse 11.2), §11.6, §11.7"
+      url: "https://mlsysbook.ai"
+      why: "The life of a tensor, the H100 ridges and layer placements, and dataflow and tiling with every number."
+    - cite: "Jouppi et al., In-Datacenter Performance Analysis of a Tensor Processing Unit, ISCA 2017"
+      url: "https://doi.org/10.1145/3079856.3080246"
+      why: "The hook from the source, including the TPU's own roofline."
+    - cite: "Williams, Waterman, Patterson, Roofline: An Insightful Visual Performance Model, CACM 2009"
+      url: "https://doi.org/10.1145/1498765.1498785"
+      why: "The roofline paper; short and readable."
+    - cite: "Sze, Chen, Yang, Emer, Efficient Processing of Deep Neural Networks: A Tutorial and Survey, Proc. IEEE 2017"
+      url: "https://doi.org/10.1109/jproc.2017.2761740"
+      why: "Dataflows, reuse, and the energy argument in one survey."
+    - cite: "Kung, Why Systolic Architectures?, IEEE Computer 1982"
+      url: "https://doi.org/10.1109/mc.1982.1653825"
+      why: "The original argument for systolic arrays, still the clearest."
+    - cite: "Horowitz, Computing's Energy Problem (and What We Can Do about It), ISSCC 2014"
+      url: "https://doi.org/10.1109/isscc.2014.6757323"
+      why: "The energy ladder's source."
+  bridge: "Lecture 12: every vendor claims to be fastest. How do we measure fairly?"
+
+coverage:
+  primary_taught: ["Accelerator anatomy (real-abstract-real: photo, die, kit diagram)", "Matching primitives to execution units (three-lane diagram, Tensor Core data)", "Operand-supply hierarchy (tier build, taper, life of a tensor)", "Energy ladder (book figure, show of hands, systolic estimate)", "Amdahl's law (heatmap, Lighthouse 11.1 in the vote)", "Roofline and ridge point (focus, per-precision ridges, rising ridge, five layers, batch, INT8 crossing)", "Stationary dataflows (loop orders, 36x)", "Tiling (4,096 on 128, width-129 cliff)"]
+  primary_left_to_reading: []
+  secondary: ["Reduced-precision and sparse datapaths (taught: INT8's two sources, per-precision ridges; 2:4 one note)", "Compilers and runtimes (one frame, modeled)", "Choosing an accelerator (binding-resource table in the Amdahl frame)", "Fusion limits on accelerators (one note on the LayerNorm step)", "Heterogeneous SoCs and CMOS power (reading)", "Multi-chip scaling within a node (taper bars and one line)"]
+  touches_reused: ["Lecture 0: energy ladder (160 pJ/byte)", "Lecture 1: iron law, Amdahl", "Lecture 2: A100 roofline, ridge 153, ResNet-50 batch-1 at 146, decode at 1 FLOP/byte, memory wall rates, power wall", "Lecture 6: 640 pJ against a 4.6 pJ MAC", "Lecture 7: fusion traffic rule, HBM/NVLink/PCIe table, launch overhead", "Lecture 8: warps, mixed precision, FlashAttention", "Lecture 10: INT8 profile (1.3x, 5.9x), 2:4 sparsity, schematic roofline points"]
+  hand_offs: ["Lecture 12 owns where a workload actually sits against its roofline (measured against modeled) and power measurement", "Lecture 13 owns batching's latency cost, the KV cache, speculative decoding, and runtime selection", "Lecture 15 owns energy and carbon accounting"]
+
+notes_for_author:
+  - "Example 11.1's 15-30x and 30-80x compare the TPU with contemporary CPUs and GPUs together, not with the K80 alone. The hook slide says 'CPUs and GPUs, including the K80'."
+  - "No TPU v1 photo exists on Wikimedia Commons (searched). The hook uses the shared datacenter photo and the synthesis the shared TPU v4 board. If TPU v1 specs beyond the chapter (92 TOPS, 34 GB/s, its roofline ridge) are wanted on a slide, they must be read from Jouppi et al. 2017 first; this plan does not use them."
+  - "The die shot is the shared CC0 GTX 580 (Fermi, 40 nm) die, labeled as an older GPU. No CC-licensed H100 die shot was found."
+  - "Energy ratios differ by operation: 173x against an FP32 multiply (this chapter), about 139x against an FP32 MAC (Lecture 6), about 145x per byte against FP16 (iron-law chapter). Slides name the operation each time."
+  - "Segment 4 (Mapping) now has measured data: NVIDIA's Matrix Multiplication Background user guide, figure 7 (A100-SXM4-80GB, CUDA 11.2, cuBLAS 11.4; M = 27,648, K = 4,096, 256x128 tiles forced). The guide's text gives no throughput values, so the 51 points were read from the coordinates of its published SVG plot: about 190 TFLOP/s at N = 128 and 148 at N = 136; duration 0.153 to 0.208 ms (+36 percent for +6.25 percent work). The guide's caption notes cuBLAS would normally choose narrower tiles. Example 11.4, the width-129 cliff, and the compiled-latency bars remain labeled modeled."
+  - "The batch-415 crossing is derived from equation 5 and labeled derived."
+  - "Lighthouse 11.2's register energy (0.1 pJ) and HBM energy (160 pJ/byte) are 45 nm estimates, while its latencies are Hopper values; the slide labels the energy column '45 nm estimate'."
