@@ -213,24 +213,42 @@ def chips(xr, yc, lectures, accent, on, anchor="end"):
 def course_order(accent):
     """The semester as rows (one per part), each lecture a card with its
     number, title, and the stack layer it teaches."""
-    out, y = [], 14
-    rowh, cw, gap, x0 = 66, 222, 10, 196
+    # Drawn large enough to read on a slide: a 960-unit canvas fills the
+    # slide width, so 17-unit text lands near 9 pt. Long titles wrap.
+    out, y = [], 6
+    rowh, ch, cw, gap, x0 = 92, 82, 200, 10, 120
     for part, lectures in COURSE:
-        out.append(text(10, y + 26, part, size=17, weight=700, fill=C["gray"]))
+        words = part.split("  ")
+        for k, w in enumerate(words):
+            yy = y + ch / 2 + (k - (len(words) - 1) / 2) * 22
+            out.append(text(4, yy, w.replace("&", "&amp;"), size=17 if k == 0 else 15,
+                            weight=700, fill=C["gray"]))
         x = x0
         for n, title, layer in lectures:
             lit = layer != "all"
-            out.append(rect(x, y, cw, 54, accent, opacity=0.14 if lit else 0.06,
+            out.append(rect(x, y, cw, ch, accent, opacity=0.14 if lit else 0.06,
                             stroke=accent, sw=1.2, rx=8))
-            out.append(text(x + 10, y + 19, f"L{n}", size=15, weight=700, fill=accent))
-            out.append(text(x + 48, y + 19, title.replace("&", "&amp;"),
-                            size=13, weight=700, fill=C["text"]))
-            out.append(text(x + 10, y + 40, "whole stack" if not lit
-                            else f"{layer} layer".replace("&", "&amp;"),
-                            size=12, weight=600, fill=C["gray"]))
+            short = layer.split(" & ")[0].split()[-1]
+            where = "whole stack" if not lit else f"{short} layer"
+            out.append(text(x + 10, y + 17, f"L{n}", size=16, weight=700, fill=accent))
+            out.append(text(x + 52, y + 17, where, size=14, weight=600,
+                            fill=C["gray"]))
+            for k, line in enumerate(wrap(title, 17)):
+                out.append(text(x + 10, y + 43 + k * 22, line.replace("&", "&amp;"),
+                                size=17, weight=700, fill=C["text"]))
             x += cw + gap
         y += rowh
-    return svg("".join(out), w=x0 + 4 * (cw + gap) + 4, h=y, label="Course order")
+    return svg("".join(out), w=x0 + 4 * (cw + gap), h=y, label="Course order")
+
+
+def wrap(s, n):
+    """Split a title into at most two lines of about n characters."""
+    if len(s) <= n:
+        return [s]
+    words, first = s.split(), ""
+    while words and len(first + " " + words[0]) <= n + 1:
+        first = (first + " " + words.pop(0)).strip()
+    return [first or words.pop(0), " ".join(words)]
 
 
 # ---------------------------------------------------------------- machine
