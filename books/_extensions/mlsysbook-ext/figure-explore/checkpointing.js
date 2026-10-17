@@ -58,7 +58,7 @@
     function render(){const s=states[step];
       rows[0].forEach(({node,state},i)=>{
         node.className='mlsys-checkpoint-node '+(i>s.done?'mlsys-checkpoint-pending':i===0||i===3?'mlsys-checkpoint-kept':'mlsys-checkpoint-dropped')+(step<4&&i===s.done?' mlsys-checkpoint-current':'');
-        state.textContent=i>s.done?'future':i===0||i===3?'saved':step<4&&s.live.includes(i)?'live, transient':'dropped';
+        state.textContent=i>s.done?'future':i===0||i===3?'saved':step<4&&s.live.includes(i)?'live':'not kept';
       });
       rows[1].forEach(({node,state},i)=>{
         const active=step>=5&&s.live.includes(i),recomputed=active&&s.recomputed?.includes(i);
