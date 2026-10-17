@@ -18,6 +18,13 @@ Every value is sourced from the rendered chapter (ML Lifecycle) unless noted:
   - Monitoring cadences: Sec. 3.11.1 (minute, day, week, month, quarter).
   - 224-pixel demonstration: fundus photo by Hao et al. (CC BY 4.0, Wikimedia
     Commons), shrunk to the ImageNet default of 224 x 224 (Sec. 3.7.2).
+    Lesion widths measured on that photo (see shrink_demo).
+  - Ungradable examples: illustrative degradations of the same photo, after
+    the causes Beede et al. 2020 report (Sec. 3.1.2).
+  - Stage contracts: chapter table 2; audit case: Checkpoint 3.3 (Sec. 3.11).
+  - Release gate: Sec. 3.8 (manifest), Sec. 3.8.1 (94 percent overall), the
+    Sec. 3.8 self-check (76 percent for cataract patients), Sec. 3.10.2
+    (lens-opacity augmentation).
 
 Run from this folder: python3 make_figs.py
 """
@@ -206,7 +213,8 @@ def loop_compact(name, tint=None):
 
 
 loop_compact("loop_compact.svg")
-loop_compact("loop_compact_fix.svg", tint={2: (C["data"], C["data_l"]),
+loop_compact("loop_compact_fix.svg", tint={1: (C["compute"], C["compute_l"]),
+                                           2: (C["data"], C["data_l"]),
                                            5: (C["memory"], C["memory_l"])})
 
 
@@ -505,7 +513,12 @@ def shrink_demo():
     w, h = im.size
     left = 30                                    # keep the panel label out
     sq = im.crop((left, 0, left + h, h))          # square, as a 224 x 224 input
-    box = (526, 140, 746, 340)                     # exudates, in square coords
+    # One exudate cluster, in square coords. Measured on the source with a
+    # local-contrast threshold, these exudates are about 8 to 12 pixels wide;
+    # the 224 x 224 input scales every length by 224 / 857 = 0.26, so they
+    # become about 2 to 3 pixels wide. Both panels are drawn at the same size
+    # (nearest-neighbor for the small image) so its pixel grid shows.
+    box = (546, 150, 656, 250)
     full = sq.crop(box).resize((440, 400), Image.LANCZOS)
     small = sq.resize((224, 224), Image.LANCZOS)
     f = 224 / h
@@ -515,9 +528,128 @@ def shrink_demo():
     low.save(out / "retina_224_crop.png")
     ov = sq.copy()
     d = ImageDraw.Draw(ov)
-    d.rectangle(box, outline=(255, 255, 255), width=6)
+    d.rectangle(box, outline=(255, 255, 255), width=5)
     ov.resize((500, 500), Image.LANCZOS).save(out / "retina_whole.png")
 
 
 shrink_demo()
+
+
+# What an ungradable photo looks like: the same fundus photo with three
+# degradations the clinic study reports (lighting, focus, undilated pupils).
+# Illustrative: made from the Hao et al. photo, not the study's images.
+def degraded():
+    from PIL import Image, ImageEnhance, ImageFilter
+    import numpy as np
+    im = Image.open(out / "fundus-dr-hao.png").convert("RGB")
+    w, h = im.size
+    sq = im.crop((30, 0, 30 + h, h)).resize((420, 420), Image.LANCZOS)
+    sq.save(out / "fundus_ok.png")
+    ImageEnhance.Brightness(sq).enhance(0.28).save(out / "fundus_dark.png")
+    sq.filter(ImageFilter.GaussianBlur(7)).save(out / "fundus_blur.png")
+    a = np.asarray(sq).astype(float)
+    yy, xx = np.mgrid[0:420, 0:420]
+    r = np.hypot(xx - 210, yy - 210) / 210
+    mask = np.clip((0.62 - r) / 0.22, 0.0, 1.0) ** 1.5
+    Image.fromarray((a * mask[..., None]).astype("uint8")).save(out / "fundus_pupil.png")
+
+
+degraded()
+
+
+# -----------------------------------------------------------------------------
+# 6. Stage contracts on the loop (Table 2, Sec. 3.2; audit case Sec. 3.11).
+#    Invariant chips on three hand-offs; step 2 shows a blocked hand-off; step
+#    4 traces a monitoring signal to the stage 4 contract that missed it.
+# -----------------------------------------------------------------------------
+def chip_box(x, y, a, b, col, fill, w=290):
+    return [f'<rect x="{x - w / 2}" y="{y - 34}" width="{w}" height="68" rx="10" '
+            f'fill="{fill}" stroke="{col}" stroke-width="3"/>',
+            text(x, y - 7, a, 22, col, "bold"),
+            text(x, y + 22, b, 23, C["text"])]
+
+
+def contracts(step):
+    p = svg_open(900, 560)
+    p.append('<g transform="translate(0,30)">')
+    for k in range(1, 7):
+        p += stage_box(k)
+    p += flow_arrows()
+    p += return_arrow(label=False)
+    p.append('</g>')
+    ok = (C["data"], C["data_l"])
+    p.append(line(300, 106, 300, 160, C["data"], 3, None))
+    p += chip_box(300, 70, "1 → 2", "criteria are numbers", *ok)
+    if step >= 2:
+        p.append(line(287, 155, 313, 185, C["danger"], 6, None))
+        p.append(line(287, 185, 313, 155, C["danger"], 6, None))
+        p.append(text(300, 248, "blocked:", 24, C["danger"], "bold"))
+        p.append(text(300, 276, "target “TBD”", 24, C["danger"], "bold"))
+    if step >= 3:
+        p.append(line(600, 106, 600, 160, C["data"], 3, None))
+        p += chip_box(600, 70, "2 → 3", "provenance per image", *ok)
+        bad = step >= 4
+        col, fill = (C["danger"], C["danger_l"]) if bad else ok
+        p.append(line(600, 470, 600, 418, col, 3, None))
+        p += chip_box(600, 506, "4 → 5", "no subgroup below floor", col, fill,
+                      w=320)
+    if step >= 4:
+        p.append(text(560, 320, "no result for", 24, C["danger"], "bold"))
+        p.append(text(560, 348, "patients over 70", 24, C["danger"], "bold"))
+    save_svg(p, f"contracts_step{step}.svg")
+
+
+for s in (1, 2, 3, 4):
+    contracts(s)
+
+
+# -----------------------------------------------------------------------------
+# 7. The release gate (Sec. 3.8, Sec. 3.8.1, Table 2, Sec. 3.10). The 94 and
+#    76 percent values are the chapter's subgroup example; the device
+#    rows are requirements, not measurements.
+# -----------------------------------------------------------------------------
+def gate(step):
+    p = svg_open(980, 430)
+    p.append('<rect x="8" y="8" width="694" height="414" rx="12" fill="#FAFAFA" '
+             'stroke="#999999" stroke-width="2"/>')
+    p.append(text(28, 50, "Release manifest, one model version", 25, C["text"],
+                  "bold", "start"))
+    p.append(text(450, 92, "Floor", 21, C["neutral"], "bold", "start"))
+    p.append(text(572, 92, "Result", 21, C["neutral"], "bold", "start"))
+    p.append('<line x1="22" y1="104" x2="688" y2="104" stroke="#BBBBBB" stroke-width="2"/>')
+    rows = [
+        (1, "Sensitivity, all clinic photos", "90%", "94% pass", C["data"]),
+        (2, "Sensitivity, cataract patients", "90%", "76% fail", C["danger"]),
+        (3, "Peak memory on clinic device", "500 MB", "measure", C["neutral"]),
+        (3, "Latency on clinic device", "in visit", "measure", C["neutral"]),
+        (3, "Confidence matches accuracy", "per use", "measure", C["neutral"]),
+    ]
+    for i, (k, name, floor, res, col) in enumerate(rows):
+        if step < k:
+            continue
+        y = 146 + i * 54
+        p.append(text(28, y, name, 24, C["text"], "normal", "start"))
+        p.append(text(450, y, floor, 24, C["text"], "normal", "start"))
+        p.append(text(572, y, res, 24, col, "bold", "start"))
+    if step >= 3:
+        p.append(text(28, 405, "Also recorded: checkpoint hash, preprocessing, slices",
+                      20, C["neutral"], "normal", "start"))
+    if step >= 2:
+        y = 200
+        p.append(line(706, y - 8, 736, y - 8, C["danger"], 4, "r"))
+        p.append(f'<rect x="742" y="{y - 92}" width="232" height="214" rx="12" '
+                 f'fill="{C["danger_l"]}" stroke="{C["danger"]}" stroke-width="3"/>')
+        for j, (s_, wgt) in enumerate((("Gate halts.", "bold"),
+                                       ("Back to stage 2:", "bold"),
+                                       ("collect cataract", "normal"),
+                                       ("images, retrain", "normal"),
+                                       ("with lens-opacity", "normal"),
+                                       ("augmentation", "normal"))):
+            p.append(text(858, y - 58 + j * 32, s_, 21, C["danger"] if wgt == "bold"
+                          else C["text"], wgt))
+    save_svg(p, f"gate_step{step}.svg")
+
+
+for s in (1, 2, 3):
+    gate(s)
 print("figures written")
